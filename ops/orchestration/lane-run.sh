@@ -15,6 +15,7 @@ trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
 # How what this run posts is signed (the acting lead posts by itself).
 [ -z "${ORCH_SIGNED:-}" ] || export ORCH_SIGNED
+signed_as=${ORCH_SIGNED:-}
 mkdir -p "$ORCH_STATE_DIR/reports"
 
 french_number() { printf '%s' "$1" | sed -E ':a;s/^([0-9]+)([0-9]{3})/\1 \2/;ta'; }
@@ -31,6 +32,8 @@ attempt() {
     --model "$model" --provider "$adapter" --requested-model "$requested" \
     --project "${ORCH_PROJECT:-}" --label "${ORCH_LABEL:-}"
   echo "── $ORCH_LANE · $role · $alias ($adapter: $model) ──"
+  # What this run posts by itself says which model wrote it.
+  [ -z "${signed_as:-}" ] || export ORCH_SIGNED="$signed_as, modèle $alias"
   adapter_env "$adapter"
   # The role's own permissions, unless the run was given others (the acting
   # lead), which never apply to another role of the same lane (the write-up).
@@ -169,6 +172,14 @@ if [ "${ORCH_COMMENT_ON:-}" = none ]; then
 elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_SIGNED:-$ORCH_ROLE, lane $ORCH_LANE}"); then
   echo "Commentaire Linear : $url"
   echo "$url" > "$run_dir/comment.url"
+elif [ $? = 4 ]; then
+  # The user already got his comments of the hour: this one is kept, and
+  # leaves with the others in one grouped comment (flush_outbox, at a wake).
+  mkdir -p "$ORCH_STATE_DIR/linear-outbox"
+  # Written under another name, then renamed: a wake never takes half a file.
+  cp "$comment" "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part"
+  mv "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part" "$ORCH_STATE_DIR/linear-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
+  echo "Commentaire Linear gardé pour un envoi groupé (limite de l'heure atteinte) : $comment"
 else
   echo "!! Le commentaire Linear n'a pas pu être envoyé. Il reste ici : $comment"
 fi

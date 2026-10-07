@@ -115,6 +115,73 @@ model_seen() {
   printf '%s\t%s\n' "$2" "$(date +%s)" >> "$ORCH_STATE_DIR/models/$1.available"
 }
 
+# The worktree where a discussion writes docs/decisions.md, and nothing else.
+decisions_worktree() {
+  printf '%s\n' "${ORCH_DECISIONS_WORKTREE:-$(expand_home "$(conf_get lanes root)")/$(conf_get talk role)-$(conf_get lead report_on)}"
+}
+
+# flush_outbox: the comments the hourly limit held back (lane-run.sh) leave in
+# one grouped comment on the ticket of the reports, as soon as the user may be
+# written again. Nothing is removed before Linear has it.
+flush_outbox() {
+  local box="$ORCH_STATE_DIR/linear-outbox" sending grouped file count code left
+  # What a wake killed while sending had taken aside comes back first.
+  for left in "$box"/sending.*; do
+    [ -d "$left" ] || continue
+    mv "$left"/*.md "$box"/ 2> /dev/null || true
+    rmdir "$left" 2> /dev/null || true
+  done
+  ls "$box"/*.md > /dev/null 2>&1 || return 0
+  # Taken aside first: a report that arrives while these are sent is not
+  # among them, and stays for the next time.
+  sending=$(mktemp -d "$box/sending.XXXXXX")
+  mv "$box"/*.md "$sending"/
+  count=$(ls -1 "$sending" | grep -c .)
+  grouped=$(mktemp)
+  {
+    printf '**%s comptes rendus groupés** (pas plus de quelques commentaires par heure : ceux-ci attendaient)\n' "$count"
+    for file in "$sending"/*.md; do
+      printf '\n### %s\n\n' "$(basename "$file" | sed 's/--.*//')"
+      cat "$file"
+    done
+  } > "$grouped"
+  code=0
+  "$ORCH_HOME/linear.sh" comment "$(conf_get lead report_on)" "$grouped" "dispatcher, comptes rendus groupés" > /dev/null || code=$?
+  rm -f "$grouped"
+  # Not sent: back where they were, for the next wake.
+  [ "$code" = 0 ] || mv "$sending"/*.md "$box"/
+  rm -rf "$sending"
+  return 0
+}
+
+# github_down: what GitHub says is down among the parts the dispatcher needs,
+# as its public status page has it: nothing when all is well. Exit 2 when the
+# page cannot be read, which says nothing either way. A slowdown is not an
+# outage.
+github_down() {
+  local page
+  page=$(curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null) || return 2
+  jq -e '.components | type == "array"' <<<"$page" > /dev/null 2>&1 || return 2
+  jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
+      | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' <<<"$page"
+}
+
+# talk_open: is a discussion open in the lane of the lead? talk.sh writes
+# "opening <time>" in the mark before it opens the terminal (good for five
+# minutes: Orca may take two to open one), talk-run.sh puts
+# its process there and takes the mark away when the conversation ends. A
+# mark whose process is gone, or is no longer a conversation (its number was
+# given to something else), or an opening that never came, holds nothing.
+talk_open() {
+  local mark="$ORCH_STATE_DIR/wake/talk" first second
+  read -r first second < "$mark" 2> /dev/null || return 1
+  if [ "$first" = opening ]; then
+    [ $(( $(date +%s) - ${second:-0} )) -lt "${ORCH_TALK_OPENING:-300}" ]
+  else
+    [[ "$first" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/$first/cmdline" 2> /dev/null | grep -q "talk-run.sh"
+  fi
+}
+
 # close_old_terminals <lane> <kept>: closes in Orca the terminals of the past
 # sessions of a lane, all but the last <kept> (run folders are named by their
 # time). What a session said stays in its run folder and in the ledger. A

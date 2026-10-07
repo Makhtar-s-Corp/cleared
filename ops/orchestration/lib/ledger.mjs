@@ -28,6 +28,9 @@ export const EVENT_KINDS = [
   'orca_terminal_failed', // Orca did not open the terminal of a lane: the run was not started
   'lead_lane_blocked', // the lane of the project lead holds work of its own: no session starts until it is looked at
   'wake_started', // a session of the project lead was started; the detail says what woke it
+  'decision', // a decision the user worded in a discussion, transcribed by decide.sh (source discussion)
+  'role_model_changed', // the model of a role was changed: detail "<role>: <from> -> <to>: <why>"; the lead only starts on the one decided last
+  'github_down', // GitHub was down: at is the start, value the minutes it lasted, detail "from <start> to <end>: <what was down>"
 ];
 
 const SCHEMA = `
@@ -183,7 +186,7 @@ function main([command, ...rest]) {
       if (!result.changes) throw new Error(`unknown run ${runId}`);
     }
   } else if (command === 'event') {
-    addEvent(db, { kind: o['--kind'], ticket: o['--ticket'] || null, runId: o['--run-id'] || null, detail: o['--detail'] || null, value: o['--value'] === undefined ? null : Number(o['--value']), source: o['--source'] || 'dispatcher' });
+    addEvent(db, { kind: o['--kind'], at: o['--at'] || undefined, ticket: o['--ticket'] || null, runId: o['--run-id'] || null, detail: o['--detail'] || null, value: o['--value'] === undefined ? null : Number(o['--value']), source: o['--source'] || 'dispatcher' });
   } else {
     throw new Error('usage: ledger.mjs init | run-start | run-end | run-set | event | sql');
   }
