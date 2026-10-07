@@ -36,9 +36,11 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 git -C "$worktree" log --format='%B' "$base..HEAD" > "$out/messages.txt"
 guard_text "$out/messages.txt" || die "$branch not pushed: a commit message is refused by the guard"
-# The changes themselves, as a diff: the guard reads the lines of a code file
-# as it reads the tree, and those of any other file strictly.
-git -C "$worktree" diff "$base...HEAD" > "$out/changes.diff"
+# What the branch adds, as a diff without context nor removed lines: the
+# guard reads the added lines of a code file as it reads the tree, those of
+# any other file strictly. What a branch removes is already on the remote.
+# (A binary file is not read: the guard only knows text.)
+git -C "$worktree" diff --unified=0 "$base...HEAD" | grep -v -E '^-([^-]|$)' > "$out/changes.diff" || true
 guard_text "$out/changes.diff" || die "$branch not pushed: its changes are refused by the guard"
 
 # The lane's branch to the branch of the same name, and only that. No force
@@ -60,5 +62,8 @@ fi
 [[ "$number" =~ ^[0-9]+$ ]] || die "$branch is pushed, but its pull request could not be opened or read"
 
 lines=$(git -C "$worktree" diff --shortstat "$base...HEAD" | awk '{for (i = 1; i <= NF; i++) if ($(i + 1) ~ /^(insertion|deletion)/) total += $i} END {print total + 0}')
-[ -z "${ORCH_RUN_ID:-}" ] || ledger run-set --run-id "$ORCH_RUN_ID" --pr-number "$number" --lines-changed "$lines"
+# The branch is out by now: a ledger that does not take the number must not
+# make this look like a failed push.
+[ -z "${ORCH_RUN_ID:-}" ] || ledger run-set --run-id "$ORCH_RUN_ID" --pr-number "$number" --lines-changed "$lines" \
+  || echo "$(basename "$0"): pull request #$number not written to the ledger" >&2
 echo "#$number"

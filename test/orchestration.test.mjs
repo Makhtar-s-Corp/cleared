@@ -811,6 +811,11 @@ test('what the push script says is read from its last line, whatever git or gh w
   };
   assert.match(lane('echo "remote: Create a pull request" >&2; echo "warning from gh"; echo "#41"'), /PR ouverte ou mise à jour : #41/);
   assert.match(lane('echo "nothing to push: dev/X-1 has no commit of its own"'), /Rien à pousser/);
+  // An answer nobody expected is said as such, not passed off as "nothing to push".
+  const odd = lane('echo "something else"');
+  assert.match(odd, /Réponse inattendue du script de push : something else/);
+  // The reason of a failure is the script's own last word, not a hint of git after it.
+  assert.match(lane('echo "push-lane.sh: dev/X-1 not pushed: its changes are refused by the guard" >&2; echo "hint: see the manual" >&2; exit 1'), /n'a pas été poussée : push-lane\.sh: dev\/X-1 not pushed: its changes are refused/);
   const failed = lane('echo "push-lane.sh: dev/X-1 not pushed: a commit message is refused by the guard" >&2; exit 1');
   assert.match(failed, /La branche n'a pas été poussée : push-lane\.sh: dev\/X-1 not pushed/);
   assert.doesNotMatch(failed, /Rien à pousser|PR ouverte/);
@@ -853,4 +858,54 @@ test('a run that stops before its end still says it is over', () => {
   const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
   assert.notEqual(run.status, 0);
   assert.notEqual(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '0');
+});
+
+test('the lane of the project lead: a commit of its own stops the wake even when the base did not move, once in the ledger; a stray untracked file does not', () => {
+  const box = sandbox();
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const blocked = () => { const db = openLedger(join(box.state, 'ledger.db')); const n = db.prepare("select count(*) n from events where kind = 'lead_lane_blocked'").get().n; db.close(); return n; };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  const comment = (id) => ({ id, createdAt: new Date().toISOString(), url: `u#${id}`, body: `message ${id}` });
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  wake();
+  const path = join(box.home, 'lanes', 'release-lead');
+  box.git('worktree', 'add', '-q', '-b', 'release/lead', path, 'main');
+  // An untracked file left behind is no reason to stop.
+  writeFileSync(join(path, 'left-behind.txt'), 'x');
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1')])));
+  const fine = wake();
+  assert.equal(fine.status, 0, fine.stderr);
+  writeFileSync(join(fine.stdout.trim(), 'exit-code'), '0');
+  // A commit of its own, the base not having moved: the wake stops, and says so once.
+  execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'work left in the lane of the lead']);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
+  assert.equal(wake().status, 1);
+  assert.equal(wake().status, 1);
+  assert.equal(blocked(), 1);
+  assert.match(execFileSync('git', ['-C', path, 'log', '-1', '--format=%s'], { encoding: 'utf8' }), /work left/);
+});
+
+test('a state file that cannot be read makes the wake start over as a first one, not fail every minute', async () => {
+  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  for (const broken of [{}, { at: 'not a date', seen: [], pulls: {} }, { seen: ['x'] }]) {
+    const { events, next } = changes(broken, [{ id: 'i1', identifier: 'X-1', title: 't', url: 'u', state: 's', project: null, createdAt: new Date().toISOString(), description: 'd', comments: [] }], []);
+    assert.deepEqual(events, []);
+    assert.ok(!Number.isNaN(Date.parse(next.at)));
+  }
+});
+
+test('push-lane judges what a branch adds, not what it removes: taking a refused value out of a file does not block the lane', () => {
+  const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"`;
+  const lane = laneWithRemote('dev/X-5', null);
+  // The value is already on the base branch; the lane removes it.
+  writeFileSync(join(lane.box.repo, 'notes.md'), `${flagged}\nune ligne\n`);
+  lane.box.git('add', 'notes.md');
+  lane.box.git('commit', '-q', '-m', 'docs: notes');
+  lane.box.git('push', '-q', 'origin', 'main');
+  execFileSync('git', ['-C', lane.path, 'merge', '-q', '--ff-only', 'main']);
+  writeFileSync(join(lane.path, 'notes.md'), 'une ligne\n');
+  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-am', 'docs: the value goes away']);
+  const run = lane.push();
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), '#41');
 });

@@ -62,7 +62,7 @@ La lane `review/<ticket>` part de la tête de la PR, en lecture seule. `--since 
 - rien n'a bougé : il écrit « réveil sauté » au ledger et s'arrête. Zéro token ;
 - quelque chose a bougé (un commentaire ou un ticket de l'utilisateur, une PR ouverte, passée en « prête », fusionnée ou fermée, ses vérifications qui passent au vert ou au rouge) : il lance une seule session courte du rôle `[lead] role`, dans sa lane stable `release/lead`, avec le modèle de la table, et lui remet la liste. Ce qu'un agent a écrit n'est jamais un événement.
 
-Une session encore au travail retient la suivante, sans rien perdre de ce qui bouge entre-temps. Si une session s'arrête sans le dire (terminal tué), le réveil suivant attend au plus `[lead] max_minutes`. La lane du chef de projet n'est jamais remise à zéro : s'il y reste un changement ou un commit, le réveil s'arrête et n'y touche pas. Une source qui ne répond pas : le réveil ne lit rien et n'avance pas.
+Une session encore au travail retient la suivante, sans rien perdre de ce qui bouge entre-temps. Si une session s'arrête sans le dire (terminal tué), le réveil suivant attend au plus `[lead] max_minutes`. La lane du chef de projet n'est jamais remise à zéro : s'il y reste un fichier suivi modifié ou un commit à elle, le réveil s'arrête, n'y touche pas, et l'écrit une fois au ledger (`lead_lane_blocked`). Un fichier non suivi laissé là ne bloque rien. Une source qui ne répond pas : le réveil ne lit rien et n'avance pas.
 
 `[lead] live = no` : le chef de projet observe. Il écrit ce qu'il ferait, dans son compte rendu (`state/reports/`), et ne fait rien : ni commentaire, ni lane, ni fusion. Tant que l'ancien chef de projet tourne, c'est le seul mode ; `wake.sh` refuse `live = yes`, qui n'est pas construit.
 
@@ -76,7 +76,7 @@ ops/orchestration/wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
 
 ## Pousser une lane
 
-Une lane n'a aucune commande réseau. Quand son run est terminé, `lane-run.sh` appelle `push-lane.sh` pour les rôles de `[lanes] push_roles` : il pousse la branche de la lane vers la branche du même nom, et ouvre sa PR en brouillon vers la branche de base. Rien d'autre : jamais forcé, jamais la branche de base, jamais une autre branche. Les messages de commit et les changements de la branche passent d'abord par le garde-fou du dépôt ; refusés, rien ne part (un push ne se rattrape pas).
+Une lane n'a aucune commande réseau. Quand son run est terminé, `lane-run.sh` appelle `push-lane.sh` pour les rôles de `[lanes] push_roles` : il pousse la branche de la lane vers la branche du même nom, et ouvre sa PR en brouillon vers la branche de base. Rien d'autre : jamais forcé, jamais la branche de base, jamais une autre branche. Les messages de commit et ce que la branche ajoute passent d'abord par le garde-fou du dépôt ; refusés, rien ne part (un push ne se rattrape pas). Ce qu'une branche retire n'est pas jugé, et un fichier binaire n'est pas lu : le garde-fou ne connaît que le texte.
 
 ## Le ledger
 

@@ -26,6 +26,7 @@ export const EVENT_KINDS = [
   'cli_outdated', // value = days a CLI is behind its latest release (weekly check)
   'orca_terminal_delayed', // value = seconds Orca took to open the terminal of a lane (past the usual wait)
   'orca_terminal_failed', // Orca did not open the terminal of a lane: the run was not started
+  'lead_lane_blocked', // the lane of the project lead holds work of its own: no session starts until it is looked at
 ];
 
 const SCHEMA = `

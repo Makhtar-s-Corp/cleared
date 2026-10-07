@@ -114,16 +114,24 @@ fi
 # this is where its branch leaves and its pull request opens.
 pushed_note=
 if [ "$lane_code" = 0 ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
-  # Its answer is its last line on stdout; what git and gh say on the way
-  # goes to the terminal, and the reason of a failure is kept.
+  # Its answer is its last line on stdout. What git and gh say on the way is
+  # kept in a file and shown once the script has ended.
   push_err=$(mktemp)
-  if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2> >(tee "$push_err" >&2)); then
+  if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2> "$push_err"); then
     pushed=$(sed -n '$p' <<<"$pushed")
-    if [[ "$pushed" =~ ^#[0-9]+$ ]]; then pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."; else pushed_note="Rien à pousser : la lane n'a aucun commit."; fi
+    if [[ "$pushed" =~ ^#[0-9]+$ ]]; then
+      pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."
+    elif [[ "$pushed" == "nothing to push"* ]]; then
+      pushed_note="Rien à pousser : la lane n'a aucun commit."
+    else
+      pushed_note="Réponse inattendue du script de push : ${pushed:-rien}. À vérifier à la main."
+    fi
   else
-    sleep 0.2
-    pushed_note="La branche n'a pas été poussée : $(sed -n '$p' "$push_err")"
+    # Its own last word, not a hint git may have added after it.
+    reason=$(grep '^push-lane\.sh: ' "$push_err" | sed -n '$p')
+    pushed_note="La branche n'a pas été poussée : ${reason:-$(sed -n '$p' "$push_err")}"
   fi
+  cat "$push_err" >&2
   rm -f "$push_err"
   echo "$pushed_note"
 fi

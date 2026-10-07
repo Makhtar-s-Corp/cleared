@@ -76,10 +76,19 @@ base=$(conf_get lanes base)
 git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
 if [ ! -d "$worktree" ]; then
   git -C "$ORCH_REPO" worktree add --quiet -B "$lane" "$worktree" "$base"
-elif [ -n "$(git -C "$worktree" status --porcelain)" ] || ! git -C "$worktree" merge --quiet --ff-only "$base" 2> /dev/null; then
-  # Nothing is ever thrown away here: someone, or a session, left work in it.
+elif [ -n "$(git -C "$worktree" status --porcelain --untracked-files=no)" ] \
+  || [ "$(git -C "$worktree" rev-list --count "$base..HEAD")" != 0 ] \
+  || ! git -C "$worktree" merge --quiet --ff-only "$base" 2> /dev/null; then
+  # Nothing is ever thrown away here: someone, or a session, left work in it
+  # (a changed file, a commit of its own). Written to the ledger once, not at
+  # every wake; what moved stays for the wake after the lane is looked at.
+  if [ ! -f "$wake_dir/blocked" ]; then
+    ledger event --kind lead_lane_blocked --detail "the lane of the project lead ($worktree) has changes or commits of its own"
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$wake_dir/blocked"
+  fi
   die "the lane of the project lead ($worktree) has changes or commits of its own: left untouched, no session started"
 fi
+rm -f "$wake_dir/blocked"
 
 run_base="lead-$(date -u +%Y%m%dT%H%M%SZ)"
 run_dir="$ORCH_STATE_DIR/runs/$run_base"

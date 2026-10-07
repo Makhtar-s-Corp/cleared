@@ -37,6 +37,9 @@ export function checksOf(rollup = []) {
 export const OVERLAP_MS = 10 * 60_000;
 
 export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString()) {
+  // A state that cannot be read (no time of last wake) is no state: this
+  // wake takes note of what exists, like the very first one.
+  if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
   const first = !previous;
   // Newer than this is news. A ticket touched again brings its old comments
   // along: they were never seen here, and they are not news.
