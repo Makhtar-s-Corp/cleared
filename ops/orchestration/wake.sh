@@ -35,15 +35,22 @@ mkdir -p "$wake_dir"
 ledger init > /dev/null
 
 # One wake at a time.
+# An ordinary wake that finds another one at work, or a session of the lead
+# still running, leaves quietly: it comes back in a minute. A handover is
+# asked for by someone who must know that nothing started.
+busy() {
+  [ -z "$handover" ] || die "$1: nothing started"
+  exit 0
+}
 exec 8> "$wake_dir/lock"
-flock -n 8 || exit 0
+flock -n 8 || busy "another wake is at work"
 
 # A session of the lead still at work keeps the next one back: what moved
 # meanwhile stays for the wake after it, nothing is lost.
 current="$wake_dir/current"
 if [ -f "$current" ] && [ ! -f "$(cat "$current")/exit-code" ]; then
   age=$(( ($(date +%s) - $(stat -c %Y "$current")) / 60 ))
-  [ "$age" -ge "$(conf_get lead max_minutes)" ] || exit 0
+  [ "$age" -ge "$(conf_get lead max_minutes)" ] || busy "a session of the project lead is still running"
 fi
 
 work=$(mktemp -d)
@@ -151,7 +158,7 @@ fi
 {
   printf 'ORCH_LANE=%q\nORCH_TICKET=%q\nORCH_ROLE=%q\nORCH_RUN_BASE=%q\n' "$lane" "" "$role" "$run_base"
   printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$(jq -r '.chain[0].alias' <<<"$routed")" "règle : $(jq -r '.rule' <<<"$routed")" ""
-  printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\nORCH_FROM=%q\n' "$comment_on" "" "$(conf_get lead name)"
+  printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\nORCH_SIGNED=%q\n' "$comment_on" "" "$(conf_get lead name)"
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PROJECT=%q\nORCH_LABEL=%q\n' "" "" "" ""
 } > "$run_dir/lane.env"
 

@@ -991,7 +991,7 @@ test('the handover wake: one session that rereads the handover and says what it 
   assert.doesNotMatch(prompt, /lead prompt/);
   const env = readFileSync(join(runDir, 'lane.env'), 'utf8');
   assert.match(env, /ORCH_COMMENT_ON=X-100/);
-  assert.match(env, /ORCH_FROM=chef\\ de\\ projet/);
+  assert.match(env, /ORCH_SIGNED=chef\\ de\\ projet/);
   // The run itself: its answer is posted in the report ticket, signed as the project lead.
   const lane = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
   assert.equal(lane.status, 0, lane.stderr);
@@ -1027,4 +1027,31 @@ test('Linear is asked for the tickets of one state, to check what a handover say
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout), [{ identifier: 'X-1', title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress', project: 'P', assignee: null }]);
   assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /In Progress/);
+});
+
+test('the handover wake says so, and fails, when it starts nothing: a session of the lead still running, or another wake at work', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'handover.md'), 'passation');
+  const handover = () => spawnSync(join(box.home, 'wake.sh'), ['--handover', join(box.home, 'handover.md')], { env: box.env, encoding: 'utf8' });
+  const first = handover();
+  assert.equal(first.status, 0, first.stderr);
+  // The session it started has not finished: a second handover starts nothing, and must not look like it did.
+  const second = handover();
+  assert.equal(second.status, 1);
+  assert.match(second.stderr, /still running: nothing started/);
+  assert.equal(Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')), 1);
+  // An ordinary wake in the same situation stays quiet: it will come back in a minute.
+  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+});
+
+test('a listing of tickets that fills the page says it may be cut short', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  const nodes = Array.from({ length: 100 }, (_, i) => ({ identifier: `X-${i}`, title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: { name: 'Done' }, project: null, assignee: null }));
+  writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data: { issues: { nodes } } }));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat "${join(dir, 'answer.json')}"\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['list', 'Done'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
+  assert.equal(run.status, 0);
+  assert.equal(JSON.parse(run.stdout).length, 100);
+  assert.match(run.stderr, /may be cut short/);
 });

@@ -98,9 +98,12 @@ case "${1:-}" in
     ;;
   list)
     [ -n "${2:-}" ] || die "usage: linear.sh list <state>"
-    gql 'query($team: String!, $state: String!) { issues(first: 100, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt state { name } project { name } assignee { name } } } }' \
+    listed=$(gql 'query($team: String!, $state: String!) { issues(first: 100, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt state { name } project { name } assignee { name } } } }' \
       "$(jq -nc --arg team "$(conf_get linear team)" --arg state "$2" '{team: $team, state: $state}')" \
-      | jq -c '[.data.issues.nodes[] | {identifier, title, url, updatedAt, state: .state.name, project: (.project.name // null), assignee: (.assignee.name // null)}]'
+      | jq -c '[.data.issues.nodes[] | {identifier, title, url, updatedAt, state: .state.name, project: (.project.name // null), assignee: (.assignee.name // null)}]')
+    # One page only: a full page may not be everything.
+    [ "$(jq length <<<"$listed")" -lt 100 ] || echo "$(basename "$0"): 100 tickets in the state \"$2\": the list may be cut short" >&2
+    printf '%s\n' "$listed"
     ;;
   waiting)
     team=$(conf_get linear team)

@@ -64,7 +64,7 @@ La lane `review/<ticket>` part de la tête de la PR, en lecture seule. `--since 
 
 Une session encore au travail retient la suivante, sans rien perdre de ce qui bouge entre-temps. Si une session s'arrête sans le dire (terminal tué), le réveil suivant attend au plus `[lead] max_minutes`. La lane du chef de projet n'est jamais remise à zéro : s'il y reste un fichier suivi modifié ou un commit à elle, le réveil s'arrête, n'y touche pas, et l'écrit une fois au ledger (`lead_lane_blocked`). Un fichier non suivi laissé là ne bloque rien. Une source qui ne répond pas : le réveil ne lit rien et n'avance pas.
 
-`[lead] live = no` : le chef de projet observe. Il écrit ce qu'il ferait, dans son compte rendu (`state/reports/`), et ne fait rien : ni commentaire, ni lane, ni fusion. Tant que l'ancien chef de projet tourne, c'est le seul mode ; `wake.sh` refuse `live = yes`, qui n'est pas construit.
+`[lead] live = no` : le chef de projet observe. Il écrit ce qu'il ferait, dans son compte rendu (`state/reports/`), et ne fait rien : ni commentaire, ni lane, ni fusion. Seule exception, le réveil de passation décrit plus bas, qui poste un commentaire dans un ticket. Tant que l'ancien chef de projet tourne, c'est le seul mode ; `wake.sh` refuse `live = yes`, qui n'est pas construit.
 
 Ce que reçoit le modèle : la liste de ce qui a bougé contient des titres et des commentaires de Linear, tels quels. Elle ne passe pas par le garde-fou quand le rôle est servi par Claude, qui lit déjà le dépôt et Linear pour tout le reste ; l'adaptateur de Codex, lui, fait passer par le garde-fou tout ce qu'il envoie. « Aucune donnée réelle dans Linear » reste la règle qui protège ce chemin.
 
