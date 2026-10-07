@@ -165,7 +165,7 @@ case "$1" in
 esac
 `, { mode: 0o755 });
   fake('first', '${FIRST_EXIT:-0}');
-  fake('second', '0');
+  fake('second', '${SECOND_EXIT:-0}');
   // Linear and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
@@ -2067,14 +2067,18 @@ test('a review that fails is tried once more, not for ever: after two tries of t
   execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/y']);
   const head = execFileSync('git', ['-C', lane.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', title: 't', body: 'b', headRefName: 'feat/y', headRefOid: head, additions: 1, deletions: 0, files: [] }));
-  const review = () => spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' });
-  // The reviewer fails (its model answers with an error), twice.
+  const review = () => spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'a-model-of-no-table'], { env, encoding: 'utf8' });
+  // The reviewer does not come to an end, twice: its first model cannot start, and the one that takes over fails.
+  // That is two lines in the ledger for one review, and still one try.
   for (const attempt of [1, 2]) {
     const opened = review();
     assert.equal(opened.status, 0, `try ${attempt}: ${opened.stderr}`);
     const run = JSON.parse(opened.stdout);
-    assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [run.run_dir], { cwd: run.worktree, env: { ...env, FIRST_EXIT: '1' }, encoding: 'utf8' }).status, 1);
+    assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [run.run_dir], { cwd: run.worktree, env: { ...env, FIRST_EXIT: '2', SECOND_EXIT: '1' }, encoding: 'utf8' }).status, 1);
   }
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.equal(db.prepare("select count(*) n from runs where role = 'review' and outcome in ('failed', 'refused')").get().n, 4);
+  db.close();
   const third = review();
   assert.equal(third.status, 1);
   assert.match(third.stderr, /2 reviews of this commit .* did not come to an end/);

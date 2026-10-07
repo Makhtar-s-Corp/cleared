@@ -97,4 +97,4 @@ opened=$("$ORCH_HOME/spawn-lane.sh" "${args[@]}")
 printf '%s\n' "$opened"
 # The commit this review reads, kept with its run: it counts as reviewed even if the report is lost.
 [ -n "$dry_run" ] || printf '%s\n' "$head" > "$(jq -r '.run_dir' <<<"$opened")/reviewed-head" \
-  || echo "$(basename "$0"): the commit of this review could not be written down with its run: it only counts once its report exists" >&2
+  || echo "$(basename "$0"): the commit of this review could not be written down with its run: it counts as reviewed only once its report exists, and not at all as a try if it fails" >&2

@@ -44,10 +44,13 @@ export function reviewedHeads(db, reports, pr) {
 // end (failed, or refused by a safeguard): the commit review-pr.sh wrote
 // with each run tells which commit it was.
 export function failedTries(db, reports, pr, head) {
-  return db.prepare("SELECT run_id FROM runs WHERE role = 'review' AND source = 'dispatcher' AND outcome IN ('failed', 'refused') AND pr_number = ?").all(Number(pr))
-    .filter((row) => {
-      try { return readFileSync(join(reports, '..', 'runs', row.run_id.replace(/-review-a\d+$/, ''), 'reviewed-head'), 'utf8').trim() === head; } catch { return false; }
-    }).length;
+  // One review is one folder of run, whatever the number of models it went through.
+  const tries = new Set();
+  for (const row of db.prepare("SELECT run_id FROM runs WHERE role = 'review' AND source = 'dispatcher' AND outcome IN ('failed', 'refused') AND pr_number = ?").all(Number(pr))) {
+    const run = row.run_id.replace(/-review-a\d+$/, '');
+    try { if (readFileSync(join(reports, '..', 'runs', run, 'reviewed-head'), 'utf8').trim() === head) tries.add(run); } catch { /* not opened by review-pr.sh */ }
+  }
+  return tries.size;
 }
 
 // Those that came to an end by themselves: one that was closed by hand has nothing to say.
