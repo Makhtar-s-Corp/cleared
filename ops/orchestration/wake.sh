@@ -45,6 +45,34 @@ busy() {
 exec 8> "$wake_dir/lock"
 flock -n 8 || busy "another wake is at work"
 
+# What the hourly limit held back leaves now, grouped, if the user may be written.
+[ -n "$handover" ] || flush_outbox
+
+# GitHub down, as its status page says: noted when it starts, written to the
+# ledger when it ends, with both times. Its events wait meanwhile.
+github_mark="$wake_dir/github-down"
+github_out=
+if [ -z "$handover" ]; then
+  github_read=0
+  github_out=$(github_down) || github_read=$?
+  # Its page cannot be read: an outage already noted goes on, none begins.
+  if [ "$github_read" != 0 ]; then
+    github_out=
+    [ ! -f "$github_mark" ] || github_out=$(sed -n '2p' "$github_mark")
+  fi
+  if [ -n "$github_out" ]; then
+    [ -f "$github_mark" ] || printf '%s\n%s\n' "$(now_utc)" "$github_out" > "$github_mark"
+  elif [ -f "$github_mark" ]; then
+    began=$(sed -n '1p' "$github_mark")
+    ledger event --kind github_down --at "$began" --value "$(( ($(date +%s) - $(date -d "$began" +%s)) / 60 ))" \
+      --detail "from $began to $(now_utc): $(sed -n '2p' "$github_mark")"
+    rm -f "$github_mark"
+  fi
+fi
+
+# The lead only ever runs on the model decided last (check-lead-model.sh).
+"$ORCH_HOME/check-lead-model.sh" || die "the project lead does not start"
+
 # A session of the lead still at work keeps the next one back: what moved
 # meanwhile stays for the wake after it, nothing is lost.
 current="$wake_dir/current"
@@ -52,6 +80,11 @@ if [ -f "$current" ] && [ ! -f "$(cat "$current")/exit-code" ]; then
   age=$(( ($(date +%s) - $(stat -c %Y "$current")) / 60 ))
   [ "$age" -ge "$(conf_get lead max_minutes)" ] || busy "a session of the project lead is still running"
 fi
+
+# Never two agents in the same folder: while the user talks with the lead in
+# its lane (talk.sh), no short session starts there. Nothing is read, so
+# nothing that moves meanwhile is lost.
+! talk_open || busy "a discussion is open in the lane of the project lead"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -75,8 +108,12 @@ if [ -z "$handover" ]; then
 
   # A source that does not answer: this wake sees nothing and moves nothing.
   "$ORCH_HOME/linear.sh" changes "$since" > "$work/linear.json" || die "Linear did not answer: nothing read, nothing moved"
-  (cd "$ORCH_REPO" && gh pr list --state all --limit 60 --json number,title,headRefName,isDraft,state,updatedAt,statusCheckRollup) > "$work/pulls.json" \
-    || die "GitHub did not answer: nothing read, nothing moved"
+  if [ -n "$github_out" ]; then
+    echo '[]' > "$work/pulls.json"
+  else
+    (cd "$ORCH_REPO" && gh pr list --state all --limit 60 --json number,title,headRefName,isDraft,state,updatedAt,statusCheckRollup) > "$work/pulls.json" \
+      || die "GitHub did not answer: nothing read, nothing moved"
+  fi
   # What the scripts of the dispatcher posted themselves.
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" "$ORCH_STATE_DIR/linear-issues.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
   # What the lanes already at work say to the lead: only once it acts. A
@@ -89,7 +126,7 @@ if [ -z "$handover" ]; then
       | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
     node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
   fi
-  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" > "$work/changes.json"
+  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" ${github_out:+down} > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
 
   if [ -n "$dry_run" ]; then
@@ -100,7 +137,7 @@ if [ -z "$handover" ]; then
   if [ "$count" = 0 ]; then
     # Nothing moved, or nothing worth a session: what waits is kept for the next one.
     waiting=$(jq '.next.waiting | length' "$work/changes.json")
-    [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing worth a session since $last ($waiting waiting for the next one)"
+    [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing worth a session since $last ($waiting waiting for the next one)${github_out:+; GitHub is down ($github_out): its events wait}"
     jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
     exit 0
   fi
@@ -109,10 +146,12 @@ fi
 # Something moved: one short session, with the model of the lead's role.
 role=$(conf_get lead role)
 routed=$(node "$ORCH_HOME/lib/route.mjs" --role "$role")
-chain=$(available_chain "$(jq -c '.chain' <<<"$routed")")
+# The lead runs on the model of its role and on no other: when that one is
+# not available, it waits. What moved is not lost, the next wake finds it.
+chain=$(available_chain "$(jq -c '.chain[0:1]' <<<"$routed")")
 if [ "$(jq length <<<"$chain")" = 0 ]; then
-  ledger event --kind model_fallback_failed --detail "project lead: no model of the chain is available ($(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed"))"
-  die "no model of the chain is available for the project lead"
+  ledger event --kind model_fallback_failed --detail "project lead: its model ($(jq -r '.chain[0].alias' <<<"$routed")) is not available, and no other model takes its place"
+  die "the model of the project lead ($(jq -r '.chain[0].alias' <<<"$routed")) is not available: no other model takes its place, no session started"
 fi
 
 # Its one lane, kept from wake to wake and brought to the head of the base.
@@ -166,6 +205,7 @@ else
       elif .kind == "pr_ready" then "- PR #\(.pr) (\(.title), branche \(.branch)) — prête pour revue, vérifications : \(.checks)"
       elif .kind == "pr_opened" then "- PR #\(.pr) (\(.title), branche \(.branch)) — ouverte en brouillon"
       else "- PR #\(.pr) (\(.title), branche \(.branch)) — \(.kind | sub("pr_"; ""))" end' "$work/changes.json"
+    [ -z "$github_out" ] || printf '\nGitHub est en panne en ce moment (%s, d'"'"'après sa page d'"'"'état) : aucun envoi, aucune vérification, aucune fusion ne peut partir. Ne donne aucun créneau ; dis-le en une phrase à qui demande, et rien de plus.\n' "$github_out"
   } > "$run_dir/prompt.md"
   # While it observes, its decisions stay in its report: nothing is posted.
   comment_on=none

@@ -1,6 +1,10 @@
 # Every minute: Linear and GitHub are read, nothing is exposed.
 [Unit]
 Description=Orchestration: wake of the project lead (every minute)
+# Started by hand or at boot, the timer first has the model of the lead
+# checked: it does not start on a model that was set aside.
+Requires=orchestration-lead-model.service
+After=orchestration-lead-model.service
 
 [Timer]
 OnCalendar=*:*:00
