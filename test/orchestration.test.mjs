@@ -1358,6 +1358,30 @@ test('the last message of a lane is a report for the lead only when its turn is 
   assert.deepEqual(laneReports([timed('fresh', at(5000)), timed('old', at(7 * 3600e3)), timed('right', at(600e3))], projects, { maxHours: 6 }).map((report) => report.lane), ['right']);
 });
 
+test('the lead is not woken by what it wrote itself, nor by a lane it was told to leave alone: only the lanes at work are read', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = yes\nnot_lanes = old-lead\n'));
+  const projects = join(box.home, 'projects');
+  const says = (worktree, branch, text) => {
+    const path = join(box.home, 'lanes', worktree);
+    box.git('worktree', 'add', '-q', '-b', branch, path, 'main');
+    const dir = join(projects, path.replace(/[^A-Za-z0-9]/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: `r-${worktree}`, timestamp: new Date(Date.now() - 120000).toISOString(), message: { content: [{ type: 'text', text }] } })}\n`);
+  };
+  // The lead's own lane (its report of the last wake), a lane of the dispatcher, the old lead kept open: none is a lane at work.
+  says('release-lead', 'release/lead', 'Pour le chef de projet : mon compte rendu du réveil précédent.');
+  says('review-X-9', 'review/X-9', 'Pour le chef de projet : relecture finie.');
+  says('old-lead', 'chore/old-lead', 'Pour le chef de projet : je suis l’ancien.');
+  says('a-lane', 'feat/a-lane', 'Pour le chef de projet : j’ai fini, je demande un créneau.');
+  mkdirSync(join(box.home, '.claude'), { recursive: true });
+  execFileSync('ln', ['-s', projects, join(box.home, '.claude', 'projects')]);
+  const seen = spawnSync(join(box.home, 'wake.sh'), ['--dry-run'], { env: { ...box.env, HOME: box.home }, encoding: 'utf8' });
+  assert.equal(seen.status, 0, seen.stderr);
+  assert.deepEqual(JSON.parse(seen.stdout).filter((event) => event.kind === 'lane_report').map((event) => event.lane), ['a-lane']);
+});
+
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
   const box = sandbox();
   const projects = join(box.home, 'projects');

@@ -122,7 +122,12 @@ if [ -z "$handover" ]; then
   if [ "$(conf_get lead live)" = yes ]; then
     root=$(expand_home "$(conf_get lanes root)")
     git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}' \
-      | grep -F "$root/" | grep -v -E "\t($(conf_keys roles | paste -sd'|'))/" \
+      | grep -F "$root/" \
+      | awk -F'\t' -v roles="$(conf_keys roles | paste -sd'|')" -v left="$(conf_get lead not_lanes)" '
+          # Not a lane at work: one the dispatcher opened (the lead itself among them), or one it was told to leave alone.
+          BEGIN { n = split(left, names, /[ ,]+/); for (i = 1; i <= n; i++) skip[names[i]] = 1 }
+          { name = $1; sub(/.*\//, "", name) }
+          $2 !~ ("^(" roles ")/") && !(name in skip)' \
       | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
     node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
   fi
