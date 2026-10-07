@@ -147,7 +147,12 @@ jq -n --arg lane "$lane" --arg worktree "$worktree" --arg requested "$requested"
   '{lane: $lane, worktree: $worktree, requested: $requested, model: $chosen, rule: $rule, run_dir: $run, terminal: $terminal}'
 
 if [ -n "$wait_for_exit" ]; then
-  orca terminal wait --terminal "$handle" --for exit --timeout-ms "${ORCH_WAIT_MS:-1800000}" > /dev/null 2>&1 || true
-  [ -f "$run_dir/exit-code" ] || die "the lane did not finish within the wait"
+  # The shell of the terminal outlives the run: the run says it is over by
+  # writing its exit code.
+  deadline=$(( $(date +%s) + ${ORCH_WAIT_SECONDS:-1800} ))
+  until [ -f "$run_dir/exit-code" ]; do
+    [ "$(date +%s)" -lt "$deadline" ] || die "the lane did not finish within the wait"
+    sleep 2
+  done
   exit "$(cat "$run_dir/exit-code")"
 fi
