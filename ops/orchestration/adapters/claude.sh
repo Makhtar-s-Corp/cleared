@@ -59,12 +59,16 @@ case "${1:-}" in
     code=${PIPESTATUS[0]}
     set -e
     result=$(jq -c 'select(.type == "result")' "$events" 2>/dev/null | tail -n 1)
+    # Did the model itself say anything? (The CLI words its own errors as a
+    # message of a model named "<synthetic>".)
+    worked=$(jq -c 'select(.type == "assistant" and (.message.model // "") != "<synthetic>")' "$events" 2>/dev/null | head -c 1)
+    failed=
     if [ -z "$result" ]; then
-      [ "$code" = 0 ] && code=1
+      failed=1
       echo "The CLI ended without a result (exit code $code)." > "$body"
       contract_usage '{}'
     else
-      [ "$(jq -r '.is_error' <<<"$result")" = true ] && [ "$code" = 0 ] && code=1
+      [ "$(jq -r '.is_error' <<<"$result")" != true ] || failed=1
       jq -r '.result // "The CLI returned no text."' <<<"$result" > "$body"
       # Sums over every model the session used; the main one is the costliest.
       contract_usage "$(jq -c '
@@ -74,6 +78,12 @@ case "${1:-}" in
            cost_usd: .total_cost_usd}
         + (if ($m | length) > 0 then {model: ($m | to_entries | max_by(.value.costUSD) | .key)} else {} end)
         | .tokens_total = ((.tokens_in // 0) + (.tokens_out // 0) + (.tokens_cache // 0) + (.tokens_cache_write // 0))' <<<"$result")"
+    fi
+    # An error before the model produced anything (model gone, quota reached,
+    # CLI not signed in) is "cannot start now": the dispatcher takes the
+    # declared fallback. An error after it has worked is a failure.
+    if [ -n "$failed" ]; then
+      if [ -z "$worked" ]; then code=2; elif [ "$code" = 0 ]; then code=1; fi
     fi
     contract_report claude "$code" "$body"
     exit "$code"

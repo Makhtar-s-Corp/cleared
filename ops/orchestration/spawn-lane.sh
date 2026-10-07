@@ -107,7 +107,7 @@ prompt_file=${prompt_file:-$ORCH_HOME/prompts/$role.md}
 
 # 3. The limit on lanes running at once is applied here, not left to a rule.
 # One spawn at a time counts and creates: two at once would both fit under
-# the limit. The lock is dropped when this script ends.
+# the limit. The lock is dropped as soon as the worktree exists.
 mkdir -p "$ORCH_STATE_DIR"
 exec 9> "$ORCH_STATE_DIR/spawn.lock"
 flock -w 120 9 || die "another spawn holds the lock"
@@ -129,6 +129,8 @@ worktree="$root/$role-$ticket"
 [ -e "$worktree" ] && die "$worktree already exists"
 git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
 git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "$base"
+# The lane exists and counts from now on: the next spawn may go.
+exec 9>&-
 
 # 5. What the terminal of the lane will run.
 run_base="$ticket-$(date -u +%Y%m%dT%H%M%SZ)"

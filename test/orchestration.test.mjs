@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../ops/orchestration/lib/conf.mjs';
@@ -170,7 +170,10 @@ esac
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   git('commit', '-q', '--allow-empty', '-m', 'init');
-  const env = { ...process.env, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf') };
+  // No test talks to the real Orca: this one opens a terminal that runs nothing.
+  execFileSync('mkdir', ['-p', join(home, 'bin')]);
+  writeFileSync(join(home, 'bin', 'orca'), '#!/usr/bin/env bash\nif [ "$1 $2" = "terminal create" ]; then echo \'{"handle":"t1"}\'; fi\n', { mode: 0o755 });
+  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf') };
   return { home, state, repo, env, git };
 }
 
@@ -236,7 +239,7 @@ test('no allowed command runs whatever follows it, and none touches git state sh
   for (const name of Object.keys(conf.sections).filter((section) => section.startsWith('permissions.'))) {
     for (const allowed of list(conf.sections[name].allow)) {
       assert.notEqual(allowed, 'node scripts/with-test-postgres.mjs', `${name}: this wrapper runs any command given after --`);
-      assert.doesNotMatch(allowed, /^git (stash|switch|checkout|rebase)\b/, `${name} allows "${allowed}"`);
+      assert.doesNotMatch(allowed, /^git (stash|switch|checkout|rebase|branch|worktree|reset|tag|update-ref)\b/, `${name} allows "${allowed}"`);
     }
   }
   assert.ok(conf.sections['permissions.mechanical'], 'a mechanical task that falls back needs its own permissions');
@@ -286,4 +289,74 @@ test('the Linear text is the write-up when the writing model answers, the raw re
   assert.match(raw, /La mise en forme a échoué/);
   assert.match(raw, /answer of second/);
   assert.match(raw, /Modèle utilisé : `m2`/);
+});
+
+test('the Claude adapter says "cannot start now" when the model produced nothing, and "failed" once it has worked', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  const call = (events) => {
+    writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\ncat > /dev/null\ncat <<'JSON'\n${events.map((e) => JSON.stringify(e)).join('\n')}\nJSON\nexit 1\n`, { mode: 0o755 });
+    return spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    }).status;
+  };
+  const refused = { type: 'result', is_error: true, api_error_status: 404, result: 'no such model', modelUsage: {} };
+  assert.equal(call([{ type: 'assistant', error: 'model_not_found', message: { model: '<synthetic>', content: [{ type: 'text', text: 'no such model' }] } }, refused]), 2);
+  assert.equal(call([refused]), 2);
+  assert.equal(call([{ type: 'assistant', message: { model: 'm', content: [{ type: 'text', text: 'working' }] } }, { ...refused, api_error_status: 429 }]), 1);
+});
+
+test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2), and reads the answer and the tokens', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'prompt.md'), 'p');
+  const call = ({ ci = 0, script }) => {
+    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\necho ${ci}\n`, { mode: 0o755 });
+    writeFileSync(join(box.home, 'task.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], {
+      cwd: box.repo, encoding: 'utf8', env: { ...box.env, ADAPTER_TASK_SCRIPT: join(box.home, 'task.sh') },
+    });
+    return { status: run.status, report: readFileSync(join(box.home, 'r.md'), 'utf8'), usage: JSON.parse(readFileSync(join(box.home, 'u.json'), 'utf8')) };
+  };
+  const refusal = call({ script: 'echo "/tmp/x/repo/test/a.test.mjs:3: secret littéral" >&2; echo "Refusé : contenu sensible dans ce qui serait envoyé à Codex." >&2; exit 1' });
+  assert.equal(refusal.status, 3);
+  assert.match(refusal.report, /^outcome: refused$/m);
+  assert.match(refusal.report, /- test\/a\.test\.mjs:3: secret littéral/);
+  assert.equal(call({ ci: 1, script: 'exit 0' }).status, 2);
+  const done = call({ script: 'printf "the answer\\nthe answer"; printf "tokens used\\n1,234\\n" >&2' });
+  assert.equal(done.status, 0);
+  assert.equal(done.usage.tokens_total, 1234);
+  assert.match(done.report, /## Compte rendu\n\nthe answer\n\n## Fichiers modifiés/);
+});
+
+test('the spawn lock is released once the lane exists, not held while waiting for it', async () => {
+  const box = sandbox();
+  const args = (ticket, ...more) => [join(box.home, 'spawn-lane.sh'), ['dev', ticket, '--comment-on', 'none', ...more], { env: { ...box.env, ORCH_WAIT_SECONDS: '20' }, encoding: 'utf8' }];
+  // The first lane never finishes (its terminal runs nothing): it waits 20 s.
+  const waiting = spawn(...args('X-2', '--wait'));
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const before = Date.now();
+  const second = spawnSync(...args('X-3'));
+  waiting.kill();
+  assert.equal(second.status, 0, second.stderr);
+  assert.ok(Date.now() - before < 10000, 'the second spawn waited for the first one to stop waiting');
+});
+
+test('a comment that the guard refuses never reaches Linear', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
+  const post = (text) => {
+    writeFileSync(join(dir, 'comment.md'), text);
+    return spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', join(dir, 'comment.md'), 'test'], { env, encoding: 'utf8' });
+  };
+  // Built at run time so that this file holds nothing the guard would flag.
+  const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}" est dans le rapport.`;
+  const refused = post(flagged);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /not sent/);
+  assert.throws(() => readFileSync(join(dir, 'called')), 'the network was reached');
+  const sent = post('Fait : rien. Reste à faire : rien.');
+  assert.equal(sent.status, 0, sent.stderr);
+  assert.equal(sent.stdout.trim(), 'u');
 });

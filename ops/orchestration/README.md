@@ -79,6 +79,7 @@ node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur)
 ## Deux pièges
 
 - Ne jamais charger `.env.local` avant de lancer un modèle : il contient une clé d'API, et la facturation quitterait l'abonnement. `linear.sh` n'y lit que sa propre clé ; `adapters/claude.sh` retire la clé de l'environnement.
+- Rien de réel ne part dans Linear : `linear.sh` fait passer chaque commentaire par le garde-fou du dépôt (`scripts/codex-guard.mjs`, pris dans `origin/main`) avant de l'envoyer. Un texte refusé n'est pas envoyé ; il reste dans le dossier du run.
 - Les commentaires passent par la clé de l'utilisateur : Linear affiche son nom. `linear.sh` commence donc chaque commentaire par « Écrit par un agent », et garde leurs identifiants dans `state/linear-comments.jsonl`. Une veille doit s'en servir pour ne pas les prendre pour des messages de l'utilisateur.
 
 ## Servir la page

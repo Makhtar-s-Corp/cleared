@@ -6,6 +6,11 @@
 #   linear.sh waiting                           tickets waiting for the user, as JSON
 #   linear.sh comments <ticket>                 its comments as JSON (id, createdAt, body)
 #
+# Nothing real goes to Linear, an outside service (decision of 2026-10-06):
+# a comment is checked by the guard of the repository first (private terms,
+# secrets, IBANs, addresses, phone numbers), taken from the trusted ref like
+# scripts/codex-task.sh does. A refused text is not sent and stays on disk.
+#
 # Every comment starts with a line saying an agent wrote it: the key belongs
 # to the user, so Linear shows his name, and a watcher must be able to tell
 # these comments from his. Their ids are also kept in state/linear-comments.jsonl.
@@ -24,12 +29,32 @@ fi
 gql() {
   local response
   response=$(jq -n --arg query "$1" --argjson variables "${2:-{\}}" '{query: $query, variables: $variables}' \
-    | curl -sS --max-time 30 -H "Authorization: $key" -H 'Content-Type: application/json' --data @- https://api.linear.app/graphql)
+    | curl -sS --max-time 30 -H @<(printf 'Authorization: %s' "$key") -H 'Content-Type: application/json' --data @- https://api.linear.app/graphql)
   if [ "$(jq -r 'has("errors")' <<<"$response" 2>/dev/null)" != false ]; then
     echo "linear: $(jq -r '.errors[0].message // "unreadable answer"' <<<"$response" 2>/dev/null || echo 'unreadable answer')" >&2
     return 1
   fi
   printf '%s\n' "$response"
+}
+
+# guard_text <file>: refuses, without showing any value, a text the guard of
+# the repository would not let out.
+guard_text() {
+  local ref=${ORCH_GUARD_REF:-origin/main} dir part
+  dir=$(mktemp -d)
+  for part in codex-guard.mjs codex-guard-allow.json private-terms.mjs private-terms.json; do
+    git -C "$ORCH_REPO" show "$ref:scripts/$part" > "$dir/$part" 2>/dev/null || {
+      rm -rf "$dir"
+      echo "linear: not sent, the guard (scripts/$part on $ref) could not be read" >&2
+      return 1
+    }
+  done
+  if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
+    rm -rf "$dir"
+    echo "linear: not sent, the guard refuses this text" >&2
+    return 1
+  fi
+  rm -rf "$dir"
 }
 
 ticket_ok() { [[ "$1" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$1\" is not a ticket identifier"; }
@@ -45,6 +70,7 @@ case "${1:-}" in
     ticket_ok "$2"
     [ -f "$3" ] || die "no such file: $3"
     from=${4:-script}
+    guard_text "$3" || exit 1
     id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id')
     body=$(printf '> Écrit par un agent (%s), pas par Makhtar.\n\n%s\n' "$from" "$(cat "$3")")
     created=$(gql 'mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }' \

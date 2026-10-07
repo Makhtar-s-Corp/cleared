@@ -52,11 +52,17 @@ case "${1:-}" in
     [ "$running" = 0 ] || refuse "une CI est en cours ou son état est illisible ($running) : aucun conteneur ne démarre pendant une CI."
     git diff --quiet HEAD || refuse "la copie de travail a des modifications non commitées."
 
+    # Output goes to files, read once the script has ended; the lane follows
+    # the transcript meanwhile.
+    tail -f "$err" >&2 &
+    follow=$!
     set +e
-    "$task_script" "$PWD" "$prompt_file" "$model" > >(tee "$out") 2> >(tee "$err" >&2)
+    "$task_script" "$PWD" "$prompt_file" "$model" > "$out" 2> "$err"
     code=$?
     set -e
-    wait
+    sleep 0.3
+    kill "$follow" 2> /dev/null || true
+    wait "$follow" 2> /dev/null || true
     if [ "$code" != 0 ] && grep -q -E '^(Refus|Refused)' "$err"; then
       {
         grep -E '^(Refus|Refused)' "$err" | tail -n 1
@@ -65,7 +71,6 @@ case "${1:-}" in
         echo
         grep -E ': (secret|adresse|terme|IBAN)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | head -n 30
       } > "$body"
-      cat "$body" >&2
       contract_usage '{}'
       contract_report codex 3 "$body"
       exit 3
