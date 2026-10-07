@@ -120,6 +120,15 @@ decisions_worktree() {
   printf '%s\n' "${ORCH_DECISIONS_WORKTREE:-$(expand_home "$(conf_get lanes root)")/$(conf_get talk role)-$(conf_get lead report_on)}"
 }
 
+# github_down: what GitHub says is down among the parts the dispatcher needs,
+# as its public status page has it (nothing when all is well, or when the
+# page cannot be read). A slowdown is not an outage.
+github_down() {
+  curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null \
+    | jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
+        | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' 2> /dev/null || true
+}
+
 # talk_open: is a discussion open in the lane of the lead? talk.sh writes
 # "opening <time>" in the mark before it opens the terminal (good for five
 # minutes: Orca may take two to open one), talk-run.sh puts

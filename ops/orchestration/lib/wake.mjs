@@ -3,7 +3,8 @@
 // GitHub say now and what was seen before. No model: this is the pre-check
 // that decides whether a session is worth starting.
 //
-//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session>]]
+//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session> [down]]]
+//       down: GitHub is down, its pull requests are not read
 //       <time read>: taken before Linear and GitHub were asked, so that
 //       nothing created while they answered falls between two wakes
 //       prints {events: [...], next: {...}}
@@ -43,7 +44,7 @@ export const OVERLAP_MS = 10 * 60_000;
 // What waits for a session is kept up to this many events, the oldest dropped.
 export const WAITING_MAX = 40;
 
-export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null) {
+export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false } = {}) {
   // A state that cannot be read (no time of last wake) is no state: this
   // wake takes note of what exists, like the very first one.
   if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
@@ -80,8 +81,11 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     events.push({ kind: 'lane_report', at: report.at, lane: report.lane, branch: report.branch, text: excerpt(report.text, 3000) });
   }
 
-  const nextPulls = {};
-  for (const pull of pulls) {
+  // While GitHub is down, what its pull requests seem to do (checks that it
+  // cancelled itself) is no news, and nobody could act on it: they are
+  // remembered as they were, and read again once it is back.
+  const nextPulls = githubDown ? { ...known } : {};
+  for (const pull of githubDown ? [] : pulls) {
     const state = pull.state === 'MERGED' ? 'merged' : pull.state === 'CLOSED' ? 'closed' : pull.isDraft ? 'draft' : 'ready';
     const checks = checksOf(pull.statusCheckRollup);
     const before = known[pull.number];
@@ -113,11 +117,11 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github] = process.argv.slice(2);
   const wakeOn = worthList?.trim() ? new Set(worthList.split(',').map((kind) => kind.trim()).filter(Boolean)) : null;
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down' }))}\n`);
 }

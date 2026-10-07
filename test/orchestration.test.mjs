@@ -151,16 +151,16 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), join(ORCH_HOME, 'confirm-decision.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), join(ORCH_HOME, 'confirm-decision.sh'), join(ORCH_HOME, 'check-lead-model.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/../lib/contract.sh"
 case "$1" in
-  list-models) shift; printf '%s\\n' "$@" ;;
+  list-models) shift; [ ${name} != first ] || [ -z "\${FIRST_GONE:-}" ] || exit 0; printf '%s\\n' "$@" ;;
   talk) shift; [ ${name} != first ] || [ -z "\${FIRST_CANNOT_TALK:-}" ] || exit 2
     printf '%s\\n' "${name}" "$@" "edit=\${ORCH_EDIT_ONLY:-}" "read=\${ORCH_READ_DIRS:-}" "mode=\${ORCH_PERMISSION_MODE:-}" "allow=\${ORCH_ALLOW:-}" "run=\${ORCH_RUN_ID:-}" > "\${ORCH_STATE_DIR}/talked"; exit 0 ;;
-  run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
+  run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; echo "\${ORCH_SIGNED:-}" > "\${ORCH_STATE_DIR}/signed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
     contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
@@ -175,6 +175,8 @@ if [ "$1" = comments ]; then echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'linear-now.json'), '[]');
+  // What GitHub says of itself: all is well, unless a test writes otherwise. No test asks the real page.
+  writeFileSync(join(home, 'github-status.json'), JSON.stringify({ components: ['Git Operations', 'Pull Requests', 'Actions', 'API Requests', 'Webhooks'].map((name) => ({ name, status: 'operational' })) }));
   writeFileSync(join(home, 'pulls-now.json'), '[]');
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
@@ -193,7 +195,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
   execFileSync('mkdir', ['-p', join(home, 'bin')]);
   writeFileSync(join(home, 'bin', 'gh'), `#!/usr/bin/env bash
-if [ "$1 $2" = "pr list" ]; then cat "${join(home, 'pulls-now.json')}"
+if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1; cat "${join(home, 'pulls-now.json')}"
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "run list" ]; then echo '[]'
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
@@ -212,7 +214,7 @@ if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; 
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
 if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
 `, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main' };
+  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main', ORCH_GITHUB_STATUS: `file://${join(home, 'github-status.json')}` };
   return { home, state, repo, env, git };
 }
 
@@ -790,6 +792,140 @@ test('a lane woken again and again keeps the terminals of its last sessions: the
   assert.throws(() => readFileSync(join(runs, 'lead-0006', 'terminal.closed')));
 });
 
+test('while GitHub is down, what its pull requests seem to do is no event and is not forgotten: it is read again once GitHub is back', async () => {
+  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: false, state: 'OPEN', updatedAt: '2026-01-02T10:01:00Z', statusCheckRollup: [{ conclusion: 'SUCCESS' }], ...over });
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  const first = changes(null, issue([]), [pull({})], new Set(), '2026-01-02T10:00:00Z');
+  // The outage cancels the checks: nothing is said of it, and the pull request is remembered as it was.
+  const cancelled = [pull({ statusCheckRollup: [{ conclusion: 'CANCELLED' }] })];
+  const down = changes(first.next, issue([{ id: 'c1', body: 'Et ça ?', createdAt: '2026-01-02T10:03:00Z', url: 'u#c1' }]), cancelled, new Set(), '2026-01-02T10:05:00Z', [], null, { githubDown: true });
+  assert.deepEqual(down.events.map((event) => event.kind), ['comment'], 'the user is still heard');
+  assert.deepEqual(down.next.pulls, first.next.pulls);
+  // Back: what is true now is said, once.
+  const back = changes(down.next, issue([]), cancelled, new Set(), '2026-01-02T10:30:00Z');
+  assert.deepEqual(back.events.map((event) => [event.kind, event.checks]), [['pr_checks', 'failure']]);
+});
+
+test('wake.sh during an outage of GitHub: no session for its events, the outage in the ledger with its start and its end, and the events handed out once it is over', () => {
+  const box = sandbox();
+  const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, at, value, detail from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const status = (actions) => writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'operational' }, { name: 'Actions', status: actions }, { name: 'Webhooks', status: 'degraded_performance' }] }));
+  const pull = (checks) => [{ number: 7, title: 'Une PR', headRefName: 'b', isDraft: false, state: 'OPEN', updatedAt: new Date().toISOString(), statusCheckRollup: [{ conclusion: checks }] }];
+  writeFileSync(join(box.home, 'pulls-now.json'), JSON.stringify(pull('SUCCESS')));
+  assert.equal(wake().status, 0);
+  // GitHub goes down and cancels the checks; it does not even answer the list of pull requests.
+  status('major_outage');
+  writeFileSync(join(box.home, 'pulls-now.json'), JSON.stringify(pull('CANCELLED')));
+  const during = wake({ FAKE_GH_LIST_DOWN: '1' });
+  assert.equal(during.status, 0, during.stderr);
+  assert.equal(calls(), 0, 'no session to find out that nothing can be done');
+  const started = readFileSync(join(box.state, 'wake', 'github-down'), 'utf8').split('\n')[0];
+  assert.match(events().at(-1).detail, /GitHub is down/);
+  assert.equal(wake({ FAKE_GH_LIST_DOWN: '1' }).status, 0);
+  assert.equal(events().filter((event) => event.kind === 'github_down').length, 0, 'written once, when it ends');
+  // A slowdown is not an outage: it is over. One entry, with its start and its end; the cancelled checks are said now.
+  status('operational');
+  const after = wake();
+  assert.equal(after.status, 0, after.stderr);
+  const outage = events().filter((event) => event.kind === 'github_down');
+  assert.equal(outage.length, 1);
+  assert.equal(outage[0].at, started);
+  assert.ok(outage[0].value >= 0);
+  assert.match(outage[0].detail, new RegExp(`^from ${started} to \\S+: Actions$`));
+  assert.throws(() => readFileSync(join(box.state, 'wake', 'github-down')));
+  assert.equal(calls(), 1);
+  assert.match(readFileSync(join(after.stdout.trim(), 'prompt.md'), 'utf8'), /PR #7 \(Une PR[\s\S]*vérifications : failure/);
+});
+
+test('host-state says the host is free for nothing while GitHub is down, and the dashboard explains the hole', async () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Pull Requests', status: 'partial_outage' }, { name: 'Actions', status: 'operational' }] }));
+  const run = spawnSync(join(box.home, 'host-state.sh'), [], { env: { ...box.env, FAKE_GH_LIST_DOWN: '1', ORCH_PROC_DIR: join(box.home, 'proc-none') }, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const state = JSON.parse(run.stdout);
+  assert.equal(state.github_is_down, 'Pull Requests');
+  assert.equal(state.free_for_a_ci_run, false);
+  assert.equal(state.free_for_a_merge, false);
+
+  const { collect, render } = await import('../ops/orchestration/lib/dashboard.mjs');
+  const db = openLedger(join(box.state, 'ledger.db'));
+  const now = Date.parse('2026-10-07T16:00:00Z');
+  addEvent(db, { kind: 'github_down', at: '2026-10-07T15:06:00Z', value: 26, detail: 'from 2026-10-07T15:06:00Z to 2026-10-07T15:32:00Z: Git Operations, Pull Requests, Actions' });
+  const inputs = { lanes: [], worktrees: [], max_lanes: 3, waiting: [], cli: null, load: 1, cores: 4, swap_total_kb: 1, swap_free_kb: 1, mem_available_kb: 1, mem_total_kb: 2, github_down_since: null };
+  const data = collect(db, conf, inputs, now);
+  assert.deepEqual(data.outages, [{ at: '2026-10-07T15:06:00Z', minutes: 26, detail: 'Git Operations, Pull Requests, Actions' }]);
+  assert.match(render(data, conf, now), /GitHub en panne[^<]*<\/span>[\s\S]*?26 min[\s\S]*?Git Operations, Pull Requests, Actions/);
+  assert.match(render(collect(db, conf, { ...inputs, github_down_since: '2026-10-07T15:50:00Z' }, now), conf, now), /GitHub est en panne depuis/);
+  db.close();
+});
+
+test('the lead does not start on a model that was set aside: the table must say the model decided last, and no other model takes its place', () => {
+  const box = sandbox();
+  const check = (extra = {}) => spawnSync(join(box.home, 'check-lead-model.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
+  const decide = (detail) => { const db = openLedger(join(box.state, 'ledger.db')); addEvent(db, { kind: 'role_model_changed', detail }); db.close(); };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  const comment = (id) => ({ id, createdAt: new Date().toISOString(), url: `u#${id}`, body: 'OK, vas-y.' });
+  // No decision written down: the table is the only word.
+  assert.equal(check().status, 0);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  assert.equal(wake().status, 0);
+  // Decided: b, no longer a. The table still says a (the change is not merged yet): nothing starts, and it says why.
+  decide('release: a -> b: too many wrong messages');
+  decide('dev: a -> b: another role, which is not the lead');
+  const refused = check();
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /role release[\s\S]*\ba\b[\s\S]*not the one decided last \(b\)[\s\S]*too many wrong messages/);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1')])));
+  const held = wake();
+  assert.equal(held.status, 1);
+  assert.equal(calls(), 0);
+  // The table follows the decision: it starts, with that model and no fallback behind it.
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('release = a\n', 'release = b\n'));
+  assert.equal(check().status, 0);
+  const started = wake();
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(calls(), 1);
+  assert.deepEqual(JSON.parse(readFileSync(join(started.stdout.trim(), 'chain.json'), 'utf8')).map((link) => link.alias), ['b']);
+});
+
+test('the lead waits rather than run on another model: when its model is not available, no session starts and it is in the ledger', () => {
+  const box = sandbox();
+  const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  assert.equal(wake().status, 0);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
+  const gone = wake({ FIRST_GONE: '1' });
+  assert.equal(gone.status, 1);
+  assert.match(gone.stderr, /no other model takes its place/);
+  assert.equal(calls(), 0);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.deepEqual(db.prepare("select kind from events where kind = 'model_fallback_failed'").all().length, 1);
+  db.close();
+  // Back: the comment was not lost.
+  const back = wake();
+  assert.equal(back.status, 0, back.stderr);
+  assert.match(readFileSync(join(back.stdout.trim(), 'prompt.md'), 'utf8'), /OK, vas-y/);
+});
+
+test('starting the timer of the wakes by hand runs the check of the model first: a timer cannot put a model set aside back to work', () => {
+  const dir = join(ORCH_HOME, 'serve');
+  const timer = readFileSync(join(dir, 'orchestration-wake.timer'), 'utf8');
+  assert.match(timer, /^Requires=orchestration-lead-model\.service$/m);
+  assert.match(timer, /^After=orchestration-lead-model\.service$/m);
+  const service = readFileSync(join(dir, 'orchestration-lead-model.service'), 'utf8');
+  assert.match(service, /^Type=oneshot$/m);
+  assert.match(service, /^ExecStart=@ORCH_HOME@\/check-lead-model\.sh$/m);
+  assert.doesNotMatch(service, /RemainAfterExit/, 'checked again at every start');
+});
+
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
   const box = sandbox();
   writeFileSync(join(box.home, 'linear.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
@@ -1104,7 +1240,7 @@ test('the handover wake: one session that rereads the handover and says what it 
   const lane = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
   assert.equal(lane.status, 0, lane.stderr);
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
-  assert.match(posted, /^X-100 from=chef de projet\n/);
+  assert.match(posted, /^X-100 from=chef de projet, modèle a\n/);
   assert.match(posted, /answer of first/);
 });
 
@@ -1211,6 +1347,8 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   // The run gets the permissions of the acting lead, not those of the role.
   spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env, encoding: 'utf8' });
   assert.equal(readFileSync(join(box.state, 'allowed-first'), 'utf8').trim(), 'read-only|only-for-the-acting-lead|never');
+  // What it writes to the user says which model wrote it.
+  assert.equal(readFileSync(join(box.state, 'signed-first'), 'utf8').trim(), 'chef de projet, modèle a');
   // Said once: the next wake does not hand the same report again.
   writeFileSync(join(runDir, 'exit-code'), '0');
   assert.equal(wake().stdout.trim(), '');

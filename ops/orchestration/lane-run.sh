@@ -15,6 +15,7 @@ trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
 # How what this run posts is signed (the acting lead posts by itself).
 [ -z "${ORCH_SIGNED:-}" ] || export ORCH_SIGNED
+signed_as=${ORCH_SIGNED:-}
 mkdir -p "$ORCH_STATE_DIR/reports"
 
 french_number() { printf '%s' "$1" | sed -E ':a;s/^([0-9]+)([0-9]{3})/\1 \2/;ta'; }
@@ -31,6 +32,8 @@ attempt() {
     --model "$model" --provider "$adapter" --requested-model "$requested" \
     --project "${ORCH_PROJECT:-}" --label "${ORCH_LABEL:-}"
   echo "── $ORCH_LANE · $role · $alias ($adapter: $model) ──"
+  # What this run posts by itself says which model wrote it.
+  [ -z "${signed_as:-}" ] || export ORCH_SIGNED="$signed_as, modèle $alias"
   adapter_env "$adapter"
   # The role's own permissions, unless the run was given others (the acting
   # lead), which never apply to another role of the same lane (the write-up).
