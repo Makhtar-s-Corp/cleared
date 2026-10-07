@@ -79,23 +79,15 @@ route_notes=$(jq -r '.notes | join(" ")' <<<"$routed")
 # 2. Availability, asked to each adapter. An unavailable model is replaced by
 # its declared fallback, loudly; a chain with no available model is an error.
 available=$(mktemp)
-echo '[]' > "$available"
+available_chain "$(jq -c '.chain' <<<"$routed")" > "$available"
 spawn_note=
-while IFS=$'\t' read -r alias adapter model; do
-  if model_available "$adapter" "$model"; then
-    jq -c --arg alias "$alias" --arg adapter "$adapter" --arg model "$model" '. + [{alias: $alias, adapter: $adapter, model: $model}]' "$available" > "$available.next" && mv "$available.next" "$available"
-  else
-    echo "$(basename "$0"): $alias ($adapter: $model) is not available" >&2
-    [ "$(jq length "$available")" = 0 ] && spawn_note="${spawn_note}${alias} indisponible au lancement. "
-  fi
-done < <(jq -r '.chain[] | [.alias, .adapter, .model] | @tsv' <<<"$routed")
 if [ "$(jq length "$available")" = 0 ]; then
   [ -n "$dry_run" ] || ledger event --kind model_fallback_failed --ticket "$ticket" --detail "$lane: no model of the chain is available ($(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed"))"
   die "no model of the chain is available for $lane: $(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed")"
 fi
 chosen=$(jq -r '.[0].alias' "$available")
 if [ "$chosen" != "$requested" ]; then
-  spawn_note="${spawn_note}Repli déclaré pris : $chosen."
+  spawn_note="$requested indisponible au lancement. Repli déclaré pris : $chosen."
   [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$lane: $requested unavailable at spawn, fallback $chosen"
   echo "$(basename "$0"): fallback, $requested -> $chosen" >&2
 fi
@@ -160,12 +152,7 @@ mv "$available" "$run_dir/chain.json"
 writeup_role=$(conf_get linear writeup_role)
 if [ -n "$writeup_role" ] && [ "$comment_on" != none ] && grep -qw -- "$role" <<<"$(conf_get linear writeup_for)"; then
   written=$(node "$ORCH_HOME/lib/route.mjs" --role "$writeup_role")
-  echo '[]' > "$run_dir/writeup-chain.json"
-  while IFS=$'\t' read -r alias adapter model; do
-    if model_available "$adapter" "$model"; then
-      jq -c --arg alias "$alias" --arg adapter "$adapter" --arg model "$model" '. + [{alias: $alias, adapter: $adapter, model: $model}]' "$run_dir/writeup-chain.json" > "$run_dir/writeup-chain.next" && mv "$run_dir/writeup-chain.next" "$run_dir/writeup-chain.json"
-    fi
-  done < <(jq -r '.chain[] | [.alias, .adapter, .model] | @tsv' <<<"$written")
+  available_chain "$(jq -c '.chain' <<<"$written")" > "$run_dir/writeup-chain.json"
   [ "$(jq length "$run_dir/writeup-chain.json")" = 0 ] && rm -f "$run_dir/writeup-chain.json"
 fi
 {

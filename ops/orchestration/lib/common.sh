@@ -78,6 +78,20 @@ model_available() {
   return 1
 }
 
+# available_chain <chain as JSON, from route.mjs>: the candidates the adapters
+# say are available now, in order, as a JSON array (empty when none is).
+available_chain() {
+  local kept='[]' alias adapter model
+  while IFS=$'\t' read -r alias adapter model; do
+    if model_available "$adapter" "$model"; then
+      kept=$(jq -c --arg alias "$alias" --arg adapter "$adapter" --arg model "$model" '. + [{alias: $alias, adapter: $adapter, model: $model}]' <<<"$kept")
+    else
+      echo "$(basename "$0"): $alias ($adapter: $model) is not available" >&2
+    fi
+  done < <(jq -r '.[] | [.alias, .adapter, .model] | @tsv' <<<"$1")
+  printf '%s\n' "$kept"
+}
+
 model_seen() {
   mkdir -p "$ORCH_STATE_DIR/models"
   printf '%s\t%s\n' "$2" "$(date +%s)" >> "$ORCH_STATE_DIR/models/$1.available"

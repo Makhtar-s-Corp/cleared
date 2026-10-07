@@ -151,7 +151,7 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
@@ -164,14 +164,22 @@ esac
 `, { mode: 0o755 });
   fake('first', '${FIRST_EXIT:-0}');
   fake('second', '0');
-  writeFileSync(join(home, 'linear.sh'), '#!/usr/bin/env bash\necho \'{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}\'\n', { mode: 0o755 });
+  // Linear and GitHub as files the test writes: what they "say now".
+  writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
+if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
+echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
+`, { mode: 0o755 });
+  writeFileSync(join(home, 'linear-now.json'), '[]');
+  writeFileSync(join(home, 'pulls-now.json'), '[]');
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\n[linear]\nwriteup_role =\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   git('commit', '-q', '--allow-empty', '-m', 'init');
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
   execFileSync('mkdir', ['-p', join(home, 'bin')]);
+  writeFileSync(join(home, 'bin', 'gh'), `#!/usr/bin/env bash\nif [ "$1 $2" = "pr list" ]; then cat "${join(home, 'pulls-now.json')}"; else echo 0; fi\n`, { mode: 0o755 });
   // FAKE_ORCA_FAILS: how many times it refuses to open a terminal before it does.
   writeFileSync(join(home, 'bin', 'orca'), `#!/usr/bin/env bash
 if [ "$1 $2" = "terminal create" ]; then
@@ -574,4 +582,102 @@ test('a lane of a role that is not counted does not take one of the three places
   box.git('worktree', 'add', '-q', '-b', 'release/X-9', join(box.home, 'lanes', 'release-X-9'), 'main');
   const run = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
+});
+
+test('the pre-check of the project lead: what the user and the outside world did is an event, what agents wrote is not', async () => {
+  const { changes, checksOf } = await import('../ops/orchestration/lib/wake.mjs');
+  const issue = (over) => ({ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments: [], ...over });
+  const comment = (id, body, createdAt = '2026-01-02T10:01:00Z') => ({ id, body, createdAt, url: `u#${id}` });
+  const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: '2026-01-02T10:00:00Z', statusCheckRollup: [], ...over });
+
+  // The very first wake only takes note: nothing that already exists is an event.
+  const first = changes(null, [issue({ comments: [comment('c0', 'déjà là')] })], [pull({})], new Set(), '2026-01-02T10:00:00Z');
+  assert.deepEqual(first.events, []);
+  assert.deepEqual(first.next.pulls, { 7: { state: 'draft', checks: 'none' } });
+
+  const linear = [
+    issue({ comments: [
+      comment('c0', 'déjà là'),
+      comment('c1', 'OK A'),
+      comment('c2', '> Écrit par un agent (dev, lane dev/X-1), pas par Makhtar.\n\ntexte'),
+      comment('c3', 'un commentaire posté par le script', '2026-01-02T10:02:00Z'),
+      comment('c4', 'Chef de projet : pris en charge.'),
+    ] }),
+    issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:03:00Z', description: 'Un ticket de Makhtar' }),
+    issue({ id: 'i3', identifier: 'X-3', createdAt: '2026-01-02T10:03:00Z', description: '> Ticket ouvert par un agent (script), pas par Makhtar.' }),
+    issue({ id: 'i4', identifier: 'X-4', createdAt: '2025-12-01T00:00:00Z', description: 'ancien, vu pour la première fois' }),
+  ];
+  const second = changes(first.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] }), pull({ number: 8, state: 'MERGED' })], new Set(['c3']), '2026-01-02T10:05:00Z');
+  assert.deepEqual(second.events.map((event) => [event.kind, event.ticket ?? event.pr]), [['pr_ready', 7], ['comment', 'X-1'], ['ticket_new', 'X-2']]);
+  assert.equal(second.events[1].text, 'OK A');
+
+  // Nothing new: nothing. Then the checks turn red: one event, once.
+  const pulls = [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })];
+  const third = changes(second.next, linear, pulls, new Set(['c3']));
+  assert.deepEqual(third.events, []);
+  const red = [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { conclusion: 'FAILURE' }] })];
+  const fourth = changes(third.next, linear, red, new Set(['c3']));
+  assert.deepEqual(fourth.events.map((event) => [event.kind, event.checks]), [['pr_checks', 'failure']]);
+  assert.deepEqual(changes(fourth.next, linear, red, new Set(['c3'])).events, []);
+  // Merged: said once, then forgotten.
+  const merged = changes(fourth.next, linear, [pull({ state: 'MERGED' })], new Set(['c3']));
+  assert.deepEqual(merged.events.map((event) => event.kind), ['pr_merged']);
+  assert.deepEqual(merged.next.pulls, {});
+  assert.equal(checksOf([{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }]), 'pending');
+  assert.equal(checksOf([{ conclusion: 'SKIPPED' }]), 'none');
+});
+
+test('the wake of the project lead: nothing moved, nothing starts; a comment of the user starts one session, once', () => {
+  const box = sandbox();
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, ticket from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  const old = { id: 'c0', createdAt: '2026-01-01T00:00:00Z', url: 'u#c0', body: 'déjà là' };
+
+  // First wake: it takes note of what exists. Second: nothing moved, and that is written down.
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old])));
+  assert.equal(wake().status, 0);
+  assert.deepEqual(events(), []);
+  assert.equal(wake().status, 0);
+  assert.deepEqual(events(), [{ kind: 'wake_skipped', ticket: null }]);
+  assert.equal(calls(), 0, 'no terminal, no model');
+
+  // An agent comments: still nothing. The user comments: one session.
+  const agent = { id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: '> Écrit par un agent (dev), pas par Makhtar.\n\nFait.' };
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old, agent])));
+  assert.equal(wake().status, 0);
+  assert.equal(calls(), 0);
+  const user = { id: 'c2', createdAt: new Date().toISOString(), url: 'u#c2', body: 'OK, vas-y.' };
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old, agent, user])));
+  const started = wake();
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(calls(), 1);
+  const runDir = started.stdout.trim();
+  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /lead prompt[\s\S]*X-1 \(Titre\) — commentaire de Makhtar[\s\S]*« OK, vas-y\. »/);
+  assert.match(readFileSync(join(runDir, 'lane.env'), 'utf8'), /ORCH_LANE=release\/lead[\s\S]*ORCH_COMMENT_ON=none/);
+  assert.match(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }), /\[release\/lead\]/);
+  assert.deepEqual(events().slice(-1), [{ kind: 'comment_handled', ticket: 'X-1' }]);
+
+  // The session has not finished: the next wake starts nothing and loses nothing.
+  const later = { id: 'c3', createdAt: new Date().toISOString(), url: 'u#c3', body: 'Et aussi ceci.' };
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old, agent, user, later])));
+  assert.equal(wake().status, 0);
+  assert.equal(calls(), 1);
+  // It finishes: the comment made meanwhile is handed to the next session, the first one is not handed again.
+  writeFileSync(join(runDir, 'exit-code'), '0');
+  const next = wake();
+  assert.equal(calls(), 2);
+  const prompt = readFileSync(join(next.stdout.trim(), 'prompt.md'), 'utf8');
+  assert.match(prompt, /Et aussi ceci/);
+  assert.doesNotMatch(prompt, /vas-y/);
+});
+
+test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'linear.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  const run = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /Linear did not answer/);
+  assert.throws(() => readFileSync(join(box.state, 'wake', 'state.json')));
 });
