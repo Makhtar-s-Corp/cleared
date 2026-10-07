@@ -10,8 +10,8 @@
 #     (or, for a lane of the dispatcher, the one the ledger has): no known
 #     author, no review;
 #   - one review at a time for a ticket (the one before, once finished, is
-#     closed here), no more than [review] per_hour an hour, and only when
-#     the host is free: opening a lane is a heavy operation.
+#     closed here), and no more than [review] per_hour an hour. A review
+#     lane only reads: it does not wait for the host to be free.
 # What the reviewer says comes back to the lead at its next wake (the event
 # review_done); nothing is posted to Linear.
 #
@@ -35,6 +35,12 @@ while [ $# -gt 0 ]; do
 done
 ledger init > /dev/null
 
+# A review lane only reads (no install, no test): it is not one of the heavy
+# operations of the host and may open while a CI runs (docs/regles-lanes.md,
+# rule of the user of 2026-10-07). Not while GitHub is down.
+down=$(github_down) || down=
+[ -z "$down" ] || die "GitHub is down ($down): the pull request cannot be fetched, ask again at a later wake"
+
 pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json number,state,title,body,headRefName,headRefOid) || die "pull request #$pr could not be read"
 [ "$(jq -r '.state' <<<"$pull")" = OPEN ] || die "pull request #$pr is not open"
 head=$(jq -r '.headRefOid' <<<"$pull") branch=$(jq -r '.headRefName' <<<"$pull")
@@ -57,26 +63,30 @@ worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs
 # What can be read wins over what is said.
 [ -n "$author" ] || author=$said_author
 
-# One review at a time for a ticket; the one before, finished, is closed.
+# Tried twice without coming to an end (its model failed, or its safeguard
+# refused): no third try of the same commit, the user is told instead.
+tries=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" tries "$pr" "$head")
+[ "$tries" -lt 2 ] || die "$tries reviews of this commit (${head:0:8}) did not come to an end: no other try, say it to the user"
+
+# One review at a time for a ticket, and a few an hour. Checked before the
+# lane of the review before is closed: a refusal closes nothing.
 lane="review/$ticket"
+previous=
 if dispatcher_lanes | grep -qxF -- "$lane"; then
   if [ "$(ledger sql "select count(*) n from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[0].n')" != 0 ]; then
     die "a review of $ticket is still running: one at a time"
   fi
-  # A finished review holds nothing to keep (the reviewer writes no file of
-  # the repository, and its report is in the state): closed whatever it left.
-  [ -n "$dry_run" ] || "$ORCH_HOME/kill-lane.sh" "$lane" --force > /dev/null \
-    || die "the lane of the review before ($lane) could not be closed: no new review of $ticket until it is"
+  previous=1
 fi
 limit=$(conf_get review per_hour)
 [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
 recent=$(ledger sql "select count(*) n from runs where role = 'review' and source = 'dispatcher' and started_at >= '$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)'" | jq -r '.[0].n')
 [ "$recent" -lt "$limit" ] || die "$recent reviews were already opened in the last hour (limit: $limit): none opened"
-
-# Opening a lane is a heavy operation on the host (docs/regles-lanes.md):
-# none while a CI runs, a deployment settles or GitHub is down.
-if [ -z "$dry_run" ] && [ "$("$ORCH_HOME/host-state.sh" | jq -r '.free_for_a_ci_run')" != true ]; then
-  die "the host is not free (a CI, a deployment, or GitHub down): opening a lane is a heavy operation, ask again at a later wake"
+# A finished review holds nothing to keep (the reviewer writes no file of
+# the repository, and its report is in the state): closed whatever it left.
+if [ -n "$previous" ] && [ -z "$dry_run" ]; then
+  "$ORCH_HOME/kill-lane.sh" "$lane" --force > /dev/null \
+    || die "the lane of the review before ($lane) could not be closed: no new review of $ticket until it is"
 fi
 
 args=(review "$ticket" --pr "$pr" --comment-on none)
@@ -86,4 +96,5 @@ args=(review "$ticket" --pr "$pr" --comment-on none)
 opened=$("$ORCH_HOME/spawn-lane.sh" "${args[@]}")
 printf '%s\n' "$opened"
 # The commit this review reads, kept with its run: it counts as reviewed even if the report is lost.
-[ -n "$dry_run" ] || printf '%s\n' "$head" > "$(jq -r '.run_dir' <<<"$opened")/reviewed-head"
+[ -n "$dry_run" ] || printf '%s\n' "$head" > "$(jq -r '.run_dir' <<<"$opened")/reviewed-head" \
+  || echo "$(basename "$0"): the commit of this review could not be written down with its run: it only counts once its report exists" >&2

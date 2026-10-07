@@ -4,6 +4,7 @@
 // its worktree. No model here: review-pr.sh and the wake decide with this.
 //
 //   reviews.mjs heads <pr>            the commits of that pull request already reviewed, oldest first (JSON)
+//   reviews.mjs tries <pr> <commit>   how many reviews of that commit did not come to an end
 //   reviews.mjs done <hours>          the reviews finished in the last hours, with what they say (JSON)
 //   reviews.mjs author <worktree>     the model that wrote the last messages of the session of that worktree
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -39,6 +40,16 @@ export function reviewedHeads(db, reports, pr) {
     .map((row) => reportOf(reports, row.run_id)?.commit ?? kept(row.run_id)).filter(Boolean);
 }
 
+// How many reviews of that commit of that pull request did not come to an
+// end (failed, or refused by a safeguard): the commit review-pr.sh wrote
+// with each run tells which commit it was.
+export function failedTries(db, reports, pr, head) {
+  return db.prepare("SELECT run_id FROM runs WHERE role = 'review' AND source = 'dispatcher' AND outcome IN ('failed', 'refused') AND pr_number = ?").all(Number(pr))
+    .filter((row) => {
+      try { return readFileSync(join(reports, '..', 'runs', row.run_id.replace(/-review-a\d+$/, ''), 'reviewed-head'), 'utf8').trim() === head; } catch { return false; }
+    }).length;
+}
+
 // Those that came to an end by themselves: one that was closed by hand has nothing to say.
 export function finishedReviews(db, reports, hours = 6, now = Date.now()) {
   const since = new Date(now - hours * 3600e3).toISOString();
@@ -72,7 +83,7 @@ if (runAsCommand(import.meta.url)) {
     process.stdout.write(`${authorModel(argument) ?? ''}\n`);
   } else {
     const db = openLedger(undefined, { readOnly: existsSync(join(process.env.ORCH_STATE_DIR ?? '', 'ledger.db')) });
-    const out = command === 'heads' ? reviewedHeads(db, reports, argument) : finishedReviews(db, reports, Number(argument) || 6);
+    const out = command === 'heads' ? reviewedHeads(db, reports, argument) : command === 'tries' ? failedTries(db, reports, argument, process.argv[4]) : finishedReviews(db, reports, Number(argument) || 6);
     db.close();
     process.stdout.write(`${JSON.stringify(out)}\n`);
   }

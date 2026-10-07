@@ -1972,11 +1972,14 @@ test('the lead opens the review of a pull request by a script that never reads t
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = yes\n'));
   const wake = (...args) => spawnSync(join(box.home, 'wake.sh'), args, { env, encoding: 'utf8' });
   assert.equal(wake().status, 0);
-  // Opening a lane is a heavy operation on the host: none while a CI runs.
-  const busy = review({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
-  assert.equal(busy.status, 1);
-  assert.match(busy.stderr, /host is not free/);
-  const first = review();
+  // A review lane only reads: it is not one of the heavy operations of the host, and opens while a CI runs
+  // (rule of the user, 2026-10-07). Not while GitHub is down: nothing could be fetched.
+  writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'major_outage' }] }));
+  const down = review();
+  assert.equal(down.status, 1);
+  assert.match(down.stderr, /GitHub is down/);
+  writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'operational' }] }));
+  const first = review({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
   assert.equal(first.status, 0, first.stderr);
   const opened = JSON.parse(first.stdout);
   assert.equal(opened.lane, 'review/X-5');
@@ -2028,7 +2031,10 @@ test('the lead opens the review of a pull request by a script that never reads t
   assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [again.run_dir], { cwd: again.worktree, env, encoding: 'utf8' }).status, 0);
   execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: one more']);
   publish();
-  assert.match(review().stderr, /3 reviews were already opened in the last hour/);
+  const over = review();
+  assert.match(over.stderr, /3 reviews were already opened in the last hour/);
+  // Refused: the lane of the review before is still there, with its report to hand; nothing was closed for nothing.
+  assert.equal(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('[review/X-5]')).length, 1);
   // The ticket is said, never guessed; a pull request that is closed is not reviewed.
   assert.match(spawnSync(join(box.home, 'review-pr.sh'), ['7'], { env, encoding: 'utf8' }).stderr, /usage: review-pr\.sh <pull request number> <ticket>/);
   writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 8, state: 'MERGED', title: 't', body: 'b', headRefName: 'feat/x', headRefOid: headOf() }));
@@ -2050,4 +2056,26 @@ test('what a review says comes back to the lead at its next wake, once; one that
   assert.deepEqual(changes(woken.next, [], [], new Set(), '2026-01-02T10:06:00Z', [], new Set(['review_done']), { reviews }).events, []);
   assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('review_done'));
   assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('ops/orchestration/review-pr.sh'));
+});
+
+test('a review that fails is tried once more, not for ever: after two tries of the same commit, the script says to tell the user', () => {
+  const lane = laneWithRemote('feat/y', 'feat: the work of the lane');
+  const { box } = lane;
+  const env = { ...box.env, HOME: box.home };
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('per_hour = 3', 'per_hour = 9'));
+  execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/y']);
+  const head = execFileSync('git', ['-C', lane.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', title: 't', body: 'b', headRefName: 'feat/y', headRefOid: head, additions: 1, deletions: 0, files: [] }));
+  const review = () => spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' });
+  // The reviewer fails (its model answers with an error), twice.
+  for (const attempt of [1, 2]) {
+    const opened = review();
+    assert.equal(opened.status, 0, `try ${attempt}: ${opened.stderr}`);
+    const run = JSON.parse(opened.stdout);
+    assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [run.run_dir], { cwd: run.worktree, env: { ...env, FIRST_EXIT: '1' }, encoding: 'utf8' }).status, 1);
+  }
+  const third = review();
+  assert.equal(third.status, 1);
+  assert.match(third.stderr, /2 reviews of this commit .* did not come to an end/);
 });
