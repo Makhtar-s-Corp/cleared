@@ -23,6 +23,15 @@ case "${1:-}" in
       for candidate in "$@"; do grep -xF -- "$candidate" <<<"$listed" || true; done
     fi
     ;;
+  version)
+    # The copy that counts is the one the isolated task script mounts in its
+    # container, not the one on the PATH.
+    task_script=${ADAPTER_TASK_SCRIPT:-}
+    case "$task_script" in "~/"*) task_script="$HOME/${task_script#\~/}" ;; esac
+    mounted=$(grep -o -E '/[^ :"]+/node_modules/@openai/codex' "$task_script" 2>/dev/null | head -n 1)
+    installed=$(jq -r '.version' "$mounted/package.json" 2>/dev/null || codex --version 2>/dev/null | awk '{print $NF}')
+    contract_npm_version codex "${ADAPTER_PACKAGE:-}" "$installed"
+    ;;
   run)
     shift
     contract_parse_run "$@"
@@ -72,7 +81,7 @@ case "${1:-}" in
     exit "$code"
     ;;
   *)
-    echo "usage: $(basename "$0") list-models [<model>...] | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
+    echo "usage: $(basename "$0") list-models [<model>...] | version | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
     exit 64
     ;;
 esac

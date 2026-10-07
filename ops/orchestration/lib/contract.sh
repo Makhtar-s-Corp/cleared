@@ -4,13 +4,35 @@
 #   <adapter> list-models [<model id>...]
 #       prints the model ids this backend can run now, one per line
 #       (limited to the candidates when some are given).
+#   <adapter> version
+#       prints one JSON line: {cli, installed, latest, days_behind}, where
+#       days_behind is how much older the installed release is than the
+#       latest one (0 when up to date, null when unknown).
 #   <adapter> run --model <id> --prompt-file <file> --report <file> --usage <file>
 #       runs the prompt in the current worktree, writes the report and the
 #       usage, and exits with 0 (done), 2 (refused before the model was
 #       called) or anything else (failed).
 #
+# ORCH_PERMISSION_MODE (read-only or accept-edits), ORCH_ALLOW and ORCH_DENY
+# (comma separated command prefixes) say what the run may do without a
+# screen; an adapter that isolates its CLI otherwise may ignore them.
+#
 # ORCH_TEXT_ONLY=1 in the environment says the task only rewords a text: an
 # adapter may then start its CLI without tools, which costs less.
+
+# contract_npm_version <cli> <npm package> <installed version>: the JSON line
+# of `version` for a CLI published on npm, from the dates of the registry.
+contract_npm_version() {
+  local latest
+  latest=$(npm view "$2" version 2>/dev/null || true)
+  # The list of release dates is long: it goes through stdin, not an argument.
+  { npm view "$2" time --json 2>/dev/null || echo '{}'; } | jq -c --arg cli "$1" --arg installed "$3" --arg latest "$latest" '
+    def day: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
+    . as $times
+    | {cli: $cli, installed: $installed, latest: (if $latest == "" then null else $latest end)}
+    | .days_behind = (if .latest == null or ($times[$installed] // null) == null or ($times[$latest] // null) == null then null
+        else ((($times[$latest] | day) - ($times[$installed] | day)) / 86400 | floor | if . < 0 then 0 else . end) end)'
+}
 
 contract_parse_run() {
   model= prompt_file= report= usage=
@@ -75,7 +97,7 @@ contract_report() {
       echo 'Aucun.'
     else
       git status --porcelain | head -n 30 | sed 's/^/- /'
-      [ "$changed" -gt 30 ] && echo "- … et $((changed - 30)) autres"
+      if [ "$changed" -gt 30 ]; then echo "- … et $((changed - 30)) autres"; fi
     fi
   } > "$report"
 }

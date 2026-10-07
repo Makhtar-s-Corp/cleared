@@ -67,6 +67,7 @@ export function collect(db, conf, inputs, nowMs = Date.now()) {
   const warnDays = Number(section(conf, 'dashboard').warn_days || 10);
   const subscriptions = Object.entries(section(conf, 'subscriptions')).map(([name, end]) => {
     if (!end) return { name, end: null };
+    if (end === 'ongoing') return { name, end, ongoing: true };
     const daysLeft = Math.ceil((new Date(`${end}T23:59:59Z`) - nowMs) / 86400e3);
     return { name, end, daysLeft, state: daysLeft < 0 ? 'critical' : daysLeft <= warnDays ? 'warning' : 'good' };
   });
@@ -83,6 +84,7 @@ export function collect(db, conf, inputs, nowMs = Date.now()) {
     legacyByModel,
     waiting: inputs.waiting,
     subscriptions,
+    cli: inputs.cli ?? null,
     host: {
       load: inputs.load, cores: inputs.cores,
       swapUsed: (inputs.swap_total_kb - inputs.swap_free_kb) / 1048576, swapTotal: inputs.swap_total_kb / 1048576,
@@ -147,10 +149,21 @@ export function render(data, conf, nowMs = Date.now()) {
 
   const subscriptions = data.subscriptions.map((sub) => {
     if (!sub.end) return `<li><span class="name">${esc(sub.name)}</span><span class="sub">date de fin à renseigner dans <code>agents.conf</code></span></li>`;
+    if (sub.ongoing) return `<li><span class="name">${esc(sub.name)}</span>${badge('good', 'en cours')}<span class="sub">sans date de fin</span></li>`;
     const label = sub.daysLeft < 0 ? 'terminé' : sub.daysLeft === 0 ? 'se termine aujourd’hui' : `${plural(sub.daysLeft, 'jour restant', 'jours restants')}`;
     const end = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${sub.end}T12:00:00Z`));
     return `<li><span class="name">${esc(sub.name)}</span>${badge(sub.state, label)}<span class="sub">jusqu’au ${esc(end)}</span></li>`;
   }).join('');
+
+  const cli = data.cli == null
+    ? '<li><span class="sub">Versions non contrôlées pour l’instant.</span></li>'
+    : data.cli.versions.map((tool) => {
+      if (tool.installed == null) return `<li><span class="name">${esc(tool.cli)}</span><span class="sub">version illisible</span></li>`;
+      if (tool.days_behind == null) return `<li><span class="name">${esc(tool.cli)}</span><span class="sub">${esc(tool.installed)}, dernière version inconnue</span></li>`;
+      const late = tool.days_behind > data.cli.max_days_behind;
+      const label = tool.days_behind === 0 ? 'à jour' : `${plural(tool.days_behind, 'jour', 'jours')} de retard`;
+      return `<li><span class="name">${esc(tool.cli)}</span>${badge(late ? 'warning' : 'good', label)}<span class="sub">${esc(tool.installed)}${tool.latest !== tool.installed ? `, dernière : ${esc(tool.latest)}` : ''}</span></li>`;
+    }).join('');
 
   const loadRatio = host.load / host.cores;
   const swapRatio = host.swapTotal ? host.swapUsed / host.swapTotal : 0;
@@ -233,6 +246,9 @@ ${waiting}
 
 <h2>Abonnements</h2>
 <ul class="list">${subscriptions}</ul>
+
+<h2>Outils en ligne de commande</h2>
+<ul class="list">${cli}</ul>
 
 <h2>Santé du serveur</h2>
 <ul class="list">${health}</ul>

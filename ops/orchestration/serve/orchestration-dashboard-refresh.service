@@ -1,0 +1,8 @@
+# systemd user unit, installed by serve/install.sh: writes the dashboard
+# again from the ledger. Scripts only, no model is started.
+[Unit]
+Description=Orchestration dashboard (refresh)
+
+[Service]
+Type=oneshot
+ExecStart=@ORCH_HOME@/dashboard.sh

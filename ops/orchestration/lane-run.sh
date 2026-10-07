@@ -28,12 +28,14 @@ attempt() {
     --project "${ORCH_PROJECT:-}" --label "${ORCH_LABEL:-}"
   echo "── $ORCH_LANE · $role · $alias ($adapter: $model) ──"
   adapter_env "$adapter"
+  permissions_env "$role"
   ORCH_RUN_ID=$run_id ORCH_ROLE=$role ORCH_REQUESTED_MODEL=$requested \
     "$(adapter_path "$adapter")" run --model "$model" --prompt-file "$prompt" --report "$report" --usage "$usage_file"
   code=$?
   case "$code" in 0) outcome=done; model_seen "$adapter" "$model" ;; 2) outcome=refused ;; *) outcome=failed ;; esac
   [ -f "$usage_file" ] || echo '{}' > "$usage_file"
   ledger run-end --run-id "$run_id" --outcome "$outcome" --exit-code "$code" --usage-file "$usage_file"
+  if [ -n "${ORCH_PR:-}" ]; then ledger run-set --run-id "$run_id" --pr-number "$ORCH_PR" --lines-changed "${ORCH_PR_LINES:-0}"; fi
 }
 
 # run_chain <role> <prompt file> <chain file> <requested alias>: first
@@ -88,7 +90,7 @@ tokens=$(jq -r '.tokens_total // empty' "$lane_usage")
 cost=$(jq -r 'if .cost_usd then (.cost_usd * 100 | round / 100 | tostring | sub("\\."; ",")) else empty end' "$lane_usage")
 comment="$run_dir/comment.md"
 {
-  echo "**Lane \`$ORCH_LANE\`** · rôle $ORCH_ROLE · $ORCH_TICKET"
+  echo "**Lane \`$ORCH_LANE\`** · rôle $ORCH_ROLE · $ORCH_TICKET${ORCH_PR:+ · PR #$ORCH_PR}"
   echo
   echo "- Modèle demandé : \`$ORCH_REQUESTED_ALIAS\` ($ORCH_RULE_NOTE)"
   echo "- Modèle utilisé : \`$(sed -n 's/^model: //p' "$lane_report")\` (adaptateur \`$lane_adapter\`)"

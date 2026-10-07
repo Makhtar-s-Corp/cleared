@@ -43,6 +43,20 @@ adapter_env() {
   return 0
 }
 
+# What a role may do without a screen, from [permissions.<role>], handed to
+# the adapter as ORCH_PERMISSION_MODE, ORCH_ALLOW and ORCH_DENY (comma
+# separated command prefixes). No section: nothing is set, and the CLI keeps
+# the settings of the user.
+permissions_env() {
+  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY
+  local mode
+  mode=$(conf_get "permissions.$1" mode)
+  [ -n "$mode" ] || return 0
+  export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY
+  ORCH_ALLOW=$(conf_get "permissions.$1" allow)
+  ORCH_DENY=$(conf_get "permissions.$1" deny)
+}
+
 adapter_path() {
   local path="$ORCH_HOME/adapters/$1.sh"
   [ -x "$path" ] || die "no adapter for \"$1\": add $path (contract in README.md)"

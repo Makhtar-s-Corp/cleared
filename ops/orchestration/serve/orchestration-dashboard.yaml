@@ -3,9 +3,7 @@
 # the route refuses any source outside the Tailscale network, like the
 # existing openclaw-tailscale-only.yaml.
 #
-# Replace TAILSCALE_IP with the address `tailscale ip -4` prints, then:
-#
-#   sudo cp orchestration-dashboard.yaml /data/coolify/proxy/dynamic/
+# serve/install.sh fills in the addresses and says what to copy where.
 http:
   middlewares:
     orchestration-tailscale-only:
@@ -26,4 +24,4 @@ http:
     orchestration-dashboard:
       loadBalancer:
         servers:
-          - url: 'http://172.18.0.1:8787'
+          - url: 'http://@BIND@:@PORT@'

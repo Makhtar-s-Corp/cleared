@@ -1,16 +1,14 @@
-# systemd user unit: serves the static dashboard to the Coolify proxy only.
-# It listens on the gateway of the "coolify" Docker network, which the
-# Internet does not reach; the proxy route in front of it only lets the
-# Tailscale network in. No container.
-#
-#   cp orchestration-dashboard.service ~/.config/systemd/user/
-#   systemctl --user enable --now orchestration-dashboard.service
+# systemd user unit, installed by serve/install.sh: serves the static
+# dashboard to the Coolify proxy only. It listens on the gateway of the
+# "coolify" Docker network, which the Internet does not reach; the proxy route
+# in front of it only lets the Tailscale network in. No container.
 [Unit]
 Description=Orchestration dashboard (static page)
 
 [Service]
-ExecStart=/usr/bin/python3 -m http.server 8787 --bind 172.18.0.1 --directory %h/orca-workspaces/budgeting/ops/orchestration/state/dashboard
+ExecStart=/usr/bin/python3 -m http.server @PORT@ --bind @BIND@ --directory @DASHBOARD_DIR@
 Restart=on-failure
+RestartSec=30
 
 [Install]
 WantedBy=default.target

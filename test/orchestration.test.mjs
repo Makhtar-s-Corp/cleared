@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../ops/orchestration/lib/conf.mjs';
 import { route } from '../ops/orchestration/lib/route.mjs';
@@ -24,6 +26,7 @@ test('every alias, fallback, role and rule of agents.conf points to a declared m
 test('the role default applies when no override matches', () => {
   assert.equal(first({ role: 'release' }), conf.roles.release);
   assert.equal(first({ role: 'mechanical' }), conf.roles.mechanical);
+  assert.notEqual(first({ role: 'mechanical', prLines: 5000 }), conf.roles.mechanical, 'heavy mechanical work has its own model');
   assert.equal(first({ role: 'dev', labels: ['Improvement'], project: 'CI et infra' }), conf.roles.dev);
 });
 
@@ -55,6 +58,26 @@ test('the reviewer is never the model that wrote the pull request', () => {
   assert.equal(route(conf, task({ role: 'review', authorModel: other })).chain[0].alias, author);
 });
 
+test('a review does not start when nobody knows who wrote the pull request', () => {
+  assert.throws(() => route(conf, task({ role: 'review' })), /author of the pull request is unknown/);
+});
+
+test('every role with permissions never allows what it denies, nor a network or docker command', () => {
+  const sections = Object.keys(conf.sections).filter((name) => name.startsWith('permissions.'));
+  assert.ok(sections.includes('permissions.dev') && sections.includes('permissions.review'));
+  const list = (text) => (text || '').split(',').map((item) => item.trim()).filter(Boolean);
+  for (const name of sections) {
+    const { mode, allow, deny } = conf.sections[name];
+    assert.ok(['read-only', 'accept-edits'].includes(mode), `${name}: mode`);
+    assert.ok(conf.roles[name.slice('permissions.'.length)], `${name}: not a role`);
+    for (const allowed of list(allow)) {
+      for (const denied of list(deny)) assert.ok(!(allowed === denied || allowed.startsWith(`${denied} `)), `${name} allows "${allowed}", which it denies`);
+      assert.doesNotMatch(allowed, /^(curl|wget|ssh|scp|nc|docker|gh|npx)\b|^git (push|fetch|pull|clone|remote)\b|^npm (install|ci|i)\b|docker/, `${name} allows "${allowed}"`);
+    }
+    for (const must of ['curl', 'docker', 'git push']) assert.ok(list(deny).includes(must), `${name} does not deny ${must}`);
+  }
+});
+
 test('the chain follows the declared fallbacks and stops on a loop', () => {
   const routed = route(conf, task({ role: 'mechanical' }));
   assert.equal(routed.chain[1].alias, conf.fallbacks[conf.roles.mechanical]);
@@ -72,7 +95,7 @@ test('the dispatcher scripts name no model and no provider', () => {
   const names = new Set();
   for (const [alias, model] of Object.entries(conf.models)) { names.add(alias); names.add(model.model); names.add(model.adapter); }
   for (const word of ['gpt', 'opus', 'sonnet', 'haiku', 'fable', 'gemini']) names.add(word);
-  const files = ['spawn-lane.sh', 'kill-lane.sh', 'lane-run.sh', 'lib/common.sh', 'lib/contract.sh', 'lib/route.mjs', 'lib/conf.mjs'];
+  const files = ['spawn-lane.sh', 'kill-lane.sh', 'lane-run.sh', 'check-cli.sh', 'dashboard.sh', 'lib/common.sh', 'lib/contract.sh', 'lib/route.mjs', 'lib/conf.mjs'];
   for (const file of files) {
     const code = readFileSync(join(ORCH_HOME, file), 'utf8').split('\n').filter((line) => !/^\s*(#|\/\/)/.test(line)).join('\n');
     for (const name of names) {
@@ -105,4 +128,19 @@ test('a cost is computed from the price table only when the CLI gives none, and 
   assert.deepEqual(costEur(pricing, { ...usage, model: 'priced' }), { cost: (1 + 2 + 0.5 + 4 + 8) * 0.5, basis: 'prices' });
   assert.deepEqual(costEur(pricing, { ...usage, model: 'unpriced' }), { cost: null, basis: null });
   assert.equal(costEur(pricing, { model: 'unpriced', tokens_total: 1493 }).cost, null);
+});
+
+test('the report is written, and the adapter goes on, when the lane changed a few files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-report-'));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  writeFileSync(join(dir, 'changed.txt'), 'x');
+  writeFileSync(join(dir, 'body.md'), 'Fait : rien.');
+  const script = `set -euo pipefail; . "${join(ORCH_HOME, 'lib/contract.sh')}"; model=m; report=report.md; usage=usage.json; contract_started=now;
+    contract_usage '{}'; contract_report test 0 body.md; echo after`;
+  const run = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /after/);
+  const report = readFileSync(join(dir, 'report.md'), 'utf8');
+  assert.match(report, /^format: lane-report\/1$/m);
+  assert.match(report, /## Compte rendu\n\nFait : rien\.\n\n## Fichiers modifiés\n\n- \?\? /);
 });

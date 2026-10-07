@@ -7,7 +7,7 @@ Le dispatcher ouvre une lane par agent, choisit son modèle dans une table, et �
 ```sh
 ops/orchestration/spawn-lane.sh dev SEE-105              # ouvre la lane dev/SEE-105
 ops/orchestration/spawn-lane.sh dev SEE-105 --dry-run    # dit seulement quel modèle serait pris, et pourquoi
-ops/orchestration/spawn-lane.sh dev SEE-105 --model codex  # force un modèle de la table
+ops/orchestration/spawn-lane.sh mechanical SEE-105 --model codex-heavy  # force un modèle de la table
 ops/orchestration/kill-lane.sh dev/SEE-105               # ferme la lane (terminaux, copie de travail, branche)
 ops/orchestration/dashboard.sh                           # réécrit la page du tableau de bord
 ```
@@ -31,22 +31,36 @@ Changer de modèle, c'est changer une ligne. Un nouveau fournisseur, c'est un fi
 
 ```
 adapters/<nom>.sh list-models [<modèle>...]
+adapters/<nom>.sh version
 adapters/<nom>.sh run --model <id> --prompt-file <fichier> --report <fichier> --usage <fichier>
 ```
 
 - `list-models` rend les modèles que ce fournisseur peut lancer maintenant, un par ligne. Le dispatcher l'interroge avant chaque lancement et garde un « oui » pendant un jour.
+- `version` rend la version installée, la dernière publiée et le retard en jours. `check-cli.sh` l'appelle une fois par semaine : au-delà de `cli_max_days_behind` (14), il écrit un événement `cli_outdated` que le digest reprendra.
 - `run` s'exécute dans la copie de travail courante et sort avec 0 (terminé), 2 (refus avant tout appel au modèle) ou autre chose (échec).
 - Le compte rendu a la même forme pour tous : `lib/contract.sh` l'écrit. En tête, le run, la lane, le modèle demandé, le modèle utilisé, le résultat, les tokens ; puis « Compte rendu » et « Fichiers modifiés ».
 - Le fichier d'usage donne les tokens tels que la CLI les rapporte. Ce qu'elle ne donne pas reste vide.
 
 `adapters/codex.sh` ne lance jamais Codex sur l'hôte : il appelle le script isolé du checkout principal (`scripts/codex-task.sh`), refuse tant qu'une CI tourne, et rend le refus du garde-fou tel quel.
 
+## Ce qu'une lane a le droit de faire
+
+`[permissions.<rôle>]` dans `agents.conf` : `read-only` ou `accept-edits`, la liste des seules commandes permises, et celle des commandes refusées quoi qu'il arrive. Pour `dev` : tests, vérification, build et git local ; jamais de commande réseau ni de docker, donc pas de `git push` : pousser la branche et ouvrir la PR reviendra à un script, pas au modèle. Sans écran, ce qui n'est pas dans la liste est refusé, pas demandé. C'est une consigne donnée à la CLI, pas un bac à sable : un test qu'elle a le droit de lancer reste du code.
+
+## Relire une PR
+
+```sh
+ops/orchestration/spawn-lane.sh review SEE-112 --pr 257
+```
+
+La lane `review/<ticket>` part de la tête de la PR, en lecture seule. Le modèle vient de la table, avec la taille et les chemins de la PR ; ce n'est jamais celui qui l'a écrite (lu dans le ledger, ou donné par `--author-model`). Sans auteur connu, la relecture ne démarre pas. Son compte rendu est posté tel quel, sans passer par la mise en forme.
+
 ## Le ledger
 
 `state/ledger.db` (SQLite), dans le checkout principal, hors de git, commun à toutes les lanes. Écrit par les scripts (`lib/ledger.mjs`), jamais par un modèle.
 
 - `runs` : un lancement de modèle. `run_id`, `ticket`, `role`, `model`, `provider`, `started_at`, `ended_at`, `tokens_in`, `tokens_out`, `tokens_cache`, `cost_eur`, `outcome`, `pr_number`, `lines_changed`, `human_decision`, `human_latency_min`, et en plus `lane`, `source`, `requested_model`, `exit_code`, `tokens_cache_write`, `tokens_total`, `cost_basis`, `project`, `label`.
-- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action).
+- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action), `cli_outdated` (jours de retard d'une CLI).
 
 `outcome` vaut `running`, `done`, `failed`, `refused`, `killed`, `idle`, puis, posés par l'étape de release : `merged`, `returned`, `reverted`.
 
@@ -67,11 +81,15 @@ node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur)
 - Ne jamais charger `.env.local` avant de lancer un modèle : il contient une clé d'API, et la facturation quitterait l'abonnement. `linear.sh` n'y lit que sa propre clé ; `adapters/claude.sh` retire la clé de l'environnement.
 - Les commentaires passent par la clé de l'utilisateur : Linear affiche son nom. `linear.sh` commence donc chaque commentaire par « Écrit par un agent », et garde leurs identifiants dans `state/linear-comments.jsonl`. Une veille doit s'en servir pour ne pas les prendre pour des messages de l'utilisateur.
 
-## Servir la page (pas encore en place)
+## Servir la page
 
-Proposé, à valider avant toute mise en place : la page reste sur le réseau Tailscale, comme OpenClaw. Les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
+La page reste sur le réseau Tailscale, comme OpenClaw (décision du 7 octobre) : les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
 
-- `serve/orchestration-dashboard.service` : un service utilisateur qui sert le seul dossier `state/dashboard/`, à l'écoute sur la passerelle du réseau Docker de Coolify. Aucun conteneur.
-- `serve/orchestration-dashboard.yaml` : la route du proxy de Coolify, qui refuse toute source hors Tailscale. À copier dans `/data/coolify/proxy/dynamic/` (droits d'administrateur).
+`serve/install.sh` installe, sans droits d'administrateur :
 
-Adresse une fois en place : `http://orchestration.TAILSCALE_IP.sslip.io/`, où `TAILSCALE_IP` est l'adresse Tailscale du serveur (`tailscale ip -4`). Rien de tout cela n'a été essayé sur le serveur.
+- un service utilisateur qui sert le seul dossier `state/dashboard/`, à l'écoute sur la passerelle du réseau Docker de Coolify ; aucun conteneur ;
+- une minuterie qui relance `dashboard.sh` toutes les dix minutes, en attendant que le dispatcher ait son propre réveil (phase 2). Des scripts seulement, aucun modèle.
+
+Il prépare aussi la route du proxy de Coolify, qui refuse toute source hors Tailscale, et donne la commande pour la copier dans `/data/coolify/proxy/dynamic/` : celle-là demande un administrateur.
+
+La minuterie appelle le `dashboard.sh` du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.

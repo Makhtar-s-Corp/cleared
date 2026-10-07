@@ -11,6 +11,10 @@ out=${1:-$ORCH_STATE_DIR/dashboard/index.html}
 mkdir -p "$(dirname "$out")"
 ledger init > /dev/null
 
+# Once a week this also checks how far behind the CLIs are.
+"$ORCH_HOME/check-cli.sh" > /dev/null || true
+cli=$(cat "$ORCH_STATE_DIR/cli-versions.json" 2>/dev/null || echo null)
+
 # What the ledger does not hold: read here, by scripts, never by a model.
 # A source that does not answer is written as null and shown as such.
 waiting=$("$ORCH_HOME/linear.sh" waiting 2>/dev/null || echo null)
@@ -20,6 +24,7 @@ trap 'rm -f "$inputs"' EXIT
 jq -n \
   --argjson waiting "$waiting" \
   --argjson merged "${merged:-null}" \
+  --argjson cli "$cli" \
   --argjson lanes "$(dispatcher_lanes | jq -R . | jq -sc .)" \
   --argjson max_lanes "$(conf_get limits max_lanes)" \
   --argjson worktrees "$(git -C "$ORCH_REPO" worktree list --porcelain | grep -c '^branch ')" \
@@ -29,7 +34,7 @@ jq -n \
   --argjson swap_free_kb "$(awk '/^SwapFree/ {print $2}' /proc/meminfo)" \
   --argjson mem_total_kb "$(awk '/^MemTotal/ {print $2}' /proc/meminfo)" \
   --argjson mem_available_kb "$(awk '/^MemAvailable/ {print $2}' /proc/meminfo)" \
-  '{waiting: $waiting, merged_prs_7d: $merged, lanes: $lanes, max_lanes: $max_lanes, worktrees: $worktrees,
+  '{waiting: $waiting, merged_prs_7d: $merged, cli: $cli, lanes: $lanes, max_lanes: $max_lanes, worktrees: $worktrees,
     load: $load, cores: $cores, swap_total_kb: $swap_total_kb, swap_free_kb: $swap_free_kb,
     mem_total_kb: $mem_total_kb, mem_available_kb: $mem_available_kb}' > "$inputs"
 

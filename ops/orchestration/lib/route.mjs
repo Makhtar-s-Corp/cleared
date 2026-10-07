@@ -57,7 +57,10 @@ export function route(conf, task) {
   known(conf, alias, rule);
 
   const review = section(conf, 'review');
-  const mustDiffer = task.role === 'review' && review.differs_from_author === 'yes' && task.authorModel;
+  if (task.role === 'review' && review.differs_from_author === 'yes' && !task.authorModel) {
+    throw new Error('the author of the pull request is unknown: pass --author-model, a review never starts on a guess');
+  }
+  const mustDiffer = task.role === 'review' && review.differs_from_author === 'yes';
   if (mustDiffer && sameModel(conf, alias, task.authorModel)) {
     const other = review.when_same;
     if (!other || sameModel(conf, other, task.authorModel)) {

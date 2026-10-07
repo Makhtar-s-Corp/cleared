@@ -23,6 +23,7 @@ export const EVENT_KINDS = [
   'model_fallback', // a declared fallback was taken (the lane still ran)
   'model_fallback_failed', // no model of the chain could run
   'comment_handled', // value = minutes between a comment of the user and the first action
+  'cli_outdated', // value = days a CLI is behind its latest release (weekly check)
 ];
 
 const SCHEMA = `

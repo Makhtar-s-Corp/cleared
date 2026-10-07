@@ -23,14 +23,34 @@ case "${1:-}" in
       fi
     done
     ;;
+  version)
+    contract_npm_version claude "${ADAPTER_PACKAGE:-}" "$(claude --version 2>/dev/null | awk '{print $1}')"
+    ;;
   run)
     shift
     contract_parse_run "$@"
     events=$(mktemp) body=$(mktemp)
     trap 'rm -f "$events" "$body"' EXIT
     args=(-p --model "$model" --output-format stream-json --verbose)
-    [ -n "${ADAPTER_PERMISSION_MODE:-}" ] && args+=(--permission-mode "$ADAPTER_PERMISSION_MODE")
-    [ -n "${ORCH_TEXT_ONLY:-}" ] && args+=(--tools "" --strict-mcp-config --no-session-persistence)
+    # Without a screen, a tool that is not allowed is refused, not asked for:
+    # the list of allowed commands is the limit. The refusals are stated too.
+    if [ -n "${ORCH_PERMISSION_MODE:-}" ]; then
+      allowed=() denied=()
+      while IFS= read -r prefix; do [ -n "$prefix" ] && allowed+=("Bash($prefix)" "Bash($prefix *)"); done \
+        < <(tr ',' '\n' <<<"${ORCH_ALLOW:-}" | sed 's/^ *//; s/ *$//')
+      while IFS= read -r prefix; do [ -n "$prefix" ] && denied+=("Bash($prefix)" "Bash($prefix *)"); done \
+        < <(tr ',' '\n' <<<"${ORCH_DENY:-}" | sed 's/^ *//; s/ *$//')
+      for tool in ${ADAPTER_DENY_TOOLS:-}; do denied+=("$tool"); done
+      case "$ORCH_PERMISSION_MODE" in
+        accept-edits) args+=(--permission-mode acceptEdits) ;;
+        read-only) denied+=(Edit Write NotebookEdit) ;;
+        *) echo "unknown permission mode: $ORCH_PERMISSION_MODE" >&2; exit 64 ;;
+      esac
+      [ ${#allowed[@]} -gt 0 ] && args+=(--allowedTools "${allowed[@]}")
+      [ ${#denied[@]} -gt 0 ] && args+=(--disallowedTools "${denied[@]}")
+    fi
+    [ "${ADAPTER_CONNECTORS:-}" = none ] && args+=(--strict-mcp-config)
+    [ -n "${ORCH_TEXT_ONLY:-}" ] && args+=(--tools "" --no-session-persistence)
     set +e
     # The lane shows what the model says and which tools it calls, as it goes.
     cli "${args[@]}" < "$prompt_file" | tee "$events" | jq -r --unbuffered '
@@ -59,7 +79,7 @@ case "${1:-}" in
     exit "$code"
     ;;
   *)
-    echo "usage: $(basename "$0") list-models [<model>...] | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
+    echo "usage: $(basename "$0") list-models [<model>...] | version | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
     exit 64
     ;;
 esac
