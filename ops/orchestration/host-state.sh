@@ -9,6 +9,13 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 cd "$ORCH_REPO"
+# GitHub down: nothing can be sent, checked or merged, and it may not even
+# answer what follows. Said as such, the host is free for nothing.
+down=$(github_down) || down=
+if [ -n "$down" ]; then
+  jq -n --arg down "$down" '{github_is_down: $down, ci_runs_in_progress: [], free_for_a_ci_run: false, free_for_a_merge: false, open_pull_requests: []}'
+  exit 0
+fi
 base=$(conf_get lanes base)
 target=${base#origin/}
 runs=$(gh run list --limit 20 --json status,headBranch,event --jq '[.[] | select(.status != "completed") | {branch: .headBranch, event}]')

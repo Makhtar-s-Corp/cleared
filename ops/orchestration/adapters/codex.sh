@@ -23,6 +23,11 @@ case "${1:-}" in
       for candidate in "$@"; do grep -xF -- "$candidate" <<<"$listed" || true; done
     fi
     ;;
+  talk)
+    # The CLI only runs inside its container, without a screen.
+    echo "codex: no conversation from this adapter" >&2
+    exit 2
+    ;;
   version)
     # The copy that counts is the one the isolated task script mounts in its
     # container, not the one on the PATH.

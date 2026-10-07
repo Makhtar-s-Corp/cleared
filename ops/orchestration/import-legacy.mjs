@@ -18,6 +18,7 @@ import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { loadConf, ORCH_HOME, expandHome, section } from './lib/conf.mjs';
 import { openLedger, costEur } from './lib/ledger.mjs';
+import { dispatcherWorktree } from './lib/lanes.mjs';
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
@@ -29,7 +30,9 @@ const since = new Date(Date.now() - days * 86400e3).toISOString();
 const conf = loadConf();
 const REARM = new Set(['Monitor', 'TaskStop', 'TaskOutput', 'ScheduleWakeup']);
 
-// The session logs of every worktree under the lanes root.
+// The session logs of every worktree under the lanes root. Those of a
+// worktree the dispatcher opened are marked: they are not the old way of
+// working, and the ledger has them already.
 function logFiles() {
   const root = expandHome(section(conf, 'lanes').root);
   const prefix = root.replace(/[^A-Za-z0-9]/g, '-');
@@ -38,13 +41,14 @@ function logFiles() {
   for (const dir of readdirSync(projects)) {
     if (!dir.startsWith(prefix)) continue;
     const lead = dir.slice(prefix.length + 1).split('-')[0] === leadWorktree;
+    const owned = dispatcherWorktree(dir.slice(prefix.length + 1), Object.keys(conf.roles));
     for (const file of readdirSync(join(projects, dir))) {
       if (!file.endsWith('.jsonl')) continue;
-      files.push({ path: join(projects, dir, file), session: basename(file, '.jsonl'), subagent: false, lead });
+      files.push({ path: join(projects, dir, file), session: basename(file, '.jsonl'), subagent: false, lead, owned });
       const sub = join(projects, dir, basename(file, '.jsonl'), 'subagents');
       if (!existsSync(sub)) continue;
       for (const child of readdirSync(sub)) {
-        if (child.endsWith('.jsonl')) files.push({ path: join(sub, child), session: basename(file, '.jsonl'), subagent: basename(child, '.jsonl'), lead });
+        if (child.endsWith('.jsonl')) files.push({ path: join(sub, child), session: basename(file, '.jsonl'), subagent: basename(child, '.jsonl'), lead, owned });
       }
     }
   }
@@ -156,11 +160,17 @@ const insert = db.prepare(`INSERT OR REPLACE INTO runs (run_id, ticket, role, mo
   cost_eur, outcome, lane, source, tokens_cache_write, tokens_total, cost_basis) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'legacy', ?, ?, ?)`);
 const insertEvent = db.prepare("INSERT INTO events (at, kind, ticket, run_id, detail, value, source) VALUES (?, ?, ?, ?, ?, ?, ?)");
 const comments = new Map();
-const summary = { sessions: 0, runs: 0, idle: 0, expired: 0, comments: 0 };
+const summary = { sessions: 0, runs: 0, idle: 0, expired: 0, comments: 0, removed: 0 };
 
 for (const file of logFiles()) {
-  const { wakes, events } = await readSession(file);
   const tag = `legacy:${file.session.slice(0, 8)}${file.subagent ? `:${file.subagent.slice(-8)}` : ''}`;
+  if (file.owned) {
+    // Counted twice by an earlier import: taken back out.
+    summary.removed += db.prepare('DELETE FROM runs WHERE source = ? AND run_id LIKE ?').run('legacy', `${tag}:%`).changes;
+    db.prepare('DELETE FROM events WHERE source = ?').run(tag);
+    continue;
+  }
+  const { wakes, events } = await readSession(file);
   const recent = wakes.filter((wake) => wake.start >= since);
   if (!recent.length) continue;
   summary.sessions += 1;

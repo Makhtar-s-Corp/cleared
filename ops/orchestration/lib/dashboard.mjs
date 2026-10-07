@@ -83,6 +83,10 @@ export function collect(db, conf, inputs, nowMs = Date.now()) {
     byModel,
     legacyByModel,
     waiting: inputs.waiting,
+    // The outages of GitHub explain the holes: nothing could be sent, checked or merged meanwhile.
+    outages: all("SELECT at, value, detail FROM events WHERE kind = 'github_down' AND at >= ? ORDER BY at DESC", since)
+      .map((row) => ({ at: row.at, minutes: row.value, detail: (row.detail ?? '').replace(/^from \S+ to \S+: /, '') })),
+    githubDownSince: inputs.github_down_since ?? null,
     subscriptions,
     cli: inputs.cli ?? null,
     host: {
@@ -104,6 +108,9 @@ export function render(data, conf, nowMs = Date.now()) {
   const zone = section(conf, 'dashboard');
   const when = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: zone.timezone || 'UTC' }).format(nowMs);
   const { merged, legacy, idle, legacyIdle, delay, lanes, host } = data;
+  const local = (options) => (iso) => new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: zone.timezone || 'UTC' }).format(new Date(iso));
+  const clock = local({ hour: '2-digit', minute: '2-digit' });
+  const day = local({ day: 'numeric', month: 'long' });
 
   const tiles = [
     tile('Coût par ticket fusionné', merged.perTicket == null ? '—' : esc(euros(merged.perTicket)), [
@@ -172,7 +179,9 @@ export function render(data, conf, nowMs = Date.now()) {
     `<li><span class="name">Charge</span>${badge(state(loadRatio, 0.7, 1))}<span class="sub">${number(host.load, 1)} pour ${number(host.cores)} cœurs</span></li>`,
     `<li><span class="name">Swap</span>${badge(state(swapRatio, 0.5, 0.9))}<span class="sub">${number(host.swapUsed, 1)} Go utilisés sur ${number(host.swapTotal, 1)}</span></li>`,
     `<li><span class="name">Mémoire</span>${badge(state(1 - host.memAvailable / host.memTotal, 0.8, 0.92))}<span class="sub">${number(host.memAvailable, 1)} Go disponibles sur ${number(host.memTotal, 0)}</span></li>`,
-  ].join('');
+  ].join('')
+    + (data.githubDownSince ? `<li><span class="name">GitHub</span>${badge('critical', 'en panne')}<span class="sub">GitHub est en panne depuis ${esc(clock(data.githubDownSince))} : rien ne peut être envoyé, vérifié ni fusionné</span></li>` : '')
+    + (data.outages ?? []).map((outage) => `<li><span class="name">GitHub en panne le ${esc(day(outage.at))}</span><span class="sub">à ${esc(clock(outage.at))}, ${number(outage.minutes)} min : ${esc(outage.detail)}</span></li>`).join('');
 
   return `<!doctype html>
 <html lang="fr">
