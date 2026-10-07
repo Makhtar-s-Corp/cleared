@@ -79,23 +79,15 @@ route_notes=$(jq -r '.notes | join(" ")' <<<"$routed")
 # 2. Availability, asked to each adapter. An unavailable model is replaced by
 # its declared fallback, loudly; a chain with no available model is an error.
 available=$(mktemp)
-echo '[]' > "$available"
+available_chain "$(jq -c '.chain' <<<"$routed")" > "$available"
 spawn_note=
-while IFS=$'\t' read -r alias adapter model; do
-  if model_available "$adapter" "$model"; then
-    jq -c --arg alias "$alias" --arg adapter "$adapter" --arg model "$model" '. + [{alias: $alias, adapter: $adapter, model: $model}]' "$available" > "$available.next" && mv "$available.next" "$available"
-  else
-    echo "$(basename "$0"): $alias ($adapter: $model) is not available" >&2
-    [ "$(jq length "$available")" = 0 ] && spawn_note="${spawn_note}${alias} indisponible au lancement. "
-  fi
-done < <(jq -r '.chain[] | [.alias, .adapter, .model] | @tsv' <<<"$routed")
 if [ "$(jq length "$available")" = 0 ]; then
   [ -n "$dry_run" ] || ledger event --kind model_fallback_failed --ticket "$ticket" --detail "$lane: no model of the chain is available ($(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed"))"
   die "no model of the chain is available for $lane: $(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed")"
 fi
 chosen=$(jq -r '.[0].alias' "$available")
 if [ "$chosen" != "$requested" ]; then
-  spawn_note="${spawn_note}Repli déclaré pris : $chosen."
+  spawn_note="$requested indisponible au lancement. Repli déclaré pris : $chosen."
   [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$lane: $requested unavailable at spawn, fallback $chosen"
   echo "$(basename "$0"): fallback, $requested -> $chosen" >&2
 fi
@@ -118,7 +110,7 @@ exec 9> "$ORCH_STATE_DIR/spawn.lock"
 flock -w 120 9 || die "another spawn holds the lock"
 max=$(conf_get limits max_lanes)
 lanes=$(dispatcher_lanes)
-open=$(grep -c . <<<"$lanes" || true)
+open=$(counted_lanes | grep -c . || true)
 if grep -qxF -- "$lane" <<<"$lanes"; then die "the lane $lane is already open"; fi
 if [ "$open" -ge "$max" ]; then
   ledger event --kind lane_limit_reached --ticket "$ticket" --detail "$lane refused: $open lanes open for a limit of $max" --value "$open"
@@ -160,12 +152,7 @@ mv "$available" "$run_dir/chain.json"
 writeup_role=$(conf_get linear writeup_role)
 if [ -n "$writeup_role" ] && [ "$comment_on" != none ] && grep -qw -- "$role" <<<"$(conf_get linear writeup_for)"; then
   written=$(node "$ORCH_HOME/lib/route.mjs" --role "$writeup_role")
-  echo '[]' > "$run_dir/writeup-chain.json"
-  while IFS=$'\t' read -r alias adapter model; do
-    if model_available "$adapter" "$model"; then
-      jq -c --arg alias "$alias" --arg adapter "$adapter" --arg model "$model" '. + [{alias: $alias, adapter: $adapter, model: $model}]' "$run_dir/writeup-chain.json" > "$run_dir/writeup-chain.next" && mv "$run_dir/writeup-chain.next" "$run_dir/writeup-chain.json"
-    fi
-  done < <(jq -r '.chain[] | [.alias, .adapter, .model] | @tsv' <<<"$written")
+  available_chain "$(jq -c '.chain' <<<"$written")" > "$run_dir/writeup-chain.json"
   [ "$(jq length "$run_dir/writeup-chain.json")" = 0 ] && rm -f "$run_dir/writeup-chain.json"
 fi
 {
@@ -177,14 +164,8 @@ fi
 } > "$run_dir/lane.env"
 
 # 6. The terminal, visible in Orca under the lane.
-terminal=
-for _ in 1 2 3 4 5 6; do
-  if terminal=$(orca terminal create --worktree "path:$worktree" --title "$lane · $chosen" --command "$ORCH_HOME/lane-run.sh $run_dir" --json 2>/dev/null); then break; fi
-  terminal=
-  sleep 5
-done
-[ -n "$terminal" ] || die "the worktree $worktree exists but Orca did not open a terminal in it; run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir)"
-handle=$(jq -r '.. | objects | .handle? // empty' <<<"$terminal" | head -n 1)
+handle=$(open_terminal "$worktree" "$lane · $chosen" "$ORCH_HOME/lane-run.sh $run_dir" "$ticket") \
+  || die "the worktree $worktree exists but Orca did not open a terminal in it; run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir)"
 # Orca knows the worktree by now: link it to its ticket.
 orca worktree set --worktree "path:$worktree" --linear-issue "$ticket" --comment "$role · $chosen · ouverte par le dispatcher" > /dev/null 2>&1 || true
 echo "$handle" > "$run_dir/terminal.handle"

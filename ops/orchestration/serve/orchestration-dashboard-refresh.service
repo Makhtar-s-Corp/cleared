@@ -4,5 +4,8 @@
 Description=Orchestration dashboard (refresh)
 
 [Service]
+# orca and the CLIs are installed in the home of the user: a unit does not get
+# that folder on its PATH by itself.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Type=oneshot
 ExecStart=@ORCH_HOME@/dashboard.sh

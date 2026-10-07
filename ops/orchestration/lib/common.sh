@@ -78,9 +78,72 @@ model_available() {
   return 1
 }
 
+# available_chain <chain as JSON, from route.mjs>: the candidates the adapters
+# say are available now, in order, as a JSON array (empty when none is).
+available_chain() {
+  local kept='[]' alias adapter model
+  while IFS=$'\t' read -r alias adapter model; do
+    if model_available "$adapter" "$model"; then
+      kept=$(jq -c --arg alias "$alias" --arg adapter "$adapter" --arg model "$model" '. + [{alias: $alias, adapter: $adapter, model: $model}]' <<<"$kept")
+    else
+      echo "$(basename "$0"): $alias ($adapter: $model) is not available" >&2
+    fi
+  done < <(jq -r '.[] | [.alias, .adapter, .model] | @tsv' <<<"$1")
+  printf '%s\n' "$kept"
+}
+
 model_seen() {
   mkdir -p "$ORCH_STATE_DIR/models"
   printf '%s\t%s\n' "$2" "$(date +%s)" >> "$ORCH_STATE_DIR/models/$1.available"
+}
+
+# guard_text <file>: refuses, without showing any value, a text the guard of
+# the repository would not let out (private terms, secrets, IBANs, addresses,
+# phone numbers). For anything a script sends to an outside service: Linear,
+# GitHub. The guard comes from the trusted ref, like scripts/codex-task.sh.
+guard_text() {
+  local ref=${ORCH_GUARD_REF:-origin/main} dir part
+  dir=$(mktemp -d)
+  for part in codex-guard.mjs codex-guard-allow.json private-terms.mjs private-terms.json; do
+    git -C "$ORCH_REPO" show "$ref:scripts/$part" > "$dir/$part" 2>/dev/null || {
+      rm -rf "$dir"
+      echo "$(basename "$0"): not sent, the guard (scripts/$part on $ref) could not be read" >&2
+      return 1
+    }
+  done
+  if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
+    rm -rf "$dir"
+    echo "$(basename "$0"): not sent, the guard refuses this text" >&2
+    return 1
+  fi
+  rm -rf "$dir"
+}
+
+# open_terminal <worktree> <title> <command> [<ticket>]: opens a terminal of
+# the lane in Orca and prints its handle. Orca only knows a new worktree a few
+# seconds after git does, sometimes much later: the attempt is repeated for
+# ORCH_ORCA_WAIT seconds (120), then made once more. A wait longer than
+# ORCH_ORCA_SLOW seconds (30), and a failure, are written to the ledger.
+open_terminal() {
+  local worktree=$1 title=$2 command=$3 ticket=${4:-} wait=${ORCH_ORCA_WAIT:-120} step=${ORCH_ORCA_STEP:-5} slow=${ORCH_ORCA_SLOW:-30}
+  local started answer waited last=
+  started=$(date +%s)
+  while :; do
+    if answer=$(orca terminal create --worktree "path:$worktree" --title "$title" --command "$command" --json 2> /dev/null); then
+      waited=$(( $(date +%s) - started ))
+      if [ "$waited" -ge "$slow" ]; then
+        ledger event --kind orca_terminal_delayed --ticket "$ticket" --value "$waited" --detail "$title: Orca took $waited s to open the terminal"
+      fi
+      jq -r '.. | objects | .handle? // empty' <<<"$answer" | sed -n '1p'
+      return 0
+    fi
+    [ -z "$last" ] || break
+    # Past the wait: one more attempt, then give up.
+    if [ $(( $(date +%s) - started )) -ge "$wait" ]; then last=1; fi
+    sleep "$step"
+  done
+  ledger event --kind orca_terminal_failed --ticket "$ticket" --value "$(( $(date +%s) - started ))" --detail "$title: Orca did not open a terminal in $worktree"
+  return 1
 }
 
 # Lanes opened by the dispatcher: branches named <role>/<ticket>.
@@ -88,4 +151,13 @@ dispatcher_lanes() {
   local roles
   roles=$(conf_keys roles | paste -sd'|')
   git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's#^branch refs/heads/##p' | grep -E "^($roles)/" || true
+}
+
+# Those that take one of the max_lanes places: the roles of [limits]
+# counted_roles (every role when it is not set). A lane that only watches or
+# reads, like the project lead's, does not hold a place.
+counted_lanes() {
+  local counted
+  counted=$(conf_get limits counted_roles | tr -s ' ' '|')
+  if [ -z "$counted" ]; then dispatcher_lanes; else dispatcher_lanes | grep -E "^($counted)/" || true; fi
 }
