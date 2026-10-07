@@ -120,6 +120,28 @@ decisions_worktree() {
   printf '%s\n' "${ORCH_DECISIONS_WORKTREE:-$(expand_home "$(conf_get lanes root)")/$(conf_get talk role)-$(conf_get lead report_on)}"
 }
 
+# flush_outbox: the comments the hourly limit held back (lane-run.sh) leave in
+# one grouped comment on the ticket of the reports, as soon as the user may be
+# written again. Nothing is removed before Linear has it.
+flush_outbox() {
+  local box="$ORCH_STATE_DIR/linear-outbox" grouped file count code
+  count=$(ls -1 "$box" 2> /dev/null | grep -c . || true)
+  [ "$count" != 0 ] || return 0
+  grouped=$(mktemp)
+  {
+    printf '**%s comptes rendus groupés** (pas plus de quelques commentaires par heure : ceux-ci attendaient)\n' "$count"
+    for file in "$box"/*.md; do
+      printf '\n### %s\n\n' "$(basename "$file" | sed 's/--.*//')"
+      cat "$file"
+    done
+  } > "$grouped"
+  code=0
+  "$ORCH_HOME/linear.sh" comment "$(conf_get lead report_on)" "$grouped" "dispatcher, comptes rendus groupés" > /dev/null || code=$?
+  rm -f "$grouped"
+  [ "$code" != 0 ] || rm -f "$box"/*.md
+  return 0
+}
+
 # github_down: what GitHub says is down among the parts the dispatcher needs,
 # as its public status page has it (nothing when all is well, or when the
 # page cannot be read). A slowdown is not an outage.

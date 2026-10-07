@@ -172,6 +172,12 @@ if [ "${ORCH_COMMENT_ON:-}" = none ]; then
 elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_SIGNED:-$ORCH_ROLE, lane $ORCH_LANE}"); then
   echo "Commentaire Linear : $url"
   echo "$url" > "$run_dir/comment.url"
+elif [ $? = 4 ]; then
+  # The user already got his comments of the hour: this one is kept, and
+  # leaves with the others in one grouped comment (flush_outbox, at a wake).
+  mkdir -p "$ORCH_STATE_DIR/linear-outbox"
+  cp "$comment" "$ORCH_STATE_DIR/linear-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
+  echo "Commentaire Linear gardé pour un envoi groupé (limite de l'heure atteinte) : $comment"
 else
   echo "!! Le commentaire Linear n'a pas pu être envoyé. Il reste ici : $comment"
 fi

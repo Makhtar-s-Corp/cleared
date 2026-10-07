@@ -45,6 +45,9 @@ busy() {
 exec 8> "$wake_dir/lock"
 flock -n 8 || busy "another wake is at work"
 
+# What the hourly limit held back leaves now, grouped, if the user may be written.
+[ -n "$handover" ] || flush_outbox
+
 # GitHub down, as its status page says: noted when it starts, written to the
 # ledger when it ends, with both times. Its events wait meanwhile.
 github_mark="$wake_dir/github-down"

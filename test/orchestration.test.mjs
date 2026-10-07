@@ -169,7 +169,7 @@ esac
   // Linear and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
-if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "https://example.test/comment"; exit; fi
+if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "https://example.test/comment"; exit; fi
 if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
 if [ "$1" = comments ]; then echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
@@ -222,7 +222,7 @@ function runLane(box, firstExit, extra = {}, cwd = box.repo) {
   const runDir = mkdtempSync(join(tmpdir(), 'orch-run-'));
   writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
   writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }, { alias: 'b', adapter: 'second', model: 'm2' }]));
-  writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n');
+  writeFileSync(join(runDir, 'lane.env'), `ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=${extra.ORCH_COMMENT_TEST ?? 'none'}\nORCH_WRITEUP_ROLE=\n`);
   const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd, env: { ...box.env, FIRST_EXIT: String(firstExit), ...extra }, encoding: 'utf8' });
   const db = openLedger(join(box.state, 'ledger.db'));
   const runs = db.prepare('select model, outcome, exit_code from runs order by rowid').all().map((row) => ({ ...row }));
@@ -1543,9 +1543,39 @@ test('the user is not written more than a few times an hour by all the agents to
   // That made six: the next one is refused, whoever writes it, and nothing is sent.
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
   const refused = post('another agent');
-  assert.equal(refused.status, 1);
   assert.match(refused.stderr, /already written 6 times in the last hour[\s\S]*[Gg]roup/);
   assert.equal(readFileSync(join(dir, 'asked'), 'utf8'), asked);
+  assert.equal(refused.status, 4, 'told apart from a failure: the caller keeps the text for a grouped comment');
+  // The limit holds without its setting (a typing mistake must not switch the rule of the user off).
+  const noKey = join(dir, 'agents.conf');
+  writeFileSync(noKey, readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'coments_per_hour = 6'));
+  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: noKey } }).status, 4);
+  // What the user confirms himself is his own word, not one more message of an agent: it is never held back.
+  const confirm = join(dir, 'confirm-decision.sh');
+  writeFileSync(confirm, `#!/usr/bin/env bash\n"${join(ORCH_HOME, 'linear.sh')}" comment X-1 "$1" "chef de projet, en discussion"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'decision.md'), 'Ma décision.');
+  const own = spawnSync(confirm, [join(dir, 'decision.md')], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  assert.equal(own.status, 0, own.stderr);
+  assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Ma décision\./);
+});
+
+test('the report of a lane that the hourly limit holds back is kept, and leaves later in one grouped comment', () => {
+  const box = sandbox();
+  const lane = runLane(box, 0, { FAKE_LINEAR_FULL: '1', ORCH_COMMENT_TEST: 'X-1' });
+  assert.equal(lane.status, 0);
+  const outbox = readdirSync(join(box.state, 'linear-outbox'));
+  assert.equal(outbox.length, 1);
+  assert.match(outbox[0], /^X-1--/);
+  // A second one waits too; the next wake that may write groups them in one comment on the ticket of the reports.
+  writeFileSync(join(box.state, 'linear-outbox', 'X-2--other.md'), 'Compte rendu de X-2.\n');
+  const flush = (extra = {}) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; flush_outbox`], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  assert.equal(flush({ FAKE_LINEAR_FULL: '1' }).status, 0);
+  assert.equal(readdirSync(join(box.state, 'linear-outbox')).length, 2, 'still held: nothing is lost');
+  assert.equal(flush().status, 0);
+  const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
+  assert.match(posted, /^X-100 from=/);
+  assert.match(posted, /2 comptes rendus groupés[\s\S]*### X-1[\s\S]*answer of first[\s\S]*### X-2[\s\S]*Compte rendu de X-2\./);
+  assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')), []);
 });
 
 test('the discussion has no right to act: its permissions name what it may read and the one script it proposes with, and refuse the rest', () => {

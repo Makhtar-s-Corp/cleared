@@ -83,7 +83,7 @@ if [ ! -f "$pending/$id/comment.url" ]; then
     cat "$text"
     [ "$adr" != true ] || printf '\n\nÉcrite aussi dans `docs/decisions.md` (pull request en brouillon, à fusionner comme les autres).\n'
   } > "$comment"
-  url=$("$ORCH_HOME/linear.sh" comment "$ticket" "$comment" "$(conf_get lead name), en discussion") || { rm -f "$comment"; die "Linear did not take the comment: the decision still waits, run this again"; }
+  url=$("$ORCH_HOME/linear.sh" comment "$ticket" "$comment" "$(conf_get lead name), en discussion") || { rm -f "$comment"; die "Linear did not take the comment (see above): the decision still waits, run this again"; }
   rm -f "$comment"
   echo "$url" > "$pending/$id/comment.url"
 fi

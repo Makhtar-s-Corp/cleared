@@ -68,10 +68,21 @@ case "${1:-}" in
     # The user reads every comment: all the agents together write him no more
     # than a few an hour. Beyond, nothing is posted; what there is to say is
     # grouped in one comment, later.
+    # Counted and posted under one lock: two agents at once do not both
+    # take the last place. The limit holds without its setting (6). What
+    # the user confirms himself (confirm-decision.sh) is his own word, not
+    # one more message of an agent: it is never held back. Exit 4 tells the
+    # caller apart from a failure: it keeps its text for a grouped comment.
     limit=$(conf_get linear comments_per_hour)
-    if [ -n "$limit" ]; then
+    mkdir -p "$ORCH_STATE_DIR"
+    exec 9> "$ORCH_STATE_DIR/linear-comments.lock"
+    flock -w 60 9 || die "another comment is being posted for too long"
+    if ! tr '\0' ' ' < "/proc/$PPID/cmdline" 2> /dev/null | grep -q "confirm-decision.sh"; then
       recent=$(jq -R -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.at > $since) | .at' "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | grep -c . || true)
-      [ "$recent" -lt "$limit" ] || die "the user was already written $recent times in the last hour (limit: $limit): nothing posted. Group what there is to say in one comment, later"
+      if [ "$recent" -ge "${limit:-6}" ]; then
+        echo "$(basename "$0"): the user was already written $recent times in the last hour (limit: ${limit:-6}): nothing posted. Group what there is to say in one comment, later" >&2
+        exit 4
+      fi
     fi
     guard_text "$3" || exit 1
     id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id // empty')
