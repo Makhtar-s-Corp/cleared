@@ -18,11 +18,9 @@ worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs
 
 if [ "$force" != --force ]; then
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "$lane has uncommitted changes (use --force to drop them)"
-  base=$(conf_get lanes base)
-  if ! git -C "$worktree" rev-parse --verify --quiet "origin/$lane" > /dev/null \
-    && [ "$(git -C "$worktree" rev-list --count "$base..HEAD")" != 0 ]; then
-    die "$lane has commits that were never pushed (use --force to drop them)"
-  fi
+  # Unpushed work: a commit of the lane that no branch of the remote holds.
+  # (A lane opened on a pull request starts from commits that are pushed.)
+  [ -n "$(git -C "$worktree" branch -r --contains HEAD)" ] || die "$lane has commits that were never pushed (use --force to drop them)"
 fi
 
 ledger init > /dev/null
