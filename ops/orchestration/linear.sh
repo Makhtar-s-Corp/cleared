@@ -5,6 +5,7 @@
 #   linear.sh comment <ticket> <file> [<from>]  posts the file as a comment, prints its URL
 #   linear.sh waiting                           tickets waiting for the user, as JSON
 #   linear.sh changes <ISO time>                tickets touched since then, with their recent comments, as JSON
+#   linear.sh list <state>                      the tickets in that state ("In Progress"…), as JSON
 #
 # Linear serves the comments of a ticket newest first: `first: n` is the n
 # most recent ones, `last: n` the n oldest (checked on a long ticket).
@@ -95,6 +96,12 @@ case "${1:-}" in
       "$(jq -nc --arg team "$(conf_get linear team)" --arg since "$2" '{team: $team, since: $since}')" \
       | jq -c '[.data.issues.nodes[] | {id, identifier, title, url, createdAt, updatedAt, description: ((.description // "") | .[0:1200]), state: .state.name, project: (.project.name // null), comments: [.comments.nodes[] | {id, createdAt, url, body}]}]'
     ;;
+  list)
+    [ -n "${2:-}" ] || die "usage: linear.sh list <state>"
+    gql 'query($team: String!, $state: String!) { issues(first: 100, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt state { name } project { name } assignee { name } } } }' \
+      "$(jq -nc --arg team "$(conf_get linear team)" --arg state "$2" '{team: $team, state: $state}')" \
+      | jq -c '[.data.issues.nodes[] | {identifier, title, url, updatedAt, state: .state.name, project: (.project.name // null), assignee: (.assignee.name // null)}]'
+    ;;
   waiting)
     team=$(conf_get linear team)
     gql 'query($team: String!) { viewer { assignedIssues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: "In Review"}}}) { nodes { identifier title url updatedAt comments(first: 1) { nodes { url createdAt } } } } } }' \
@@ -102,6 +109,6 @@ case "${1:-}" in
       | jq -c '[.data.viewer.assignedIssues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
     ;;
   *)
-    die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | create <project> <label> <title> <file> | changes <ISO time> | waiting"
+    die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | create <project> <label> <title> <file> | changes <ISO time> | list <state> | waiting"
     ;;
 esac

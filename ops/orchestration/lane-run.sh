@@ -162,7 +162,7 @@ rm -f "$body"
 
 if [ "${ORCH_COMMENT_ON:-}" = none ]; then
   echo "Commentaire Linear non envoyé (demandé) : $comment"
-elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "$ORCH_ROLE, lane $ORCH_LANE"); then
+elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_FROM:-$ORCH_ROLE, lane $ORCH_LANE}"); then
   echo "Commentaire Linear : $url"
   echo "$url" > "$run_dir/comment.url"
 else

@@ -167,13 +167,15 @@ esac
   // Linear and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
+if [ "$1" = comment ]; then { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "https://example.test/comment"; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'linear-now.json'), '[]');
   writeFileSync(join(home, 'pulls-now.json'), '[]');
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'prompts', 'handover.md'), 'handover prompt\n');
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // The guard of the repository, as the scripts read it from the trusted ref.
@@ -975,4 +977,54 @@ test('a blockage of the lead lane that was cleared is written again if it comes 
   writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
   assert.equal(wake().status, 1);
   assert.equal(blocked(), 2);
+});
+
+test('the handover wake: one session that rereads the handover and says what it understood in the report ticket, whatever moved or not', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'handover.md'), 'Chef de projet : passation. Trois tickets en cours.');
+  const run = spawnSync(join(box.home, 'wake.sh'), ['--handover', join(box.home, 'handover.md')], { env: box.env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const runDir = run.stdout.trim();
+  const prompt = readFileSync(join(runDir, 'prompt.md'), 'utf8');
+  assert.match(prompt, /^handover prompt/);
+  assert.match(prompt, /Chef de projet : passation\. Trois tickets en cours\./);
+  assert.doesNotMatch(prompt, /lead prompt/);
+  const env = readFileSync(join(runDir, 'lane.env'), 'utf8');
+  assert.match(env, /ORCH_COMMENT_ON=X-100/);
+  assert.match(env, /ORCH_FROM=chef\\ de\\ projet/);
+  // The run itself: its answer is posted in the report ticket, signed as the project lead.
+  const lane = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
+  assert.equal(lane.status, 0, lane.stderr);
+  const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
+  assert.match(posted, /^X-100 from=chef de projet\n/);
+  assert.match(posted, /answer of first/);
+  // A wake that is not the handover still refuses to act.
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('live = no', 'live = yes'));
+  writeFileSync(join(box.home, 'linear-now.json'), '[]');
+  spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify([{ id: 'i1', identifier: 'X-1', title: 'T', url: 'u', state: 's', project: null, createdAt: new Date().toISOString(), description: 'de Makhtar', comments: [] }]));
+  writeFileSync(join(runDir, 'exit-code'), '0');
+  const acting = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(acting.status, 1);
+  assert.match(acting.stderr, /not built yet/);
+});
+
+test('the handover wake needs a handover to read, and a ticket to answer in', () => {
+  const box = sandbox();
+  assert.equal(spawnSync(join(box.home, 'wake.sh'), ['--handover', join(box.home, 'nowhere.md')], { env: box.env, encoding: 'utf8' }).status, 1);
+  writeFileSync(join(box.home, 'handover.md'), 'x');
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('report_on = X-100\n', ''));
+  const run = spawnSync(join(box.home, 'wake.sh'), ['--handover', join(box.home, 'handover.md')], { env: box.env, encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /report_on/);
+});
+
+test('Linear is asked for the tickets of one state, to check what a handover says', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"identifier":"X-1","title":"T","url":"u","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"assignee":null}]}}}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), [{ identifier: 'X-1', title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress', project: 'P', assignee: null }]);
+  assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /In Progress/);
 });
