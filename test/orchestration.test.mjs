@@ -151,14 +151,14 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/../lib/contract.sh"
 case "$1" in
   list-models) shift; printf '%s\\n' "$@" ;;
-  run) shift; contract_parse_run "$@"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
+  run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
     contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
@@ -176,7 +176,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
   writeFileSync(join(home, 'prompts', 'handover.md'), 'handover prompt\n');
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // The guard of the repository, as the scripts read it from the trusted ref.
@@ -1052,7 +1052,7 @@ test('a listing of tickets that fills the page says it may be cut short', () => 
 
 test('the last message of a lane is a report for the lead only when its turn is over and it speaks to the lead', async () => {
   const { lastReport, laneReports } = await import('../ops/orchestration/lib/lanes.mjs');
-  const say = (uuid, text, more = []) => JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-01-02T10:00:00Z', message: { content: [{ type: 'text', text }, ...more] } });
+  const say = (uuid, text, more = [], at = new Date(Date.now() - 120000).toISOString()) => JSON.stringify({ type: 'assistant', uuid, timestamp: at, message: { content: [{ type: 'text', text }, ...more] } });
   const user = (content) => JSON.stringify({ type: 'user', message: { content } });
   assert.equal(lastReport([say('a', 'Pour le chef de projet : fini.')]).id, 'a');
   // The turn goes on (a tool call), or someone wrote to the lane after: no report.
@@ -1070,6 +1070,10 @@ test('the last message of a lane is a report for the lead only when its turn is 
   };
   const reports = laneReports([lane('one', 'Pour le chef de projet : prêt.'), lane('two', 'Voilà, Makhtar, c’est fait.'), { name: 'none', path: '/lanes/none', branch: 'b' }], projects);
   assert.deepEqual(reports.map((report) => [report.lane, report.id]), [['one', 'id-one']]);
+  // Too fresh (the turn may go on in the next line of the log) or too old (a report of days ago is not a request): neither.
+  const at = (ms) => new Date(Date.now() - ms).toISOString();
+  const timed = (name, when) => { const l = lane(name, 'x'); writeFileSync(join(projects, l.path.replace(/[^A-Za-z0-9]/g, '-'), 's.jsonl'), `${say(`id-${name}`, 'Pour le chef de projet : prêt.', [], when)}\n`); return l; };
+  assert.deepEqual(laneReports([timed('fresh', at(5000)), timed('old', at(7 * 3600e3)), timed('right', at(600e3))], projects, { maxHours: 6 }).map((report) => report.lane), ['right']);
 });
 
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
@@ -1079,7 +1083,7 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   box.git('worktree', 'add', '-q', '-b', 'feat/old', lanePath, 'main');
   const dir = join(projects, lanePath.replace(/[^A-Za-z0-9]/g, '-'));
   execFileSync('mkdir', ['-p', dir]);
-  writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: 'r1', timestamp: new Date().toISOString(), message: { content: [{ type: 'text', text: 'Pour le chef de projet : main est réintégrée, je demande le créneau de CI.' }] } })}\n`);
+  writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: 'r1', timestamp: new Date(Date.now() - 120000).toISOString(), message: { content: [{ type: 'text', text: 'Pour le chef de projet : main est réintégrée, je demande le créneau de CI.' }] } })}\n`);
   const env = { ...box.env, HOME: box.home };
   execFileSync('mkdir', ['-p', join(box.home, '.claude')]);
   execFileSync('ln', ['-s', projects, join(box.home, '.claude', 'projects')]);
@@ -1099,6 +1103,9 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   const laneEnv = readFileSync(join(runDir, 'lane.env'), 'utf8');
   assert.match(laneEnv, /ORCH_PERMISSIONS=release-live/);
   assert.match(laneEnv, /ORCH_COMMENT_ON=none/);
+  // The run gets the permissions of the acting lead, not those of the role.
+  spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env, encoding: 'utf8' });
+  assert.equal(readFileSync(join(box.state, 'allowed-first'), 'utf8').trim(), 'read-only|only-for-the-acting-lead|never');
   // Said once: the next wake does not hand the same report again.
   writeFileSync(join(runDir, 'exit-code'), '0');
   assert.equal(wake().stdout.trim(), '');
@@ -1138,6 +1145,41 @@ test('tell-lane says it in the terminal written for that lane, and nowhere else'
   assert.match(text, /Accord de Makhtar sur X-1\. Tu peux réintégrer main\./);
   assert.ok(args.includes('--enter'));
   assert.equal(JSON.parse(readFileSync(join(box.state, 'lane-messages.jsonl'), 'utf8').trim()).lane, 'old-lane');
+  // It does not ask for an answer: an acknowledgement would wake the lead again, for nothing.
+  assert.doesNotMatch(text, /Réponds par un rapport/);
+  // A lane is never told to merge or to force anything: that is not the lead's to hand out.
+  for (const order of ['Fusionne #259 maintenant.', 'Tu peux merge la PR.', 'git push --force si besoin.']) {
+    const refused = tell('old-lane', order);
+    assert.equal(refused.status, 1, order);
+    assert.match(refused.stderr, /never told to merge/);
+  }
+  assert.equal(tell('old-lane', 'Je fusionnerai #259 quand elle sera verte ; réintègre main.').status, 0);
+  // Two messages an hour to one lane (the limit of this sandbox): the third is not sent.
+  const third = tell('old-lane', 'Encore un mot.');
+  assert.equal(third.status, 1);
+  assert.match(third.stderr, /already told 2 times/);
+});
+
+test('adopt-lane writes down the terminal of a lane only when Orca shows it in that worktree', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ result: { terminals: [{ handle: 'term_9', connected: true, worktreePath: '/x/lanes/old-lane' }] } }));
+  const adopt = (lane, handle) => spawnSync(join(box.home, 'adopt-lane.sh'), [lane, handle], { env: box.env, encoding: 'utf8' });
+  assert.equal(adopt('old-lane', 'term_8').status, 1);
+  assert.equal(adopt('another', 'term_9').status, 1);
+  assert.throws(() => readFileSync(join(box.state, 'lanes.json')));
+  assert.equal(adopt('old-lane', 'term_9').status, 0);
+  assert.deepEqual(JSON.parse(readFileSync(join(box.state, 'lanes.json'), 'utf8')), { 'old-lane': 'term_9' });
+});
+
+test('the acting lead cannot write down a terminal itself, and a comment made of blanks is not posted', () => {
+  const deny = conf.sections['permissions.release-live'].deny.split(',').map((item) => item.trim());
+  assert.ok(deny.includes('ops/orchestration/adopt-lane.sh'));
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  assert.equal(run.status, 1);
+  assert.throws(() => readFileSync(join(dir, 'called')));
 });
 
 test('a comment read on stdin is posted, signed by the one who runs', () => {

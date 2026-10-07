@@ -87,7 +87,7 @@ if [ -z "$handover" ]; then
     git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}' \
       | grep -F "$root/" | grep -v -E "\t($(conf_keys roles | paste -sd'|'))/" \
       | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
-    node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" > "$work/reports.json" || echo '[]' > "$work/reports.json"
+    node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
   fi
   node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")

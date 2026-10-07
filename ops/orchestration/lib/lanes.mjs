@@ -4,7 +4,7 @@
 // terminal, that speaks to the project lead. This reads that last message
 // from the session log of each lane. No model.
 //
-//   lanes.mjs <worktrees.json> [<projects dir>]
+//   lanes.mjs <worktrees.json> [<max age in hours>] [<projects dir>]
 //       <worktrees.json>: [{name, path, branch}]
 //       prints [{id, lane, branch, at, text}], one per lane whose last
 //       message addresses the project lead
@@ -14,6 +14,9 @@ import { join } from 'node:path';
 import { runAsCommand } from './conf.mjs';
 
 const TAIL_BYTES = 600_000;
+// Younger than this, the turn of the lane may still go on in the next line of
+// its log: the message is not a report yet.
+const SETTLE_MS = 45_000;
 // A report is addressed to the lead when it names it at its beginning.
 const ADDRESSED = /chef de projet/i;
 
@@ -50,7 +53,9 @@ export function lastReport(lines) {
   return last;
 }
 
-export function laneReports(worktrees, projects = join(homedir(), '.claude', 'projects')) {
+// `maxHours`: a last message older than that is not a request any more (a
+// lane left as it was days ago is not waiting for the lead that takes over).
+export function laneReports(worktrees, projects = join(homedir(), '.claude', 'projects'), { maxHours = 6, now = Date.now() } = {}) {
   const reports = [];
   for (const worktree of worktrees) {
     const dir = join(projects, worktree.path.replace(/[^A-Za-z0-9]/g, '-'));
@@ -59,7 +64,8 @@ export function laneReports(worktrees, projects = join(homedir(), '.claude', 'pr
     if (!logs.length) continue;
     const latest = logs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
     const report = lastReport(tail(latest));
-    if (report && ADDRESSED.test(report.text.slice(0, 400))) {
+    const age = report ? now - new Date(report.at) : NaN;
+    if (report && age >= SETTLE_MS && age <= maxHours * 3600e3 && ADDRESSED.test(report.text.slice(0, 400))) {
       reports.push({ id: report.id, lane: worktree.name, branch: worktree.branch, at: report.at, text: report.text });
     }
   }
@@ -68,5 +74,6 @@ export function laneReports(worktrees, projects = join(homedir(), '.claude', 'pr
 
 if (runAsCommand(import.meta.url)) {
   const worktrees = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-  process.stdout.write(`${JSON.stringify(laneReports(worktrees, process.argv[3]))}\n`);
+  const maxHours = Number(process.argv[3]) || 6;
+  process.stdout.write(`${JSON.stringify(laneReports(worktrees, process.argv[4], { maxHours }))}\n`);
 }

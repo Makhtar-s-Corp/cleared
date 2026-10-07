@@ -72,8 +72,9 @@ Ce que reçoit le modèle : la liste de ce qui a bougé contient des titres et d
 
 - Il est réveillé aussi par le dernier message d'une lane déjà au travail, quand ce message s'adresse au chef de projet (`lib/lanes.mjs` le lit dans le journal de session de la lane ; une lane ne lit pas Linear).
 - Il répond à Makhtar dans Linear avec `linear.sh comment <ticket> -`, qui fait passer tout texte par le garde-fou et le signe « chef de projet ».
-- Il répond à une lane dans son terminal avec `tell-lane.sh <lane> -`. Le terminal de chaque lane est écrit dans `state/lanes.json` ; rien ne part vers un terminal inconnu, parti, ou d'une autre copie de travail. Chaque message est gardé dans `state/lane-messages.jsonl`.
-- `host-state.sh` lui dit si la machine est libre : CI en cours, déploiement qui se pose, test d'écran ou capture en cours, état de chaque PR ouverte.
+- Il répond à une lane dans son terminal avec `tell-lane.sh <lane> -`. Le terminal de chaque lane est écrit dans `state/lanes.json` par `adopt-lane.sh <lane> <terminal>`, que lance celui qui confie les lanes au chef de projet, jamais le chef de projet lui-même ; rien ne part vers un terminal inconnu, parti, ou d'une autre copie de travail. Une lane ne se voit jamais dire de fusionner ni de forcer, et ne reçoit pas plus de quelques messages par heure. Chaque message est gardé dans `state/lane-messages.jsonl`.
+- `host-state.sh` lui dit si la machine est libre : CI en cours, déploiement possible (moins de dix minutes depuis le dernier changement de `main`, ou des conteneurs tout juste démarrés), test d'écran ou capture en cours, état de chaque PR ouverte.
+- Le dernier message d'une lane ne compte que s'il a plus de 45 secondes (son tour est fini) et moins de `[lead] report_hours` heures.
 
 Il n'ouvre ni ne ferme aucune lane, ne pousse rien et ne fusionne rien : ces scripts lui sont refusés. À une lane, il ne transmet que ce qui découle d'un accord écrit de Makhtar ; le reste, il le lui demande.
 

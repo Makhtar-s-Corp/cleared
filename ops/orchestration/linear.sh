@@ -58,11 +58,12 @@ case "${1:-}" in
     # write no file).
     if [ "${3:-}" = - ]; then
       text_file=$(mktemp)
+      trap 'rm -f "$text_file"' EXIT
       cat > "$text_file"
       set -- "$1" "$2" "$text_file" "${4:-${ORCH_SIGNED:-script}}"
     fi
     [ -f "$3" ] || die "no such file: $3"
-    [ -s "$3" ] || die "nothing to post"
+    grep -q '[^[:space:]]' "$3" || die "nothing to post"
     from=${4:-${ORCH_SIGNED:-script}}
     guard_text "$3" || exit 1
     id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id // empty')
