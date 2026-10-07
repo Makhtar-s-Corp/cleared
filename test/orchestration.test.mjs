@@ -288,12 +288,14 @@ test('no allowed command runs whatever follows it, and none touches git state sh
 
 test('the model a run is filed under is the one that wrote, not a helper it consulted, however much the helper cost; a role can be run without that helper', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-claude-advisor-'));
-  const said = (model) => JSON.stringify({ type: 'assistant', message: { model, content: [{ type: 'text', text: 'working' }] } });
+  const said = (model, parent = null) => JSON.stringify({ type: 'assistant', parent_tool_use_id: parent, message: { model, content: [{ type: 'text', text: 'working' }] } });
+  // A sub-agent on another model writes more messages than the session itself: it is not the model of the run.
+  const sub = [1, 2, 3, 4].map(() => said('a-sub-agent', 'toolu_1'));
   const result = JSON.stringify({ type: 'result', is_error: false, result: 'done', total_cost_usd: 4, modelUsage: {
     'the-writer': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 1000, cacheCreationInputTokens: 100, costUSD: 1 },
     'the-helper': { inputTokens: 200, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 3 },
   } });
-  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\ncat <<'JSON'\n${[said('the-writer'), said('the-writer'), said('<synthetic>'), result].join('\n')}\nJSON\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\ncat <<'JSON'\n${[said('the-writer'), ...sub, said('the-writer'), said('<synthetic>'), result].join('\n')}\nJSON\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'prompt.md'), 'p');
   const call = (extra = {}) => {
     const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'asked', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
@@ -304,7 +306,7 @@ test('the model a run is filed under is the one that wrote, not a helper it cons
   };
   const plain = call();
   assert.equal(plain.usage.model, 'the-writer');
-  assert.deepEqual(plain.usage.helpers, [{ model: 'the-helper', cost_usd: 3 }], 'what the helper cost is kept, apart');
+  assert.deepEqual(plain.usage.helpers, [{ model: 'the-helper', cost_usd: 3 }], 'what the helper cost is in the usage file of the run');
   assert.equal(plain.usage.cost_usd, 4);
   assert.equal(plain.usage.tokens_total, 1340);
   assert.ok(!plain.args.includes('--settings'));
@@ -320,6 +322,9 @@ test('the project lead runs without the helper model: it coordinates, and the he
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[permissions.release-live]\nmode = read-only\n', '[permissions.release-live]\nmode = read-only\nadvisor = no\n'));
   const out = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env release-live; echo "\${ORCH_ADVISOR:-unset}"; permissions_env talk; echo "\${ORCH_ADVISOR:-unset}"`], { env: box.env, encoding: 'utf8' });
   assert.deepEqual(out.stdout.trim().split('\n'), ['no', 'unset'], 'said for the role that has it, and not carried over to the next');
+  // A role with nothing else in its permissions still gets it.
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}[permissions.dev]\nadvisor = no\n`);
+  assert.equal(spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env dev; echo "\${ORCH_ADVISOR:-unset} \${ORCH_PERMISSION_MODE:-none}"`], { env: box.env, encoding: 'utf8' }).stdout.trim(), 'no none');
 });
 
 test('the Claude adapter turns the permissions of a role into the allow and deny lists of its CLI', () => {

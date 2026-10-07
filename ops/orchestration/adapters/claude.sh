@@ -60,6 +60,7 @@ case "${1:-}" in
     fi
     args+=(--allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}")
     [ "${ADAPTER_CONNECTORS:-}" = none ] && args+=(--strict-mcp-config)
+    [ "${ORCH_ADVISOR:-}" = no ] && args+=(--settings '{"advisorModel":""}')
     [ -n "$session" ] && args+=(--session-id "$session")
     cli "${args[@]}" "$(cat "$prompt_file")"
     exit $?
@@ -119,7 +120,8 @@ case "${1:-}" in
       # The model of the run is the one that wrote its messages, not a helper
       # it consulted (which may well cost more): what helpers cost is kept
       # apart. Tokens and cost are summed over every model the session used.
-      wrote=$(jq -R -r 'fromjson? | select(.type == "assistant") | .message.model // empty | select(. != "<synthetic>")' "$events" 2>/dev/null | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')
+      # (The messages of a sub-agent are in the stream too: only the main thread counts.)
+      wrote=$(jq -R -r 'fromjson? | select(.type == "assistant" and (.parent_tool_use_id // null) == null) | .message.model // empty | select(. != "<synthetic>")' "$events" 2>/dev/null | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')
       contract_usage "$(jq -c --arg wrote "$wrote" '
         (.modelUsage // {}) as $m
         | {tokens_in: ([$m[].inputTokens] | add), tokens_out: ([$m[].outputTokens] | add),
