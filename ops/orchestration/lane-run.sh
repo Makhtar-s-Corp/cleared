@@ -173,5 +173,7 @@ else
   echo "!! Le commentaire Linear n'a pas pu être envoyé. Il reste ici : $comment"
 fi
 echo "Compte rendu : $lane_report"
+# A lane woken again and again keeps the terminals of its last sessions only.
+[ -z "${ORCH_KEEP_TERMINALS:-}" ] || close_old_terminals "$ORCH_LANE" "$ORCH_KEEP_TERMINALS"
 echo "$lane_code" > "$run_dir/exit-code"
 exit "$lane_code"

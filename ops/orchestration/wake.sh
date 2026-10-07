@@ -89,7 +89,7 @@ if [ -z "$handover" ]; then
       | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
     node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
   fi
-  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" > "$work/changes.json"
+  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
 
   if [ -n "$dry_run" ]; then
@@ -98,7 +98,9 @@ if [ -z "$handover" ]; then
   fi
 
   if [ "$count" = 0 ]; then
-    [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing moved since $last"
+    # Nothing moved, or nothing worth a session: what waits is kept for the next one.
+    waiting=$(jq '.next.waiting | length' "$work/changes.json")
+    [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing worth a session since $last ($waiting waiting for the next one)"
     jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
     exit 0
   fi
@@ -176,6 +178,8 @@ fi
   # What the session may run: the permissions of the role, or those of the
   # acting lead.
   [ -z "$acting" ] || [ -n "$handover" ] || printf 'ORCH_PERMISSIONS=%q\n' "$role-live"
+  # One terminal a session: only the last ones stay open in the lane.
+  [ -z "$(conf_get lead terminals_kept)" ] || printf 'ORCH_KEEP_TERMINALS=%q\n' "$(conf_get lead terminals_kept)"
 } > "$run_dir/lane.env"
 
 watching=" · observation"
@@ -191,6 +195,9 @@ if [ -n "$handover" ]; then
   exit 0
 fi
 jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
+# Why this session was started, for whoever counts the wakes.
+ledger event --kind wake_started --run-id "$run_base-$role-a1" \
+  --detail "$(jq -r '[.events[] | "\(.kind) \(.ticket // (if .pr then "#\(.pr)" else .lane end))"] | join(", ")' "$work/changes.json")"
 # How long a comment of the user waited before a session took it.
 jq -c '.events[] | select(.kind == "comment")' "$work/changes.json" | while IFS= read -r event; do
   minutes=$(( ($(date +%s) - $(date -d "$(jq -r '.at' <<<"$event")" +%s)) / 60 ))

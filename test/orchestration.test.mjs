@@ -205,6 +205,7 @@ fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
 if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
+if [ "$1 $2" = "terminal close" ]; then echo "$4" >> "${join(home, 'orca-closed')}"; fi
 `, { mode: 0o755 });
   const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main' };
   return { home, state, repo, env, git };
@@ -690,6 +691,91 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
   assert.doesNotMatch(prompt, /vas-y/);
 });
 
+test('the pre-check starts a session only for what is worth one: the rest waits and is handed to the next session, once', async () => {
+  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const worth = new Set(['comment', 'pr_checks']);
+  const issue = (over) => ({ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Backlog', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments: [], ...over });
+  const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: '2026-01-02T10:01:00Z', statusCheckRollup: [], ...over });
+  const first = changes(null, [issue({})], [], new Set(), '2026-01-02T10:00:00Z', [], worth);
+  // A draft opened and a ticket created: nobody has anything to decide yet.
+  const linear = [issue({}), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:02:00Z', description: 'Un ticket de Makhtar' })];
+  const quiet = changes(first.next, linear, [pull({})], new Set(), '2026-01-02T10:05:00Z', [], worth);
+  assert.deepEqual(quiet.events, []);
+  assert.deepEqual(quiet.next.waiting.map((event) => event.kind), ['pr_opened', 'ticket_new']);
+  // Nothing new: what waits keeps waiting, once.
+  const still = changes(quiet.next, linear, [pull({})], new Set(), '2026-01-02T10:06:00Z', [], worth);
+  assert.deepEqual(still.events, []);
+  assert.equal(still.next.waiting.length, 2);
+  // The checks turn green: one session, which is handed what waited too.
+  const green = changes(still.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
+  assert.deepEqual(green.events.map((event) => event.kind), ['pr_opened', 'ticket_new', 'pr_ready']);
+  assert.deepEqual(green.next.waiting, [], 'made ready is not worth a session, but it came with green checks');
+  const pending = changes(still.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
+  assert.deepEqual(pending.events, []);
+  const done = changes(pending.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:09:00Z', [], worth);
+  assert.deepEqual(done.events.map((event) => event.kind), ['pr_opened', 'ticket_new', 'pr_ready', 'pr_checks']);
+  assert.deepEqual(done.next.waiting, []);
+  // No list of what is worth a session: everything is, as before.
+  assert.deepEqual(changes(first.next, linear, [pull({})], new Set(), '2026-01-02T10:05:00Z').events.map((event) => event.kind), ['pr_opened', 'ticket_new']);
+});
+
+test('wake.sh: a draft opened starts nothing and opens no terminal; the next comment of the user starts one session that is told both, and the ledger says why it woke', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = no\nwake_on = comment, pr_checks\nterminals_kept = 3\n'));
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, detail from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  assert.equal(wake().status, 0);
+  writeFileSync(join(box.home, 'pulls-now.json'), JSON.stringify([{ number: 7, title: 'Un brouillon', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: new Date().toISOString(), statusCheckRollup: [] }]));
+  assert.equal(wake().status, 0);
+  assert.equal(calls(), 0, 'no terminal, no model');
+  assert.deepEqual(events().map((event) => event.kind), ['wake_skipped']);
+  assert.match(events()[0].detail, /1 waiting/);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
+  const started = wake();
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(calls(), 1);
+  const runDir = started.stdout.trim();
+  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /2 événement\(s\)[\s\S]*PR #7 \(Un brouillon[\s\S]*ouverte en brouillon[\s\S]*« OK, vas-y\. »/);
+  assert.match(readFileSync(join(runDir, 'lane.env'), 'utf8'), /^ORCH_KEEP_TERMINALS=3$/m);
+  const why = events().find((event) => event.kind === 'wake_started');
+  assert.equal(why.detail, 'pr_opened #7, comment X-1');
+});
+
+test('a lane woken again and again keeps the terminals of its last sessions: the older ones are closed when a session ends, once, and no other lane is touched', () => {
+  const box = sandbox();
+  const runs = join(box.state, 'runs');
+  const past = (name, handle, lane = 'release/lead') => {
+    mkdirSync(join(runs, name), { recursive: true });
+    writeFileSync(join(runs, name, 'lane.env'), `ORCH_LANE=${lane}\n`);
+    writeFileSync(join(runs, name, 'terminal.handle'), `${handle}\n`);
+  };
+  const session = (name, handle, keep = 'ORCH_KEEP_TERMINALS=3\n') => {
+    past(name, handle);
+    writeFileSync(join(runs, name, 'prompt.md'), 'prompt\n');
+    writeFileSync(join(runs, name, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }]));
+    writeFileSync(join(runs, name, 'lane.env'), `ORCH_LANE=release/lead\nORCH_TICKET=\nORCH_ROLE=release\nORCH_RUN_BASE=${name}\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n${keep}`);
+    const run = spawnSync(join(box.home, 'lane-run.sh'), [join(runs, name)], { cwd: box.repo, env: box.env, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  };
+  const closed = () => { try { return readFileSync(join(box.home, 'orca-closed'), 'utf8').trim().split('\n'); } catch { return []; } };
+  for (const n of [1, 2, 3, 4]) past(`lead-000${n}`, `t${n}`);
+  past('X-9-0001', 'other', 'dev/X-9');
+  // A session that was not asked to keep only the last ones closes nothing.
+  session('lead-0005', 't5', '');
+  assert.deepEqual(closed(), []);
+  session('lead-0006', 't6');
+  assert.deepEqual(closed(), ['t1', 't2', 't3']);
+  assert.ok(readFileSync(join(runs, 'lead-0001', 'terminal.closed'), 'utf8'));
+  assert.throws(() => readFileSync(join(runs, 'lead-0004', 'terminal.closed')));
+  // The next one closes one more, and does not close again what is closed.
+  session('lead-0007', 't7');
+  assert.deepEqual(closed(), ['t1', 't2', 't3', 't4']);
+});
+
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
   const box = sandbox();
   writeFileSync(join(box.home, 'linear.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
@@ -784,6 +870,8 @@ test('every unit that runs a script of the dispatcher finds the tools of the use
   for (const unit of readdirSync(dir).filter((name) => name.endsWith('.service'))) {
     const text = readFileSync(join(dir, unit), 'utf8');
     assert.match(text, /^Environment=PATH=%h\/\.local\/bin:/m, unit);
+    // One locale the host has, whatever the session that started the units carried.
+    assert.match(text, /^Environment=LANG=C\.UTF-8$/m, unit);
   }
   for (const timer of readdirSync(dir).filter((name) => name.endsWith('.timer'))) assert.ok(readdirSync(dir).includes(timer.replace('.timer', '.service')), timer);
 });

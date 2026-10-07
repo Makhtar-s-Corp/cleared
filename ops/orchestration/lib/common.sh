@@ -115,6 +115,24 @@ model_seen() {
   printf '%s\t%s\n' "$2" "$(date +%s)" >> "$ORCH_STATE_DIR/models/$1.available"
 }
 
+# close_old_terminals <lane> <kept>: closes in Orca the terminals of the past
+# sessions of a lane, all but the last <kept> (run folders are named by their
+# time). What a session said stays in its run folder and in the ledger. A
+# terminal is closed once; one that Orca no longer shows is forgotten.
+close_old_terminals() {
+  local lane=$1 kept=$2 env dir handle listed
+  while IFS= read -r env; do
+    dir=$(dirname "$env")
+    [ -s "$dir/terminal.handle" ] && [ ! -f "$dir/terminal.closed" ] || continue
+    handle=$(sed -n '1p' "$dir/terminal.handle")
+    if orca terminal close --terminal "$handle" --tab > /dev/null 2>&1 \
+      || { listed=$(orca terminal list --json 2> /dev/null) && ! jq -e --arg handle "$handle" '(.result.terminals // .result) | any(.handle == $handle)' <<<"$listed" > /dev/null 2>&1; }; then
+      now_utc > "$dir/terminal.closed"
+    fi
+  done < <(grep -l -x -F "ORCH_LANE=$lane" "$ORCH_STATE_DIR"/runs/*/lane.env 2> /dev/null | head -n "-$kept")
+  return 0
+}
+
 # guard_text <file>: refuses, without showing any value, a text the guard of
 # the repository would not let out (private terms, secrets, IBANs, addresses,
 # phone numbers). For anything a script sends to an outside service: Linear,

@@ -3,7 +3,7 @@
 // GitHub say now and what was seen before. No model: this is the pre-check
 // that decides whether a session is worth starting.
 //
-//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json>]
+//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session>]]
 //       <time read>: taken before Linear and GitHub were asked, so that
 //       nothing created while they answered falls between two wakes
 //       prints {events: [...], next: {...}}
@@ -11,6 +11,11 @@
 // An event is something only the user or the outside world did: a comment or
 // a ticket of the user, a pull request opened, made ready, merged or closed,
 // its checks turning green or red. What agents wrote is never an event.
+//
+// Not every event is worth a session: with a list of the kinds that are
+// ([lead] wake_on), the others wait in the state and are handed to the next
+// session that something else starts. Nothing is lost, and a draft opened or
+// a ticket filed for later no longer starts a model that has nothing to decide.
 import { readFileSync } from 'node:fs';
 import { runAsCommand } from './conf.mjs';
 
@@ -35,8 +40,10 @@ export function checksOf(rollup = []) {
 // Linear is asked again for the last minutes before the previous wake: what
 // was created in that margin and not seen yet still counts as new.
 export const OVERLAP_MS = 10 * 60_000;
+// What waits for a session is kept up to this many events, the oldest dropped.
+export const WAITING_MAX = 40;
 
-export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = []) {
+export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null) {
   // A state that cannot be read (no time of last wake) is no state: this
   // wake takes note of what exists, like the very first one.
   if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
@@ -92,8 +99,13 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
   }
 
   events.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  // A pull request made ready with its checks already settled is as good as its checks turning.
+  const worth = (event) => !wakeOn || wakeOn.has(event.kind)
+    || (event.kind === 'pr_ready' && wakeOn.has('pr_checks') && ['success', 'failure'].includes(event.checks));
+  const all = [...(previous?.waiting ?? []), ...events];
+  const start = events.some(worth);
   // The identifiers already seen are kept, the oldest dropped: Linear is only asked for the last hours.
-  return { events, next: { at: now, seen: [...seen].slice(-3000), pulls: nextPulls } };
+  return { events: start ? all : [], next: { at: now, seen: [...seen].slice(-3000), pulls: nextPulls, waiting: start ? [] : all.slice(-WAITING_MAX) } };
 }
 
 const read = (path, fallback) => {
@@ -101,10 +113,11 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList] = process.argv.slice(2);
+  const wakeOn = worthList?.trim() ? new Set(worthList.split(',').map((kind) => kind.trim()).filter(Boolean)) : null;
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : []))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn))}\n`);
 }
