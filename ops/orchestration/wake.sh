@@ -36,7 +36,16 @@ state="$wake_dir/state.json"
 read_at=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 # Linear is asked for what was touched since the last wake, with some overlap;
 # what was already seen is told apart by its identifier.
-if [ -f "$state" ]; then since=$(date -u -d "$(jq -r '.at' "$state") - 12 minutes" +%Y-%m-%dT%H:%M:%SZ); else since=$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ); fi
+# A state file that cannot be read is no state: this wake starts over as a
+# first one (lib/wake.mjs does the same with it).
+last=$(jq -r '.at // empty' "$state" 2> /dev/null || true)
+if [ -n "$last" ] && since=$(date -u -d "$last - 12 minutes" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null); then
+  :
+else
+  last=
+  since=$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+  [ ! -f "$state" ] || echo "$(basename "$0"): $state cannot be read: starting over as a first wake" >&2
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -55,7 +64,7 @@ if [ "$dry_run" = --dry-run ]; then
 fi
 
 if [ "$count" = 0 ]; then
-  [ ! -f "$state" ] || ledger event --kind wake_skipped --detail "nothing moved since $(jq -r '.at' "$state")"
+  [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing moved since $last"
   jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
   exit 0
 fi

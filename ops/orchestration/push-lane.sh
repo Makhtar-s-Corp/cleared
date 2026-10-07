@@ -40,7 +40,12 @@ guard_text "$out/messages.txt" || die "$branch not pushed: a commit message is r
 # guard reads the added lines of a code file as it reads the tree, those of
 # any other file strictly. What a branch removes is already on the remote.
 # (A binary file is not read: the guard only knows text.)
-git -C "$worktree" diff --unified=0 "$base...HEAD" | grep -v -E '^-([^-]|$)' > "$out/changes.diff" || true
+# A diff that cannot be computed stops everything here: an empty file would
+# pass the guard with nothing having been looked at.
+git -C "$worktree" diff --unified=0 "$base...HEAD" > "$out/raw.diff" || die "$branch not pushed: its changes against $base cannot be read"
+# Kept: the name of each file and the lines added. Dropped: the lines removed
+# and the old text git quotes after the @@ of a hunk.
+{ grep -v '^-' "$out/raw.diff" || true; } | sed -E 's/^(@@ [^@]* @@).*/\1/' > "$out/changes.diff"
 guard_text "$out/changes.diff" || die "$branch not pushed: its changes are refused by the guard"
 
 # The lane's branch to the branch of the same name, and only that. No force

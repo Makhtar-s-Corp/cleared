@@ -909,3 +909,70 @@ test('push-lane judges what a branch adds, not what it removes: taking a refused
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), '#41');
 });
+
+test('push-lane sends nothing when the changes of the branch cannot be read at all', () => {
+  const lane = laneWithRemote('dev/X-5', null);
+  // A branch with no history in common with the base: its changes against the base cannot be computed.
+  const tree = execFileSync('git', ['-C', lane.box.repo, 'mktree'], { input: '', encoding: 'utf8' }).trim();
+  const orphan = execFileSync('git', ['-C', lane.box.repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit-tree', tree, '-m', 'feat: from nowhere'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', lane.path, 'reset', '-q', '--hard', orphan]);
+  const run = lane.push();
+  assert.notEqual(run.status, 0);
+  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
+  assert.equal(lane.created(), null);
+});
+
+test('push-lane does not refuse a branch for a value that only shows in the context of its changes', () => {
+  const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"`;
+  const lane = laneWithRemote('dev/X-5', null);
+  // The value is on the base, on a line git quotes as context in the header of the hunk below it.
+  writeFileSync(join(lane.box.repo, 'notes.txt'), `${flagged}\n\n\n\n\n\n\n\n fin\n`);
+  lane.box.git('add', 'notes.txt');
+  lane.box.git('commit', '-q', '-m', 'docs: notes');
+  lane.box.git('push', '-q', 'origin', 'main');
+  execFileSync('git', ['-C', lane.path, 'merge', '-q', '--ff-only', 'main']);
+  writeFileSync(join(lane.path, 'notes.txt'), `${flagged}\n\n\n\n\n\n\n\n fin\n une ligne de plus\n-- et une qui commence par deux tirets\n`);
+  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-am', 'docs: one more line']);
+  assert.match(execFileSync('git', ['-C', lane.path, 'diff', '--unified=0', 'main...HEAD'], { encoding: 'utf8' }), /^@@ .* @@ Le mot de/m, 'the fixture must put the value in a hunk header');
+  const run = lane.push();
+  assert.equal(run.status, 0, run.stderr);
+});
+
+test('wake.sh itself starts over as a first wake on a state file it cannot read, instead of failing every minute', () => {
+  for (const broken of ['{}', '{"at":"not a date","seen":[],"pulls":{}}', 'not json at all']) {
+    const box = sandbox();
+    execFileSync('mkdir', ['-p', join(box.state, 'wake')]);
+    writeFileSync(join(box.state, 'wake', 'state.json'), broken);
+    const run = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+    assert.equal(run.status, 0, `${broken}: ${run.stderr}`);
+    assert.ok(!Number.isNaN(Date.parse(JSON.parse(readFileSync(join(box.state, 'wake', 'state.json'), 'utf8')).at)), broken);
+  }
+});
+
+test('a blockage of the lead lane that was cleared is written again if it comes back', () => {
+  const box = sandbox();
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const blocked = () => { const db = openLedger(join(box.state, 'ledger.db')); const n = db.prepare("select count(*) n from events where kind = 'lead_lane_blocked'").get().n; db.close(); return n; };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  const comment = (id) => ({ id, createdAt: new Date().toISOString(), url: `u#${id}`, body: `message ${id}` });
+  const path = join(box.home, 'lanes', 'release-lead');
+  const leave = () => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'left']);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  wake();
+  box.git('worktree', 'add', '-q', '-b', 'release/lead', path, 'main');
+  leave();
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1')])));
+  assert.equal(wake().status, 1);
+  assert.equal(blocked(), 1);
+  // Someone cleans the lane; then nothing moves for a while (the comment is taken by a session first).
+  execFileSync('git', ['-C', path, 'reset', '-q', '--hard', 'main']);
+  const taken = wake();
+  assert.equal(taken.status, 0, taken.stderr);
+  writeFileSync(join(taken.stdout.trim(), 'exit-code'), '0');
+  assert.equal(wake().status, 0);
+  // The blockage comes back: it is written again.
+  leave();
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
+  assert.equal(wake().status, 1);
+  assert.equal(blocked(), 2);
+});
