@@ -121,7 +121,8 @@ decisions_worktree() {
 }
 
 # talk_open: is a discussion open in the lane of the lead? talk.sh writes
-# "opening <time>" in the mark before it opens the terminal, talk-run.sh puts
+# "opening <time>" in the mark before it opens the terminal (good for five
+# minutes: Orca may take two to open one), talk-run.sh puts
 # its process there and takes the mark away when the conversation ends. A
 # mark whose process is gone, or is no longer a conversation (its number was
 # given to something else), or an opening that never came, holds nothing.
@@ -129,7 +130,7 @@ talk_open() {
   local mark="$ORCH_STATE_DIR/wake/talk" first second
   read -r first second < "$mark" 2> /dev/null || return 1
   if [ "$first" = opening ]; then
-    [ $(( $(date +%s) - ${second:-0} )) -lt 180 ]
+    [ $(( $(date +%s) - ${second:-0} )) -lt "${ORCH_TALK_OPENING:-300}" ]
   else
     [[ "$first" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/$first/cmdline" 2> /dev/null | grep -q "talk-run.sh"
   fi

@@ -21,7 +21,11 @@ waiting() { ls -1 "$pending" 2> /dev/null || true; }
 show() { jq -r '"\(.ticket)\(if .adr then " (avec docs/decisions.md)" else "" end), proposée à \(.at)"' "$pending/$1/decision.json"; }
 case "${1:-}" in
   --list)
-    for id in $(waiting); do echo "$id : $(show "$id")"; sed 's/^/    /' "$pending/$id/text.md"; done
+    for id in $(waiting); do
+      echo "$id : $(show "$id")"
+      sed 's/^/    /' "$pending/$id/text.md"
+      [ ! -s "$pending/$id/adr.diff" ] || sed -n '/^@@/,$p' "$pending/$id/adr.diff" | sed 's/^/    | /'
+    done
     exit 0
     ;;
   --drop)
@@ -52,8 +56,15 @@ if [ "$adr" = true ] && [ ! -f "$pending/$id/adr.sent" ]; then
     # not what the user is confirming.
     git -C "$worktree" diff -- docs/decisions.md | cmp -s - "$pending/$id/adr.diff" \
       || die "docs/decisions.md changed since this decision was proposed: nothing left. Drop it (--drop $id) and have it proposed again"
-    echo "Ajouté à docs/decisions.md :"
-    grep '^+[^+]' "$pending/$id/adr.diff" | sed 's/^+/    /'
+    # The user sees the whole change, what it removes included, before
+    # anything is committed: the first run shows it, the second one sends.
+    if [ ! -f "$pending/$id/adr.shown" ]; then
+      echo "Ce qui changera dans docs/decisions.md (lignes « - » retirées, lignes « + » ajoutées) :"
+      sed -n '/^@@/,$p' "$pending/$id/adr.diff" | sed 's/^/    /'
+      now_utc > "$pending/$id/adr.shown"
+      echo "Rien n'est parti. Si c'est bien ce que tu décides, relance la même commande ; sinon : confirm-decision.sh --drop $id"
+      exit 0
+    fi
     git -C "$worktree" add docs/decisions.md
     git -C "$worktree" commit --quiet -m "docs: a decision of the user, transcribed in a discussion ($ticket)"
   elif [ -n "$changed" ]; then

@@ -1504,10 +1504,12 @@ test('never two agents in the lane of the lead: an open discussion holds its sho
   writeFileSync(join(box.state, 'wake', 'talk'), `opening ${Math.floor(Date.now() / 1000)}\n`);
   assert.equal(wake().status, 0);
   assert.equal(calls(), 0);
-  writeFileSync(join(box.state, 'wake', 'talk'), `opening ${Math.floor(Date.now() / 1000) - 600}\n`);
   // The mark of a conversation that died without saying so holds nothing back, even when its number now belongs to
-  // another process (this one); what moved meanwhile is handed out.
+  // another process (this one).
   writeFileSync(join(box.state, 'wake', 'talk'), `${process.pid}\n`);
+  assert.equal(spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; talk_open`], { env: box.env }).status, 1);
+  // Nor does an opening that never became a conversation; what moved meanwhile is handed out.
+  writeFileSync(join(box.state, 'wake', 'talk'), `opening ${Math.floor(Date.now() / 1000) - 600}\n`);
   const started = wake();
   assert.equal(calls(), 1);
   assert.match(readFileSync(join(started.stdout.trim(), 'prompt.md'), 'utf8'), /OK, vas-y/);
@@ -1582,6 +1584,11 @@ test('a decision is proposed by the discussion and leaves only when the user con
   writeFileSync(join(lane.path, 'docs', 'decisions.md'), 'first\nUne règle qui dure.\n');
   assert.equal(decide(['X-5', '-', '--adr'], 'Une règle qui dure.').status, 0);
   // The push fails once (GitHub does not open the pull request): nothing is said to be decided, and the next try sends the commit already made.
+  // The first run shows the whole change, removed lines included, and sends nothing; the second one sends.
+  const shown = confirm([], { FAKE_GH_DOWN: '1' });
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.match(shown.stdout, /Ce qui changera dans docs\/decisions\.md[\s\S]*\+Une règle qui dure\.[\s\S]*Rien n'est parti/);
+  assert.equal(execFileSync('git', ['-C', lane.path, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), 'M docs/decisions.md');
   const failed = confirm([], { FAKE_GH_DOWN: '1' });
   assert.equal(failed.status, 1);
   assert.match(failed.stderr, /nothing is transcribed yet/);
@@ -1589,7 +1596,6 @@ test('a decision is proposed by the discussion and leaves only when the user con
   assert.doesNotMatch(posted(), /Une règle qui dure/);
   const adr = confirm();
   assert.equal(adr.status, 0, adr.stderr);
-  assert.match(failed.stdout, /Ajouté à docs\/decisions\.md :\n    Une règle qui dure\./, 'the user is shown the passage that leaves');
   assert.equal(decisions().length, 2);
   assert.match(posted(), /Une règle qui dure\.[\s\S]*Écrite aussi dans `docs\/decisions\.md`/);
   assert.ok(lane.onRemote().some((ref) => ref.startsWith('talk/X-100 ')), 'the branch of the decisions left, to its namesake');
