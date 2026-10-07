@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -69,7 +69,7 @@ test('every role with permissions never allows what it denies, nor a network or 
   for (const name of sections) {
     const { mode, allow, deny } = conf.sections[name];
     assert.ok(['read-only', 'accept-edits'].includes(mode), `${name}: mode`);
-    assert.ok(conf.roles[name.slice('permissions.'.length)], `${name}: not a role`);
+    assert.ok(conf.roles[name.slice('permissions.'.length).replace(/-live$/, '')], `${name}: not a role`);
     for (const allowed of list(allow)) {
       for (const denied of list(deny)) assert.ok(!(allowed === denied || allowed.startsWith(`${denied} `)), `${name} allows "${allowed}", which it denies`);
       assert.doesNotMatch(allowed, /^(curl|wget|ssh|scp|nc|docker|gh|npx)\b|^git (push|fetch|pull|clone|remote)\b|^npm (install|ci|i)\b|docker/, `${name} allows "${allowed}"`);
@@ -151,14 +151,14 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/../lib/contract.sh"
 case "$1" in
   list-models) shift; printf '%s\\n' "$@" ;;
-  run) shift; contract_parse_run "$@"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
+  run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
     contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
@@ -175,7 +175,8 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
   writeFileSync(join(home, 'prompts', 'handover.md'), 'handover prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // The guard of the repository, as the scripts read it from the trusted ref.
@@ -189,8 +190,11 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'bin', 'gh'), `#!/usr/bin/env bash
 if [ "$1 $2" = "pr list" ]; then cat "${join(home, 'pulls-now.json')}"
 elif [ "$1 $2" = "pr create" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
+elif [ "$1 $2" = "run list" ]; then echo '[]'
+elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
 `, { mode: 0o755 });
+  writeFileSync(join(home, 'bin', 'docker'), '#!/usr/bin/env bash\n', { mode: 0o755 });
   // FAKE_ORCA_FAILS: how many times it refuses to open a terminal before it does.
   writeFileSync(join(home, 'bin', 'orca'), `#!/usr/bin/env bash
 if [ "$1 $2" = "terminal create" ]; then
@@ -199,6 +203,9 @@ if [ "$1 $2" = "terminal create" ]; then
   echo '{"handle":"t1"}'
 fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
+if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
+if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
+if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
 `, { mode: 0o755 });
   const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main' };
   return { home, state, repo, env, git };
@@ -684,6 +691,100 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
   assert.doesNotMatch(prompt, /vas-y/);
 });
 
+test('the pre-check starts a session only for what is worth one: the rest waits and is handed to the next session, once', async () => {
+  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const worth = new Set(['comment', 'pr_checks']);
+  const issue = (over) => ({ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Backlog', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments: [], ...over });
+  const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: '2026-01-02T10:01:00Z', statusCheckRollup: [], ...over });
+  const first = changes(null, [issue({})], [], new Set(), '2026-01-02T10:00:00Z', [], worth);
+  // A draft opened and a ticket created: nobody has anything to decide yet.
+  const linear = [issue({}), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:02:00Z', description: 'Un ticket de Makhtar' })];
+  const quiet = changes(first.next, linear, [pull({})], new Set(), '2026-01-02T10:05:00Z', [], worth);
+  assert.deepEqual(quiet.events, []);
+  assert.deepEqual(quiet.next.waiting.map((event) => event.kind), ['pr_opened', 'ticket_new']);
+  // Nothing new: what waits keeps waiting, once.
+  const still = changes(quiet.next, linear, [pull({})], new Set(), '2026-01-02T10:06:00Z', [], worth);
+  assert.deepEqual(still.events, []);
+  assert.equal(still.next.waiting.length, 2);
+  // The checks turn green: one session, which is handed what waited too.
+  const green = changes(still.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
+  assert.deepEqual(green.events.map((event) => event.kind), ['pr_opened', 'ticket_new', 'pr_ready']);
+  assert.deepEqual(green.next.waiting, [], 'made ready is not worth a session, but it came with green checks');
+  const pending = changes(still.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
+  assert.deepEqual(pending.events, []);
+  const done = changes(pending.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:09:00Z', [], worth);
+  assert.deepEqual(done.events.map((event) => event.kind), ['pr_opened', 'ticket_new', 'pr_ready', 'pr_checks']);
+  assert.deepEqual(done.next.waiting, []);
+  // No list of what is worth a session: everything is, as before.
+  assert.deepEqual(changes(first.next, linear, [pull({})], new Set(), '2026-01-02T10:05:00Z').events.map((event) => event.kind), ['pr_opened', 'ticket_new']);
+});
+
+test('wake.sh: a draft opened starts nothing and opens no terminal; the next comment of the user starts one session that is told both, and the ledger says why it woke', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = no\nwake_on = comment, pr_checks\nterminals_kept = 3\n'));
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, detail from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  assert.equal(wake().status, 0);
+  writeFileSync(join(box.home, 'pulls-now.json'), JSON.stringify([{ number: 7, title: 'Un brouillon', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: new Date().toISOString(), statusCheckRollup: [] }]));
+  assert.equal(wake().status, 0);
+  assert.equal(calls(), 0, 'no terminal, no model');
+  assert.deepEqual(events().map((event) => event.kind), ['wake_skipped']);
+  assert.match(events()[0].detail, /1 waiting/);
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
+  const started = wake();
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(calls(), 1);
+  const runDir = started.stdout.trim();
+  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /2 événement\(s\)[\s\S]*PR #7 \(Un brouillon[\s\S]*ouverte en brouillon[\s\S]*« OK, vas-y\. »/);
+  assert.match(readFileSync(join(runDir, 'lane.env'), 'utf8'), /^ORCH_KEEP_TERMINALS=3$/m);
+  const why = events().find((event) => event.kind === 'wake_started');
+  assert.equal(why.detail, 'pr_opened #7, comment X-1');
+});
+
+test('a lane woken again and again keeps the terminals of its last sessions: the older ones are closed when a session ends, once, and no other lane is touched', () => {
+  const box = sandbox();
+  const runs = join(box.state, 'runs');
+  const past = (name, handle, lane = 'release/lead') => {
+    mkdirSync(join(runs, name), { recursive: true });
+    writeFileSync(join(runs, name, 'lane.env'), `ORCH_LANE=${lane}\n`);
+    writeFileSync(join(runs, name, 'terminal.handle'), `${handle}\n`);
+  };
+  const session = (name, handle, keep = 'ORCH_KEEP_TERMINALS=3\n', extra = {}) => {
+    past(name, handle);
+    writeFileSync(join(runs, name, 'prompt.md'), 'prompt\n');
+    writeFileSync(join(runs, name, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }]));
+    writeFileSync(join(runs, name, 'lane.env'), `ORCH_LANE=release/lead\nORCH_TICKET=\nORCH_ROLE=release\nORCH_RUN_BASE=${name}\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n${keep}`);
+    const run = spawnSync(join(box.home, 'lane-run.sh'), [join(runs, name)], { cwd: box.repo, env: { ...box.env, ...extra }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  };
+  const closed = () => { try { return readFileSync(join(box.home, 'orca-closed'), 'utf8').trim().split('\n'); } catch { return []; } };
+  for (const n of [1, 2, 3, 4]) past(`lead-000${n}`, `t${n}`);
+  past('X-9-0001', 'other', 'dev/X-9');
+  // A session that was not asked to keep only the last ones closes nothing.
+  session('lead-0005', 't5', '');
+  assert.deepEqual(closed(), []);
+  session('lead-0006', 't6');
+  assert.deepEqual(closed(), ['t1', 't2', 't3']);
+  assert.ok(readFileSync(join(runs, 'lead-0001', 'terminal.closed'), 'utf8'));
+  assert.throws(() => readFileSync(join(runs, 'lead-0004', 'terminal.closed')));
+  // The next one closes one more, and does not close again what is closed.
+  session('lead-0007', 't7');
+  assert.deepEqual(closed(), ['t1', 't2', 't3', 't4']);
+  // Orca refuses to close and answers without a list: the terminal is not written down as closed, the next session tries again.
+  writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ ok: false }));
+  session('lead-0008', 't8', 'ORCH_KEEP_TERMINALS=3\n', { FAKE_ORCA_CLOSE_FAILS: '1' });
+  assert.throws(() => readFileSync(join(runs, 'lead-0005', 'terminal.closed')));
+  // It refuses to close a terminal it no longer shows: that one is forgotten.
+  writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ result: { terminals: [{ handle: 't6' }] } }));
+  session('lead-0009', 't9', 'ORCH_KEEP_TERMINALS=3\n', { FAKE_ORCA_CLOSE_FAILS: '1' });
+  assert.ok(readFileSync(join(runs, 'lead-0005', 'terminal.closed'), 'utf8'));
+  assert.throws(() => readFileSync(join(runs, 'lead-0006', 'terminal.closed')));
+});
+
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
   const box = sandbox();
   writeFileSync(join(box.home, 'linear.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
@@ -778,6 +879,8 @@ test('every unit that runs a script of the dispatcher finds the tools of the use
   for (const unit of readdirSync(dir).filter((name) => name.endsWith('.service'))) {
     const text = readFileSync(join(dir, unit), 'utf8');
     assert.match(text, /^Environment=PATH=%h\/\.local\/bin:/m, unit);
+    // One locale the host has, whatever the session that started the units carried.
+    assert.match(text, /^Environment=LANG=C\.UTF-8$/m, unit);
   }
   for (const timer of readdirSync(dir).filter((name) => name.endsWith('.timer'))) assert.ok(readdirSync(dir).includes(timer.replace('.timer', '.service')), timer);
 });
@@ -998,15 +1101,6 @@ test('the handover wake: one session that rereads the handover and says what it 
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
   assert.match(posted, /^X-100 from=chef de projet\n/);
   assert.match(posted, /answer of first/);
-  // A wake that is not the handover still refuses to act.
-  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('live = no', 'live = yes'));
-  writeFileSync(join(box.home, 'linear-now.json'), '[]');
-  spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify([{ id: 'i1', identifier: 'X-1', title: 'T', url: 'u', state: 's', project: null, createdAt: new Date().toISOString(), description: 'de Makhtar', comments: [] }]));
-  writeFileSync(join(runDir, 'exit-code'), '0');
-  const acting = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
-  assert.equal(acting.status, 1);
-  assert.match(acting.stderr, /not built yet/);
 });
 
 test('the handover wake needs a handover to read, and a ticket to answer in', () => {
@@ -1054,4 +1148,238 @@ test('a listing of tickets that fills the page says it may be cut short', () => 
   assert.equal(run.status, 0);
   assert.equal(JSON.parse(run.stdout).length, 100);
   assert.match(run.stderr, /may be cut short/);
+});
+
+test('the last message of a lane is a report for the lead only when its turn is over and it speaks to the lead', async () => {
+  const { lastReport, laneReports } = await import('../ops/orchestration/lib/lanes.mjs');
+  const say = (uuid, text, more = [], at = new Date(Date.now() - 120000).toISOString()) => JSON.stringify({ type: 'assistant', uuid, timestamp: at, message: { content: [{ type: 'text', text }, ...more] } });
+  const user = (content) => JSON.stringify({ type: 'user', message: { content } });
+  assert.equal(lastReport([say('a', 'Pour le chef de projet : fini.')]).id, 'a');
+  // The turn goes on (a tool call), or someone wrote to the lane after: no report.
+  assert.equal(lastReport([say('a', 'Je regarde.', [{ type: 'tool_use', name: 'Bash' }])]), null);
+  assert.equal(lastReport([say('a', 'Pour le chef de projet : fini.'), user('continue')]), null);
+  // A tool result is not someone writing to the lane.
+  assert.equal(lastReport([say('a', 'x', [{ type: 'tool_use', name: 'Bash' }]), user([{ type: 'tool_result', content: 'ok' }]), say('b', 'Pour le chef de projet : fini.')]).id, 'b');
+  const projects = mkdtempSync(join(tmpdir(), 'orch-projects-'));
+  const lane = (name, text) => {
+    const path = `/lanes/${name}`;
+    const dir = join(projects, path.replace(/[^A-Za-z0-9]/g, '-'));
+    execFileSync('mkdir', ['-p', dir]);
+    writeFileSync(join(dir, 's.jsonl'), `${say(`id-${name}`, text)}\n`);
+    return { name, path, branch: `b/${name}` };
+  };
+  const reports = laneReports([lane('one', 'Pour le chef de projet : prêt.'), lane('two', 'Voilà, Makhtar, c’est fait.'), { name: 'none', path: '/lanes/none', branch: 'b' }], projects);
+  assert.deepEqual(reports.map((report) => [report.lane, report.id]), [['one', 'id-one']]);
+  // Too fresh (the turn may go on in the next line of the log) or too old (a report of days ago is not a request): neither.
+  const at = (ms) => new Date(Date.now() - ms).toISOString();
+  const timed = (name, when) => { const l = lane(name, 'x'); writeFileSync(join(projects, l.path.replace(/[^A-Za-z0-9]/g, '-'), 's.jsonl'), `${say(`id-${name}`, 'Pour le chef de projet : prêt.', [], when)}\n`); return l; };
+  assert.deepEqual(laneReports([timed('fresh', at(5000)), timed('old', at(7 * 3600e3)), timed('right', at(600e3))], projects, { maxHours: 6 }).map((report) => report.lane), ['right']);
+});
+
+test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
+  const box = sandbox();
+  const projects = join(box.home, 'projects');
+  const lanePath = join(box.home, 'lanes', 'old-lane');
+  box.git('worktree', 'add', '-q', '-b', 'feat/old', lanePath, 'main');
+  const dir = join(projects, lanePath.replace(/[^A-Za-z0-9]/g, '-'));
+  execFileSync('mkdir', ['-p', dir]);
+  writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: 'r1', timestamp: new Date(Date.now() - 120000).toISOString(), message: { content: [{ type: 'text', text: 'Pour le chef de projet : main est réintégrée, je demande le créneau de CI.' }] } })}\n`);
+  const env = { ...box.env, HOME: box.home };
+  execFileSync('mkdir', ['-p', join(box.home, '.claude')]);
+  execFileSync('ln', ['-s', projects, join(box.home, '.claude', 'projects')]);
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env, encoding: 'utf8' });
+  // Observing: the first wake takes note, the second finds nothing: the lane is not read.
+  wake();
+  const observing = wake();
+  assert.equal(observing.stdout.trim(), '');
+  // Acting: the report is an event.
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('live = no', 'live = yes'));
+  const acting = wake();
+  assert.equal(acting.status, 0, acting.stderr);
+  const runDir = acting.stdout.trim();
+  const prompt = readFileSync(join(runDir, 'prompt.md'), 'utf8');
+  assert.match(prompt, /^acting lead prompt/);
+  assert.match(prompt, /Lane old-lane \(branche feat\/old\) — son dernier message[\s\S]*je demande le créneau de CI/);
+  const laneEnv = readFileSync(join(runDir, 'lane.env'), 'utf8');
+  assert.match(laneEnv, /ORCH_PERMISSIONS=release-live/);
+  assert.match(laneEnv, /ORCH_COMMENT_ON=none/);
+  // The run gets the permissions of the acting lead, not those of the role.
+  spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env, encoding: 'utf8' });
+  assert.equal(readFileSync(join(box.state, 'allowed-first'), 'utf8').trim(), 'read-only|only-for-the-acting-lead|never');
+  // Said once: the next wake does not hand the same report again.
+  writeFileSync(join(runDir, 'exit-code'), '0');
+  assert.equal(wake().stdout.trim(), '');
+});
+
+test('the acting lead may answer and nothing more: its permissions allow three scripts and refuse the ones that open, close, push or create', () => {
+  const live = conf.sections['permissions.release-live'];
+  const list = (text) => text.split(',').map((item) => item.trim());
+  assert.equal(live.mode, 'read-only');
+  const scripts = list(live.allow).filter((item) => item.startsWith('ops/'));
+  assert.deepEqual(scripts, ['ops/orchestration/linear.sh comment', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh']);
+  for (const refused of ['ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
+});
+
+test('tell-lane says it in the terminal written for that lane, and nowhere else', () => {
+  const box = sandbox();
+  execFileSync('mkdir', ['-p', box.state]);
+  const worktree = join(box.home, 'lanes', 'old-lane');
+  box.git('worktree', 'add', '-q', '-b', 'old-lane', worktree, 'main');
+  writeFileSync(join(box.state, 'lanes.json'), JSON.stringify({ 'old-lane': 'term_1' }));
+  const terminals = (list) => writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ result: { terminals: list } }));
+  const tell = (lane, text, extra = {}) => spawnSync(join(box.home, 'tell-lane.sh'), [lane, '-'], { env: { ...box.env, ...extra }, encoding: 'utf8', input: text });
+  const sent = () => { try { return readFileSync(join(box.home, 'orca-sent'), 'utf8'); } catch { return null; } };
+  // An unknown lane, a terminal that is gone, one that is in another worktree: nothing is sent.
+  terminals([{ handle: 'term_1', connected: true, worktreePath: worktree }]);
+  assert.equal(tell('another', 'x').status, 1);
+  terminals([]);
+  assert.match(tell('old-lane', 'x').stderr, /is gone/);
+  terminals([{ handle: 'term_1', connected: true, worktreePath: join(box.home, 'lanes', 'somewhere-else') }]);
+  assert.match(tell('old-lane', 'x').stderr, /not in its worktree/);
+  // A folder of the same name somewhere else is not the worktree of that lane.
+  terminals([{ handle: 'term_1', connected: true, worktreePath: '/elsewhere/old-lane' }]);
+  assert.match(tell('old-lane', 'x').stderr, /not in its worktree/);
+  // Orca that does not answer is said, not passed over in silence.
+  assert.match(tell('old-lane', 'x', { FAKE_ORCA_DOWN: '1' }).stderr, /Orca did not answer/);
+  assert.equal(sent(), null);
+  terminals([{ handle: 'term_1', connected: true, worktreePath: worktree }]);
+  const ok = tell('old-lane', 'Accord de Makhtar sur X-1.\nTu peux réintégrer main.');
+  assert.equal(ok.status, 0, ok.stderr);
+  const args = sent().split('\n');
+  assert.equal(args[args.indexOf('--terminal') + 1], 'term_1');
+  const text = args[args.indexOf('--text') + 1];
+  assert.match(text, /^Pour la lane old-lane, de la part du chef de projet/);
+  assert.match(text, /Accord de Makhtar sur X-1\. Tu peux réintégrer main\./);
+  assert.ok(args.includes('--enter'));
+  assert.equal(JSON.parse(readFileSync(join(box.state, 'lane-messages.jsonl'), 'utf8').trim()).lane, 'old-lane');
+  // It does not ask for an answer: an acknowledgement would wake the lead again, for nothing.
+  assert.doesNotMatch(text, /Réponds par un rapport/);
+  // A lane is never told to merge or to force anything: that is not the lead's to hand out.
+  for (const order of ['Fusionne #259 maintenant.', 'Tu peux merge la PR.', 'Tu peux fusionner la PR.', 'git push --force si besoin.']) {
+    const refused = tell('old-lane', order);
+    assert.equal(refused.status, 1, order);
+    assert.match(refused.stderr, /never told to merge/);
+  }
+  // A line of the journal that cannot be read does not hide the messages already sent.
+  writeFileSync(join(box.state, 'lane-messages.jsonl'), `not json\n${readFileSync(join(box.state, 'lane-messages.jsonl'), 'utf8')}`);
+  assert.equal(tell('old-lane', 'Je fusionnerai #259 quand elle sera verte ; réintègre main.').status, 0);
+  // Two messages an hour to one lane (the limit of this sandbox): the third is not sent.
+  const third = tell('old-lane', 'Encore un mot.');
+  assert.equal(third.status, 1);
+  assert.match(third.stderr, /already told 2 times/);
+});
+
+test('what a lane may be told: an order to merge or to force is refused in its usual forms, a caution or what the lead will do itself is not', async () => {
+  const { refusedOrder } = await import('../ops/orchestration/lib/lane-message.mjs');
+  for (const order of [
+    'Fusionne #259 maintenant.', 'Tu peux fusionner la PR.', 'Tu peux merge la PR.', 'Il faut merger dès que c’est vert.', 'Lance gh pr merge 259.',
+    'Fais un force push.', 'git push --force si besoin.', 'git push --force-with-lease origin', 'git push -f origin ta-branche',
+    // A negation that invites, and an order after a reassurance, are orders.
+    'N’hésite pas à fusionner.', "N'attends pas pour fusionner.", 'Ne t’inquiète pas, fusionne #259.', 'Ne fusionne pas avant la CI ; après, fusionne.',
+    'La CI est verte et tu peux fusionner.', 'FUSIONNEZ.',
+    // A negation far before the word does not bear on it.
+    'Comme tu n’as plus rien à faire fusionne la PR.',
+  ]) assert.ok(refusedOrder(order), order);
+  for (const said of [
+    'Ne fusionne pas avant l’accord de Makhtar.', 'Tu ne dois ni fusionner ni forcer.', 'Ne jamais fusionner sans son accord écrit.', 'Pas de merge de ton côté.',
+    'Ne force rien : jamais de --force.', 'Sans force-push, donc.',
+    'Je fusionnerai #259 quand elle sera verte ; réintègre main.', 'Je la fusionne à un moment sans test d’écran.', 'Le script fusionnera quand tout sera vert.',
+    '#266 est fusionnée, réintègre main.', 'Une fois #259 fusionnée, c’est ton tour.', 'Après la fusion de #266, réintègre main.',
+    'Réintègre main et pousse une seule fois.', 'Le conflit émerge dans server/core.mjs.',
+  ]) assert.equal(refusedOrder(said), null, said);
+});
+
+test('adopt-lane writes down the terminal of a lane only when Orca shows it in that worktree', () => {
+  const box = sandbox();
+  const worktree = join(box.home, 'lanes', 'old-lane');
+  box.git('worktree', 'add', '-q', '-b', 'old-lane', worktree, 'main');
+  const terminals = (answer) => writeFileSync(join(box.home, 'terminals.json'), JSON.stringify(answer));
+  terminals({ result: { terminals: [{ handle: 'term_9', connected: true, worktreePath: worktree }, { handle: 'term_7', connected: true, worktreePath: '/elsewhere/old-lane' }] } });
+  const adopt = (lane, handle, extra = {}) => spawnSync(join(box.home, 'adopt-lane.sh'), [lane, handle], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  assert.equal(adopt('old-lane', 'term_8').status, 1);
+  assert.equal(adopt('another', 'term_9').status, 1);
+  // A folder of the same name somewhere else is not the worktree of that lane.
+  assert.match(adopt('old-lane', 'term_7').stderr, /not in the worktree/);
+  // Orca that does not answer, or answers without a list, is said: no silent stop.
+  const down = adopt('old-lane', 'term_9', { FAKE_ORCA_DOWN: '1' });
+  assert.equal(down.status, 1);
+  assert.match(down.stderr, /Orca did not answer/);
+  terminals({ ok: false });
+  const noList = adopt('old-lane', 'term_9');
+  assert.equal(noList.status, 1);
+  assert.match(noList.stderr, /no list of terminals/);
+  assert.throws(() => readFileSync(join(box.state, 'lanes.json')));
+  terminals({ result: { terminals: [{ handle: 'term_9', connected: true, worktreePath: worktree }] } });
+  assert.equal(adopt('old-lane', 'term_9').status, 0);
+  assert.deepEqual(JSON.parse(readFileSync(join(box.state, 'lanes.json'), 'utf8')), { 'old-lane': 'term_9' });
+});
+
+test('host-state sees a screen test from the command that runs it, before any browser, and not from whoever only names one', async () => {
+  const { screenProcesses } = await import('../ops/orchestration/lib/screens.mjs');
+  const named = [
+    ['claude', 'Lance npm run test:ui puis playwright, et lis scripts/run-ui-tests.mjs'],
+    ['bash', '-c', 'pgrep -f "playwright|test:ui|capture-all|run-ui-tests"'],
+    ['node', 'scripts/with-test-postgres.mjs', '--', 'node', '--test', 'test/orchestration.test.mjs'],
+    ['vim', 'scripts/run-ui-tests.mjs'],
+    // Installing the browsers is not a screen test.
+    ['npx', 'playwright', 'install', 'chromium'],
+  ];
+  const running = [
+    ['npm run test:ui'],
+    ['node', 'scripts/with-test-postgres.mjs', '--', 'npm', 'run', 'test:ui:run'],
+    ['node', '/somewhere/budgeting/scripts/run-ui-tests.mjs'],
+    ['node', 'scripts/capture-all.mjs'],
+    ['node', 'scripts/ui-shots.mjs', 'http://127.0.0.1:4173'],
+    ['node', '/somewhere/node_modules/.bin/playwright', 'test'],
+    ['npx', 'playwright', 'test', '--project=chromium'],
+    ['/home/someone/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell', '--headless'],
+    ['/opt/old/headless_shell', '--no-sandbox'],
+  ];
+  assert.equal(screenProcesses(named).length, 0);
+  for (const argv of running) assert.equal(screenProcesses([argv]).length, 1, argv.join(' '));
+
+  // The script itself, on a process table written by the test.
+  const box = sandbox();
+  const proc = join(box.home, 'proc');
+  const process_ = (pid, argv) => { mkdirSync(join(proc, String(pid)), { recursive: true }); writeFileSync(join(proc, String(pid), 'cmdline'), `${argv.join('\0')}\0`); };
+  mkdirSync(join(proc, 'self'), { recursive: true });
+  named.forEach((argv, index) => process_(100 + index, argv));
+  const state = () => {
+    const run = spawnSync(join(box.home, 'host-state.sh'), [], { env: { ...box.env, ORCH_PROC_DIR: proc }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    return JSON.parse(run.stdout);
+  };
+  const quiet = state();
+  assert.equal(quiet.screen_tests_or_captures_running, 0);
+  assert.equal(quiet.free_for_a_merge, true);
+  // npm names its own process in one piece: no browser yet, and the host is already not free for a merge.
+  writeFileSync(join(proc, '200'), ''); // a file that is not a process is passed over
+  mkdirSync(join(proc, '201'));
+  writeFileSync(join(proc, '201', 'cmdline'), 'npm run test:ui\0\0\0');
+  const busy = state();
+  assert.equal(busy.screen_tests_or_captures_running, 1);
+  assert.equal(busy.free_for_a_merge, false);
+});
+
+test('the acting lead cannot write down a terminal itself, and a comment made of blanks is not posted', () => {
+  const deny = conf.sections['permissions.release-live'].deny.split(',').map((item) => item.trim());
+  assert.ok(deny.includes('ops/orchestration/adopt-lane.sh'));
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  assert.equal(run.status, 1);
+  assert.throws(() => readFileSync(join(dir, 'called')));
+});
+
+test('a comment read on stdin is posted, signed by the one who runs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
+  assert.equal(run.status, 0, run.stderr);
+  const asked = readFileSync(join(dir, 'asked'), 'utf8');
+  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par Makhtar/);
+  assert.match(asked, /Une question pour toi\./);
+  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
 });

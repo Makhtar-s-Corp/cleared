@@ -79,7 +79,17 @@ if [ -z "$handover" ]; then
     || die "GitHub did not answer: nothing read, nothing moved"
   # What the scripts of the dispatcher posted themselves.
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" "$ORCH_STATE_DIR/linear-issues.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" > "$work/changes.json"
+  # What the lanes already at work say to the lead: only once it acts. A
+  # lane is a worktree under the lanes root that the dispatcher did not open.
+  echo '[]' > "$work/reports.json"
+  if [ "$(conf_get lead live)" = yes ]; then
+    root=$(expand_home "$(conf_get lanes root)")
+    git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}' \
+      | grep -F "$root/" | grep -v -E "\t($(conf_keys roles | paste -sd'|'))/" \
+      | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
+    node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
+  fi
+  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
 
   if [ -n "$dry_run" ]; then
@@ -88,7 +98,9 @@ if [ -z "$handover" ]; then
   fi
 
   if [ "$count" = 0 ]; then
-    [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing moved since $last"
+    # Nothing moved, or nothing worth a session: what waits is kept for the next one.
+    waiting=$(jq '.next.waiting | length' "$work/changes.json")
+    [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing worth a session since $last ($waiting waiting for the next one)"
     jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
     exit 0
   fi
@@ -130,9 +142,11 @@ mkdir -p "$run_dir"
 printf '%s\n' "$chain" > "$run_dir/chain.json"
 [ -n "$handover" ] || jq '.events' "$work/changes.json" > "$run_dir/events.json"
 live=$(conf_get lead live)
-# Until the lead acts through scripts of its own, an ordinary wake only
-# observes. The handover wake is the one exception: it answers in one ticket.
-[ -n "$handover" ] || [ "$live" != yes ] || die "[lead] live = yes: the acting project lead is not built yet"
+# live = no: the lead observes, it writes what it would do and does nothing.
+# live = yes: it acts, by the few scripts its permissions name (it answers in
+# Linear and to the lanes at work; it opens no lane and merges nothing yet).
+acting=
+[ "$live" != yes ] || acting=1
 if [ -n "$handover" ]; then
   {
     cat "$ORCH_HOME/prompts/handover.md"
@@ -142,11 +156,12 @@ if [ -n "$handover" ]; then
   comment_on=$(conf_get lead report_on)
 else
   {
-    cat "$ORCH_HOME/prompts/$role.md"
+    cat "$ORCH_HOME/prompts/$role${acting:+-live}.md"
     printf '\n---\nCe qui a bougé depuis le dernier réveil (%s événement(s)) :\n\n' "$count"
     jq -r '.events[] |
       if .kind == "comment" then "- \(.ticket) (\(.title)) — commentaire de Makhtar, \(.at) : « \(.text) »"
       elif .kind == "ticket_new" then "- \(.ticket) (\(.title)) — nouveau ticket, \(.at), projet \(.project // "aucun") : « \(.text) »"
+      elif .kind == "lane_report" then "- Lane \(.lane) (branche \(.branch)) — son dernier message, \(.at) : « \(.text) »"
       elif .kind == "pr_checks" then "- PR #\(.pr) (\(.title), branche \(.branch)) — vérifications : \(.checks)"
       elif .kind == "pr_ready" then "- PR #\(.pr) (\(.title), branche \(.branch)) — prête pour revue, vérifications : \(.checks)"
       elif .kind == "pr_opened" then "- PR #\(.pr) (\(.title), branche \(.branch)) — ouverte en brouillon"
@@ -160,9 +175,15 @@ fi
   printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$(jq -r '.chain[0].alias' <<<"$routed")" "règle : $(jq -r '.rule' <<<"$routed")" ""
   printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\nORCH_SIGNED=%q\n' "$comment_on" "" "$(conf_get lead name)"
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PROJECT=%q\nORCH_LABEL=%q\n' "" "" "" ""
+  # What the session may run: the permissions of the role, or those of the
+  # acting lead.
+  [ -z "$acting" ] || [ -n "$handover" ] || printf 'ORCH_PERMISSIONS=%q\n' "$role-live"
+  # One terminal a session: only the last ones stay open in the lane.
+  [ -z "$(conf_get lead terminals_kept)" ] || printf 'ORCH_KEEP_TERMINALS=%q\n' "$(conf_get lead terminals_kept)"
 } > "$run_dir/lane.env"
 
 watching=" · observation"
+[ -z "$acting" ] || watching=""
 [ -z "$handover" ] || watching=" · passation"
 open_terminal "$worktree" "$lane · $(jq -r '.[0].alias' <<<"$chain")$watching" "$ORCH_HOME/lane-run.sh $run_dir" > "$run_dir/terminal.handle" \
   || die "Orca did not open the terminal of the project lead; what moved stays for the next wake"
@@ -174,6 +195,9 @@ if [ -n "$handover" ]; then
   exit 0
 fi
 jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
+# Why this session was started, for whoever counts the wakes.
+ledger event --kind wake_started --run-id "$run_base-$role-a1" \
+  --detail "$(jq -r '[.events[] | "\(.kind) \(.ticket // (if .pr then "#\(.pr)" else .lane end))"] | join(", ")' "$work/changes.json")"
 # How long a comment of the user waited before a session took it.
 jq -c '.events[] | select(.kind == "comment")' "$work/changes.json" | while IFS= read -r event; do
   minutes=$(( ($(date +%s) - $(date -d "$(jq -r '.at' <<<"$event")" +%s)) / 60 ))
