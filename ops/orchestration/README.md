@@ -68,6 +68,8 @@ Une session encore au travail retient la suivante, sans rien perdre de ce qui bo
 
 Ce que reçoit le modèle : la liste de ce qui a bougé contient des titres et des commentaires de Linear, tels quels. Elle ne passe pas par le garde-fou quand le rôle est servi par Claude, qui lit déjà le dépôt et Linear pour tout le reste ; l'adaptateur de Codex, lui, fait passer par le garde-fou tout ce qu'il envoie. « Aucune donnée réelle dans Linear » reste la règle qui protège ce chemin.
 
+Prendre la suite d'un autre chef de projet : `wake.sh --handover <fichier>` lance une seule session, qu'il y ait du nouveau ou non. Elle relit la passation du fichier et dit, dans le ticket de `[lead] report_on`, ce qu'elle a compris et ce qu'elle ferait en premier. Elle ne prend aucun ticket ; ce qui a bougé reste pour les réveils suivants. `linear.sh list <état>` donne les tickets d'un état, pour vérifier une passation.
+
 Pourquoi une minuterie du serveur et non une automatisation Orca : essayée le 7 octobre, celle-ci lance `claude --dangerously-skip-permissions` dans une session interactive qui ne se termine pas. Le modèle ne viendrait plus de la table, la liste blanche du rôle ne s'appliquerait pas, et la CLI ne rendrait aucun usage à écrire au ledger. Le pré-contrôle sans modèle et la lane stable visible dans Orca sont gardés.
 
 ```sh
