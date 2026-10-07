@@ -356,6 +356,14 @@ test('a comment that the guard refuses never reaches Linear', () => {
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /not sent/);
   assert.throws(() => readFileSync(join(dir, 'called')), 'the network was reached');
+  // A ticket goes through the same guard, title and description.
+  const open = (title, text) => {
+    writeFileSync(join(dir, 'ticket.md'), text);
+    return spawnSync(join(ORCH_HOME, 'linear.sh'), ['create', 'Projet', 'Bug', title, join(dir, 'ticket.md')], { env, encoding: 'utf8' });
+  };
+  assert.notEqual(open('Un titre', flagged).status, 0);
+  assert.notEqual(open(flagged, 'Une description.').status, 0);
+  assert.throws(() => readFileSync(join(dir, 'called')), 'the network was reached');
   const sent = post('Fait : rien. Reste à faire : rien.');
   assert.equal(sent.status, 0, sent.stderr);
   assert.equal(sent.stdout.trim(), 'u');

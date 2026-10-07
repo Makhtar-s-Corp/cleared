@@ -5,6 +5,7 @@
 #   linear.sh comment <ticket> <file> [<from>]  posts the file as a comment, prints its URL
 #   linear.sh waiting                           tickets waiting for the user, as JSON
 #   linear.sh comments <ticket>                 its comments as JSON (id, createdAt, body)
+#   linear.sh create <project> <label> <title> <file>   opens a ticket, prints its identifier and URL
 #
 # Nothing real goes to Linear, an outside service (decision of 2026-10-06):
 # a comment is checked by the guard of the repository first (private terms,
@@ -79,6 +80,23 @@ case "${1:-}" in
     jq -c --arg ticket "$2" --arg from "$from" --arg at "$(now_utc)" '.data.commentCreate.comment + {ticket: $ticket, from: $from, at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/linear-comments.jsonl"
     jq -r '.data.commentCreate.comment.url' <<<"$created"
     ;;
+  create)
+    [ $# -eq 5 ] && [ -f "$5" ] || die "usage: linear.sh create <project> <label> <title> <description file>"
+    title_file=$(mktemp)
+    printf '%s\n' "$4" > "$title_file"
+    guard_text "$title_file" && guard_text "$5" || { rm -f "$title_file"; exit 1; }
+    rm -f "$title_file"
+    found=$(gql 'query($team: String!, $project: String!, $label: String!) { teams(filter: {key: {eq: $team}}) { nodes { id } } projects(filter: {name: {eq: $project}}) { nodes { id } } issueLabels(filter: {name: {eq: $label}}) { nodes { id } } }' \
+      "$(jq -nc --arg team "$(conf_get linear team)" --arg project "$2" --arg label "$3" '{team: $team, project: $project, label: $label}')")
+    team_id=$(jq -r '.data.teams.nodes[0].id // empty' <<<"$found") project_id=$(jq -r '.data.projects.nodes[0].id // empty' <<<"$found") label_id=$(jq -r '.data.issueLabels.nodes[0].id // empty' <<<"$found")
+    [ -n "$team_id" ] && [ -n "$project_id" ] && [ -n "$label_id" ] || die "team, project \"$2\" or label \"$3\" not found in Linear"
+    description=$(printf '> Ticket ouvert par un agent (%s), pas par Makhtar.\n\n%s\n' "${ORCH_FROM:-script}" "$(cat "$5")")
+    created=$(gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }' \
+      "$(jq -nc --arg team "$team_id" --arg project "$project_id" --arg label "$label_id" --arg title "$4" --arg description "$description" '{input: {teamId: $team, projectId: $project, labelIds: [$label], title: $title, description: $description}}')")
+    mkdir -p "$ORCH_STATE_DIR"
+    jq -c --arg at "$(now_utc)" '.data.issueCreate.issue + {at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/linear-issues.jsonl"
+    jq -r '.data.issueCreate.issue | "\(.identifier) \(.url)"' <<<"$created"
+    ;;
   comments)
     ticket_ok "$2"
     gql 'query($id: String!) { issue(id: $id) { comments(first: 100) { nodes { id createdAt body url } } } }' \
@@ -91,6 +109,6 @@ case "${1:-}" in
       | jq -c '[.data.viewer.assignedIssues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
     ;;
   *)
-    die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | waiting"
+    die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | create <project> <label> <title> <file> | waiting"
     ;;
 esac
