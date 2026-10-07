@@ -53,7 +53,7 @@ adapters/<nom>.sh run --model <id> --prompt-file <fichier> --report <fichier> --
 ops/orchestration/spawn-lane.sh review SEE-112 --pr 257
 ```
 
-La lane `review/<ticket>` part de la tête de la PR, en lecture seule. Le modèle vient de la table, avec la taille et les chemins de la PR ; ce n'est jamais celui qui l'a écrite (lu dans le ledger, ou donné par `--author-model`). Sans auteur connu, la relecture ne démarre pas. Son compte rendu est posté tel quel, sans passer par la mise en forme.
+La lane `review/<ticket>` part de la tête de la PR, en lecture seule. `--since <commit>` limite la relecture à ce qui a changé depuis un commit déjà relu ; `--from <réf>` la fait partir d'une branche locale pas encore poussée. Le modèle vient de la table, avec la taille et les chemins de la PR ; ce n'est jamais celui qui l'a écrite (lu dans le ledger, ou donné par `--author-model`). Sans auteur connu, la relecture ne démarre pas. Son compte rendu est posté tel quel, sans passer par la mise en forme.
 
 ## Le ledger
 
@@ -84,13 +84,13 @@ node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur)
 
 ## Servir la page
 
-La page reste sur le réseau Tailscale, comme OpenClaw (décision du 7 octobre) : les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
+La page n'est lisible que depuis le réseau Tailscale (décision du 7 octobre) : les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
 
-`serve/install.sh` installe, sans droits d'administrateur :
+`serve/install.sh` installe, sans droits d'administrateur, sans conteneur et sans proxy :
 
-- un service utilisateur qui sert le seul dossier `state/dashboard/`, à l'écoute sur la passerelle du réseau Docker de Coolify ; aucun conteneur ;
+- un service utilisateur, `serve/serve-dashboard.mjs`, à l'écoute sur la seule adresse Tailscale du serveur. Écouter là ne suffit pas, un conteneur de l'hôte atteint aussi cette adresse : le service refuse donc toute connexion dont la source n'est pas une machine du réseau Tailscale, et ne sert que la page ;
 - une minuterie qui relance `dashboard.sh` toutes les dix minutes, en attendant que le dispatcher ait son propre réveil (phase 2). Des scripts seulement, aucun modèle.
 
-Il prépare aussi la route du proxy de Coolify, qui refuse toute source hors Tailscale, et donne la commande pour la copier dans `/data/coolify/proxy/dynamic/` : celle-là demande un administrateur.
+`serve/check.sh` vérifie qui peut lire la page : cette machine par Tailscale, oui ; un conteneur, non, par aucune adresse ; rien n'écoute ailleurs. `install.sh` le lance à la fin.
 
-La minuterie appelle le `dashboard.sh` du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.
+Les deux services appellent les scripts du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.

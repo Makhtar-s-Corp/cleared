@@ -76,6 +76,7 @@ contract_report() {
     echo "lane: ${ORCH_LANE:-}"
     echo "ticket: ${ORCH_TICKET:-}"
     echo "role: ${ORCH_ROLE:-}"
+    echo "commit: $(git rev-parse --verify --quiet HEAD 2>/dev/null || true)"
     echo "adapter: $adapter"
     echo "requested_model: ${ORCH_REQUESTED_MODEL:-}"
     echo "model: $(jq -r '.model' "$usage")"

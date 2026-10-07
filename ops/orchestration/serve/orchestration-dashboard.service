@@ -1,12 +1,12 @@
-# systemd user unit, installed by serve/install.sh: serves the static
-# dashboard to the Coolify proxy only. It listens on the gateway of the
-# "coolify" Docker network, which the Internet does not reach; the proxy route
-# in front of it only lets the Tailscale network in. No container.
+# systemd user unit, installed by serve/install.sh: serves the one page of
+# the dashboard on the Tailscale address of the server, and refuses any peer
+# that is not a machine of the Tailscale network (serve-dashboard.mjs). No
+# container, no proxy in front.
 [Unit]
-Description=Orchestration dashboard (static page)
+Description=Orchestration dashboard (static page, Tailscale only)
 
 [Service]
-ExecStart=/usr/bin/python3 -m http.server @PORT@ --bind @BIND@ --directory @DASHBOARD_DIR@
+ExecStart=/usr/bin/node @ORCH_HOME@/serve/serve-dashboard.mjs @BIND@ @PORT@ @DASHBOARD_DIR@/index.html
 Restart=on-failure
 RestartSec=30
 

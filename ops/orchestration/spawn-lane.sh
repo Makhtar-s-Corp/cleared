@@ -5,10 +5,13 @@
 #
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
+#                 [--since <commit>] [--from <ref>]
 #                 [--path <touched path>]... [--pr-lines <n>] [--wait] [--dry-run]
 #
 # With --pr, the lane starts from the head of that pull request, and its size
-# and touched paths take part in the choice of the model.
+# and touched paths take part in the choice of the model. --since narrows the
+# work to what changed after a commit (a review of what was not read yet);
+# --from starts the lane from that ref instead (a local branch not pushed yet).
 #
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
@@ -18,11 +21,11 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 [ $# -ge 2 ] || usage
 role=$1 ticket=$2
 shift 2
-forced= prompt_file= comment_on=$ticket author= pr= pr_lines= wait_for_exit= dry_run=
+forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run=
 paths=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,6 +34,8 @@ while [ $# -gt 0 ]; do
     --comment-on) comment_on=$2; shift 2 ;;
     --author-model) author=$2; shift 2 ;;
     --pr) pr=$2; shift 2 ;;
+    --since) since=$2; shift 2 ;;
+    --from) from=$2; shift 2 ;;
     --path) paths+=(--path "$2"); shift 2 ;;
     --pr-lines) pr_lines=$2; shift 2 ;;
     --wait) wait_for_exit=1; shift ;;
@@ -127,7 +132,16 @@ base=$(conf_get lanes base)
 [ -n "$pr_head" ] && base="origin/$pr_head"
 worktree="$root/$role-$ticket"
 [ -e "$worktree" ] && die "$worktree already exists"
-git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
+if [ -n "$from" ]; then
+  base=$from
+else
+  git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
+fi
+git -C "$ORCH_REPO" rev-parse --verify --quiet "$base^{commit}" > /dev/null || die "no such ref to start from: $base"
+if [ -n "$since" ]; then
+  since=$(git -C "$ORCH_REPO" rev-parse --verify --quiet "$since^{commit}") || die "no such commit: --since"
+  git -C "$ORCH_REPO" merge-base --is-ancestor "$since" "$base" || die "--since is not an ancestor of $base"
+fi
 git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "$base"
 # The lane exists and counts from now on: the next spawn may go.
 exec 9>&-
@@ -141,6 +155,7 @@ mv "$available" "$run_dir/chain.json"
   cat "$prompt_file"
   printf '\n---\nTicket %s : %s\n%s\nLane : %s (branche du même nom).\n' "$ticket" "$(jq -r '.title' <<<"$issue")" "$(jq -r '.url' <<<"$issue")" "$lane"
   [ -z "$pr" ] || printf 'PR #%s, branche %s, comparée à %s.\n' "$pr" "$pr_head" "$(conf_get lanes base)"
+  [ -z "$since" ] || printf 'Périmètre limité : seulement ce qui a changé depuis le commit %s, déjà traité (`git diff %s..HEAD`, `git log %s..HEAD`). Le reste sert de contexte.\n' "$since" "$since" "$since"
 } > "$run_dir/prompt.md"
 writeup_role=$(conf_get linear writeup_role)
 if [ -n "$writeup_role" ] && [ "$comment_on" != none ] && grep -qw -- "$role" <<<"$(conf_get linear writeup_for)"; then

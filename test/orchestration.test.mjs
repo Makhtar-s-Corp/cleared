@@ -360,3 +360,25 @@ test('a comment that the guard refuses never reaches Linear', () => {
   assert.equal(sent.status, 0, sent.stderr);
   assert.equal(sent.stdout.trim(), 'u');
 });
+
+test('the dashboard page is refused to any peer outside the allowed ranges, and only the page is served', async () => {
+  const { dashboardServer, allowed, TAILSCALE } = await import('../ops/orchestration/serve/serve-dashboard.mjs');
+  for (const peer of ['100.88.1.2', '100.127.255.254', '::ffff:100.64.0.1', 'fd7a:115c:a1e0::1', 'fd7a:115c:a1e0:ab12::9']) assert.ok(allowed(peer, TAILSCALE), peer);
+  // A container of a Docker network, the loopback, a public address, the ranges next to Tailscale's, nonsense.
+  for (const peer of ['172.18.0.5', '127.0.0.1', '::1', '10.0.1.7', '192.168.1.4', '8.8.8.8', '100.63.255.255', '100.128.0.1', '::ffff:172.18.0.5', 'fd7a:115c:a1e1::1', '', undefined, 'x']) assert.ok(!allowed(peer, TAILSCALE), String(peer));
+  const dir = mkdtempSync(join(tmpdir(), 'orch-serve-'));
+  writeFileSync(join(dir, 'index.html'), '<p>page</p>');
+  writeFileSync(join(dir, 'secret.txt'), 'not served');
+  const answer = async (ranges, path = '/') => {
+    const server = dashboardServer({ file: join(dir, 'index.html'), ranges });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`);
+    const body = await response.text();
+    await new Promise((resolve) => server.close(resolve));
+    return [response.status, body];
+  };
+  assert.equal((await answer(TAILSCALE))[0], 403, 'the loopback is not the Tailscale network');
+  assert.deepEqual(await answer(['127.0.0.0/8']), [200, '<p>page</p>']);
+  assert.equal((await answer(['127.0.0.0/8'], '/secret.txt'))[0], 404);
+  assert.equal((await answer(['127.0.0.0/8'], '/../secret.txt'))[0], 404);
+});
