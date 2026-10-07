@@ -24,6 +24,8 @@ export const EVENT_KINDS = [
   'model_fallback_failed', // no model of the chain could run
   'comment_handled', // value = minutes between a comment of the user and the first action
   'cli_outdated', // value = days a CLI is behind its latest release (weekly check)
+  'orca_terminal_delayed', // value = seconds Orca took to open the terminal of a lane (past the usual wait)
+  'orca_terminal_failed', // Orca did not open the terminal of a lane: the run was not started
 ];
 
 const SCHEMA = `

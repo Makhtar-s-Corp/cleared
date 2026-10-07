@@ -42,7 +42,7 @@ test('overrides by kind of task: engine, screen, and a screen pull request that 
 });
 
 test('a condition on something unknown does not match', () => {
-  const small = parseConf('[models]\na = x:1\nb = x:2\n[roles]\ndev = a\n[rules]\ndev pr_lines>10 -> b\ndev path=server/ -> b\n');
+  const small = parseConf('[models]\na = x:1\nb = x:2\n[roles]\ndev = a\nrelease = a\n[rules]\ndev pr_lines>10 -> b\ndev path=server/ -> b\n');
   assert.equal(route(small, task({})).chain[0].alias, 'a');
 });
 
@@ -166,13 +166,21 @@ esac
   fake('second', '0');
   writeFileSync(join(home, 'linear.sh'), '#!/usr/bin/env bash\necho \'{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}\'\n', { mode: 0o755 });
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\n[linear]\nwriteup_role =\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\n[linear]\nwriteup_role =\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   git('commit', '-q', '--allow-empty', '-m', 'init');
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
   execFileSync('mkdir', ['-p', join(home, 'bin')]);
-  writeFileSync(join(home, 'bin', 'orca'), '#!/usr/bin/env bash\nif [ "$1 $2" = "terminal create" ]; then echo \'{"handle":"t1"}\'; fi\nif [ "$1 $2" = "worktree rm" ]; then exit 1; fi\n', { mode: 0o755 });
+  // FAKE_ORCA_FAILS: how many times it refuses to open a terminal before it does.
+  writeFileSync(join(home, 'bin', 'orca'), `#!/usr/bin/env bash
+if [ "$1 $2" = "terminal create" ]; then
+  count=$(cat "${join(home, 'orca-calls')}" 2>/dev/null || echo 0); echo $((count + 1)) > "${join(home, 'orca-calls')}"
+  [ "$count" -ge "\${FAKE_ORCA_FAILS:-0}" ] || exit 1
+  echo '{"handle":"t1"}'
+fi
+if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
+`, { mode: 0o755 });
   const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf') };
   return { home, state, repo, env, git };
 }
@@ -534,4 +542,36 @@ test('a line cut short in the session does not hide that the model worked', () =
   });
   assert.equal(run.status, 1, 'the model had worked: a failure, not a fallback');
   assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /overloaded/);
+});
+
+test('Orca slow to open the terminal: the spawn waits, goes through, and the incident is in the ledger', () => {
+  const box = sandbox();
+  const run = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: { ...box.env, FAKE_ORCA_FAILS: '3', ORCH_ORCA_WAIT: '4', ORCH_ORCA_STEP: '1', ORCH_ORCA_SLOW: '2' }, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  const events = db.prepare('select kind, ticket, value from events').all().map((row) => ({ ...row }));
+  db.close();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'orca_terminal_delayed');
+  assert.equal(events[0].ticket, 'X-2');
+  assert.ok(events[0].value >= 2, `waited ${events[0].value} s`);
+});
+
+test('Orca never opens the terminal: after the wait and one more try the spawn fails, says how to run by hand, and it is in the ledger', () => {
+  const box = sandbox();
+  const run = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: { ...box.env, FAKE_ORCA_FAILS: '999', ORCH_ORCA_WAIT: '2', ORCH_ORCA_STEP: '1', ORCH_ORCA_SLOW: '1' }, encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /run by hand/);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.deepEqual(db.prepare('select kind, ticket from events').all().map((row) => ({ ...row })), [{ kind: 'orca_terminal_failed', ticket: 'X-2' }]);
+  db.close();
+  const calls = Number(readFileSync(join(box.home, 'orca-calls'), 'utf8'));
+  assert.ok(calls >= 3, `${calls} attempts: the wait, then one more`);
+});
+
+test('a lane of a role that is not counted does not take one of the three places', () => {
+  const box = sandbox({ maxLanes: 1 });
+  box.git('worktree', 'add', '-q', '-b', 'release/X-9', join(box.home, 'lanes', 'release-X-9'), 'main');
+  const run = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
 });

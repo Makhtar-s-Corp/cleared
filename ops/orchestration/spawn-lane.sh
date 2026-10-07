@@ -118,7 +118,7 @@ exec 9> "$ORCH_STATE_DIR/spawn.lock"
 flock -w 120 9 || die "another spawn holds the lock"
 max=$(conf_get limits max_lanes)
 lanes=$(dispatcher_lanes)
-open=$(grep -c . <<<"$lanes" || true)
+open=$(counted_lanes | grep -c . || true)
 if grep -qxF -- "$lane" <<<"$lanes"; then die "the lane $lane is already open"; fi
 if [ "$open" -ge "$max" ]; then
   ledger event --kind lane_limit_reached --ticket "$ticket" --detail "$lane refused: $open lanes open for a limit of $max" --value "$open"
@@ -177,14 +177,8 @@ fi
 } > "$run_dir/lane.env"
 
 # 6. The terminal, visible in Orca under the lane.
-terminal=
-for _ in 1 2 3 4 5 6; do
-  if terminal=$(orca terminal create --worktree "path:$worktree" --title "$lane · $chosen" --command "$ORCH_HOME/lane-run.sh $run_dir" --json 2>/dev/null); then break; fi
-  terminal=
-  sleep 5
-done
-[ -n "$terminal" ] || die "the worktree $worktree exists but Orca did not open a terminal in it; run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir)"
-handle=$(jq -r '.. | objects | .handle? // empty' <<<"$terminal" | head -n 1)
+handle=$(open_terminal "$worktree" "$lane · $chosen" "$ORCH_HOME/lane-run.sh $run_dir" "$ticket") \
+  || die "the worktree $worktree exists but Orca did not open a terminal in it; run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir)"
 # Orca knows the worktree by now: link it to its ticket.
 orca worktree set --worktree "path:$worktree" --linear-issue "$ticket" --comment "$role · $chosen · ouverte par le dispatcher" > /dev/null 2>&1 || true
 echo "$handle" > "$run_dir/terminal.handle"

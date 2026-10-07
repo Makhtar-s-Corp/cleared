@@ -14,7 +14,7 @@ ops/orchestration/dashboard.sh                           # réécrit la page du 
 
 Une lane est une copie de travail git sur la branche `<rôle>/<ticket>` : Orca l'affiche sous ce nom sans rien lui demander. Son terminal lance le modèle, puis poste le compte rendu dans Linear avec le modèle réellement utilisé.
 
-`spawn-lane.sh` refuse d'ouvrir une lane au-delà de `max_lanes` (3) et l'écrit dans le ledger. Seules les branches `<rôle>/<ticket>` comptent : les anciennes lanes ne sont ni comptées ni fermées par ces scripts.
+`spawn-lane.sh` refuse d'ouvrir une lane au-delà de `max_lanes` (3) et l'écrit dans le ledger. Seuls les rôles de `counted_roles` (`dev`, `mechanical`) prennent une de ces places. Orca ne connaît une copie de travail que quelques secondes après git, parfois bien plus : le script réessaie pendant 120 secondes, puis une dernière fois ; une attente de plus de 30 secondes et un échec sont écrits au ledger (`orca_terminal_delayed`, `orca_terminal_failed`). Seules les branches `<rôle>/<ticket>` comptent : les anciennes lanes ne sont ni comptées ni fermées par ces scripts.
 
 ## Changer de modèle
 
