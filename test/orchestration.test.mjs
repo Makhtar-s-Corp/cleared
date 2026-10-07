@@ -151,7 +151,7 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
@@ -172,7 +172,7 @@ esac
   git('commit', '-q', '--allow-empty', '-m', 'init');
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
   execFileSync('mkdir', ['-p', join(home, 'bin')]);
-  writeFileSync(join(home, 'bin', 'orca'), '#!/usr/bin/env bash\nif [ "$1 $2" = "terminal create" ]; then echo \'{"handle":"t1"}\'; fi\n', { mode: 0o755 });
+  writeFileSync(join(home, 'bin', 'orca'), '#!/usr/bin/env bash\nif [ "$1 $2" = "terminal create" ]; then echo \'{"handle":"t1"}\'; fi\nif [ "$1 $2" = "worktree rm" ]; then exit 1; fi\n', { mode: 0o755 });
   const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf') };
   return { home, state, repo, env, git };
 }
@@ -469,4 +469,68 @@ test('the scripts run as commands from a folder whose name has a space or an acc
   const routed = spawnSync('node', [join(dir, 'lib', 'route.mjs')], { encoding: 'utf8', env: { ...process.env, ORCH_CONF: join(ORCH_HOME, 'agents.conf') } });
   assert.equal(routed.status, 1);
   assert.match(routed.stderr, /--role is required/);
+  const env = { ...process.env, ORCH_CONF: join(ORCH_HOME, 'agents.conf'), ORCH_STATE_DIR: join(dir, 'state') };
+  const ledger = spawnSync('node', [join(dir, 'lib', 'ledger.mjs'), 'init'], { encoding: 'utf8', env });
+  assert.equal(ledger.status, 0, ledger.stderr);
+  assert.match(ledger.stdout, /ledger\.db/);
+  assert.equal(spawnSync('node', [join(dir, 'lib', 'dashboard.mjs')], { encoding: 'utf8', env }).status, 1, 'with no input file it fails, it does not do nothing');
+  // Through a symbolic link too.
+  execFileSync('ln', ['-s', join(dir, 'lib', 'route.mjs'), join(dir, 'route-link.mjs')]);
+  assert.match(spawnSync('node', [join(dir, 'route-link.mjs')], { encoding: 'utf8', env }).stderr, /--role is required/);
+});
+
+test('closing a lane: work that only the lane holds is kept unless forced; what the remote holds is enough', () => {
+  const box = sandbox();
+  const remote = join(box.home, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  box.git('remote', 'add', 'origin', remote);
+  box.git('push', '-q', 'origin', 'main');
+  const lane = (ticket) => {
+    const path = join(box.home, 'lanes', `dev-${ticket}`);
+    box.git('worktree', 'add', '-q', '-b', `dev/${ticket}`, path, 'origin/main');
+    return path;
+  };
+  const commit = (path) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'work']);
+  const kill = (ticket, ...more) => spawnSync(join(box.home, 'kill-lane.sh'), [`dev/${ticket}`, ...more], { env: box.env, encoding: 'utf8' });
+  const open = () => execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' });
+
+  lane('X-1'); // nothing of its own
+  assert.equal(kill('X-1').status, 0);
+
+  const pushed = lane('X-2');
+  commit(pushed);
+  execFileSync('git', ['-C', pushed, 'push', '-q', 'origin', 'dev/X-2']);
+  assert.equal(kill('X-2').status, 0);
+
+  const local = lane('X-3');
+  commit(local);
+  // Another local branch holding the commit is not a backup: it can be deleted too.
+  box.git('branch', 'copy-of-X-3', 'dev/X-3');
+  const refused = kill('X-3');
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /1 commit\(s\) that the remote does not hold/);
+  assert.match(open(), /dev\/X-3/);
+  assert.equal(kill('X-3', '--force').status, 0);
+  assert.doesNotMatch(open(), /dev\/X-/);
+});
+
+test('a comment on a ticket Linear does not know is an error', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"data":{"issue":null}}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /no such ticket: X-404/);
+});
+
+test('a line cut short in the session does not hide that the model worked', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"type":"system","subtype":"ini'\necho '{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"working"}]}}'\necho '{"type":"result","is_error":true,"api_error_status":529,"result":"overloaded","modelUsage":{}}'\nexit 1\n`, { mode: 0o755 });
+  const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+    cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+  assert.equal(run.status, 1, 'the model had worked: a failure, not a fallback');
+  assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /overloaded/);
 });

@@ -6,8 +6,7 @@
 //
 //   route.mjs --role dev [--label Bug] [--project "…"] [--path server/x.mjs]…
 //             [--pr-lines 120] [--author-model <alias or id>] [--model <alias>]
-import { pathToFileURL } from 'node:url';
-import { loadConf, section } from './conf.mjs';
+import { loadConf, runAsCommand, section } from './conf.mjs';
 
 function known(conf, alias, where) {
   const model = conf.models[alias];
@@ -104,7 +103,7 @@ function parseArgs(argv) {
   return task;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (runAsCommand(import.meta.url)) {
   try {
     process.stdout.write(`${JSON.stringify(route(loadConf(), parseArgs(process.argv.slice(2))))}\n`);
   } catch (error) {

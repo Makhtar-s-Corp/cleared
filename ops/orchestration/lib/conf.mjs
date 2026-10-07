@@ -1,11 +1,21 @@
 // Reads agents.conf and resolves where the shared state lives.
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 
 export const ORCH_HOME = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// True when the module at `url` is the script node was started with, whatever
+// the path looks like (a space, an accent, a symbolic link).
+export function runAsCommand(url) {
+  try {
+    return Boolean(process.argv[1]) && url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
 
 export function confPath() {
   return process.env.ORCH_CONF || join(ORCH_HOME, 'agents.conf');

@@ -9,6 +9,7 @@
 //   serve-dashboard.mjs <address> <port> <index.html> [<allowed CIDR>...]
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 
@@ -60,8 +61,15 @@ export function dashboardServer({ file, ranges = TAILSCALE }) {
   });
 }
 
-// Run as a command (the path may hold a space or an accent, hence the URL).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run as a command (the path may hold a space, an accent or a symbolic link).
+const command = (() => {
+  try {
+    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+})();
+if (command) {
   const [address, port, file, ...ranges] = process.argv.slice(2);
   if (!address || !port || !file) {
     process.stderr.write('usage: serve-dashboard.mjs <address> <port> <index.html> [<allowed CIDR>...]\n');

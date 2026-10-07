@@ -3,3 +3,5 @@ Tu es la lane de développement du ticket ci-dessous. Lis `CLAUDE.md` et `docs/r
 Travaille dans cette copie de travail seulement, sur sa branche. Ne fusionne rien, ne déploie rien, n'écris rien en production.
 
 Termine par un compte rendu en trois parties : « Fait », « Reste à faire », « Questions pour Makhtar » (une question fermée par ligne, avec ta recommandation).
+
+Ton tout dernier message est le compte rendu complet : c'est lui seul qui est gardé et posté. N'écris rien après lui et n'appelle aucun outil après lui.

@@ -16,3 +16,5 @@ Verdict : « à corriger avant fusion » ou « rien de bloquant ».
 Défauts : une ligne par défaut, du plus grave au moins grave, sous la forme `fichier:ligne` — ce qui se passe, avec quelle entrée, et ce qui devrait se passer.
 À vérifier : ce que tu n'as pas pu établir.
 Questions pour Makhtar : une question fermée par ligne, avec ta recommandation, ou « aucune ».
+
+Ton tout dernier message est le compte rendu complet : c'est lui seul qui est gardé et posté. N'écris rien après lui et n'appelle aucun outil après lui.

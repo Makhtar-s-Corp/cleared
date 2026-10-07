@@ -3,9 +3,8 @@
 // script. Every figure is a SQL result or a value read by dashboard.sh.
 //
 //   dashboard.mjs <inputs.json>  > index.html
-import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
-import { loadConf, section } from './conf.mjs';
+import { loadConf, runAsCommand, section } from './conf.mjs';
 import { openLedger } from './ledger.mjs';
 
 const WINDOW_DAYS = 7;
@@ -261,7 +260,7 @@ ${waiting}
 `;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (runAsCommand(import.meta.url)) {
   const inputs = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   const conf = loadConf();
   const db = openLedger();

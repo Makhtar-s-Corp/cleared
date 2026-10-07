@@ -53,17 +53,19 @@ case "${1:-}" in
     [ -n "${ORCH_TEXT_ONLY:-}" ] && args+=(--tools "" --no-session-persistence)
     set +e
     # The lane shows what the model says and which tools it calls, as it goes.
-    cli "${args[@]}" < "$prompt_file" | tee "$events" | jq -r --unbuffered '
-      select(.type == "assistant") | .message.content[]?
+    cli "${args[@]}" < "$prompt_file" | tee "$events" | jq -R -r --unbuffered '
+      fromjson? | select(.type == "assistant") | .message.content[]?
       | if .type == "text" then .text elif .type == "tool_use" then "  > " + .name else empty end' 2>/dev/null
     code=${PIPESTATUS[0]}
     set -e
-    result=$(jq -c 'select(.type == "result")' "$events" 2>/dev/null | tail -n 1)
+    # Each line is read on its own: one cut short (a CLI stopped while
+    # writing) does not hide the lines after it.
+    result=$(jq -R -c 'fromjson? | select(.type == "result")' "$events" 2>/dev/null | tail -n 1)
     # Did the model itself say anything? (The CLI words its own errors as a
     # message of a model named "<synthetic>".)
     # Counted to the end: cutting the reading short would end this script
     # on a broken pipe, before its report, as soon as the session is long.
-    worked=$(jq -c 'select(.type == "assistant" and (.message.model // "") != "<synthetic>") | 1' "$events" 2>/dev/null | grep -c . || true)
+    worked=$(jq -R -c 'fromjson? | select(.type == "assistant" and (.message.model // "") != "<synthetic>") | 1' "$events" 2>/dev/null | grep -c . || true)
     refused=
     if [ -z "$result" ]; then
       # Killed or crashed: a failure, whatever it had done. Never a fallback.

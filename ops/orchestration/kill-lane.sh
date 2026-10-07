@@ -4,8 +4,8 @@
 #
 #   kill-lane.sh <role>/<ticket> [--force]
 #
-# Without --force, a lane with uncommitted changes or unpushed commits is
-# left alone.
+# Without --force, a lane with uncommitted changes, or with commits that the
+# remote does not hold, is left alone.
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
@@ -18,12 +18,10 @@ worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs
 
 if [ "$force" != --force ]; then
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "$lane has uncommitted changes (use --force to drop them)"
-  # Work that would be lost: a commit of the lane that no other branch holds,
-  # on the remote or here. (A lane opened on a pull request, or from a local
-  # branch, starts from commits that live elsewhere.)
-  mapfile -t others < <(git -C "$worktree" for-each-ref --format='%(refname)' refs/heads | grep -vxF "refs/heads/$lane")
-  own=$(git -C "$worktree" rev-list --count HEAD --not --remotes "${others[@]}")
-  [ "$own" = 0 ] || die "$lane has $own commit(s) that no other branch holds (use --force to drop them)"
+  # Work that would be lost: a commit of the lane that the remote does not
+  # hold. Another local branch is not a backup: it can be deleted too.
+  own=$(git -C "$worktree" rev-list --count HEAD --not --remotes)
+  [ "$own" = 0 ] || die "$lane has $own commit(s) that the remote does not hold (use --force to drop them)"
 fi
 
 ledger init > /dev/null
