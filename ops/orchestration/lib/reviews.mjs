@@ -29,9 +29,14 @@ const reportOf = (reports, runId) => {
 };
 
 // The reviews of the dispatcher for one pull request that went to their end, with the commit each one read.
+// The commit comes from the report; when the report is lost, from what
+// review-pr.sh wrote in the folder of the run when it opened it.
 export function reviewedHeads(db, reports, pr) {
+  const kept = (runId) => {
+    try { return readFileSync(join(reports, '..', 'runs', runId.replace(/-review-a\d+$/, ''), 'reviewed-head'), 'utf8').trim() || null; } catch { return null; }
+  };
   return db.prepare("SELECT run_id FROM runs WHERE role = 'review' AND source = 'dispatcher' AND outcome = 'done' AND pr_number = ? ORDER BY started_at").all(Number(pr))
-    .map((row) => reportOf(reports, row.run_id)?.commit).filter(Boolean);
+    .map((row) => reportOf(reports, row.run_id)?.commit ?? kept(row.run_id)).filter(Boolean);
 }
 
 // Those that came to an end by themselves: one that was closed by hand has nothing to say.

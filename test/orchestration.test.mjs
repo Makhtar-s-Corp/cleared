@@ -199,7 +199,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1; cat "${join(home, 'pulls-now.json')}"
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr view" ]; then cat "${join(home, 'pr-view.json')}"
-elif [ "$1 $2" = "run list" ]; then echo '[]'
+elif [ "$1 $2" = "run list" ]; then echo "\${FAKE_GH_RUNS:-[]}"
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
 `, { mode: 0o755 });
@@ -1972,6 +1972,10 @@ test('the lead opens the review of a pull request by a script that never reads t
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = yes\n'));
   const wake = (...args) => spawnSync(join(box.home, 'wake.sh'), args, { env, encoding: 'utf8' });
   assert.equal(wake().status, 0);
+  // Opening a lane is a heavy operation on the host: none while a CI runs.
+  const busy = review({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
+  assert.equal(busy.status, 1);
+  assert.match(busy.stderr, /host is not free/);
   const first = review();
   assert.equal(first.status, 0, first.stderr);
   const opened = JSON.parse(first.stdout);
@@ -2001,12 +2005,24 @@ test('the lead opens the review of a pull request by a script that never reads t
   assert.match(unknown.stderr, /author of the pull request is unknown/);
   const said = spawnSync(join(box.home, 'review-pr.sh'), ['9', 'X-8', '--author-model', 'a', '--dry-run'], { env: { ...env, HOME: join(box.home, 'nobody') }, encoding: 'utf8' });
   assert.equal(JSON.parse(said.stdout).would_run.alias, 'b');
+  // A finished review whose report was lost still counts for the commit it read: no loop of reviews of the same thing.
+  publish();
+  const reportPath = join(box.state, 'reports', `${opened.run_dir.split('/').at(-1)}-review-a1.md`);
+  const kept = readFileSync(reportPath, 'utf8');
+  execFileSync('rm', [reportPath]);
+  assert.match(review().stderr, /already reviewed at this commit/);
+  writeFileSync(reportPath, kept);
   // The lane pushes a fix: the next review reads only what changed since, and the lane of the one before is closed for it.
   execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: what the review found']);
   publish();
+  // The reviewer left a file behind in its worktree: the lane of a finished review holds nothing to keep, it is closed all the same.
+  writeFileSync(join(opened.worktree, 'notes-of-the-reviewer.txt'), 'x');
   const second = review();
   assert.equal(second.status, 0, second.stderr);
   const again = JSON.parse(second.stdout);
+  assert.notEqual(again.run_dir, opened.run_dir);
+  assert.throws(() => readFileSync(join(opened.worktree, 'notes-of-the-reviewer.txt')), 'the lane of the review before is closed');
+  assert.equal(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('[review/X-5]')).length, 1);
   assert.match(readFileSync(join(again.run_dir, 'prompt.md'), 'utf8'), new RegExp(`seulement ce qui a changé depuis le commit ${firstHead}`));
   // No more than a few an hour (three in this sandbox, the held one counted).
   assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [again.run_dir], { cwd: again.worktree, env, encoding: 'utf8' }).status, 0);

@@ -10,7 +10,8 @@
 #     (or, for a lane of the dispatcher, the one the ledger has): no known
 #     author, no review;
 #   - one review at a time for a ticket (the one before, once finished, is
-#     closed here), and no more than [review] per_hour an hour.
+#     closed here), no more than [review] per_hour an hour, and only when
+#     the host is free: opening a lane is a heavy operation.
 # What the reviewer says comes back to the lead at its next wake (the event
 # review_done); nothing is posted to Linear.
 #
@@ -62,15 +63,27 @@ if dispatcher_lanes | grep -qxF -- "$lane"; then
   if [ "$(ledger sql "select count(*) n from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[0].n')" != 0 ]; then
     die "a review of $ticket is still running: one at a time"
   fi
-  [ -n "$dry_run" ] || "$ORCH_HOME/kill-lane.sh" "$lane" > /dev/null
+  # A finished review holds nothing to keep (the reviewer writes no file of
+  # the repository, and its report is in the state): closed whatever it left.
+  [ -n "$dry_run" ] || "$ORCH_HOME/kill-lane.sh" "$lane" --force > /dev/null \
+    || die "the lane of the review before ($lane) could not be closed: no new review of $ticket until it is"
 fi
 limit=$(conf_get review per_hour)
 [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
 recent=$(ledger sql "select count(*) n from runs where role = 'review' and source = 'dispatcher' and started_at >= '$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)'" | jq -r '.[0].n')
 [ "$recent" -lt "$limit" ] || die "$recent reviews were already opened in the last hour (limit: $limit): none opened"
 
+# Opening a lane is a heavy operation on the host (docs/regles-lanes.md):
+# none while a CI runs, a deployment settles or GitHub is down.
+if [ -z "$dry_run" ] && [ "$("$ORCH_HOME/host-state.sh" | jq -r '.free_for_a_ci_run')" != true ]; then
+  die "the host is not free (a CI, a deployment, or GitHub down): opening a lane is a heavy operation, ask again at a later wake"
+fi
+
 args=(review "$ticket" --pr "$pr" --comment-on none)
 [ -z "$since" ] || args+=(--since "$since")
 [ -z "$author" ] || args+=(--author-model "$author")
 [ -z "$dry_run" ] || args+=(--dry-run)
-"$ORCH_HOME/spawn-lane.sh" "${args[@]}"
+opened=$("$ORCH_HOME/spawn-lane.sh" "${args[@]}")
+printf '%s\n' "$opened"
+# The commit this review reads, kept with its run: it counts as reviewed even if the report is lost.
+[ -n "$dry_run" ] || printf '%s\n' "$head" > "$(jq -r '.run_dir' <<<"$opened")/reviewed-head"
