@@ -16,6 +16,24 @@ expand_home() { case "$1" in "~/"*) printf '%s\n' "$HOME/${1#\~/}" ;; *) printf 
 
 ledger() { node --no-warnings "$ORCH_HOME/lib/ledger.mjs" "$@"; }
 
+# lane_worktree <name>: the worktree of that name, as git knows it. Fails when
+# there is none, or more than one.
+lane_worktree() {
+  local found
+  found=$(git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's/^worktree //p' | awk -F/ -v name="$1" '$NF == name')
+  [ -n "$found" ] && [ "$(grep -c . <<<"$found")" -eq 1 ] && printf '%s\n' "$found"
+}
+
+# orca_terminal <handle>: "<connected> <worktree path>" of that terminal as
+# Orca shows it now, nothing when Orca has no such terminal. Orca that does
+# not answer, or answers without a list, is said and stops the script.
+orca_terminal() {
+  local listed
+  listed=$(orca terminal list --json 2> /dev/null) || die "Orca did not answer (orca terminal list): nothing done"
+  jq -e '(.result.terminals // .result) | type == "array"' <<<"$listed" > /dev/null 2>&1 || die "Orca gave no list of terminals: nothing done"
+  jq -r --arg handle "$1" '(.result.terminals // .result)[] | select(.handle == $handle) | "\(.connected) \(.worktreePath)"' <<<"$listed" | sed -n '1p'
+}
+
 # conf_get <section> <key>: one value of agents.conf (empty when absent).
 conf_get() {
   awk -v section="[$1]" -v wanted="$2" '

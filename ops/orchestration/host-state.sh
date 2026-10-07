@@ -14,10 +14,10 @@ target=${base#origin/}
 runs=$(gh run list --limit 20 --json status,headBranch,event --jq '[.[] | select(.status != "completed") | {branch: .headBranch, event}]')
 pulls=$(gh pr list --state open --limit 60 --json number,title,headRefName,isDraft,statusCheckRollup --jq '[.[] | {number, title, branch: .headRefName, draft: .isDraft,
   checks: ([.statusCheckRollup[] | (.conclusion // .status // "") | ascii_upcase] | if any(. == "FAILURE") then "failure" elif any(. == "IN_PROGRESS" or . == "QUEUED" or . == "PENDING") then "pending" elif any(. == "SUCCESS") then "success" else "none" end)}]')
-# Screen tests and captures run a headless browser: found by the name of the
-# process, not by a pattern in command lines (which would also find whoever
-# wrote that pattern).
-screens=$(pgrep -c headless_shell || true)
+# Screen tests and captures: the commands that run them and their browser,
+# read from the process table (lib/screens.mjs), so that one is seen before
+# it has opened a browser, and a command line that only names one is not.
+screens=$(node --no-warnings "$ORCH_HOME/lib/screens.mjs" "${ORCH_PROC_DIR:-/proc}")
 # A deployment builds its images before any container starts: until ten
 # minutes after the last change of the base branch, the host is not free.
 merged=$(gh api "repos/{owner}/{repo}/commits/$target" --jq '.commit.committer.date')

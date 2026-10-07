@@ -29,20 +29,22 @@ text=$(printf '%s' "$text" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
 [ -n "$text" ] || die "nothing to say"
 # What a lane may never be told through here, whatever the lead judged: to
 # merge, or to force anything. Merging is not the lane's, and not the lead's
-# to hand out (to bring main into a branch, say "réintègre main").
-if grep -q -i -E "(^|[^[:alpha:]])(fusionne[sz]?|merge[sz]?|mergez|gh pr merge|force-push|--force)([^[:alpha:]]|$)" <<<"$text"; then
-  die "a lane is never told to merge or to force anything: nothing sent"
+# to hand out. A net (lib/lane-message.mjs), not the control.
+if ! refused=$(node --no-warnings "$ORCH_HOME/lib/lane-message.mjs" <<<"$text"); then
+  die "a lane is never told to merge or to force anything (« $refused »): nothing sent. To bring main into a branch, say « réintègre main »; otherwise say who merges (« je fusionnerai ») or that the lane does not (« ne fusionne pas »)"
 fi
 # A lead and a lane answering each other in a loop would start a model at
 # every turn: no more than a few messages an hour to one lane.
 limit=$(conf_get lead messages_per_lane_per_hour)
-recent=$(jq -r --arg lane "$lane" --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'select(.lane == $lane and .at > $since) | .at' "$ORCH_STATE_DIR/lane-messages.jsonl" 2> /dev/null | grep -c . || true)
+recent=$(jq -R -r --arg lane "$lane" --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.lane == $lane and .at > $since) | .at' "$ORCH_STATE_DIR/lane-messages.jsonl" 2> /dev/null | grep -c . || true)
 [ "$recent" -lt "${limit:-6}" ] || die "\"$lane\" was already told $recent times in the last hour: nothing sent, say it to the user instead"
 
-# The terminal must still be there, and be the one of that worktree.
-found=$(orca terminal list --json 2> /dev/null | jq -r --arg handle "$handle" '(.result.terminals // .result)[] | select(.handle == $handle) | "\(.connected) \(.worktreePath)"' | sed -n '1p')
+# The terminal must still be there, and be the one of that worktree: the
+# whole path git gives, not a folder of the same name somewhere else.
+worktree=$(lane_worktree "$lane") || die "git knows no worktree named \"$lane\" (or several): nothing sent"
+found=$(orca_terminal "$handle")
 [ -n "$found" ] || die "the terminal of \"$lane\" is gone: nothing sent"
-case "$found" in "true "*"/$lane") ;; *) die "the terminal written for \"$lane\" is not connected, or is not in its worktree: nothing sent" ;; esac
+[ "$found" = "true $worktree" ] || die "the terminal written for \"$lane\" is not connected, or is not in its worktree: nothing sent"
 
 message="Pour la lane $lane, de la part du $(conf_get lead name) (session courte, il ne lit pas ce terminal en continu) : $text Si tu as quelque chose à lui demander ou à lui rendre, écris-le en dernier message de ce terminal, en commençant par « Pour le chef de projet ». Un simple accusé de réception n'est pas nécessaire."
 orca terminal send --terminal "$handle" --text "$message" --enter > /dev/null || die "Orca did not take the message for \"$lane\""
