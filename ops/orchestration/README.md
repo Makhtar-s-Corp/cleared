@@ -33,6 +33,7 @@ Changer de modèle, c'est changer une ligne. Un nouveau fournisseur, c'est un fi
 adapters/<nom>.sh list-models [<modèle>...]
 adapters/<nom>.sh version
 adapters/<nom>.sh run --model <id> --prompt-file <fichier> --report <fichier> --usage <fichier>
+adapters/<nom>.sh talk --model <id> --prompt-file <fichier> [--session-id <uuid>]
 ```
 
 - `list-models` rend les modèles que ce fournisseur peut lancer maintenant, un par ligne. Le dispatcher l'interroge avant chaque lancement et garde un « oui » pendant un jour.
@@ -40,6 +41,7 @@ adapters/<nom>.sh run --model <id> --prompt-file <fichier> --report <fichier> --
 - `run` s'exécute dans la copie de travail courante et sort avec 0 (terminé), 2 (ne peut pas démarrer maintenant : rien n'est parti), 3 (son propre garde-fou refuse le contenu de la tâche) ou autre chose (échec). Après un 2, le dispatcher passe au repli déclaré. Après un 3, il s'arrête (`[policy] guard_refusal = stop`) ou passe au repli (`fallback`). Un échec du modèle n'est jamais une raison d'en essayer un autre.
 - Le compte rendu a la même forme pour tous : `lib/contract.sh` l'écrit. En tête, le run, la lane, le modèle demandé, le modèle utilisé, le résultat, les tokens ; puis « Compte rendu » et « Fichiers modifiés ».
 - Le fichier d'usage donne les tokens tels que la CLI les rapporte. Ce qu'elle ne donne pas reste vide.
+- `talk` tient une conversation avec l'utilisateur dans le terminal courant, ouverte par le prompt, et sort avec 2 si ce fournisseur n'en propose pas ici. Rien n'y est demandé à l'écran : ce que les permissions ne nomment pas est refusé ; `ORCH_EDIT_ONLY` nomme le seul fichier modifiable.
 
 `adapters/codex.sh` ne lance jamais Codex sur l'hôte : il appelle le script isolé du checkout principal (`scripts/codex-task.sh`), sort avec 2 tant qu'une CI tourne, et avec 3 quand le garde-fou refuse, en rendant ce refus tel quel.
 
@@ -90,6 +92,19 @@ Pourquoi une minuterie du serveur et non une automatisation Orca : essayée le 7
 ```sh
 ops/orchestration/wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
 ```
+
+## Discuter avec le chef de projet
+
+`talk.sh` ouvre une conversation dans la lane `release/lead` d'Orca (onglet « discussion »). Le modèle est celui du rôle `[talk] role` de la table ; si le premier de la chaîne ne peut pas tenir de conversation, le suivant la prend. Avant le premier mot, le script lit l'état des lieux et le met dans le briefing : la machine et les PR ouvertes, ce qui attend l'utilisateur dans Linear, les derniers commentaires du ticket de suivi, les lanes au travail, la fin des trois derniers comptes rendus du chef de projet, les décisions déjà transcrites. `talk.sh --dry-run` affiche ce briefing sans rien ouvrir.
+
+La session n'a aucun droit d'action (`[permissions.talk]`). Elle lit le dépôt, Linear (`linear.sh issue`, `comments`, `list`, `waiting`) et `host-state.sh`. Rien ne lui est demandé à l'écran : ce qui n'est pas nommé est refusé, pour qu'un « oui » de trop ne devienne pas une action. Elle n'écrit que par `decide.sh <ticket> - [--adr]`, pour une décision que l'utilisateur a formulée dans la conversation et confirmée :
+
+- le texte passe par le garde-fou ;
+- il est posté en commentaire du ticket, marqué comme écrit par un agent ;
+- une ligne `decision` est écrite au ledger, source `discussion` (`select at, ticket, detail from events where kind = 'decision'`) ;
+- avec `--adr`, la modification que la session a faite à `docs/decisions.md` part en PR en brouillon. Ce fichier est le seul qu'elle peut modifier, et dans une copie de travail à part (`talk-<ticket de suivi>`, branche `talk/<ticket de suivi>`) : la lane du chef de projet ne contient jamais de fichier modifié, et ses réveils continuent pendant la conversation. `decide.sh` refuse si autre chose a changé dans cette copie.
+
+La conversation est écrite au ledger comme une session de source `discussion`, avec les tokens que son propre journal de session a comptés. Son terminal n'est pas fermé par les réveils du chef de projet. Une décision transcrite ne réveille pas le chef de projet et ne vaut pas, pour lui, accord écrit : question ouverte, à l'utilisateur de trancher.
 
 ## Pousser une lane
 

@@ -28,6 +28,7 @@ export const EVENT_KINDS = [
   'orca_terminal_failed', // Orca did not open the terminal of a lane: the run was not started
   'lead_lane_blocked', // the lane of the project lead holds work of its own: no session starts until it is looked at
   'wake_started', // a session of the project lead was started; the detail says what woke it
+  'decision', // a decision the user worded in a discussion, transcribed by decide.sh (source discussion)
 ];
 
 const SCHEMA = `

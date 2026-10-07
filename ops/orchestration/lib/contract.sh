@@ -13,6 +13,12 @@
 #       usage, and exits with 0 (done), 2 (cannot start now: nothing was sent
 #       to the model), 3 (its own safeguard refuses the content of the task)
 #       or anything else (failed).
+#   <adapter> talk --model <id> --prompt-file <file> [--session-id <uuid>]
+#       holds a conversation with the user in the current terminal, opened by
+#       the prompt, and exits with the code of its CLI, or with 2 when this
+#       backend has no conversation to offer here. In a conversation nothing
+#       is asked for: what the permissions do not name is refused.
+#       ORCH_EDIT_ONLY names the one file the session may edit.
 #
 # ORCH_PERMISSION_MODE (read-only or accept-edits), ORCH_ALLOW and ORCH_DENY
 # (comma separated command prefixes) say what the run may do without a

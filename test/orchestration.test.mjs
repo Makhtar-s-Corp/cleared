@@ -151,13 +151,15 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/../lib/contract.sh"
 case "$1" in
   list-models) shift; printf '%s\\n' "$@" ;;
+  talk) shift; [ ${name} != first ] || [ -z "\${FIRST_CANNOT_TALK:-}" ] || exit 2
+    printf '%s\\n' "${name}" "$@" "edit=\${ORCH_EDIT_ONLY:-}" "mode=\${ORCH_PERMISSION_MODE:-}" "allow=\${ORCH_ALLOW:-}" "run=\${ORCH_RUN_ID:-}" > "\${ORCH_STATE_DIR}/talked"; exit 0 ;;
   run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
     contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
@@ -167,7 +169,9 @@ esac
   // Linear and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
-if [ "$1" = comment ]; then { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "https://example.test/comment"; exit; fi
+if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "https://example.test/comment"; exit; fi
+if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
+if [ "$1" = comments ]; then echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'linear-now.json'), '[]');
@@ -176,7 +180,8 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
   writeFileSync(join(home, 'prompts', 'handover.md'), 'handover prompt\n');
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // The guard of the repository, as the scripts read it from the trusted ref.
@@ -1382,4 +1387,143 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
   assert.match(asked, /Écrit par un agent \(chef de projet\), pas par Makhtar/);
   assert.match(asked, /Une question pour toi\./);
   assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
+});
+
+test('the discussion has no right to act: its permissions name what it may read and the one script it writes with, and refuse the rest', () => {
+  const talk = conf.sections['permissions.talk'];
+  const list = (text) => text.split(',').map((item) => item.trim());
+  assert.equal(conf.sections.talk.role, 'talk');
+  assert.ok(conf.models[conf.roles.talk], 'the model of the discussion comes from the table');
+  assert.equal(talk.mode, 'read-only');
+  assert.deepEqual(list(talk.allow).filter((item) => item.startsWith('ops/')), [
+    'ops/orchestration/decide.sh', 'ops/orchestration/linear.sh issue', 'ops/orchestration/linear.sh comments', 'ops/orchestration/linear.sh list',
+    'ops/orchestration/linear.sh waiting', 'ops/orchestration/host-state.sh', 'ops/orchestration/tell-lane.sh --list',
+  ]);
+  for (const refused of ['ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'ops/orchestration/adopt-lane.sh', 'gh', 'orca', 'git push', 'git commit']) assert.ok(list(talk.deny).includes(refused), refused);
+  assert.ok(conf.sections.lanes.push_roles.split(/\s+/).includes('talk'), 'the file of the decisions leaves by the narrow push script');
+});
+
+test('the Claude adapter holds a conversation where nothing is asked for: one file may be edited, the rest is refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-talk-'));
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\necho "key=\${ANTHROPIC_API_KEY:-none}" > "${join(dir, 'env')}"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'the briefing');
+  const call = (extra) => {
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['talk', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--session-id', 's-1'], {
+      cwd: dir, encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ANTHROPIC_API_KEY: 'not-for-a-subscription', ORCH_PERMISSION_MODE: 'read-only', ORCH_ALLOW: 'ops/orchestration/decide.sh, git log', ORCH_DENY: 'gh, git push', ADAPTER_CONNECTORS: 'none', ...extra },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    return readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+  };
+  const args = call({ ORCH_EDIT_ONLY: '/somewhere/talk-X-100/docs/decisions.md' });
+  assert.ok(!args.includes('-p'), 'a conversation, not a run without a screen');
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
+  const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
+  assert.deepEqual(allowed, ['Read', 'Grep', 'Glob', 'Bash(ops/orchestration/decide.sh)', 'Bash(ops/orchestration/decide.sh *)', 'Bash(git log)', 'Bash(git log *)', 'Edit(//somewhere/talk-X-100/docs/decisions.md)']);
+  for (const denied of ['Write', 'NotebookEdit', 'Bash(gh)', 'Bash(git push *)']) assert.ok(args.includes(denied), denied);
+  assert.equal(args[args.indexOf('--add-dir') + 1], '/somewhere/talk-X-100');
+  assert.equal(args[args.indexOf('--session-id') + 1], 's-1');
+  assert.equal(args.at(-1), 'the briefing');
+  assert.equal(readFileSync(join(dir, 'env'), 'utf8').trim(), 'key=none', 'the conversation is on the subscription, never on an API key');
+  // No file named: no edit at all.
+  const none = call({});
+  assert.ok(none.slice(none.indexOf('--disallowedTools')).includes('Edit'));
+  assert.ok(!none.some((arg) => arg.startsWith('Edit(')));
+  // The other backend has no conversation to offer: the next model of the chain takes it.
+  assert.equal(spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['talk', '--model', 'm', '--prompt-file', join(dir, 'prompt.md')], { encoding: 'utf8' }).status, 2);
+});
+
+test('talk.sh opens one conversation in the lane of the lead, briefed by scripts; talk-run.sh holds it with the permissions of the discussion and writes it to the ledger as a discussion', () => {
+  const box = sandbox();
+  const brief = spawnSync(join(box.home, 'talk.sh'), ['--dry-run'], { env: box.env, encoding: 'utf8' });
+  assert.equal(brief.status, 0, brief.stderr);
+  assert.match(brief.stdout, /talk prompt, decisions in .*\/lanes\/talk-X-100\/docs\/decisions\.md, default ticket X-100/);
+  assert.match(brief.stdout, /X-7 \(Un écran à valider\)/);
+  assert.match(brief.stdout, /Un commentaire du ticket de suivi\./);
+  assert.throws(() => readFileSync(join(box.home, 'orca-calls')), 'a dry run opens nothing');
+
+  const opened = spawnSync(join(box.home, 'talk.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(opened.status, 0, opened.stderr);
+  assert.equal(Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')), 1);
+  const runDir = opened.stdout.trim().split('\n').at(-1);
+  const worktrees = execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' });
+  assert.match(worktrees, /\[release\/lead\]/);
+  assert.match(worktrees, /\[talk\/X-100\]/);
+  // A wake of the lead that ends does not close the terminal of a conversation: it is not one of its sessions.
+  assert.throws(() => readFileSync(join(runDir, 'lane.env')));
+
+  // The conversation itself (the terminal of the test runs nothing: it is run here).
+  const held = spawnSync(join(box.home, 'talk-run.sh'), [runDir], { cwd: join(box.home, 'lanes', 'release-lead'), env: { ...box.env, FIRST_CANNOT_TALK: '1', ORCH_TTY: '/dev/null' }, encoding: 'utf8' });
+  assert.equal(held.status, 0, held.stderr);
+  const said = readFileSync(join(box.state, 'talked'), 'utf8').trim().split('\n');
+  assert.equal(said[0], 'second', 'a backend that cannot talk hands over to the next of the chain');
+  assert.ok(said.includes(`edit=${join(box.home, 'lanes', 'talk-X-100', 'docs', 'decisions.md')}`));
+  assert.ok(said.includes('mode=read-only') && said.includes('allow=only-for-the-talk'));
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.deepEqual({ ...db.prepare('select role, lane, source, model, outcome from runs').get() }, { role: 'talk', lane: 'release/lead', source: 'discussion', model: 'm2', outcome: 'done' });
+  db.close();
+});
+
+test('decide.sh transcribes a decision of the user: Linear, the ledger with the source discussion, and docs/decisions.md by a draft pull request; nothing is written when it refuses', () => {
+  const lane = laneWithRemote('talk/X-100', null);
+  const { box } = lane;
+  const decide = (args, input, extra = {}) => spawnSync(join(box.home, 'decide.sh'), args, { env: { ...box.env, ORCH_RUN_ID: 'talk-1-talk-a1', ...extra }, encoding: 'utf8', input });
+  const decisions = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind, source, ticket, run_id, detail from events where kind = 'decision'").all().map((row) => ({ ...row })); db.close(); return rows; };
+  const posted = () => { try { return readFileSync(join(box.home, 'linear-posted'), 'utf8'); } catch { return null; } };
+
+  // Refusals: no ticket, nothing to say, Linear that does not answer. Nothing reaches the ledger.
+  assert.equal(decide(['not-a-ticket', '-'], 'x').status, 1);
+  assert.equal(decide(['X-5', '-'], ' \n').status, 1);
+  assert.match(decide(['X-5', '-'], 'On garde le bouton.', { FAKE_LINEAR_DOWN: '1' }).stderr, /nothing transcribed/);
+  assert.equal(posted(), null);
+
+  const done = decide(['X-5', '-'], 'On garde le bouton\nsous la liste.');
+  assert.equal(done.status, 0, done.stderr);
+  assert.match(done.stdout, /Décision transcrite : https:\/\/example\.test\/comment/);
+  assert.match(posted(), /^X-5 from=chef de projet, en discussion\n\*\*Décision de Makhtar, transcrite pendant une discussion[\s\S]*On garde le bouton\nsous la liste\./);
+  assert.deepEqual(decisions(), [{ kind: 'decision', source: 'discussion', ticket: 'X-5', run_id: 'talk-1-talk-a1', detail: 'On garde le bouton sous la liste.' }]);
+
+  // --adr: only with a change to the file of the decisions, and to nothing else, in the worktree of the decisions.
+  const none = decide(['X-5', '-', '--adr'], 'Une règle.');
+  assert.match(none.stderr, /needs a change to docs\/decisions\.md/);
+  mkdirSync(join(lane.path, 'docs'), { recursive: true });
+  writeFileSync(join(lane.path, 'docs', 'decisions.md'), 'first\n');
+  execFileSync('git', ['-C', lane.path, 'add', '.']);
+  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: the file of the decisions']);
+  execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'HEAD:main']);
+  execFileSync('git', ['-C', box.repo, 'merge', '-q', '--ff-only', 'talk/X-100']);
+  writeFileSync(join(lane.path, 'docs', 'decisions.md'), 'first\nUne règle qui dure.\n');
+  writeFileSync(join(lane.path, 'other.md'), 'not for a discussion\n');
+  assert.match(decide(['X-5', '-', '--adr'], 'Une règle.').stderr, /and to nothing else/);
+  execFileSync('rm', [join(lane.path, 'other.md')]);
+  assert.equal(decisions().length, 1, 'a refused transcription is not in the ledger');
+  const adr = decide(['X-5', '-', '--adr'], 'Une règle qui dure.', { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@localhost', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@localhost' });
+  assert.equal(adr.status, 0, adr.stderr);
+  assert.equal(decisions().length, 2);
+  assert.match(posted(), /Écrite aussi dans `docs\/decisions\.md`/);
+  assert.ok(lane.onRemote().some((ref) => ref.startsWith('talk/X-100 ')), 'the branch of the decisions left, to its namesake');
+  assert.ok(lane.created().includes('--draft'));
+  assert.equal(execFileSync('git', ['-C', lane.path, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+});
+
+test('the tokens of a conversation are counted from its own session log, each message once', async () => {
+  const { sessionUsage } = await import('../ops/orchestration/lib/session-usage.mjs');
+  const message = (id, usage, model = 'm-big') => JSON.stringify({ type: 'assistant', message: { id, model, usage } });
+  const usage = sessionUsage([
+    message('a', { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 }),
+    message('a', { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 }),
+    message('b', { input_tokens: 1, output_tokens: 2 }),
+    JSON.stringify({ type: 'user', message: { content: 'hello' } }),
+    'not json',
+    message('c', { input_tokens: 999 }, '<synthetic>'),
+  ], 'asked');
+  assert.deepEqual(usage, { model: 'm-big', tokens_in: 11, tokens_out: 7, tokens_cache: 100, tokens_cache_write: 20, tokens_total: 138, cost_usd: null });
+  assert.equal(sessionUsage([], 'asked').tokens_total, 0);
+});
+
+test('the sessions of a worktree the dispatcher opened are not the old way of working: the import of the past leaves them out', async () => {
+  const { dispatcherWorktree } = await import('../ops/orchestration/lib/lanes.mjs');
+  const roles = Object.keys(conf.roles);
+  for (const name of ['release-lead', 'dev-SEE-105', 'review-SEE-112', 'talk-SEE-112']) assert.equal(dispatcherWorktree(name, roles), true, name);
+  for (const name of ['orrchestrator', 'app-rapide', 'release-notes', 'dev-something', 'fiche-enveloppe-projet']) assert.equal(dispatcherWorktree(name, roles), false, name);
 });

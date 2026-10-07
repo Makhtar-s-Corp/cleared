@@ -26,6 +26,41 @@ case "${1:-}" in
   version)
     contract_npm_version claude "${ADAPTER_PACKAGE:-}" "$(claude --version 2>/dev/null | awk '{print $1}')"
     ;;
+  talk)
+    shift
+    model= prompt_file= session=
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --model) model=$2 ;;
+        --prompt-file) prompt_file=$2 ;;
+        --session-id) session=$2 ;;
+        *) echo "talk: unknown option $1" >&2; exit 64 ;;
+      esac
+      shift 2
+    done
+    [ -n "$model" ] && [ -f "$prompt_file" ] || { echo "usage: claude.sh talk --model <id> --prompt-file <file> [--session-id <uuid>]" >&2; exit 64; }
+    # With the user at the screen, a tool that is not allowed would be asked
+    # for, and one "yes" too many would be an action: nothing is asked, what
+    # the lists do not name is refused. Reading is always allowed.
+    allowed=(Read Grep Glob) denied=(Write NotebookEdit)
+    while IFS= read -r prefix; do [ -n "$prefix" ] && allowed+=("Bash($prefix)" "Bash($prefix *)"); done \
+      < <(tr ',' '\n' <<<"${ORCH_ALLOW:-}" | sed 's/^ *//; s/ *$//')
+    while IFS= read -r prefix; do [ -n "$prefix" ] && denied+=("Bash($prefix)" "Bash($prefix *)"); done \
+      < <(tr ',' '\n' <<<"${ORCH_DENY:-}" | sed 's/^ *//; s/ *$//')
+    for tool in ${ADAPTER_DENY_TOOLS:-}; do denied+=("$tool"); done
+    args=(--model "$model" --permission-mode dontAsk)
+    if [ -n "${ORCH_EDIT_ONLY:-}" ]; then
+      allowed+=("Edit(/$ORCH_EDIT_ONLY)")
+      args+=(--add-dir "$(dirname "$(dirname "$ORCH_EDIT_ONLY")")")
+    else
+      denied+=(Edit)
+    fi
+    args+=(--allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}")
+    [ "${ADAPTER_CONNECTORS:-}" = none ] && args+=(--strict-mcp-config)
+    [ -n "$session" ] && args+=(--session-id "$session")
+    cli "${args[@]}" "$(cat "$prompt_file")"
+    exit $?
+    ;;
   run)
     shift
     contract_parse_run "$@"
