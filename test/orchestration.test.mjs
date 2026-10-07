@@ -1372,7 +1372,7 @@ test('the lead is not woken by what it wrote itself, nor by a lane it was told t
   };
   // The lead's own lane (its report of the last wake), a lane of the dispatcher, the old lead kept open: none is a lane at work.
   says('release-lead', 'release/lead', 'Pour le chef de projet : mon compte rendu du réveil précédent.');
-  says('review-X-9', 'review/X-9', 'Pour le chef de projet : relecture finie.');
+  says('dev-X-9', 'dev/X-9', 'Pour le chef de projet : lane du dispatcher, finie.');
   says('old-lead', 'chore/old-lead', 'Pour le chef de projet : je suis l’ancien.');
   says('a-lane', 'feat/a-lane', 'Pour le chef de projet : j’ai fini, je demande un créneau.');
   mkdirSync(join(box.home, '.claude'), { recursive: true });
