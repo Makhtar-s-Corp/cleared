@@ -119,6 +119,7 @@ if [ -z "$handover" ]; then
   # What the lanes already at work say to the lead: only once it acts. A
   # lane is a worktree under the lanes root that the dispatcher did not open.
   echo '[]' > "$work/reports.json"
+  echo '[]' > "$work/reviews.json"
   if [ "$(conf_get lead live)" = yes ]; then
     root=$(expand_home "$(conf_get lanes root)")
     git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}' \
@@ -130,8 +131,10 @@ if [ -z "$handover" ]; then
           $2 !~ ("^(" roles ")/") && !(name in skip)' \
       | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
     node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
+    # The reviews the dispatcher ran that came to their end: the lead opens them, it is told what they say.
+    node --no-warnings "$ORCH_HOME/lib/reviews.mjs" done "$(conf_get lead report_hours)" > "$work/reviews.json" || echo '[]' > "$work/reviews.json"
   fi
-  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" ${github_out:+down} > "$work/changes.json"
+  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" "${github_out:+down}" "$work/reviews.json" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
 
   if [ -n "$dry_run" ]; then
@@ -206,6 +209,7 @@ else
       if .kind == "comment" then "- \(.ticket) (\(.title)) — commentaire de Makhtar, \(.at) : « \(.text) »"
       elif .kind == "ticket_new" then "- \(.ticket) (\(.title)) — nouveau ticket, \(.at), projet \(.project // "aucun") : « \(.text) »"
       elif .kind == "lane_report" then "- Lane \(.lane) (branche \(.branch)) — son dernier message, \(.at) : « \(.text) »"
+      elif .kind == "review_done" then "- Relecture de la PR #\(.pr) (\(.ticket)) par un autre modèle que son auteur, terminée (\(.outcome)), sur le commit \(.commit // "inconnu" | .[0:8]) : « \(.text) »"
       elif .kind == "pr_checks" then "- PR #\(.pr) (\(.title), branche \(.branch)) — vérifications : \(.checks)"
       elif .kind == "pr_ready" then "- PR #\(.pr) (\(.title), branche \(.branch)) — prête pour revue, vérifications : \(.checks)"
       elif .kind == "pr_opened" then "- PR #\(.pr) (\(.title), branche \(.branch)) — ouverte en brouillon"
@@ -242,7 +246,7 @@ fi
 jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
 # Why this session was started, for whoever counts the wakes.
 ledger event --kind wake_started --run-id "$run_base-$role-a1" \
-  --detail "$(jq -r '[.events[] | "\(.kind) \(.ticket // (if .pr then "#\(.pr)" else .lane end))"] | join(", ")' "$work/changes.json")"
+  --detail "$(jq -r '[.events[] | "\(.kind) \(if .pr then "#\(.pr)" else (.ticket // .lane) end)"] | join(", ")' "$work/changes.json")"
 # How long a comment of the user waited before a session took it.
 jq -c '.events[] | select(.kind == "comment")' "$work/changes.json" | while IFS= read -r event; do
   minutes=$(( ($(date +%s) - $(date -d "$(jq -r '.at' <<<"$event")" +%s)) / 60 ))
