@@ -1,0 +1,77 @@
+# Orchestration des agents
+
+Le dispatcher ouvre une lane par agent, choisit son modèle dans une table, et écrit tout ce qu'il fait dans un ledger. Ticket : SEE-112. Constat de départ : [AUDIT.md](AUDIT.md). Décisions : `docs/decisions.md`, « Orchestration des agents ».
+
+## Au quotidien
+
+```sh
+ops/orchestration/spawn-lane.sh dev SEE-105              # ouvre la lane dev/SEE-105
+ops/orchestration/spawn-lane.sh dev SEE-105 --dry-run    # dit seulement quel modèle serait pris, et pourquoi
+ops/orchestration/spawn-lane.sh dev SEE-105 --model codex  # force un modèle de la table
+ops/orchestration/kill-lane.sh dev/SEE-105               # ferme la lane (terminaux, copie de travail, branche)
+ops/orchestration/dashboard.sh                           # réécrit la page du tableau de bord
+```
+
+Une lane est une copie de travail git sur la branche `<rôle>/<ticket>` : Orca l'affiche sous ce nom sans rien lui demander. Son terminal lance le modèle, puis poste le compte rendu dans Linear avec le modèle réellement utilisé.
+
+`spawn-lane.sh` refuse d'ouvrir une lane au-delà de `max_lanes` (3) et l'écrit dans le ledger. Seules les branches `<rôle>/<ticket>` comptent : les anciennes lanes ne sont ni comptées ni fermées par ces scripts.
+
+## Changer de modèle
+
+Tout est dans [`agents.conf`](agents.conf). Aucun script ne nomme un modèle ou un fournisseur (un test le vérifie).
+
+- `[roles]` : le modèle par défaut de chaque rôle.
+- `[rules]` : les surcharges par type de tâche, lues dans le ticket Linear (projet, étiquette) puis, quand la PR existe, dans sa taille et ses chemins. La première ligne qui correspond l'emporte.
+- `[fallbacks]` : le repli de chaque modèle. Un modèle indisponible, ou un adaptateur qui refuse de démarrer, passe au repli déclaré ; c'est écrit dans le ledger et dans le commentaire Linear. Une chaîne sans modèle disponible est une erreur.
+- `[review]` : une PR n'est jamais relue par le modèle qui l'a écrite.
+
+Changer de modèle, c'est changer une ligne. Un nouveau fournisseur, c'est un fichier `adapters/<nom>.sh` et une ligne dans `[models]`.
+
+## Le contrat d'un adaptateur
+
+```
+adapters/<nom>.sh list-models [<modèle>...]
+adapters/<nom>.sh run --model <id> --prompt-file <fichier> --report <fichier> --usage <fichier>
+```
+
+- `list-models` rend les modèles que ce fournisseur peut lancer maintenant, un par ligne. Le dispatcher l'interroge avant chaque lancement et garde un « oui » pendant un jour.
+- `run` s'exécute dans la copie de travail courante et sort avec 0 (terminé), 2 (refus avant tout appel au modèle) ou autre chose (échec).
+- Le compte rendu a la même forme pour tous : `lib/contract.sh` l'écrit. En tête, le run, la lane, le modèle demandé, le modèle utilisé, le résultat, les tokens ; puis « Compte rendu » et « Fichiers modifiés ».
+- Le fichier d'usage donne les tokens tels que la CLI les rapporte. Ce qu'elle ne donne pas reste vide.
+
+`adapters/codex.sh` ne lance jamais Codex sur l'hôte : il appelle le script isolé du checkout principal (`scripts/codex-task.sh`), refuse tant qu'une CI tourne, et rend le refus du garde-fou tel quel.
+
+## Le ledger
+
+`state/ledger.db` (SQLite), dans le checkout principal, hors de git, commun à toutes les lanes. Écrit par les scripts (`lib/ledger.mjs`), jamais par un modèle.
+
+- `runs` : un lancement de modèle. `run_id`, `ticket`, `role`, `model`, `provider`, `started_at`, `ended_at`, `tokens_in`, `tokens_out`, `tokens_cache`, `cost_eur`, `outcome`, `pr_number`, `lines_changed`, `human_decision`, `human_latency_min`, et en plus `lane`, `source`, `requested_model`, `exit_code`, `tokens_cache_write`, `tokens_total`, `cost_basis`, `project`, `label`.
+- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action).
+
+`outcome` vaut `running`, `done`, `failed`, `refused`, `killed`, `idle`, puis, posés par l'étape de release : `merged`, `returned`, `reverted`.
+
+Le coût est celui que la CLI rapporte, au tarif de l'API, converti en euros (`[currency]`). Quand elle n'en rapporte pas, il est calculé depuis `[prices]` ; sans prix, il reste vide.
+
+```sh
+node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur) from runs group by 1"
+```
+
+`import-legacy.mjs` relit les journaux des sessions de l'ancienne organisation (chef de projet et lanes) et les met dans le ledger avec `source = 'legacy'`, pour avoir une base de comparaison. Il peut être relancé.
+
+## Le tableau de bord
+
+`dashboard.sh` écrit `state/dashboard/index.html` : une page statique, une colonne, sans script. Dans l'ordre : quatre indicateurs, le coût et la qualité par modèle sur 7 jours, « En attente de toi » avec le lien vers le commentaire Linear, les abonnements et la santé du serveur.
+
+## Deux pièges
+
+- Ne jamais charger `.env.local` avant de lancer un modèle : il contient une clé d'API, et la facturation quitterait l'abonnement. `linear.sh` n'y lit que sa propre clé ; `adapters/claude.sh` retire la clé de l'environnement.
+- Les commentaires passent par la clé de l'utilisateur : Linear affiche son nom. `linear.sh` commence donc chaque commentaire par « Écrit par un agent », et garde leurs identifiants dans `state/linear-comments.jsonl`. Une veille doit s'en servir pour ne pas les prendre pour des messages de l'utilisateur.
+
+## Servir la page (pas encore en place)
+
+Proposé, à valider avant toute mise en place : la page reste sur le réseau Tailscale, comme OpenClaw. Les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
+
+- `serve/orchestration-dashboard.service` : un service utilisateur qui sert le seul dossier `state/dashboard/`, à l'écoute sur la passerelle du réseau Docker de Coolify. Aucun conteneur.
+- `serve/orchestration-dashboard.yaml` : la route du proxy de Coolify, qui refuse toute source hors Tailscale. À copier dans `/data/coolify/proxy/dynamic/` (droits d'administrateur).
+
+Adresse une fois en place : `http://orchestration.TAILSCALE_IP.sslip.io/`, où `TAILSCALE_IP` est l'adresse Tailscale du serveur (`tailscale ip -4`). Rien de tout cela n'a été essayé sur le serveur.
