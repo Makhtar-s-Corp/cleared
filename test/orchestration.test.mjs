@@ -286,6 +286,47 @@ test('no allowed command runs whatever follows it, and none touches git state sh
   assert.ok(conf.sections['permissions.mechanical'], 'a mechanical task that falls back needs its own permissions');
 });
 
+test('the model a run is filed under is the one that wrote, not a helper it consulted, however much the helper cost; a role can be run without that helper', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-advisor-'));
+  const said = (model, parent = null) => JSON.stringify({ type: 'assistant', parent_tool_use_id: parent, message: { model, content: [{ type: 'text', text: 'working' }] } });
+  // A sub-agent on another model writes more messages than the session itself: it is not the model of the run.
+  const sub = [1, 2, 3, 4].map(() => said('a-sub-agent', 'toolu_1'));
+  const result = JSON.stringify({ type: 'result', is_error: false, result: 'done', total_cost_usd: 4, modelUsage: {
+    'the-writer': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 1000, cacheCreationInputTokens: 100, costUSD: 1 },
+    'the-helper': { inputTokens: 200, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 3 },
+  } });
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\ncat <<'JSON'\n${[said('the-writer'), ...sub, said('the-writer'), said('<synthetic>'), result].join('\n')}\nJSON\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  const call = (extra = {}) => {
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'asked', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ...extra },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    return { usage: JSON.parse(readFileSync(join(dir, 'u.json'), 'utf8')), args: readFileSync(join(dir, 'args'), 'utf8').split('\n') };
+  };
+  const plain = call();
+  assert.equal(plain.usage.model, 'the-writer');
+  assert.deepEqual(plain.usage.helpers, [{ model: 'the-helper', cost_usd: 3 }], 'what the helper cost is in the usage file of the run');
+  assert.equal(plain.usage.cost_usd, 4);
+  assert.equal(plain.usage.tokens_total, 1340);
+  assert.ok(!plain.args.includes('--settings'));
+  // Asked without the helper: the CLI is told so by its settings, the one way it listens to (a refused tool does not remove it).
+  const without = call({ ORCH_ADVISOR: 'no' });
+  assert.equal(without.args[without.args.indexOf('--settings') + 1], '{"advisorModel":""}');
+});
+
+test('the project lead runs without the helper model: it coordinates, and the helper cost twice what it did itself', () => {
+  for (const role of ['release', 'release-live']) assert.equal(conf.sections[`permissions.${role}`].advisor, 'no', role);
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[permissions.release-live]\nmode = read-only\n', '[permissions.release-live]\nmode = read-only\nadvisor = no\n'));
+  const out = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env release-live; echo "\${ORCH_ADVISOR:-unset}"; permissions_env talk; echo "\${ORCH_ADVISOR:-unset}"`], { env: box.env, encoding: 'utf8' });
+  assert.deepEqual(out.stdout.trim().split('\n'), ['no', 'unset'], 'said for the role that has it, and not carried over to the next');
+  // A role with nothing else in its permissions still gets it.
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}[permissions.dev]\nadvisor = no\n`);
+  assert.equal(spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env dev; echo "\${ORCH_ADVISOR:-unset} \${ORCH_PERMISSION_MODE:-none}"`], { env: box.env, encoding: 'utf8' }).stdout.trim(), 'no none');
+});
+
 test('the Claude adapter turns the permissions of a role into the allow and deny lists of its CLI', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
   writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\necho '{"type":"result","is_error":false,"result":"ok","total_cost_usd":0,"modelUsage":{}}'\n`, { mode: 0o755 });
@@ -1320,6 +1361,30 @@ test('the last message of a lane is a report for the lead only when its turn is 
   const at = (ms) => new Date(Date.now() - ms).toISOString();
   const timed = (name, when) => { const l = lane(name, 'x'); writeFileSync(join(projects, l.path.replace(/[^A-Za-z0-9]/g, '-'), 's.jsonl'), `${say(`id-${name}`, 'Pour le chef de projet : prêt.', [], when)}\n`); return l; };
   assert.deepEqual(laneReports([timed('fresh', at(5000)), timed('old', at(7 * 3600e3)), timed('right', at(600e3))], projects, { maxHours: 6 }).map((report) => report.lane), ['right']);
+});
+
+test('the lead is not woken by what it wrote itself, nor by a lane it was told to leave alone: only the lanes at work are read', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = yes\nnot_lanes = old-lead\n'));
+  const projects = join(box.home, 'projects');
+  const says = (worktree, branch, text) => {
+    const path = join(box.home, 'lanes', worktree);
+    box.git('worktree', 'add', '-q', '-b', branch, path, 'main');
+    const dir = join(projects, path.replace(/[^A-Za-z0-9]/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: `r-${worktree}`, timestamp: new Date(Date.now() - 120000).toISOString(), message: { content: [{ type: 'text', text }] } })}\n`);
+  };
+  // The lead's own lane (its report of the last wake), a lane of the dispatcher, the old lead kept open: none is a lane at work.
+  says('release-lead', 'release/lead', 'Pour le chef de projet : mon compte rendu du réveil précédent.');
+  says('dev-X-9', 'dev/X-9', 'Pour le chef de projet : lane du dispatcher, finie.');
+  says('old-lead', 'chore/old-lead', 'Pour le chef de projet : je suis l’ancien.');
+  says('a-lane', 'feat/a-lane', 'Pour le chef de projet : j’ai fini, je demande un créneau.');
+  mkdirSync(join(box.home, '.claude'), { recursive: true });
+  execFileSync('ln', ['-s', projects, join(box.home, '.claude', 'projects')]);
+  const seen = spawnSync(join(box.home, 'wake.sh'), ['--dry-run'], { env: { ...box.env, HOME: box.home }, encoding: 'utf8' });
+  assert.equal(seen.status, 0, seen.stderr);
+  assert.deepEqual(JSON.parse(seen.stdout).filter((event) => event.kind === 'lane_report').map((event) => event.lane), ['a-lane']);
 });
 
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
