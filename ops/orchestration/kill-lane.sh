@@ -18,9 +18,12 @@ worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs
 
 if [ "$force" != --force ]; then
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "$lane has uncommitted changes (use --force to drop them)"
-  # Unpushed work: a commit of the lane that no branch of the remote holds.
-  # (A lane opened on a pull request starts from commits that are pushed.)
-  [ -n "$(git -C "$worktree" branch -r --contains HEAD)" ] || die "$lane has commits that were never pushed (use --force to drop them)"
+  # Work that would be lost: a commit of the lane that no other branch holds,
+  # on the remote or here. (A lane opened on a pull request, or from a local
+  # branch, starts from commits that live elsewhere.)
+  mapfile -t others < <(git -C "$worktree" for-each-ref --format='%(refname)' refs/heads | grep -vxF "refs/heads/$lane")
+  own=$(git -C "$worktree" rev-list --count HEAD --not --remotes "${others[@]}")
+  [ "$own" = 0 ] || die "$lane has $own commit(s) that no other branch holds (use --force to drop them)"
 fi
 
 ledger init > /dev/null

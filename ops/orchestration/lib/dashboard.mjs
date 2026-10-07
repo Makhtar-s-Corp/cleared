@@ -3,6 +3,7 @@
 // script. Every figure is a SQL result or a value read by dashboard.sh.
 //
 //   dashboard.mjs <inputs.json>  > index.html
+import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { loadConf, section } from './conf.mjs';
 import { openLedger } from './ledger.mjs';
@@ -260,7 +261,7 @@ ${waiting}
 `;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const inputs = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   const conf = loadConf();
   const db = openLedger();

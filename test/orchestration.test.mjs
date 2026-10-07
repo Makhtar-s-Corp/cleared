@@ -158,7 +158,7 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/../lib/contract.sh"
 case "$1" in
   list-models) shift; printf '%s\\n' "$@" ;;
-  run) shift; contract_parse_run "$@"; body=$(mktemp); echo "answer of ${name}" > "$body"
+  run) shift; contract_parse_run "$@"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "answer of ${name}" > "$body"
     contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
@@ -177,12 +177,12 @@ esac
   return { home, state, repo, env, git };
 }
 
-function runLane(box, firstExit) {
+function runLane(box, firstExit, extra = {}) {
   const runDir = mkdtempSync(join(tmpdir(), 'orch-run-'));
   writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
   writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }, { alias: 'b', adapter: 'second', model: 'm2' }]));
   writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n');
-  const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: { ...box.env, FIRST_EXIT: String(firstExit) }, encoding: 'utf8' });
+  const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: { ...box.env, FIRST_EXIT: String(firstExit), ...extra }, encoding: 'utf8' });
   const db = openLedger(join(box.state, 'ledger.db'));
   const runs = db.prepare('select model, outcome, exit_code from runs order by rowid').all().map((row) => ({ ...row }));
   const events = db.prepare('select kind from events order by rowid').all().map((row) => row.kind);
@@ -389,4 +389,84 @@ test('the dashboard page is refused to any peer outside the allowed ranges, and 
   assert.deepEqual(await answer(['127.0.0.0/8']), [200, '<p>page</p>']);
   assert.equal((await answer(['127.0.0.0/8'], '/secret.txt'))[0], 404);
   assert.equal((await answer(['127.0.0.0/8'], '/../secret.txt'))[0], 404);
+});
+
+test('a long session does not make the Claude adapter die before its report', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  // Several megabytes of events, as a real session writes.
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\ncat > /dev/null\nline='{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"${'x'.repeat(400)}"}]}}'\nfor i in $(seq 1 12000); do echo "$line"; done\necho '{"type":"result","is_error":false,"result":"the end","total_cost_usd":0,"modelUsage":{}}'\n`, { mode: 0o755 });
+  const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+    cwd: dir, encoding: 'utf8', maxBuffer: 64e6, env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+  assert.equal(run.status, 0, run.stderr.slice(-300));
+  assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /## Compte rendu\n\nthe end\n/);
+});
+
+test('a CLI that ends with no result at all is a failure, not a reason to try another model', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  writeFileSync(join(dir, 'claude'), '#!/usr/bin/env bash\ncat > /dev/null\nexit 137\n', { mode: 0o755 });
+  const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+    cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+  assert.equal(run.status, 137);
+  assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /^outcome: failed$/m);
+});
+
+test('a backend that dies without a report: the lane says so instead of posting an empty text', () => {
+  const lane = runLane(sandbox(), 0, { FIRST_DIES: '1' });
+  assert.equal(lane.status, 141);
+  assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'failed', exit_code: 141 }]);
+  assert.match(lane.comment, /sans compte rendu/);
+  assert.match(lane.comment, /Modèle utilisé : `m1`/);
+});
+
+test('Linear saying no is an error: nothing is reported as sent or opened', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  const no = { data: { issue: { id: 'i' }, teams: { nodes: [{ id: 't' }] }, projects: { nodes: [{ id: 'p' }] }, issueLabels: { nodes: [{ id: 'l' }] }, commentCreate: { success: false, comment: null }, issueCreate: { success: false, issue: null } } };
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '${JSON.stringify(no)}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
+  for (const args of [['comment', 'X-1', join(dir, 'text.md'), 'test'], ['create', 'Projet', 'Bug', 'Un titre', join(dir, 'text.md')]]) {
+    const run = spawnSync(join(ORCH_HOME, 'linear.sh'), args, { env, encoding: 'utf8' });
+    assert.notEqual(run.status, 0, args[0]);
+    assert.equal(run.stdout.trim(), '', args[0]);
+  }
+  assert.throws(() => readFileSync(join(dir, 'state', 'linear-comments.jsonl')));
+  assert.throws(() => readFileSync(join(dir, 'state', 'linear-issues.jsonl')));
+});
+
+test('the dashboard server answers 400 to a request it cannot read, and goes on serving', async () => {
+  const { dashboardServer } = await import('../ops/orchestration/serve/serve-dashboard.mjs');
+  const { connect } = await import('node:net');
+  const dir = mkdtempSync(join(tmpdir(), 'orch-serve-'));
+  writeFileSync(join(dir, 'index.html'), '<p>page</p>');
+  const server = dashboardServer({ file: join(dir, 'index.html'), ranges: ['127.0.0.0/8'] });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const raw = await new Promise((resolve) => {
+    let data = '';
+    const socket = connect(port, '127.0.0.1', () => socket.write('GET http://[ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'));
+    socket.on('data', (chunk) => { data += chunk; });
+    socket.on('close', () => resolve(data));
+  });
+  try {
+    assert.match(raw, /^HTTP\/1\.1 400 /);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('the scripts run as commands from a folder whose name has a space or an accent', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch été '));
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'serve'), join(ORCH_HOME, 'lib'), dir]);
+  const served = spawnSync('node', [join(dir, 'serve', 'serve-dashboard.mjs')], { encoding: 'utf8' });
+  assert.equal(served.status, 64, 'run with no argument, it must print its usage, not do nothing');
+  const routed = spawnSync('node', [join(dir, 'lib', 'route.mjs')], { encoding: 'utf8', env: { ...process.env, ORCH_CONF: join(ORCH_HOME, 'agents.conf') } });
+  assert.equal(routed.status, 1);
+  assert.match(routed.stderr, /--role is required/);
 });

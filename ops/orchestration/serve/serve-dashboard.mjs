@@ -10,6 +10,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
+import { pathToFileURL } from 'node:url';
 
 // The ranges Tailscale hands out to the machines of a network.
 export const TAILSCALE = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'];
@@ -39,7 +40,13 @@ export function dashboardServer({ file, ranges = TAILSCALE }) {
       response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end('Refusé.\n');
       return;
     }
-    const path = new URL(request.url, 'http://x').pathname;
+    let path;
+    try {
+      path = new URL(request.url, 'http://x').pathname;
+    } catch {
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end('Demande illisible.\n');
+      return;
+    }
     if (!['GET', 'HEAD'].includes(request.method) || (path !== '/' && path !== '/index.html')) {
       response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('Introuvable.\n');
       return;
@@ -53,7 +60,8 @@ export function dashboardServer({ file, ranges = TAILSCALE }) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run as a command (the path may hold a space or an accent, hence the URL).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [address, port, file, ...ranges] = process.argv.slice(2);
   if (!address || !port || !file) {
     process.stderr.write('usage: serve-dashboard.mjs <address> <port> <index.html> [<allowed CIDR>...]\n');

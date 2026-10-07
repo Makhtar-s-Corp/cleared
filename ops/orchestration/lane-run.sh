@@ -77,7 +77,14 @@ lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lan
 # What the user reads in Linear. The figures and the model come from the
 # scripts; only the wording of the report may come from the writing model.
 body=$(mktemp)
-sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$lane_report" | sed '1d;$d' > "$body"
+if [ -f "$lane_report" ]; then
+  sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$lane_report" | sed '1d;$d' > "$body"
+  used=$(sed -n 's/^model: //p' "$lane_report")
+else
+  # The backend stopped before writing anything: said as it is.
+  echo "L'adaptateur \`$lane_adapter\` s'est arrêté sans compte rendu (code $lane_code). Ce qu'il a affiché est resté dans le terminal de la lane." > "$body"
+  used=$lane_model
+fi
 writeup_note=
 if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ]; then
   {
@@ -113,7 +120,7 @@ comment="$run_dir/comment.md"
   echo "**Lane \`$ORCH_LANE\`** · rôle $ORCH_ROLE · $ORCH_TICKET${ORCH_PR:+ · PR #$ORCH_PR}"
   echo
   echo "- Modèle demandé : \`$ORCH_REQUESTED_ALIAS\` ($ORCH_RULE_NOTE)"
-  echo "- Modèle utilisé : \`$(sed -n 's/^model: //p' "$lane_report")\` (adaptateur \`$lane_adapter\`)"
+  echo "- Modèle utilisé : \`$used\` (adaptateur \`$lane_adapter\`)"
   [ -n "$lane_fallback" ] && echo "- Repli : $lane_fallback"
   [ -n "${ORCH_SPAWN_NOTE:-}" ] && echo "- $ORCH_SPAWN_NOTE"
   echo "- Résultat : $result${tokens:+ · $(french_number "$tokens") tokens}${cost:+ · $cost \$ au tarif API}"

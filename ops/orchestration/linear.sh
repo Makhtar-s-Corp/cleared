@@ -72,10 +72,12 @@ case "${1:-}" in
     [ -f "$3" ] || die "no such file: $3"
     from=${4:-script}
     guard_text "$3" || exit 1
-    id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id')
+    id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id // empty')
+    [ -n "$id" ] || die "no such ticket: $2"
     body=$(printf '> Écrit par un agent (%s), pas par Makhtar.\n\n%s\n' "$from" "$(cat "$3")")
     created=$(gql 'mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }' \
       "$(jq -nc --arg issue "$id" --arg body "$body" '{input: {issueId: $issue, body: $body}}')")
+    [ "$(jq -r '.data.commentCreate.success == true and (.data.commentCreate.comment.id | type) == "string"' <<<"$created")" = true ] || die "Linear did not record the comment"
     mkdir -p "$ORCH_STATE_DIR"
     jq -c --arg ticket "$2" --arg from "$from" --arg at "$(now_utc)" '.data.commentCreate.comment + {ticket: $ticket, from: $from, at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/linear-comments.jsonl"
     jq -r '.data.commentCreate.comment.url' <<<"$created"
@@ -93,6 +95,7 @@ case "${1:-}" in
     description=$(printf '> Ticket ouvert par un agent (%s), pas par Makhtar.\n\n%s\n' "${ORCH_FROM:-script}" "$(cat "$5")")
     created=$(gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }' \
       "$(jq -nc --arg team "$team_id" --arg project "$project_id" --arg label "$label_id" --arg title "$4" --arg description "$description" '{input: {teamId: $team, projectId: $project, labelIds: [$label], title: $title, description: $description}}')")
+    [ "$(jq -r '.data.issueCreate.success == true and (.data.issueCreate.issue.identifier | type) == "string"' <<<"$created")" = true ] || die "Linear did not open the ticket"
     mkdir -p "$ORCH_STATE_DIR"
     jq -c --arg at "$(now_utc)" '.data.issueCreate.issue + {at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/linear-issues.jsonl"
     jq -r '.data.issueCreate.issue | "\(.identifier) \(.url)"' <<<"$created"

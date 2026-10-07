@@ -10,6 +10,7 @@
 //                        [--human-decision …] [--human-latency-min N]
 //   ledger.mjs event     --kind … [--ticket …] [--run-id …] [--detail …] [--value N]
 //   ledger.mjs sql "select …"        (read only, prints JSON)
+import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -186,7 +187,7 @@ function main([command, ...rest]) {
   db.close();
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     main(process.argv.slice(2));
   } catch (error) {

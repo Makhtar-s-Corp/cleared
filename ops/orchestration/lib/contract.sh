@@ -98,7 +98,7 @@ contract_report() {
     if [ "$changed" = 0 ]; then
       echo 'Aucun.'
     else
-      git status --porcelain | head -n 30 | sed 's/^/- /'
+      git status --porcelain | sed -n '1,30s/^/- /p'
       if [ "$changed" -gt 30 ]; then echo "- … et $((changed - 30)) autres"; fi
     fi
   } > "$report"

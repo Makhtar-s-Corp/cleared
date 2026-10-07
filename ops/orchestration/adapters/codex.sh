@@ -28,7 +28,7 @@ case "${1:-}" in
     # container, not the one on the PATH.
     task_script=${ADAPTER_TASK_SCRIPT:-}
     case "$task_script" in "~/"*) task_script="$HOME/${task_script#\~/}" ;; esac
-    mounted=$(grep -o -E '/[^ :"]+/node_modules/@openai/codex' "$task_script" 2>/dev/null | head -n 1)
+    mounted=$(grep -o -m 1 -E '/[^ :"]+/node_modules/@openai/codex' "$task_script" 2>/dev/null || true)
     installed=$(jq -r '.version' "$mounted/package.json" 2>/dev/null || codex --version 2>/dev/null | awk '{print $NF}')
     contract_npm_version codex "${ADAPTER_PACKAGE:-}" "$installed"
     ;;
@@ -69,7 +69,7 @@ case "${1:-}" in
         echo
         echo "Ce que le garde-fou a relevé (emplacements seulement, jamais la valeur) :"
         echo
-        grep -E ': (secret|adresse|terme|IBAN)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | head -n 30
+        grep -E ': (secret|adresse|terme|IBAN)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | sed -n '1,30p'
       } > "$body"
       contract_usage '{}'
       contract_report codex 3 "$body"
