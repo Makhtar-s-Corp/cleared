@@ -3,7 +3,9 @@
 // GitHub say now and what was seen before. No model: this is the pre-check
 // that decides whether a session is worth starting.
 //
-//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt>
+//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read>
+//       <time read>: taken before Linear and GitHub were asked, so that
+//       nothing created while they answered falls between two wakes
 //       prints {events: [...], next: {...}}
 //
 // An event is something only the user or the outside world did: a comment or
@@ -30,8 +32,15 @@ export function checksOf(rollup = []) {
   return states.includes('SUCCESS') ? 'success' : 'none';
 }
 
+// Linear is asked again for the last minutes before the previous wake: what
+// was created in that margin and not seen yet still counts as new.
+export const OVERLAP_MS = 10 * 60_000;
+
 export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString()) {
   const first = !previous;
+  // Newer than this is news. A ticket touched again brings its old comments
+  // along: they were never seen here, and they are not news.
+  const horizon = first ? null : new Date(new Date(previous.at) - OVERLAP_MS).toISOString();
   const seen = new Set(previous?.seen ?? []);
   const known = previous?.pulls ?? {};
   const events = [];
@@ -41,14 +50,14 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     if (!seen.has(issue.id)) {
       seen.add(issue.id);
       // A ticket met for the first time is new only if it was created since the last wake.
-      if (!first && issue.createdAt > previous.at && !byAgent(issue.description, issue.id, agentIds)) {
+      if (!first && issue.createdAt > horizon && !byAgent(issue.description, issue.id, agentIds)) {
         events.push({ kind: 'ticket_new', at: issue.createdAt, ...ticket, text: excerpt(issue.description) });
       }
     }
     for (const comment of issue.comments ?? []) {
       if (seen.has(comment.id)) continue;
       seen.add(comment.id);
-      if (first || byAgent(comment.body, comment.id, agentIds)) continue;
+      if (first || comment.createdAt <= horizon || byAgent(comment.body, comment.id, agentIds)) continue;
       events.push({ kind: 'comment', at: comment.createdAt, ...ticket, url: comment.url ?? issue.url, text: excerpt(comment.body) });
     }
   }
@@ -81,10 +90,10 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt] = process.argv.slice(2);
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined))}\n`);
 }

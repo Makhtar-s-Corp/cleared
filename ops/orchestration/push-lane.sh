@@ -10,8 +10,8 @@
 #   - a draft pull request from that branch to the base branch, if none is
 #     open yet.
 # It refuses anything else: another branch, a role that [lanes] push_roles
-# does not name, commit messages the guard of the repository would not let
-# out. Called by lane-run.sh once a run is done, never by a model.
+# does not name, and commit messages or changes that the guard of the
+# repository would not let out (a push cannot be taken back). Called by lane-run.sh once a run is done, never by a model.
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
@@ -36,6 +36,10 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 git -C "$worktree" log --format='%B' "$base..HEAD" > "$out/messages.txt"
 guard_text "$out/messages.txt" || die "$branch not pushed: a commit message is refused by the guard"
+# The changes themselves, as a diff: the guard reads the lines of a code file
+# as it reads the tree, and those of any other file strictly.
+git -C "$worktree" diff "$base...HEAD" > "$out/changes.diff"
+guard_text "$out/changes.diff" || die "$branch not pushed: its changes are refused by the guard"
 
 # The lane's branch to the branch of the same name, and only that. No force
 # in any form: a remote branch that moved makes this fail, on purpose.

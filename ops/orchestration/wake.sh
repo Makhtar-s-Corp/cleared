@@ -32,10 +32,11 @@ if [ -f "$current" ] && [ ! -f "$(cat "$current")/exit-code" ]; then
 fi
 
 state="$wake_dir/state.json"
-now=$(now_utc)
+# Taken before anything is read: it becomes the time of this wake.
+read_at=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 # Linear is asked for what was touched since the last wake, with some overlap;
 # what was already seen is told apart by its identifier.
-if [ -f "$state" ]; then since=$(date -u -d "$(jq -r '.at' "$state") - 10 minutes" +%Y-%m-%dT%H:%M:%SZ); else since=$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ); fi
+if [ -f "$state" ]; then since=$(date -u -d "$(jq -r '.at' "$state") - 12 minutes" +%Y-%m-%dT%H:%M:%SZ); else since=$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ); fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -45,7 +46,7 @@ trap 'rm -rf "$work"' EXIT
   || die "GitHub did not answer: nothing read, nothing moved"
 # What the scripts of the dispatcher posted themselves.
 cat "$ORCH_STATE_DIR/linear-comments.jsonl" "$ORCH_STATE_DIR/linear-issues.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" > "$work/changes.json"
+node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" > "$work/changes.json"
 count=$(jq '.events | length' "$work/changes.json")
 
 if [ "$dry_run" = --dry-run ]; then
@@ -75,8 +76,9 @@ base=$(conf_get lanes base)
 git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
 if [ ! -d "$worktree" ]; then
   git -C "$ORCH_REPO" worktree add --quiet -B "$lane" "$worktree" "$base"
-else
-  git -C "$worktree" merge --quiet --ff-only "$base" 2> /dev/null || git -C "$worktree" reset --quiet --hard "$base"
+elif [ -n "$(git -C "$worktree" status --porcelain)" ] || ! git -C "$worktree" merge --quiet --ff-only "$base" 2> /dev/null; then
+  # Nothing is ever thrown away here: someone, or a session, left work in it.
+  die "the lane of the project lead ($worktree) has changes or commits of its own: left untouched, no session started"
 fi
 
 run_base="lead-$(date -u +%Y%m%dT%H%M%SZ)"

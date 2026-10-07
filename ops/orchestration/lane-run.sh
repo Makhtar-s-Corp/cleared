@@ -10,6 +10,8 @@ set -uo pipefail
 
 run_dir=${1:?usage: lane-run.sh <run directory>}
 . "$run_dir/lane.env"
+# Whatever stops this script, the run says it is over: a wake waits for it.
+trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
 mkdir -p "$ORCH_STATE_DIR/reports"
 
@@ -112,11 +114,17 @@ fi
 # this is where its branch leaves and its pull request opens.
 pushed_note=
 if [ "$lane_code" = 0 ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
-  if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2>&1); then
-    case "$pushed" in "#"*) pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)." ;; *) pushed_note="Rien à pousser : la lane n'a aucun commit." ;; esac
+  # Its answer is its last line on stdout; what git and gh say on the way
+  # goes to the terminal, and the reason of a failure is kept.
+  push_err=$(mktemp)
+  if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2> >(tee "$push_err" >&2)); then
+    pushed=$(sed -n '$p' <<<"$pushed")
+    if [[ "$pushed" =~ ^#[0-9]+$ ]]; then pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."; else pushed_note="Rien à pousser : la lane n'a aucun commit."; fi
   else
-    pushed_note="La branche n'a pas été poussée : $(tail -n 1 <<<"$pushed")"
+    sleep 0.2
+    pushed_note="La branche n'a pas été poussée : $(sed -n '$p' "$push_err")"
   fi
+  rm -f "$push_err"
   echo "$pushed_note"
 fi
 

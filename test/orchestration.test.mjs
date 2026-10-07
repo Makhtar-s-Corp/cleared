@@ -779,3 +779,78 @@ test('every unit that runs a script of the dispatcher finds the tools of the use
   }
   for (const timer of readdirSync(dir).filter((name) => name.endsWith('.timer'))) assert.ok(readdirSync(dir).includes(timer.replace('.timer', '.service')), timer);
 });
+
+test('an old ticket touched again does not bring its old comments back as news; one created while the last wake was reading is not lost', async () => {
+  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const previous = { at: '2026-01-02T10:00:00Z', seen: [], pulls: {} };
+  const old = { id: 'i9', identifier: 'X-9', title: 'Vieux', url: 'u', state: 'Done', project: 'P', createdAt: '2025-11-01T00:00:00Z', description: 'd',
+    comments: [{ id: 'k1', createdAt: '2025-11-02T00:00:00Z', url: 'u#k1', body: 'un vieux commentaire' }, { id: 'k2', createdAt: '2026-01-02T10:00:30Z', url: 'u#k2', body: 'le nouveau' }] };
+  // Created five seconds before the time the last wake noted, but after Linear had answered it.
+  const missed = { id: 'i8', identifier: 'X-8', title: 'Créé pendant la lecture', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-02T09:59:55Z', description: 'de Makhtar', comments: [] };
+  const { events } = changes(previous, [old, missed], [], new Set(), '2026-01-02T10:01:00Z');
+  assert.deepEqual(events.map((event) => [event.kind, event.ticket, event.text]), [['ticket_new', 'X-8', 'de Makhtar'], ['comment', 'X-9', 'le nouveau']]);
+});
+
+test('Linear is asked for the newest comments of a ticket (first:, which it serves newest first), never the oldest', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[]},"viewer":{"assignedIssues":{"nodes":[]}}}}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') };
+  for (const args of [['changes', '2026-01-01T00:00:00Z'], ['waiting']]) assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), args, { env, encoding: 'utf8' }).status, 0, args[0]);
+  const asked = readFileSync(join(dir, 'asked'), 'utf8');
+  assert.match(asked, /comments\(first: 20\)/);
+  assert.match(asked, /comments\(first: 1\)/);
+  assert.doesNotMatch(asked, /comments\(last:/);
+});
+
+test('what the push script says is read from its last line, whatever git or gh wrote before; a failed push is said as such', () => {
+  const lane = (script) => {
+    const box = sandbox();
+    writeFileSync(join(box.home, 'push-lane.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
+    return runLane(box, 0).comment;
+  };
+  assert.match(lane('echo "remote: Create a pull request" >&2; echo "warning from gh"; echo "#41"'), /PR ouverte ou mise à jour : #41/);
+  assert.match(lane('echo "nothing to push: dev/X-1 has no commit of its own"'), /Rien à pousser/);
+  const failed = lane('echo "push-lane.sh: dev/X-1 not pushed: a commit message is refused by the guard" >&2; exit 1');
+  assert.match(failed, /La branche n'a pas été poussée : push-lane\.sh: dev\/X-1 not pushed/);
+  assert.doesNotMatch(failed, /Rien à pousser|PR ouverte/);
+});
+
+test('push-lane sends nothing when the changes of the branch hold what the guard refuses', () => {
+  const lane = laneWithRemote('dev/X-5', null);
+  writeFileSync(join(lane.path, 'notes.md'), `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"\n`);
+  execFileSync('git', ['-C', lane.path, 'add', 'notes.md']);
+  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: notes']);
+  const run = lane.push();
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /refused by the guard/);
+  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
+});
+
+test('the lane of the project lead is never reset: with work of its own in it, the wake stops and touches nothing', () => {
+  const box = sandbox();
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  wake();
+  const path = join(box.home, 'lanes', 'release-lead');
+  box.git('worktree', 'add', '-q', '-b', 'release/lead', path, 'main');
+  execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'work left in the lane of the lead']);
+  box.git('commit', '-q', '--allow-empty', '-m', 'main moves on');
+  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c2', createdAt: new Date().toISOString(), url: 'u#c2', body: 'OK' }])));
+  const run = wake();
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /left untouched/);
+  assert.match(execFileSync('git', ['-C', path, 'log', '-1', '--format=%s'], { encoding: 'utf8' }), /work left in the lane of the lead/);
+});
+
+test('a run that stops before its end still says it is over', () => {
+  const box = sandbox();
+  const runDir = mkdtempSync(join(tmpdir(), 'orch-run-'));
+  writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
+  writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'g', adapter: 'ghost', model: 'm' }]));
+  writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=g\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n');
+  const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
+  assert.notEqual(run.status, 0);
+  assert.notEqual(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '0');
+});

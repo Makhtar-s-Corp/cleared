@@ -5,6 +5,9 @@
 #   linear.sh comment <ticket> <file> [<from>]  posts the file as a comment, prints its URL
 #   linear.sh waiting                           tickets waiting for the user, as JSON
 #   linear.sh changes <ISO time>                tickets touched since then, with their recent comments, as JSON
+#
+# Linear serves the comments of a ticket newest first: `first: n` is the n
+# most recent ones, `last: n` the n oldest (checked on a long ticket).
 #   linear.sh comments <ticket>                 its comments as JSON (id, createdAt, body)
 #   linear.sh create <project> <label> <title> <file>   opens a ticket, prints its identifier and URL
 #
@@ -88,13 +91,13 @@ case "${1:-}" in
     ;;
   changes)
     [[ "${2:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || die "usage: linear.sh changes <ISO time>"
-    gql 'query($team: String!, $since: DateTimeOrDuration!) { issues(first: 50, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, updatedAt: {gt: $since}}) { nodes { id identifier title url createdAt updatedAt description state { name } project { name } comments(last: 20) { nodes { id createdAt body url } } } } }' \
+    gql 'query($team: String!, $since: DateTimeOrDuration!) { issues(first: 50, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, updatedAt: {gt: $since}}) { nodes { id identifier title url createdAt updatedAt description state { name } project { name } comments(first: 20) { nodes { id createdAt body url } } } } }' \
       "$(jq -nc --arg team "$(conf_get linear team)" --arg since "$2" '{team: $team, since: $since}')" \
       | jq -c '[.data.issues.nodes[] | {id, identifier, title, url, createdAt, updatedAt, description: ((.description // "") | .[0:1200]), state: .state.name, project: (.project.name // null), comments: [.comments.nodes[] | {id, createdAt, url, body}]}]'
     ;;
   waiting)
     team=$(conf_get linear team)
-    gql 'query($team: String!) { viewer { assignedIssues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: "In Review"}}}) { nodes { identifier title url updatedAt comments(last: 1) { nodes { url createdAt } } } } } }' \
+    gql 'query($team: String!) { viewer { assignedIssues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: "In Review"}}}) { nodes { identifier title url updatedAt comments(first: 1) { nodes { url createdAt } } } } } }' \
       "$(jq -nc --arg team "$team" '{team: $team}')" \
       | jq -c '[.data.viewer.assignedIssues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
     ;;
