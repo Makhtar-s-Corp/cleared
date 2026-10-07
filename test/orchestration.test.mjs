@@ -151,7 +151,7 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), join(ORCH_HOME, 'confirm-decision.sh'), join(ORCH_HOME, 'check-lead-model.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), join(ORCH_HOME, 'confirm-decision.sh'), join(ORCH_HOME, 'check-lead-model.sh'), join(ORCH_HOME, 'review-pr.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
@@ -165,7 +165,7 @@ case "$1" in
 esac
 `, { mode: 0o755 });
   fake('first', '${FIRST_EXIT:-0}');
-  fake('second', '0');
+  fake('second', '${SECOND_EXIT:-0}');
   // Linear and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
@@ -182,8 +182,9 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
   writeFileSync(join(home, 'prompts', 'handover.md'), 'handover prompt\n');
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
+  writeFileSync(join(home, 'prompts', 'review.md'), 'review prompt\n');
   writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // The guard of the repository, as the scripts read it from the trusted ref.
@@ -197,7 +198,8 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'bin', 'gh'), `#!/usr/bin/env bash
 if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1; cat "${join(home, 'pulls-now.json')}"
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
-elif [ "$1 $2" = "run list" ]; then echo '[]'
+elif [ "$1 $2" = "pr view" ]; then cat "${join(home, 'pr-view.json')}"
+elif [ "$1 $2" = "run list" ]; then echo "\${FAKE_GH_RUNS:-[]}"
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
 `, { mode: 0o755 });
@@ -284,6 +286,47 @@ test('no allowed command runs whatever follows it, and none touches git state sh
     }
   }
   assert.ok(conf.sections['permissions.mechanical'], 'a mechanical task that falls back needs its own permissions');
+});
+
+test('the model a run is filed under is the one that wrote, not a helper it consulted, however much the helper cost; a role can be run without that helper', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-advisor-'));
+  const said = (model, parent = null) => JSON.stringify({ type: 'assistant', parent_tool_use_id: parent, message: { model, content: [{ type: 'text', text: 'working' }] } });
+  // A sub-agent on another model writes more messages than the session itself: it is not the model of the run.
+  const sub = [1, 2, 3, 4].map(() => said('a-sub-agent', 'toolu_1'));
+  const result = JSON.stringify({ type: 'result', is_error: false, result: 'done', total_cost_usd: 4, modelUsage: {
+    'the-writer': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 1000, cacheCreationInputTokens: 100, costUSD: 1 },
+    'the-helper': { inputTokens: 200, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 3 },
+  } });
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\ncat <<'JSON'\n${[said('the-writer'), ...sub, said('the-writer'), said('<synthetic>'), result].join('\n')}\nJSON\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  const call = (extra = {}) => {
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'asked', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ...extra },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    return { usage: JSON.parse(readFileSync(join(dir, 'u.json'), 'utf8')), args: readFileSync(join(dir, 'args'), 'utf8').split('\n') };
+  };
+  const plain = call();
+  assert.equal(plain.usage.model, 'the-writer');
+  assert.deepEqual(plain.usage.helpers, [{ model: 'the-helper', cost_usd: 3 }], 'what the helper cost is in the usage file of the run');
+  assert.equal(plain.usage.cost_usd, 4);
+  assert.equal(plain.usage.tokens_total, 1340);
+  assert.ok(!plain.args.includes('--settings'));
+  // Asked without the helper: the CLI is told so by its settings, the one way it listens to (a refused tool does not remove it).
+  const without = call({ ORCH_ADVISOR: 'no' });
+  assert.equal(without.args[without.args.indexOf('--settings') + 1], '{"advisorModel":""}');
+});
+
+test('the project lead runs without the helper model: it coordinates, and the helper cost twice what it did itself', () => {
+  for (const role of ['release', 'release-live']) assert.equal(conf.sections[`permissions.${role}`].advisor, 'no', role);
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[permissions.release-live]\nmode = read-only\n', '[permissions.release-live]\nmode = read-only\nadvisor = no\n'));
+  const out = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env release-live; echo "\${ORCH_ADVISOR:-unset}"; permissions_env talk; echo "\${ORCH_ADVISOR:-unset}"`], { env: box.env, encoding: 'utf8' });
+  assert.deepEqual(out.stdout.trim().split('\n'), ['no', 'unset'], 'said for the role that has it, and not carried over to the next');
+  // A role with nothing else in its permissions still gets it.
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}[permissions.dev]\nadvisor = no\n`);
+  assert.equal(spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env dev; echo "\${ORCH_ADVISOR:-unset} \${ORCH_PERMISSION_MODE:-none}"`], { env: box.env, encoding: 'utf8' }).stdout.trim(), 'no none');
 });
 
 test('the Claude adapter turns the permissions of a role into the allow and deny lists of its CLI', () => {
@@ -1322,6 +1365,30 @@ test('the last message of a lane is a report for the lead only when its turn is 
   assert.deepEqual(laneReports([timed('fresh', at(5000)), timed('old', at(7 * 3600e3)), timed('right', at(600e3))], projects, { maxHours: 6 }).map((report) => report.lane), ['right']);
 });
 
+test('the lead is not woken by what it wrote itself, nor by a lane it was told to leave alone: only the lanes at work are read', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = yes\nnot_lanes = old-lead\n'));
+  const projects = join(box.home, 'projects');
+  const says = (worktree, branch, text) => {
+    const path = join(box.home, 'lanes', worktree);
+    box.git('worktree', 'add', '-q', '-b', branch, path, 'main');
+    const dir = join(projects, path.replace(/[^A-Za-z0-9]/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: `r-${worktree}`, timestamp: new Date(Date.now() - 120000).toISOString(), message: { content: [{ type: 'text', text }] } })}\n`);
+  };
+  // The lead's own lane (its report of the last wake), a lane of the dispatcher, the old lead kept open: none is a lane at work.
+  says('release-lead', 'release/lead', 'Pour le chef de projet : mon compte rendu du réveil précédent.');
+  says('dev-X-9', 'dev/X-9', 'Pour le chef de projet : lane du dispatcher, finie.');
+  says('old-lead', 'chore/old-lead', 'Pour le chef de projet : je suis l’ancien.');
+  says('a-lane', 'feat/a-lane', 'Pour le chef de projet : j’ai fini, je demande un créneau.');
+  mkdirSync(join(box.home, '.claude'), { recursive: true });
+  execFileSync('ln', ['-s', projects, join(box.home, '.claude', 'projects')]);
+  const seen = spawnSync(join(box.home, 'wake.sh'), ['--dry-run'], { env: { ...box.env, HOME: box.home }, encoding: 'utf8' });
+  assert.equal(seen.status, 0, seen.stderr);
+  assert.deepEqual(JSON.parse(seen.stdout).filter((event) => event.kind === 'lane_report').map((event) => event.lane), ['a-lane']);
+});
+
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
   const box = sandbox();
   const projects = join(box.home, 'projects');
@@ -1365,7 +1432,7 @@ test('the acting lead may answer and read, nothing more: its permissions refuse 
   assert.equal(live.mode, 'read-only');
   const scripts = list(live.allow).filter((item) => item.startsWith('ops/'));
   // It answers by two scripts; the rest only reads (what the user wrote in Linear, the state of the host).
-  assert.deepEqual(scripts, ['ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh comments', 'ops/orchestration/linear.sh issue', 'ops/orchestration/linear.sh waiting', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh']);
+  assert.deepEqual(scripts, ['ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh comments', 'ops/orchestration/linear.sh issue', 'ops/orchestration/linear.sh waiting', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh', 'ops/orchestration/review-pr.sh']);
   for (const refused of ['ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
 });
 
@@ -1883,4 +1950,136 @@ test('the sessions of a worktree the dispatcher opened are not the old way of wo
   const roles = Object.keys(conf.roles);
   for (const name of ['release-lead', 'dev-SEE-105', 'review-SEE-112', 'talk-SEE-112']) assert.equal(dispatcherWorktree(name, roles), true, name);
   for (const name of ['orrchestrator', 'app-rapide', 'release-notes', 'dev-something', 'fiche-enveloppe-projet']) assert.equal(dispatcherWorktree(name, roles), false, name);
+});
+
+test('the lead opens the review of a pull request by a script that never reads the same commit twice, reads only what changed since, and knows who wrote it', () => {
+  const lane = laneWithRemote('feat/x', 'feat: the work of the lane');
+  const { box } = lane;
+  const env = { ...box.env, HOME: box.home };
+  const headOf = () => execFileSync('git', ['-C', lane.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const publish = () => {
+    execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/x']);
+    writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', title: 'feat: the work of the lane', body: 'Lane feat/x (X-5, X-6).', headRefName: 'feat/x', headRefOid: headOf(), additions: 3, deletions: 1, files: [{ path: 'server/a.mjs' }] }));
+  };
+  // The session of the worktree wrote with the model m1: the review goes to another one.
+  const logs = join(box.home, '.claude', 'projects', lane.path.replace(/[^A-Za-z0-9]/g, '-'));
+  mkdirSync(logs, { recursive: true });
+  writeFileSync(join(logs, 's.jsonl'), `${JSON.stringify({ type: 'assistant', message: { model: 'm1', content: [{ type: 'text', text: 'done' }] } })}\n`);
+  const review = (extra = {}) => spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5'], { env: { ...env, ...extra }, encoding: 'utf8' });
+  publish();
+  // The lead acts, and its wakes have begun before the review ends.
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = yes\n'));
+  const wake = (...args) => spawnSync(join(box.home, 'wake.sh'), args, { env, encoding: 'utf8' });
+  assert.equal(wake().status, 0);
+  // A review lane only reads: it is not one of the heavy operations of the host, and opens while a CI runs
+  // (rule of the user, 2026-10-07). Not while GitHub is down: nothing could be fetched.
+  writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'major_outage' }] }));
+  const down = review();
+  assert.equal(down.status, 1);
+  assert.match(down.stderr, /GitHub is down/);
+  writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'operational' }] }));
+  const first = review({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
+  assert.equal(first.status, 0, first.stderr);
+  const opened = JSON.parse(first.stdout);
+  assert.equal(opened.lane, 'review/X-5');
+  assert.equal(opened.model, 'b', 'not the model that wrote it');
+  assert.match(readFileSync(join(opened.run_dir, 'prompt.md'), 'utf8'), /^review prompt[\s\S]*PR #7, branche feat\/x/);
+  assert.match(readFileSync(join(opened.run_dir, 'lane.env'), 'utf8'), /ORCH_COMMENT_ON=none/);
+  // It runs: no second one meanwhile.
+  writeFileSync(join(box.state, 'x'), '');
+  const db = openLedger(join(box.state, 'ledger.db'));
+  runStart(db, { runId: 'held', role: 'review', lane: 'review/X-5' });
+  db.close();
+  assert.match(review().stderr, /still running/);
+  const done = openLedger(join(box.state, 'ledger.db'));
+  runEnd(done, conf, { runId: 'held', outcome: 'killed' });
+  done.close();
+  // It finishes (the terminal of the test runs nothing: the run is run here). The same commit is not read again.
+  const firstHead = headOf();
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [opened.run_dir], { cwd: opened.worktree, env, encoding: 'utf8' }).status, 0);
+  assert.match(review().stderr, /already reviewed at this commit/);
+  // What the reviewer said is handed to the lead at its next wake.
+  const told = JSON.parse(wake('--dry-run').stdout).filter((event) => event.kind === 'review_done');
+  assert.deepEqual(told.map((event) => [event.pr, event.ticket, event.commit, event.text]), [[7, 'X-5', firstHead, 'answer of second']]);
+  // A branch no worktree holds: nobody to read the author from, no review on a guess; the lane says its model, and it goes.
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 9, state: 'OPEN', title: 't', body: 'b', headRefName: 'main', headRefOid: execFileSync('git', ['-C', box.repo, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), additions: 1, deletions: 0, files: [] }));
+  const unknown = spawnSync(join(box.home, 'review-pr.sh'), ['9', 'X-8', '--dry-run'], { env: { ...env, HOME: join(box.home, 'nobody') }, encoding: 'utf8' });
+  assert.match(unknown.stderr, /author of the pull request is unknown/);
+  const said = spawnSync(join(box.home, 'review-pr.sh'), ['9', 'X-8', '--author-model', 'a', '--dry-run'], { env: { ...env, HOME: join(box.home, 'nobody') }, encoding: 'utf8' });
+  assert.equal(JSON.parse(said.stdout).would_run.alias, 'b');
+  // A finished review whose report was lost still counts for the commit it read: no loop of reviews of the same thing.
+  publish();
+  const reportPath = join(box.state, 'reports', `${opened.run_dir.split('/').at(-1)}-review-a1.md`);
+  const kept = readFileSync(reportPath, 'utf8');
+  execFileSync('rm', [reportPath]);
+  assert.match(review().stderr, /already reviewed at this commit/);
+  writeFileSync(reportPath, kept);
+  // The lane pushes a fix: the next review reads only what changed since, and the lane of the one before is closed for it.
+  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: what the review found']);
+  publish();
+  // The reviewer left a file behind in its worktree: the lane of a finished review holds nothing to keep, it is closed all the same.
+  writeFileSync(join(opened.worktree, 'notes-of-the-reviewer.txt'), 'x');
+  const second = review();
+  assert.equal(second.status, 0, second.stderr);
+  const again = JSON.parse(second.stdout);
+  assert.notEqual(again.run_dir, opened.run_dir);
+  assert.throws(() => readFileSync(join(opened.worktree, 'notes-of-the-reviewer.txt')), 'the lane of the review before is closed');
+  assert.equal(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('[review/X-5]')).length, 1);
+  assert.match(readFileSync(join(again.run_dir, 'prompt.md'), 'utf8'), new RegExp(`seulement ce qui a changé depuis le commit ${firstHead}`));
+  // No more than a few an hour (three in this sandbox, the held one counted).
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [again.run_dir], { cwd: again.worktree, env, encoding: 'utf8' }).status, 0);
+  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: one more']);
+  publish();
+  const over = review();
+  assert.match(over.stderr, /3 reviews were already opened in the last hour/);
+  // Refused: the lane of the review before is still there, with its report to hand; nothing was closed for nothing.
+  assert.equal(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('[review/X-5]')).length, 1);
+  // The ticket is said, never guessed; a pull request that is closed is not reviewed.
+  assert.match(spawnSync(join(box.home, 'review-pr.sh'), ['7'], { env, encoding: 'utf8' }).stderr, /usage: review-pr\.sh <pull request number> <ticket>/);
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 8, state: 'MERGED', title: 't', body: 'b', headRefName: 'feat/x', headRefOid: headOf() }));
+  assert.match(spawnSync(join(box.home, 'review-pr.sh'), ['8', 'X-5'], { env, encoding: 'utf8' }).stderr, /is not open/);
+});
+
+test('what a review says comes back to the lead at its next wake, once; one that ended before is not told again', async () => {
+  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { readReport } = await import('../ops/orchestration/lib/reviews.mjs');
+  const report = '---\nformat: lane-report/1\ncommit: abc123\noutcome: done\n---\n\n## Compte rendu\n\nVerdict : à corriger avant fusion.\n\n- un défaut\n\n## Fichiers modifiés\n\nAucun.\n';
+  assert.deepEqual(readReport(report), { commit: 'abc123', outcome: 'done', ended_at: null, body: 'Verdict : à corriger avant fusion.\n\n- un défaut' });
+  const first = changes(null, [], [], new Set(), '2026-01-02T10:00:00Z');
+  const reviews = [
+    { id: 'review:old', at: '2026-01-02T09:00:00Z', pr: 6, ticket: 'X-4', outcome: 'done', commit: 'old', text: 'ancienne' },
+    { id: 'review:r1', at: '2026-01-02T10:03:00Z', pr: 7, ticket: 'X-5', outcome: 'done', commit: 'abc123', text: 'Verdict : à corriger avant fusion.' },
+  ];
+  const woken = changes(first.next, [], [], new Set(), '2026-01-02T10:05:00Z', [], new Set(['review_done']), { reviews });
+  assert.deepEqual(woken.events.map((event) => [event.kind, event.pr, event.ticket, event.text]), [['review_done', 7, 'X-5', 'Verdict : à corriger avant fusion.']]);
+  assert.deepEqual(changes(woken.next, [], [], new Set(), '2026-01-02T10:06:00Z', [], new Set(['review_done']), { reviews }).events, []);
+  assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('review_done'));
+  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('ops/orchestration/review-pr.sh'));
+});
+
+test('a review that fails is tried once more, not for ever: after two tries of the same commit, the script says to tell the user', () => {
+  const lane = laneWithRemote('feat/y', 'feat: the work of the lane');
+  const { box } = lane;
+  const env = { ...box.env, HOME: box.home };
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('per_hour = 3', 'per_hour = 9'));
+  execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/y']);
+  const head = execFileSync('git', ['-C', lane.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', title: 't', body: 'b', headRefName: 'feat/y', headRefOid: head, additions: 1, deletions: 0, files: [] }));
+  const review = () => spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'a-model-of-no-table'], { env, encoding: 'utf8' });
+  // The reviewer does not come to an end, twice: its first model cannot start, and the one that takes over fails.
+  // That is two lines in the ledger for one review, and still one try.
+  for (const attempt of [1, 2]) {
+    const opened = review();
+    assert.equal(opened.status, 0, `try ${attempt}: ${opened.stderr}`);
+    const run = JSON.parse(opened.stdout);
+    assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [run.run_dir], { cwd: run.worktree, env: { ...env, FIRST_EXIT: '2', SECOND_EXIT: '1' }, encoding: 'utf8' }).status, 1);
+  }
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.equal(db.prepare("select count(*) n from runs where role = 'review' and outcome in ('failed', 'refused')").get().n, 4);
+  db.close();
+  const third = review();
+  assert.equal(third.status, 1);
+  assert.match(third.stderr, /2 reviews of this commit .* did not come to an end/);
 });

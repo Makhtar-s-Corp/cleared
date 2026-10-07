@@ -25,6 +25,9 @@
 # (comma separated command prefixes) say what the run may do without a
 # screen; an adapter that isolates its CLI otherwise may ignore them.
 #
+# ORCH_ADVISOR=no says the run goes without the helper model its CLI may
+# consult by itself (a second model, billed apart).
+#
 # ORCH_TEXT_ONLY=1 in the environment says the task only rewords a text: an
 # adapter may then start its CLI without tools, which costs less.
 

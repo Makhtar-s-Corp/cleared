@@ -3,7 +3,7 @@
 // GitHub say now and what was seen before. No model: this is the pre-check
 // that decides whether a session is worth starting.
 //
-//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session> [down]]]
+//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session> [down|up [<finished reviews.json>]]]]
 //       down: GitHub is down, its pull requests are not read
 //       <time read>: taken before Linear and GitHub were asked, so that
 //       nothing created while they answered falls between two wakes
@@ -11,7 +11,9 @@
 //
 // An event is something only the user or the outside world did: a comment or
 // a ticket of the user, a pull request opened, made ready, merged or closed,
-// its checks turning green or red. What agents wrote is never an event.
+// its checks turning green or red. What agents wrote is never an event,
+// with one exception: the report of a review the dispatcher ran, which is
+// handed to the lead as it is (review_done).
 //
 // Not every event is worth a session: with a list of the kinds that are
 // ([lead] wake_on), the others wait in the state and are handed to the next
@@ -44,7 +46,7 @@ export const OVERLAP_MS = 10 * 60_000;
 // What waits for a session is kept up to this many events, the oldest dropped.
 export const WAITING_MAX = 40;
 
-export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false } = {}) {
+export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false, reviews = [] } = {}) {
   // A state that cannot be read (no time of last wake) is no state: this
   // wake takes note of what exists, like the very first one.
   if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
@@ -79,6 +81,15 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     if (seen.has(report.id)) continue;
     seen.add(report.id);
     events.push({ kind: 'lane_report', at: report.at, lane: report.lane, branch: report.branch, text: excerpt(report.text, 3000) });
+  }
+
+  // A review the dispatcher ran came to its end: what it says goes to the
+  // lead. One that ended before the wake before is taken note of, not told.
+  for (const review of reviews) {
+    if (seen.has(review.id)) continue;
+    seen.add(review.id);
+    if (first || review.at <= horizon) continue;
+    events.push({ kind: 'review_done', at: review.at, pr: review.pr, ticket: review.ticket, outcome: review.outcome, commit: review.commit, text: excerpt(review.text, 3500) });
   }
 
   // While GitHub is down, what its pull requests seem to do (checks that it
@@ -117,11 +128,11 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github, reviewsPath] = process.argv.slice(2);
   const wakeOn = worthList?.trim() ? new Set(worthList.split(',').map((kind) => kind.trim()).filter(Boolean)) : null;
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down' }))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down', reviews: reviewsPath ? read(reviewsPath, []) : [] }))}\n`);
 }
