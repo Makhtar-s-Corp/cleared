@@ -770,3 +770,12 @@ test('a dev lane that finished: its branch is pushed, its pull request is in the
   assert.deepEqual({ ...db.prepare('select pr_number, lines_changed from runs').get() }, { pr_number: 41, lines_changed: 0 });
   db.close();
 });
+
+test('every unit that runs a script of the dispatcher finds the tools of the user: orca and the CLIs live in his own folder', () => {
+  const dir = join(ORCH_HOME, 'serve');
+  for (const unit of readdirSync(dir).filter((name) => name.endsWith('.service'))) {
+    const text = readFileSync(join(dir, unit), 'utf8');
+    assert.match(text, /^Environment=PATH=%h\/\.local\/bin:/m, unit);
+  }
+  for (const timer of readdirSync(dir).filter((name) => name.endsWith('.timer'))) assert.ok(readdirSync(dir).includes(timer.replace('.timer', '.service')), timer);
+});
