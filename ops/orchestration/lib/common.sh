@@ -66,13 +66,15 @@ adapter_env() {
 # separated command prefixes). No section: nothing is set, and the CLI keeps
 # the settings of the user.
 permissions_env() {
-  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY
+  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR
   local mode
   mode=$(conf_get "permissions.$1" mode)
   [ -n "$mode" ] || return 0
   export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY
   ORCH_ALLOW=$(conf_get "permissions.$1" allow)
   ORCH_DENY=$(conf_get "permissions.$1" deny)
+  # advisor = no: the role runs without the helper model the CLI may consult.
+  [ "$(conf_get "permissions.$1" advisor)" != no ] || export ORCH_ADVISOR=no
 }
 
 adapter_path() {

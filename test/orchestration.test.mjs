@@ -286,6 +286,42 @@ test('no allowed command runs whatever follows it, and none touches git state sh
   assert.ok(conf.sections['permissions.mechanical'], 'a mechanical task that falls back needs its own permissions');
 });
 
+test('the model a run is filed under is the one that wrote, not a helper it consulted, however much the helper cost; a role can be run without that helper', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-advisor-'));
+  const said = (model) => JSON.stringify({ type: 'assistant', message: { model, content: [{ type: 'text', text: 'working' }] } });
+  const result = JSON.stringify({ type: 'result', is_error: false, result: 'done', total_cost_usd: 4, modelUsage: {
+    'the-writer': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 1000, cacheCreationInputTokens: 100, costUSD: 1 },
+    'the-helper': { inputTokens: 200, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 3 },
+  } });
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\ncat <<'JSON'\n${[said('the-writer'), said('the-writer'), said('<synthetic>'), result].join('\n')}\nJSON\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  const call = (extra = {}) => {
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'asked', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ...extra },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    return { usage: JSON.parse(readFileSync(join(dir, 'u.json'), 'utf8')), args: readFileSync(join(dir, 'args'), 'utf8').split('\n') };
+  };
+  const plain = call();
+  assert.equal(plain.usage.model, 'the-writer');
+  assert.deepEqual(plain.usage.helpers, [{ model: 'the-helper', cost_usd: 3 }], 'what the helper cost is kept, apart');
+  assert.equal(plain.usage.cost_usd, 4);
+  assert.equal(plain.usage.tokens_total, 1340);
+  assert.ok(!plain.args.includes('--settings'));
+  // Asked without the helper: the CLI is told so by its settings, the one way it listens to (a refused tool does not remove it).
+  const without = call({ ORCH_ADVISOR: 'no' });
+  assert.equal(without.args[without.args.indexOf('--settings') + 1], '{"advisorModel":""}');
+});
+
+test('the project lead runs without the helper model: it coordinates, and the helper cost twice what it did itself', () => {
+  for (const role of ['release', 'release-live']) assert.equal(conf.sections[`permissions.${role}`].advisor, 'no', role);
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[permissions.release-live]\nmode = read-only\n', '[permissions.release-live]\nmode = read-only\nadvisor = no\n'));
+  const out = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; permissions_env release-live; echo "\${ORCH_ADVISOR:-unset}"; permissions_env talk; echo "\${ORCH_ADVISOR:-unset}"`], { env: box.env, encoding: 'utf8' });
+  assert.deepEqual(out.stdout.trim().split('\n'), ['no', 'unset'], 'said for the role that has it, and not carried over to the next');
+});
+
 test('the Claude adapter turns the permissions of a role into the allow and deny lists of its CLI', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
   writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\necho '{"type":"result","is_error":false,"result":"ok","total_cost_usd":0,"modelUsage":{}}'\n`, { mode: 0o755 });

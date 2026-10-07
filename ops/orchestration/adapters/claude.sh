@@ -89,6 +89,9 @@ case "${1:-}" in
     fi
     [ "${ADAPTER_CONNECTORS:-}" = none ] && args+=(--strict-mcp-config)
     [ -n "${ORCH_TEXT_ONLY:-}" ] && args+=(--tools "" --no-session-persistence)
+    # Without the helper model: only its setting removes it (tried: refusing
+    # the tool by name leaves it there).
+    [ "${ORCH_ADVISOR:-}" = no ] && args+=(--settings '{"advisorModel":""}')
     set +e
     # The lane shows what the model says and which tools it calls, as it goes.
     cli "${args[@]}" < "$prompt_file" | tee "$events" | jq -R -r --unbuffered '
@@ -113,13 +116,17 @@ case "${1:-}" in
     else
       [ "$(jq -r '.is_error' <<<"$result")" != true ] || refused=1
       jq -r '.result // "The CLI returned no text."' <<<"$result" > "$body"
-      # Sums over every model the session used; the main one is the costliest.
-      contract_usage "$(jq -c '
+      # The model of the run is the one that wrote its messages, not a helper
+      # it consulted (which may well cost more): what helpers cost is kept
+      # apart. Tokens and cost are summed over every model the session used.
+      wrote=$(jq -R -r 'fromjson? | select(.type == "assistant") | .message.model // empty | select(. != "<synthetic>")' "$events" 2>/dev/null | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')
+      contract_usage "$(jq -c --arg wrote "$wrote" '
         (.modelUsage // {}) as $m
         | {tokens_in: ([$m[].inputTokens] | add), tokens_out: ([$m[].outputTokens] | add),
            tokens_cache: ([$m[].cacheReadInputTokens] | add), tokens_cache_write: ([$m[].cacheCreationInputTokens] | add),
            cost_usd: .total_cost_usd}
-        + (if ($m | length) > 0 then {model: ($m | to_entries | max_by(.value.costUSD) | .key)} else {} end)
+        + (if $wrote != "" then {model: $wrote} elif ($m | length) > 0 then {model: ($m | to_entries | max_by(.value.costUSD) | .key)} else {} end)
+        + (if $wrote != "" then {helpers: [$m | to_entries[] | select(.key != $wrote) | {model: .key, cost_usd: .value.costUSD}]} else {} end)
         | .tokens_total = ((.tokens_in // 0) + (.tokens_out // 0) + (.tokens_cache // 0) + (.tokens_cache_write // 0))' <<<"$result")"
     fi
     # An error the CLI reports before the model produced anything (model
