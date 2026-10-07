@@ -1,0 +1,81 @@
+# The adapter contract, shared so that every backend writes the same report.
+# Sourced by adapters/<name>.sh. See README.md.
+#
+#   <adapter> list-models [<model id>...]
+#       prints the model ids this backend can run now, one per line
+#       (limited to the candidates when some are given).
+#   <adapter> run --model <id> --prompt-file <file> --report <file> --usage <file>
+#       runs the prompt in the current worktree, writes the report and the
+#       usage, and exits with 0 (done), 2 (refused before the model was
+#       called) or anything else (failed).
+#
+# ORCH_TEXT_ONLY=1 in the environment says the task only rewords a text: an
+# adapter may then start its CLI without tools, which costs less.
+
+contract_parse_run() {
+  model= prompt_file= report= usage=
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --model) model=$2 ;;
+      --prompt-file) prompt_file=$2 ;;
+      --report) report=$2 ;;
+      --usage) usage=$2 ;;
+      *) echo "unknown option $1" >&2; exit 64 ;;
+    esac
+    shift 2
+  done
+  [ -n "$model" ] && [ -f "$prompt_file" ] && [ -n "$report" ] && [ -n "$usage" ] || {
+    echo "usage: run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
+    exit 64
+  }
+  mkdir -p "$(dirname "$report")" "$(dirname "$usage")"
+  contract_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+}
+
+# contract_usage <json>: the usage file. Fields the CLI does not give stay null.
+contract_usage() {
+  jq -n --arg model "$model" --argjson given "$1" '
+    {model: $model, tokens_in: null, tokens_out: null, tokens_cache: null, tokens_cache_write: null, tokens_total: null, cost_usd: null} + $given
+  ' > "$usage"
+}
+
+# contract_report <adapter> <exit code> <body file>: the report, same shape
+# for every backend. The body is what the model answered (or why it did not).
+contract_report() {
+  local adapter=$1 code=$2 body=$3 outcome changed
+  case "$code" in 0) outcome=done ;; 2) outcome=refused ;; *) outcome=failed ;; esac
+  # Zero outside a git worktree (a text-only task runs in an empty directory).
+  changed=$( (git status --porcelain 2>/dev/null || true) | wc -l | tr -d ' ')
+  {
+    echo '---'
+    echo 'format: lane-report/1'
+    echo "run_id: ${ORCH_RUN_ID:-}"
+    echo "lane: ${ORCH_LANE:-}"
+    echo "ticket: ${ORCH_TICKET:-}"
+    echo "role: ${ORCH_ROLE:-}"
+    echo "adapter: $adapter"
+    echo "requested_model: ${ORCH_REQUESTED_MODEL:-}"
+    echo "model: $(jq -r '.model' "$usage")"
+    echo "outcome: $outcome"
+    echo "exit_code: $code"
+    echo "started_at: $contract_started"
+    echo "ended_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    jq -r '"tokens_in: \(.tokens_in // "")\ntokens_out: \(.tokens_out // "")\ntokens_cache: \(.tokens_cache // "")\ntokens_cache_write: \(.tokens_cache_write // "")\ntokens_total: \(.tokens_total // "")\ncost_usd: \(.cost_usd // "")"' "$usage"
+    echo "files_changed: $changed"
+    echo '---'
+    echo
+    echo '## Compte rendu'
+    echo
+    cat "$body"
+    [ -z "$(tail -c 1 "$body")" ] || echo
+    echo
+    echo '## Fichiers modifiés'
+    echo
+    if [ "$changed" = 0 ]; then
+      echo 'Aucun.'
+    else
+      git status --porcelain | head -n 30 | sed 's/^/- /'
+      [ "$changed" -gt 30 ] && echo "- … et $((changed - 30)) autres"
+    fi
+  } > "$report"
+}
