@@ -490,7 +490,8 @@ test('closing a lane: work that only the lane holds is kept unless forced; what 
     box.git('worktree', 'add', '-q', '-b', `dev/${ticket}`, path, 'origin/main');
     return path;
   };
-  const commit = (path) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'work']);
+  // Each commit has its own message: two empty commits made in the same second on the same parent would otherwise be one and the same commit.
+  const commit = (path, message) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', message]);
   const kill = (ticket, ...more) => spawnSync(join(box.home, 'kill-lane.sh'), [`dev/${ticket}`, ...more], { env: box.env, encoding: 'utf8' });
   const open = () => execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' });
 
@@ -498,12 +499,12 @@ test('closing a lane: work that only the lane holds is kept unless forced; what 
   assert.equal(kill('X-1').status, 0);
 
   const pushed = lane('X-2');
-  commit(pushed);
+  commit(pushed, 'work that is pushed');
   execFileSync('git', ['-C', pushed, 'push', '-q', 'origin', 'dev/X-2']);
   assert.equal(kill('X-2').status, 0);
 
   const local = lane('X-3');
-  commit(local);
+  commit(local, 'work that only the lane holds');
   // Another local branch holding the commit is not a backup: it can be deleted too.
   box.git('branch', 'copy-of-X-3', 'dev/X-3');
   const refused = kill('X-3');
