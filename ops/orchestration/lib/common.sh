@@ -126,7 +126,7 @@ close_old_terminals() {
     [ -s "$dir/terminal.handle" ] && [ ! -f "$dir/terminal.closed" ] || continue
     handle=$(sed -n '1p' "$dir/terminal.handle")
     if orca terminal close --terminal "$handle" --tab > /dev/null 2>&1 \
-      || { listed=$(orca terminal list --json 2> /dev/null) && ! jq -e --arg handle "$handle" '(.result.terminals // .result) | any(.handle == $handle)' <<<"$listed" > /dev/null 2>&1; }; then
+      || { listed=$(orca terminal list --json 2> /dev/null) && jq -e --arg handle "$handle" '(.result.terminals // .result) | type == "array" and (any(.handle == $handle) | not)' <<<"$listed" > /dev/null 2>&1; }; then
       now_utc > "$dir/terminal.closed"
     fi
   done < <(grep -l -x -F "ORCH_LANE=$lane" "$ORCH_STATE_DIR"/runs/*/lane.env 2> /dev/null | head -n "-$kept")

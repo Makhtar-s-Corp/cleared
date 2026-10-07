@@ -205,7 +205,7 @@ fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
 if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
-if [ "$1 $2" = "terminal close" ]; then echo "$4" >> "${join(home, 'orca-closed')}"; fi
+if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
 `, { mode: 0o755 });
   const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main' };
   return { home, state, repo, env, git };
@@ -753,12 +753,12 @@ test('a lane woken again and again keeps the terminals of its last sessions: the
     writeFileSync(join(runs, name, 'lane.env'), `ORCH_LANE=${lane}\n`);
     writeFileSync(join(runs, name, 'terminal.handle'), `${handle}\n`);
   };
-  const session = (name, handle, keep = 'ORCH_KEEP_TERMINALS=3\n') => {
+  const session = (name, handle, keep = 'ORCH_KEEP_TERMINALS=3\n', extra = {}) => {
     past(name, handle);
     writeFileSync(join(runs, name, 'prompt.md'), 'prompt\n');
     writeFileSync(join(runs, name, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }]));
     writeFileSync(join(runs, name, 'lane.env'), `ORCH_LANE=release/lead\nORCH_TICKET=\nORCH_ROLE=release\nORCH_RUN_BASE=${name}\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n${keep}`);
-    const run = spawnSync(join(box.home, 'lane-run.sh'), [join(runs, name)], { cwd: box.repo, env: box.env, encoding: 'utf8' });
+    const run = spawnSync(join(box.home, 'lane-run.sh'), [join(runs, name)], { cwd: box.repo, env: { ...box.env, ...extra }, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
   };
   const closed = () => { try { return readFileSync(join(box.home, 'orca-closed'), 'utf8').trim().split('\n'); } catch { return []; } };
@@ -774,6 +774,15 @@ test('a lane woken again and again keeps the terminals of its last sessions: the
   // The next one closes one more, and does not close again what is closed.
   session('lead-0007', 't7');
   assert.deepEqual(closed(), ['t1', 't2', 't3', 't4']);
+  // Orca refuses to close and answers without a list: the terminal is not written down as closed, the next session tries again.
+  writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ ok: false }));
+  session('lead-0008', 't8', 'ORCH_KEEP_TERMINALS=3\n', { FAKE_ORCA_CLOSE_FAILS: '1' });
+  assert.throws(() => readFileSync(join(runs, 'lead-0005', 'terminal.closed')));
+  // It refuses to close a terminal it no longer shows: that one is forgotten.
+  writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ result: { terminals: [{ handle: 't6' }] } }));
+  session('lead-0009', 't9', 'ORCH_KEEP_TERMINALS=3\n', { FAKE_ORCA_CLOSE_FAILS: '1' });
+  assert.ok(readFileSync(join(runs, 'lead-0005', 'terminal.closed'), 'utf8'));
+  assert.throws(() => readFileSync(join(runs, 'lead-0006', 'terminal.closed')));
 });
 
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
@@ -1260,7 +1269,7 @@ test('tell-lane says it in the terminal written for that lane, and nowhere else'
   assert.match(third.stderr, /already told 2 times/);
 });
 
-test('what a lane may be told: an order to merge or to force is refused however it is put, a caution or what the lead will do itself is not', async () => {
+test('what a lane may be told: an order to merge or to force is refused in its usual forms, a caution or what the lead will do itself is not', async () => {
   const { refusedOrder } = await import('../ops/orchestration/lib/lane-message.mjs');
   for (const order of [
     'Fusionne #259 maintenant.', 'Tu peux fusionner la PR.', 'Tu peux merge la PR.', 'Il faut merger dès que c’est vert.', 'Lance gh pr merge 259.',
@@ -1268,6 +1277,8 @@ test('what a lane may be told: an order to merge or to force is refused however 
     // A negation that invites, and an order after a reassurance, are orders.
     'N’hésite pas à fusionner.', "N'attends pas pour fusionner.", 'Ne t’inquiète pas, fusionne #259.', 'Ne fusionne pas avant la CI ; après, fusionne.',
     'La CI est verte et tu peux fusionner.', 'FUSIONNEZ.',
+    // A negation far before the word does not bear on it.
+    'Comme tu n’as plus rien à faire fusionne la PR.',
   ]) assert.ok(refusedOrder(order), order);
   for (const said of [
     'Ne fusionne pas avant l’accord de Makhtar.', 'Tu ne dois ni fusionner ni forcer.', 'Ne jamais fusionner sans son accord écrit.', 'Pas de merge de ton côté.',
@@ -1310,6 +1321,8 @@ test('host-state sees a screen test from the command that runs it, before any br
     ['bash', '-c', 'pgrep -f "playwright|test:ui|capture-all|run-ui-tests"'],
     ['node', 'scripts/with-test-postgres.mjs', '--', 'node', '--test', 'test/orchestration.test.mjs'],
     ['vim', 'scripts/run-ui-tests.mjs'],
+    // Installing the browsers is not a screen test.
+    ['npx', 'playwright', 'install', 'chromium'],
   ];
   const running = [
     ['npm run test:ui'],
@@ -1318,6 +1331,7 @@ test('host-state sees a screen test from the command that runs it, before any br
     ['node', 'scripts/capture-all.mjs'],
     ['node', 'scripts/ui-shots.mjs', 'http://127.0.0.1:4173'],
     ['node', '/somewhere/node_modules/.bin/playwright', 'test'],
+    ['npx', 'playwright', 'test', '--project=chromium'],
     ['/home/someone/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell', '--headless'],
     ['/opt/old/headless_shell', '--no-sandbox'],
   ];

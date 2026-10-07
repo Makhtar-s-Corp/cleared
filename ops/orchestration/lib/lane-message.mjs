@@ -15,7 +15,8 @@ const NAMED = /(?<![\p{L}\p{N}_-])(fusionn\p{L}*|merg\p{L}*|force[ -]?push\p{L}*
 // Done, or to be done by someone who is not the lane.
 const NOT_AN_ORDER = /^(?:(?:fusionn|merg)(?:é|ée|és|ées|erai|era|eront|able|ables)|merged)$/iu;
 const BY_THE_LEAD = /(?<!\p{L})(?:(?:je|j['’])\s*(?:(?:la|le|les|l['’]|vais|viens|de|peux|pourrai|dois|devrai|ne|n['’]|pas|encore)\s*)*|moi\s+qui\s+(?:(?:la|le|les|l['’])\s*)?)$/iu;
-const NEGATED = /(?<!\p{L})(?:(?:ne|sans|jamais|ni|pas\s+de|aucune?|interdit\p{L}*)(?!\p{L})|n['’]|pas\s+d['’])/iu;
+// A negation bears on what follows it closely: at most three words further.
+const NEGATED = /(?<!\p{L})(?:(?:ne|sans|jamais|ni|pas\s+de|aucune?|interdit\p{L}*)(?!\p{L})|n['’]|pas\s+d['’])(?:\s*\S+){0,3}\s*$/iu;
 // « N'hésite pas à fusionner » is an order, whatever its negation.
 const INVITES = /(?<!\p{L})(?:hésite|tarde|attend|empêche|oublie|manque)/iu;
 
