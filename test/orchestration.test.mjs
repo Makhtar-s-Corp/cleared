@@ -1588,7 +1588,11 @@ test('the report of a lane that the hourly limit holds back is kept, and leaves 
   writeFileSync(join(box.state, 'linear-outbox', 'X-2--other.md'), 'Compte rendu de X-2.\n');
   writeFileSync(join(box.state, 'linear-outbox', 'notes.txt'), 'not a report\n');
   const flush = (extra = {}) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; flush_outbox`], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  // A wake killed while it was sending left some aside: they are taken back, not forgotten.
+  mkdirSync(join(box.state, 'linear-outbox', 'sending.killed'));
+  writeFileSync(join(box.state, 'linear-outbox', 'sending.killed', 'X-3--left.md'), 'Compte rendu de X-3.\n');
   assert.equal(flush({ FAKE_LINEAR_FULL: '1' }).status, 0);
+  execFileSync('mv', [join(box.state, 'linear-outbox', 'X-3--left.md'), join(box.home, 'taken-back.md')]);
   assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')).sort(), [outbox[0], 'X-2--other.md', 'notes.txt'].sort(), 'still held: nothing is lost');
   assert.equal(flush().status, 0);
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');

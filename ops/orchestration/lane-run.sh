@@ -176,7 +176,9 @@ elif [ $? = 4 ]; then
   # The user already got his comments of the hour: this one is kept, and
   # leaves with the others in one grouped comment (flush_outbox, at a wake).
   mkdir -p "$ORCH_STATE_DIR/linear-outbox"
-  cp "$comment" "$ORCH_STATE_DIR/linear-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
+  # Written under another name, then renamed: a wake never takes half a file.
+  cp "$comment" "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part"
+  mv "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part" "$ORCH_STATE_DIR/linear-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
   echo "Commentaire Linear gardé pour un envoi groupé (limite de l'heure atteinte) : $comment"
 else
   echo "!! Le commentaire Linear n'a pas pu être envoyé. Il reste ici : $comment"

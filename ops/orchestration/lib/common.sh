@@ -124,7 +124,13 @@ decisions_worktree() {
 # one grouped comment on the ticket of the reports, as soon as the user may be
 # written again. Nothing is removed before Linear has it.
 flush_outbox() {
-  local box="$ORCH_STATE_DIR/linear-outbox" sending grouped file count code
+  local box="$ORCH_STATE_DIR/linear-outbox" sending grouped file count code left
+  # What a wake killed while sending had taken aside comes back first.
+  for left in "$box"/sending.*; do
+    [ -d "$left" ] || continue
+    mv "$left"/*.md "$box"/ 2> /dev/null || true
+    rmdir "$left" 2> /dev/null || true
+  done
   ls "$box"/*.md > /dev/null 2>&1 || return 0
   # Taken aside first: a report that arrives while these are sent is not
   # among them, and stays for the next time.
