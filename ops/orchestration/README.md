@@ -55,12 +55,33 @@ ops/orchestration/spawn-lane.sh review SEE-112 --pr 257
 
 La lane `review/<ticket>` part de la tête de la PR, en lecture seule. `--since <commit>` limite la relecture à ce qui a changé depuis un commit déjà relu ; `--from <réf>` la fait partir d'une branche locale pas encore poussée. Le modèle vient de la table, avec la taille et les chemins de la PR ; ce n'est jamais celui qui l'a écrite (lu dans le ledger, ou donné par `--author-model`). Sans auteur connu, la relecture ne démarre pas. Son compte rendu est posté tel quel, sans passer par la mise en forme.
 
+## Le chef de projet en sessions courtes
+
+`wake.sh` tourne toutes les minutes (minuterie du serveur). Il lit Linear et GitHub par des scripts et compare avec ce que le réveil d'avant a vu :
+
+- rien n'a bougé : il écrit « réveil sauté » au ledger et s'arrête. Zéro token ;
+- quelque chose a bougé (un commentaire ou un ticket de l'utilisateur, une PR ouverte, passée en « prête », fusionnée ou fermée, ses vérifications qui passent au vert ou au rouge) : il lance une seule session courte du rôle `[lead] role`, dans sa lane stable `release/lead`, avec le modèle de la table, et lui remet la liste. Ce qu'un agent a écrit n'est jamais un événement.
+
+Une session encore au travail retient la suivante, sans rien perdre de ce qui bouge entre-temps. Une source qui ne répond pas : le réveil ne lit rien et n'avance pas.
+
+`[lead] live = no` : le chef de projet observe. Il écrit ce qu'il ferait, dans son compte rendu (`state/reports/`), et ne fait rien : ni commentaire, ni lane, ni fusion. Tant que l'ancien chef de projet tourne, c'est le seul mode ; `wake.sh` refuse `live = yes`, qui n'est pas construit.
+
+Pourquoi une minuterie du serveur et non une automatisation Orca : essayée le 7 octobre, celle-ci lance `claude --dangerously-skip-permissions` dans une session interactive qui ne se termine pas. Le modèle ne viendrait plus de la table, la liste blanche du rôle ne s'appliquerait pas, et la CLI ne rendrait aucun usage à écrire au ledger. Le pré-contrôle sans modèle et la lane stable visible dans Orca sont gardés.
+
+```sh
+ops/orchestration/wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
+```
+
+## Pousser une lane
+
+Une lane n'a aucune commande réseau. Quand son run est terminé, `lane-run.sh` appelle `push-lane.sh` pour les rôles de `[lanes] push_roles` : il pousse la branche de la lane vers la branche du même nom, et ouvre sa PR en brouillon vers la branche de base. Rien d'autre : jamais forcé, jamais la branche de base, jamais une autre branche. Les messages de commit passent d'abord par le garde-fou du dépôt ; refusés, rien ne part.
+
 ## Le ledger
 
 `state/ledger.db` (SQLite), dans le checkout principal, hors de git, commun à toutes les lanes. Écrit par les scripts (`lib/ledger.mjs`), jamais par un modèle.
 
 - `runs` : un lancement de modèle. `run_id`, `ticket`, `role`, `model`, `provider`, `started_at`, `ended_at`, `tokens_in`, `tokens_out`, `tokens_cache`, `cost_eur`, `outcome`, `pr_number`, `lines_changed`, `human_decision`, `human_latency_min`, et en plus `lane`, `source`, `requested_model`, `exit_code`, `tokens_cache_write`, `tokens_total`, `cost_basis`, `project`, `label`.
-- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action), `cli_outdated` (jours de retard d'une CLI).
+- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action), `cli_outdated` (jours de retard d'une CLI), `orca_terminal_delayed` et `orca_terminal_failed` (Orca lent ou muet à l'ouverture d'un terminal).
 
 `outcome` vaut `running`, `done`, `failed`, `refused`, `killed`, `idle`, puis, posés par l'étape de release : `merged`, `returned`, `reverted`.
 
@@ -82,15 +103,17 @@ node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur)
 - Rien de réel ne part dans Linear : `linear.sh` fait passer chaque commentaire par le garde-fou du dépôt (`scripts/codex-guard.mjs`, pris dans `origin/main`) avant de l'envoyer. Un texte refusé n'est pas envoyé ; il reste dans le dossier du run.
 - Les commentaires passent par la clé de l'utilisateur : Linear affiche son nom. `linear.sh` commence donc chaque commentaire par « Écrit par un agent », et garde leurs identifiants dans `state/linear-comments.jsonl`. Une veille doit s'en servir pour ne pas les prendre pour des messages de l'utilisateur.
 
-## Servir la page
+## Les services du serveur
 
 La page n'est lisible que depuis le réseau Tailscale (décision du 7 octobre) : les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
 
 `serve/install.sh` installe, sans droits d'administrateur, sans conteneur et sans proxy :
 
 - un service utilisateur, `serve/serve-dashboard.mjs`, à l'écoute sur la seule adresse Tailscale du serveur. Écouter là ne suffit pas, un conteneur de l'hôte atteint aussi cette adresse : le service refuse donc toute connexion dont la source n'est pas une machine du réseau Tailscale, et ne sert que la page ;
-- une minuterie qui relance `dashboard.sh` toutes les dix minutes, en attendant que le dispatcher ait son propre réveil (phase 2). Des scripts seulement, aucun modèle.
+- une minuterie qui relance `dashboard.sh` toutes les dix minutes. Des scripts seulement, aucun modèle ;
+- la minuterie du réveil du chef de projet, toutes les minutes ;
+- la relecture, chaque heure, des sessions de l'ancienne organisation dans le ledger.
 
 `serve/check.sh` vérifie qui peut lire la page : cette machine par Tailscale, oui ; un conteneur, non, par aucune adresse ; rien n'écoute ailleurs. `install.sh` le lance à la fin.
 
-Les deux services appellent les scripts du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.
+Tous appellent les scripts du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.

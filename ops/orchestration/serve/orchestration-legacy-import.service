@@ -1,0 +1,8 @@
+# systemd user unit, installed by serve/install.sh: reads the session logs of
+# the old way of working into the ledger, so that both can be compared.
+[Unit]
+Description=Orchestration: old sessions into the ledger
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node --no-warnings @ORCH_HOME@/import-legacy.mjs --days 3

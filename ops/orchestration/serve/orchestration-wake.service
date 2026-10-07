@@ -1,0 +1,8 @@
+# systemd user unit, installed by serve/install.sh: one wake of the project
+# lead. Scripts only; a model starts only when something moved.
+[Unit]
+Description=Orchestration: wake of the project lead
+
+[Service]
+Type=oneshot
+ExecStart=@ORCH_HOME@/wake.sh

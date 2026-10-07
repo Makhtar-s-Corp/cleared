@@ -151,7 +151,7 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
@@ -173,13 +173,22 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'pulls-now.json'), '[]');
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
-  git('commit', '-q', '--allow-empty', '-m', 'init');
+  // The guard of the repository, as the scripts read it from the trusted ref.
+  const realRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  execFileSync('mkdir', ['-p', join(repo, 'scripts')]);
+  for (const file of ['codex-guard.mjs', 'codex-guard-allow.json', 'private-terms.mjs', 'private-terms.json']) execFileSync('cp', [join(realRoot, 'scripts', file), join(repo, 'scripts', file)]);
+  git('add', '.');
+  git('commit', '-q', '-m', 'init');
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
   execFileSync('mkdir', ['-p', join(home, 'bin')]);
-  writeFileSync(join(home, 'bin', 'gh'), `#!/usr/bin/env bash\nif [ "$1 $2" = "pr list" ]; then cat "${join(home, 'pulls-now.json')}"; else echo 0; fi\n`, { mode: 0o755 });
+  writeFileSync(join(home, 'bin', 'gh'), `#!/usr/bin/env bash
+if [ "$1 $2" = "pr list" ]; then cat "${join(home, 'pulls-now.json')}"
+elif [ "$1 $2" = "pr create" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
+else echo 0; fi
+`, { mode: 0o755 });
   // FAKE_ORCA_FAILS: how many times it refuses to open a terminal before it does.
   writeFileSync(join(home, 'bin', 'orca'), `#!/usr/bin/env bash
 if [ "$1 $2" = "terminal create" ]; then
@@ -189,16 +198,16 @@ if [ "$1 $2" = "terminal create" ]; then
 fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
 `, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf') };
+  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main' };
   return { home, state, repo, env, git };
 }
 
-function runLane(box, firstExit, extra = {}) {
+function runLane(box, firstExit, extra = {}, cwd = box.repo) {
   const runDir = mkdtempSync(join(tmpdir(), 'orch-run-'));
   writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
   writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }, { alias: 'b', adapter: 'second', model: 'm2' }]));
   writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n');
-  const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: { ...box.env, FIRST_EXIT: String(firstExit), ...extra }, encoding: 'utf8' });
+  const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd, env: { ...box.env, FIRST_EXIT: String(firstExit), ...extra }, encoding: 'utf8' });
   const db = openLedger(join(box.state, 'ledger.db'));
   const runs = db.prepare('select model, outcome, exit_code from runs order by rowid').all().map((row) => ({ ...row }));
   const events = db.prepare('select kind from events order by rowid').all().map((row) => row.kind);
@@ -680,4 +689,84 @@ test('a source that does not answer: the wake reads nothing, moves nothing, and 
   assert.equal(run.status, 1);
   assert.match(run.stderr, /Linear did not answer/);
   assert.throws(() => readFileSync(join(box.state, 'wake', 'state.json')));
+});
+
+// A lane with one commit, in a sandbox whose repository has a remote.
+function laneWithRemote(branch, message = 'feat: the work of the lane') {
+  const box = sandbox();
+  const remote = join(box.home, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  box.git('remote', 'add', 'origin', remote);
+  box.git('push', '-q', 'origin', 'main');
+  const path = join(box.home, 'lanes', branch.replace('/', '-'));
+  box.git('worktree', 'add', '-q', '-b', branch, path, 'main');
+  if (message) execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', message]);
+  const push = (target = path) => spawnSync(join(box.home, 'push-lane.sh'), [target], { env: box.env, encoding: 'utf8' });
+  const onRemote = () => execFileSync('git', ['--git-dir', remote, 'for-each-ref', '--format=%(refname:short) %(objectname:short)', 'refs/heads'], { encoding: 'utf8' }).trim().split('\n');
+  const created = () => { try { return readFileSync(join(box.home, 'pr-create-args'), 'utf8').trim().split('\n'); } catch { return null; } };
+  return { box, remote, path, push, onRemote, created };
+}
+
+test('push-lane: the branch of the lane goes to the branch of the same name, and its draft pull request opens to the base', () => {
+  const lane = laneWithRemote('dev/X-5');
+  const run = lane.push();
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), '#41');
+  assert.ok(lane.onRemote().some((ref) => ref.startsWith('dev/X-5 ')));
+  const args = lane.created();
+  assert.ok(args.includes('--draft'));
+  assert.equal(args[args.indexOf('--base') + 1], 'main');
+  assert.equal(args[args.indexOf('--head') + 1], 'dev/X-5');
+  assert.equal(args[args.indexOf('--title') + 1], 'feat: the work of the lane');
+});
+
+test('push-lane refuses everything that is not a lane of a pushed role: the base branch, another branch, another role, a lane with nothing', () => {
+  const lane = laneWithRemote('dev/X-5');
+  const refused = (target, pattern) => { const run = lane.push(target); assert.equal(run.status, 1, pattern); assert.match(run.stderr, pattern); };
+  refused(lane.box.repo, /is not the branch of a lane/); // the main checkout, on main
+  lane.box.git('worktree', 'add', '-q', '-b', 'feature/free', join(lane.box.home, 'lanes', 'free'), 'main');
+  refused(join(lane.box.home, 'lanes', 'free'), /is not the branch of a lane/);
+  lane.box.git('worktree', 'add', '-q', '-b', 'release/X-7', join(lane.box.home, 'lanes', 'release-X-7'), 'main');
+  refused(join(lane.box.home, 'lanes', 'release-X-7'), /are not pushed/);
+  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main'], 'nothing left the machine');
+  assert.equal(lane.created(), null);
+  const empty = laneWithRemote('dev/X-6', null);
+  const nothing = empty.push();
+  assert.equal(nothing.status, 0);
+  assert.match(nothing.stdout, /nothing to push/);
+  assert.deepEqual(empty.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
+});
+
+test('push-lane never forces: a remote branch that moved makes it fail, and stays as it was', () => {
+  const lane = laneWithRemote('dev/X-5');
+  // Someone else pushed another commit to the branch of the lane.
+  const other = join(lane.box.home, 'other');
+  execFileSync('git', ['clone', '-q', lane.remote, other]);
+  execFileSync('git', ['-C', other, '-c', 'user.name=o', '-c', 'user.email=o@localhost', 'commit', '-q', '--allow-empty', '-m', 'someone else']);
+  execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'HEAD:refs/heads/dev/X-5']);
+  const before = lane.onRemote();
+  const run = lane.push();
+  assert.notEqual(run.status, 0);
+  assert.deepEqual(lane.onRemote(), before);
+  assert.equal(lane.created(), null);
+  assert.doesNotMatch(readFileSync(join(ORCH_HOME, 'push-lane.sh'), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n'), /--force|-f\b|\+HEAD|\+refs/);
+});
+
+test('push-lane sends nothing when a commit message is refused by the guard', () => {
+  const flagged = `fix: le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"`;
+  const lane = laneWithRemote('dev/X-5', flagged);
+  const run = lane.push();
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /refused by the guard/);
+  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
+});
+
+test('a dev lane that finished: its branch is pushed, its pull request is in the ledger and in the Linear text', () => {
+  const lane = laneWithRemote('dev/X-1');
+  const result = runLane(lane.box, 0, {}, lane.path);
+  assert.equal(result.status, 0);
+  assert.match(result.comment, /PR ouverte ou mise à jour : #41/);
+  const db = openLedger(join(lane.box.state, 'ledger.db'));
+  assert.deepEqual({ ...db.prepare('select pr_number, lines_changed from runs').get() }, { pr_number: 41, lines_changed: 0 });
+  db.close();
 });

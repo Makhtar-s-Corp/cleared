@@ -72,6 +72,7 @@ run_chain() {
 }
 
 run_chain "$ORCH_ROLE" "$run_dir/prompt.md" "$run_dir/chain.json" "$ORCH_REQUESTED_ALIAS"
+lane_run_id=$run_id
 lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lane_adapter=$adapter lane_model=$model lane_fallback=$fallback_note
 
 # What the user reads in Linear. The figures and the model come from the
@@ -107,6 +108,18 @@ if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ]; then
   rm -rf "$scratch"
 fi
 
+# A lane has no network command: when its role is one whose work is pushed,
+# this is where its branch leaves and its pull request opens.
+pushed_note=
+if [ "$lane_code" = 0 ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
+  if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2>&1); then
+    case "$pushed" in "#"*) pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)." ;; *) pushed_note="Rien à pousser : la lane n'a aucun commit." ;; esac
+  else
+    pushed_note="La branche n'a pas été poussée : $(tail -n 1 <<<"$pushed")"
+  fi
+  echo "$pushed_note"
+fi
+
 case "$lane_code" in
   0) result="terminé" ;;
   2) result="pas démarré : rien n'a été envoyé au modèle" ;;
@@ -124,6 +137,7 @@ comment="$run_dir/comment.md"
   [ -n "$lane_fallback" ] && echo "- Repli : $lane_fallback"
   [ -n "${ORCH_SPAWN_NOTE:-}" ] && echo "- $ORCH_SPAWN_NOTE"
   echo "- Résultat : $result${tokens:+ · $(french_number "$tokens") tokens}${cost:+ · $cost \$ au tarif API}"
+  [ -n "$pushed_note" ] && echo "- $pushed_note"
   [ -n "$writeup_note" ] && echo "- $writeup_note"
   echo
   cat "$body"

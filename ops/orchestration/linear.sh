@@ -39,26 +39,6 @@ gql() {
   printf '%s\n' "$response"
 }
 
-# guard_text <file>: refuses, without showing any value, a text the guard of
-# the repository would not let out.
-guard_text() {
-  local ref=${ORCH_GUARD_REF:-origin/main} dir part
-  dir=$(mktemp -d)
-  for part in codex-guard.mjs codex-guard-allow.json private-terms.mjs private-terms.json; do
-    git -C "$ORCH_REPO" show "$ref:scripts/$part" > "$dir/$part" 2>/dev/null || {
-      rm -rf "$dir"
-      echo "linear: not sent, the guard (scripts/$part on $ref) could not be read" >&2
-      return 1
-    }
-  done
-  if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
-    rm -rf "$dir"
-    echo "linear: not sent, the guard refuses this text" >&2
-    return 1
-  fi
-  rm -rf "$dir"
-}
-
 ticket_ok() { [[ "$1" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$1\" is not a ticket identifier"; }
 
 case "${1:-}" in

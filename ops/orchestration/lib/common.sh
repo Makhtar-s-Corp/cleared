@@ -97,6 +97,28 @@ model_seen() {
   printf '%s\t%s\n' "$2" "$(date +%s)" >> "$ORCH_STATE_DIR/models/$1.available"
 }
 
+# guard_text <file>: refuses, without showing any value, a text the guard of
+# the repository would not let out (private terms, secrets, IBANs, addresses,
+# phone numbers). For anything a script sends to an outside service: Linear,
+# GitHub. The guard comes from the trusted ref, like scripts/codex-task.sh.
+guard_text() {
+  local ref=${ORCH_GUARD_REF:-origin/main} dir part
+  dir=$(mktemp -d)
+  for part in codex-guard.mjs codex-guard-allow.json private-terms.mjs private-terms.json; do
+    git -C "$ORCH_REPO" show "$ref:scripts/$part" > "$dir/$part" 2>/dev/null || {
+      rm -rf "$dir"
+      echo "$(basename "$0"): not sent, the guard (scripts/$part on $ref) could not be read" >&2
+      return 1
+    }
+  done
+  if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
+    rm -rf "$dir"
+    echo "$(basename "$0"): not sent, the guard refuses this text" >&2
+    return 1
+  fi
+  rm -rf "$dir"
+}
+
 # open_terminal <worktree> <title> <command> [<ticket>]: opens a terminal of
 # the lane in Orca and prints its handle. Orca only knows a new worktree a few
 # seconds after git does, sometimes much later: the attempt is repeated for
