@@ -13,6 +13,8 @@ run_dir=${1:?usage: lane-run.sh <run directory>}
 # Whatever stops this script, the run says it is over: a wake waits for it.
 trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
+# How what this run posts is signed (the acting lead posts by itself).
+[ -z "${ORCH_SIGNED:-}" ] || export ORCH_SIGNED
 mkdir -p "$ORCH_STATE_DIR/reports"
 
 french_number() { printf '%s' "$1" | sed -E ':a;s/^([0-9]+)([0-9]{3})/\1 \2/;ta'; }
@@ -30,7 +32,9 @@ attempt() {
     --project "${ORCH_PROJECT:-}" --label "${ORCH_LABEL:-}"
   echo "── $ORCH_LANE · $role · $alias ($adapter: $model) ──"
   adapter_env "$adapter"
-  permissions_env "$role"
+  # The role's own permissions, unless the run was given others (the acting
+  # lead), which never apply to another role of the same lane (the write-up).
+  if [ "$role" = "$ORCH_ROLE" ]; then permissions_env "${ORCH_PERMISSIONS:-$role}"; else permissions_env "$role"; fi
   ORCH_RUN_ID=$run_id ORCH_ROLE=$role ORCH_REQUESTED_MODEL=$requested \
     "$(adapter_path "$adapter")" run --model "$model" --prompt-file "$prompt" --report "$report" --usage "$usage_file"
   code=$?

@@ -69,7 +69,7 @@ test('every role with permissions never allows what it denies, nor a network or 
   for (const name of sections) {
     const { mode, allow, deny } = conf.sections[name];
     assert.ok(['read-only', 'accept-edits'].includes(mode), `${name}: mode`);
-    assert.ok(conf.roles[name.slice('permissions.'.length)], `${name}: not a role`);
+    assert.ok(conf.roles[name.slice('permissions.'.length).replace(/-live$/, '')], `${name}: not a role`);
     for (const allowed of list(allow)) {
       for (const denied of list(deny)) assert.ok(!(allowed === denied || allowed.startsWith(`${denied} `)), `${name} allows "${allowed}", which it denies`);
       assert.doesNotMatch(allowed, /^(curl|wget|ssh|scp|nc|docker|gh|npx)\b|^git (push|fetch|pull|clone|remote)\b|^npm (install|ci|i)\b|docker/, `${name} allows "${allowed}"`);
@@ -151,7 +151,7 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
@@ -175,6 +175,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
   writeFileSync(join(home, 'prompts', 'release.md'), 'lead prompt\n');
   writeFileSync(join(home, 'prompts', 'handover.md'), 'handover prompt\n');
+  writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
   writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
@@ -199,6 +200,8 @@ if [ "$1 $2" = "terminal create" ]; then
   echo '{"handle":"t1"}'
 fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
+if [ "$1 $2" = "terminal list" ]; then cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
+if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
 `, { mode: 0o755 });
   const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main' };
   return { home, state, repo, env, git };
@@ -998,15 +1001,6 @@ test('the handover wake: one session that rereads the handover and says what it 
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
   assert.match(posted, /^X-100 from=chef de projet\n/);
   assert.match(posted, /answer of first/);
-  // A wake that is not the handover still refuses to act.
-  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('live = no', 'live = yes'));
-  writeFileSync(join(box.home, 'linear-now.json'), '[]');
-  spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify([{ id: 'i1', identifier: 'X-1', title: 'T', url: 'u', state: 's', project: null, createdAt: new Date().toISOString(), description: 'de Makhtar', comments: [] }]));
-  writeFileSync(join(runDir, 'exit-code'), '0');
-  const acting = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
-  assert.equal(acting.status, 1);
-  assert.match(acting.stderr, /not built yet/);
 });
 
 test('the handover wake needs a handover to read, and a ticket to answer in', () => {
@@ -1054,4 +1048,106 @@ test('a listing of tickets that fills the page says it may be cut short', () => 
   assert.equal(run.status, 0);
   assert.equal(JSON.parse(run.stdout).length, 100);
   assert.match(run.stderr, /may be cut short/);
+});
+
+test('the last message of a lane is a report for the lead only when its turn is over and it speaks to the lead', async () => {
+  const { lastReport, laneReports } = await import('../ops/orchestration/lib/lanes.mjs');
+  const say = (uuid, text, more = []) => JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-01-02T10:00:00Z', message: { content: [{ type: 'text', text }, ...more] } });
+  const user = (content) => JSON.stringify({ type: 'user', message: { content } });
+  assert.equal(lastReport([say('a', 'Pour le chef de projet : fini.')]).id, 'a');
+  // The turn goes on (a tool call), or someone wrote to the lane after: no report.
+  assert.equal(lastReport([say('a', 'Je regarde.', [{ type: 'tool_use', name: 'Bash' }])]), null);
+  assert.equal(lastReport([say('a', 'Pour le chef de projet : fini.'), user('continue')]), null);
+  // A tool result is not someone writing to the lane.
+  assert.equal(lastReport([say('a', 'x', [{ type: 'tool_use', name: 'Bash' }]), user([{ type: 'tool_result', content: 'ok' }]), say('b', 'Pour le chef de projet : fini.')]).id, 'b');
+  const projects = mkdtempSync(join(tmpdir(), 'orch-projects-'));
+  const lane = (name, text) => {
+    const path = `/lanes/${name}`;
+    const dir = join(projects, path.replace(/[^A-Za-z0-9]/g, '-'));
+    execFileSync('mkdir', ['-p', dir]);
+    writeFileSync(join(dir, 's.jsonl'), `${say(`id-${name}`, text)}\n`);
+    return { name, path, branch: `b/${name}` };
+  };
+  const reports = laneReports([lane('one', 'Pour le chef de projet : prêt.'), lane('two', 'Voilà, Makhtar, c’est fait.'), { name: 'none', path: '/lanes/none', branch: 'b' }], projects);
+  assert.deepEqual(reports.map((report) => [report.lane, report.id]), [['one', 'id-one']]);
+});
+
+test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
+  const box = sandbox();
+  const projects = join(box.home, 'projects');
+  const lanePath = join(box.home, 'lanes', 'old-lane');
+  box.git('worktree', 'add', '-q', '-b', 'feat/old', lanePath, 'main');
+  const dir = join(projects, lanePath.replace(/[^A-Za-z0-9]/g, '-'));
+  execFileSync('mkdir', ['-p', dir]);
+  writeFileSync(join(dir, 's.jsonl'), `${JSON.stringify({ type: 'assistant', uuid: 'r1', timestamp: new Date().toISOString(), message: { content: [{ type: 'text', text: 'Pour le chef de projet : main est réintégrée, je demande le créneau de CI.' }] } })}\n`);
+  const env = { ...box.env, HOME: box.home };
+  execFileSync('mkdir', ['-p', join(box.home, '.claude')]);
+  execFileSync('ln', ['-s', projects, join(box.home, '.claude', 'projects')]);
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env, encoding: 'utf8' });
+  // Observing: the first wake takes note, the second finds nothing: the lane is not read.
+  wake();
+  const observing = wake();
+  assert.equal(observing.stdout.trim(), '');
+  // Acting: the report is an event.
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('live = no', 'live = yes'));
+  const acting = wake();
+  assert.equal(acting.status, 0, acting.stderr);
+  const runDir = acting.stdout.trim();
+  const prompt = readFileSync(join(runDir, 'prompt.md'), 'utf8');
+  assert.match(prompt, /^acting lead prompt/);
+  assert.match(prompt, /Lane old-lane \(branche feat\/old\) — son dernier message[\s\S]*je demande le créneau de CI/);
+  const laneEnv = readFileSync(join(runDir, 'lane.env'), 'utf8');
+  assert.match(laneEnv, /ORCH_PERMISSIONS=release-live/);
+  assert.match(laneEnv, /ORCH_COMMENT_ON=none/);
+  // Said once: the next wake does not hand the same report again.
+  writeFileSync(join(runDir, 'exit-code'), '0');
+  assert.equal(wake().stdout.trim(), '');
+});
+
+test('the acting lead may answer and nothing more: its permissions allow three scripts and refuse the ones that open, close, push or create', () => {
+  const live = conf.sections['permissions.release-live'];
+  const list = (text) => text.split(',').map((item) => item.trim());
+  assert.equal(live.mode, 'read-only');
+  const scripts = list(live.allow).filter((item) => item.startsWith('ops/'));
+  assert.deepEqual(scripts, ['ops/orchestration/linear.sh comment', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh']);
+  for (const refused of ['ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
+});
+
+test('tell-lane says it in the terminal written for that lane, and nowhere else', () => {
+  const box = sandbox();
+  execFileSync('mkdir', ['-p', box.state]);
+  writeFileSync(join(box.state, 'lanes.json'), JSON.stringify({ 'old-lane': 'term_1' }));
+  const terminals = (list) => writeFileSync(join(box.home, 'terminals.json'), JSON.stringify({ result: { terminals: list } }));
+  const tell = (lane, text) => spawnSync(join(box.home, 'tell-lane.sh'), [lane, '-'], { env: box.env, encoding: 'utf8', input: text });
+  const sent = () => { try { return readFileSync(join(box.home, 'orca-sent'), 'utf8'); } catch { return null; } };
+  // An unknown lane, a terminal that is gone, one that is in another worktree: nothing is sent.
+  terminals([{ handle: 'term_1', connected: true, worktreePath: '/x/lanes/old-lane' }]);
+  assert.equal(tell('another', 'x').status, 1);
+  terminals([]);
+  assert.match(tell('old-lane', 'x').stderr, /is gone/);
+  terminals([{ handle: 'term_1', connected: true, worktreePath: '/x/lanes/somewhere-else' }]);
+  assert.match(tell('old-lane', 'x').stderr, /not in its worktree/);
+  assert.equal(sent(), null);
+  terminals([{ handle: 'term_1', connected: true, worktreePath: '/x/lanes/old-lane' }]);
+  const ok = tell('old-lane', 'Accord de Makhtar sur X-1.\nTu peux réintégrer main.');
+  assert.equal(ok.status, 0, ok.stderr);
+  const args = sent().split('\n');
+  assert.equal(args[args.indexOf('--terminal') + 1], 'term_1');
+  const text = args[args.indexOf('--text') + 1];
+  assert.match(text, /^Pour la lane old-lane, de la part du chef de projet/);
+  assert.match(text, /Accord de Makhtar sur X-1\. Tu peux réintégrer main\./);
+  assert.ok(args.includes('--enter'));
+  assert.equal(JSON.parse(readFileSync(join(box.state, 'lane-messages.jsonl'), 'utf8').trim()).lane, 'old-lane');
+});
+
+test('a comment read on stdin is posted, signed by the one who runs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
+  assert.equal(run.status, 0, run.stderr);
+  const asked = readFileSync(join(dir, 'asked'), 'utf8');
+  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par Makhtar/);
+  assert.match(asked, /Une question pour toi\./);
+  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
 });

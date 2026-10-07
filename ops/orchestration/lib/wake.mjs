@@ -3,7 +3,7 @@
 // GitHub say now and what was seen before. No model: this is the pre-check
 // that decides whether a session is worth starting.
 //
-//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read>
+//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json>]
 //       <time read>: taken before Linear and GitHub were asked, so that
 //       nothing created while they answered falls between two wakes
 //       prints {events: [...], next: {...}}
@@ -36,7 +36,7 @@ export function checksOf(rollup = []) {
 // was created in that margin and not seen yet still counts as new.
 export const OVERLAP_MS = 10 * 60_000;
 
-export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString()) {
+export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = []) {
   // A state that cannot be read (no time of last wake) is no state: this
   // wake takes note of what exists, like the very first one.
   if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
@@ -63,6 +63,14 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
       if (first || comment.createdAt <= horizon || byAgent(comment.body, comment.id, agentIds)) continue;
       events.push({ kind: 'comment', at: comment.createdAt, ...ticket, url: comment.url ?? issue.url, text: excerpt(comment.body) });
     }
+  }
+
+  // What a lane at work says to the lead: the last message of its terminal.
+  // On the very first wake it is news too: a lane that waits is not left waiting.
+  for (const report of reports) {
+    if (seen.has(report.id)) continue;
+    seen.add(report.id);
+    events.push({ kind: 'lane_report', at: report.at, lane: report.lane, branch: report.branch, text: excerpt(report.text, 3000) });
   }
 
   const nextPulls = {};
@@ -93,10 +101,10 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath, readAt] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath] = process.argv.slice(2);
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : []))}\n`);
 }

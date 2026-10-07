@@ -2,7 +2,7 @@
 # The one script through which agents and scripts talk to Linear.
 #
 #   linear.sh issue <ticket>                    ticket as JSON (project, labels, state…)
-#   linear.sh comment <ticket> <file> [<from>]  posts the file as a comment, prints its URL
+#   linear.sh comment <ticket> <file|-> [<from>]  posts the file (or stdin) as a comment, prints its URL
 #   linear.sh waiting                           tickets waiting for the user, as JSON
 #   linear.sh changes <ISO time>                tickets touched since then, with their recent comments, as JSON
 #   linear.sh list <state>                      the tickets in that state ("In Progress"…), as JSON
@@ -54,8 +54,16 @@ case "${1:-}" in
     ;;
   comment)
     ticket_ok "$2"
+    # "-": the text is read on stdin (an agent that may run this script, and
+    # write no file).
+    if [ "${3:-}" = - ]; then
+      text_file=$(mktemp)
+      cat > "$text_file"
+      set -- "$1" "$2" "$text_file" "${4:-${ORCH_SIGNED:-script}}"
+    fi
     [ -f "$3" ] || die "no such file: $3"
-    from=${4:-script}
+    [ -s "$3" ] || die "nothing to post"
+    from=${4:-${ORCH_SIGNED:-script}}
     guard_text "$3" || exit 1
     id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id // empty')
     [ -n "$id" ] || die "no such ticket: $2"
