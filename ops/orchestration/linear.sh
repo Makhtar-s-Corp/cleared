@@ -65,6 +65,14 @@ case "${1:-}" in
     [ -f "$3" ] || die "no such file: $3"
     grep -q '[^[:space:]]' "$3" || die "nothing to post"
     from=${4:-${ORCH_SIGNED:-script}}
+    # The user reads every comment: all the agents together write him no more
+    # than a few an hour. Beyond, nothing is posted; what there is to say is
+    # grouped in one comment, later.
+    limit=$(conf_get linear comments_per_hour)
+    if [ -n "$limit" ]; then
+      recent=$(jq -R -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.at > $since) | .at' "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | grep -c . || true)
+      [ "$recent" -lt "$limit" ] || die "the user was already written $recent times in the last hour (limit: $limit): nothing posted. Group what there is to say in one comment, later"
+    fi
     guard_text "$3" || exit 1
     id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id // empty')
     [ -n "$id" ] || die "no such ticket: $2"

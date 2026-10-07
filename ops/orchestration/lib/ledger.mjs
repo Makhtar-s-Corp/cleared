@@ -29,6 +29,7 @@ export const EVENT_KINDS = [
   'lead_lane_blocked', // the lane of the project lead holds work of its own: no session starts until it is looked at
   'wake_started', // a session of the project lead was started; the detail says what woke it
   'decision', // a decision the user worded in a discussion, transcribed by decide.sh (source discussion)
+  'role_model_changed', // the model of a role was changed in agents.conf; the detail says from what, to what, and why
 ];
 
 const SCHEMA = `

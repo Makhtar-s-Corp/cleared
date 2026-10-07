@@ -1216,12 +1216,13 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   assert.equal(wake().stdout.trim(), '');
 });
 
-test('the acting lead may answer and nothing more: its permissions allow three scripts and refuse the ones that open, close, push or create', () => {
+test('the acting lead may answer and read, nothing more: its permissions refuse the scripts that open, close, push or create', () => {
   const live = conf.sections['permissions.release-live'];
   const list = (text) => text.split(',').map((item) => item.trim());
   assert.equal(live.mode, 'read-only');
   const scripts = list(live.allow).filter((item) => item.startsWith('ops/'));
-  assert.deepEqual(scripts, ['ops/orchestration/linear.sh comment', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh']);
+  // It answers by two scripts; the rest only reads (what the user wrote in Linear, the state of the host).
+  assert.deepEqual(scripts, ['ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh comments', 'ops/orchestration/linear.sh issue', 'ops/orchestration/linear.sh waiting', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh']);
   for (const refused of ['ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
 });
 
@@ -1387,6 +1388,26 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
   assert.match(asked, /Écrit par un agent \(chef de projet\), pas par Makhtar/);
   assert.match(asked, /Une question pour toi\./);
   assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
+});
+
+test('the user is not written more than a few times an hour by all the agents together: beyond, the comment is refused and is to be grouped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-linear-'));
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
+  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const limit = Number(conf.sections.linear.comments_per_hour);
+  assert.equal(limit, 6);
+  const post = (from) => spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: from } });
+  const entry = (minutesAgo, from) => JSON.stringify({ id: `c${minutesAgo}`, ticket: 'X-2', from, at: new Date(Date.now() - minutesAgo * 60_000).toISOString().replace(/\.\d+Z$/, 'Z') });
+  mkdirSync(join(dir, 'state'));
+  // Five in the last hour, by several agents, and older ones that no longer count: one more goes.
+  writeFileSync(join(dir, 'state', 'linear-comments.jsonl'), `${[entry(200, 'a'), entry(61, 'a'), entry(50, 'chef de projet'), entry(40, 'a'), entry(30, 'review'), entry(20, 'chef de projet'), entry(10, 'a')].join('\n')}\nnot json\n`);
+  assert.equal(post('chef de projet').status, 0);
+  // That made six: the next one is refused, whoever writes it, and nothing is sent.
+  const asked = readFileSync(join(dir, 'asked'), 'utf8');
+  const refused = post('another agent');
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /already written 6 times in the last hour[\s\S]*[Gg]roup/);
+  assert.equal(readFileSync(join(dir, 'asked'), 'utf8'), asked);
 });
 
 test('the discussion has no right to act: its permissions name what it may read and the one script it proposes with, and refuse the rest', () => {
