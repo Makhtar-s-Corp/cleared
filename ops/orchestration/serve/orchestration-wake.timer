@@ -1,0 +1,10 @@
+# Every minute: Linear and GitHub are read, nothing is exposed.
+[Unit]
+Description=Orchestration: wake of the project lead (every minute)
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

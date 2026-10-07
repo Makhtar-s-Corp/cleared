@@ -10,6 +10,8 @@ set -uo pipefail
 
 run_dir=${1:?usage: lane-run.sh <run directory>}
 . "$run_dir/lane.env"
+# Whatever stops this script, the run says it is over: a wake waits for it.
+trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
 mkdir -p "$ORCH_STATE_DIR/reports"
 
@@ -72,6 +74,7 @@ run_chain() {
 }
 
 run_chain "$ORCH_ROLE" "$run_dir/prompt.md" "$run_dir/chain.json" "$ORCH_REQUESTED_ALIAS"
+lane_run_id=$run_id
 lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lane_adapter=$adapter lane_model=$model lane_fallback=$fallback_note
 
 # What the user reads in Linear. The figures and the model come from the
@@ -107,6 +110,32 @@ if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ]; then
   rm -rf "$scratch"
 fi
 
+# A lane has no network command: when its role is one whose work is pushed,
+# this is where its branch leaves and its pull request opens.
+pushed_note=
+if [ "$lane_code" = 0 ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
+  # Its answer is its last line on stdout. What git and gh say on the way is
+  # kept in a file and shown once the script has ended.
+  push_err=$(mktemp)
+  if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2> "$push_err"); then
+    pushed=$(sed -n '$p' <<<"$pushed")
+    if [[ "$pushed" =~ ^#[0-9]+$ ]]; then
+      pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."
+    elif [[ "$pushed" == "nothing to push"* ]]; then
+      pushed_note="Rien à pousser : la lane n'a aucun commit."
+    else
+      pushed_note="Réponse inattendue du script de push : ${pushed:-rien}. À vérifier à la main."
+    fi
+  else
+    # Its own last word, not a hint git may have added after it.
+    reason=$(grep '^push-lane\.sh: ' "$push_err" | sed -n '$p')
+    pushed_note="La branche n'a pas été poussée : ${reason:-$(sed -n '$p' "$push_err")}"
+  fi
+  cat "$push_err" >&2
+  rm -f "$push_err"
+  echo "$pushed_note"
+fi
+
 case "$lane_code" in
   0) result="terminé" ;;
   2) result="pas démarré : rien n'a été envoyé au modèle" ;;
@@ -124,6 +153,7 @@ comment="$run_dir/comment.md"
   [ -n "$lane_fallback" ] && echo "- Repli : $lane_fallback"
   [ -n "${ORCH_SPAWN_NOTE:-}" ] && echo "- $ORCH_SPAWN_NOTE"
   echo "- Résultat : $result${tokens:+ · $(french_number "$tokens") tokens}${cost:+ · $cost \$ au tarif API}"
+  [ -n "$pushed_note" ] && echo "- $pushed_note"
   [ -n "$writeup_note" ] && echo "- $writeup_note"
   echo
   cat "$body"
@@ -132,7 +162,7 @@ rm -f "$body"
 
 if [ "${ORCH_COMMENT_ON:-}" = none ]; then
   echo "Commentaire Linear non envoyé (demandé) : $comment"
-elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "$ORCH_ROLE, lane $ORCH_LANE"); then
+elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_SIGNED:-$ORCH_ROLE, lane $ORCH_LANE}"); then
   echo "Commentaire Linear : $url"
   echo "$url" > "$run_dir/comment.url"
 else
