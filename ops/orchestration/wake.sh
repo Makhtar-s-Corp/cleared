@@ -53,6 +53,11 @@ if [ -f "$current" ] && [ ! -f "$(cat "$current")/exit-code" ]; then
   [ "$age" -ge "$(conf_get lead max_minutes)" ] || busy "a session of the project lead is still running"
 fi
 
+# Never two agents in the same folder: while the user talks with the lead in
+# its lane (talk.sh), no short session starts there. Nothing is read, so
+# nothing that moves meanwhile is lost.
+! talk_open || busy "a discussion is open in the lane of the project lead"
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 state="$wake_dir/state.json"

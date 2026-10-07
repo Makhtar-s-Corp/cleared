@@ -115,6 +115,22 @@ model_seen() {
   printf '%s\t%s\n' "$2" "$(date +%s)" >> "$ORCH_STATE_DIR/models/$1.available"
 }
 
+# The worktree where a discussion writes docs/decisions.md, and nothing else.
+decisions_worktree() {
+  printf '%s\n' "${ORCH_DECISIONS_WORKTREE:-$(expand_home "$(conf_get lanes root)")/$(conf_get talk role)-$(conf_get lead report_on)}"
+}
+
+# unpushed <worktree>: how many of its commits no remote holds.
+unpushed() { git -C "$1" rev-list --count HEAD --not --remotes; }
+
+# talk_open: is a discussion open in the lane of the lead? (talk-run.sh writes
+# its process there, and takes it away when the conversation ends.)
+talk_open() {
+  local pid
+  pid=$(cat "$ORCH_STATE_DIR/wake/talk" 2> /dev/null) || return 1
+  [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null
+}
+
 # close_old_terminals <lane> <kept>: closes in Orca the terminals of the past
 # sessions of a lane, all but the last <kept> (run folders are named by their
 # time). What a session said stays in its run folder and in the ledger. A

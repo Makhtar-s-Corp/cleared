@@ -33,7 +33,7 @@ function tail(path) {
 // The last thing the lane said, if nothing was asked of it since.
 // A worktree the dispatcher opened itself: <role>-<ticket>, or <role>-lead.
 // Its sessions are in the ledger already, written as they ran.
-export const dispatcherWorktree = (name, roles) => roles.some((role) => new RegExp(`^${role}-([A-Z]+-[0-9]+|lead)$`).test(name));
+export const dispatcherWorktree = (name, roles) => roles.some((role) => name.startsWith(`${role}-`) && /^([A-Z]+-[0-9]+|lead)$/.test(name.slice(role.length + 1)));
 
 export function lastReport(lines) {
   let last = null;

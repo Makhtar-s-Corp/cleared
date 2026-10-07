@@ -18,7 +18,8 @@
 #       the prompt, and exits with the code of its CLI, or with 2 when this
 #       backend has no conversation to offer here. In a conversation nothing
 #       is asked for: what the permissions do not name is refused.
-#       ORCH_EDIT_ONLY names the one file the session may edit.
+#       ORCH_EDIT_ONLY names the one file the session may edit, and
+#       ORCH_READ_DIRS (separated by colons) the folders it may read.
 #
 # ORCH_PERMISSION_MODE (read-only or accept-edits), ORCH_ALLOW and ORCH_DENY
 # (comma separated command prefixes) say what the run may do without a

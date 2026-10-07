@@ -3,7 +3,7 @@
 // of it (the conversation has no machine-readable output of its own). Same
 // shape as the usage file of an adapter.
 //
-//   session-usage.mjs <session id> <model> [<projects dir>]
+//   session-usage.mjs <session id> <model> [<projects dir>]      exit 1 when the session has no log
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -32,10 +32,12 @@ export function sessionUsage(lines, model = null) {
 
 if (runAsCommand(import.meta.url)) {
   const [session, model, projects = join(homedir(), '.claude', 'projects')] = process.argv.slice(2);
-  let lines = [];
+  let lines = null;
   for (const dir of existsSync(projects) ? readdirSync(projects) : []) {
     const path = join(projects, dir, `${session}.jsonl`);
     if (existsSync(path)) { lines = readFileSync(path, 'utf8').split('\n'); break; }
   }
+  // No log: the tokens are unknown, which is not the same as none.
+  if (!lines) process.exit(1);
   process.stdout.write(`${JSON.stringify(sessionUsage(lines, model || null))}\n`);
 }

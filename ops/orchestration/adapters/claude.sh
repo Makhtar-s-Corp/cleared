@@ -41,8 +41,11 @@ case "${1:-}" in
     [ -n "$model" ] && [ -f "$prompt_file" ] || { echo "usage: claude.sh talk --model <id> --prompt-file <file> [--session-id <uuid>]" >&2; exit 64; }
     # With the user at the screen, a tool that is not allowed would be asked
     # for, and one "yes" too many would be an action: nothing is asked, what
-    # the lists do not name is refused. Reading is always allowed.
-    allowed=(Read Grep Glob) denied=(Write NotebookEdit)
+    # the lists do not name is refused. Reading is limited to the folders of
+    # ORCH_READ_DIRS (the current one when unset), files of secrets left out;
+    # the search tools, which read anywhere once allowed, are not offered.
+    allowed=() denied=(Write NotebookEdit "Read(//**/.env*)")
+    while IFS= read -r dir; do [ -n "$dir" ] && allowed+=("Read(/$dir/**)"); done < <(tr ':' '\n' <<<"${ORCH_READ_DIRS:-$PWD}")
     while IFS= read -r prefix; do [ -n "$prefix" ] && allowed+=("Bash($prefix)" "Bash($prefix *)"); done \
       < <(tr ',' '\n' <<<"${ORCH_ALLOW:-}" | sed 's/^ *//; s/ *$//')
     while IFS= read -r prefix; do [ -n "$prefix" ] && denied+=("Bash($prefix)" "Bash($prefix *)"); done \

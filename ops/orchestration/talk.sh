@@ -74,6 +74,14 @@ if [ -n "$dry_run" ]; then
   exit 0
 fi
 
+# Never two agents in the same folder: one conversation at a time, and none
+# while a short session of the lead is at work in its lane.
+! talk_open || die "a discussion is already open in the lane $lane"
+current="$ORCH_STATE_DIR/wake/current"
+if [ -f "$current" ] && [ ! -f "$(cat "$current")/exit-code" ] && [ $(( ($(date +%s) - $(stat -c %Y "$current")) / 60 )) -lt "$(conf_get lead max_minutes)" ]; then
+  die "a short session of the project lead is at work in its lane: try again in a minute or two"
+fi
+
 chain=$(available_chain "$(jq -c '.chain' <<<"$routed")")
 [ "$(jq length <<<"$chain")" != 0 ] || die "no model of the chain is available for the role $role ($(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed"))"
 
@@ -81,11 +89,20 @@ chain=$(available_chain "$(jq -c '.chain' <<<"$routed")")
 # is not there yet and otherwise left as it is. The decisions have a worktree
 # of their own, so that the lane of the lead never holds a changed file.
 git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
-[ -d "$worktree" ] || git -C "$ORCH_REPO" worktree add --quiet -B "$lane" "$worktree" "$base"
-if [ ! -d "$decisions" ]; then
-  git -C "$ORCH_REPO" worktree add --quiet -B "$role/$report_on" "$decisions" "$base"
-elif [ -z "$(git -C "$decisions" status --porcelain)" ] && [ "$(git -C "$decisions" rev-list --count "$base..HEAD")" = 0 ]; then
-  git -C "$decisions" merge --quiet --ff-only "$base" 2> /dev/null || true
+branch_exists() { git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$1"; }
+# A branch that exists is taken as it is, never started over: it may hold
+# decisions that have not left yet.
+add_worktree() { if branch_exists "$1"; then git -C "$ORCH_REPO" worktree add --quiet "$2" "$1"; else git -C "$ORCH_REPO" worktree add --quiet -b "$1" "$2" "$base"; fi; }
+[ -d "$worktree" ] || add_worktree "$lane" "$worktree"
+[ -d "$decisions" ] || add_worktree "$role/$report_on" "$decisions"
+# The decisions are written on top of the base as it is now: the base is
+# brought into their branch (their last pull request may have been merged,
+# as it was or squashed). A branch that cannot take it is said, and left.
+if [ -n "$(git -C "$decisions" status --porcelain)" ]; then
+  echo "$(basename "$0"): $decisions holds a change that was never confirmed: left as it is" >&2
+elif ! git -C "$decisions" merge --quiet --no-edit "$base" 2> /dev/null; then
+  git -C "$decisions" merge --abort 2> /dev/null || true
+  echo "$(basename "$0"): $decisions cannot take $base in (conflict): its docs/decisions.md is behind, look at it before a lasting rule is written" >&2
 fi
 
 run_base="talk-$(date -u +%Y%m%dT%H%M%SZ)"

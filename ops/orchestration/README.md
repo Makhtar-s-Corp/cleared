@@ -97,14 +97,19 @@ ops/orchestration/wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
 
 `talk.sh` ouvre une conversation dans la lane `release/lead` d'Orca (onglet « discussion »). Le modèle est celui du rôle `[talk] role` de la table ; si le premier de la chaîne ne peut pas tenir de conversation, le suivant la prend. Avant le premier mot, le script lit l'état des lieux et le met dans le briefing : la machine et les PR ouvertes, ce qui attend l'utilisateur dans Linear, les derniers commentaires du ticket de suivi, les lanes au travail, la fin des trois derniers comptes rendus du chef de projet, les décisions déjà transcrites. `talk.sh --dry-run` affiche ce briefing sans rien ouvrir.
 
-La session n'a aucun droit d'action (`[permissions.talk]`). Elle lit le dépôt, Linear (`linear.sh issue`, `comments`, `list`, `waiting`) et `host-state.sh`. Rien ne lui est demandé à l'écran : ce qui n'est pas nommé est refusé, pour qu'un « oui » de trop ne devienne pas une action. Elle n'écrit que par `decide.sh <ticket> - [--adr]`, pour une décision que l'utilisateur a formulée dans la conversation et confirmée :
+La session n'a aucun droit d'action (`[permissions.talk]`). Rien ne lui est demandé à l'écran : ce qui n'est pas nommé est refusé, pour qu'un « oui » de trop ne devienne pas une action. Elle lit les fichiers de la lane du chef de projet et de la copie des décisions, pas ailleurs, et jamais un fichier de secrets (`.env*`) ; elle n'a pas les outils de recherche, qui lisent partout dès qu'ils sont permis (essayé). Elle lit Linear (`linear.sh issue`, `comments`, `list`, `waiting`), `host-state.sh`, et l'historique du dépôt (`git log`, `git show`, `git ls-files`), sans les options de git qui écrivent un fichier ou en lisent un hors du dépôt.
 
-- le texte passe par le garde-fou ;
-- il est posté en commentaire du ticket, marqué comme écrit par un agent ;
-- une ligne `decision` est écrite au ledger, source `discussion` (`select at, ticket, detail from events where kind = 'decision'`) ;
-- avec `--adr`, la modification que la session a faite à `docs/decisions.md` part en PR en brouillon. Ce fichier est le seul qu'elle peut modifier, et dans une copie de travail à part (`talk-<ticket de suivi>`, branche `talk/<ticket de suivi>`) : la lane du chef de projet ne contient jamais de fichier modifié, et ses réveils continuent pendant la conversation. `decide.sh` refuse si autre chose a changé dans cette copie.
+Son seul pouvoir d'écriture est de proposer la transcription d'une décision que l'utilisateur a formulée, et rien ne part sans lui :
 
-La conversation est écrite au ledger comme une session de source `discussion`, avec les tokens que son propre journal de session a comptés. Son terminal n'est pas fermé par les réveils du chef de projet. Une décision transcrite ne réveille pas le chef de projet et ne vaut pas, pour lui, accord écrit : question ouverte, à l'utilisateur de trancher.
+1. La session appelle `decide.sh <ticket> - [--adr]`. Le texte passe par le garde-fou et reste en attente dans `state/decisions/pending/`. Rien n'est envoyé.
+2. L'utilisateur confirme lui-même, en tapant dans la conversation `! ops/orchestration/confirm-decision.sh` (ou depuis un autre terminal). La session n'a pas le droit de lancer ce script. `--list` montre ce qui attend, `--drop <numéro>` abandonne.
+3. Alors seulement : avec `--adr`, la modification que la session a faite à `docs/decisions.md` est validée et part en PR en brouillon (`push-lane.sh`) ; puis le texte est posté en commentaire du ticket, marqué comme écrit par un agent et confirmé par l'utilisateur ; puis une ligne `decision` est écrite au ledger, source `discussion` (`select at, ticket, detail from events where kind = 'decision'`). Dans cet ordre : ce qui ne peut pas partir arrête tout avant qu'on dise la décision prise, et relancer la confirmation reprend là où elle s'est arrêtée.
+
+`docs/decisions.md` est le seul fichier que la session peut modifier, et dans une copie de travail à part (`talk-<ticket de suivi>`, branche `talk/<ticket de suivi>`) : la lane du chef de projet ne contient jamais de fichier modifié. À chaque discussion, `main` est ramenée dans cette branche ; une branche qui existe n'est jamais recommencée.
+
+Jamais deux agents dans le même dossier : tant qu'une discussion est ouverte, les sessions courtes du chef de projet attendent (rien de ce qui bouge n'est perdu, elles le reçoivent ensuite), et `talk.sh` refuse d'ouvrir pendant qu'une session courte travaille. Fermer la conversation (`/exit`) les relance.
+
+La conversation est écrite au ledger comme une session de source `discussion`, avec les tokens que son propre journal de session a comptés (inconnus, et non zéro, si le journal est introuvable). Son terminal n'est pas fermé par les réveils du chef de projet. Une décision transcrite ne réveille pas le chef de projet et ne vaut pas, pour lui, accord écrit : question ouverte, à l'utilisateur de trancher.
 
 ## Pousser une lane
 
