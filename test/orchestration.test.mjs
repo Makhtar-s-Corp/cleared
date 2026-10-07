@@ -826,6 +826,11 @@ test('wake.sh during an outage of GitHub: no session for its events, the outage 
   assert.match(events().at(-1).detail, /GitHub is down/);
   assert.equal(wake({ FAKE_GH_LIST_DOWN: '1' }).status, 0);
   assert.equal(events().filter((event) => event.kind === 'github_down').length, 0, 'written once, when it ends');
+  // Its status page cannot be read for a minute: that is not the end of the outage.
+  writeFileSync(join(box.home, 'github-status.json'), 'not json');
+  assert.equal(wake({ FAKE_GH_LIST_DOWN: '1' }).status, 0);
+  assert.equal(events().filter((event) => event.kind === 'github_down').length, 0);
+  assert.equal(readFileSync(join(box.state, 'wake', 'github-down'), 'utf8').split('\n')[0], started);
   // A slowdown is not an outage: it is over. One entry, with its start and its end; the cancelled checks are said now.
   status('operational');
   const after = wake();
@@ -1550,13 +1555,26 @@ test('the user is not written more than a few times an hour by all the agents to
   const noKey = join(dir, 'agents.conf');
   writeFileSync(noKey, readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'coments_per_hour = 6'));
   assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: noKey } }).status, 4);
+  // Nor without a number in it.
+  const notANumber = join(dir, 'agents-six.conf');
+  writeFileSync(notANumber, readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'comments_per_hour = six'));
+  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: notANumber } }).status, 4);
   // What the user confirms himself is his own word, not one more message of an agent: it is never held back.
-  const confirm = join(dir, 'confirm-decision.sh');
-  writeFileSync(confirm, `#!/usr/bin/env bash\n"${join(ORCH_HOME, 'linear.sh')}" comment X-1 "$1" "chef de projet, en discussion"\n`, { mode: 0o755 });
-  writeFileSync(join(dir, 'decision.md'), 'Ma décision.');
-  const own = spawnSync(confirm, [join(dir, 'decision.md')], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  const pending = join(dir, 'state', 'decisions', 'pending', 'd1');
+  mkdirSync(pending, { recursive: true });
+  writeFileSync(join(pending, 'text.md'), 'Ma décision.\n');
+  writeFileSync(join(pending, 'decision.json'), JSON.stringify({ ticket: 'X-1', adr: false, run: '', at: '2026-01-02T10:00:00Z' }));
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
+  const own = spawnSync(join(ORCH_HOME, 'confirm-decision.sh'), [], { encoding: 'utf8', env });
   assert.equal(own.status, 0, own.stderr);
   assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Ma décision\./);
+  // Only that script: a command that merely names it, or another script of that name, is an agent like the others.
+  const before = readFileSync(join(dir, 'asked'), 'utf8');
+  const impostor = join(dir, 'confirm-decision.sh');
+  writeFileSync(impostor, `#!/usr/bin/env bash\n"${join(ORCH_HOME, 'linear.sh')}" comment X-1 - "an agent" <<< "Un mot de plus."\n`, { mode: 0o755 });
+  assert.equal(spawnSync(impostor, [], { encoding: 'utf8', env }).status, 4);
+  assert.equal(spawnSync('bash', ['-c', `"${join(ORCH_HOME, 'linear.sh')}" comment X-1 - "an agent" <<< "Je cite ${join(ORCH_HOME, 'confirm-decision.sh')}."`], { encoding: 'utf8', env }).status, 4);
+  assert.equal(readFileSync(join(dir, 'asked'), 'utf8'), before);
 });
 
 test('the report of a lane that the hourly limit holds back is kept, and leaves later in one grouped comment', () => {
@@ -1568,14 +1586,15 @@ test('the report of a lane that the hourly limit holds back is kept, and leaves 
   assert.match(outbox[0], /^X-1--/);
   // A second one waits too; the next wake that may write groups them in one comment on the ticket of the reports.
   writeFileSync(join(box.state, 'linear-outbox', 'X-2--other.md'), 'Compte rendu de X-2.\n');
+  writeFileSync(join(box.state, 'linear-outbox', 'notes.txt'), 'not a report\n');
   const flush = (extra = {}) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; flush_outbox`], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   assert.equal(flush({ FAKE_LINEAR_FULL: '1' }).status, 0);
-  assert.equal(readdirSync(join(box.state, 'linear-outbox')).length, 2, 'still held: nothing is lost');
+  assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')).sort(), [outbox[0], 'X-2--other.md', 'notes.txt'].sort(), 'still held: nothing is lost');
   assert.equal(flush().status, 0);
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
   assert.match(posted, /^X-100 from=/);
   assert.match(posted, /2 comptes rendus groupés[\s\S]*### X-1[\s\S]*answer of first[\s\S]*### X-2[\s\S]*Compte rendu de X-2\./);
-  assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')), []);
+  assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')), ['notes.txt'], 'only what was sent is removed');
 });
 
 test('the discussion has no right to act: its permissions name what it may read and the one script it proposes with, and refuse the rest', () => {

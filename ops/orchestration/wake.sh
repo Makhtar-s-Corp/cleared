@@ -53,7 +53,13 @@ flock -n 8 || busy "another wake is at work"
 github_mark="$wake_dir/github-down"
 github_out=
 if [ -z "$handover" ]; then
-  github_out=$(github_down)
+  github_read=0
+  github_out=$(github_down) || github_read=$?
+  # Its page cannot be read: an outage already noted goes on, none begins.
+  if [ "$github_read" != 0 ]; then
+    github_out=
+    [ ! -f "$github_mark" ] || github_out=$(sed -n '2p' "$github_mark")
+  fi
   if [ -n "$github_out" ]; then
     [ -f "$github_mark" ] || printf '%s\n%s\n' "$(now_utc)" "$github_out" > "$github_mark"
   elif [ -f "$github_mark" ]; then

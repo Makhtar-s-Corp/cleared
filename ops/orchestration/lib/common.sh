@@ -124,13 +124,17 @@ decisions_worktree() {
 # one grouped comment on the ticket of the reports, as soon as the user may be
 # written again. Nothing is removed before Linear has it.
 flush_outbox() {
-  local box="$ORCH_STATE_DIR/linear-outbox" grouped file count code
-  count=$(ls -1 "$box" 2> /dev/null | grep -c . || true)
-  [ "$count" != 0 ] || return 0
+  local box="$ORCH_STATE_DIR/linear-outbox" sending grouped file count code
+  ls "$box"/*.md > /dev/null 2>&1 || return 0
+  # Taken aside first: a report that arrives while these are sent is not
+  # among them, and stays for the next time.
+  sending=$(mktemp -d "$box/sending.XXXXXX")
+  mv "$box"/*.md "$sending"/
+  count=$(ls -1 "$sending" | grep -c .)
   grouped=$(mktemp)
   {
     printf '**%s comptes rendus groupés** (pas plus de quelques commentaires par heure : ceux-ci attendaient)\n' "$count"
-    for file in "$box"/*.md; do
+    for file in "$sending"/*.md; do
       printf '\n### %s\n\n' "$(basename "$file" | sed 's/--.*//')"
       cat "$file"
     done
@@ -138,17 +142,22 @@ flush_outbox() {
   code=0
   "$ORCH_HOME/linear.sh" comment "$(conf_get lead report_on)" "$grouped" "dispatcher, comptes rendus groupés" > /dev/null || code=$?
   rm -f "$grouped"
-  [ "$code" != 0 ] || rm -f "$box"/*.md
+  # Not sent: back where they were, for the next wake.
+  [ "$code" = 0 ] || mv "$sending"/*.md "$box"/
+  rm -rf "$sending"
   return 0
 }
 
 # github_down: what GitHub says is down among the parts the dispatcher needs,
-# as its public status page has it (nothing when all is well, or when the
-# page cannot be read). A slowdown is not an outage.
+# as its public status page has it: nothing when all is well. Exit 2 when the
+# page cannot be read, which says nothing either way. A slowdown is not an
+# outage.
 github_down() {
-  curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null \
-    | jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
-        | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' 2> /dev/null || true
+  local page
+  page=$(curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null) || return 2
+  jq -e '.components | type == "array"' <<<"$page" > /dev/null 2>&1 || return 2
+  jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
+      | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' <<<"$page"
 }
 
 # talk_open: is a discussion open in the lane of the lead? talk.sh writes

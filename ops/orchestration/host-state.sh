@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$ORCH_REPO"
 # GitHub down: nothing can be sent, checked or merged, and it may not even
 # answer what follows. Said as such, the host is free for nothing.
-down=$(github_down)
+down=$(github_down) || down=
 if [ -n "$down" ]; then
   jq -n --arg down "$down" '{github_is_down: $down, ci_runs_in_progress: [], free_for_a_ci_run: false, free_for_a_merge: false, open_pull_requests: []}'
   exit 0

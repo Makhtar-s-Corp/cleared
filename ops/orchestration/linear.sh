@@ -77,10 +77,14 @@ case "${1:-}" in
     mkdir -p "$ORCH_STATE_DIR"
     exec 9> "$ORCH_STATE_DIR/linear-comments.lock"
     flock -w 60 9 || die "another comment is being posted for too long"
-    if ! tr '\0' ' ' < "/proc/$PPID/cmdline" 2> /dev/null | grep -q "confirm-decision.sh"; then
+    # The script of the user is told by what runs it, not by a word in a
+    # command: the parent process is bash running that very file.
+    [[ "$limit" =~ ^[0-9]+$ ]] || limit=6
+    mapfile -d '' -t parent < "/proc/$PPID/cmdline" 2> /dev/null || parent=()
+    if [ "$(basename "${parent[0]:-}")" != bash ] || [ "$(realpath -q "${parent[1]:-/nonexistent}" 2> /dev/null)" != "$(realpath "$ORCH_HOME/confirm-decision.sh")" ]; then
       recent=$(jq -R -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.at > $since) | .at' "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | grep -c . || true)
-      if [ "$recent" -ge "${limit:-6}" ]; then
-        echo "$(basename "$0"): the user was already written $recent times in the last hour (limit: ${limit:-6}): nothing posted. Group what there is to say in one comment, later" >&2
+      if [ "$recent" -ge "$limit" ]; then
+        echo "$(basename "$0"): the user was already written $recent times in the last hour (limit: $limit): nothing posted. Group what there is to say in one comment, later" >&2
         exit 4
       fi
     fi
