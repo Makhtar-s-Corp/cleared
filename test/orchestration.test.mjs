@@ -1402,6 +1402,11 @@ test('the discussion has no right to act: its permissions name what it may read 
   ]);
   for (const refused of ['ops/orchestration/confirm-decision.sh', 'ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'ops/orchestration/adopt-lane.sh', 'gh', 'orca', 'git push', 'git commit']) assert.ok(list(talk.deny).includes(refused), refused);
   assert.ok(conf.sections.lanes.push_roles.split(/\s+/).includes('talk'), 'the file of the decisions leaves by the narrow push script');
+  // Confirming a decision is the user's: no role may run it, whatever else it may do.
+  for (const [name, section] of Object.entries(conf.sections).filter(([key]) => key.startsWith('permissions.'))) {
+    assert.ok(list(section.deny).includes('ops/orchestration/confirm-decision.sh'), name);
+    assert.ok(!list(section.allow ?? '').some((item) => item.includes('confirm-decision')), name);
+  }
   // A read command of git must not become a way to write a file, or to read one outside the repository.
   for (const role of ['talk', 'release-live', 'review']) {
     for (const option of ['*--output*', '*--no-index*']) assert.ok(list(conf.sections[`permissions.${role}`].deny).includes(option), `${role} ${option}`);
@@ -1480,21 +1485,29 @@ test('talk.sh opens one conversation in the lane of the lead, briefed by scripts
   assert.throws(() => readFileSync(join(box.state, 'wake', 'talk')));
 });
 
-test('never two agents in the lane of the lead: an open discussion holds its short sessions back without losing what moves, and no discussion opens while one is at work', () => {
+test('never two agents in the lane of the lead: an open discussion holds its short sessions back without losing what moves, and no discussion opens while one is at work', (t) => {
   const box = sandbox();
   const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
   writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
   assert.equal(wake().status, 0);
-  // A discussion is open (the mark holds a process that lives: this one).
-  writeFileSync(join(box.state, 'wake', 'talk'), `${process.pid}\n`);
+  // A discussion is open: the mark holds the process of a conversation that lives.
+  const conversation = spawn('bash', ['-c', 'exec -a talk-run.sh sleep 60'], { stdio: 'ignore' });
+  t.after(() => conversation.kill());
+  writeFileSync(join(box.state, 'wake', 'talk'), `${conversation.pid}\n`);
   writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
   assert.equal(wake().status, 0);
   assert.equal(calls(), 0, 'no session while the user talks with the lead');
   assert.match(spawnSync(join(box.home, 'talk.sh'), [], { env: box.env, encoding: 'utf8' }).stderr, /already open/);
-  // The mark of a conversation that died without saying so holds nothing back; what moved meanwhile is handed out.
-  writeFileSync(join(box.state, 'wake', 'talk'), '999999999\n');
+  // So does a discussion that is being opened, for the time a terminal takes to open, and no longer.
+  writeFileSync(join(box.state, 'wake', 'talk'), `opening ${Math.floor(Date.now() / 1000)}\n`);
+  assert.equal(wake().status, 0);
+  assert.equal(calls(), 0);
+  writeFileSync(join(box.state, 'wake', 'talk'), `opening ${Math.floor(Date.now() / 1000) - 600}\n`);
+  // The mark of a conversation that died without saying so holds nothing back, even when its number now belongs to
+  // another process (this one); what moved meanwhile is handed out.
+  writeFileSync(join(box.state, 'wake', 'talk'), `${process.pid}\n`);
   const started = wake();
   assert.equal(calls(), 1);
   assert.match(readFileSync(join(started.stdout.trim(), 'prompt.md'), 'utf8'), /OK, vas-y/);
@@ -1557,6 +1570,17 @@ test('a decision is proposed by the discussion and leaves only when the user con
   execFileSync('rm', [join(lane.path, 'other.md')]);
   assert.equal(decide(['X-5', '-', '--adr'], 'Une règle qui dure.').status, 0);
   assert.equal(execFileSync('git', ['-C', lane.path, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), 'M docs/decisions.md', 'proposing commits nothing');
+  // One at a time: a second one is not prepared while the first waits.
+  assert.match(decide(['X-6', '-'], 'Une autre.').stderr, /already waits for the user/);
+  // The file is touched again after the proposal: what would leave is not what the user was shown. Nothing leaves.
+  writeFileSync(join(lane.path, 'docs', 'decisions.md'), 'first\nUne règle qui dure.\nEt une ligne glissée après coup.\n');
+  const touched = confirm();
+  assert.equal(touched.status, 1);
+  assert.match(touched.stderr, /changed since this decision was proposed/);
+  assert.equal(execFileSync('git', ['-C', lane.path, 'log', '--format=%s', 'main..HEAD'], { encoding: 'utf8' }), '');
+  assert.equal(confirm(['--drop', waiting()[0]]).status, 0);
+  writeFileSync(join(lane.path, 'docs', 'decisions.md'), 'first\nUne règle qui dure.\n');
+  assert.equal(decide(['X-5', '-', '--adr'], 'Une règle qui dure.').status, 0);
   // The push fails once (GitHub does not open the pull request): nothing is said to be decided, and the next try sends the commit already made.
   const failed = confirm([], { FAKE_GH_DOWN: '1' });
   assert.equal(failed.status, 1);
@@ -1565,6 +1589,7 @@ test('a decision is proposed by the discussion and leaves only when the user con
   assert.doesNotMatch(posted(), /Une règle qui dure/);
   const adr = confirm();
   assert.equal(adr.status, 0, adr.stderr);
+  assert.match(failed.stdout, /Ajouté à docs\/decisions\.md :\n    Une règle qui dure\./, 'the user is shown the passage that leaves');
   assert.equal(decisions().length, 2);
   assert.match(posted(), /Une règle qui dure\.[\s\S]*Écrite aussi dans `docs\/decisions\.md`/);
   assert.ok(lane.onRemote().some((ref) => ref.startsWith('talk/X-100 ')), 'the branch of the decisions left, to its namesake');
@@ -1585,6 +1610,9 @@ test('the decisions of a second discussion are written on top of the base as it 
   const ancestors = execFileSync('git', ['-C', lane.path, 'rev-list', 'HEAD'], { encoding: 'utf8' });
   assert.ok(ancestors.includes(earlier), 'the earlier decision is still there');
   assert.ok(ancestors.includes(moved), 'the base was brought in');
+  // That conversation ends (the terminal of the test ran nothing: its mark is taken away here). A second one is refused while the first is open.
+  assert.match(open().stderr, /already open/);
+  execFileSync('rm', [join(box.state, 'wake', 'talk')]);
   // Its folder disappears: the branch is taken back as it is.
   box.git('worktree', 'remove', '--force', lane.path);
   const kept = execFileSync('git', ['-C', box.repo, 'rev-parse', 'talk/X-100'], { encoding: 'utf8' }).trim();

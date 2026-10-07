@@ -120,15 +120,19 @@ decisions_worktree() {
   printf '%s\n' "${ORCH_DECISIONS_WORKTREE:-$(expand_home "$(conf_get lanes root)")/$(conf_get talk role)-$(conf_get lead report_on)}"
 }
 
-# unpushed <worktree>: how many of its commits no remote holds.
-unpushed() { git -C "$1" rev-list --count HEAD --not --remotes; }
-
-# talk_open: is a discussion open in the lane of the lead? (talk-run.sh writes
-# its process there, and takes it away when the conversation ends.)
+# talk_open: is a discussion open in the lane of the lead? talk.sh writes
+# "opening <time>" in the mark before it opens the terminal, talk-run.sh puts
+# its process there and takes the mark away when the conversation ends. A
+# mark whose process is gone, or is no longer a conversation (its number was
+# given to something else), or an opening that never came, holds nothing.
 talk_open() {
-  local pid
-  pid=$(cat "$ORCH_STATE_DIR/wake/talk" 2> /dev/null) || return 1
-  [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null
+  local mark="$ORCH_STATE_DIR/wake/talk" first second
+  read -r first second < "$mark" 2> /dev/null || return 1
+  if [ "$first" = opening ]; then
+    [ $(( $(date +%s) - ${second:-0} )) -lt 180 ]
+  else
+    [[ "$first" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/$first/cmdline" 2> /dev/null | grep -q "talk-run.sh"
+  fi
 }
 
 # close_old_terminals <lane> <kept>: closes in Orca the terminals of the past

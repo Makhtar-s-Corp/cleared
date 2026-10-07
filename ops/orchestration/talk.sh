@@ -75,7 +75,11 @@ if [ -n "$dry_run" ]; then
 fi
 
 # Never two agents in the same folder: one conversation at a time, and none
-# while a short session of the lead is at work in its lane.
+# while a short session of the lead is at work in its lane. Checked and
+# marked under the lock of the wakes, so that no wake starts in between.
+mkdir -p "$ORCH_STATE_DIR/wake"
+exec 8> "$ORCH_STATE_DIR/wake/lock"
+flock -w 120 8 || die "a wake of the project lead holds its lock for too long: try again in a minute"
 ! talk_open || die "a discussion is already open in the lane $lane"
 current="$ORCH_STATE_DIR/wake/current"
 if [ -f "$current" ] && [ ! -f "$(cat "$current")/exit-code" ] && [ $(( ($(date +%s) - $(stat -c %Y "$current")) / 60 )) -lt "$(conf_get lead max_minutes)" ]; then
@@ -93,7 +97,9 @@ branch_exists() { git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$1";
 # A branch that exists is taken as it is, never started over: it may hold
 # decisions that have not left yet.
 add_worktree() { if branch_exists "$1"; then git -C "$ORCH_REPO" worktree add --quiet "$2" "$1"; else git -C "$ORCH_REPO" worktree add --quiet -b "$1" "$2" "$base"; fi; }
-[ -d "$worktree" ] || add_worktree "$lane" "$worktree"
+# The lane of the lead, when it is made here, is brought to the base like a
+# wake does; one that cannot follow is left as it is, and a wake will say so.
+[ -d "$worktree" ] || { add_worktree "$lane" "$worktree"; git -C "$worktree" merge --quiet --ff-only "$base" 2> /dev/null || true; }
 [ -d "$decisions" ] || add_worktree "$role/$report_on" "$decisions"
 # The decisions are written on top of the base as it is now: the base is
 # brought into their branch (their last pull request may have been merged,
@@ -115,7 +121,8 @@ printf '%s\n' "$chain" > "$run_dir/chain.json"
   printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_DECISIONS_WORKTREE=%q\nORCH_REPORT_ON=%q\n' "$(jq -r '.chain[0].alias' <<<"$routed")" "$decisions" "$report_on"
 } > "$run_dir/talk.env"
 
+echo "opening $(date +%s)" > "$ORCH_STATE_DIR/wake/talk"
 open_terminal "$worktree" "$lane · discussion · $(jq -r '.[0].alias' <<<"$chain")" "$ORCH_HOME/talk-run.sh $run_dir" > "$run_dir/terminal.handle" \
-  || die "Orca did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"
+  || { rm -f "$ORCH_STATE_DIR/wake/talk"; die "Orca did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"; }
 echo "Discussion ouverte dans la lane $lane d'Orca (onglet « discussion »), modèle $(jq -r '.[0].alias' <<<"$chain")."
 echo "$run_dir"

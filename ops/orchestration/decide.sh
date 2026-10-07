@@ -23,6 +23,13 @@ cat > "$text"
 grep -q '[^[:space:]]' "$text" || die "no decision to transcribe"
 guard_text "$text" || exit 1
 
+pending="$ORCH_STATE_DIR/decisions/pending"
+mkdir -p "$pending"
+# One decision at a time: the next one is prepared once the user has
+# confirmed or dropped this one (a confirmation sends the whole change made
+# to docs/decisions.md, which must be the one he was shown).
+[ -z "$(ls -A "$pending")" ] || die "a decision already waits for the user ($(ls "$pending" | paste -sd' ')): he confirms or drops it first (confirm-decision.sh, or --drop)"
+
 if [ -n "$adr" ]; then
   worktree=$(decisions_worktree)
   [ -d "$worktree" ] || die "no worktree of the decisions ($worktree): open a discussion with talk.sh first"
@@ -30,11 +37,12 @@ if [ -n "$adr" ]; then
   [ "$changed" = " M docs/decisions.md" ] || die "--adr needs a change to docs/decisions.md, and to nothing else, in $worktree (found: ${changed:-nothing}): nothing kept"
 fi
 
-pending="$ORCH_STATE_DIR/decisions/pending"
-mkdir -p "$pending"
 id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir "$pending/$id"
 cp "$text" "$pending/$id/text.md"
+# What will leave with it, as it is now: the user confirms this, and nothing
+# written to the file afterwards.
+[ -z "$adr" ] || git -C "$worktree" diff -- docs/decisions.md > "$pending/$id/adr.diff"
 jq -n --arg ticket "$ticket" --arg adr "$adr" --arg run "${ORCH_RUN_ID:-}" --arg at "$(now_utc)" '{ticket: $ticket, adr: ($adr == "yes"), run: $run, at: $at}' > "$pending/$id/decision.json"
 echo "Décision gardée, rien n'est encore parti. Makhtar la confirme lui-même, en tapant dans cette conversation :"
 echo "  ! ops/orchestration/confirm-decision.sh"

@@ -48,6 +48,12 @@ if [ "$adr" = true ] && [ ! -f "$pending/$id/adr.sent" ]; then
   worktree=$(decisions_worktree)
   changed=$(git -C "$worktree" status --porcelain)
   if [ "$changed" = " M docs/decisions.md" ]; then
+    # What leaves is what was proposed: a file touched again since then is
+    # not what the user is confirming.
+    git -C "$worktree" diff -- docs/decisions.md | cmp -s - "$pending/$id/adr.diff" \
+      || die "docs/decisions.md changed since this decision was proposed: nothing left. Drop it (--drop $id) and have it proposed again"
+    echo "Ajouté à docs/decisions.md :"
+    grep '^+[^+]' "$pending/$id/adr.diff" | sed 's/^+/    /'
     git -C "$worktree" add docs/decisions.md
     git -C "$worktree" commit --quiet -m "docs: a decision of the user, transcribed in a discussion ($ticket)"
   elif [ -n "$changed" ]; then

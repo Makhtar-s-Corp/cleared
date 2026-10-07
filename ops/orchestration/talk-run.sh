@@ -56,10 +56,7 @@ echo "$code" > "$run_dir/exit-code"
 # A change left in the file of the decisions and never transcribed is said,
 # not thrown away and not sent.
 if [ -n "$(git -C "$ORCH_DECISIONS_WORKTREE" status --porcelain 2> /dev/null)" ]; then
-  echo "!! docs/decisions.md a été modifié sans être confirmé : le changement reste dans $ORCH_DECISIONS_WORKTREE, rien n'est parti."
-fi
-if [ "$(unpushed "$ORCH_DECISIONS_WORKTREE" 2> /dev/null || echo 0)" != 0 ]; then
-  echo "!! Une règle écrite dans docs/decisions.md n'est pas partie (commit resté dans $ORCH_DECISIONS_WORKTREE) : relance confirm-decision.sh."
+  echo "!! docs/decisions.md a été modifié et n'est pas parti : le changement reste dans $ORCH_DECISIONS_WORKTREE."
 fi
 left=$("$ORCH_HOME/confirm-decision.sh" --list 2> /dev/null || true)
 [ -z "$left" ] || printf '!! Décisions proposées et pas encore confirmées par toi (confirm-decision.sh, ou --drop) :\n%s\n' "$left"
