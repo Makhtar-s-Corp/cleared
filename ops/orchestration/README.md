@@ -14,7 +14,7 @@ ops/orchestration/dashboard.sh                           # réécrit la page du 
 
 Une lane est une copie de travail git sur la branche `<rôle>/<ticket>` : Orca l'affiche sous ce nom sans rien lui demander. Son terminal lance le modèle, puis poste le compte rendu dans Linear avec le modèle réellement utilisé.
 
-`spawn-lane.sh` refuse d'ouvrir une lane au-delà de `max_lanes` (3) et l'écrit dans le ledger. Seules les branches `<rôle>/<ticket>` comptent : les anciennes lanes ne sont ni comptées ni fermées par ces scripts.
+`spawn-lane.sh` refuse d'ouvrir une lane au-delà de `max_lanes` (3) et l'écrit dans le ledger. Seuls les rôles de `counted_roles` (`dev`, `mechanical`) prennent une de ces places. Orca ne connaît une copie de travail que quelques secondes après git, parfois bien plus : le script réessaie pendant 120 secondes, puis une dernière fois ; une attente de plus de 30 secondes et un échec sont écrits au ledger (`orca_terminal_delayed`, `orca_terminal_failed`). Seules les branches `<rôle>/<ticket>` comptent : les anciennes lanes ne sont ni comptées ni fermées par ces scripts.
 
 ## Changer de modèle
 
@@ -55,12 +55,52 @@ ops/orchestration/spawn-lane.sh review SEE-112 --pr 257
 
 La lane `review/<ticket>` part de la tête de la PR, en lecture seule. `--since <commit>` limite la relecture à ce qui a changé depuis un commit déjà relu ; `--from <réf>` la fait partir d'une branche locale pas encore poussée. Le modèle vient de la table, avec la taille et les chemins de la PR ; ce n'est jamais celui qui l'a écrite (lu dans le ledger, ou donné par `--author-model`). Sans auteur connu, la relecture ne démarre pas. Son compte rendu est posté tel quel, sans passer par la mise en forme.
 
+## Le chef de projet en sessions courtes
+
+`wake.sh` tourne toutes les minutes (minuterie du serveur). Il lit Linear et GitHub par des scripts et compare avec ce que le réveil d'avant a vu :
+
+- rien n'a bougé : il écrit « réveil sauté » au ledger et s'arrête. Zéro token ;
+- quelque chose a bougé (un commentaire ou un ticket de l'utilisateur, une PR ouverte, passée en « prête », fusionnée ou fermée, ses vérifications qui passent au vert ou au rouge) : il lance une seule session courte du rôle `[lead] role`, dans sa lane stable `release/lead`, avec le modèle de la table, et lui remet la liste. Ce qu'un agent a écrit n'est jamais un événement.
+
+Tout ce qui bouge ne vaut pas une session. `[lead] wake_on` nomme ce qui en lance une à lui seul (un commentaire de l'utilisateur, le message d'une lane, des vérifications qui passent au vert ou au rouge, une fusion). Le reste (une PR ouverte en brouillon, passée en « prête » alors que ses vérifications tournent encore, fermée, un ticket créé) attend dans l'état du réveil et est remis à la session suivante, avec ce qui la lance : rien n'est perdu, et aucun modèle ne démarre pour constater qu'il n'a rien à décider. Mesure du 7 octobre, sur quinze sessions : neuf sans rien à décider, dont six lancées par l'un de ces quatre événements. Le ledger dit pourquoi chaque session a été lancée (`wake_started`, avec la liste de ce qui a bougé)  ; pour recompter les sessions lancées à partir de cette version : `select detail from events where kind = 'wake_started'` (celles d'avant se lisent dans `state/runs/lead-*/events.json`).
+
+Le pré-contrôle n'ouvre jamais de terminal : il tourne dans la minuterie du serveur. Orca ne montre un terminal que lorsqu'une session démarre, un par session, dans la lane `release/lead`. À la fin de chaque session, `lane-run.sh` ferme les terminaux des sessions plus anciennes et n'en garde que `[lead] terminals_kept` ; ce qu'une session a dit reste dans `state/runs/` et dans le ledger.
+
+Une session encore au travail retient la suivante, sans rien perdre de ce qui bouge entre-temps. Si une session s'arrête sans le dire (terminal tué), le réveil suivant attend au plus `[lead] max_minutes`. La lane du chef de projet n'est jamais remise à zéro : s'il y reste un fichier suivi modifié ou un commit à elle, le réveil s'arrête, n'y touche pas, et l'écrit une fois au ledger (`lead_lane_blocked`). Un fichier non suivi laissé là ne bloque rien. Une source qui ne répond pas : le réveil ne lit rien et n'avance pas.
+
+`[lead] live = no` : le chef de projet observe. Il écrit ce qu'il ferait, dans son compte rendu (`state/reports/`), et ne fait rien : ni commentaire, ni lane, ni fusion. Seule exception, le réveil de passation décrit plus bas, qui poste un commentaire dans un ticket. Tant que l'ancien chef de projet tourne, c'est le seul mode ; `wake.sh` refuse `live = yes`, qui n'est pas construit.
+
+Ce que reçoit le modèle : la liste de ce qui a bougé contient des titres et des commentaires de Linear, tels quels. Elle ne passe pas par le garde-fou quand le rôle est servi par Claude, qui lit déjà le dépôt et Linear pour tout le reste ; l'adaptateur de Codex, lui, fait passer par le garde-fou tout ce qu'il envoie. « Aucune donnée réelle dans Linear » reste la règle qui protège ce chemin.
+
+`[lead] live = yes` : le chef de projet agit, dans les limites de `[permissions.<rôle>-live]`. Première étape, la seule construite : il répond.
+
+- Il est réveillé aussi par le dernier message d'une lane déjà au travail, quand ce message s'adresse au chef de projet (`lib/lanes.mjs` le lit dans le journal de session de la lane ; une lane ne lit pas Linear).
+- Il répond à Makhtar dans Linear avec `linear.sh comment <ticket> -`, qui fait passer tout texte par le garde-fou et le signe « chef de projet ».
+- Il répond à une lane dans son terminal avec `tell-lane.sh <lane> -`. Le terminal de chaque lane est écrit dans `state/lanes.json` par `adopt-lane.sh <lane> <terminal>`, que lance celui qui confie les lanes au chef de projet, jamais le chef de projet lui-même. Rien ne part vers un terminal inconnu, parti, ou d'une autre copie de travail : le chemin qu'Orca donne pour le terminal doit être, en entier, celui que git donne pour la copie de travail de ce nom. Si Orca ne répond pas, le script le dit et s'arrête. Une lane ne reçoit pas plus de `[lead] messages_per_lane_per_hour` messages par heure. Chaque message est gardé dans `state/lane-messages.jsonl`.
+- Une lane ne se voit jamais dire de fusionner ni de forcer un envoi. `lib/lane-message.mjs` lit le message proposition par proposition et refuse celle qui nomme une fusion ou un envoi forcé (« fusionne », « tu peux fusionner », « merge », « force push », `--force`, `push -f`), sauf si elle dit de ne pas le faire (« ne fusionne pas », la négation au plus trois mots avant), ce que le chef de projet ou un script fera lui-même (« je fusionnerai ») ou ce qui est fait (« #12 est fusionnée »). C'est un filet, pas le contrôle : il se trompe dans les deux sens (une tournure inattendue passe, une phrase innocente est refusée et son auteur la reformule). Le contrôle, c'est la liste de ce que le chef de projet a le droit de lancer et l'accord écrit de Makhtar.
+- `host-state.sh` lui dit si la machine est libre : CI en cours, déploiement possible, test d'écran ou capture en cours, état de chaque PR ouverte. Deux de ces réponses sont des approximations. « Déploiement possible » : moins de dix minutes depuis le dernier changement de `main`, ou des conteneurs démarrés depuis moins de quatre minutes ; rien n'interroge Coolify. « Test d'écran en cours » : `lib/screens.mjs` lit la table des processus et compte les commandes qui en lancent un (`npm run test:ui`, `scripts/run-ui-tests.mjs`, `scripts/capture-*.mjs`, `scripts/ui-shots.mjs`, `playwright test`) et leur navigateur sans écran ; une commande qui en nomme seulement un (un prompt, une recherche) ne compte pas. Un test d'écran lancé autrement n'est pas vu.
+- Le dernier message d'une lane ne compte que s'il a plus de 45 secondes (son tour est fini) et moins de `[lead] report_hours` heures.
+
+Il n'ouvre ni ne ferme aucune lane, ne pousse rien et ne fusionne rien : ces scripts lui sont refusés. À une lane, il ne transmet que ce qui découle d'un accord écrit de Makhtar ; le reste, il le lui demande.
+
+Prendre la suite d'un autre chef de projet : `wake.sh --handover <fichier>` lance une seule session, qu'il y ait du nouveau ou non. Elle relit la passation du fichier et dit, dans le ticket de `[lead] report_on`, ce qu'elle a compris et ce qu'elle ferait en premier. Elle ne prend aucun ticket ; ce qui a bougé reste pour les réveils suivants. `linear.sh list <état>` donne les tickets d'un état, pour vérifier une passation.
+
+Pourquoi une minuterie du serveur et non une automatisation Orca : essayée le 7 octobre, celle-ci lance `claude --dangerously-skip-permissions` dans une session interactive qui ne se termine pas. Le modèle ne viendrait plus de la table, la liste blanche du rôle ne s'appliquerait pas, et la CLI ne rendrait aucun usage à écrire au ledger. Le pré-contrôle sans modèle et la lane stable visible dans Orca sont gardés.
+
+```sh
+ops/orchestration/wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
+```
+
+## Pousser une lane
+
+Une lane n'a aucune commande réseau. Quand son run est terminé, `lane-run.sh` appelle `push-lane.sh` pour les rôles de `[lanes] push_roles` : il pousse la branche de la lane vers la branche du même nom, et ouvre sa PR en brouillon vers la branche de base. Rien d'autre : jamais forcé, jamais la branche de base, jamais une autre branche. Les messages de commit et ce que la branche ajoute passent d'abord par le garde-fou du dépôt ; refusés, rien ne part (un push ne se rattrape pas). Ce qu'une branche retire n'est pas jugé, et un fichier binaire n'est pas lu : le garde-fou ne connaît que le texte.
+
 ## Le ledger
 
 `state/ledger.db` (SQLite), dans le checkout principal, hors de git, commun à toutes les lanes. Écrit par les scripts (`lib/ledger.mjs`), jamais par un modèle.
 
 - `runs` : un lancement de modèle. `run_id`, `ticket`, `role`, `model`, `provider`, `started_at`, `ended_at`, `tokens_in`, `tokens_out`, `tokens_cache`, `cost_eur`, `outcome`, `pr_number`, `lines_changed`, `human_decision`, `human_latency_min`, et en plus `lane`, `source`, `requested_model`, `exit_code`, `tokens_cache_write`, `tokens_total`, `cost_basis`, `project`, `label`.
-- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action), `cli_outdated` (jours de retard d'une CLI).
+- `events` : `wake_skipped`, `monitor_expired`, `lane_limit_reached`, `prod_revert`, `model_fallback`, `model_fallback_failed`, `comment_handled` (délai, en minutes, entre un commentaire de l'utilisateur et la première action), `cli_outdated` (jours de retard d'une CLI), `orca_terminal_delayed` et `orca_terminal_failed` (Orca lent ou muet à l'ouverture d'un terminal).
 
 `outcome` vaut `running`, `done`, `failed`, `refused`, `killed`, `idle`, puis, posés par l'étape de release : `merged`, `returned`, `reverted`.
 
@@ -82,15 +122,17 @@ node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur)
 - Rien de réel ne part dans Linear : `linear.sh` fait passer chaque commentaire par le garde-fou du dépôt (`scripts/codex-guard.mjs`, pris dans `origin/main`) avant de l'envoyer. Un texte refusé n'est pas envoyé ; il reste dans le dossier du run.
 - Les commentaires passent par la clé de l'utilisateur : Linear affiche son nom. `linear.sh` commence donc chaque commentaire par « Écrit par un agent », et garde leurs identifiants dans `state/linear-comments.jsonl`. Une veille doit s'en servir pour ne pas les prendre pour des messages de l'utilisateur.
 
-## Servir la page
+## Les services du serveur
 
 La page n'est lisible que depuis le réseau Tailscale (décision du 7 octobre) : les titres des tickets en attente y figurent, et rien de ce qui est à venir n'est public.
 
 `serve/install.sh` installe, sans droits d'administrateur, sans conteneur et sans proxy :
 
 - un service utilisateur, `serve/serve-dashboard.mjs`, à l'écoute sur la seule adresse Tailscale du serveur. Écouter là ne suffit pas, un conteneur de l'hôte atteint aussi cette adresse : le service refuse donc toute connexion dont la source n'est pas une machine du réseau Tailscale, et ne sert que la page ;
-- une minuterie qui relance `dashboard.sh` toutes les dix minutes, en attendant que le dispatcher ait son propre réveil (phase 2). Des scripts seulement, aucun modèle.
+- une minuterie qui relance `dashboard.sh` toutes les dix minutes. Des scripts seulement, aucun modèle ;
+- la minuterie du réveil du chef de projet, toutes les minutes ;
+- la relecture, chaque heure, des sessions de l'ancienne organisation dans le ledger.
 
 `serve/check.sh` vérifie qui peut lire la page : cette machine par Tailscale, oui ; un conteneur, non, par aucune adresse ; rien n'écoute ailleurs. `install.sh` le lance à la fin.
 
-Les deux services appellent les scripts du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.
+Tous appellent les scripts du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.
