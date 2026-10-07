@@ -10,8 +10,9 @@
 #       latest one (0 when up to date, null when unknown).
 #   <adapter> run --model <id> --prompt-file <file> --report <file> --usage <file>
 #       runs the prompt in the current worktree, writes the report and the
-#       usage, and exits with 0 (done), 2 (refused before the model was
-#       called) or anything else (failed).
+#       usage, and exits with 0 (done), 2 (cannot start now: nothing was sent
+#       to the model), 3 (its own safeguard refuses the content of the task)
+#       or anything else (failed).
 #
 # ORCH_PERMISSION_MODE (read-only or accept-edits), ORCH_ALLOW and ORCH_DENY
 # (comma separated command prefixes) say what the run may do without a
@@ -65,7 +66,7 @@ contract_usage() {
 # for every backend. The body is what the model answered (or why it did not).
 contract_report() {
   local adapter=$1 code=$2 body=$3 outcome changed
-  case "$code" in 0) outcome=done ;; 2) outcome=refused ;; *) outcome=failed ;; esac
+  case "$code" in 0) outcome=done ;; 2 | 3) outcome=refused ;; *) outcome=failed ;; esac
   # Zero outside a git worktree (a text-only task runs in an empty directory).
   changed=$( (git status --porcelain 2>/dev/null || true) | wc -l | tr -d ' ')
   {

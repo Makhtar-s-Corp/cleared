@@ -4,8 +4,8 @@
 # Codex never runs on the host. This adapter only calls the trusted task
 # script of the main checkout (ADAPTER_TASK_SCRIPT), which runs Codex in a
 # container on a guarded snapshot of the commit and brings back a patch. When
-# that script refuses (sensitive content, uncommitted changes), so does the
-# adapter: exit code 2, and the dispatcher takes the declared fallback.
+# it cannot start now (a CI run in progress, uncommitted changes) the adapter
+# exits with 2; when the guard of that script refuses the content, with 3.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/contract.sh"
@@ -67,8 +67,8 @@ case "${1:-}" in
       } > "$body"
       cat "$body" >&2
       contract_usage '{}'
-      contract_report codex 2 "$body"
-      exit 2
+      contract_report codex 3 "$body"
+      exit 3
     fi
     # The task script prints the last message twice (the CLI, then its file).
     half=$(( $(wc -c < "$out") / 2 ))

@@ -13,8 +13,8 @@
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
 #
-# Exit codes: 0 spawned, 3 lane limit reached, 5 no model of the chain is
-# available, 1 anything else.
+# Exit codes: 0 spawned, 3 lane limit reached, 1 anything else (among which:
+# no model of the chain is available).
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
@@ -106,9 +106,15 @@ prompt_file=${prompt_file:-$ORCH_HOME/prompts/$role.md}
 [ -f "$prompt_file" ] || die "no prompt for the role \"$role\": $prompt_file"
 
 # 3. The limit on lanes running at once is applied here, not left to a rule.
+# One spawn at a time counts and creates: two at once would both fit under
+# the limit. The lock is dropped when this script ends.
+mkdir -p "$ORCH_STATE_DIR"
+exec 9> "$ORCH_STATE_DIR/spawn.lock"
+flock -w 120 9 || die "another spawn holds the lock"
 max=$(conf_get limits max_lanes)
-open=$(dispatcher_lanes | wc -l | tr -d ' ')
-if dispatcher_lanes | grep -qxF "$lane"; then die "the lane $lane is already open"; fi
+lanes=$(dispatcher_lanes)
+open=$(grep -c . <<<"$lanes" || true)
+if grep -qxF -- "$lane" <<<"$lanes"; then die "the lane $lane is already open"; fi
 if [ "$open" -ge "$max" ]; then
   ledger event --kind lane_limit_reached --ticket "$ticket" --detail "$lane refused: $open lanes open for a limit of $max" --value "$open"
   echo "$(basename "$0"): lane limit reached ($open open, limit $max): $lane not opened" >&2

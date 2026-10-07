@@ -11,7 +11,8 @@ set -euo pipefail
 
 lane=${1:?usage: kill-lane.sh <role>/<ticket> [--force]}
 force=${2:-}
-dispatcher_lanes | grep -qxF "$lane" || die "\"$lane\" is not a lane opened by the dispatcher (open: $(dispatcher_lanes | paste -sd' '))"
+lanes=$(dispatcher_lanes)
+grep -qxF -- "$lane" <<<"$lanes" || die "\"$lane\" is not a lane opened by the dispatcher (open: $(paste -sd' ' <<<"$lanes"))"
 worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs/heads/$lane" '/^worktree /{w = substr($0, 10)} $0 == b {print w}')
 [ -d "$worktree" ] || die "no worktree for $lane"
 

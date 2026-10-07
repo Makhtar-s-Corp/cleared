@@ -37,15 +37,15 @@ adapters/<nom>.sh run --model <id> --prompt-file <fichier> --report <fichier> --
 
 - `list-models` rend les modèles que ce fournisseur peut lancer maintenant, un par ligne. Le dispatcher l'interroge avant chaque lancement et garde un « oui » pendant un jour.
 - `version` rend la version installée, la dernière publiée et le retard en jours. `check-cli.sh` l'appelle une fois par semaine : au-delà de `cli_max_days_behind` (14), il écrit un événement `cli_outdated` que le digest reprendra.
-- `run` s'exécute dans la copie de travail courante et sort avec 0 (terminé), 2 (refus avant tout appel au modèle) ou autre chose (échec).
+- `run` s'exécute dans la copie de travail courante et sort avec 0 (terminé), 2 (ne peut pas démarrer maintenant : rien n'est parti), 3 (son propre garde-fou refuse le contenu de la tâche) ou autre chose (échec). Après un 2, le dispatcher passe au repli déclaré. Après un 3, il s'arrête (`[policy] guard_refusal = stop`) ou passe au repli (`fallback`). Un échec du modèle n'est jamais une raison d'en essayer un autre.
 - Le compte rendu a la même forme pour tous : `lib/contract.sh` l'écrit. En tête, le run, la lane, le modèle demandé, le modèle utilisé, le résultat, les tokens ; puis « Compte rendu » et « Fichiers modifiés ».
 - Le fichier d'usage donne les tokens tels que la CLI les rapporte. Ce qu'elle ne donne pas reste vide.
 
-`adapters/codex.sh` ne lance jamais Codex sur l'hôte : il appelle le script isolé du checkout principal (`scripts/codex-task.sh`), refuse tant qu'une CI tourne, et rend le refus du garde-fou tel quel.
+`adapters/codex.sh` ne lance jamais Codex sur l'hôte : il appelle le script isolé du checkout principal (`scripts/codex-task.sh`), sort avec 2 tant qu'une CI tourne, et avec 3 quand le garde-fou refuse, en rendant ce refus tel quel.
 
 ## Ce qu'une lane a le droit de faire
 
-`[permissions.<rôle>]` dans `agents.conf` : `read-only` ou `accept-edits`, la liste des seules commandes permises, et celle des commandes refusées quoi qu'il arrive. Pour `dev` : tests, vérification, build et git local ; jamais de commande réseau ni de docker, donc pas de `git push` : pousser la branche et ouvrir la PR reviendra à un script, pas au modèle. Sans écran, ce qui n'est pas dans la liste est refusé, pas demandé. C'est une consigne donnée à la CLI, pas un bac à sable : un test qu'elle a le droit de lancer reste du code.
+`[permissions.<rôle>]` dans `agents.conf` : `read-only` ou `accept-edits`, la liste des seules commandes permises, et celle des commandes refusées quoi qu'il arrive. Pour `dev` : tests, vérification, build et git local ; jamais de commande réseau ni de docker, donc pas de `git push` : pousser la branche et ouvrir la PR reviendra à un script, pas au modèle. Sans écran, ce qui n'est pas dans la liste est refusé, pas demandé. C'est une consigne donnée à la CLI, pas un bac à sable : un test qu'elle a le droit de lancer reste du code. Limites connues : une commande permise garde ses options (`git diff --output=…` écrit un fichier, `git diff --no-index` lit hors de la copie de travail). La lecture directe d'un fichier hors de la copie de travail, elle, est refusée sans écran (essayé).
 
 ## Relire une PR
 

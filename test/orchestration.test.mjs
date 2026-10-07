@@ -144,3 +144,146 @@ test('the report is written, and the adapter goes on, when the lane changed a fe
   assert.match(report, /^format: lane-report\/1$/m);
   assert.match(report, /## Compte rendu\n\nFait : rien\.\n\n## Fichiers modifiés\n\n- \?\? /);
 });
+
+// A throwaway copy of the dispatcher with fake backends: `first` exits with
+// FIRST_EXIT, `second` always answers. Nothing leaves the machine.
+function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
+  const state = join(home, 'state');
+  const repo = join(home, 'repo');
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), home]);
+  execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
+  const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/../lib/contract.sh"
+case "$1" in
+  list-models) shift; printf '%s\\n' "$@" ;;
+  run) shift; contract_parse_run "$@"; body=$(mktemp); echo "answer of ${name}" > "$body"
+    contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
+esac
+`, { mode: 0o755 });
+  fake('first', '${FIRST_EXIT:-0}');
+  fake('second', '0');
+  writeFileSync(join(home, 'linear.sh'), '#!/usr/bin/env bash\necho \'{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}\'\n', { mode: 0o755 });
+  writeFileSync(join(home, 'prompts', 'dev.md'), 'prompt\n');
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\n[linear]\nwriteup_role =\n[currency]\nusd_eur = 1\n`);
+  const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
+  git('init', '-q', '-b', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'init');
+  const env = { ...process.env, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf') };
+  return { home, state, repo, env, git };
+}
+
+function runLane(box, firstExit) {
+  const runDir = mkdtempSync(join(tmpdir(), 'orch-run-'));
+  writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
+  writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }, { alias: 'b', adapter: 'second', model: 'm2' }]));
+  writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n');
+  const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: { ...box.env, FIRST_EXIT: String(firstExit) }, encoding: 'utf8' });
+  const db = openLedger(join(box.state, 'ledger.db'));
+  const runs = db.prepare('select model, outcome, exit_code from runs order by rowid').all().map((row) => ({ ...row }));
+  const events = db.prepare('select kind from events order by rowid').all().map((row) => row.kind);
+  db.close();
+  return { status: run.status, runs, events, comment: readFileSync(join(runDir, 'comment.md'), 'utf8') };
+}
+
+test('a backend that cannot start now hands over to the declared fallback, and says so', () => {
+  const lane = runLane(sandbox(), 2);
+  assert.equal(lane.status, 0);
+  assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'refused', exit_code: 2 }, { model: 'm2', outcome: 'done', exit_code: 0 }]);
+  assert.deepEqual(lane.events, ['model_fallback']);
+  assert.match(lane.comment, /Repli : a/);
+});
+
+test('a refusal by the safeguard of a backend stops the lane when the policy says stop', () => {
+  const lane = runLane(sandbox({ policy: 'stop' }), 3);
+  assert.equal(lane.status, 3);
+  assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'refused', exit_code: 3 }]);
+  assert.deepEqual(lane.events, ['model_fallback_failed']);
+  assert.match(lane.comment, /garde-fou/);
+});
+
+test('a refusal by the safeguard of a backend takes the fallback when the policy says fallback', () => {
+  const lane = runLane(sandbox({ policy: 'fallback' }), 3);
+  assert.equal(lane.status, 0);
+  assert.deepEqual(lane.runs.map((run) => run.outcome), ['refused', 'done']);
+  assert.deepEqual(lane.events, ['model_fallback']);
+});
+
+test('a failure of the model is not a reason to try another one', () => {
+  const lane = runLane(sandbox(), 1);
+  assert.equal(lane.status, 1);
+  assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'failed', exit_code: 1 }]);
+  assert.deepEqual(lane.events, []);
+});
+
+test('the lane limit refuses one lane too many and writes it down; an open lane is not opened twice', () => {
+  const box = sandbox({ maxLanes: 1 });
+  box.git('worktree', 'add', '-q', '-b', 'dev/X-1', join(box.home, 'lanes', 'dev-X-1'), 'main');
+  const spawn = (ticket) => spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', ticket, '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  const twice = spawn('X-1');
+  assert.equal(twice.status, 1);
+  assert.match(twice.stderr, /already open/);
+  const over = spawn('X-2');
+  assert.equal(over.status, 3, over.stderr);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.deepEqual(db.prepare('select kind, ticket, value from events').all().map((row) => ({ ...row })), [{ kind: 'lane_limit_reached', ticket: 'X-2', value: 1 }]);
+  db.close();
+});
+
+test('no allowed command runs whatever follows it, and none touches git state shared between lanes', () => {
+  const list = (text) => (text || '').split(',').map((item) => item.trim()).filter(Boolean);
+  for (const name of Object.keys(conf.sections).filter((section) => section.startsWith('permissions.'))) {
+    for (const allowed of list(conf.sections[name].allow)) {
+      assert.notEqual(allowed, 'node scripts/with-test-postgres.mjs', `${name}: this wrapper runs any command given after --`);
+      assert.doesNotMatch(allowed, /^git (stash|switch|checkout|rebase)\b/, `${name} allows "${allowed}"`);
+    }
+  }
+  assert.ok(conf.sections['permissions.mechanical'], 'a mechanical task that falls back needs its own permissions');
+});
+
+test('the Claude adapter turns the permissions of a role into the allow and deny lists of its CLI', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-claude-'));
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\necho '{"type":"result","is_error":false,"result":"ok","total_cost_usd":0,"modelUsage":{}}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'p');
+  const call = (mode) => {
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+      cwd: dir, encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCH_PERMISSION_MODE: mode, ORCH_ALLOW: 'git status, npm test', ORCH_DENY: 'curl, git push', ADAPTER_DENY_TOOLS: 'WebFetch', ADAPTER_CONNECTORS: 'none' },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    return readFileSync(join(dir, 'args'), 'utf8').split('\n');
+  };
+  const edits = call('accept-edits');
+  const allowed = edits.slice(edits.indexOf('--allowedTools') + 1, edits.indexOf('--disallowedTools'));
+  assert.deepEqual(allowed, ['Bash(git status)', 'Bash(git status *)', 'Bash(npm test)', 'Bash(npm test *)']);
+  assert.equal(edits[edits.indexOf('--permission-mode') + 1], 'acceptEdits');
+  for (const denied of ['Bash(curl)', 'Bash(curl *)', 'Bash(git push)', 'Bash(git push *)', 'WebFetch']) assert.ok(edits.includes(denied), denied);
+  assert.ok(edits.includes('--strict-mcp-config'));
+  const readOnly = call('read-only');
+  assert.ok(!readOnly.includes('--permission-mode'));
+  for (const denied of ['Edit', 'Write', 'NotebookEdit']) assert.ok(readOnly.includes(denied), denied);
+});
+
+test('the Linear text is the write-up when the writing model answers, the raw report when it does not', () => {
+  const lane = (writerExit) => {
+    const box = sandbox();
+    writeFileSync(join(box.home, 'prompts', 'writeup.md'), 'reword\n');
+    const runDir = mkdtempSync(join(tmpdir(), 'orch-run-'));
+    writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
+    writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'b', adapter: 'second', model: 'm2' }]));
+    writeFileSync(join(runDir, 'writeup-chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }]));
+    writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-test\nORCH_REQUESTED_ALIAS=b\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=writing\n');
+    const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: { ...box.env, FIRST_EXIT: String(writerExit) }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    return readFileSync(join(runDir, 'comment.md'), 'utf8');
+  };
+  const worded = lane(0);
+  assert.match(worded, /Texte mis en forme par m1/);
+  assert.match(worded, /answer of first/);
+  assert.doesNotMatch(worded, /answer of second/);
+  const raw = lane(1);
+  assert.match(raw, /La mise en forme a échoué/);
+  assert.match(raw, /answer of second/);
+  assert.match(raw, /Modèle utilisé : `m2`/);
+});

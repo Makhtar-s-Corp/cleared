@@ -32,28 +32,40 @@ attempt() {
   ORCH_RUN_ID=$run_id ORCH_ROLE=$role ORCH_REQUESTED_MODEL=$requested \
     "$(adapter_path "$adapter")" run --model "$model" --prompt-file "$prompt" --report "$report" --usage "$usage_file"
   code=$?
-  case "$code" in 0) outcome=done; model_seen "$adapter" "$model" ;; 2) outcome=refused ;; *) outcome=failed ;; esac
+  case "$code" in 0) outcome=done; model_seen "$adapter" "$model" ;; 2 | 3) outcome=refused ;; *) outcome=failed ;; esac
   [ -f "$usage_file" ] || echo '{}' > "$usage_file"
   ledger run-end --run-id "$run_id" --outcome "$outcome" --exit-code "$code" --usage-file "$usage_file"
   if [ -n "${ORCH_PR:-}" ]; then ledger run-set --run-id "$run_id" --pr-number "$ORCH_PR" --lines-changed "${ORCH_PR_LINES:-0}"; fi
 }
 
 # run_chain <role> <prompt file> <chain file> <requested alias>: first
-# candidate that starts.
-# A refusal to start (exit 2) moves to the declared fallback, and says so.
+# candidate that starts. A backend that cannot start now (exit 2) hands over
+# to the declared fallback; one whose safeguard refuses the task (exit 3) does
+# so only if [policy] guard_refusal says fallback. Both are said out loud.
 run_chain() {
-  local role=$1 prompt=$2 chain=$3 requested=$4 count index
+  local role=$1 prompt=$2 chain=$3 requested=$4 count index why
   count=$(jq length "$chain")
   fallback_note=
   for ((index = 0; index < count; index++)); do
     attempt "$index" "$role" "$prompt" "$chain" "$requested"
-    [ "$code" = 2 ] || return 0
+    case "$code" in
+      2) why="n'a pas pu démarrer" ;;
+      3)
+        why="a été refusé par son garde-fou"
+        if [ "$(conf_get policy guard_refusal)" != fallback ]; then
+          ledger event --kind model_fallback_failed --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "$alias: its safeguard refused the task; no fallback by policy"
+          echo "!! $alias $why : la lane s'arrête là (pas de repli après un refus de garde-fou)."
+          return 0
+        fi
+        ;;
+      *) return 0 ;;
+    esac
     if [ $((index + 1)) -lt "$count" ]; then
-      fallback_note="$alias a refusé de démarrer ; repli déclaré : $(jq -r ".[$((index + 1))].alias" "$chain")."
-      ledger event --kind model_fallback --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "$alias refused to start, next: $(jq -r ".[$((index + 1))].alias" "$chain")"
+      fallback_note="$alias $why ; repli déclaré : $(jq -r ".[$((index + 1))].alias" "$chain")."
+      ledger event --kind model_fallback --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "$alias could not run (exit $code), next: $(jq -r ".[$((index + 1))].alias" "$chain")"
       echo "!! $fallback_note"
     else
-      ledger event --kind model_fallback_failed --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "no model of the chain could start (last: $alias)"
+      ledger event --kind model_fallback_failed --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "no model of the chain could start (last: $alias, exit $code)"
       echo "!! Aucun modèle de la chaîne n'a pu démarrer (dernier essai : $alias)."
     fi
   done
@@ -74,18 +86,26 @@ if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ]; then
     cat "$body"
   } > "$run_dir/writeup-prompt.md"
   scratch=$(mktemp -d)
-  (cd "$scratch" && export ORCH_TEXT_ONLY=1 && run_chain "$ORCH_WRITEUP_ROLE" "$run_dir/writeup-prompt.md" "$run_dir/writeup-chain.json" "$(jq -r '.[0].alias' "$run_dir/writeup-chain.json")"; exit "$code")
-  if [ $? = 0 ]; then
-    writeup_report=$(ls -t "$ORCH_STATE_DIR/reports/$ORCH_RUN_BASE-$ORCH_WRITEUP_ROLE-"*.md | head -n 1)
-    sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$writeup_report" | sed '1d;$d' > "$body"
-    writeup_note="Texte mis en forme par $(sed -n 's/^model: //p' "$writeup_report")."
+  lane_dir=$PWD
+  cd "$scratch"
+  ORCH_TEXT_ONLY=1 run_chain "$ORCH_WRITEUP_ROLE" "$run_dir/writeup-prompt.md" "$run_dir/writeup-chain.json" "$(jq -r '.[0].alias' "$run_dir/writeup-chain.json")"
+  cd "$lane_dir"
+  # $code and $report are those of the last attempt of the write-up.
+  if [ "$code" = 0 ]; then
+    sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$report" | sed '1d;$d' > "$body"
+    writeup_note="Texte mis en forme par $(sed -n 's/^model: //p' "$report")."
   else
     writeup_note="La mise en forme a échoué : le compte rendu est celui de la lane, tel quel."
   fi
   rm -rf "$scratch"
 fi
 
-case "$lane_code" in 0) result="terminé" ;; 2) result="refusé avant le lancement du modèle" ;; *) result="échec (code $lane_code)" ;; esac
+case "$lane_code" in
+  0) result="terminé" ;;
+  2) result="pas démarré : rien n'a été envoyé au modèle" ;;
+  3) result="refusé par le garde-fou du fournisseur : rien n'a été envoyé" ;;
+  *) result="échec (code $lane_code)" ;;
+esac
 tokens=$(jq -r '.tokens_total // empty' "$lane_usage")
 cost=$(jq -r 'if .cost_usd then (.cost_usd * 100 | round / 100 | tostring | sub("\\."; ",")) else empty end' "$lane_usage")
 comment="$run_dir/comment.md"
