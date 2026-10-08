@@ -2054,11 +2054,16 @@ test('what a review says comes back to the lead at its next wake, once; one that
   const woken = changes(first.next, [], [], new Set(), '2026-01-02T10:05:00Z', [], new Set(['review_done']), { reviews });
   assert.deepEqual(woken.events.map((event) => [event.kind, event.pr, event.ticket, event.text]), [['review_done', 7, 'X-5', 'Verdict : à corriger avant fusion.']]);
   assert.deepEqual(changes(woken.next, [], [], new Set(), '2026-01-02T10:06:00Z', [], new Set(['review_done']), { reviews }).events, []);
+  // A verdict is handed whole: the lead cannot go and read the rest (seen on 2026-10-07: one came cut in the middle of a question).
+  const long = `Verdict : à corriger.\n${'Un défaut, sa ligne, ce qui est attendu. '.repeat(200)}\nDernière question pour Makhtar.`;
+  const whole = changes(first.next, [], [], new Set(), '2026-01-02T10:05:00Z', [], null, { reviews: [{ ...reviews[1], text: long }] });
+  assert.ok(long.length > 8000);
+  assert.match(whole.events[0].text, /Dernière question pour Makhtar\.$/);
   assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('review_done'));
   assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('ops/orchestration/review-pr.sh'));
 });
 
-test('a review that fails is tried once more, not for ever: after two tries of the same commit, the script says to tell the user', () => {
+test('a review that fails is tried once more, not for ever: after two tries of the same commit, the script says to tell the user', async () => {
   const lane = laneWithRemote('feat/y', 'feat: the work of the lane');
   const { box } = lane;
   const env = { ...box.env, HOME: box.home };
@@ -2079,6 +2084,18 @@ test('a review that fails is tried once more, not for ever: after two tries of t
   const db = openLedger(join(box.state, 'ledger.db'));
   assert.equal(db.prepare("select count(*) n from runs where role = 'review' and outcome in ('failed', 'refused')").get().n, 4);
   db.close();
+  // A review whose first model could not start and whose second one came to its end is no failed try.
+  const { failedTries } = await import('../ops/orchestration/lib/reviews.mjs');
+  const ledger = openLedger(join(box.state, 'ledger.db'));
+  mkdirSync(join(box.state, 'runs', 'X-5-ended'), { recursive: true });
+  writeFileSync(join(box.state, 'runs', 'X-5-ended', 'reviewed-head'), 'another-commit\n');
+  for (const [attempt, outcome] of [['a1', 'refused'], ['a2', 'done']]) {
+    runStart(ledger, { runId: `X-5-ended-review-${attempt}`, role: 'review', lane: 'review/X-5' });
+    runEnd(ledger, conf, { runId: `X-5-ended-review-${attempt}`, outcome });
+    ledger.prepare('UPDATE runs SET pr_number = 7 WHERE run_id = ?').run(`X-5-ended-review-${attempt}`);
+  }
+  assert.equal(failedTries(ledger, join(box.state, 'reports'), 7, 'another-commit'), 0);
+  ledger.close();
   const third = review();
   assert.equal(third.status, 1);
   assert.match(third.stderr, /2 reviews of this commit .* did not come to an end/);

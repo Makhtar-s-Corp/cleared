@@ -45,6 +45,9 @@ export function checksOf(rollup = []) {
 export const OVERLAP_MS = 10 * 60_000;
 // What waits for a session is kept up to this many events, the oldest dropped.
 export const WAITING_MAX = 40;
+// A verdict is handed whole (the lead cannot read the report where it lies);
+// only a text out of all proportion is cut.
+export const REVIEW_MAX = 30_000;
 
 export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false, reviews = [] } = {}) {
   // A state that cannot be read (no time of last wake) is no state: this
@@ -89,7 +92,7 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     if (seen.has(review.id)) continue;
     seen.add(review.id);
     if (first || review.at <= horizon) continue;
-    events.push({ kind: 'review_done', at: review.at, pr: review.pr, ticket: review.ticket, outcome: review.outcome, commit: review.commit, text: excerpt(review.text, 3500) });
+    events.push({ kind: 'review_done', at: review.at, pr: review.pr, ticket: review.ticket, outcome: review.outcome, commit: review.commit, text: excerpt(review.text, REVIEW_MAX) });
   }
 
   // While GitHub is down, what its pull requests seem to do (checks that it
