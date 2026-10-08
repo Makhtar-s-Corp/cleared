@@ -208,6 +208,35 @@ drop_queued_review() {
   rm -f "$1"
 }
 
+# open_queued_merges: the go-lives merge-pr.sh could not do at once, tried
+# again now, oldest first, one a wake (a merge takes the host for a while).
+# No model: the same script, with every check again. One that is refused for
+# good leaves the queue: written to the ledger (merge_refused) and told to
+# the lead at its next wake.
+open_queued_merges() {
+  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why
+  ls "$queue"/*.json > /dev/null 2>&1 || return 0
+  while IFS= read -r entry; do
+    if ! jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1; then
+      ledger event --kind merge_refused --detail "an entry of the queue of go-lives ($(basename "$entry")) cannot be read: removed, the go-live is to be asked for again"
+      rm -f "$entry"
+      continue
+    fi
+    pr=$(jq -r '.pr' "$entry") ticket=$(jq -r '.ticket' "$entry") said=$(jq -r '.announcement // ""' "$entry")
+    code=0
+    why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
+    case "$code" in
+      0) rm -f "$entry" "$queue/$pr.announcement.md"; return 0 ;;
+      5) ;;
+      *)
+        ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue without being done: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
+        rm -f "$entry" "$queue/$pr.announcement.md"
+        ;;
+    esac
+  done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry" 2> /dev/null)" "$entry"; done | sort | cut -f2)
+  return 0
+}
+
 # github_down: what GitHub says is down among the parts the dispatcher needs,
 # as its public status page has it: nothing when all is well. Exit 2 when the
 # page cannot be read, which says nothing either way. A slowdown is not an

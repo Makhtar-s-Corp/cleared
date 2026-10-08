@@ -137,6 +137,69 @@ case "${1:-}" in
     [ "$(jq length <<<"$listed")" -lt 100 ] || echo "$(basename "$0"): 100 tickets in the state \"$2\": the list may be cut short" >&2
     printf '%s\n' "$listed"
     ;;
+  upload)
+    # Sends one screenshot to Linear and prints the address to put in a
+    # comment. Only an image (its first bytes say so, not its name), and
+    # only from the folders where the lanes keep their captures: nothing
+    # else on this machine leaves by here.
+    file=$(realpath -e "${2:-}" 2> /dev/null) || die "usage: linear.sh upload <image>: no such file"
+    allowed=
+    while IFS= read -r root; do
+      [ -n "$root" ] || continue
+      root=$(realpath -m "$(expand_home "$root")")
+      case "$file" in "$root"/*) allowed=1 ;; esac
+    done < <(conf_get linear capture_roots | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+    [ -n "$allowed" ] || die "$file is not under a folder of captures ([linear] capture_roots): nothing sent"
+    case "$(head -c 8 "$file" | od -An -tx1 | tr -d ' \n')" in
+      89504e470d0a1a0a) type=image/png ;;
+      ffd8ff*) type=image/jpeg ;;
+      *) die "$file is not a PNG or JPEG image: nothing sent" ;;
+    esac
+    size=$(stat -c %s "$file")
+    [ "$size" -le 5000000 ] || die "$file is larger than 5 MB: nothing sent"
+    asked=$(gql 'mutation($type: String!, $name: String!, $size: Int!) { fileUpload(contentType: $type, filename: $name, size: $size) { success uploadFile { uploadUrl assetUrl headers { key value } } } }' \
+      "$(jq -nc --arg type "$type" --arg name "$(basename "$file")" --argjson size "$size" '{type: $type, name: $name, size: $size}')")
+    [ "$(jq -r '.data.fileUpload.success' <<<"$asked")" = true ] || die "Linear did not take the upload"
+    headers=()
+    while IFS=$'\t' read -r name value; do headers+=(-H "$name: $value"); done < <(jq -r '.data.fileUpload.uploadFile.headers[] | [.key, .value] | @tsv' <<<"$asked")
+    curl -sS --fail --max-time 60 -X PUT -H "Content-Type: $type" -H 'Cache-Control: public, max-age=31536000' "${headers[@]}" --data-binary "@$file" "$(jq -r '.data.fileUpload.uploadFile.uploadUrl' <<<"$asked")" > /dev/null \
+      || die "the image could not be sent"
+    jq -r '.data.fileUpload.uploadFile.assetUrl' <<<"$asked"
+    ;;
+  state)
+    ticket_ok "$2"
+    gql 'query($id: String!) { issue(id: $id) { state { name } } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.state.name // empty'
+    ;;
+  moved-by-owner)
+    # Is the ticket in that status, and was it put there by the owner of the
+    # key himself? 0: yes. 5: it is not in that status. 6: it was put there
+    # by an integration, or by another account. 7: Linear has not written
+    # the move to the history yet. Linear cannot tell the owner from a
+    # program that acts under his account: this only holds for the agents
+    # that have no way to change a status (docs/decisions.md).
+    ticket_ok "$2"
+    [ -n "${3:-}" ] || die "usage: linear.sh moved-by-owner <ticket> <status>"
+    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } history(first: 40) { nodes { createdAt actorId botActor { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
+    [ "$(jq -r '.data.issue.state.name // empty' <<<"$answer")" = "$3" ] || exit 5
+    last=$(jq -c --arg status "$3" '[.data.issue.history.nodes[] | select(.toState.name == $status)] | sort_by(.createdAt) | last // empty' <<<"$answer")
+    [ -n "$last" ] || exit 7
+    [ "$(jq -r '.botActor == null and .actorId != null' <<<"$last")" = true ] && [ "$(jq -r '.actorId' <<<"$last")" = "$(jq -r '.data.viewer.id' <<<"$answer")" ] || exit 6
+    ;;
+  move)
+    # A script only ever puts a ticket in the status that asks the user for
+    # his agreement, or in the one that says it is done. Never in the one
+    # that is his agreement.
+    ticket_ok "$2"
+    target=${3:-}
+    [ -n "$target" ] && { [ "$target" = "$(conf_get linear validate_state)" ] || [ "$target" = "$(conf_get linear done_state)" ]; } \
+      || die "a script may only move a ticket to \"$(conf_get linear validate_state)\" or \"$(conf_get linear done_state)\", never to \"${target:-nothing}\""
+    found=$(gql 'query($id: String!, $team: String!) { issue(id: $id) { id } teams(filter: {key: {eq: $team}}) { nodes { states { nodes { id name } } } } }' "$(jq -nc --arg id "$2" --arg team "$(conf_get linear team)" '{id: $id, team: $team}')")
+    issue_id=$(jq -r '.data.issue.id // empty' <<<"$found") state_id=$(jq -r --arg name "$target" '.data.teams.nodes[0].states.nodes[] | select(.name == $name) | .id' <<<"$found")
+    [ -n "$issue_id" ] && [ -n "$state_id" ] || die "ticket \"$2\" or status \"$target\" not found in Linear"
+    moved=$(gql 'mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }' "$(jq -nc --arg id "$issue_id" --arg state "$state_id" '{id: $id, input: {stateId: $state}}')")
+    [ "$(jq -r '.data.issueUpdate.success' <<<"$moved")" = true ] || die "Linear did not move $2"
+    echo "$2 -> $target"
+    ;;
   waiting)
     team=$(conf_get linear team)
     gql 'query($team: String!) { viewer { assignedIssues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: "In Review"}}}) { nodes { identifier title url updatedAt comments(first: 1) { nodes { url createdAt } } } } } }' \
@@ -144,6 +207,6 @@ case "${1:-}" in
       | jq -c '[.data.viewer.assignedIssues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
     ;;
   *)
-    die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | create <project> <label> <title> <file> | changes <ISO time> | list <state> | waiting"
+    die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | create <project> <label> <title> <file> | changes <ISO time> | list <state> | waiting | state <ticket> | moved-by-owner <ticket> <status> | move <ticket> <status> | upload <image>"
     ;;
 esac
