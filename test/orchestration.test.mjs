@@ -2987,22 +2987,37 @@ esac
   assert.equal(lines('asked-as').length, 2);
   const kept = join(dir, 'state', 'tracker-token.json');
   assert.equal(execFileSync('stat', ['-c', '%a', kept], { encoding: 'utf8' }).trim(), '600');
+  // The token of another application is not this one's: a new identifier, a new token.
+  assert.equal(linear({ LINEAR_APP_CLIENT_ID: 'another-id', LINEAR_APP_CLIENT_SECRET: 'another-secret' }, 'state', 'X-1').status, 0);
+  assert.equal(lines('token-asked').length, 2);
+  assert.match(lines('token-asked')[1], /client_id=another-id/);
+  assert.equal(linear({}, 'state', 'X-1').status, 0);
+  assert.equal(lines('token-asked').length, 3, 'and back');
   // A token that is too old is asked for again.
   writeFileSync(kept, JSON.stringify({ ...JSON.parse(readFileSync(kept, 'utf8')), at: '2020-01-01T00:00:00Z' }));
   assert.equal(linear({}, 'state', 'X-1').status, 0);
-  assert.equal(lines('token-asked').length, 2);
+  assert.equal(lines('token-asked').length, 4);
   // A token the tracker refuses (the secret changed, the application was installed again) is thrown away and asked
   // for again, once: the agents are not left mute for half a day.
   writeFileSync(join(dir, 'refuse-once'), '1');
   const refused = linear({}, 'state', 'X-1');
   assert.equal(refused.status, 0, refused.stderr);
   assert.equal(refused.stdout.trim(), 'Todo');
-  assert.equal(lines('token-asked').length, 3);
+  assert.equal(lines('token-asked').length, 5);
   writeFileSync(join(dir, 'refuse-once'), '5');
   const stillRefused = linear({}, 'state', 'X-1');
   assert.equal(stillRefused.status, 1, 'refused again with a new token: said, not tried for ever');
-  assert.equal(lines('token-asked').length, 4);
+  assert.equal(lines('token-asked').length, 6);
   execFileSync('rm', ['-f', join(dir, 'refuse-once')]);
+  // What waits for the user is what is in the status that asks him, whoever the scripts act as: under the
+  // application of the agents, « the tickets assigned to the one who asks » would be an empty list, with no error.
+  writeFileSync(join(dir, 'curl'), readFileSync(join(dir, 'curl'), 'utf8').replace(`"issue":{"state":{"name":"Todo"}}`, `"issue":{"state":{"name":"Todo"}},"issues":{"nodes":[{"identifier":"X-7","title":"Un écran","url":"u","updatedAt":"2026-01-02T10:00:00Z","comments":{"nodes":[{"url":"u#c","createdAt":"2026-01-02T09:00:00Z"}]}}]}`).replace('echo "$auth" >> ', `echo "$body" >> "${join(dir, 'asked-what')}"; echo "$auth" >> `));
+  const waiting = linear({}, 'waiting');
+  assert.equal(waiting.status, 0, waiting.stderr);
+  assert.deepEqual(JSON.parse(waiting.stdout), [{ identifier: 'X-7', title: 'Un écran', url: 'u#c', since: '2026-01-02T09:00:00Z' }]);
+  const askedWhat = readFileSync(join(dir, 'asked-what'), 'utf8');
+  assert.match(askedWhat, /À valider/);
+  assert.doesNotMatch(askedWhat, /assignedIssues/);
   // Without the application, the key of a person: the tracker then cannot tell him from an agent, and says so.
   writeFileSync(secrets, 'LINEAR_API_KEY=personal-key\n');
   execFileSync('rm', ['-f', kept]);
