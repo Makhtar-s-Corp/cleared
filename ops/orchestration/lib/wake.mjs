@@ -25,7 +25,9 @@ import { runAsCommand } from './conf.mjs';
 // What says "an agent wrote this". The first two are the marks linear.sh puts;
 // the third is the habit of the old project lead, kept while both run.
 const AGENT_MARKS = [/^>\s*Écrit par un agent/, /^>\s*Ticket ouvert par un agent/, /^Chef de projet\s*:/];
-const byAgent = (text, id, agentIds) => agentIds.has(id) || AGENT_MARKS.some((mark) => mark.test((text ?? '').trimStart()));
+// And what the tracker itself says an agent wrote (its author is an
+// application), when it can tell: no mark and no identifier needed then.
+const byAgent = (text, id, agentIds, flagged = false) => flagged === true || agentIds.has(id) || AGENT_MARKS.some((mark) => mark.test((text ?? '').trimStart()));
 
 const excerpt = (text, length = 600) => {
   const flat = (text ?? '').replace(/\s+/g, ' ').trim();
@@ -82,14 +84,14 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     if (!seen.has(issue.id)) {
       seen.add(issue.id);
       // A ticket met for the first time is new only if it was created since the last wake.
-      if (!first && issue.createdAt > horizon && !byAgent(issue.description, issue.id, agentIds)) {
+      if (!first && issue.createdAt > horizon && !byAgent(issue.description, issue.id, agentIds, issue.agent)) {
         events.push({ kind: 'ticket_new', at: issue.createdAt, ...ticket, text: excerpt(issue.description) });
       }
     }
     for (const comment of issue.comments ?? []) {
       if (seen.has(comment.id)) continue;
       seen.add(comment.id);
-      if (first || comment.createdAt <= horizon || byAgent(comment.body, comment.id, agentIds)) continue;
+      if (first || comment.createdAt <= horizon || byAgent(comment.body, comment.id, agentIds, comment.agent)) continue;
       events.push({ kind: 'comment', at: comment.createdAt, ...ticket, url: comment.url ?? issue.url, text: excerpt(comment.body) });
     }
   }

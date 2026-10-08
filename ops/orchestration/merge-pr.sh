@@ -129,16 +129,24 @@ needs=$(node_lib merge.mjs needs "$work/files.json")
 go=$(conf_get linear go_state) validate=$(conf_get linear validate_state) agreed=
 asked="$ORCH_STATE_DIR/validations/$ticket.json"
 if [ "$needs" != tooling ]; then
+  # His move is read from the tracker: where the project asks for it, not
+  # from one that cannot tell him from an agent.
+  if [ "$(conf_get merge separate_identity)" = required ] && [ "$("$ORCH_HOME/linear.sh" identity)" != app ]; then
+    no "the tracker cannot tell the user from an agent (the scripts act under the key of a person): no agreement is read from it ([merge] separate_identity). Give the agents their own application"
+  fi
+  # His move answers a request: the time of the last one made on this ticket.
+  requested=$(jq -r '.at // empty' "$asked" 2> /dev/null) || requested=
   code=0
-  "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" || code=$?
+  "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" ${requested:+"$requested"} || code=$?
   case "$code" in
     0)
       # His move is his agreement to what he was shown, and to nothing else:
-      # another pull request of the ticket, or a version pushed since, was
-      # seen by nobody but a reviewer.
+      # another pull request of the ticket, or one more commit of any kind
+      # (a merge of the base that changed nothing is one), was seen by
+      # nobody but a reviewer. His rule of 2026-10-08: the exact version.
       shown=$(jq -r --argjson pr "$pr" '.pulls[]? | select(.pr == $pr) | .head' "$asked" 2> /dev/null | sed -n '1p') || shown=
       [ -n "$shown" ] || no "$ticket is in « $go », but the user was never shown #$pr: ask him for it (ask-validation.sh $ticket - --pr $pr)"
-      if ! only_base_merges "$shown" "$head"; then
+      if [ "$shown" != "$head" ]; then
         [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
         [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the user agreed to ${shown:0:8} and the branch is now at ${head:0:8}: $ticket is back in « $validate », to be asked again with this version"
         no "this version (${head:0:8}) is not the version he was shown (${shown:0:8}): $ticket is back in « $validate ». Ask him again with this version (ask-validation.sh $ticket - --pr $pr)"
@@ -146,6 +154,13 @@ if [ "$needs" != tooling ]; then
       agreed=status
       ;;
     7) later "Linear has not written yet who put $ticket in « $go »" ;;
+    8)
+      # By him, but before the request: an agreement to something else, and
+      # a card that somebody else put back where he had left it.
+      [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
+      [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the move of the user to « $go » is older than the request made at $requested: it answers another request. $ticket is back in « $validate »"
+      no "the move of the user to « $go » is older than the request made at $requested: $ticket is back in « $validate », where the request waits for him"
+      ;;
     6)
       # In his status, but not put there by him: never live, and back to the status that asks him.
       [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
