@@ -55,7 +55,7 @@ export const WAITING_MAX = 40;
 // only a text out of all proportion is cut.
 export const REVIEW_MAX = 30_000;
 
-export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false, reviews = [] } = {}) {
+export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false, reviews = [], watchedStates = [] } = {}) {
   // A state that cannot be read (no time of last wake) is no state: this
   // wake takes note of what exists, like the very first one.
   if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
@@ -67,8 +67,18 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
   const known = previous?.pulls ?? {};
   const events = [];
 
+  // The status of each ticket seen, to tell when one enters a status that
+  // is watched (the user's agreement to a go-live). The agents the lead
+  // runs with cannot change a status: such a move is the user's, or to be
+  // refused by the script that checks who made it.
+  const states = { ...(previous?.states ?? {}) };
   for (const issue of linear) {
     const ticket = { ticket: issue.identifier, title: issue.title, url: issue.url, state: issue.state, project: issue.project };
+    if (issue.state && states[issue.id] !== issue.state) {
+      const entered = watchedStates.includes(issue.state) && !first && (issue.updatedAt ?? now) > horizon;
+      if (entered) events.push({ kind: 'ticket_moved', at: issue.updatedAt ?? now, ...ticket });
+      states[issue.id] = issue.state;
+    }
     if (!seen.has(issue.id)) {
       seen.add(issue.id);
       // A ticket met for the first time is new only if it was created since the last wake.
@@ -129,7 +139,7 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
   const all = [...(previous?.waiting ?? []), ...events];
   const start = events.some(worth);
   // The identifiers already seen are kept, the oldest dropped: Linear is only asked for the last hours.
-  return { events: start ? all : [], next: { at: now, seen: [...seen].slice(-3000), pulls: nextPulls, waiting: start ? [] : all.slice(-WAITING_MAX) } };
+  return { events: start ? all : [], next: { at: now, seen: [...seen].slice(-3000), pulls: nextPulls, states: Object.fromEntries(Object.entries(states).slice(-1500)), waiting: start ? [] : all.slice(-WAITING_MAX) } };
 }
 
 const read = (path, fallback) => {
@@ -137,11 +147,11 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github, reviewsPath] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github, reviewsPath, watched] = process.argv.slice(2);
   const wakeOn = worthList?.trim() ? new Set(worthList.split(',').map((kind) => kind.trim()).filter(Boolean)) : null;
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down', reviews: reviewsPath ? read(reviewsPath, []) : [] }))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down', reviews: reviewsPath ? read(reviewsPath, []) : [], watchedStates: (watched ?? '').split(',').map((name) => name.trim()).filter(Boolean) }))}\n`);
 }
