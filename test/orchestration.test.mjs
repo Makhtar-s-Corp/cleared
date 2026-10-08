@@ -2184,22 +2184,22 @@ test('a review that cannot open now waits in a queue and opens by itself, withou
   assert.equal(wake().status, 0);
   assert.deepEqual(queued(), ['7.json']);
   assert.equal(dropped().length, 1);
-  // A try that is only "not now" (the limit of the hour) is no failure: an old one is forgotten, the count starts again.
+  // A try that is only "not now" (a review of that ticket still running) is no failure: the hour of failures that had
+  // begun is forgotten, so that one failure after a long wait is the first of its hour, not the last.
   execFileSync('mv', [join(box.home, 'pr-view.kept'), join(box.home, 'pr-view.json')]);
-  entry({ failing_since: new Date(Date.now() - 3 * 3600_000).toISOString() });
+  publish();
   const held = openLedger(join(box.state, 'ledger.db'));
-  runStart(held, { runId: 'holds-the-hour', role: 'review', lane: 'review/X-9' });
-  runEnd(held, conf, { runId: 'holds-the-hour', outcome: 'done' });
+  runStart(held, { runId: 'still-reading', role: 'review', lane: 'review/X-5' });
+  held.prepare("UPDATE runs SET started_at = '2020-01-01T00:00:00Z' WHERE run_id = 'still-reading'").run();
   held.close();
-  const kept = (name) => JSON.parse(readFileSync(join(box.state, 'reviews-queue', name), 'utf8'));
+  entry({ failing_since: new Date(Date.now() - 3 * 3600_000).toISOString() });
   assert.equal(wake().status, 0);
-  assert.deepEqual(queued(), ['7.json'], 'the limit of the hour holds it: kept');
-  age();
+  assert.deepEqual(queued(), ['7.json'], 'kept while the other review runs');
+  assert.equal(JSON.parse(readFileSync(join(box.state, 'reviews-queue', '7.json'), 'utf8')).failing_since, undefined, 'the old hour of failures is forgotten');
+  const over = openLedger(join(box.state, 'ledger.db'));
+  runEnd(over, conf, { runId: 'still-reading', outcome: 'killed' });
+  over.close();
   execFileSync('mv', [join(box.home, 'pr-view.json'), join(box.home, 'pr-view.kept')]);
-  entry({ failing_since: undefined, waited: true });
-  assert.equal(wake().status, 0);
-  assert.deepEqual(queued(), ['7.json'], 'one failure after a long wait is the first of its hour, not the last');
-  assert.ok(Date.now() - Date.parse(kept('7.json').failing_since) < 60_000);
   // It has been failing for more than an hour: dropped, written to the ledger, and told to the lead as what it is.
   entry({ failing_since: new Date(Date.now() - 61 * 60_000).toISOString() });
   assert.equal(wake().status, 0);
