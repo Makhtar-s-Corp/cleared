@@ -76,6 +76,13 @@ only_base_merges() {
   done < <(git -C "$ORCH_REPO" rev-list "$1..$2" --not "$base")
 }
 
+# One go-live at a time, from the first read to the merge: the wake that
+# tries the queue and a call of the lead would both read a free host, and a
+# branch that holds the base, before either had merged.
+mkdir -p "$ORCH_STATE_DIR"
+exec 9> "$ORCH_STATE_DIR/merge.lock"
+flock -n 9 || later "another go-live is being done"
+
 down=$(github_down) || down=
 [ -z "$down" ] || later "GitHub is down ($down)"
 
@@ -161,11 +168,7 @@ if [ "$needs" != tooling ]; then
   [ -n "$announcement" ] || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
 fi
 
-# 5. The host, one go-live at a time: the wake that tries the queue and a
-# call of the lead would both read a free host before either had merged.
-mkdir -p "$ORCH_STATE_DIR"
-exec 9> "$ORCH_STATE_DIR/merge.lock"
-flock -n 9 || later "another go-live is being done"
+# 5. The host.
 host=$("$ORCH_HOME/host-state.sh")
 [ "$(jq -r '.free_for_a_merge' <<<"$host")" = true ] || later "the host is not free for a merge (a CI, a deployment settling or a screen test)"
 
@@ -190,10 +193,16 @@ if [ -n "$announcement" ]; then
     cp "$announcement" "$ORCH_STATE_DIR/linear-outbox/.$pr.part" && mv "$ORCH_STATE_DIR/linear-outbox/.$pr.part" "$ORCH_STATE_DIR/linear-outbox/$ticket--mise-en-ligne-$pr.md"
   fi
 fi
-# The ticket is closed once everything he was shown on it is live.
+# The ticket is closed once everything he was shown on it is live. A pull
+# request he was shown and that was closed since without going live no
+# longer counts.
 if [ "$agreed" = status ]; then
   jq --argjson pr "$pr" --arg at "$(now_utc)" '(.pulls[] | select(.pr == $pr)) |= . + {merged_at: $at}' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
-  if [ "$(jq '[.pulls[] | select(.merged_at == null)] | length' "$asked")" = 0 ]; then
+  left=0
+  while IFS= read -r other; do
+    [ "$(cd "$ORCH_REPO" && gh pr view "$other" --json state 2> /dev/null | jq -r '.state // "OPEN"')" != OPEN ] || left=$((left + 1))
+  done < <(jq -r '.pulls[] | select(.merged_at == null) | .pr' "$asked")
+  if [ "$left" = 0 ]; then
     "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null \
       || echo "$(basename "$0"): #$pr is live, but $ticket could not be put in « $(conf_get linear done_state) »" >&2
   fi

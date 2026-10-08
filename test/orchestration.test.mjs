@@ -215,7 +215,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1; cat "${join(home, 'pulls-now.json')}"
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
-elif [ "$1 $2" = "pr view" ]; then cat "${join(home, 'pr-view.json')}"
+elif [ "$1 $2" = "pr view" ]; then cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"
 elif [ "$1 $2" = "run list" ]; then echo "\${FAKE_GH_RUNS:-[]}"
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
@@ -2283,18 +2283,44 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   for (const lock of ['ops/orchestration/merge-pr.sh', 'ops/orchestration/lib/merge.mjs', 'ops/orchestration/linear.sh', 'ops/orchestration/ask-validation.sh', 'docs/regles-lanes.md', 'CLAUDE.md']) {
     assert.equal(agreementNeeded(['ops/orchestration/wake.sh', lock], merge), 'guarded', lock);
   }
+  // Everything the two scripts of the lock run or read to decide is guarded with them: what says « reviewed », « green »
+  // and « the host is free » is the lock as much as the script that asks. Found by following what they call, so that a
+  // helper added tomorrow is guarded or this fails. (The shared library is followed for the ledger only: it names
+  // every script of the tooling, and what it does for the lock is in the file itself, which is guarded.)
+  const calls = (file) => {
+    const text = readFileSync(join(ORCH_HOME, file), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#') && !line.trim().startsWith('//')).join('\n');
+    if (file.endsWith('.mjs')) return [...text.matchAll(/from '\.\/([a-z-]+\.mjs)'/g)].map((found) => `lib/${found[1]}`);
+    if (file === 'lib/common.sh') return ['lib/ledger.mjs'];
+    // Named by linear.sh as the one caller whose comment is the user's own word: guarded, and what it calls in turn is not the lock.
+    if (file === 'confirm-decision.sh') return [];
+    return [...[...text.matchAll(/\$ORCH_HOME\/([A-Za-z0-9_.\/-]+\.(?:sh|mjs))/g)].map((found) => found[1]), ...[...text.matchAll(/node_lib ([a-z-]+\.mjs)/g)].map((found) => `lib/${found[1]}`), ...(text.includes('lib/common.sh') ? ['lib/common.sh'] : [])];
+  };
+  const reached = new Set(['merge-pr.sh', 'ask-validation.sh']);
+  for (const file of reached) for (const called of calls(file)) reached.add(called);
+  assert.deepEqual([...reached].sort(), ['ask-validation.sh', 'confirm-decision.sh', 'host-state.sh', 'lib/common.sh', 'lib/conf.mjs', 'lib/ledger.mjs', 'lib/merge.mjs', 'lib/reviews.mjs', 'lib/screens.mjs', 'linear.sh', 'merge-pr.sh']);
+  // And what makes a review a review by another model than the author.
+  for (const file of [...reached, 'review-pr.sh', 'lib/route.mjs']) assert.equal(agreementNeeded([`ops/orchestration/${file}`], merge), 'guarded', file);
+  for (const tooling of ['ops/orchestration/wake.sh', 'ops/orchestration/lib/wake.mjs', 'ops/orchestration/lib/dashboard.mjs', 'ops/orchestration/README.md', 'ops/orchestration/talk.sh']) assert.equal(agreementNeeded([tooling], merge), 'tooling', tooling);
   // The settings are one file for everything: only the sections the lock reads, and the ones that hold a limit or a
   // right the user set, are his. Without the two versions to compare, the file is his whole.
   const settings = readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8');
   const touched = ['ops/orchestration/wake.sh', merge.settings_file];
   assert.equal(merge.settings_file, 'ops/orchestration/agents.conf');
   assert.equal(agreementNeeded(touched, merge), 'guarded', 'nothing to compare: guarded');
-  assert.equal(agreementNeeded(touched, merge, { before: settings, after: settings.replace(/^per_hour = .*$/m, 'per_hour = 99') }), 'tooling', 'the number of reviews an hour is tooling');
+  assert.equal(agreementNeeded(touched, merge, { before: settings, after: settings.replace(/^terminals_kept = .*$/m, 'terminals_kept = 9').replace(/^lane_reports_wait_minutes = .*$/m, 'lane_reports_wait_minutes = 1').replace('[dashboard]', '[dashboard]\nmore = yes') }), 'tooling', 'how many terminals of the lead stay open is tooling, in a section that also holds limits of his');
   for (const [what, after] of [
     ['what is tooling', settings.replace(/^tooling_paths = .*$/m, 'tooling_paths = ops/, server/')],
     ['the comments he reads an hour', settings.replace(/^comments_per_hour = .*$/m, 'comments_per_hour = 60')],
     ['where an image may leave from', settings.replace(/^capture_roots = .*$/m, 'capture_roots = /')],
     ['what a lane may run', settings.replace('[permissions.dev]', '[permissions.dev]\nallow_more = curl')],
+    ['the author reviewing its own pull request', settings.replace(/^differs_from_author = yes$/m, 'differs_from_author = no')],
+    ['the reviews the lead may open an hour', settings.replace(/^per_hour\s*= .*$/m, 'per_hour = 99')],
+    ['the branch a go-live goes to', settings.replace(/^base = origin\/main$/m, 'base = origin/elsewhere')],
+    ['the messages a lane gets an hour', settings.replace(/^messages_per_lane_per_hour = .*$/m, 'messages_per_lane_per_hour = 60')],
+    ['whether the lead acts', settings.replace(/^live = yes$/m, 'live = no')],
+    ['the lanes at work at once', settings.replace(/^max_lanes = .*$/m, 'max_lanes = 30')],
+    ['what happens when the guard refuses', settings.replace(/^guard_refusal = .*$/m, 'guard_refusal = fallback')],
+    ['how a model is started', settings.replace('[adapter.claude]', '[adapter.claude]\nflags = --anything')],
     ['a section of his removed', settings.replace('[merge]', '[merged]')],
   ]) {
     assert.notEqual(after, settings, what);
@@ -2360,7 +2386,7 @@ function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare =
   };
   // The base of the sandbox is its local main: the scripts read it as origin/main once it is pushed.
   const confPath = join(box.home, 'agents.conf');
-  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ops/orchestration/, docs/decisions.md\nguarded_paths = .github/, compose, Dockerfile, ops/orchestration/merge-pr.sh\nsettings_file = ops/orchestration/agents.conf\nguarded_settings = merge, linear, permissions.\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ops/orchestration/, docs/decisions.md\nguarded_paths = .github/, compose, Dockerfile, ops/orchestration/merge-pr.sh\nsettings_file = ops/orchestration/agents.conf\nguarded_settings = merge, linear, permissions., lead:live\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   publish();
   const opened = JSON.parse(spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' }).stdout);
@@ -2423,12 +2449,14 @@ test('what touches the checks of the CI, the lock of the go-lives or a setting o
     git('add', '-A');
     git('commit', '-q', '-m', 'chore: a setting');
   } }).merge(['--dry-run']);
-  const plain = settings('[review]\nper_hour = 9\n');
+  const plain = settings('[dashboard]\nport = 9\n[lead]\nterminals_kept = 9\n');
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(JSON.parse(plain.stdout).kind, 'tooling');
-  const opened = settings('[review]\nper_hour = 9\n[merge]\ntooling_paths = server/\n');
-  assert.equal(opened.status, 6);
-  assert.match(opened.stderr, /has not agreed[\s\S]*his own agreement is needed/);
+  for (const his of ['[dashboard]\nport = 9\n[merge]\ntooling_paths = server/\n', '[lead]\nterminals_kept = 9\nlive = yes\n']) {
+    const opened = settings(his);
+    assert.equal(opened.status, 6, his);
+    assert.match(opened.stderr, /has not agreed[\s\S]*his own agreement is needed/);
+  }
 });
 
 test('what a pull request changes is read from git: a list GitHub cut short, or a file moved out of the code, hides nothing', () => {
@@ -2515,6 +2543,14 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   assert.ok(pull.merged());
   assert.deepEqual(pull.moves(), [], 'the other pull request he agreed to is not live yet');
   assert.deepEqual(JSON.parse(readFileSync(join(pull.box.state, 'validations', 'X-5.json'), 'utf8')).pulls.map((one) => Boolean(one.merged_at)), [true, false]);
+  // A pull request he was shown and that was given up since does not keep the ticket open for ever.
+  const other = reviewedPull(['server/core.mjs']);
+  mkdirSync(join(other.box.state, 'validations'), { recursive: true });
+  writeFileSync(join(other.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: other.headOf() }, { pr: 8, head: 'abc' }] }));
+  writeFileSync(join(other.box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state: 'CLOSED', headRefOid: 'abc' }));
+  writeFileSync(join(other.box.home, 'linear-moved'), '0');
+  assert.equal(other.merge(['-'], {}, 'Annonce.').status, 0);
+  assert.deepEqual(other.moves(), ['X-5 -> Done']);
 });
 
 test('only the version a reviewer read goes live: a commit of the lane on top of it does not, a merge of the base that changed nothing does; a review that asks for corrections is no review', () => {
@@ -2669,6 +2705,13 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.equal(again.status, 0, again.stderr);
   assert.match(posted(), /\(Version montrée : PR 7 à 22222222\.\)/);
   assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }]);
+  // A second pull request of the same ticket is added to what he was shown: his agreement to the first still stands.
+  writeFileSync(join(box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state: 'OPEN', headRefOid: '8888888888888888888888888888888888888888' }));
+  const second = ask(['--pr', '8'], 'Une deuxième partie est prête. Je la mets en ligne ?');
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(posted(), /\(Version montrée : PR 8 à 88888888\.\)/);
+  assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }, { pr: 8, head: '8888888888888888888888888888888888888888' }]);
+  assert.match(ask(['--pr', '8'], 'Encore ?').stderr, /already waits for the user/);
 });
 
 test('only an image, and only from the folder a lane sets apart for what may leave, may be sent to Linear', () => {

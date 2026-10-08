@@ -56,10 +56,14 @@ for pr in "${pulls[@]}"; do
 done
 # Asked once for a version: a ticket that already waits for him with these
 # very versions is not asked again. A version pushed since is a new request.
+# What he was shown before of the other pull requests of the ticket stays:
+# his agreement to them still stands.
 kept="$ORCH_STATE_DIR/validations/$ticket.json"
-if [ "$("$ORCH_HOME/linear.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c '[.pulls[] | {pr, head}]' "$kept" 2> /dev/null)" = "$shown" ]; then
+before=$(jq -c '[.pulls[]]' "$kept" 2> /dev/null) || before='[]'
+if [ "$("$ORCH_HOME/linear.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c --argjson shown "$shown" '[.[] | {pr, head}] as $kept | $shown - $kept | length' <<<"$before")" = 0 ]; then
   die "$ticket already waits for the user in « $validate » for these versions: nothing asked again"
 fi
+all=$(jq -c --argjson shown "$shown" '[.[] | select(.pr as $pr | $shown | map(.pr) | index($pr) | not)] + $shown | sort_by(.pr)' <<<"$before")
 # The captures first: a request whose capture cannot be sent is not posted without it.
 for index in "${!captures[@]}"; do
   address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
@@ -68,5 +72,5 @@ done
 printf '\n\n(Version montrée : %s.)\n' "$versions" >> "$text"
 "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
 mkdir -p "$ORCH_STATE_DIR/validations"
-jq -n --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$shown" '{ticket: $ticket, at: $at, pulls: $pulls}' > "$kept.part" && mv "$kept.part" "$kept"
+jq -n --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '{ticket: $ticket, at: $at, pulls: $pulls}' > "$kept.part" && mv "$kept.part" "$kept"
 "$ORCH_HOME/linear.sh" move "$ticket" "$validate"

@@ -152,7 +152,7 @@ case "${1:-}" in
     while IFS= read -r root; do
       [ -n "$root" ] || continue
       pattern=$(realpath -m "$(expand_home "$root")" | sed 's/[][\.^$()+?{}|]/\\&/g; s/\*/[^\/]+/g')
-      [[ "$file" =~ ^$pattern/[^/]+$ ]] && allowed=1
+      if [[ "$file" =~ ^$pattern/[^/]+$ ]]; then allowed=1; fi
     done < <(conf_get linear capture_roots | tr ',' '\n' | sed 's/^ *//; s/ *$//')
     [ -n "$allowed" ] || die "$file is not under a folder of captures ([linear] capture_roots): nothing sent"
     case "$(head -c 8 "$file" | od -An -tx1 | tr -d ' \n')" in

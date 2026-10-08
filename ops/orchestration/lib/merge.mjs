@@ -31,16 +31,26 @@ function sectionsOf(text) {
   return sections;
 }
 
-// The settings are one file for everything. The sections [merge]
-// guarded_settings names (a name ending with a dot is a prefix) are the ones
-// this script reads and the ones that hold a limit or a right the user set:
-// a change there is a change to the lock, the rest is tooling.
+// The settings are one file for everything. What [merge] guarded_settings
+// names is what this script reads and what holds a limit or a right the
+// user set: a section (a name ending with a dot is a prefix), or one key of
+// a section (section:key). A change there is a change to the lock, the rest
+// is tooling.
 export function guardedSettingsChanged(before, after, merge) {
   const guarded = list(merge.guarded_settings);
-  const mine = (name) => guarded.some((entry) => (entry.endsWith('.') ? name.startsWith(entry) : name === entry));
   const was = sectionsOf(before);
   const is = sectionsOf(after);
-  return [...new Set([...was.keys(), ...is.keys()])].filter(mine).some((name) => (was.get(name) ?? ['∅']).join('\n') !== (is.get(name) ?? ['∅']).join('\n'));
+  const names = [...new Set([...was.keys(), ...is.keys()])];
+  const same = (a, b) => (a ?? ['∅']).join('\n') === (b ?? ['∅']).join('\n');
+  return guarded.some((entry) => {
+    const colon = entry.indexOf(':');
+    if (colon > 0) {
+      const section = entry.slice(0, colon);
+      const key = (lines) => (lines ?? []).filter((line) => line.startsWith(`${entry.slice(colon + 1)} = `));
+      return !same(key(was.get(section)), key(is.get(section)));
+    }
+    return names.filter((name) => (entry.endsWith('.') ? name.startsWith(entry) : name === entry)).some((name) => !same(was.get(name), is.get(name)));
+  });
 }
 
 // guarded: it touches the checks of the CI, the deployment, or the lock of
