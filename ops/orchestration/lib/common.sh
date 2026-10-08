@@ -216,7 +216,9 @@ drop_queued_review() {
 # good leaves the queue: written to the ledger (merge_refused) and told to
 # the lead at its next wake.
 open_queued_merges() {
-  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why
+  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why hours since
+  hours=$(conf_get merge queue_hours)
+  [[ "$hours" =~ ^[0-9]+$ ]] || hours=24
   ls "$queue"/*.json > /dev/null 2>&1 || return 0
   while IFS= read -r entry; do
     if ! jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1; then
@@ -229,7 +231,15 @@ open_queued_merges() {
     why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
     case "$code" in
       0) rm -f "$entry" "$queue/$pr.announcement.md"; return 0 ;;
-      5) ;;
+      5)
+        # It does not wait for ever. Only a time in the form merge-pr.sh
+        # writes counts: anything else is no time, and it leaves too.
+        since=$(jq -r '.at // ""' "$entry")
+        if ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || [[ "$since" < "$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+          ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr waited more than $hours hours in the queue ($(tr '\n' ' ' <<<"$why" | cut -c1-300)): it left the queue, and is to be asked for again"
+          rm -f "$entry" "$queue/$pr.announcement.md"
+        fi
+        ;;
       *)
         ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue without being done: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
         rm -f "$entry" "$queue/$pr.announcement.md"

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../ops/orchestration/lib/conf.mjs';
 import { route } from '../ops/orchestration/lib/route.mjs';
 import { openLedger, runStart, runEnd, addEvent, costEur } from '../ops/orchestration/lib/ledger.mjs';
@@ -2269,7 +2269,7 @@ test('what a reviewer wrote reaches the lead as a quotation: none of its lines c
 });
 
 test('a go-live reads which agreement a change needs, the lines the user wrote before the statuses, and the verdict of the reviewer; it judges none of them', async () => {
-  const { agreementNeeded, lagIsHarmless, fusionLine, verdictIs } = await import('../ops/orchestration/lib/merge.mjs');
+  const { agreementNeeded, guardedSettingsChanged, lagIsHarmless, fusionLine, verdictIs } = await import('../ops/orchestration/lib/merge.mjs');
   const merge = conf.sections.merge;
   // Invisible tooling ships once reviewed and green; anything else needs the user; the checks of the CI and the deployment always do.
   assert.equal(agreementNeeded(['ops/orchestration/wake.sh', 'test/orchestration.test.mjs', 'docs/decisions.md'], merge), 'tooling');
@@ -2278,21 +2278,55 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   assert.equal(agreementNeeded(['ops/orchestration/wake.sh', '.github/workflows/checks.yml'], merge), 'guarded');
   assert.equal(agreementNeeded(['compose.yaml'], merge), 'guarded');
   assert.equal(agreementNeeded(['Dockerfile'], merge), 'guarded');
+  // The lock itself (the script that puts live, what it reads its rules from, the script that speaks to Linear) and the
+  // written rules of the user are never invisible tooling: a change to them could open the lock by itself.
+  for (const lock of ['ops/orchestration/merge-pr.sh', 'ops/orchestration/lib/merge.mjs', 'ops/orchestration/linear.sh', 'ops/orchestration/ask-validation.sh', 'docs/regles-lanes.md', 'CLAUDE.md']) {
+    assert.equal(agreementNeeded(['ops/orchestration/wake.sh', lock], merge), 'guarded', lock);
+  }
+  // The settings are one file for everything: only the sections the lock reads, and the ones that hold a limit or a
+  // right the user set, are his. Without the two versions to compare, the file is his whole.
+  const settings = readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8');
+  const touched = ['ops/orchestration/wake.sh', merge.settings_file];
+  assert.equal(merge.settings_file, 'ops/orchestration/agents.conf');
+  assert.equal(agreementNeeded(touched, merge), 'guarded', 'nothing to compare: guarded');
+  assert.equal(agreementNeeded(touched, merge, { before: settings, after: settings.replace(/^per_hour = .*$/m, 'per_hour = 99') }), 'tooling', 'the number of reviews an hour is tooling');
+  for (const [what, after] of [
+    ['what is tooling', settings.replace(/^tooling_paths = .*$/m, 'tooling_paths = ops/, server/')],
+    ['the comments he reads an hour', settings.replace(/^comments_per_hour = .*$/m, 'comments_per_hour = 60')],
+    ['where an image may leave from', settings.replace(/^capture_roots = .*$/m, 'capture_roots = /')],
+    ['what a lane may run', settings.replace('[permissions.dev]', '[permissions.dev]\nallow_more = curl')],
+    ['a section of his removed', settings.replace('[merge]', '[merged]')],
+  ]) {
+    assert.notEqual(after, settings, what);
+    assert.equal(agreementNeeded(touched, merge, { before: settings, after }), 'guarded', what);
+    assert.equal(guardedSettingsChanged(settings, after, merge), true, what);
+  }
+  assert.equal(guardedSettingsChanged(settings, `# a comment\n${settings}`.replace(/^verdict = /m, 'verdict   =   '), merge), false, 'spaces and comments change nothing');
+  assert.equal(agreementNeeded(['server/core.mjs', merge.settings_file], merge, { before: settings, after: settings }), 'agreement');
   assert.equal(agreementNeeded([], merge), 'agreement', 'nothing known of it is not tooling');
   assert.equal(lagIsHarmless(['docs/decisions.md', 'ops/orchestration/wake.sh', 'test/orchestration.test.mjs'], merge), true);
   assert.equal(lagIsHarmless(['docs/decisions.md', 'server/state/derived.mjs'], merge), false);
   // His line, plain or as Linear rewrites it; never one an agent wrote, never the one of another ticket.
-  const comment = (id, body) => ({ id, body });
+  const comment = (id, body, over = {}) => ({ id, body, byOwner: true, createdAt: '2026-10-08T06:07:14.704Z', editedAt: null, ...over });
+  // The lines stopped the moment his two statuses were created in Linear (read from Linear, not chosen).
+  const rules = { until: merge.lines_until, openedAt: '2026-10-07T10:00:00Z' };
+  assert.equal(merge.lines_until, '2026-10-08T06:23:38Z');
   const his = [comment('u1', 'Oui.\n\nFusion : [X-12](https://linear.app/x/issue/X-12/titre)\nFusion : X-40\n\nPas de ligne pour X-95.'), comment('u2', 'Fusion : X-7 #34. Vaut pour celle-là.')];
-  assert.equal(fusionLine(his, new Set(), 'X-12'), true);
-  assert.equal(fusionLine(his, new Set(), 'X-40'), true);
-  assert.equal(fusionLine(his, new Set(), 'X-1'), false, 'X-12 is not X-1');
-  assert.equal(fusionLine(his, new Set(), 'X-95'), false, 'named, but not on a line of agreement');
-  assert.equal(fusionLine(his, new Set(), 'X-7', 34), true);
-  assert.equal(fusionLine(his, new Set(), 'X-7', 3), false, '#34 is not #3');
-  assert.equal(fusionLine(his, new Set(), 'X-12', 34), false, 'a line that names no pull request does not cover one that needs its own');
-  assert.equal(fusionLine([comment('a1', '> Écrit par un agent (chef de projet), pas par Makhtar.\n\nFusion : X-12')], new Set(), 'X-12'), false);
-  assert.equal(fusionLine([comment('s1', 'Fusion : X-12')], new Set(['s1']), 'X-12'), false, 'a comment a script posted is not his');
+  assert.equal(fusionLine(his, new Set(), 'X-12', null, rules), true);
+  assert.equal(fusionLine(his, new Set(), 'X-40', null, rules), true);
+  assert.equal(fusionLine(his, new Set(), 'X-1', null, rules), false, 'X-12 is not X-1');
+  assert.equal(fusionLine(his, new Set(), 'X-95', null, rules), false, 'named, but not on a line of agreement');
+  assert.equal(fusionLine(his, new Set(), 'X-7', 34, rules), true);
+  assert.equal(fusionLine(his, new Set(), 'X-7', 3, rules), false, '#34 is not #3');
+  assert.equal(fusionLine(his, new Set(), 'X-12', 34, rules), false, 'a line that names no pull request does not cover one that needs its own');
+  assert.equal(fusionLine([comment('a1', '> Écrit par un agent (chef de projet), pas par Makhtar.\n\nFusion : X-12')], new Set(), 'X-12', null, rules), false);
+  assert.equal(fusionLine([comment('s1', 'Fusion : X-12')], new Set(['s1']), 'X-12', null, rules), false, 'a comment a script posted is not his');
+  assert.equal(fusionLine([comment('o1', 'Fusion : X-12', { byOwner: false })], new Set(), 'X-12', null, rules), false, 'written from another account, or by an integration');
+  assert.equal(fusionLine([comment('o2', 'Fusion : X-12', { byOwner: undefined })], new Set(), 'X-12', null, rules), false, 'whose it is is not known');
+  assert.equal(fusionLine([comment('l1', 'Fusion : X-12', { createdAt: '2026-10-08T09:00:00Z' })], new Set(), 'X-12', null, rules), false, 'written after the statuses replaced the lines: a lane with his connector could have written it');
+  assert.equal(fusionLine([comment('l2', 'Fusion : X-12', { editedAt: '2026-10-08T09:00:00Z' })], new Set(), 'X-12', null, rules), false, 'rewritten after the statuses');
+  assert.equal(fusionLine([comment('l3', 'Fusion : X-12')], new Set(), 'X-12', null, { ...rules, openedAt: '2026-10-08T06:10:00Z' }), false, 'a line covers the pull requests that existed when he wrote it, not one opened later on the same ticket');
+  assert.equal(fusionLine([comment('l4', 'Fusion : X-12')], new Set(), 'X-12', null, { openedAt: rules.openedAt }), false, 'no end of the lines set: no line counts');
   const report = (verdict) => `---\ncommit: abc\n---\n\n## Compte rendu\n\n${verdict}\n\nDéfauts : …\n\n## Fichiers modifiés\n\nAucun.\n`;
   assert.equal(verdictIs(report('Verdict : rien de bloquant.'), 'rien de bloquant'), true);
   assert.equal(verdictIs(report('**Verdict : rien de bloquant**'), 'rien de bloquant'), true);
@@ -2301,9 +2335,20 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
 });
 
 // A pull request of a lane, reviewed for a ticket with the verdict asked for, in a sandbox with a remote.
-function reviewedPull(files, { answer = 'Verdict : rien de bloquant.' } = {}) {
+function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare = null } = {}) {
   const lane = laneWithRemote('feat/w', 'feat: the work of the lane');
   const { box } = lane;
+  // What a pull request changes is read from git, not from what GitHub lists: the files are really in the branch.
+  const laneGit = (...args) => execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  if (prepare) prepare({ box, lane, git: laneGit });
+  for (const file of files) {
+    mkdirSync(dirname(join(lane.path, file)), { recursive: true });
+    writeFileSync(join(lane.path, file), `${file}\n`);
+  }
+  if (files.length) {
+    laneGit('add', '-A');
+    laneGit('commit', '-q', '-m', 'feat: the files of the pull request');
+  }
   // The host of the sandbox is its own: no process of the real one (a CI running its screen tests) is read.
   mkdirSync(join(box.home, 'proc-none'), { recursive: true });
   const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none') };
@@ -2311,11 +2356,11 @@ function reviewedPull(files, { answer = 'Verdict : rien de bloquant.' } = {}) {
   const publish = (over = {}) => {
     execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/w']);
     execFileSync('git', ['-C', box.repo, 'fetch', '-q', 'origin']);
-    writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', isDraft: false, title: 't', body: 'b', headRefName: 'feat/w', baseRefName: 'main', headRefOid: headOf(), additions: 1, deletions: 0, files: files.map((path) => ({ path })), statusCheckRollup: [{ conclusion: 'SUCCESS' }, { conclusion: 'SKIPPED' }], ...over }));
+    writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', isDraft: false, title: 't', body: 'b', headRefName: 'feat/w', baseRefName: 'main', headRefOid: headOf(), createdAt: '2026-01-01T00:00:00Z', additions: 1, deletions: 0, files: files.map((path) => ({ path })), statusCheckRollup: [{ conclusion: 'SUCCESS' }, { conclusion: 'SKIPPED' }], ...over }));
   };
   // The base of the sandbox is its local main: the scripts read it as origin/main once it is pushed.
   const confPath = join(box.home, 'agents.conf');
-  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ops/orchestration/, docs/decisions.md\nguarded_paths = .github/, compose, Dockerfile\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\n`);
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ops/orchestration/, docs/decisions.md\nguarded_paths = .github/, compose, Dockerfile, ops/orchestration/merge-pr.sh\nsettings_file = ops/orchestration/agents.conf\nguarded_settings = merge, linear, permissions.\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   publish();
   const opened = JSON.parse(spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' }).stdout);
@@ -2324,7 +2369,9 @@ function reviewedPull(files, { answer = 'Verdict : rien de bloquant.' } = {}) {
   const merged = () => { try { return readFileSync(join(box.home, 'pr-merged'), 'utf8').trim().split('\n'); } catch { return null; } };
   const moves = () => { try { return readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
   const ledgerKinds = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind from events where kind in ('merged_by_script', 'merge_refused') order by rowid").all().map((row) => row.kind); db.close(); return rows; };
-  return { lane, box, env, headOf, publish, merge, merged, moves, ledgerKinds };
+  const hisLine = (body, over = {}) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'u1', body, byOwner: true, createdAt: '2026-01-02T10:00:00Z', editedAt: null, ...over }]));
+  const ask = (input = '**Ce qui change.** Je la mets en ligne ?') => spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env, encoding: 'utf8', input });
+  return { lane, box, env, headOf, publish, merge, merged, moves, ledgerKinds, hisLine, ask, git: laneGit };
 }
 
 test('invisible tooling, reviewed and green, goes live without asking the user; what touches the checks of the CI needs his own word', () => {
@@ -2341,44 +2388,133 @@ test('invisible tooling, reviewed and green, goes live without asking the user; 
   assert.equal(args[args.indexOf('--match-head-commit') + 1], pull.headOf(), 'the very commit that was checked');
   assert.deepEqual(pull.ledgerKinds(), ['merged_by_script']);
   assert.deepEqual(pull.moves(), [], 'no status moves for tooling');
-  // The same change, plus a file of the CI: his agreement, by his status or by a line that names this pull request.
-  execFileSync('rm', [join(pull.box.home, 'pr-merged')]);
-  pull.publish({ files: [{ path: 'ops/orchestration/wake.sh' }, { path: '.github/workflows/checks.yml' }] });
+});
+
+test('what touches the checks of the CI, the lock of the go-lives or a setting of the user never goes as tooling; a line of his counts only if he wrote it, before his statuses, for a pull request that existed', () => {
+  // A file of the CI: his agreement, by his status or by a line of before the statuses that names this pull request.
+  const pull = reviewedPull(['ops/orchestration/wake.sh', '.github/workflows/checks.yml']);
   const guarded = pull.merge();
   assert.equal(guarded.status, 6);
-  assert.match(guarded.stderr, /has not agreed[\s\S]*checks of the CI or the deployment/);
-  writeFileSync(join(pull.box.home, 'linear-comments.json'), JSON.stringify([{ id: 'u1', body: 'Fusion : X-5' }]));
-  assert.equal(pull.merge(['-'], {}, 'Annonce.').status, 6, 'his line for the ticket does not cover a pull request that needs its own');
-  writeFileSync(join(pull.box.home, 'linear-comments.json'), JSON.stringify([{ id: 'u1', body: 'Fusion : X-5 #7' }]));
+  assert.match(guarded.stderr, /has not agreed[\s\S]*his own agreement is needed/);
+  const refused = (why) => assert.equal(pull.merge(['-'], {}, 'Annonce.').status, 6, why);
+  pull.hisLine('Fusion : X-5');
+  refused('his line for the ticket does not cover a pull request that needs its own');
+  pull.hisLine('Fusion : X-5 #7', { byOwner: false });
+  refused('a line he did not write: a lane with a connector to Linear, another account');
+  pull.hisLine('Fusion : X-5 #7', { createdAt: '2026-01-04T10:00:00Z' });
+  refused('a line written after his statuses replaced the lines');
+  pull.hisLine('Fusion : X-5 #7', { editedAt: '2026-01-04T10:00:00Z' });
+  refused('a line rewritten after his statuses');
+  pull.hisLine('Fusion : X-5 #7', { createdAt: '2025-12-31T10:00:00Z' });
+  refused('a line older than the pull request');
+  assert.equal(pull.merged(), null);
+  pull.hisLine('Fusion : X-5 #7');
   const named = pull.merge(['-'], {}, 'Annonce.');
   assert.equal(named.status, 0, named.stderr);
   assert.ok(pull.merged());
+  // The script that puts live is under orchestration tooling, and is not tooling.
+  const lock = reviewedPull(['ops/orchestration/merge-pr.sh', 'ops/orchestration/wake.sh']).merge(['--dry-run']);
+  assert.equal(lock.status, 6);
+  assert.match(lock.stderr, /has not agreed[\s\S]*his own agreement is needed/);
+  // The settings: a number of reviews an hour is tooling, what the lock reads is not.
+  const settings = (text) => reviewedPull([], { prepare: ({ lane, git }) => {
+    mkdirSync(join(lane.path, 'ops', 'orchestration'), { recursive: true });
+    writeFileSync(join(lane.path, 'ops', 'orchestration', 'agents.conf'), text);
+    git('add', '-A');
+    git('commit', '-q', '-m', 'chore: a setting');
+  } }).merge(['--dry-run']);
+  const plain = settings('[review]\nper_hour = 9\n');
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.equal(JSON.parse(plain.stdout).kind, 'tooling');
+  const opened = settings('[review]\nper_hour = 9\n[merge]\ntooling_paths = server/\n');
+  assert.equal(opened.status, 6);
+  assert.match(opened.stderr, /has not agreed[\s\S]*his own agreement is needed/);
 });
 
-test('what the user of the app sees goes live only on his own move of the ticket, with its announcement, and the ticket is closed; a move that is not his is refused and undone', () => {
+test('what a pull request changes is read from git: a list GitHub cut short, or a file moved out of the code, hides nothing', () => {
+  // GitHub lists only the tooling (a list cut at a hundred files): the code is in the branch all the same.
+  const cut = reviewedPull(['ops/orchestration/wake.sh', 'server/core.mjs']);
+  cut.publish({ files: [{ path: 'ops/orchestration/wake.sh' }] });
+  const hidden = cut.merge(['--dry-run']);
+  assert.equal(hidden.status, 6, hidden.stdout);
+  assert.match(hidden.stderr, /the user has not agreed/);
+  // A file of the code moved under the tooling: where it came from counts as much as where it went.
+  const moved = reviewedPull([], { prepare: ({ box, lane, git }) => {
+    mkdirSync(join(box.repo, 'server'), { recursive: true });
+    writeFileSync(join(box.repo, 'server', 'x.mjs'), 'export const x = 1; // long enough for git to see the same file moved\n');
+    box.git('add', '.');
+    box.git('commit', '-q', '-m', 'feat: code on the base');
+    box.git('push', '-q', 'origin', 'main');
+    git('fetch', '-q', 'origin');
+    git('merge', '-q', '--no-edit', 'origin/main');
+    mkdirSync(join(lane.path, 'ops', 'orchestration'), { recursive: true });
+    git('mv', 'server/x.mjs', 'ops/orchestration/x.mjs');
+    git('commit', '-q', '-m', 'refactor: moved');
+  } }).merge(['--dry-run']);
+  assert.equal(moved.status, 6, moved.stdout);
+  assert.match(moved.stderr, /the user has not agreed/);
+});
+
+test('what the user of the app sees goes live only on his own move of the ticket, for the version he was shown, with its announcement; a move that is not his, or a version pushed after, is refused and the ticket goes back to him', () => {
   const pull = reviewedPull(['server/core.mjs', 'frontend/pages/Today.jsx']);
+  const live = (input = 'Annonce.') => pull.merge(['-'], {}, input);
   // Not in his status, no line of his: asked for, not done.
-  const none = pull.merge(['-'], {}, 'Annonce.');
+  const none = live();
   assert.equal(none.status, 6);
-  assert.match(none.stderr, /the user has not agreed[\s\S]*ask-validation\.sh X-5/);
+  assert.match(none.stderr, /the user has not agreed[\s\S]*ask-validation\.sh X-5 - --pr 7/);
   assert.equal(pull.merged(), null);
-  // In his status, but put there by an integration or another account: never live, back to the status that asks him.
-  writeFileSync(join(pull.box.home, 'linear-moved'), '6');
-  const forged = pull.merge(['-'], {}, 'Annonce.');
-  assert.equal(forged.status, 6);
-  assert.match(forged.stderr, /did not put it there himself/);
+  // In his status by his own hand, but nobody showed him this pull request: his move is for something else.
+  writeFileSync(join(pull.box.home, 'linear-moved'), '0');
+  const unasked = live();
+  assert.equal(unasked.status, 6);
+  assert.match(unasked.stderr, /was never shown #7/);
+  assert.deepEqual(pull.moves(), [], 'the ticket stays where he put it: it may be for another pull request');
+  // Shown an earlier version: the lane pushed after. What he agreed to is not what would go live.
+  const before = pull.git('rev-parse', 'HEAD~1').trim();
+  mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
+  writeFileSync(join(pull.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: before }] }));
+  const stale = live();
+  assert.equal(stale.status, 6);
+  assert.match(stale.stderr, /is not the version he was shown/);
   assert.deepEqual(pull.moves(), ['X-5 -> À valider']);
   assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
+  assert.equal(pull.merged(), null);
+  // Asked again, with this version: the request says which one, and it is kept.
+  writeFileSync(join(pull.box.home, 'linear-moved'), '5');
+  const asked = pull.ask();
+  assert.equal(asked.status, 0, asked.stderr);
+  assert.match(readFileSync(join(pull.box.home, 'linear-posted'), 'utf8'), new RegExp(`Je la mets en ligne \\?[\\s\\S]*\\(Version montrée : PR 7 à ${pull.headOf().slice(0, 8)}\\.\\)`));
+  assert.deepEqual(JSON.parse(readFileSync(join(pull.box.state, 'validations', 'X-5.json'), 'utf8')).pulls, [{ pr: 7, head: pull.headOf() }]);
+  assert.deepEqual(pull.moves(), ['X-5 -> À valider', 'X-5 -> À valider']);
+  // In his status, but put there by an integration or another account: never live, back to the status that asks him.
+  writeFileSync(join(pull.box.home, 'linear-moved'), '6');
+  const forged = live();
+  assert.equal(forged.status, 6);
+  assert.match(forged.stderr, /did not put it there himself/);
+  assert.deepEqual(pull.moves(), ['X-5 -> À valider', 'X-5 -> À valider', 'X-5 -> À valider']);
+  assert.deepEqual(pull.ledgerKinds(), ['merge_refused', 'merge_refused']);
   assert.equal(pull.merged(), null);
   // Put there by him. Without an announcement it does not go: he is owed where to see what he agreed to.
   writeFileSync(join(pull.box.home, 'linear-moved'), '0');
   assert.match(pull.merge().stderr, /an announcement is needed/);
-  const done = pull.merge(['-'], {}, '**Mise en ligne** : ce qui change, où le voir, comment vérifier.');
+  const done = live('**Mise en ligne** : ce qui change, où le voir, comment vérifier.');
   assert.equal(done.status, 0, done.stderr);
   assert.ok(pull.merged());
   assert.match(readFileSync(join(pull.box.home, 'linear-posted'), 'utf8'), /^X-5 from=[\s\S]*\*\*Mise en ligne\*\* : ce qui change/);
-  assert.deepEqual(pull.moves(), ['X-5 -> À valider', 'X-5 -> Done']);
-  assert.deepEqual(pull.ledgerKinds(), ['merge_refused', 'merged_by_script']);
+  assert.deepEqual(pull.moves().slice(-1), ['X-5 -> Done']);
+  assert.deepEqual(pull.ledgerKinds(), ['merge_refused', 'merge_refused', 'merged_by_script']);
+});
+
+test('a ticket asked for with two pull requests is closed when both are live, not after the first', () => {
+  const pull = reviewedPull(['server/core.mjs']);
+  mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
+  writeFileSync(join(pull.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: pull.headOf() }, { pr: 8, head: 'abc' }] }));
+  writeFileSync(join(pull.box.home, 'linear-moved'), '0');
+  const done = pull.merge(['-'], {}, 'Annonce.');
+  assert.equal(done.status, 0, done.stderr);
+  assert.ok(pull.merged());
+  assert.deepEqual(pull.moves(), [], 'the other pull request he agreed to is not live yet');
+  assert.deepEqual(JSON.parse(readFileSync(join(pull.box.state, 'validations', 'X-5.json'), 'utf8')).pulls.map((one) => Boolean(one.merged_at)), [true, false]);
 });
 
 test('only the version a reviewer read goes live: a commit of the lane on top of it does not, a merge of the base that changed nothing does; a review that asks for corrections is no review', () => {
@@ -2413,12 +2549,27 @@ test('a go-live that only waits is kept and done by the wake, with every check a
   // Its checks still run: not refused, kept.
   pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }] });
   const waiting = pull.merge();
-  assert.equal(waiting.status, 0, waiting.stderr);
+  assert.equal(waiting.status, 3, 'kept in the queue is its own answer, not the one of a go-live done');
   assert.match(waiting.stdout, /mise en file \(its checks still run\)/);
+  assert.equal(pull.merge(['--dry-run']).status, 3, 'and a dry run says the same');
   assert.deepEqual(queued(), ['7.json']);
   assert.equal(wake().status, 0);
   assert.deepEqual(queued(), ['7.json']);
   assert.equal(pull.merged(), null);
+  // It does not wait for ever: after [merge] queue_hours it leaves, and the lead is told.
+  const entry = join(pull.box.state, 'merge-queue', '7.json');
+  writeFileSync(entry, JSON.stringify({ ...JSON.parse(readFileSync(entry, 'utf8')), at: '2020-01-01T00:00:00Z' }));
+  assert.equal(wake().status, 0);
+  assert.deepEqual(queued(), []);
+  assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
+  assert.equal(pull.merge().status, 3);
+  // One go-live at a time: while another holds the lock, this one waits, whatever the host says.
+  pull.publish();
+  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(pull.box.state, 'merge.lock'), join(pull.box.home, 'merge-pr.sh'), '7', 'X-5'], { env: pull.env, encoding: 'utf8' });
+  assert.equal(held.status, 3, held.stderr);
+  assert.match(held.stdout, /another go-live is being done/);
+  assert.equal(pull.merged(), null);
+  pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }] });
   // Green, but the host is busy with a CI: still kept.
   pull.publish();
   assert.equal(spawnSync(join(pull.box.home, 'wake.sh'), [], { env: { ...pull.env, FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' }, encoding: 'utf8' }).status, 0);
@@ -2469,40 +2620,68 @@ test('a script never puts a ticket in the status that is the user\'s agreement, 
   assert.equal(linear('moved-by-owner', 'X-1', 'Go MEP').status, 0);
   history('Go MEP', [move('Go MEP', 'owner', null, '2026-01-02T09:00:00Z'), move('Go MEP', null, { name: 'GitHub' }, '2026-01-02T11:00:00Z')]);
   assert.equal(linear('moved-by-owner', 'X-1', 'Go MEP').status, 6);
+  // A comment says whether the owner of the key wrote it, and when it was last rewritten.
+  const written = (id, user, over = {}) => ({ id, createdAt: '2026-01-02T10:00:00Z', editedAt: null, body: 'Fusion : X-1', url: 'u', user: user && { id: user }, botActor: null, externalUser: null, ...over });
+  answer({ viewer: { id: 'owner' }, issue: { comments: { nodes: [written('a', 'owner'), written('b', 'someone-else'), written('c', 'owner', { botActor: { id: 'bot' } }), written('d', null, { externalUser: { id: 'ext' } }), written('e', 'owner', { editedAt: '2026-01-05T10:00:00Z' })] } } });
+  const comments = JSON.parse(linear('comments', 'X-1').stdout);
+  assert.deepEqual(comments.map((one) => one.byOwner), [true, false, false, false, true]);
+  assert.equal(comments[4].editedAt, '2026-01-05T10:00:00Z');
 });
 
-test('the user is asked for his agreement once, on the ticket, with the capture when it is a screen; a capture that cannot be sent stops the request', () => {
+test('the user is asked for his agreement once for a version, on the ticket, with the capture when it is a screen; a capture that cannot be sent stops the request', () => {
   const box = sandbox();
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
+  const pull = (head, over = {}) => writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', headRefOid: head, ...over }));
+  pull('1111111111111111111111111111111111111111');
   const ask = (args, input) => spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', ...args], { env: box.env, encoding: 'utf8', input });
   const posted = () => { try { return readFileSync(join(box.home, 'linear-posted'), 'utf8'); } catch { return null; } };
   const moves = () => { try { return readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const kept = () => { try { return JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8')).pulls; } catch { return null; } };
+  // Asked for nothing in particular: he would agree to whatever comes after.
+  const vague = ask([], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
+  assert.equal(vague.status, 1);
+  assert.match(vague.stderr, /usage: ask-validation\.sh/);
   // A capture that is not one: nothing is asked without it.
-  const bad = ask(['--capture', '/somewhere/notes.txt', 'Après'], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
+  const bad = ask(['--pr', '7', '--capture', '/somewhere/notes.txt', 'Après'], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /could not be sent: nothing asked/);
   assert.equal(posted(), null);
   assert.deepEqual(moves(), []);
-  const asked = ask(['--capture', '/somewhere/avant.png', 'Avant', '--capture', '/somewhere/apres.png'], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
+  assert.equal(kept(), null);
+  // A pull request that is closed is not asked for.
+  pull('1111111111111111111111111111111111111111', { state: 'MERGED' });
+  assert.match(ask(['--pr', '7'], 'Je la mets en ligne ?').stderr, /#7 is not open/);
+  pull('1111111111111111111111111111111111111111');
+  const asked = ask(['--pr', '7', '--capture', '/somewhere/avant.png', 'Avant', '--capture', '/somewhere/apres.png'], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
   assert.equal(asked.status, 0, asked.stderr);
-  assert.match(posted(), /^X-5 from=[\s\S]*Je la mets en ligne \?[\s\S]*\*\*Avant\*\*\n\n!\[Avant\]\(https:\/\/uploads\.example\.test\/avant\.png\)[\s\S]*!\[Capture\]\(https:\/\/uploads\.example\.test\/apres\.png\)/);
+  assert.match(posted(), /^X-5 from=[\s\S]*Je la mets en ligne \?[\s\S]*\*\*Avant\*\*\n\n!\[Avant\]\(https:\/\/uploads\.example\.test\/avant\.png\)[\s\S]*!\[Capture\]\(https:\/\/uploads\.example\.test\/apres\.png\)[\s\S]*\(Version montrée : PR 7 à 11111111\.\)\s*$/);
   assert.deepEqual(moves(), ['X-5 -> À valider']);
-  // Already waiting for him: not asked twice.
-  const twice = ask([], 'Encore ?');
+  assert.deepEqual(kept(), [{ pr: 7, head: '1111111111111111111111111111111111111111' }]);
+  // Already waiting for him, for this very version: not asked twice.
+  const twice = ask(['--pr', '7'], 'Encore ?');
   assert.equal(twice.status, 1);
   assert.match(twice.stderr, /already waits for the user/);
   assert.deepEqual(moves(), ['X-5 -> À valider']);
+  // The lane pushed since: what waits for him is no longer what would go live, so he is shown the new version.
+  pull('2222222222222222222222222222222222222222');
+  const again = ask(['--pr', '7'], 'La fiche a changé depuis ma demande. Je la mets en ligne ?');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(posted(), /\(Version montrée : PR 7 à 22222222\.\)/);
+  assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }]);
 });
 
-test('only an image, and only from the folders where the lanes keep their captures, may be sent to Linear', () => {
+test('only an image, and only from the folder a lane sets apart for what may leave, may be sent to Linear', () => {
   const dir = scratch('orch-linear-');
-  const captures = join(dir, 'captures');
-  mkdirSync(captures);
+  const captures = join(dir, 'lanes', 'a-lane', 'to-send');
+  mkdirSync(captures, { recursive: true });
+  mkdirSync(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send'), { recursive: true });
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('rest of the image')]);
   writeFileSync(join(captures, 'apres.png'), png);
   writeFileSync(join(captures, 'secret.png'), 'TOKEN=not-an-image\n');
   writeFileSync(join(dir, 'elsewhere.png'), png);
+  writeFileSync(join(dir, 'lanes', 'a-lane', 'test-results.png'), png);
+  writeFileSync(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png'), png);
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash
 printf '%s\\n' "$@" >> "${join(dir, 'curl-args')}"
 case " $* " in *" PUT "*) exit 0 ;; esac
@@ -2510,12 +2689,16 @@ cat > /dev/null
 echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://storage.example.test/put","assetUrl":"https://uploads.example.test/asset","headers":[{"key":"x-goog-content-length-range","value":"25,25"}]}}}}'
 `, { mode: 0o755 });
   const confPath = join(dir, 'agents.conf');
-  writeFileSync(confPath, `${readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^capture_roots = .*$/m, `capture_roots = ${captures}`)}`);
+  writeFileSync(confPath, `${readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^capture_roots = .*$/m, `capture_roots = ${join(dir, 'lanes')}/*/to-send`)}`);
   const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
   const upload = (file) => spawnSync(join(ORCH_HOME, 'linear.sh'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
   const sent = () => { try { return readFileSync(join(dir, 'curl-args'), 'utf8'); } catch { return ''; } };
   assert.match(upload(join(dir, 'elsewhere.png')).stderr, /not under a folder of captures/);
-  assert.match(upload(join(captures, '..', 'elsewhere.png')).stderr, /not under a folder of captures/);
+  assert.match(upload(join(captures, '..', 'to-send', '..', 'test-results.png')).stderr, /not under a folder of captures/);
+  // The rest of a lane's worktree (its test results, the images of the repository) does not leave: only that one folder, at that one place.
+  assert.match(upload(join(dir, 'lanes', 'a-lane', 'test-results.png')).stderr, /not under a folder of captures/);
+  assert.match(upload(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png')).stderr, /not under a folder of captures/);
+  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/orca-workspaces\/budgeting\/\.local\/captures-linear, ~\/orca-workspaces\/budgeting-lanes\/budgeting\/\*\/\.local\/captures-linear$/m);
   assert.match(upload(join(captures, 'secret.png')).stderr, /not a PNG or JPEG image/);
   assert.match(upload(join(captures, 'missing.png')).stderr, /no such file/);
   assert.equal(sent(), '', 'nothing left the machine');

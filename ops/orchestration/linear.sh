@@ -9,7 +9,7 @@
 #
 # Linear serves the comments of a ticket newest first: `first: n` is the n
 # most recent ones, `last: n` the n oldest (checked on a long ticket).
-#   linear.sh comments <ticket>                 its comments as JSON (id, createdAt, body)
+#   linear.sh comments <ticket>                 its comments as JSON (id, createdAt, editedAt, body, byOwner)
 #   linear.sh create <project> <label> <title> <file>   opens a ticket, prints its identifier and URL
 #
 # Nothing real goes to Linear, an outside service (decision of 2026-10-06):
@@ -119,8 +119,11 @@ case "${1:-}" in
     ;;
   comments)
     ticket_ok "$2"
-    gql 'query($id: String!) { issue(id: $id) { comments(first: 100) { nodes { id createdAt body url } } } }' \
-      "$(jq -nc --arg id "$2" '{id: $id}')" | jq -c '.data.issue.comments.nodes'
+    # byOwner: written from the account that owns the key, by no integration.
+    # A program that acts under his account still shows as him.
+    gql 'query($id: String!) { viewer { id } issue(id: $id) { comments(first: 100) { nodes { id createdAt editedAt body url user { id } botActor { id } externalUser { id } } } } }' \
+      "$(jq -nc --arg id "$2" '{id: $id}')" \
+      | jq -c '.data.viewer.id as $owner | [.data.issue.comments.nodes[] | {id, createdAt, editedAt, body, url, byOwner: ($owner != null and .user.id == $owner and .botActor == null and .externalUser == null)}]'
     ;;
   changes)
     [[ "${2:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || die "usage: linear.sh changes <ISO time>"
@@ -140,14 +143,16 @@ case "${1:-}" in
   upload)
     # Sends one screenshot to Linear and prints the address to put in a
     # comment. Only an image (its first bytes say so, not its name), and
-    # only from the folders where the lanes keep their captures: nothing
-    # else on this machine leaves by here.
+    # only from the folder a lane sets apart for what may leave ([linear]
+    # capture_roots, where * is one folder name): nothing else on this
+    # machine leaves by here. The guard reads the text of a comment, not an
+    # image: what is put in that folder was taken on the demonstration data.
     file=$(realpath -e "${2:-}" 2> /dev/null) || die "usage: linear.sh upload <image>: no such file"
     allowed=
     while IFS= read -r root; do
       [ -n "$root" ] || continue
-      root=$(realpath -m "$(expand_home "$root")")
-      case "$file" in "$root"/*) allowed=1 ;; esac
+      pattern=$(realpath -m "$(expand_home "$root")" | sed 's/[][\.^$()+?{}|]/\\&/g; s/\*/[^\/]+/g')
+      [[ "$file" =~ ^$pattern/[^/]+$ ]] && allowed=1
     done < <(conf_get linear capture_roots | tr ',' '\n' | sed 's/^ *//; s/ *$//')
     [ -n "$allowed" ] || die "$file is not under a folder of captures ([linear] capture_roots): nothing sent"
     case "$(head -c 8 "$file" | od -An -tx1 | tr -d ' \n')" in
