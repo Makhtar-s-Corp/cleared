@@ -65,7 +65,10 @@ later() {
 node_lib() { node --no-warnings "$ORCH_HOME/lib/$1" "${@:2}"; }
 # only_base_merges <commit> <head>: the head holds that commit, and adds on
 # top of it nothing but merges of the base that changed nothing by
-# themselves. A commit of the lane itself would have been seen by nobody.
+# themselves. A commit of the lane itself would have been seen by nobody;
+# nor would the branch of another lane, which brings commits of its own
+# (of one parent, refused below) or a merge that changed something by
+# itself (refused too).
 only_base_merges() {
   local added parents auto
   [ "$1" != "$2" ] || return 0
@@ -129,13 +132,24 @@ needs=$(node_lib merge.mjs needs "$work/files.json")
 go=$(conf_get linear go_state) validate=$(conf_get linear validate_state) agreed=
 asked="$ORCH_STATE_DIR/validations/$ticket.json"
 if [ "$needs" != tooling ]; then
+  # His move is read from the tracker, and not from one that cannot tell him
+  # from an agent, unless the project says it accepts that ([merge]
+  # separate_identity = no).
+  if [ "$(conf_get merge separate_identity)" != no ] && [ "$("$ORCH_HOME/linear.sh" identity)" != app ]; then
+    no "the tracker cannot tell the user from an agent (the scripts act under the key of a person): no agreement is read from it ([merge] separate_identity). Give the agents their own application"
+  fi
+  # His move answers a request: the time of the last one made on this ticket.
+  requested=$(jq -r '.at // empty' "$asked" 2> /dev/null) || requested=
   code=0
-  "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" || code=$?
+  "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" ${requested:+"$requested"} || code=$?
   case "$code" in
     0)
       # His move is his agreement to what he was shown, and to nothing else:
-      # another pull request of the ticket, or a version pushed since, was
-      # seen by nobody but a reviewer.
+      # another pull request of the ticket, a commit of the lane, or the
+      # base brought in with a conflict the lane resolved, was seen by
+      # nobody but a reviewer. The base brought in as it is changes nothing
+      # of what the pull request does, and the checks ran again on it: his
+      # agreement stands (his rule of 2026-10-08).
       shown=$(jq -r --argjson pr "$pr" '.pulls[]? | select(.pr == $pr) | .head' "$asked" 2> /dev/null | sed -n '1p') || shown=
       [ -n "$shown" ] || no "$ticket is in « $go », but the user was never shown #$pr: ask him for it (ask-validation.sh $ticket - --pr $pr)"
       if ! only_base_merges "$shown" "$head"; then
@@ -146,6 +160,13 @@ if [ "$needs" != tooling ]; then
       agreed=status
       ;;
     7) later "Linear has not written yet who put $ticket in « $go »" ;;
+    8)
+      # By him, but before the request: an agreement to something else, and
+      # a card that somebody else put back where he had left it.
+      [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
+      [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the move of the user to « $go » is older than the request made at $requested: it answers another request. $ticket is back in « $validate »"
+      no "the move of the user to « $go » is older than the request made at $requested: $ticket is back in « $validate », where the request waits for him"
+      ;;
     6)
       # In his status, but not put there by him: never live, and back to the status that asks him.
       [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true

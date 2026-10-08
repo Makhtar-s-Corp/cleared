@@ -45,7 +45,7 @@ if [ "$source" = - ]; then cat > "$text"; else [ -f "$source" ] || die "no such 
 grep -q '[^[:space:]]' "$text" || die "nothing to ask"
 validate=$(conf_get linear validate_state)
 # The version of each pull request, now.
-shown='[]' versions=
+shown='[]' versions= asked_pulls=
 for pr in "${pulls[@]}"; do
   pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json state,headRefOid) || die "pull request #$pr could not be read"
   [ "$(jq -r '.state' <<<"$pull")" = OPEN ] || die "#$pr is not open: nothing asked"
@@ -53,6 +53,7 @@ for pr in "${pulls[@]}"; do
   [[ "$head" =~ ^[0-9a-f]{40}$ ]] || die "the version of #$pr could not be read"
   shown=$(jq -c --argjson pr "$pr" --arg head "$head" '. + [{pr: $pr, head: $head}]' <<<"$shown")
   versions="${versions:+$versions, }PR $pr à ${head:0:8}"
+  asked_pulls="${asked_pulls:+$asked_pulls }$pr:$head"
 done
 # Asked once for a version: a ticket that already waits for him with these
 # very versions is not asked again. A version pushed since is a new request.
@@ -69,15 +70,41 @@ if [ "$("$ORCH_HOME/linear.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c -
   die "$ticket already waits for the user in « $validate » for these versions: nothing asked again"
 fi
 all=$(jq -c --argjson shown "$shown" '[.[] | select(.pr as $pr | $shown | map(.pr) | index($pr) | not)] + $shown | sort_by(.pr)' <<<"$before")
-# The captures first: a request whose capture cannot be sent is not posted without it.
-for index in "${!captures[@]}"; do
-  address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
-  printf '\n\n**%s**\n\n![%s](%s)\n' "${captions[$index]}" "${captions[$index]}" "$address" >> "$text"
-done
-printf '\n\n(Version montrée : %s.)\n' "$versions" >> "$text"
-"$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
+# A request is made whole: its text on the ticket, the card moved, what was
+# shown kept. If the card cannot be moved once the text is written, nothing
+# is kept yet, the script says so, and the same request asked again within
+# the hour is finished without being written to him a second time. The note
+# of the request is taken before anything is written to him: when nothing
+# can be kept, nothing is asked. What this does not cover: a script stopped
+# between the comment and the mark that it was written (a kill, the host
+# going down) writes to him again when asked again.
+pending="$ORCH_STATE_DIR/validations/$ticket.pending"
+request=$({ cat "$text"; echo "$shown"; printf '%s\n' ${captures[@]+"${captures[@]}"}; } | sha256sum | cut -d' ' -f1)
+note() { { jq -n --arg request "$request" --arg at "$(now_utc)" --argjson written "$1" '{request: $request, at: $at, written: $written}' > "$pending.part" && mv "$pending.part" "$pending"; } 2> /dev/null; }
+written=$(jq -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'select((.at // "") > $since and .written == true) | .request // empty' "$pending" 2> /dev/null) || written=
+if [ "$written" != "$request" ]; then
+  note false || die "nothing can be kept in $ORCH_STATE_DIR/validations: nothing asked, nothing written to the user. Repair the folder and ask again"
+  # The captures first: a request whose capture cannot be sent is not posted without it.
+  for index in "${!captures[@]}"; do
+    address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
+    printf '\n\n**%s**\n\n![%s](%s)\n' "${captions[$index]}" "${captions[$index]}" "$address" >> "$text"
+  done
+  # A request made again for a pull request says which version the one before
+  # was about: the user sees that it is a new one.
+  earlier=
+  for one in $asked_pulls; do
+    was=$(jq -r --argjson pr "${one%%:*}" '.[] | select(.pr == $pr) | .head' <<<"$before" | sed -n '1p')
+    [ -z "$was" ] || [ "$was" = "${one#*:}" ] || earlier="${earlier:+$earlier, }${was:0:8}"
+  done
+  printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
+  "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
+  note true || die "the request is written on $ticket, but that could not be noted: the card is not moved and what he was shown is not kept. Asked again, it will be written to him a second time: repair $ORCH_STATE_DIR/validations first"
+fi
+"$ORCH_HOME/linear.sh" move "$ticket" "$validate" \
+  || die "the request is written on $ticket, but the card could not be moved to « $validate »: nothing is kept yet. Ask again with the same request: it will be finished without being written to him a second time"
 # What else the record holds (a ticket the wake still has to close) is kept.
 record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
 [ -n "$record" ] || record='{}'
-jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"
-"$ORCH_HOME/linear.sh" move "$ticket" "$validate"
+{ jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"; } 2> /dev/null \
+  || die "the card of $ticket is in « $validate », but what he was shown could not be kept in $kept: his agreement would be bound to no version, and no go-live will read it. Repair the folder and ask again with the same request: it will be finished without being written to him a second time"
+rm -f "$pending"

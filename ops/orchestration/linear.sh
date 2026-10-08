@@ -23,19 +23,70 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
-# Only this one key is read from the secrets file. The file is never sourced:
-# it also holds an API key that would move the model billing off the subscription.
-key=${LINEAR_API_KEY:-}
-if [ -z "$key" ]; then
-  secrets=${ORCH_SECRETS_FILE:-$ORCH_REPO/.env.local}
-  [ -f "$secrets" ] && key=$(sed -n 's/^LINEAR_API_KEY=//p' "$secrets" | head -n 1 | tr -d "\"'")
+# Under whose name the scripts act. The application of the agents when the
+# project has one (its identifier and its secret): everything an agent does
+# then shows under the name of the agents, never under the one of a person,
+# and a move of the user can be told from theirs. Otherwise the key of a
+# person: the tracker then cannot tell him from an agent (« shared »), and
+# merge-pr.sh can be told to read no agreement from it ([merge]
+# separate_identity). What the environment gives comes before the file of
+# secrets; of that file only these names are read, and it is never sourced:
+# it also holds an API key that would move the model billing off the
+# subscription. Half of an application is an error, not a reason to fall
+# back in silence on the key of a person.
+secrets=${ORCH_SECRETS_FILE:-$ORCH_REPO/.env.local}
+secret_of() { [ -f "$secrets" ] && sed -n "s/^$1=//p" "$secrets" | head -n 1 | tr -d "\"'"; }
+app_id=${LINEAR_APP_CLIENT_ID:-} app_secret=${LINEAR_APP_CLIENT_SECRET:-} key=${LINEAR_API_KEY:-}
+if [ -z "$app_id$app_secret$key" ]; then
+  app_id=$(secret_of LINEAR_APP_CLIENT_ID) || app_id=
+  app_secret=$(secret_of LINEAR_APP_CLIENT_SECRET) || app_secret=
+  key=$(secret_of LINEAR_API_KEY) || key=
 fi
-[ -n "$key" ] || die "no LINEAR_API_KEY (environment, or ${ORCH_SECRETS_FILE:-$ORCH_REPO/.env.local})"
+if [ -n "$app_id$app_secret" ]; then
+  [ -n "$app_id" ] || die "LINEAR_APP_CLIENT_SECRET without LINEAR_APP_CLIENT_ID (environment, or $secrets)"
+  [ -n "$app_secret" ] || die "LINEAR_APP_CLIENT_ID without LINEAR_APP_CLIENT_SECRET (environment, or $secrets)"
+  identity=app
+else
+  [ -n "$key" ] || die "no application of the agents (LINEAR_APP_CLIENT_ID, LINEAR_APP_CLIENT_SECRET) and no LINEAR_API_KEY (environment, or $secrets)"
+  identity=shared
+fi
+
+# The token of the application: asked for with its secret, which never is on
+# a command line, kept with the state for half a day, readable by its owner
+# alone, and asked for again when it is older, or once when the tracker
+# refuses it.
+app_token() {
+  local kept="$ORCH_STATE_DIR/tracker-token.json" token answer
+  if [ "${1:-}" != new ] && [ -s "$kept" ] && [[ "$(jq -r '.at // ""' "$kept" 2> /dev/null)" > "$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+    jq -r '.token' "$kept"
+    return 0
+  fi
+  answer=$(printf 'grant_type=client_credentials&scope=read,write&client_id=%s&client_secret=%s' "$(jq -rn --arg v "$app_id" '$v | @uri')" "$(jq -rn --arg v "$app_secret" '$v | @uri')" \
+    | curl -sS --max-time 30 -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data @- https://api.linear.app/oauth/token) || return 1
+  token=$(jq -r '.access_token // empty' <<<"$answer" 2> /dev/null)
+  [ -n "$token" ] || { echo "linear: no token for the application of the agents ($(jq -r '.error_description // .error // "unreadable answer"' <<<"$answer" 2> /dev/null || echo 'unreadable answer'))" >&2; return 1; }
+  mkdir -p "$ORCH_STATE_DIR"
+  (umask 077; jq -n --arg token "$token" --arg at "$(now_utc)" '{token: $token, at: $at}' > "$kept.part") && mv "$kept.part" "$kept"
+  printf '%s\n' "$token"
+}
+
+gql_once() {
+  jq -n --arg query "$1" --argjson variables "${2:-{\}}" '{query: $query, variables: $variables}' \
+    | curl -sS --max-time 30 -H @<(printf 'Authorization: %s' "$3") -H 'Content-Type: application/json' --data @- https://api.linear.app/graphql
+}
 
 gql() {
-  local response
-  response=$(jq -n --arg query "$1" --argjson variables "${2:-{\}}" '{query: $query, variables: $variables}' \
-    | curl -sS --max-time 30 -H @<(printf 'Authorization: %s' "$key") -H 'Content-Type: application/json' --data @- https://api.linear.app/graphql)
+  local response authorization
+  if [ "$identity" = app ]; then authorization="Bearer $(app_token)" || return 1; else authorization=$key; fi
+  response=$(gql_once "$1" "${2:-}" "$authorization")
+  # A token the tracker refuses (the secret changed, the application was
+  # installed again) is thrown away and asked for again, once. Linear
+  # answers a refused token with this code in a JSON body, under HTTP 401
+  # (tried with a made-up token on 2026-10-08).
+  if [ "$identity" = app ] && [ "$(jq -r '[.errors[]?.extensions.code] | index("AUTHENTICATION_ERROR") != null' <<<"$response" 2>/dev/null)" = true ]; then
+    authorization="Bearer $(app_token new)" || return 1
+    response=$(gql_once "$1" "${2:-}" "$authorization")
+  fi
   if [ "$(jq -r 'has("errors")' <<<"$response" 2>/dev/null)" != false ]; then
     echo "linear: $(jq -r '.errors[0].message // "unreadable answer"' <<<"$response" 2>/dev/null || echo 'unreadable answer')" >&2
     return 1
@@ -43,9 +94,24 @@ gql() {
   printf '%s\n' "$response"
 }
 
+# Who the user is, for the tracker: the settings of the project say it. With
+# the application of the agents it must be said: the one that asks no longer
+# is him.
+owner_id() {
+  local owner
+  owner=$(conf_get linear owner_id)
+  [ -n "$owner" ] || [ "$identity" != app ] || { echo "$(basename "$0"): [linear] owner_id is not set: with the application of the agents, who the user is must be written in the settings" >&2; return 1; }
+  printf '%s\n' "$owner"
+}
+
 ticket_ok() { [[ "$1" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$1\" is not a ticket identifier"; }
 
 case "${1:-}" in
+  identity)
+    # app: the scripts act under the name of the agents. shared: under the
+    # one of a person, whom the tracker cannot tell from an agent.
+    echo "$identity"
+    ;;
   issue)
     ticket_ok "$2"
     gql 'query($id: String!) { issue(id: $id) { id identifier title url state { name } project { name } labels { nodes { name } } } }' \
@@ -119,17 +185,19 @@ case "${1:-}" in
     ;;
   comments)
     ticket_ok "$2"
-    # byOwner: written from the account that owns the key, by no integration.
-    # A program that acts under his account still shows as him.
-    gql 'query($id: String!) { viewer { id } issue(id: $id) { comments(first: 100) { nodes { id createdAt editedAt body url user { id } botActor { id } externalUser { id } } } } }' \
+    # byOwner: written by the user himself ([linear] owner_id; without it,
+    # and with the key of a person, the owner of that key), by no
+    # application and no integration.
+    owner=$(owner_id) || exit 1
+    gql 'query($id: String!) { viewer { id } issue(id: $id) { comments(first: 100) { nodes { id createdAt editedAt body url user { id app } botActor { id } externalUser { id } } } } }' \
       "$(jq -nc --arg id "$2" '{id: $id}')" \
-      | jq -c '.data.viewer.id as $owner | [.data.issue.comments.nodes[] | {id, createdAt, editedAt, body, url, byOwner: ($owner != null and .user.id == $owner and .botActor == null and .externalUser == null)}]'
+      | jq -c --arg owner "$owner" '(if $owner != "" then $owner else .data.viewer.id end) as $owner | [.data.issue.comments.nodes[] | {id, createdAt, editedAt, body, url, byOwner: ($owner != null and .user.id == $owner and .user.app != true and .botActor == null and .externalUser == null)}]'
     ;;
   changes)
     [[ "${2:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || die "usage: linear.sh changes <ISO time>"
-    gql 'query($team: String!, $since: DateTimeOrDuration!) { issues(first: 50, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, updatedAt: {gt: $since}}) { nodes { id identifier title url createdAt updatedAt description state { name } project { name } comments(first: 20) { nodes { id createdAt body url } } } } }' \
+    gql 'query($team: String!, $since: DateTimeOrDuration!) { issues(first: 50, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, updatedAt: {gt: $since}}) { nodes { id identifier title url createdAt updatedAt description state { name } project { name } creator { app } botActor { id } comments(first: 20) { nodes { id createdAt body url user { app } botActor { id } } } } } }' \
       "$(jq -nc --arg team "$(conf_get linear team)" --arg since "$2" '{team: $team, since: $since}')" \
-      | jq -c '[.data.issues.nodes[] | {id, identifier, title, url, createdAt, updatedAt, description: ((.description // "") | .[0:1200]), state: .state.name, project: (.project.name // null), comments: [.comments.nodes[] | {id, createdAt, url, body}]}]'
+      | jq -c '[.data.issues.nodes[] | {id, identifier, title, url, createdAt, updatedAt, description: ((.description // "") | .[0:1200]), state: .state.name, project: (.project.name // null), agent: (.creator.app == true or .botActor != null), comments: [.comments.nodes[] | {id, createdAt, url, body, agent: (.user.app == true or .botActor != null)}]}]'
     ;;
   list)
     [ -n "${2:-}" ] || die "usage: linear.sh list <state>"
@@ -176,19 +244,33 @@ case "${1:-}" in
     gql 'query($id: String!) { issue(id: $id) { state { name } } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.state.name // empty'
     ;;
   moved-by-owner)
-    # Is the ticket in that status, and was it put there by the owner of the
-    # key himself? 0: yes. 5: it is not in that status. 6: it was put there
-    # by an integration, or by another account. 7: Linear has not written
-    # the move to the history yet. Linear cannot tell the owner from a
-    # program that acts under his account: this only holds for the agents
-    # that have no way to change a status (docs/decisions.md).
+    # Is the ticket in that status, and was it put there by the user
+    # himself, after the time given when one is? 0: yes. 5: it is not in
+    # that status. 6: it was put there by an application (the one of the
+    # agents among them), an integration or another account. 7: the tracker
+    # has not written the move to its history yet. 8: by him, but before
+    # the time given: an agreement to something else. The user is the one
+    # the settings of the project name ([linear] owner_id); with the key of
+    # a person and no such setting, the owner of that key, whom the tracker
+    # cannot tell from a program acting under his account. The tracker
+    # merges the successive changes of one author in one line of history,
+    # and a card taken out and put back by an agent leaves no trace: hence
+    # the time, which is the one his line of history began (tried on
+    # 2026-10-08: a later gesture of his joins that line only when nobody
+    # acted in between).
     ticket_ok "$2"
-    [ -n "${3:-}" ] || die "usage: linear.sh moved-by-owner <ticket> <status>"
-    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } history(first: 40) { nodes { createdAt actorId botActor { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
+    [ -n "${3:-}" ] || die "usage: linear.sh moved-by-owner <ticket> <status> [<not before, ISO time>]"
+    not_before=${4:-}
+    [ -z "$not_before" ] || [[ "$not_before" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || die "\"$not_before\" is not a time"
+    owner=$(owner_id) || exit 1
+    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } history(first: 40) { nodes { createdAt actorId actor { id app } botActor { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
     [ "$(jq -r '.data.issue.state.name // empty' <<<"$answer")" = "$3" ] || exit 5
-    last=$(jq -c --arg status "$3" '[.data.issue.history.nodes[] | select(.toState.name == $status)] | sort_by(.createdAt) | last // empty' <<<"$answer")
+    last=$(jq -c --arg status "$3" '[.data.issue.history.nodes[] | select(.toState.name == $status) | . + {at: .createdAt}] | sort_by(.at) | last // empty' <<<"$answer")
     [ -n "$last" ] || exit 7
-    [ "$(jq -r '.botActor == null and .actorId != null' <<<"$last")" = true ] && [ "$(jq -r '.actorId' <<<"$last")" = "$(jq -r '.data.viewer.id' <<<"$answer")" ] || exit 6
+    [ -n "$owner" ] || owner=$(jq -r '.data.viewer.id' <<<"$answer")
+    [ "$(jq -r --arg owner "$owner" '.botActor == null and .actor.app != true and .actorId != null and .actorId == $owner' <<<"$last")" = true ] || exit 6
+    # Compared as times, to the second: the tracker writes fractions of a second, the request does not.
+    [ -z "$not_before" ] || [ "$(jq -r --arg from "$not_before" 'def seconds: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601; (.at | seconds) >= ($from | seconds)' <<<"$last")" = true ] || exit 8
     ;;
   move)
     # A script only ever puts a ticket in the status that asks the user for
