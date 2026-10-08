@@ -58,11 +58,19 @@ export function failedTries(db, reports, pr, head) {
 // Those that came to an end by themselves: one that was closed by hand has nothing to say.
 export function finishedReviews(db, reports, hours = 6, now = Date.now()) {
   const since = new Date(now - hours * 3600e3).toISOString();
-  return db.prepare("SELECT run_id, ticket, pr_number, outcome, ended_at FROM runs WHERE role = 'review' AND source = 'dispatcher' AND ended_at IS NOT NULL AND outcome IN ('done', 'failed', 'refused') AND ended_at >= ? ORDER BY ended_at").all(since)
+  // A review that left the queue without opening is told like one that ended: the lead asked for it.
+  const dropped = db.prepare("SELECT event_id, at, ticket, detail FROM events WHERE kind = 'review_dropped' AND at >= ? ORDER BY at").all(since)
+    .map((row) => ({ id: `review-dropped:${row.event_id}`, at: row.at, pr: Number(/#(\d+)/.exec(row.detail ?? '')?.[1] ?? 0) || null, ticket: row.ticket, outcome: 'dropped', commit: null, text: row.detail }));
+  // So is a go-live that was asked for and left its queue without being done.
+  // And a go-live done whose ticket could not be closed yet.
+  const refused = db.prepare("SELECT event_id, kind, at, ticket, value, detail FROM events WHERE kind IN ('merge_refused', 'ticket_left_open') AND at >= ? ORDER BY at").all(since)
+    .map((row) => ({ id: `${row.kind.replace('_', '-')}:${row.event_id}`, at: row.at, pr: row.value ?? null, ticket: row.ticket, outcome: row.kind, commit: null, text: row.detail }));
+  const ended = db.prepare("SELECT run_id, ticket, pr_number, outcome, ended_at FROM runs WHERE role = 'review' AND source = 'dispatcher' AND ended_at IS NOT NULL AND outcome IN ('done', 'failed', 'refused') AND ended_at >= ? ORDER BY ended_at").all(since)
     .map((row) => {
       const report = reportOf(reports, row.run_id);
       return { id: `review:${row.run_id}`, at: row.ended_at, pr: row.pr_number, ticket: row.ticket, outcome: row.outcome, commit: report?.commit ?? null, text: report?.body || '(sans compte rendu)' };
     });
+  return [...ended, ...dropped, ...refused];
 }
 
 // The model of the last message the session of a worktree wrote itself.
