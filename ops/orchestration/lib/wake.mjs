@@ -32,6 +32,12 @@ const excerpt = (text, length = 600) => {
   return flat.length > length ? `${flat.slice(0, length)}…` : flat;
 };
 
+// A text kept as it was written, line breaks included; only one out of all proportion is cut.
+const whole = (text, length) => {
+  const kept = (text ?? '').trim();
+  return kept.length > length ? `${kept.slice(0, length)}…` : kept;
+};
+
 // One word for the checks of a pull request.
 export function checksOf(rollup = []) {
   const states = rollup.map((check) => (check.conclusion || check.status || '').toUpperCase());
@@ -92,7 +98,7 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     if (seen.has(review.id)) continue;
     seen.add(review.id);
     if (first || review.at <= horizon) continue;
-    events.push({ kind: 'review_done', at: review.at, pr: review.pr, ticket: review.ticket, outcome: review.outcome, commit: review.commit, text: excerpt(review.text, REVIEW_MAX) });
+    events.push({ kind: 'review_done', at: review.at, pr: review.pr, ticket: review.ticket, outcome: review.outcome, commit: review.commit, text: whole(review.text, REVIEW_MAX) });
   }
 
   // While GitHub is down, what its pull requests seem to do (checks that it

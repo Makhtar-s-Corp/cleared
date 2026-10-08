@@ -156,6 +156,30 @@ flush_outbox() {
   return 0
 }
 
+# open_queued_reviews: the reviews review-pr.sh could not open at once, opened
+# now if they may, oldest first, one a wake. No model: the same script, with
+# the same rules. One that can never open (already reviewed, pull request
+# closed, no known author) is dropped, and said in the log of the wake.
+open_queued_reviews() {
+  local queue="$ORCH_STATE_DIR/reviews-queue" entry pr ticket author code limit recent
+  ls "$queue"/*.json > /dev/null 2>&1 || return 0
+  limit=$(conf_get review per_hour)
+  [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
+  recent=$(ledger sql "select count(*) n from runs where role = 'review' and source = 'dispatcher' and started_at >= '$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)'" | jq -r '.[0].n')
+  [ "$recent" -lt "$limit" ] || return 0
+  while IFS= read -r entry; do
+    pr=$(jq -r '.pr' "$entry") ticket=$(jq -r '.ticket' "$entry") author=$(jq -r '.author // ""' "$entry")
+    code=0
+    ORCH_FROM_QUEUE=1 "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" ${author:+--author-model "$author"} > /dev/null || code=$?
+    case "$code" in
+      0) rm -f "$entry"; return 0 ;;
+      5) ;;
+      *) echo "$(basename "$0"): the queued review of #$pr is dropped (it cannot open)" >&2; rm -f "$entry" ;;
+    esac
+  done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry")" "$entry"; done | sort | cut -f2)
+  return 0
+}
+
 # github_down: what GitHub says is down among the parts the dispatcher needs,
 # as its public status page has it: nothing when all is well. Exit 2 when the
 # page cannot be read, which says nothing either way. A slowdown is not an

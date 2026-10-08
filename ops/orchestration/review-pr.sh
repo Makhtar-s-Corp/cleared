@@ -11,7 +11,9 @@
 #     author, no review;
 #   - one review at a time for a ticket (the one before, once finished, is
 #     closed here), and no more than [review] per_hour an hour. A review
-#     lane only reads: it does not wait for the host to be free.
+#     lane only reads: it does not wait for the host to be free;
+#   - a review that cannot open now is not refused and forgotten: it waits
+#     in state/reviews-queue/ and the wake opens it as soon as it may.
 # What the reviewer says comes back to the lead at its next wake (the event
 # review_done); nothing is posted to Linear.
 #
@@ -35,11 +37,28 @@ while [ $# -gt 0 ]; do
 done
 ledger init > /dev/null
 
+# "Not now" is not "no": a review that cannot open yet (the limit of the hour,
+# one still running for that ticket, GitHub down) is kept in a queue that the
+# wake opens by itself, with no model, as soon as it may. Called from that
+# queue, or to see what would run, it only says so (exit 5).
+author=
+later() {
+  if [ -n "${ORCH_FROM_QUEUE:-}" ] || [ -n "$dry_run" ]; then
+    echo "$(basename "$0"): $1" >&2
+    exit 5
+  fi
+  mkdir -p "$ORCH_STATE_DIR/reviews-queue"
+  jq -n --arg pr "$pr" --arg ticket "$ticket" --arg author "${author:-$said_author}" --arg at "$(now_utc)" --arg why "$1" \
+    '{pr: ($pr | tonumber), ticket: $ticket, author: $author, at: $at, why: $why}' > "$ORCH_STATE_DIR/reviews-queue/$pr.json"
+  echo "Relecture de la PR #$pr mise en file ($1). Elle s'ouvrira d'elle-même dès que possible, sans rien relancer ; son verdict te sera remis à un réveil."
+  exit 0
+}
+
 # A review lane only reads (no install, no test): it is not one of the heavy
 # operations of the host and may open while a CI runs (docs/regles-lanes.md,
 # rule of the user of 2026-10-07). Not while GitHub is down.
 down=$(github_down) || down=
-[ -z "$down" ] || die "GitHub is down ($down): the pull request cannot be fetched, ask again at a later wake"
+[ -z "$down" ] || later "GitHub est en panne : $down"
 
 pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json number,state,title,body,headRefName,headRefOid) || die "pull request #$pr could not be read"
 [ "$(jq -r '.state' <<<"$pull")" = OPEN ] || die "pull request #$pr is not open"
@@ -57,7 +76,6 @@ while IFS= read -r commit; do
 done < <(jq -r '.[]' <<<"$reviewed")
 
 # Who wrote it: the session of the worktree on that branch.
-author=
 worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '/^worktree /{w = substr($0, 10)} $0 == b {print w}')
 [ -z "$worktree" ] || author=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" author "$worktree")
 # What can be read wins over what is said.
@@ -74,14 +92,14 @@ lane="review/$ticket"
 previous=
 if dispatcher_lanes | grep -qxF -- "$lane"; then
   if [ "$(ledger sql "select count(*) n from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[0].n')" != 0 ]; then
-    die "a review of $ticket is still running: one at a time"
+    later "une relecture de $ticket tourne encore, une à la fois"
   fi
   previous=1
 fi
 limit=$(conf_get review per_hour)
 [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
 recent=$(ledger sql "select count(*) n from runs where role = 'review' and source = 'dispatcher' and started_at >= '$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)'" | jq -r '.[0].n')
-[ "$recent" -lt "$limit" ] || die "$recent reviews were already opened in the last hour (limit: $limit): none opened"
+[ "$recent" -lt "$limit" ] || later "$recent relectures ouvertes dans la dernière heure, limite $limit"
 # A finished review holds nothing to keep (the reviewer writes no file of
 # the repository, and its report is in the state): closed whatever it left.
 if [ -n "$previous" ] && [ -z "$dry_run" ]; then

@@ -47,6 +47,8 @@ flock -n 8 || busy "another wake is at work"
 
 # What the hourly limit held back leaves now, grouped, if the user may be written.
 [ -n "$handover" ] || flush_outbox
+# The reviews that could not open when they were asked for open now, if they may.
+[ -n "$handover" ] || open_queued_reviews
 
 # GitHub down, as its status page says: noted when it starts, written to the
 # ledger when it ends, with both times. Its events wait meanwhile.
