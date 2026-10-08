@@ -156,6 +156,60 @@ flush_outbox() {
   return 0
 }
 
+# open_queued_reviews: the reviews review-pr.sh could not open at once, opened
+# now if they may, oldest first, one a wake. No model: the same script, with
+# the same rules. A failure that may pass (GitHub or the network not
+# answering) is tried again at every wake for an hour. One that will never
+# open (already reviewed, pull request closed), one that kept failing for
+# that hour, and an entry that cannot be read leave the queue: each is
+# written to the ledger (review_dropped) and told to the lead at its next
+# wake, as a review to ask for again.
+open_queued_reviews() {
+  local queue="$ORCH_STATE_DIR/reviews-queue" entry pr ticket author code limit recent since why
+  ls "$queue"/*.json > /dev/null 2>&1 || return 0
+  for entry in "$queue"/*.json; do
+    jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1 && continue
+    ledger event --kind review_dropped --detail "an entry of the queue of reviews ($(basename "$entry")) cannot be read: removed, the review is to be asked for again"
+    rm -f "$entry"
+  done
+  ls "$queue"/*.json > /dev/null 2>&1 || return 0
+  limit=$(conf_get review per_hour)
+  [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
+  recent=$(ledger sql "select count(*) n from runs where role = 'review' and source = 'dispatcher' and started_at >= '$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)'" | jq -r '.[0].n')
+  [ "$recent" -lt "$limit" ] || return 0
+  while IFS= read -r entry; do
+    pr=$(jq -r '.pr' "$entry") ticket=$(jq -r '.ticket' "$entry") author=$(jq -r '.author // ""' "$entry")
+    code=0
+    why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" ${author:+--author-model "$author"} 2>&1 > /dev/null) || code=$?
+    case "$code" in
+      0) rm -f "$entry"; return 0 ;;
+      5)
+        # "Not now" is no failure: the hour of failures, if one had begun, starts again.
+        jq 'del(.failing_since)' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        ;;
+      6) drop_queued_review "$entry" "$pr" "$ticket" "$why" ;;
+      *)
+        # Only a time in the form this script writes counts: anything else
+        # (unreadable, or a word date would take for a time to come) is no
+        # time, and the hour starts now.
+        since=$(jq -r '.failing_since // empty' "$entry")
+        if [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]]; then since=$(date -d "$since" +%s 2> /dev/null) || since=; else since=; fi
+        if [ -z "$since" ]; then
+          jq --arg since "$(now_utc)" '.failing_since = $since' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        elif [ $(( $(date +%s) - since )) -ge 3600 ]; then
+          drop_queued_review "$entry" "$pr" "$ticket" "it kept failing for an hour, the last time: $why"
+        fi
+        ;;
+    esac
+  done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry")" "$entry"; done | sort | cut -f2)
+  return 0
+}
+
+drop_queued_review() {
+  ledger event --kind review_dropped --ticket "$3" --detail "the review of #$2 left the queue without opening: $(tr '\n' ' ' <<<"$4" | cut -c1-400)"
+  rm -f "$1"
+}
+
 # github_down: what GitHub says is down among the parts the dispatcher needs,
 # as its public status page has it: nothing when all is well. Exit 2 when the
 # page cannot be read, which says nothing either way. A slowdown is not an
