@@ -200,9 +200,12 @@ if [ "$agreed" = status ]; then
   read -r still_open unknown <<<"$(shown_left "$asked")"
   if [ "$unknown" != 0 ]; then
     jq '. + {closing: true}' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
-    ledger event --kind ticket_left_open --ticket "$ticket" --value "$pr" --detail "#$pr is live, and $ticket stays in « $go »: GitHub did not say what became of $(jq -r '[.pulls[] | select(.merged_at == null) | "#\(.pr)"] | join(", ")' "$asked"), shown on the same ticket. The wake asks again and closes the ticket once it knows"
+    ledger event --kind ticket_left_open --ticket "$ticket" --value "$pr" --detail "#$pr is live, and $ticket stays in « $go »: GitHub did not say what became of $(jq -r '[.pulls[] | select(.merged_at == null) | "#\(.pr)"] | join(", ")' "$asked"), shown on the same ticket. Nothing to do: the wake asks GitHub again by itself, and closes the ticket once every other pull request shown is live or closed, if the ticket still is where the user put it"
   elif [ "$still_open" = 0 ]; then
-    "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null \
-      || echo "$(basename "$0"): #$pr is live, but $ticket could not be put in « $(conf_get linear done_state) »" >&2
+    if "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null; then
+      jq 'del(.closing)' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
+    else
+      echo "$(basename "$0"): #$pr is live, but $ticket could not be put in « $(conf_get linear done_state) »" >&2
+    fi
   fi
 fi

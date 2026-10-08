@@ -2533,15 +2533,56 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   const db = openLedger(join(pull.box.state, 'ledger.db'));
   assert.equal(db.prepare("select count(*) n from events where kind = 'ticket_left_open'").get().n, 0, 'another pull request still open is no surprise: nothing to tell');
   db.close();
-  // Nobody has to remember it: the wake asks GitHub again. Still no answer, the ticket stays; closed without going live, the ticket is closed.
+  // Nobody has to remember it: the wake asks again, and gives up on nothing in silence.
   const wake = (extra = {}) => spawnSync(join(unknown.box.home, 'wake.sh'), [], { env: { ...unknown.env, ...extra }, encoding: 'utf8' });
+  const record = () => JSON.parse(readFileSync(join(unknown.box.state, 'validations', 'X-5.json'), 'utf8'));
+  const other8 = (state) => writeFileSync(join(unknown.box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state, headRefOid: 'abc' }));
+  const linearSays = (code) => writeFileSync(join(unknown.box.home, 'linear-moved'), code);
+  const still = (why) => { assert.deepEqual(unknown.moves(), [], why); assert.equal(record().closing, true, why); };
   assert.equal(wake({ FAKE_GH_VIEW_DOWN: '8' }).status, 0);
-  assert.deepEqual(unknown.moves(), []);
-  writeFileSync(join(unknown.box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state: 'CLOSED', headRefOid: 'abc' }));
+  still('GitHub still does not answer');
+  other8('OPEN');
+  assert.equal(wake().status, 0);
+  still('the other one is open after all: nothing to close yet, and it is still watched, it may be given up without ever going live');
+  other8('CLOSED');
+  linearSays('7');
+  assert.equal(wake().status, 0);
+  still('Linear has not written yet who moved the ticket');
+  linearSays('1');
+  assert.equal(wake().status, 0);
+  still('Linear does not answer');
+  // While a go-live holds the lock, the wake does not write the same record.
+  linearSays('0');
+  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(unknown.box.state, 'merge.lock'), join(unknown.box.home, 'wake.sh')], { env: unknown.env, encoding: 'utf8' });
+  assert.equal(held.status, 0, held.stderr);
+  still('a go-live is being done');
   assert.equal(wake().status, 0);
   assert.deepEqual(unknown.moves(), ['X-5 -> Done']);
+  assert.equal(record().closing, undefined);
   assert.equal(wake().status, 0);
   assert.deepEqual(unknown.moves(), ['X-5 -> Done'], 'closed once');
+  // The ticket is no longer where he put it (he moved it, or someone else did): the wake leaves it, and says so.
+  writeFileSync(join(unknown.box.state, 'validations', 'X-5.json'), JSON.stringify({ ...record(), closing: true }));
+  linearSays('5');
+  assert.equal(wake().status, 0);
+  assert.deepEqual(unknown.moves(), ['X-5 -> Done']);
+  assert.equal(record().closing, undefined);
+  const said = JSON.parse(spawnSync('node', ['--no-warnings', join(unknown.box.home, 'lib', 'reviews.mjs'), 'done', '6'], { env: unknown.env, encoding: 'utf8' }).stdout).filter((event) => event.outcome === 'ticket_left_open');
+  assert.equal(said.length, 2);
+  assert.match(said[1].text, /leaves it as it is/);
+});
+
+test('the lead is told, in the words of the script, of a ticket a go-live could not close', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('live = no', 'live = yes'));
+  const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, HOME: box.home }, encoding: 'utf8' });
+  assert.equal(wake().status, 0);
+  assert.equal(spawnSync('node', ['--no-warnings', join(box.home, 'lib', 'ledger.mjs'), 'event', '--kind', 'ticket_left_open', '--ticket', 'X-5', '--value', '7', '--detail', '#7 is live, and X-5 stays in « Go MEP »: GitHub did not say what became of #8'], { env: box.env, encoding: 'utf8' }).status, 0);
+  const woken = wake();
+  assert.equal(woken.status, 0, woken.stderr);
+  const prompt = readFileSync(join(woken.stdout.trim(), 'prompt.md'), 'utf8');
+  assert.match(prompt, /X-5[^\n]*n'est pas fermé[^\n]*\n {4}\| #7 is live, and X-5 stays in « Go MEP »: GitHub did not say what became of #8/);
+  assert.doesNotMatch(prompt, /n'a pas été faite/, 'it is not told as a go-live that was refused');
 });
 
 test('only the version a reviewer read goes live: a commit of the lane on top of it does not, a merge of the base that changed nothing does; a review that asks for corrections is no review', () => {
@@ -2702,8 +2743,16 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }]);
   // A second pull request of the same ticket is added to what he was shown: his agreement to the first still stands.
   writeFileSync(join(box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state: 'OPEN', headRefOid: '8888888888888888888888888888888888888888' }));
+  // What else the record holds (a ticket the wake still has to close) is kept by a new request.
+  const recordPath = join(box.state, 'validations', 'X-5.json');
+  writeFileSync(recordPath, JSON.stringify({ ...JSON.parse(readFileSync(recordPath, 'utf8')), closing: true }));
   const second = ask(['--pr', '8'], 'Une deuxième partie est prête. Je la mets en ligne ?');
   assert.equal(second.status, 0, second.stderr);
+  assert.equal(JSON.parse(readFileSync(recordPath, 'utf8')).closing, true);
+  // And a request does not write the record while a go-live holds it.
+  const waited = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'merge.lock'), join(box.home, 'ask-validation.sh'), 'X-5', '-', '--pr', '9'], { env: { ...box.env, ORCH_LOCK_WAIT: '1' }, encoding: 'utf8', input: 'Une troisième ?' });
+  assert.equal(waited.status, 1);
+  assert.match(waited.stderr, /a go-live is being done/);
   assert.match(posted(), /\(Version montrée : PR 8 à 88888888\.\)/);
   assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }, { pr: 8, head: '8888888888888888888888888888888888888888' }]);
   assert.match(ask(['--pr', '8'], 'Encore ?').stderr, /already waits for the user/);

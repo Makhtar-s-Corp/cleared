@@ -59,6 +59,11 @@ done
 # What he was shown before of the other pull requests of the ticket stays:
 # his agreement to them still stands.
 kept="$ORCH_STATE_DIR/validations/$ticket.json"
+# This record is also written by a go-live and by the wake: under the same
+# lock as them, from its reading to its writing.
+mkdir -p "$ORCH_STATE_DIR/validations"
+exec 9> "$ORCH_STATE_DIR/merge.lock"
+flock -w "${ORCH_LOCK_WAIT:-60}" 9 || die "a go-live is being done: nothing asked, ask again in a minute"
 before=$(jq -c '[.pulls[]]' "$kept" 2> /dev/null) || before='[]'
 if [ "$("$ORCH_HOME/linear.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c --argjson shown "$shown" '[.[] | {pr, head}] as $kept | $shown - $kept | length' <<<"$before")" = 0 ]; then
   die "$ticket already waits for the user in « $validate » for these versions: nothing asked again"
@@ -71,6 +76,8 @@ for index in "${!captures[@]}"; do
 done
 printf '\n\n(Version montrée : %s.)\n' "$versions" >> "$text"
 "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
-mkdir -p "$ORCH_STATE_DIR/validations"
-jq -n --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '{ticket: $ticket, at: $at, pulls: $pulls}' > "$kept.part" && mv "$kept.part" "$kept"
+# What else the record holds (a ticket the wake still has to close) is kept.
+record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
+[ -n "$record" ] || record='{}'
+jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"
 "$ORCH_HOME/linear.sh" move "$ticket" "$validate"

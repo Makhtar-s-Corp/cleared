@@ -60,21 +60,33 @@ shown_left() {
 
 # A go-live was done, and its ticket could not be closed because GitHub did
 # not say what became of another pull request shown on it (merge-pr.sh marks
-# the record): asked again at each wake, with no model. The ticket is closed
-# only if it is still where the user put it himself.
+# the record): asked again at each wake, with no model, under the lock of
+# the go-lives since both write these records. Nothing is given up in
+# silence: while that pull request is open or unknown, or while Linear does
+# not answer or has not written yet who moved the ticket, the mark stays and
+# the next wake tries again. The ticket is closed only if it still is where
+# the user put it himself; if it is not, it is left as it is, and said.
 close_tickets_left_open() {
-  local record ticket open unknown
+  local record ticket open unknown code go
   ls "$ORCH_STATE_DIR/validations"/*.json > /dev/null 2>&1 || return 0
-  for record in "$ORCH_STATE_DIR/validations"/*.json; do
-    [ "$(jq -r '.closing // false' "$record" 2> /dev/null)" = true ] || continue
-    ticket=$(jq -r '.ticket' "$record")
-    read -r open unknown <<<"$(shown_left "$record")"
-    [ "$unknown" = 0 ] || continue
-    if [ "$open" = 0 ] && "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$(conf_get linear go_state)"; then
-      "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null || continue
-    fi
-    jq 'del(.closing)' "$record" > "$record.next" && mv "$record.next" "$record"
-  done
+  go=$(conf_get linear go_state)
+  (
+    flock -n 9 || exit 0
+    for record in "$ORCH_STATE_DIR/validations"/*.json; do
+      [ "$(jq -r '.closing // false' "$record" 2> /dev/null)" = true ] || continue
+      ticket=$(jq -r '.ticket' "$record")
+      read -r open unknown <<<"$(shown_left "$record")"
+      [ "$open" = 0 ] && [ "$unknown" = 0 ] || continue
+      code=0
+      "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" || code=$?
+      case "$code" in
+        0) "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null || continue ;;
+        5 | 6) ledger event --kind ticket_left_open --ticket "$ticket" --detail "everything shown on $ticket is live or closed, but the ticket is no longer in « $go » by the user's own hand (he moved it, or someone else did): the wake leaves it as it is and closes nothing. Tell the user where the ticket stands" ;;
+        *) continue ;;
+      esac
+      jq 'del(.closing)' "$record" > "$record.next" && mv "$record.next" "$record"
+    done
+  ) 9> "$ORCH_STATE_DIR/merge.lock"
   return 0
 }
 
