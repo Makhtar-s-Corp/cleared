@@ -25,7 +25,10 @@ const under = (file, prefixes) => prefixes.some((prefix) => file.startsWith(pref
 export function agreementNeeded(files, merge) {
   if (!files.length) return 'agreement';
   const prefixes = [...list(merge.guarded_paths).map((prefix) => ({ prefix, kind: 'guarded' })), ...list(merge.tooling_paths).map((prefix) => ({ prefix, kind: 'tooling' }))];
-  const kinds = files.map((file) => prefixes.filter(({ prefix }) => file.startsWith(prefix)).sort((a, b) => b.prefix.length - a.prefix.length || (a.kind === 'guarded' ? -1 : 1))[0]?.kind ?? 'agreement');
+  // What ships by itself is named exactly: a file is that file, only a name
+  // ending with a slash is a folder. What is guarded stays a beginning.
+  const holds = ({ prefix, kind }, file) => (kind === 'tooling' && !prefix.endsWith('/') ? file === prefix : file.startsWith(prefix));
+  const kinds = files.map((file) => prefixes.filter((entry) => holds(entry, file)).sort((a, b) => b.prefix.length - a.prefix.length || (a.kind === 'guarded' ? -1 : 1))[0]?.kind ?? 'agreement');
   if (kinds.includes('guarded')) return 'guarded';
   return kinds.every((kind) => kind === 'tooling') ? 'tooling' : 'agreement';
 }

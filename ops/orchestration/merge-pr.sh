@@ -194,15 +194,14 @@ fi
 # The ticket is closed once everything he was shown on it is live. A pull
 # request he was shown and that GitHub says closed or merged since no longer
 # counts; one GitHub cannot be asked about still does: the ticket is not
-# closed on a guess.
+# closed on a guess, the ledger keeps it, and the wake asks again.
 if [ "$agreed" = status ]; then
   jq --argjson pr "$pr" --arg at "$(now_utc)" '(.pulls[] | select(.pr == $pr)) |= . + {merged_at: $at}' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
-  left=0
-  while IFS= read -r other; do
-    state=$(cd "$ORCH_REPO" && gh pr view "$other" --json state 2> /dev/null | jq -r '.state // empty' 2> /dev/null) || state=
-    case "$state" in CLOSED | MERGED) ;; *) left=$((left + 1)) ;; esac
-  done < <(jq -r '.pulls[] | select(.merged_at == null) | .pr' "$asked")
-  if [ "$left" = 0 ]; then
+  read -r still_open unknown <<<"$(shown_left "$asked")"
+  if [ "$unknown" != 0 ]; then
+    jq '. + {closing: true}' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
+    ledger event --kind ticket_left_open --ticket "$ticket" --value "$pr" --detail "#$pr is live, and $ticket stays in « $go »: GitHub did not say what became of $(jq -r '[.pulls[] | select(.merged_at == null) | "#\(.pr)"] | join(", ")' "$asked"), shown on the same ticket. The wake asks again and closes the ticket once it knows"
+  elif [ "$still_open" = 0 ]; then
     "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null \
       || echo "$(basename "$0"): #$pr is live, but $ticket could not be put in « $(conf_get linear done_state) »" >&2
   fi

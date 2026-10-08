@@ -45,6 +45,39 @@ conf_get() {
     }' "$ORCH_CONF"
 }
 
+# shown_left <record of a request>: of the pull requests the user was shown
+# on a ticket and that are not live, how many are still open and how many
+# GitHub cannot be asked about, as "<open> <unknown>". One GitHub says
+# closed, or merged by another hand, no longer counts.
+shown_left() {
+  local other state open=0 unknown=0
+  while IFS= read -r other; do
+    state=$(cd "$ORCH_REPO" && gh pr view "$other" --json state 2> /dev/null | jq -r '.state // empty' 2> /dev/null) || state=
+    case "$state" in CLOSED | MERGED) ;; OPEN) open=$((open + 1)) ;; *) unknown=$((unknown + 1)) ;; esac
+  done < <(jq -r '.pulls[] | select(.merged_at == null) | .pr' "$1")
+  echo "$open $unknown"
+}
+
+# A go-live was done, and its ticket could not be closed because GitHub did
+# not say what became of another pull request shown on it (merge-pr.sh marks
+# the record): asked again at each wake, with no model. The ticket is closed
+# only if it is still where the user put it himself.
+close_tickets_left_open() {
+  local record ticket open unknown
+  ls "$ORCH_STATE_DIR/validations"/*.json > /dev/null 2>&1 || return 0
+  for record in "$ORCH_STATE_DIR/validations"/*.json; do
+    [ "$(jq -r '.closing // false' "$record" 2> /dev/null)" = true ] || continue
+    ticket=$(jq -r '.ticket' "$record")
+    read -r open unknown <<<"$(shown_left "$record")"
+    [ "$unknown" = 0 ] || continue
+    if [ "$open" = 0 ] && "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$(conf_get linear go_state)"; then
+      "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null || continue
+    fi
+    jq 'del(.closing)' "$record" > "$record.next" && mv "$record.next" "$record"
+  done
+  return 0
+}
+
 # conf_keys <section>: the keys of a section, one per line.
 conf_keys() {
   awk -v section="[$1]" '

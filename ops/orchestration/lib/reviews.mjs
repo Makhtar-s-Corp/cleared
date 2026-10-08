@@ -62,8 +62,9 @@ export function finishedReviews(db, reports, hours = 6, now = Date.now()) {
   const dropped = db.prepare("SELECT event_id, at, ticket, detail FROM events WHERE kind = 'review_dropped' AND at >= ? ORDER BY at").all(since)
     .map((row) => ({ id: `review-dropped:${row.event_id}`, at: row.at, pr: Number(/#(\d+)/.exec(row.detail ?? '')?.[1] ?? 0) || null, ticket: row.ticket, outcome: 'dropped', commit: null, text: row.detail }));
   // So is a go-live that was asked for and left its queue without being done.
-  const refused = db.prepare("SELECT event_id, at, ticket, value, detail FROM events WHERE kind = 'merge_refused' AND at >= ? ORDER BY at").all(since)
-    .map((row) => ({ id: `merge-refused:${row.event_id}`, at: row.at, pr: row.value ?? null, ticket: row.ticket, outcome: 'merge_refused', commit: null, text: row.detail }));
+  // And a go-live done whose ticket could not be closed yet.
+  const refused = db.prepare("SELECT event_id, kind, at, ticket, value, detail FROM events WHERE kind IN ('merge_refused', 'ticket_left_open') AND at >= ? ORDER BY at").all(since)
+    .map((row) => ({ id: `${row.kind.replace('_', '-')}:${row.event_id}`, at: row.at, pr: row.value ?? null, ticket: row.ticket, outcome: row.kind, commit: null, text: row.detail }));
   const ended = db.prepare("SELECT run_id, ticket, pr_number, outcome, ended_at FROM runs WHERE role = 'review' AND source = 'dispatcher' AND ended_at IS NOT NULL AND outcome IN ('done', 'failed', 'refused') AND ended_at >= ? ORDER BY ended_at").all(since)
     .map((row) => {
       const report = reportOf(reports, row.run_id);

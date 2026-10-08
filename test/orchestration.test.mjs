@@ -2283,6 +2283,11 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   assert.equal(agreementNeeded(['tools/wake.sh', 'tools/lock.sh'], table), 'guarded', 'a guarded file inside a folder of tooling');
   assert.equal(agreementNeeded(['kept/manual.md'], { tooling_paths: 'kept/manual.md', guarded_paths: 'kept/' }), 'tooling', 'a file of tooling inside a guarded folder');
   assert.equal(agreementNeeded(['kept/manual.md', 'kept/lock.sh'], { tooling_paths: 'kept/manual.md', guarded_paths: 'kept/' }), 'guarded');
+  // What ships by itself is named exactly: a file is that file, only a name ending with a slash is a folder. A script
+  // named after a manual is not the manual. What is guarded stays a beginning: guarding too much opens nothing.
+  assert.equal(agreementNeeded(['kept/manual.md.sh'], { tooling_paths: 'kept/manual.md', guarded_paths: 'kept/' }), 'guarded');
+  assert.equal(agreementNeeded(['docs/notes.mdx'], table), 'agreement');
+  assert.equal(agreementNeeded(['compose.bootstrap.yaml'], table), 'guarded');
   // The table of the project. The lock of the go-lives is the script that puts live and everything it runs or reads to
   // decide, down to what starts a reviewer and writes its report: followed far enough, that is the whole tooling of
   // the orchestration, its settings and its tests. So all of it needs the user's own agreement, like the checks of the
@@ -2291,9 +2296,12 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   assert.ok(everyFile.includes('ops/orchestration/merge-pr.sh') && everyFile.includes('ops/orchestration/lib/merge.mjs') && everyFile.includes('ops/orchestration/prompts/review.md'));
   const manuals = ['ops/orchestration/README.md', 'ops/orchestration/AUDIT.md'];
   for (const file of everyFile) assert.equal(agreementNeeded([file], merge), manuals.includes(file) ? 'tooling' : 'guarded', file);
-  for (const his of ['test/orchestration.test.mjs', 'docs/regles-lanes.md', 'CLAUDE.md', '.github/workflows/checks.yml', 'compose.yaml', 'Dockerfile']) assert.equal(agreementNeeded([his], merge), 'guarded', his);
-  assert.equal(agreementNeeded(['docs/decisions.md', ...manuals], merge), 'tooling');
-  assert.equal(agreementNeeded(['docs/decisions.md', 'server/core.mjs'], merge), 'agreement');
+  // The record of the decisions is read by the agents as their rules (the prompts of the reviewer, of the lead and of
+  // the conversation all point to it): it is guarded like them.
+  for (const his of ['test/orchestration.test.mjs', 'docs/decisions.md', 'docs/regles-lanes.md', 'CLAUDE.md', '.github/workflows/checks.yml', 'compose.yaml', 'Dockerfile', 'ops/orchestration/README.md.sh']) assert.equal(agreementNeeded([his], merge), 'guarded', his);
+  for (const prompt of ['review.md', 'release-live.md', 'talk.md']) assert.match(readFileSync(join(ORCH_HOME, 'prompts', prompt), 'utf8'), /decisions\.md|@DECISIONS@/, prompt);
+  assert.equal(agreementNeeded(manuals, merge), 'tooling');
+  assert.equal(agreementNeeded([...manuals, 'server/core.mjs'], merge), 'agreement');
   assert.equal(agreementNeeded([], merge), 'agreement', 'nothing known of it is not tooling');
   assert.equal(lagIsHarmless(['docs/decisions.md', 'ops/orchestration/wake.sh', 'test/orchestration.test.mjs'], merge), true);
   assert.equal(lagIsHarmless(['docs/decisions.md', 'server/state/derived.mjs'], merge), false);
@@ -2326,7 +2334,7 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
 });
 
 // A pull request of a lane, reviewed for a ticket with the verdict asked for, in a sandbox with a remote.
-function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare = null } = {}) {
+function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare = null, table = { tooling_paths: 'ops/orchestration/, docs/decisions.md', guarded_paths: '.github/, compose, Dockerfile, ops/orchestration/merge-pr.sh' } } = {}) {
   const lane = laneWithRemote('feat/w', 'feat: the work of the lane');
   const { box } = lane;
   // What a pull request changes is read from git, not from what GitHub lists: the files are really in the branch.
@@ -2351,7 +2359,7 @@ function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare =
   };
   // The base of the sandbox is its local main: the scripts read it as origin/main once it is pushed.
   const confPath = join(box.home, 'agents.conf');
-  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ops/orchestration/, docs/decisions.md\nguarded_paths = .github/, compose, Dockerfile, ops/orchestration/merge-pr.sh\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ${table.tooling_paths}\nguarded_paths = ${table.guarded_paths}\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   publish();
   const opened = JSON.parse(spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' }).stdout);
@@ -2403,6 +2411,14 @@ test('what touches the checks of the CI or the lock of the go-lives never goes a
   const named = pull.merge(['-'], {}, 'Annonce.');
   assert.equal(named.status, 0, named.stderr);
   assert.ok(pull.merged());
+  // With the table of the project itself, not the one of the sandbox: a script of the tooling waits for him, a manual does not.
+  const real = (files) => reviewedPull(files, { table: conf.sections.merge }).merge(['--dry-run']);
+  const waits = real(['ops/orchestration/lib/wake.mjs']);
+  assert.equal(waits.status, 6, waits.stdout);
+  assert.match(waits.stderr, /has not agreed[\s\S]*his own agreement is needed/);
+  const manual = real(['ops/orchestration/README.md']);
+  assert.equal(manual.status, 0, manual.stderr);
+  assert.equal(JSON.parse(manual.stdout).kind, 'tooling');
   // The script that puts live is under orchestration tooling, and is not tooling.
   const lock = reviewedPull(['ops/orchestration/merge-pr.sh', 'ops/orchestration/wake.sh']).merge(['--dry-run']);
   assert.equal(lock.status, 6);
@@ -2509,6 +2525,23 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   assert.equal(unknown.merge(['-'], { FAKE_GH_VIEW_DOWN: '8' }, 'Annonce.').status, 0);
   assert.ok(unknown.merged());
   assert.deepEqual(unknown.moves(), []);
+  // And it is not left there in silence: the ledger keeps it, and the lead is told at its next wake, with what to do.
+  const told = JSON.parse(spawnSync('node', ['--no-warnings', join(unknown.box.home, 'lib', 'reviews.mjs'), 'done', '6'], { env: unknown.env, encoding: 'utf8' }).stdout).filter((event) => event.outcome === 'ticket_left_open');
+  assert.equal(told.length, 1);
+  assert.deepEqual([told[0].pr, told[0].ticket], [7, 'X-5']);
+  assert.match(told[0].text, /#8/);
+  const db = openLedger(join(pull.box.state, 'ledger.db'));
+  assert.equal(db.prepare("select count(*) n from events where kind = 'ticket_left_open'").get().n, 0, 'another pull request still open is no surprise: nothing to tell');
+  db.close();
+  // Nobody has to remember it: the wake asks GitHub again. Still no answer, the ticket stays; closed without going live, the ticket is closed.
+  const wake = (extra = {}) => spawnSync(join(unknown.box.home, 'wake.sh'), [], { env: { ...unknown.env, ...extra }, encoding: 'utf8' });
+  assert.equal(wake({ FAKE_GH_VIEW_DOWN: '8' }).status, 0);
+  assert.deepEqual(unknown.moves(), []);
+  writeFileSync(join(unknown.box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state: 'CLOSED', headRefOid: 'abc' }));
+  assert.equal(wake().status, 0);
+  assert.deepEqual(unknown.moves(), ['X-5 -> Done']);
+  assert.equal(wake().status, 0);
+  assert.deepEqual(unknown.moves(), ['X-5 -> Done'], 'closed once');
 });
 
 test('only the version a reviewer read goes live: a commit of the lane on top of it does not, a merge of the base that changed nothing does; a review that asks for corrections is no review', () => {
