@@ -45,6 +45,51 @@ conf_get() {
     }' "$ORCH_CONF"
 }
 
+# shown_left <record of a request>: of the pull requests the user was shown
+# on a ticket and that are not live, how many are still open and how many
+# GitHub cannot be asked about, as "<open> <unknown>". One GitHub says
+# closed, or merged by another hand, no longer counts.
+shown_left() {
+  local other state open=0 unknown=0
+  while IFS= read -r other; do
+    state=$(cd "$ORCH_REPO" && gh pr view "$other" --json state 2> /dev/null | jq -r '.state // empty' 2> /dev/null) || state=
+    case "$state" in CLOSED | MERGED) ;; OPEN) open=$((open + 1)) ;; *) unknown=$((unknown + 1)) ;; esac
+  done < <(jq -r '.pulls[] | select(.merged_at == null) | .pr' "$1")
+  echo "$open $unknown"
+}
+
+# A go-live was done, and its ticket could not be closed because GitHub did
+# not say what became of another pull request shown on it (merge-pr.sh marks
+# the record): asked again at each wake, with no model, under the lock of
+# the go-lives since both write these records. Nothing is given up in
+# silence: while that pull request is open or unknown, or while Linear does
+# not answer or has not written yet who moved the ticket, the mark stays and
+# the next wake tries again. The ticket is closed only if it still is where
+# the user put it himself; if it is not, it is left as it is, and said.
+close_tickets_left_open() {
+  local record ticket open unknown code go
+  ls "$ORCH_STATE_DIR/validations"/*.json > /dev/null 2>&1 || return 0
+  go=$(conf_get linear go_state)
+  (
+    flock -n 9 || exit 0
+    for record in "$ORCH_STATE_DIR/validations"/*.json; do
+      [ "$(jq -r '.closing // false' "$record" 2> /dev/null)" = true ] || continue
+      ticket=$(jq -r '.ticket' "$record")
+      read -r open unknown <<<"$(shown_left "$record")"
+      [ "$open" = 0 ] && [ "$unknown" = 0 ] || continue
+      code=0
+      "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" || code=$?
+      case "$code" in
+        0) "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null || continue ;;
+        5 | 6) ledger event --kind ticket_left_open --ticket "$ticket" --detail "everything shown on $ticket is live or closed, but the ticket is no longer in « $go » by the user's own hand (he moved it, or someone else did): the wake leaves it as it is and closes nothing. Tell the user where the ticket stands" ;;
+        *) continue ;;
+      esac
+      jq 'del(.closing)' "$record" > "$record.next" && mv "$record.next" "$record"
+    done
+  ) 9> "$ORCH_STATE_DIR/merge.lock"
+  return 0
+}
+
 # conf_keys <section>: the keys of a section, one per line.
 conf_keys() {
   awk -v section="[$1]" '
@@ -208,6 +253,45 @@ open_queued_reviews() {
 drop_queued_review() {
   ledger event --kind review_dropped --ticket "$3" --detail "the review of #$2 left the queue without opening: $(tr '\n' ' ' <<<"$4" | cut -c1-400)"
   rm -f "$1"
+}
+
+# open_queued_merges: the go-lives merge-pr.sh could not do at once, tried
+# again now, oldest first, one a wake (a merge takes the host for a while).
+# No model: the same script, with every check again. One that is refused for
+# good leaves the queue: written to the ledger (merge_refused) and told to
+# the lead at its next wake.
+open_queued_merges() {
+  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why hours since
+  hours=$(conf_get merge queue_hours)
+  [[ "$hours" =~ ^[0-9]+$ ]] || hours=24
+  ls "$queue"/*.json > /dev/null 2>&1 || return 0
+  while IFS= read -r entry; do
+    if ! jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1; then
+      ledger event --kind merge_refused --detail "an entry of the queue of go-lives ($(basename "$entry")) cannot be read: removed, the go-live is to be asked for again"
+      rm -f "$entry"
+      continue
+    fi
+    pr=$(jq -r '.pr' "$entry") ticket=$(jq -r '.ticket' "$entry") said=$(jq -r '.announcement // ""' "$entry")
+    code=0
+    why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
+    case "$code" in
+      0) rm -f "$entry" "$queue/$pr.announcement.md"; return 0 ;;
+      5)
+        # It does not wait for ever. Only a time in the form merge-pr.sh
+        # writes counts: anything else is no time, and it leaves too.
+        since=$(jq -r '.at // ""' "$entry")
+        if ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || [[ "$since" < "$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+          ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr waited more than $hours hours in the queue ($(tr '\n' ' ' <<<"$why" | cut -c1-300)): it left the queue, and is to be asked for again"
+          rm -f "$entry" "$queue/$pr.announcement.md"
+        fi
+        ;;
+      *)
+        ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue without being done: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
+        rm -f "$entry" "$queue/$pr.announcement.md"
+        ;;
+    esac
+  done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry" 2> /dev/null)" "$entry"; done | sort | cut -f2)
+  return 0
 }
 
 # github_down: what GitHub says is down among the parts the dispatcher needs,
