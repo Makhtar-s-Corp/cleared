@@ -186,7 +186,7 @@ if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à val
 if [ "$1" = comments ]; then cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
 if [ "$1" = identity ]; then cat "${join(home, 'linear-identity')}" 2>/dev/null || echo app; exit; fi
-if [ "$1" = move ]; then echo "$2 -> $3" >> "${join(home, 'linear-moves')}"; echo "$3" > "${join(home, 'linear-state')}"; exit; fi
+if [ "$1" = move ]; then [ -z "\${FAKE_LINEAR_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'linear-moves')}"; echo "$3" > "${join(home, 'linear-state')}"; exit; fi
 if [ "$1" = upload ]; then case "$2" in *.png) echo "https://uploads.example.test/$(basename "$2")" ;; *) echo "not an image" >&2; exit 1 ;; esac; exit; fi
 if [ "$1" = state ]; then cat "${join(home, 'linear-state')}" 2>/dev/null || echo "In Review"; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
@@ -2508,7 +2508,7 @@ test('what the user of the app sees goes live only on his own move of the ticket
   assert.deepEqual(pull.ledgerKinds(), ['merge_refused', 'merge_refused', 'merged_by_script']);
 });
 
-test('his agreement is to the request it answers and to the exact version shown: an older move, or one more commit of any kind, sends the card back to him', () => {
+test('his agreement is to the request it answers and to the version shown: an older move, a commit of the lane or a conflict it resolved sends the card back to him; the base brought in as it is does not', () => {
   const pull = reviewedPull(['server/core.mjs']);
   const live = () => pull.merge(['-'], {}, 'Annonce.');
   const asked = pull.ask();
@@ -2523,14 +2523,33 @@ test('his agreement is to the request it answers and to the exact version shown:
   assert.deepEqual(pull.moves(), ['X-5 -> À valider', 'X-5 -> À valider']);
   assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
   assert.equal(pull.merged(), null);
-  // His move, after the request. The base moves on and the lane brings it in: nothing of its own, and still one more
-  // commit than what he was shown. His agreement falls.
+  // His move, after the request. The base moves on and the lane brings it in, with nothing of its own: what the
+  // pull request changes is what he was shown, his agreement stands (his rule of 2026-10-08).
   writeFileSync(join(pull.box.home, 'linear-moved'), '0');
   pull.box.git('commit', '-q', '--allow-empty', '-m', 'docs: the base moves');
   pull.box.git('push', '-q', 'origin', 'main');
   pull.git('fetch', '-q', 'origin');
   pull.git('merge', '-q', '--no-edit', 'origin/main');
   pull.publish();
+  const brought = pull.merge(['-', '--dry-run'], {}, 'Annonce.');
+  assert.equal(brought.status, 0, brought.stderr);
+  assert.equal(JSON.parse(brought.stdout).agreement, 'status');
+  // The base moves again, on the very file of the pull request: bringing it in takes a choice of the lane. That
+  // choice was shown to nobody: his agreement falls, as it does for any commit of the lane.
+  mkdirSync(join(pull.box.repo, 'server'), { recursive: true });
+  writeFileSync(join(pull.box.repo, 'server', 'core.mjs'), 'the base wrote here too\n');
+  pull.box.git('add', '.');
+  pull.box.git('commit', '-q', '-m', 'feat: the base changes the same file');
+  pull.box.git('push', '-q', 'origin', 'main');
+  pull.git('fetch', '-q', 'origin');
+  try { pull.git('merge', '-q', '--no-edit', 'origin/main'); assert.fail('a conflict was expected'); } catch (error) { if (error.code === 'ERR_ASSERTION') throw error; }
+  writeFileSync(join(pull.lane.path, 'server', 'core.mjs'), 'what the lane chose\n');
+  pull.git('add', '-A');
+  pull.git('commit', '-q', '--no-edit');
+  pull.publish();
+  // (That version is read by a reviewer first, as any version is.)
+  const again = JSON.parse(spawnSync(join(pull.box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env: pull.env, encoding: 'utf8' }).stdout);
+  assert.equal(spawnSync(join(pull.box.home, 'lane-run.sh'), [again.run_dir], { cwd: again.worktree, env: { ...pull.env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
   const moved = live();
   assert.equal(moved.status, 6);
   assert.match(moved.stderr, /is not the version he was shown/);
@@ -2549,7 +2568,8 @@ test('his agreement is to the request it answers and to the exact version shown:
 test('where the project asks for it, no agreement is read from a tracker that cannot tell the user from an agent', () => {
   const pull = reviewedPull(['server/core.mjs']);
   const confPath = join(pull.box.home, 'agents.conf');
-  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('verdict = rien de bloquant\n', 'verdict = rien de bloquant\nseparate_identity = required\n'));
+  // Without a word of the project, it is required: reading an agreement from such a tracker is what must be asked for.
+  assert.doesNotMatch(readFileSync(confPath, 'utf8'), /separate_identity/);
   assert.equal(pull.ask().status, 0);
   writeFileSync(join(pull.box.home, 'linear-moved'), '0');
   writeFileSync(join(pull.box.home, 'linear-identity'), 'shared\n');
@@ -2557,6 +2577,9 @@ test('where the project asks for it, no agreement is read from a tracker that ca
   assert.equal(shared.status, 6);
   assert.match(shared.stderr, /cannot tell the user from an agent/);
   assert.equal(pull.merged(), null);
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('verdict = rien de bloquant\n', 'verdict = rien de bloquant\nseparate_identity = no\n'));
+  assert.equal(pull.merge(['-', '--dry-run'], {}, 'Annonce.').status, 0, 'a project may say it accepts it');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('separate_identity = no\n', ''));
   writeFileSync(join(pull.box.home, 'linear-identity'), 'app\n');
   assert.equal(pull.merge(['-'], {}, 'Annonce.').status, 0);
   assert.equal(conf.sections.merge.separate_identity, 'required');
@@ -2738,7 +2761,10 @@ auth=
 for arg in "$@"; do case "$arg" in @/dev/fd/*|@/proc/*) auth=$(cat "\${arg#@}") ;; esac; done
 case " $* " in
   *oauth/token*) echo "$body" >> "${join(dir, 'token-asked')}"; printf '%s\\n' "$@" >> "${join(dir, 'token-args')}"; echo '{"access_token":"app-token","token_type":"Bearer","expires_in":2591999}' ;;
-  *) echo "$auth" >> "${join(dir, 'asked-as')}"; echo '{"data":{"viewer":{"id":"app-user","app":true},"issue":{"state":{"name":"Todo"}}}}' ;;
+  *) echo "$auth" >> "${join(dir, 'asked-as')}"
+     left=$(cat "${join(dir, 'refuse-once')}" 2>/dev/null || echo 0)
+     if [ "$left" -gt 0 ]; then echo $((left - 1)) > "${join(dir, 'refuse-once')}"; echo '{"errors":[{"message":"Authentication required, not authenticated","extensions":{"code":"AUTHENTICATION_ERROR"}}]}'
+     else echo '{"data":{"viewer":{"id":"app-user","app":true},"issue":{"state":{"name":"Todo"}}}}'; fi ;;
 esac
 `, { mode: 0o755 });
   const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
@@ -2767,6 +2793,18 @@ esac
   writeFileSync(kept, JSON.stringify({ ...JSON.parse(readFileSync(kept, 'utf8')), at: '2020-01-01T00:00:00Z' }));
   assert.equal(linear({}, 'state', 'X-1').status, 0);
   assert.equal(lines('token-asked').length, 2);
+  // A token the tracker refuses (the secret changed, the application was installed again) is thrown away and asked
+  // for again, once: the agents are not left mute for half a day.
+  writeFileSync(join(dir, 'refuse-once'), '1');
+  const refused = linear({}, 'state', 'X-1');
+  assert.equal(refused.status, 0, refused.stderr);
+  assert.equal(refused.stdout.trim(), 'Todo');
+  assert.equal(lines('token-asked').length, 3);
+  writeFileSync(join(dir, 'refuse-once'), '5');
+  const stillRefused = linear({}, 'state', 'X-1');
+  assert.equal(stillRefused.status, 1, 'refused again with a new token: said, not tried for ever');
+  assert.equal(lines('token-asked').length, 4);
+  execFileSync('rm', ['-f', join(dir, 'refuse-once')]);
   // Without the application, the key of a person: the tracker then cannot tell him from an agent, and says so.
   writeFileSync(secrets, 'LINEAR_API_KEY=personal-key\n');
   execFileSync('rm', ['-f', kept]);
@@ -2828,8 +2866,12 @@ test('a script never puts a ticket in the status that is the user\'s agreement, 
   // trace, and his older move is the last one seen. Tried on 2026-10-08.)
   assert.equal(asApp([by('the-user', false, '2026-01-02T11:00:00Z')], '2026-01-02T10:00:00Z').status, 0);
   assert.equal(asApp([by('the-user', false, '2026-01-02T09:00:00Z')], '2026-01-02T10:00:00Z').status, 8);
-  assert.equal(asApp([by('the-user', false, '2026-01-02T09:00:00Z', '2026-01-02T11:00:00Z')], '2026-01-02T10:00:00Z').status, 0, 'the time of his last gesture in the line of the history');
+  // A line of his that began before the request is before it, whatever he did to the card since: tried on 2026-10-08,
+  // a later gesture of his joins his line only when nobody acted in between, and then the card never left his status.
+  assert.equal(asApp([by('the-user', false, '2026-01-02T09:00:00Z', '2026-01-02T11:00:00Z')], '2026-01-02T10:00:00Z').status, 8);
   assert.equal(asApp([by('the-user', false, '2026-01-02T11:00:00Z')], 'not-a-time').status, 1);
+  assert.equal(asApp([by('the-user', false, '2026-01-02T10:00:00.900Z')], '2026-01-02T10:00:00Z').status, 0, 'times are compared as times, not as text: a fraction of a second is no reason to refuse him');
+  assert.equal(asApp([by('the-user', false, '2026-01-02T09:59:59.900Z')], '2026-01-02T10:00:00Z').status, 8);
   // A comment says whether the owner of the key wrote it, and when it was last rewritten.
   const written = (id, user, over = {}) => ({ id, createdAt: '2026-01-02T10:00:00Z', editedAt: null, body: 'Fusion : X-1', url: 'u', user: user && { id: user }, botActor: null, externalUser: null, ...over });
   answer({ viewer: { id: 'owner' }, issue: { comments: { nodes: [written('a', 'owner'), written('b', 'someone-else'), written('c', 'owner', { botActor: { id: 'bot' } }), written('d', null, { externalUser: { id: 'ext' } }), written('e', 'owner', { editedAt: '2026-01-05T10:00:00Z' })] } } });
@@ -2874,6 +2916,12 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.match(posted(), /^X-5 from=[\s\S]*Je la mets en ligne \?[\s\S]*\*\*Avant\*\*\n\n!\[Avant\]\(https:\/\/uploads\.example\.test\/avant\.png\)[\s\S]*!\[Capture\]\(https:\/\/uploads\.example\.test\/apres\.png\)[\s\S]*\(Version montrée : PR 7 à 11111111\.\)\s*$/);
   assert.deepEqual(moves(), ['X-5 -> À valider']);
   assert.deepEqual(kept(), [{ pr: 7, head: '1111111111111111111111111111111111111111' }]);
+  // A card that could not be moved is a request that was not made: what he was shown before stays what is kept.
+  pull('3333333333333333333333333333333333333333');
+  const stuck = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_LINEAR_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'Je la mets en ligne ?' });
+  assert.notEqual(stuck.status, 0);
+  assert.deepEqual(kept(), [{ pr: 7, head: '1111111111111111111111111111111111111111' }]);
+  pull('1111111111111111111111111111111111111111');
   // Already waiting for him, for this very version: not asked twice.
   const twice = ask(['--pr', '7'], 'Encore ?');
   assert.equal(twice.status, 1);

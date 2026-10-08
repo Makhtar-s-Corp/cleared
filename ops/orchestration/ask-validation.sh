@@ -84,8 +84,11 @@ for one in $asked_pulls; do
 done
 printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
 "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
+# The card first: a request whose card could not be moved was not made, and
+# what he was shown before stays what is kept.
+"$ORCH_HOME/linear.sh" move "$ticket" "$validate"
 # What else the record holds (a ticket the wake still has to close) is kept.
 record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
 [ -n "$record" ] || record='{}'
 jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"
-"$ORCH_HOME/linear.sh" move "$ticket" "$validate"
+

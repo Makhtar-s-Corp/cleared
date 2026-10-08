@@ -129,9 +129,10 @@ needs=$(node_lib merge.mjs needs "$work/files.json")
 go=$(conf_get linear go_state) validate=$(conf_get linear validate_state) agreed=
 asked="$ORCH_STATE_DIR/validations/$ticket.json"
 if [ "$needs" != tooling ]; then
-  # His move is read from the tracker: where the project asks for it, not
-  # from one that cannot tell him from an agent.
-  if [ "$(conf_get merge separate_identity)" = required ] && [ "$("$ORCH_HOME/linear.sh" identity)" != app ]; then
+  # His move is read from the tracker, and not from one that cannot tell him
+  # from an agent, unless the project says it accepts that ([merge]
+  # separate_identity = no).
+  if [ "$(conf_get merge separate_identity)" != no ] && [ "$("$ORCH_HOME/linear.sh" identity)" != app ]; then
     no "the tracker cannot tell the user from an agent (the scripts act under the key of a person): no agreement is read from it ([merge] separate_identity). Give the agents their own application"
   fi
   # His move answers a request: the time of the last one made on this ticket.
@@ -141,12 +142,14 @@ if [ "$needs" != tooling ]; then
   case "$code" in
     0)
       # His move is his agreement to what he was shown, and to nothing else:
-      # another pull request of the ticket, or one more commit of any kind
-      # (a merge of the base that changed nothing is one), was seen by
-      # nobody but a reviewer. His rule of 2026-10-08: the exact version.
+      # another pull request of the ticket, a commit of the lane, or the
+      # base brought in with a conflict the lane resolved, was seen by
+      # nobody but a reviewer. The base brought in as it is changes nothing
+      # of what the pull request does, and the checks ran again on it: his
+      # agreement stands (his rule of 2026-10-08).
       shown=$(jq -r --argjson pr "$pr" '.pulls[]? | select(.pr == $pr) | .head' "$asked" 2> /dev/null | sed -n '1p') || shown=
       [ -n "$shown" ] || no "$ticket is in « $go », but the user was never shown #$pr: ask him for it (ask-validation.sh $ticket - --pr $pr)"
-      if [ "$shown" != "$head" ]; then
+      if ! only_base_merges "$shown" "$head"; then
         [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
         [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the user agreed to ${shown:0:8} and the branch is now at ${head:0:8}: $ticket is back in « $validate », to be asked again with this version"
         no "this version (${head:0:8}) is not the version he was shown (${shown:0:8}): $ticket is back in « $validate ». Ask him again with this version (ask-validation.sh $ticket - --pr $pr)"

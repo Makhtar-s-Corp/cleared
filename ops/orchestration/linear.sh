@@ -53,7 +53,8 @@ fi
 
 # The token of the application: asked for with its secret, which never is on
 # a command line, kept with the state for half a day, readable by its owner
-# alone, and asked for again when it is older or refused.
+# alone, and asked for again when it is older, or once when the tracker
+# refuses it.
 app_token() {
   local kept="$ORCH_STATE_DIR/tracker-token.json" token answer
   if [ "${1:-}" != new ] && [ -s "$kept" ] && [[ "$(jq -r '.at // ""' "$kept" 2> /dev/null)" > "$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)" ]]; then
@@ -69,11 +70,21 @@ app_token() {
   printf '%s\n' "$token"
 }
 
+gql_once() {
+  jq -n --arg query "$1" --argjson variables "${2:-{\}}" '{query: $query, variables: $variables}' \
+    | curl -sS --max-time 30 -H @<(printf 'Authorization: %s' "$3") -H 'Content-Type: application/json' --data @- https://api.linear.app/graphql
+}
+
 gql() {
   local response authorization
   if [ "$identity" = app ]; then authorization="Bearer $(app_token)" || return 1; else authorization=$key; fi
-  response=$(jq -n --arg query "$1" --argjson variables "${2:-{\}}" '{query: $query, variables: $variables}' \
-    | curl -sS --max-time 30 -H @<(printf 'Authorization: %s' "$authorization") -H 'Content-Type: application/json' --data @- https://api.linear.app/graphql)
+  response=$(gql_once "$1" "${2:-}" "$authorization")
+  # A token the tracker refuses (the secret changed, the application was
+  # installed again) is thrown away and asked for again, once.
+  if [ "$identity" = app ] && [ "$(jq -r '[.errors[]?.extensions.code] | index("AUTHENTICATION_ERROR") != null' <<<"$response" 2>/dev/null)" = true ]; then
+    authorization="Bearer $(app_token new)" || return 1
+    response=$(gql_once "$1" "${2:-}" "$authorization")
+  fi
   if [ "$(jq -r 'has("errors")' <<<"$response" 2>/dev/null)" != false ]; then
     echo "linear: $(jq -r '.errors[0].message // "unreadable answer"' <<<"$response" 2>/dev/null || echo 'unreadable answer')" >&2
     return 1
@@ -242,19 +253,22 @@ case "${1:-}" in
     # cannot tell from a program acting under his account. The tracker
     # merges the successive changes of one author in one line of history,
     # and a card taken out and put back by an agent leaves no trace: hence
-    # the time, which is the one of his last gesture in his line.
+    # the time, which is the one his line of history began (tried on
+    # 2026-10-08: a later gesture of his joins that line only when nobody
+    # acted in between).
     ticket_ok "$2"
     [ -n "${3:-}" ] || die "usage: linear.sh moved-by-owner <ticket> <status> [<not before, ISO time>]"
     not_before=${4:-}
     [ -z "$not_before" ] || [[ "$not_before" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || die "\"$not_before\" is not a time"
     owner=$(owner_id) || exit 1
-    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } history(first: 40) { nodes { createdAt updatedAt actorId actor { id app } botActor { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
+    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } history(first: 40) { nodes { createdAt actorId actor { id app } botActor { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
     [ "$(jq -r '.data.issue.state.name // empty' <<<"$answer")" = "$3" ] || exit 5
-    last=$(jq -c --arg status "$3" '[.data.issue.history.nodes[] | select(.toState.name == $status) | . + {at: (.updatedAt // .createdAt)}] | sort_by(.at) | last // empty' <<<"$answer")
+    last=$(jq -c --arg status "$3" '[.data.issue.history.nodes[] | select(.toState.name == $status) | . + {at: .createdAt}] | sort_by(.at) | last // empty' <<<"$answer")
     [ -n "$last" ] || exit 7
     [ -n "$owner" ] || owner=$(jq -r '.data.viewer.id' <<<"$answer")
     [ "$(jq -r --arg owner "$owner" '.botActor == null and .actor.app != true and .actorId != null and .actorId == $owner' <<<"$last")" = true ] || exit 6
-    [ -z "$not_before" ] || [[ "$(jq -r '.at' <<<"$last")" > "$not_before" ]] || exit 8
+    # Compared as times, to the second: the tracker writes fractions of a second, the request does not.
+    [ -z "$not_before" ] || [ "$(jq -r --arg from "$not_before" 'def seconds: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601; (.at | seconds) >= ($from | seconds)' <<<"$last")" = true ] || exit 8
     ;;
   move)
     # A script only ever puts a ticket in the status that asks the user for
