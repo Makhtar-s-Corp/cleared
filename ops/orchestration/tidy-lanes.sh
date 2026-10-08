@@ -15,8 +15,12 @@
 # Nothing is lost: what exists only in the worktree is archived, unsaved
 # work is committed as « wip », what the remote lacks is pushed to the
 # lane's own branch (never forced, never the base, and only what the guard
-# lets out: otherwise the lane is left as it is). The branch stays on the
-# remote; only the terminals and the worktree go.
+# lets out: otherwise the lane is left as it is, with nothing committed). The
+# branch stays on the remote; only the terminals and the worktree go. A
+# branch the remote no longer has, its pull request merged or closed, is not
+# put back there: what it still holds is kept as a bundle with the archives.
+# A lane with a session running in the ledger, or opened less than
+# idle_hours ago, is at work.
 #
 #   tidy-lanes.sh [--dry-run]
 #       prints {closed: [{lane, name, why}], kept: [{lane, why}], left, sessions}
@@ -52,7 +56,16 @@ while IFS=$'\t' read -r path branch; do
 
   # Its pull requests, and the tickets it names.
   pulls=$(cd "$ORCH_REPO" && gh pr list --head "$branch" --state all --limit 20 --json number,state,title,body 2> /dev/null) || { kept "$lane" "its pull requests could not be read"; continue; }
-  tickets=$({ echo "$branch"; jq -r '.[] | .title, .body' <<<"$pulls"; } | grep -oE "\\b$team-[0-9]+" | sort -u || true)
+  # A lane with a session running in the ledger is at work, whatever its
+  # tickets say: a review is not cut in the middle.
+  if [ "$(ledger sql "select count(*) n from runs where lane = '$branch' and outcome = 'running'" | jq -r '.[0].n')" != 0 ]; then
+    kept "$lane" "a session is running in it"
+    continue
+  fi
+  # Its tickets: the ones its branch and the titles of its pull requests
+  # name, and the first one each description names (a description also
+  # cites the tickets of others).
+  tickets=$({ echo "$branch"; jq -r '.[] | .title' <<<"$pulls"; jq -r '.[] | .body' <<<"$pulls" | while IFS= read -r line; do grep -oE "\\b$team-[0-9]+" <<<"$line" | sed -n '1p'; done | sed -n '1p'; } | grep -oE "\\b$team-[0-9]+" | sort -u || true)
   blocked= open_ticket= name= waiting=
   for ticket in $tickets; do
     state=$("$ORCH_HOME/linear.sh" state "$ticket" 2> /dev/null) || state=
@@ -77,8 +90,12 @@ while IFS=$'\t' read -r path branch; do
   fi
   [ -n "$why" ] || [ -z "$waiting" ] || why=$(conf_get lanes tidy_reason_waiting)
   if [ -z "$why" ] && [ -z "$open_ticket" ]; then
-    # Its last sign of life: its last commit, or the last file touched in it.
+    # Its last sign of life: its last commit, the last file touched in it,
+    # or its opening (a lane opened a moment ago on an old base has no
+    # commit of its own yet).
     last=$(git -C "$path" log -1 --format=%ct 2> /dev/null || echo 0)
+    opened=$(stat -c %Y "$(git -C "$path" rev-parse --absolute-git-dir 2> /dev/null)/gitdir" 2> /dev/null || echo 0)
+    [ "$opened" -le "$last" ] || last=$opened
     touched=$(cd "$path" && git ls-files -z --modified --others --exclude-standard | xargs -0 -r stat -c %Y 2> /dev/null | sort -n | tail -1)
     [ -z "$touched" ] || [ "$touched" -le "$last" ] || last=$touched
     [ "$last" -gt "$(date -d "$idle_hours hours ago" +%s)" ] || why=$(conf_get lanes tidy_reason_idle)
@@ -105,24 +122,42 @@ while IFS=$'\t' read -r path branch; do
     (cd "$path" && cpio -0 -pdm --quiet "$archive" < "$out/only-here") 2> /dev/null || true
     [ "$(find "$archive" -type f | wc -l)" -ge "$count" ] || { kept "$lane" "what exists only in it could not be archived"; continue; }
   fi
-  # 2: unsaved work becomes a commit.
+  # 2: unsaved work becomes a commit, if the guard lets it out: what it
+  # refuses is not committed, and the lane is left as it is. A file the guard
+  # cannot read (not text) is nobody's to send: the lane is left too.
   if [ -n "$(git -C "$path" status --porcelain)" ]; then
+    if (cd "$path" && { git diff --numstat HEAD; git ls-files -z --others --exclude-standard | xargs -0 -r git diff --no-index --numstat /dev/null 2> /dev/null || true; }) | grep -q '^-'; then
+      kept "$lane" "it holds unsaved work that is not text, which the guard cannot read: to be looked at"
+      continue
+    fi
+    { git -C "$path" diff --unified=0 HEAD | grep -E '^\+[^+]' | cut -c2-; (cd "$path" && git ls-files -z --others --exclude-standard | xargs -0 -r cat --); } > "$out/unsaved.txt" 2> /dev/null || true
+    if [ -s "$out/unsaved.txt" ] && ! guard_text "$out/unsaved.txt" 2> /dev/null; then
+      kept "$lane" "the guard does not let its unsaved work out: left as it is, to be looked at"
+      continue
+    fi
     git -C "$path" add -A
     git -C "$path" -c user.name="${ORCH_GIT_NAME:-tidy-lanes}" -c user.email="${ORCH_GIT_EMAIL:-tidy-lanes@localhost}" commit -q -m "wip: saved before the lane was closed" || { kept "$lane" "its unsaved work could not be committed"; continue; }
   fi
-  # 3: what no remote holds goes to its own branch, if the guard lets it out.
+  # 3: what no remote holds goes to its own branch, if the guard lets it
+  # out. A branch whose pull request is merged or closed and that the remote
+  # no longer has is not put back there: what it still holds is kept as a
+  # bundle beside the archives.
   if [ "$(git -C "$path" rev-list --count HEAD --not --remotes)" != 0 ]; then
-    git -C "$path" log --format='%s%n%b' HEAD --not --remotes > "$out/messages.txt"
-    git -C "$path" log -p --format= --unified=0 HEAD --not --remotes | grep -E '^\+[^+]' | cut -c2- > "$out/changes.txt" || true
-    if ! guard_text "$out/messages.txt" 2> /dev/null || { [ -s "$out/changes.txt" ] && ! guard_text "$out/changes.txt" 2> /dev/null; }; then
-      kept "$lane" "the guard does not let its unpushed work out: left as it is, to be looked at"
-      continue
+    if [ "$why" = "$(conf_get lanes tidy_reason_live)" ] && ! git -C "$ORCH_REPO" ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
+      mkdir -p "$archive"
+      git -C "$path" bundle create "$archive/unpushed.bundle" "$branch" --not --remotes > /dev/null 2>&1 || { kept "$lane" "what its branch still holds could not be kept"; continue; }
+    else
+      git -C "$path" log --format='%s%n%b' HEAD --not --remotes > "$out/messages.txt"
+      git -C "$path" log -p --format= --unified=0 HEAD --not --remotes | grep -E '^\+[^+]' | cut -c2- > "$out/changes.txt" || true
+      if ! guard_text "$out/messages.txt" 2> /dev/null || { [ -s "$out/changes.txt" ] && ! guard_text "$out/changes.txt" 2> /dev/null; }; then
+        kept "$lane" "the guard does not let its unpushed work out: left as it is, to be looked at"
+        continue
+      fi
+      git -C "$path" push --quiet origin "HEAD:refs/heads/$branch" 2> /dev/null || { kept "$lane" "its branch could not be pushed"; continue; }
+      [ "$(git -C "$path" rev-list --count HEAD --not --remotes)" = 0 ] || { kept "$lane" "the push did not take everything"; continue; }
     fi
-    git -C "$path" push --quiet origin "HEAD:refs/heads/$branch" 2> /dev/null || { kept "$lane" "its branch could not be pushed"; continue; }
-    [ "$(git -C "$path" rev-list --count HEAD --not --remotes)" = 0 ] || { kept "$lane" "the push did not take everything"; continue; }
   fi
-  # 4: its terminals, the sessions the ledger still holds running, its worktree.
-  ledger sql "select run_id from runs where lane = '$branch' and outcome = 'running'" | jq -r '.[].run_id' | while IFS= read -r run_id; do ledger run-end --run-id "$run_id" --outcome killed; done
+  # 4: its terminals, its worktree.
   orca terminal close --worktree "path:$path" --all > /dev/null 2>&1 || true
   orca worktree rm --worktree "path:$path" --force > /dev/null 2>&1 || git -C "$ORCH_REPO" worktree remove --force "$path" 2> /dev/null || true
   [ ! -d "$path" ] || { kept "$lane" "its worktree could not be removed"; continue; }

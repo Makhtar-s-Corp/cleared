@@ -133,13 +133,19 @@ if [ -z "$handover" ]; then
   # lane is a worktree under the lanes root that the dispatcher did not open.
   echo '[]' > "$work/reports.json"
   echo '[]' > "$work/reviews.json"
-  # The night checks: the runs the forge starts by itself on the base
-  # ([lead] night_checks_event names their kind; without it they are not
-  # followed).
+  # The night checks: the runs started on the base outside any pull request
+  # ([lead] night_checks_event names their kinds: by the forge itself, or
+  # « by hand » when the timetable of the host starts them; without it they
+  # are not followed).
   echo '[]' > "$work/nights.json"
-  night_event=$(conf_get lead night_checks_event)
-  if [ -n "$night_event" ] && [ -z "$github_out" ]; then
-    (cd "$ORCH_REPO" && gh run list --event "$night_event" --branch "$(conf_get lanes base | sed 's#^origin/##')" --limit 5 --json databaseId,status,conclusion,createdAt,updatedAt,url,headSha) > "$work/nights.json" 2> /dev/null || echo '[]' > "$work/nights.json"
+  night_events=$(conf_get lead night_checks_event)
+  if [ -n "$night_events" ] && [ -z "$github_out" ]; then
+    : > "$work/nights.list"
+    while IFS= read -r kind; do
+      [ -n "$kind" ] || continue
+      (cd "$ORCH_REPO" && gh run list --event "$kind" --branch "$(conf_get lanes base | sed 's#^origin/##')" --limit 5 --json databaseId,status,conclusion,createdAt,updatedAt,url,headSha) >> "$work/nights.list" 2> /dev/null || true
+    done < <(tr ',' '\n' <<<"$night_events" | sed 's/^ *//; s/ *$//')
+    jq -sc 'add // []' "$work/nights.list" > "$work/nights.json" 2> /dev/null || echo '[]' > "$work/nights.json"
   fi
   if [ "$(conf_get lead live)" = yes ]; then
     root=$(expand_home "$(conf_get lanes root)")

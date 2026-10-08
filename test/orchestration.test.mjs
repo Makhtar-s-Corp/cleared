@@ -219,7 +219,7 @@ if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
 elif [ "$1 $2" = "pr view" ]; then [ "\${FAKE_GH_VIEW_DOWN:-}" != "$3" ] || exit 1; cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"
-elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
+elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *" --event workflow_dispatch "*) cat "${join(home, 'night-runs-by-hand.json')}" 2>/dev/null || echo '[]' ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
 `, { mode: 0o755 });
@@ -1425,18 +1425,22 @@ test('the night checks are followed: green, nothing is said and nobody is woken;
   assert.deepEqual(changes(red.next, [], [], new Set(), '2026-01-04T05:41:00Z', [], worth, { nights: [night(3, 'failure', '2026-01-04T05:35:00Z')] }).events, [], 'told once');
   assert.deepEqual(changes(running.next, [], [], new Set(), '2026-01-04T05:40:00Z', [], worth, { nights: [night(3, 'cancelled', '2026-01-04T05:35:00Z')] }).events, [], 'a run somebody stopped is not a red one');
   // In the settings of the project: which runs are the night checks, that a red one is worth a session, and where its ticket goes.
-  assert.equal(conf.sections.lead.night_checks_event, 'schedule');
+  // On this host the night checks are started by the timetable of the server, as runs « started by hand »; the forge
+  // also starts some by itself. Both kinds are followed (found on 2026-10-08: the red check of that night was of the
+  // first kind, and would have been missed).
+  assert.deepEqual(conf.sections.lead.night_checks_event.split(',').map((kind) => kind.trim()), ['schedule', 'workflow_dispatch']);
   assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('night_check_failed'));
   assert.match(conf.sections.lead.night_ticket, /^[^|]+\|[^|]+$/);
   // The whole way: the wake reads the runs, the lead is told what to do and may do it.
   const box = sandbox();
   const confPath = join(box.home, 'agents.conf');
-  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no', 'live = yes\nnight_checks_event = schedule\nnight_ticket = Infra | Bug\nwake_on = comment, night_check_failed'));
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no', 'live = yes\nnight_checks_event = schedule, workflow_dispatch\nnight_ticket = Infra | Bug\nwake_on = comment, night_check_failed'));
   const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, HOME: box.home }, encoding: 'utf8' });
   assert.equal(wake().status, 0);
   writeFileSync(join(box.home, 'night-runs.json'), JSON.stringify([night(5, 'success', new Date().toISOString())]));
   assert.equal(wake().stdout.trim(), '', 'green: no session');
-  writeFileSync(join(box.home, 'night-runs.json'), JSON.stringify([night(5, 'success', new Date().toISOString()), night(6, 'failure', new Date().toISOString())]));
+  // The red one is of the second kind: started by the timetable of the server.
+  writeFileSync(join(box.home, 'night-runs-by-hand.json'), JSON.stringify([night(6, 'failure', new Date().toISOString())]));
   const woken = wake();
   assert.equal(woken.status, 0, woken.stderr);
   const prompt = readFileSync(join(woken.stdout.trim(), 'prompt.md'), 'utf8');
@@ -1465,6 +1469,8 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
     const path = join(box.home, 'lanes', branch.replace('/', '-'));
     box.git('worktree', 'add', '-q', '-b', branch, path, 'main');
     execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', `feat: the work of ${branch}`], old ? { env: { ...process.env, GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z', GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z' } } : {});
+    // An old lane was also opened long ago: the day a worktree was opened counts as a sign of life.
+    if (old) execFileSync('touch', ['-d', '2020-01-01T00:00:00Z', join(execFileSync('git', ['-C', path, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim(), 'gitdir')]);
     return path;
   };
   const pulls = (branch, list) => writeFileSync(join(box.home, `pr-head-${branch.replace('/', '-')}.json`), JSON.stringify(list));
@@ -1473,6 +1479,7 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   pulls('feat/a', [{ number: 11, state: 'MERGED', title: 'feat: a (X-1)', body: '' }]);
   state('X-1', 'Done');
   writeFileSync(join(box.home, 'linear-title-X-1'), 'Les budgets du mois');
+  git(lane.path, 'push', '-q', 'origin', 'feat/a');
   mkdirSync(join(lane.path, '.local', 'notes'), { recursive: true });
   writeFileSync(join(lane.path, '.gitignore'), '.local/\n');
   git(lane.path, 'add', '.gitignore');
@@ -1528,13 +1535,39 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   const h = add('test/h');
   assert.equal(wake().status, 0);
   assert.equal(there(h), true, 'not twice the same day');
-  // A lane the guard would not let out is left as it is, and said.
+  // A lane the guard would not let out is left as it is, and said: nothing of it is committed, day after day.
   const secret = add('test/secret');
   writeFileSync(join(secret, 'notes.txt'), `le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"\n`);
   const refused = tidy();
   assert.equal(refused.status, 0, refused.stderr);
   assert.equal(there(secret), true);
   assert.deepEqual(JSON.parse(refused.stdout).kept.filter((one) => one.lane === 'test-secret').map((one) => /guard/.test(one.why)), [true]);
+  assert.equal(git(secret, 'log', '-1', '--format=%s').trim(), 'feat: the work of test/secret', 'no « wip » commit of what the guard refuses');
+  assert.match(git(secret, 'status', '--porcelain'), /notes\.txt/);
+  execFileSync('rm', [join(secret, 'notes.txt')]);
+  // A lane with a session running in the ledger is at work, whatever its ticket says: a review is not cut in the middle.
+  const reviewing = add('test/reviewing');
+  const db2 = openLedger(join(box.state, 'ledger.db'));
+  runStart(db2, { runId: 'run-reviewing', lane: 'test/reviewing', role: 'review', ticket: 'X-9', modelAlias: 'a', source: 'dispatcher' });
+  db2.close();
+  // A lane opened a moment ago on an old base has no commit of its own yet: it is not idle, it has just begun.
+  const fresh = join(box.home, 'lanes', 'feat-fresh');
+  box.git('worktree', 'add', '-q', '-b', 'feat/fresh', fresh, 'main');
+  // A branch whose pull request is merged and that the remote no longer has is not put back there: what it still
+  // holds is kept beside the archives.
+  const gone = add('feat/gone');
+  pulls('feat/gone', [{ number: 13, state: 'MERGED', title: 'feat: gone', body: '' }]);
+  writeFileSync(join(gone, 'late.txt'), 'written after the merge\n');
+  const after = tidy();
+  assert.equal(after.status, 0, after.stderr);
+  const last = JSON.parse(after.stdout);
+  assert.equal(there(reviewing), true);
+  assert.deepEqual(last.kept.filter((one) => one.lane === 'test-reviewing').map((one) => /session is running/.test(one.why)), [true]);
+  assert.equal(there(fresh), true, 'a new lane');
+  assert.equal(there(gone), false);
+  assert.doesNotMatch(remote(), /^feat\/gone /m, 'not put back on the remote');
+  const bundle = join(box.repo, '.local', 'lane-archives', 'feat-gone', `menage-${new Date().toISOString().slice(0, 10)}`, 'unpushed.bundle');
+  assert.match(execFileSync('git', ['-C', box.repo, 'bundle', 'list-heads', bundle], { encoding: 'utf8' }), /feat\/gone/);
 });
 
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
