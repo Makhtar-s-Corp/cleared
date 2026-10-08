@@ -2184,12 +2184,19 @@ test('a review that cannot open now waits in a queue and opens by itself, withou
   assert.equal(dropped().length, 1, 'only the entry that could not be read left, and it is in the ledger');
   assert.match(dropped()[0].detail, /8\.json[\s\S]*cannot be read/);
   // Fifty-nine minutes of failures: still kept. A time that cannot be read does not stop the wake: the count starts again.
-  entry({ failing_since: new Date(Date.now() - 59 * 60_000).toISOString() });
+  const failingSince = () => JSON.parse(readFileSync(join(box.state, 'reviews-queue', '7.json'), 'utf8')).failing_since;
+  const almost = new Date(Date.now() - 59 * 60_000).toISOString();
+  entry({ failing_since: almost });
   assert.equal(wake().status, 0);
   assert.deepEqual(queued(), ['7.json']);
-  entry({ failing_since: 'not a time' });
-  assert.equal(wake().status, 0);
-  assert.deepEqual(queued(), ['7.json']);
+  assert.equal(failingSince(), almost, 'the hour that had begun goes on');
+  // A time that cannot be read, or that is not one the script wrote (« tomorrow » would never end): the hour starts now.
+  for (const odd of ['not a time', 'tomorrow']) {
+    entry({ failing_since: odd });
+    assert.equal(wake().status, 0, odd);
+    assert.deepEqual(queued(), ['7.json'], odd);
+    assert.ok(Math.abs(Date.now() - Date.parse(failingSince())) < 60_000, odd);
+  }
   assert.equal(dropped().length, 1);
   // A try that is only "not now" (a review of that ticket still running) is no failure: the hour of failures that had
   // begun is forgotten, so that one failure after a long wait is the first of its hour, not the last.

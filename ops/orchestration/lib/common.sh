@@ -189,9 +189,11 @@ open_queued_reviews() {
         ;;
       6) drop_queued_review "$entry" "$pr" "$ticket" "$why" ;;
       *)
-        # A time that cannot be read counts as no time: the hour starts now.
-        since=$(date -d "$(jq -r '.failing_since // empty' "$entry")" +%s 2> /dev/null) || since=
-        [ -n "$(jq -r '.failing_since // empty' "$entry")" ] || since=
+        # Only a time in the form this script writes counts: anything else
+        # (unreadable, or a word date would take for a time to come) is no
+        # time, and the hour starts now.
+        since=$(jq -r '.failing_since // empty' "$entry")
+        if [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]]; then since=$(date -d "$since" +%s 2> /dev/null) || since=; else since=; fi
         if [ -z "$since" ]; then
           jq --arg since "$(now_utc)" '.failing_since = $since' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
         elif [ $(( $(date +%s) - since )) -ge 3600 ]; then
