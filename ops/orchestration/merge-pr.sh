@@ -12,12 +12,14 @@
 #      (linear.sh moved-by-owner), for the version he was shown
 #      (ask-validation.sh keeps which), or wrote « Fusion : <ticket> » before
 #      the statuses existed. Invisible tooling ([merge] tooling_paths) needs
-#      neither; what touches the checks of the CI, the deployment, this lock
-#      itself or a setting of his ([merge] guarded_paths, guarded_settings)
-#      always needs his own agreement. What the pull request changes is read
-#      from git, renames undone: GitHub cuts a long list of files short;
+#      neither; what touches the checks of the CI, the deployment, his
+#      written rules or this lock itself, with all it runs or reads
+#      ([merge] guarded_paths), always needs his own agreement. What the pull
+#      request changes is read from git, renames undone: GitHub cuts a long
+#      list of files short;
 #   5. the host is free for a merge: no CI, no deployment settling, no screen
-#      test, GitHub up, and no other go-live being done (one lock for all).
+#      test, GitHub up. One go-live at a time, under one lock from the first
+#      read to the merge.
 # Then it merges the very commit it checked, and, when the ticket was in the
 # status of agreement, says where to see the result and puts it in Done.
 #
@@ -79,9 +81,12 @@ only_base_merges() {
 # One go-live at a time, from the first read to the merge: the wake that
 # tries the queue and a call of the lead would both read a free host, and a
 # branch that holds the base, before either had merged.
-mkdir -p "$ORCH_STATE_DIR"
-exec 9> "$ORCH_STATE_DIR/merge.lock"
-flock -n 9 || later "another go-live is being done"
+# A dry run merges nothing: it neither waits for the lock nor holds it.
+if [ -z "$dry_run" ]; then
+  mkdir -p "$ORCH_STATE_DIR"
+  exec 9> "$ORCH_STATE_DIR/merge.lock"
+  flock -n 9 || later "another go-live is being done"
+fi
 
 down=$(github_down) || down=
 [ -z "$down" ] || later "GitHub is down ($down)"
@@ -120,14 +125,7 @@ done < <(ledger sql "select run_id from runs where role = 'review' and source = 
 [ -n "$reviewed" ] || no "this version (${head:0:8}) has no review for $ticket that concludes « $(conf_get merge verdict) »: have it reviewed (review-pr.sh $pr $ticket)"
 
 # 4. The agreement of the user.
-settings=$(conf_get merge settings_file)
-if [ -n "$settings" ]; then
-  git -C "$ORCH_REPO" show "$(git -C "$ORCH_REPO" merge-base "$base" "$head"):$settings" > "$work/settings-before" 2> /dev/null || : > "$work/settings-before"
-  git -C "$ORCH_REPO" show "$head:$settings" > "$work/settings-after" 2> /dev/null || : > "$work/settings-after"
-  needs=$(node_lib merge.mjs needs "$work/files.json" "$work/settings-before" "$work/settings-after")
-else
-  needs=$(node_lib merge.mjs needs "$work/files.json")
-fi
+needs=$(node_lib merge.mjs needs "$work/files.json")
 go=$(conf_get linear go_state) validate=$(conf_get linear validate_state) agreed=
 asked="$ORCH_STATE_DIR/validations/$ticket.json"
 if [ "$needs" != tooling ]; then
@@ -164,7 +162,7 @@ if [ "$needs" != tooling ]; then
       ;;
     *) die "Linear could not say who moved $ticket" ;;
   esac
-  [ -n "$agreed" ] || no "the user has not agreed: $ticket is not in « $go »$([ "$needs" != guarded ] || echo ' (it touches the checks of the CI, the deployment, the lock of the go-lives or a setting of his: his own agreement is needed, tooling or not)'). Ask him (ask-validation.sh $ticket - --pr $pr)"
+  [ -n "$agreed" ] || no "the user has not agreed: $ticket is not in « $go »$([ "$needs" != guarded ] || echo ' (it touches the checks of the CI, the deployment, his written rules or the tooling of the go-lives: his own agreement is needed, tooling or not)'). Ask him (ask-validation.sh $ticket - --pr $pr)"
   [ -n "$announcement" ] || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
 fi
 
@@ -194,13 +192,15 @@ if [ -n "$announcement" ]; then
   fi
 fi
 # The ticket is closed once everything he was shown on it is live. A pull
-# request he was shown and that was closed since without going live no
-# longer counts.
+# request he was shown and that GitHub says closed or merged since no longer
+# counts; one GitHub cannot be asked about still does: the ticket is not
+# closed on a guess.
 if [ "$agreed" = status ]; then
   jq --argjson pr "$pr" --arg at "$(now_utc)" '(.pulls[] | select(.pr == $pr)) |= . + {merged_at: $at}' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
   left=0
   while IFS= read -r other; do
-    [ "$(cd "$ORCH_REPO" && gh pr view "$other" --json state 2> /dev/null | jq -r '.state // "OPEN"')" != OPEN ] || left=$((left + 1))
+    state=$(cd "$ORCH_REPO" && gh pr view "$other" --json state 2> /dev/null | jq -r '.state // empty' 2> /dev/null) || state=
+    case "$state" in CLOSED | MERGED) ;; *) left=$((left + 1)) ;; esac
   done < <(jq -r '.pulls[] | select(.merged_at == null) | .pr' "$asked")
   if [ "$left" = 0 ]; then
     "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null \
