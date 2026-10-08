@@ -1457,7 +1457,7 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   const { box } = lane;
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFileSync(confPath, 'utf8')
-    .replace('[lanes]\n', '[lanes]\ntidy_hour = 0\nidle_hours = 24\ntrial_prefixes = test/, essai/\nbusy_states = In Progress\nclosed_states = Done, Canceled\narchives = .local/lane-archives\ntidy_reason_live = changement en ligne\ntidy_reason_idle = sans activité depuis un jour, aucun ticket ouvert\ntidy_reason_trial = équipe d’essai\n')
+    .replace('[lanes]\n', '[lanes]\ntidy_hour = 0\nidle_hours = 24\ntrial_prefixes = test/, essai/\nbusy_states = In Progress\nclosed_states = Done, Canceled\narchives = .local/lane-archives\ntidy_reason_live = changement en ligne\ntidy_reason_idle = sans activité depuis un jour, aucun ticket ouvert\ntidy_reason_trial = équipe d’essai\ntidy_reason_waiting = n’attend plus que l’accord\n')
     .replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n')
     .replace('live = no', 'live = yes'));
   const git = (path, ...args) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
@@ -1485,32 +1485,39 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   // c: a trial lane, with work nobody saved.
   const c = add('test/c');
   writeFileSync(join(c, 'draft.txt'), 'unsaved\n');
-  // d: no pull request, nothing for days, no ticket. e: the same, but at work today. f: idle, but its ticket waits for the user.
+  // d: no pull request, nothing for days, no ticket. e: the same, but at work today.
   const d = add('feat/d', { old: true });
   const e = add('feat/e');
-  const f = add('feat/X-6-f', { old: true });
+  // f: its ticket only waits for the agreement of the user. A lane that only waits has no reason to stay open: its
+  // branch is on the remote, and it is opened again only if a review asks for a correction (his rule of 2026-10-08).
+  const f = add('feat/X-6-f');
   state('X-6', 'À valider');
+  // w: one of its tickets waits for him, the other is at work: it works, it stays.
+  const w = add('feat/X-7-X-8-w');
+  state('X-7', 'Go MEP');
+  state('X-8', 'In Progress');
   const tidy = (...args) => spawnSync(join(box.home, 'tidy-lanes.sh'), args, { env: { ...box.env, HOME: box.home }, encoding: 'utf8' });
+  const remote = () => lane.onRemote().join('\n');
   const there = (path) => { try { readdirSync(path); return true; } catch { return false; } };
   // A dry run says what it would do, and does none of it.
   const dry = tidy('--dry-run');
   assert.equal(dry.status, 0, dry.stderr);
-  assert.deepEqual(JSON.parse(dry.stdout).closed.map((one) => one.lane).sort(), ['feat-a', 'feat-d', 'test-c']);
+  assert.deepEqual(JSON.parse(dry.stdout).closed.map((one) => one.lane).sort(), ['feat-X-6-f', 'feat-a', 'feat-d', 'test-c']);
   assert.ok(there(lane.path) && there(c) && there(d));
   const done = tidy();
   assert.equal(done.status, 0, done.stderr);
   const result = JSON.parse(done.stdout);
-  assert.deepEqual(result.closed.map((one) => [one.lane, one.name, one.why]).sort(), [['feat-a', 'Les budgets du mois', 'changement en ligne'], ['feat-d', 'feat-d', 'sans activité depuis un jour, aucun ticket ouvert'], ['test-c', 'test-c', 'équipe d’essai']]);
-  assert.deepEqual([there(lane.path), there(b), there(c), there(d), there(e), there(f)], [false, true, false, false, true, true]);
+  assert.deepEqual(result.closed.map((one) => [one.lane, one.name, one.why]).sort(), [['feat-X-6-f', 'Titre de X-6', 'n’attend plus que l’accord'], ['feat-a', 'Les budgets du mois', 'changement en ligne'], ['feat-d', 'feat-d', 'sans activité depuis un jour, aucun ticket ouvert'], ['test-c', 'test-c', 'équipe d’essai']]);
+  assert.deepEqual([there(lane.path), there(b), there(c), there(d), there(e), there(f), there(w)], [false, true, false, false, true, false, true]);
   assert.equal(result.left, 3);
+  assert.match(remote(), /^feat\/X-6-f /m, 'the branch of the lane that only waited is on the remote');
   // Nothing lost: the commits are on the remote, the unsaved work too as « wip », the file that existed nowhere else is archived.
-  const remote = lane.onRemote().join('\n');
-  for (const branch of ['feat/a', 'test/c', 'feat/d']) assert.match(remote, new RegExp(`^${branch} `, 'm'), branch);
+  for (const branch of ['feat/a', 'test/c', 'feat/d']) assert.match(remote(), new RegExp(`^${branch} `, 'm'), branch);
   assert.match(execFileSync('git', ['--git-dir', lane.remote, 'log', '-1', '--format=%s', 'test/c'], { encoding: 'utf8' }), /^wip: /);
   assert.equal(readFileSync(join(box.repo, '.local', 'lane-archives', 'feat-a', `menage-${new Date().toISOString().slice(0, 10)}`, '.local', 'notes', 'capture d’écran.txt'), 'utf8'), 'only here\n');
   // Kept: in the ledger, and as a note for the digest in the words of the project.
   const db = openLedger(join(box.state, 'ledger.db'));
-  assert.equal(db.prepare("select value from events where kind = 'lanes_tidied'").get().value, 3);
+  assert.equal(db.prepare("select value from events where kind = 'lanes_tidied'").get().value, 4);
   db.close();
   assert.match(readFileSync(join(box.state, 'digest-notes.jsonl'), 'utf8'), /« Les budgets du mois » : changement en ligne/);
   // Once a day, by the wake: a second wake the same day does not run it again.

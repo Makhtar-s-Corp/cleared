@@ -5,10 +5,13 @@
 #   - the pull request of its branch is merged or closed, and none is open;
 #   - nothing happened in it for [lanes] idle_hours and no open ticket is
 #     attached to it;
-#   - it is a trial: its branch starts with one of [lanes] trial_prefixes.
-# Never when a ticket attached to it is at work ([lanes] busy_states), waits
-# for the user or holds his agreement. The tickets of a lane are the ones its
-# branch and its pull requests name.
+#   - it is a trial: its branch starts with one of [lanes] trial_prefixes;
+#   - it only waits for his agreement: a ticket attached to it is in the
+#     status that asks him, or in the one of his agreement. Its branch is on
+#     the remote, and a lane is opened again only if a review asks for a
+#     correction.
+# Never when a ticket attached to it is at work ([lanes] busy_states). The
+# tickets of a lane are the ones its branch and its pull requests name.
 # Nothing is lost: what exists only in the worktree is archived, unsaved
 # work is committed as « wip », what the remote lacks is pushed to the
 # lane's own branch (never forced, never the base, and only what the guard
@@ -29,7 +32,8 @@ team=$(conf_get linear team)
 idle_hours=$(conf_get lanes idle_hours)
 [[ "$idle_hours" =~ ^[0-9]+$ ]] || idle_hours=24
 in_list() { tr ',' '\n' <<<"$2" | sed 's/^ *//; s/ *$//' | grep -qxF -- "$1"; }
-busy="$(conf_get lanes busy_states), $(conf_get linear validate_state), $(conf_get linear go_state)"
+busy=$(conf_get lanes busy_states)
+waiting_states="$(conf_get linear validate_state), $(conf_get linear go_state)"
 closed_states=$(conf_get lanes closed_states)
 lead_lane="$(conf_get lead role)/lead"
 out=$(mktemp -d)
@@ -49,16 +53,16 @@ while IFS=$'\t' read -r path branch; do
   # Its pull requests, and the tickets it names.
   pulls=$(cd "$ORCH_REPO" && gh pr list --head "$branch" --state all --limit 20 --json number,state,title,body 2> /dev/null) || { kept "$lane" "its pull requests could not be read"; continue; }
   tickets=$({ echo "$branch"; jq -r '.[] | .title, .body' <<<"$pulls"; } | grep -oE "\\b$team-[0-9]+" | sort -u || true)
-  blocked= open_ticket= name=
+  blocked= open_ticket= name= waiting=
   for ticket in $tickets; do
     state=$("$ORCH_HOME/linear.sh" state "$ticket" 2> /dev/null) || state=
     # A ticket whose state cannot be read counts as open and at work: no guess.
     [ -n "$state" ] || { blocked="$ticket (state unknown)"; break; }
     if in_list "$state" "$busy"; then blocked="$ticket ($state)"; break; fi
     in_list "$state" "$closed_states" || open_ticket=$ticket
-    [ -n "$name" ] || name=$("$ORCH_HOME/linear.sh" issue "$ticket" 2> /dev/null | jq -r '.title // empty') || name=
+    ! in_list "$state" "$waiting_states" || waiting=$ticket
   done
-  [ -z "$blocked" ] || { kept "$lane" "a ticket attached to it is at work or with the user: $blocked"; continue; }
+  [ -z "$blocked" ] || { kept "$lane" "a ticket attached to it is at work: $blocked"; continue; }
 
   # Which rule closes it, if any.
   why=
@@ -71,6 +75,7 @@ while IFS=$'\t' read -r path branch; do
       case "$branch" in "$prefix"*) why=$(conf_get lanes tidy_reason_trial) ;; esac
     done < <(conf_get lanes trial_prefixes | tr ',' '\n' | sed 's/^ *//; s/ *$//')
   fi
+  [ -n "$why" ] || [ -z "$waiting" ] || why=$(conf_get lanes tidy_reason_waiting)
   if [ -z "$why" ] && [ -z "$open_ticket" ]; then
     # Its last sign of life: its last commit, or the last file touched in it.
     last=$(git -C "$path" log -1 --format=%ct 2> /dev/null || echo 0)
@@ -79,6 +84,10 @@ while IFS=$'\t' read -r path branch; do
     [ "$last" -gt "$(date -d "$idle_hours hours ago" +%s)" ] || why=$(conf_get lanes tidy_reason_idle)
   fi
   [ -n "$why" ] || { kept "$lane" "at work, or attached to an open ticket"; continue; }
+  # Its name for the user: the title of its ticket, the one that waits for
+  # him first, then one still open, then any.
+  named=${waiting:-${open_ticket:-$(sed -n '1p' <<<"$tickets")}}
+  [ -z "$named" ] || name=$("$ORCH_HOME/linear.sh" issue "$named" 2> /dev/null | jq -r '.title // empty') || name=
   [ -n "$name" ] || name=$lane
 
   if [ -n "$dry" ]; then
