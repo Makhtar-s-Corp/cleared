@@ -70,25 +70,33 @@ if [ "$("$ORCH_HOME/linear.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c -
   die "$ticket already waits for the user in « $validate » for these versions: nothing asked again"
 fi
 all=$(jq -c --argjson shown "$shown" '[.[] | select(.pr as $pr | $shown | map(.pr) | index($pr) | not)] + $shown | sort_by(.pr)' <<<"$before")
-# The captures first: a request whose capture cannot be sent is not posted without it.
-for index in "${!captures[@]}"; do
-  address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
-  printf '\n\n**%s**\n\n![%s](%s)\n' "${captions[$index]}" "${captions[$index]}" "$address" >> "$text"
-done
-# A request made again for a pull request says which version the one before
-# was about: the user sees that it is a new one.
-earlier=
-for one in $asked_pulls; do
-  was=$(jq -r --argjson pr "${one%%:*}" '.[] | select(.pr == $pr) | .head' <<<"$before" | sed -n '1p')
-  [ -z "$was" ] || [ "$was" = "${one#*:}" ] || earlier="${earlier:+$earlier, }${was:0:8}"
-done
-printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
-"$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
-# The card first: a request whose card could not be moved was not made, and
-# what he was shown before stays what is kept.
-"$ORCH_HOME/linear.sh" move "$ticket" "$validate"
+# A request is made whole: its text on the ticket, the card moved, what was
+# shown kept. If the card cannot be moved once the text is written, nothing
+# is kept yet, the script says so, and the same request asked again is
+# finished without being written to him a second time.
+pending="$ORCH_STATE_DIR/validations/$ticket.pending"
+request=$({ cat "$text"; echo "$shown"; printf '%s\n' ${captures[@]+"${captures[@]}"}; } | sha256sum | cut -d' ' -f1)
+if [ "$(cat "$pending" 2> /dev/null)" != "$request" ]; then
+  # The captures first: a request whose capture cannot be sent is not posted without it.
+  for index in "${!captures[@]}"; do
+    address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
+    printf '\n\n**%s**\n\n![%s](%s)\n' "${captions[$index]}" "${captions[$index]}" "$address" >> "$text"
+  done
+  # A request made again for a pull request says which version the one before
+  # was about: the user sees that it is a new one.
+  earlier=
+  for one in $asked_pulls; do
+    was=$(jq -r --argjson pr "${one%%:*}" '.[] | select(.pr == $pr) | .head' <<<"$before" | sed -n '1p')
+    [ -z "$was" ] || [ "$was" = "${one#*:}" ] || earlier="${earlier:+$earlier, }${was:0:8}"
+  done
+  printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
+  "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
+  printf '%s\n' "$request" > "$pending"
+fi
+"$ORCH_HOME/linear.sh" move "$ticket" "$validate" \
+  || die "the request is written on $ticket, but the card could not be moved to « $validate »: nothing is kept yet. Ask again with the same request: it will be finished without being written to him a second time"
 # What else the record holds (a ticket the wake still has to close) is kept.
 record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
 [ -n "$record" ] || record='{}'
 jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"
-
+rm -f "$pending"

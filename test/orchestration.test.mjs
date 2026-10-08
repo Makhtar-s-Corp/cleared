@@ -181,7 +181,7 @@ esac
   // Linear and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
-if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "https://example.test/comment"; exit; fi
+if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "$2" >> "${join(home, 'linear-posted-log')}"; echo "https://example.test/comment"; exit; fi
 if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
 if [ "$1" = comments ]; then cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
@@ -2565,6 +2565,39 @@ test('his agreement is to the request it answers and to the version shown: an ol
   assert.ok(pull.merged());
 });
 
+test('only the base may be brought in without anybody reading again: another branch merged into the lane, however cleanly, is work nobody was shown', () => {
+  // Reviewed, then the lane merges a branch that is not the base: that version was read by no reviewer.
+  const pull = reviewedPull(['ops/orchestration/wake.sh']);
+  const other = join(pull.box.home, 'lanes', 'other');
+  pull.box.git('worktree', 'add', '-q', '-b', 'feat/other', other, 'main');
+  mkdirSync(join(other, 'server'), { recursive: true });
+  writeFileSync(join(other, 'server', 'elsewhere.mjs'), 'export const elsewhere = 1;\n');
+  execFileSync('git', ['-C', other, 'add', '.']);
+  execFileSync('git', ['-C', other, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'feat: the work of another lane']);
+  pull.git('merge', '-q', '--no-edit', 'feat/other');
+  pull.publish();
+  const unread = pull.merge(['--dry-run']);
+  assert.equal(unread.status, 6, unread.stdout);
+  assert.match(unread.stderr, /has no review for X-5/);
+  // Shown to the user, agreed by him, then the same thing: his agreement was to the version before.
+  const shown = reviewedPull(['server/core.mjs']);
+  assert.equal(shown.ask().status, 0);
+  writeFileSync(join(shown.box.home, 'linear-moved'), '0');
+  const elsewhere = join(shown.box.home, 'lanes', 'other');
+  shown.box.git('worktree', 'add', '-q', '-b', 'feat/other', elsewhere, 'main');
+  writeFileSync(join(elsewhere, 'elsewhere.txt'), 'the work of another lane\n');
+  execFileSync('git', ['-C', elsewhere, 'add', '.']);
+  execFileSync('git', ['-C', elsewhere, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'feat: the work of another lane']);
+  shown.git('merge', '-q', '--no-edit', 'feat/other');
+  shown.publish();
+  const again = JSON.parse(spawnSync(join(shown.box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env: shown.env, encoding: 'utf8' }).stdout);
+  assert.equal(spawnSync(join(shown.box.home, 'lane-run.sh'), [again.run_dir], { cwd: again.worktree, env: { ...shown.env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
+  const moved = shown.merge(['-'], {}, 'Annonce.');
+  assert.equal(moved.status, 6);
+  assert.match(moved.stderr, /is not the version he was shown/);
+  assert.equal(shown.merged(), null);
+});
+
 test('where the project asks for it, no agreement is read from a tracker that cannot tell the user from an agent', () => {
   const pull = reviewedPull(['server/core.mjs']);
   const confPath = join(pull.box.home, 'agents.conf');
@@ -2916,17 +2949,31 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.match(posted(), /^X-5 from=[\s\S]*Je la mets en ligne \?[\s\S]*\*\*Avant\*\*\n\n!\[Avant\]\(https:\/\/uploads\.example\.test\/avant\.png\)[\s\S]*!\[Capture\]\(https:\/\/uploads\.example\.test\/apres\.png\)[\s\S]*\(Version montrée : PR 7 à 11111111\.\)\s*$/);
   assert.deepEqual(moves(), ['X-5 -> À valider']);
   assert.deepEqual(kept(), [{ pr: 7, head: '1111111111111111111111111111111111111111' }]);
-  // A card that could not be moved is a request that was not made: what he was shown before stays what is kept.
+  // A card that could not be moved is a request that is not made yet: what he was shown before stays what is kept,
+  // the script says what is left to do, and asking again finishes it without writing to him twice.
+  const comments = () => { try { return readFileSync(join(box.home, 'linear-posted-log'), 'utf8').trim().split('\n').length; } catch { return 0; } };
   pull('3333333333333333333333333333333333333333');
-  const stuck = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_LINEAR_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'Je la mets en ligne ?' });
-  assert.notEqual(stuck.status, 0);
+  const before = comments();
+  const stuck = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_LINEAR_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'La fiche a changé. Je la mets en ligne ?' });
+  assert.equal(stuck.status, 1);
+  assert.match(stuck.stderr, /the card could not be moved[\s\S]*Ask again with the same request/);
+  assert.equal(comments(), before + 1);
   assert.deepEqual(kept(), [{ pr: 7, head: '1111111111111111111111111111111111111111' }]);
+  const finished = ask(['--pr', '7'], 'La fiche a changé. Je la mets en ligne ?');
+  assert.equal(finished.status, 0, finished.stderr);
+  assert.equal(comments(), before + 1, 'the same request is not written to him a second time');
+  assert.deepEqual(kept(), [{ pr: 7, head: '3333333333333333333333333333333333333333' }]);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> À valider']);
+  // (Back to the first version for what follows: a new request, with its comment.)
   pull('1111111111111111111111111111111111111111');
+  assert.equal(ask(['--pr', '7'], 'Retour à la première version. Je la mets en ligne ?').status, 0);
+  assert.equal(comments(), before + 2);
   // Already waiting for him, for this very version: not asked twice.
+  const movesBefore = moves().length;
   const twice = ask(['--pr', '7'], 'Encore ?');
   assert.equal(twice.status, 1);
   assert.match(twice.stderr, /already waits for the user/);
-  assert.deepEqual(moves(), ['X-5 -> À valider']);
+  assert.equal(moves().length, movesBefore);
   // The lane pushed since: what waits for him is no longer what would go live, so he is shown the new version.
   pull('2222222222222222222222222222222222222222');
   const again = ask(['--pr', '7'], 'La fiche a changé depuis ma demande. Je la mets en ligne ?');

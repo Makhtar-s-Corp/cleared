@@ -80,7 +80,9 @@ gql() {
   if [ "$identity" = app ]; then authorization="Bearer $(app_token)" || return 1; else authorization=$key; fi
   response=$(gql_once "$1" "${2:-}" "$authorization")
   # A token the tracker refuses (the secret changed, the application was
-  # installed again) is thrown away and asked for again, once.
+  # installed again) is thrown away and asked for again, once. Linear
+  # answers a refused token with this code in a JSON body, under HTTP 401
+  # (tried with a made-up token on 2026-10-08).
   if [ "$identity" = app ] && [ "$(jq -r '[.errors[]?.extensions.code] | index("AUTHENTICATION_ERROR") != null' <<<"$response" 2>/dev/null)" = true ]; then
     authorization="Bearer $(app_token new)" || return 1
     response=$(gql_once "$1" "${2:-}" "$authorization")
