@@ -158,10 +158,16 @@ flush_outbox() {
 
 # open_queued_reviews: the reviews review-pr.sh could not open at once, opened
 # now if they may, oldest first, one a wake. No model: the same script, with
-# the same rules. One that can never open (already reviewed, pull request
-# closed, no known author) is dropped, and said in the log of the wake.
+# the same rules. One that will never open (already reviewed, pull request
+# closed), or that failed three wakes in a row, leaves the queue: that is
+# written to the ledger (review_dropped) and told to the lead at its next
+# wake. An entry that cannot be read is removed.
 open_queued_reviews() {
-  local queue="$ORCH_STATE_DIR/reviews-queue" entry pr ticket author code limit recent
+  local queue="$ORCH_STATE_DIR/reviews-queue" entry pr ticket author code limit recent failed why
+  ls "$queue"/*.json > /dev/null 2>&1 || return 0
+  for entry in "$queue"/*.json; do
+    jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1 || rm -f "$entry"
+  done
   ls "$queue"/*.json > /dev/null 2>&1 || return 0
   limit=$(conf_get review per_hour)
   [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
@@ -170,14 +176,27 @@ open_queued_reviews() {
   while IFS= read -r entry; do
     pr=$(jq -r '.pr' "$entry") ticket=$(jq -r '.ticket' "$entry") author=$(jq -r '.author // ""' "$entry")
     code=0
-    ORCH_FROM_QUEUE=1 "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" ${author:+--author-model "$author"} > /dev/null || code=$?
+    why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" ${author:+--author-model "$author"} 2>&1 > /dev/null) || code=$?
     case "$code" in
       0) rm -f "$entry"; return 0 ;;
       5) ;;
-      *) echo "$(basename "$0"): the queued review of #$pr is dropped (it cannot open)" >&2; rm -f "$entry" ;;
+      6) drop_queued_review "$entry" "$pr" "$ticket" "$why" ;;
+      *)
+        failed=$(( $(jq -r '.failed // 0' "$entry") + 1 ))
+        if [ "$failed" -ge 3 ]; then
+          drop_queued_review "$entry" "$pr" "$ticket" "three tries failed, the last one: $why"
+        else
+          jq --argjson failed "$failed" '.failed = $failed' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        fi
+        ;;
     esac
   done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry")" "$entry"; done | sort | cut -f2)
   return 0
+}
+
+drop_queued_review() {
+  ledger event --kind review_dropped --ticket "$3" --detail "the review of #$2 left the queue without opening: $(tr '\n' ' ' <<<"$4" | cut -c1-400)"
+  rm -f "$1"
 }
 
 # github_down: what GitHub says is down among the parts the dispatcher needs,

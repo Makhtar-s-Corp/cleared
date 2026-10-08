@@ -30,6 +30,7 @@ export const EVENT_KINDS = [
   'wake_started', // a session of the project lead was started; the detail says what woke it
   'decision', // a decision the user worded in a discussion, transcribed by decide.sh (source discussion)
   'role_model_changed', // the model of a role was changed: detail "<role>: <from> -> <to>: <why>"; the lead only starts on the one decided last
+  'review_dropped', // a review asked for left the queue without opening; the detail says which and why
   'github_down', // GitHub was down: at is the start, value the minutes it lasted, detail "from <start> to <end>: <what was down>"
 ];
 

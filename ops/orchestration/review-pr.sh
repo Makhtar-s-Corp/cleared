@@ -40,10 +40,20 @@ ledger init > /dev/null
 # "Not now" is not "no": a review that cannot open yet (the limit of the hour,
 # one still running for that ticket, GitHub down) is kept in a queue that the
 # wake opens by itself, with no model, as soon as it may. Called from that
-# queue, or to see what would run, it only says so (exit 5).
+# queue, it only says so (exit 5).
 author=
+# "Never": this review will not open however long it waits (exit 6). Any
+# other failure may be a passing one.
+never() {
+  echo "$(basename "$0"): $1" >&2
+  exit 6
+}
 later() {
-  if [ -n "${ORCH_FROM_QUEUE:-}" ] || [ -n "$dry_run" ]; then
+  if [ -n "$dry_run" ]; then
+    echo "Elle attendrait dans la file : $1"
+    exit 0
+  fi
+  if [ -n "${ORCH_FROM_QUEUE:-}" ]; then
     echo "$(basename "$0"): $1" >&2
     exit 5
   fi
@@ -61,13 +71,13 @@ down=$(github_down) || down=
 [ -z "$down" ] || later "GitHub est en panne : $down"
 
 pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json number,state,title,body,headRefName,headRefOid) || die "pull request #$pr could not be read"
-[ "$(jq -r '.state' <<<"$pull")" = OPEN ] || die "pull request #$pr is not open"
+[ "$(jq -r '.state' <<<"$pull")" = OPEN ] || never "pull request #$pr is not open"
 head=$(jq -r '.headRefOid' <<<"$pull") branch=$(jq -r '.headRefName' <<<"$pull")
 
 # Already read at this commit: nothing to do. An earlier commit read: only what changed since.
 reviewed=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" heads "$pr")
 if jq -e --arg head "$head" 'index($head) != null' <<<"$reviewed" > /dev/null; then
-  die "pull request #$pr was already reviewed at this commit (${head:0:8}): no second review of the same thing"
+  never "pull request #$pr was already reviewed at this commit (${head:0:8}): no second review of the same thing"
 fi
 git -C "$ORCH_REPO" fetch --quiet origin "$branch" || die "the branch $branch could not be fetched"
 since=
@@ -84,7 +94,7 @@ worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs
 # Tried twice without coming to an end (its model failed, or its safeguard
 # refused): no third try of the same commit, the user is told instead.
 tries=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" tries "$pr" "$head")
-[ "$tries" -lt 2 ] || die "$tries reviews of this commit (${head:0:8}) did not come to an end: no other try, say it to the user"
+[ "$tries" -lt 2 ] || never "$tries reviews of this commit (${head:0:8}) did not come to an end: no other try, say it to the user"
 
 # One review at a time for a ticket, and a few an hour. Checked before the
 # lane of the review before is closed: a refusal closes nothing.
