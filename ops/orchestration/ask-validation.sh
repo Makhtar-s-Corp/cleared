@@ -72,11 +72,14 @@ fi
 all=$(jq -c --argjson shown "$shown" '[.[] | select(.pr as $pr | $shown | map(.pr) | index($pr) | not)] + $shown | sort_by(.pr)' <<<"$before")
 # A request is made whole: its text on the ticket, the card moved, what was
 # shown kept. If the card cannot be moved once the text is written, nothing
-# is kept yet, the script says so, and the same request asked again is
-# finished without being written to him a second time.
+# is kept yet, the script says so, and the same request asked again within
+# the hour is finished without being written to him a second time. What this
+# does not cover: a script stopped between the comment and the note of it
+# (a kill, the host going down) writes to him again when asked again.
 pending="$ORCH_STATE_DIR/validations/$ticket.pending"
 request=$({ cat "$text"; echo "$shown"; printf '%s\n' ${captures[@]+"${captures[@]}"}; } | sha256sum | cut -d' ' -f1)
-if [ "$(cat "$pending" 2> /dev/null)" != "$request" ]; then
+written=$(jq -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'select((.at // "") > $since) | .request // empty' "$pending" 2> /dev/null) || written=
+if [ "$written" != "$request" ]; then
   # The captures first: a request whose capture cannot be sent is not posted without it.
   for index in "${!captures[@]}"; do
     address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
@@ -91,12 +94,14 @@ if [ "$(cat "$pending" 2> /dev/null)" != "$request" ]; then
   done
   printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
   "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
-  printf '%s\n' "$request" > "$pending"
+  { jq -n --arg request "$request" --arg at "$(now_utc)" '{request: $request, at: $at}' > "$pending.part" && mv "$pending.part" "$pending"; } 2> /dev/null \
+    || die "the request is written on $ticket, but that could not be kept in $ORCH_STATE_DIR/validations: the card is not moved, and what he was shown is not kept. Repair the folder and ask again"
 fi
 "$ORCH_HOME/linear.sh" move "$ticket" "$validate" \
   || die "the request is written on $ticket, but the card could not be moved to « $validate »: nothing is kept yet. Ask again with the same request: it will be finished without being written to him a second time"
 # What else the record holds (a ticket the wake still has to close) is kept.
 record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
 [ -n "$record" ] || record='{}'
-jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"
+{ jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"; } 2> /dev/null \
+  || die "the card of $ticket is in « $validate », but what he was shown could not be kept in $kept: his agreement would be bound to no version, and no go-live will read it. Repair the folder and ask again"
 rm -f "$pending"

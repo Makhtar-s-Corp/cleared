@@ -65,7 +65,10 @@ later() {
 node_lib() { node --no-warnings "$ORCH_HOME/lib/$1" "${@:2}"; }
 # only_base_merges <commit> <head>: the head holds that commit, and adds on
 # top of it nothing but merges of the base that changed nothing by
-# themselves. A commit of the lane itself would have been seen by nobody.
+# themselves. A commit of the lane itself would have been seen by nobody;
+# nor would the branch of another lane, which brings commits of its own
+# (of one parent, refused below) or a merge that changed something by
+# itself (refused too).
 only_base_merges() {
   local added parents auto
   [ "$1" != "$2" ] || return 0
@@ -73,10 +76,6 @@ only_base_merges() {
   while IFS= read -r added; do
     read -r -a parents < <(git -C "$ORCH_REPO" rev-list --parents -n 1 "$added" | cut -d' ' -f2-)
     [ "${#parents[@]}" = 2 ] || return 1
-    # What is brought in comes from the base, and from nowhere else. (A
-    # branch of another lane would also bring its own commits, refused
-    # above as commits of one parent: this says it outright.)
-    git -C "$ORCH_REPO" merge-base --is-ancestor "${parents[1]}" "$base" 2> /dev/null || return 1
     auto=$(git -C "$ORCH_REPO" merge-tree --write-tree "${parents[0]}" "${parents[1]}" 2> /dev/null) || return 1
     [ "$auto" = "$(git -C "$ORCH_REPO" rev-parse "$added^{tree}")" ] || return 1
   done < <(git -C "$ORCH_REPO" rev-list "$1..$2" --not "$base")

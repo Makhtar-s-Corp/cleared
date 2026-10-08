@@ -2964,10 +2964,27 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.equal(comments(), before + 1, 'the same request is not written to him a second time');
   assert.deepEqual(kept(), [{ pr: 7, head: '3333333333333333333333333333333333333333' }]);
   assert.deepEqual(moves().slice(-1), ['X-5 -> À valider']);
+  // What was shown is kept, or the request fails out loud: a record that cannot be written is not a request made.
+  pull('4444444444444444444444444444444444444444');
+  execFileSync('chmod', ['555', join(box.state, 'validations')]);
+  const unkept = ask(['--pr', '7'], 'Encore une version. Je la mets en ligne ?');
+  execFileSync('chmod', ['755', join(box.state, 'validations')]);
+  assert.equal(unkept.status, 1, 'not a success when what he was shown could not be kept');
+  assert.match(unkept.stderr, /could not be kept/);
+  assert.deepEqual(kept(), [{ pr: 7, head: '3333333333333333333333333333333333333333' }]);
+  // A request left unfinished long ago is not taken for the one made now: he is written again.
+  const stale = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_LINEAR_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'Une version de plus. Je la mets en ligne ?' });
+  assert.equal(stale.status, 1);
+  const pendingPath = join(box.state, 'validations', 'X-5.pending');
+  writeFileSync(pendingPath, JSON.stringify({ ...JSON.parse(readFileSync(pendingPath, 'utf8')), at: '2020-01-01T00:00:00Z' }));
+  const later = comments();
+  assert.equal(ask(['--pr', '7'], 'Une version de plus. Je la mets en ligne ?').status, 0);
+  assert.equal(comments(), later + 1);
   // (Back to the first version for what follows: a new request, with its comment.)
   pull('1111111111111111111111111111111111111111');
+  const beforeBack = comments();
   assert.equal(ask(['--pr', '7'], 'Retour à la première version. Je la mets en ligne ?').status, 0);
-  assert.equal(comments(), before + 2);
+  assert.equal(comments(), beforeBack + 1);
   // Already waiting for him, for this very version: not asked twice.
   const movesBefore = moves().length;
   const twice = ask(['--pr', '7'], 'Encore ?');
