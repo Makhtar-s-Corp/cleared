@@ -33,6 +33,7 @@ export const EVENT_KINDS = [
   'merged_by_script', // merge-pr.sh put a pull request live: value is its number, the detail says what was checked
   'merge_refused', // a go-live asked for was refused for good, or left the queue: the detail says why
   'ticket_left_open', // a go-live was done but GitHub could not say what became of another pull request shown on the ticket: the wake asks again
+  'lanes_tidied', // tidy-lanes.sh closed lanes by rule: value is how many, the detail says which and why
   'review_dropped', // a review asked for left the queue without opening; the detail says which and why
   'github_down', // GitHub was down: at is the start, value the minutes it lasted, detail "from <start> to <end>: <what was down>"
 ];

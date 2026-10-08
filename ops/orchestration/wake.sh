@@ -52,6 +52,14 @@ flock -n 8 || busy "another wake is at work"
 # So do the go-lives that only waited for the host.
 [ -n "$handover" ] || open_queued_merges
 [ -n "$handover" ] || close_tickets_left_open
+# The lanes are tidied by rule once a day, after [lanes] tidy_hour: with no
+# model, like the queues. Only once the lead acts; without the setting, no
+# tidying.
+tidy_hour=$(conf_get lanes tidy_hour)
+if [ -z "$handover" ] && [ "$(conf_get lead live)" = yes ] && [[ "$tidy_hour" =~ ^[0-9]+$ ]] && [ "$((10#$(date +%H)))" -ge "$tidy_hour" ] && [ "$(cat "$wake_dir/tidied" 2> /dev/null)" != "$(date +%F)" ]; then
+  date +%F > "$wake_dir/tidied"
+  "$ORCH_HOME/tidy-lanes.sh" > /dev/null 2>&1 || true
+fi
 
 # GitHub down, as its status page says: noted when it starts, written to the
 # ledger when it ends, with both times. Its events wait meanwhile.
@@ -125,6 +133,20 @@ if [ -z "$handover" ]; then
   # lane is a worktree under the lanes root that the dispatcher did not open.
   echo '[]' > "$work/reports.json"
   echo '[]' > "$work/reviews.json"
+  # The night checks: the runs started on the base outside any pull request
+  # ([lead] night_checks_event names their kinds: by the forge itself, or
+  # « by hand » when the timetable of the host starts them; without it they
+  # are not followed).
+  echo '[]' > "$work/nights.json"
+  night_events=$(conf_get lead night_checks_event)
+  if [ -n "$night_events" ] && [ -z "$github_out" ]; then
+    : > "$work/nights.list"
+    while IFS= read -r kind; do
+      [ -n "$kind" ] || continue
+      (cd "$ORCH_REPO" && gh run list --event "$kind" --branch "$(conf_get lanes base | sed 's#^origin/##')" --limit 5 --json databaseId,status,conclusion,createdAt,updatedAt,url,headSha) >> "$work/nights.list" 2> /dev/null || true
+    done < <(tr ',' '\n' <<<"$night_events" | sed 's/^ *//; s/ *$//')
+    jq -sc 'add // []' "$work/nights.list" > "$work/nights.json" 2> /dev/null || echo '[]' > "$work/nights.json"
+  fi
   if [ "$(conf_get lead live)" = yes ]; then
     root=$(expand_home "$(conf_get lanes root)")
     git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}' \
@@ -139,7 +161,7 @@ if [ -z "$handover" ]; then
     # The reviews the dispatcher ran that came to their end: the lead opens them, it is told what they say.
     node --no-warnings "$ORCH_HOME/lib/reviews.mjs" done "$(conf_get lead report_hours)" > "$work/reviews.json" || echo '[]' > "$work/reviews.json"
   fi
-  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" "${github_out:+down}" "$work/reviews.json" "$(conf_get linear go_state)" > "$work/changes.json"
+  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" "${github_out:+down}" "$work/reviews.json" "$(conf_get linear go_state)" "$work/nights.json" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
 
   if [ -n "$dry_run" ]; then
@@ -210,8 +232,9 @@ else
   {
     cat "$ORCH_HOME/prompts/$role${acting:+-live}.md"
     printf '\n---\nCe qui a bougé depuis le dernier réveil (%s événement(s)) :\n\n' "$count"
-    jq -r '.events[] |
-      if .kind == "comment" then "- \(.ticket) (\(.title)) — commentaire de Makhtar, \(.at) : « \(.text) »"
+    jq -r --arg night_ticket "$(conf_get lead night_ticket | awk -F'|' '{ gsub(/^ +| +$/, "", $1); gsub(/^ +| +$/, "", $2); printf "\"%s\" \"%s\"", $1, $2 }')" '.events[] |
+      if .kind == "night_check_failed" then "- Contrôle de nuit rouge : les vérifications que la forge lance d'"'"'elle-même sur la branche principale ont échoué (terminé \(.at), \(.url)). Ce n'"'"'est la PR d'"'"'aucune équipe. Ouvre un ticket en langage produit (ce que ça peut changer pour l'"'"'utilisateur de l'"'"'app, ce qu'"'"'on sait) : `ops/orchestration/linear.sh create \($night_ticket) \"<titre>\" -`, puis garde une ligne pour le digest du matin avec `ops/orchestration/digest-note.sh -`. Aucun autre message."
+      elif .kind == "comment" then "- \(.ticket) (\(.title)) — commentaire de Makhtar, \(.at) : « \(.text) »"
       elif .kind == "ticket_new" then "- \(.ticket) (\(.title)) — nouveau ticket, \(.at), projet \(.project // "aucun") : « \(.text) »"
       elif .kind == "lane_report" then "- Lane \(.lane) (branche \(.branch)) — son dernier message, \(.at) : « \(.text) »"
       elif .kind == "ticket_moved" then "- \(.ticket) (\(.title)) est maintenant dans le statut « \(.state) », celui de l'"'"'accord de Makhtar pour une mise en ligne. Le script de mise en ligne vérifie lui-même qui l'"'"'y a mis."

@@ -3,7 +3,7 @@
 // GitHub say now and what was seen before. No model: this is the pre-check
 // that decides whether a session is worth starting.
 //
-//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session> [down|up [<finished reviews.json>]]]]
+//   wake.mjs <previous state.json> <linear changes.json> <github pulls.json> <agent ids.txt> <time read> [<lane reports.json> [<kinds worth a session> [down|up [<finished reviews.json> [<statuses watched> [<night runs.json>]]]]]]
 //       down: GitHub is down, its pull requests are not read
 //       <time read>: taken before Linear and GitHub were asked, so that
 //       nothing created while they answered falls between two wakes
@@ -57,7 +57,7 @@ export const WAITING_MAX = 40;
 // only a text out of all proportion is cut.
 export const REVIEW_MAX = 30_000;
 
-export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false, reviews = [], watchedStates = [] } = {}) {
+export function changes(previous, linear, pulls, agentIds = new Set(), now = new Date().toISOString(), reports = [], wakeOn = null, { githubDown = false, reviews = [], watchedStates = [], nights = [] } = {}) {
   // A state that cannot be read (no time of last wake) is no state: this
   // wake takes note of what exists, like the very first one.
   if (previous && Number.isNaN(Date.parse(previous.at))) previous = null;
@@ -113,6 +113,19 @@ export function changes(previous, linear, pulls, agentIds = new Set(), now = new
     events.push({ kind: 'review_done', at: review.at, pr: review.pr, ticket: review.ticket, outcome: review.outcome, commit: review.commit, text: whole(review.text, REVIEW_MAX) });
   }
 
+  // The night checks: the runs the forge starts by itself on the base. A
+  // green one is nobody's business: no event, nothing kept, nothing said. A
+  // red one is worth a session (rule of the user, 2026-10-08). One that
+  // somebody stopped is neither.
+  for (const night of githubDown ? [] : nights) {
+    if ((night.status ?? '').toLowerCase() !== 'completed') continue;
+    const id = `night:${night.databaseId}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (first || !['failure', 'timed_out', 'startup_failure'].includes((night.conclusion ?? '').toLowerCase())) continue;
+    events.push({ kind: 'night_check_failed', at: night.updatedAt, run: night.databaseId, url: night.url, commit: night.headSha });
+  }
+
   // While GitHub is down, what its pull requests seem to do (checks that it
   // cancelled itself) is no news, and nobody could act on it: they are
   // remembered as they were, and read again once it is back.
@@ -149,11 +162,11 @@ const read = (path, fallback) => {
 };
 
 if (runAsCommand(import.meta.url)) {
-  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github, reviewsPath, watched] = process.argv.slice(2);
+  const [previousPath, linearPath, pullsPath, agentPath, readAt, reportsPath, worthList, github, reviewsPath, watched, nightsPath] = process.argv.slice(2);
   const wakeOn = worthList?.trim() ? new Set(worthList.split(',').map((kind) => kind.trim()).filter(Boolean)) : null;
   const agentIds = new Set();
   try { for (const line of readFileSync(agentPath, 'utf8').split('\n')) if (line.trim()) agentIds.add(line.trim()); } catch { /* none yet */ }
   const linear = JSON.parse(readFileSync(linearPath, 'utf8'));
   const pulls = JSON.parse(readFileSync(pullsPath, 'utf8'));
-  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down', reviews: reviewsPath ? read(reviewsPath, []) : [], watchedStates: (watched ?? '').split(',').map((name) => name.trim()).filter(Boolean) }))}\n`);
+  process.stdout.write(`${JSON.stringify(changes(read(previousPath, null), linear, pulls, agentIds, readAt || undefined, reportsPath ? read(reportsPath, []) : [], wakeOn, { githubDown: github === 'down', reviews: reviewsPath ? read(reviewsPath, []) : [], watchedStates: (watched ?? '').split(',').map((name) => name.trim()).filter(Boolean), nights: nightsPath ? read(nightsPath, []) : [] }))}\n`);
 }

@@ -3,7 +3,7 @@
 #
 #   linear.sh issue <ticket>                    ticket as JSON (project, labels, state…)
 #   linear.sh comment <ticket> <file|-> [<from>]  posts the file (or stdin) as a comment, prints its URL
-#   linear.sh waiting                           tickets waiting for the user, as JSON
+#   linear.sh waiting                           tickets in the status that asks the user, as JSON
 #   linear.sh changes <ISO time>                tickets touched since then, with their recent comments, as JSON
 #   linear.sh list <state>                      the tickets in that state ("In Progress"…), as JSON
 #
@@ -56,8 +56,10 @@ fi
 # alone, and asked for again when it is older, or once when the tracker
 # refuses it.
 app_token() {
-  local kept="$ORCH_STATE_DIR/tracker-token.json" token answer
-  if [ "${1:-}" != new ] && [ -s "$kept" ] && [[ "$(jq -r '.at // ""' "$kept" 2> /dev/null)" > "$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+  local kept="$ORCH_STATE_DIR/tracker-token.json" token answer app
+  # The token kept is the one of this application: another identifier, another token.
+  app=$(printf '%s' "$app_id" | sha256sum | cut -c1-16)
+  if [ "${1:-}" != new ] && [ -s "$kept" ] && [ "$(jq -r '.app // ""' "$kept" 2> /dev/null)" = "$app" ] && [[ "$(jq -r '.at // ""' "$kept" 2> /dev/null)" > "$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)" ]]; then
     jq -r '.token' "$kept"
     return 0
   fi
@@ -66,7 +68,7 @@ app_token() {
   token=$(jq -r '.access_token // empty' <<<"$answer" 2> /dev/null)
   [ -n "$token" ] || { echo "linear: no token for the application of the agents ($(jq -r '.error_description // .error // "unreadable answer"' <<<"$answer" 2> /dev/null || echo 'unreadable answer'))" >&2; return 1; }
   mkdir -p "$ORCH_STATE_DIR"
-  (umask 077; jq -n --arg token "$token" --arg at "$(now_utc)" '{token: $token, at: $at}' > "$kept.part") && mv "$kept.part" "$kept"
+  (umask 077; jq -n --arg token "$token" --arg at "$(now_utc)" --arg app "$app" '{token: $token, at: $at, app: $app}' > "$kept.part") && mv "$kept.part" "$kept"
   printf '%s\n' "$token"
 }
 
@@ -288,10 +290,12 @@ case "${1:-}" in
     echo "$2 -> $target"
     ;;
   waiting)
-    team=$(conf_get linear team)
-    gql 'query($team: String!) { viewer { assignedIssues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: "In Review"}}}) { nodes { identifier title url updatedAt comments(first: 1) { nodes { url createdAt } } } } } }' \
-      "$(jq -nc --arg team "$team" '{team: $team}')" \
-      | jq -c '[.data.viewer.assignedIssues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
+    # What waits for the user: the tickets in the status that asks him. Not
+    # « the tickets assigned to the one who asks »: the scripts act as the
+    # application of the agents, to which nothing is assigned.
+    gql 'query($team: String!, $state: String!) { issues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt comments(first: 1) { nodes { url createdAt } } } } }' \
+      "$(jq -nc --arg team "$(conf_get linear team)" --arg state "$(conf_get linear validate_state)" '{team: $team, state: $state}')" \
+      | jq -c '[.data.issues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
     ;;
   *)
     die "usage: linear.sh issue <ticket> | comment <ticket> <file> [<from>] | comments <ticket> | create <project> <label> <title> <file> | changes <ISO time> | list <state> | waiting | state <ticket> | moved-by-owner <ticket> <status> | move <ticket> <status> | upload <image>"

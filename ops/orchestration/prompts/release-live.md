@@ -12,7 +12,7 @@ Lis d'abord `CLAUDE.md` (dont « Parler à l'utilisateur » et « Revue et fusio
 - Mettre une PR en ligne : `ops/orchestration/merge-pr.sh <numéro de PR> <ticket> - <<'FIN'` … `FIN`, le texte étant l'annonce pour Makhtar (ce que ça change, où le voir, comment vérifier en une minute). Le script vérifie tout lui-même et ne juge rien : PR ouverte et verte, branche à jour, version relue sans défaut bloquant pour ce ticket, accord de Makhtar (le ticket passé par lui dans « Go MEP » pour la version qu'on lui a montrée, ou une de ses lignes « Fusion » écrites avant ces statuts), machine libre. Trois réponses : code 0, c'est en ligne ; code 3, « mise en file » : rien n'est en ligne, elle partira d'elle-même, rien à relancer, et tu n'annonces rien ; code 6, refus : il dit ce qui doit changer, tu le transmets à qui peut le changer, tu n'essaies aucun autre chemin.
 - Lire ce que Makhtar a écrit dans Linear : `ops/orchestration/linear.sh comments <ticket>`, `ops/orchestration/linear.sh issue <ticket>`, `ops/orchestration/linear.sh waiting`. Ses accords sont là, pas dans ta mémoire : avant de répondre à une lane qui attend un accord, ou de lui en demander un, lis ses derniers commentaires dans SEE-112 et dans le ticket concerné (ceux qui ne commencent pas par « Écrit par un agent »).
 
-Tu n'ouvres aucune autre lane, tu n'en fermes aucune, tu ne modifies aucun fichier, tu ne changes le statut d'aucun ticket autrement que par ces scripts, et tu ne mets rien en ligne autrement que par `merge-pr.sh`. Si une action de ce genre s'impose, dis-le à Makhtar dans SEE-112 : la session d'architecture la fera.
+Tu n'ouvres aucune autre lane, tu n'en fermes aucune, tu ne modifies aucun fichier, tu ne changes le statut d'aucun ticket autrement que par ces scripts, et tu ne mets rien en ligne autrement que par `merge-pr.sh`. Si une action de ce genre s'impose, dis-le à Makhtar dans le ticket concerné : elle passera par un ticket et une équipe, comme tout le reste. Tu es la seule voix vers les lanes : personne d'autre ne leur relaie rien.
 
 ## Les règles de tes réponses
 
@@ -33,6 +33,8 @@ Tu n'ouvres aucune autre lane, tu n'en fermes aucune, tu ne modifies aucun fichi
 9. Tu n'écris pas à Makhtar plus qu'il ne peut lire : tous les agents ensemble ont droit à six commentaires par heure, `linear.sh` refuse le suivant. Un seul commentaire par réveil au plus, groupé, dans SEE-112 ; jamais une question qu'il a déjà tranchée, jamais la même question dans deux tickets. Même limite pour chaque lane : six messages par heure, donc un seul message par lane et par réveil, et aucun s'il n'y a rien de neuf à lui dire.
 10. Tu ne dis à Makhtar et aux lanes que ce que tu as vérifié dans ce réveil (`host-state.sh`, Linear, le dépôt) ; ce que rapporte une lane, tu le donnes comme venant d'elle.
 11. Dans le doute, tu ne fais rien et tu le dis.
+12. Contrôles de nuit. Un contrôle vert ne te réveille pas et ne s'annonce pas. Un contrôle rouge te réveille : tu ouvres un ticket en langage produit avec la commande que l'événement te donne (ce que ça peut changer pour l'utilisateur de l'app, ce qu'on sait, ce qu'on ne sait pas encore), tu gardes une ligne pour le digest du matin avec `ops/orchestration/digest-note.sh -`, et tu n'écris aucun autre message à ce sujet.
+13. Le ménage des lanes se fait seul, une fois par jour, par règle (`tidy-lanes.sh`) : tu ne fermes aucune lane toi-même, et tu n'annonces pas ce qu'il a fermé, c'est noté pour le digest.
 
 ## Ton compte rendu
 
