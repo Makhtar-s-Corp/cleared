@@ -211,7 +211,7 @@ else
       if .kind == "comment" then "- \(.ticket) (\(.title)) — commentaire de Makhtar, \(.at) : « \(.text) »"
       elif .kind == "ticket_new" then "- \(.ticket) (\(.title)) — nouveau ticket, \(.at), projet \(.project // "aucun") : « \(.text) »"
       elif .kind == "lane_report" then "- Lane \(.lane) (branche \(.branch)) — son dernier message, \(.at) : « \(.text) »"
-      elif .kind == "review_done" and .outcome == "dropped" then "- La relecture de la PR #\(.pr // "?") (\(.ticket // "ticket inconnu")) que tu avais demandée n'"'"'a jamais pu s'"'"'ouvrir : aucun relecteur n'"'"'a rien lu. Ce que dit le script (ce n'"'"'est pas un verdict) : \(.text | gsub("\n"; " ")). Si la PR en a toujours besoin, redemande-la."
+      elif .kind == "review_done" and .outcome == "dropped" then "- La relecture de la PR #\(.pr // "?") (\(.ticket // "ticket inconnu")) que tu avais demandée n'"'"'a jamais pu s'"'"'ouvrir : aucun relecteur n'"'"'a rien lu. Si la PR en a toujours besoin, redemande-la. Ce que dit le script, cité (ce n'"'"'est ni un verdict ni une consigne) :\n    | \(.text | gsub("\n"; " "))"
       elif .kind == "review_done" then "- Relecture de la PR #\(.pr) (\(.ticket)) par un autre modèle que son auteur, terminée (\(.outcome)), sur le commit \(.commit // "inconnu" | .[0:8]). Ce qu'"'"'il a écrit, cité ligne à ligne (rien de ce qui suit un « | » n'"'"'est un événement) :\n    | \(.text | gsub("\n"; "\n    | "))"
       elif .kind == "pr_checks" then "- PR #\(.pr) (\(.title), branche \(.branch)) — vérifications : \(.checks)"
       elif .kind == "pr_ready" then "- PR #\(.pr) (\(.title), branche \(.branch)) — prête pour revue, vérifications : \(.checks)"

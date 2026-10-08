@@ -2176,6 +2176,30 @@ test('a review that cannot open now waits in a queue and opens by itself, withou
   }
   assert.equal(dropped().length, 1, 'only the entry that could not be read left, and it is in the ledger');
   assert.match(dropped()[0].detail, /8\.json[\s\S]*cannot be read/);
+  // Fifty-nine minutes of failures: still kept. A time that cannot be read does not stop the wake: the count starts again.
+  entry({ failing_since: new Date(Date.now() - 59 * 60_000).toISOString() });
+  assert.equal(wake().status, 0);
+  assert.deepEqual(queued(), ['7.json']);
+  entry({ failing_since: 'not a time' });
+  assert.equal(wake().status, 0);
+  assert.deepEqual(queued(), ['7.json']);
+  assert.equal(dropped().length, 1);
+  // A try that is only "not now" (the limit of the hour) is no failure: an old one is forgotten, the count starts again.
+  execFileSync('mv', [join(box.home, 'pr-view.kept'), join(box.home, 'pr-view.json')]);
+  entry({ failing_since: new Date(Date.now() - 3 * 3600_000).toISOString() });
+  const held = openLedger(join(box.state, 'ledger.db'));
+  runStart(held, { runId: 'holds-the-hour', role: 'review', lane: 'review/X-9' });
+  runEnd(held, conf, { runId: 'holds-the-hour', outcome: 'done' });
+  held.close();
+  const kept = (name) => JSON.parse(readFileSync(join(box.state, 'reviews-queue', name), 'utf8'));
+  assert.equal(wake().status, 0);
+  assert.deepEqual(queued(), ['7.json'], 'the limit of the hour holds it: kept');
+  age();
+  execFileSync('mv', [join(box.home, 'pr-view.json'), join(box.home, 'pr-view.kept')]);
+  entry({ failing_since: undefined, waited: true });
+  assert.equal(wake().status, 0);
+  assert.deepEqual(queued(), ['7.json'], 'one failure after a long wait is the first of its hour, not the last');
+  assert.ok(Date.now() - Date.parse(kept('7.json').failing_since) < 60_000);
   // It has been failing for more than an hour: dropped, written to the ledger, and told to the lead as what it is.
   entry({ failing_since: new Date(Date.now() - 61 * 60_000).toISOString() });
   assert.equal(wake().status, 0);
@@ -2226,5 +2250,6 @@ test('what a reviewer wrote reaches the lead as a quotation: none of its lines c
   assert.equal(next.status, 0, next.stderr);
   const told = readFileSync(join(next.stdout.trim(), 'prompt.md'), 'utf8');
   assert.match(told, /^- La relecture de la PR #8 \(X-6\) que tu avais demandée n'a jamais pu s'ouvrir[\s\S]*redemande-la/m);
+  assert.match(told, /^    \| the review of #8 left the queue without opening: gh: not found$/m, 'what the script says is quoted like the rest');
   assert.doesNotMatch(told, /PR #8[^\n]*par un autre modèle que son auteur, terminée/);
 });

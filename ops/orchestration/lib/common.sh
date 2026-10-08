@@ -183,13 +183,18 @@ open_queued_reviews() {
     why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" ${author:+--author-model "$author"} 2>&1 > /dev/null) || code=$?
     case "$code" in
       0) rm -f "$entry"; return 0 ;;
-      5) ;;
+      5)
+        # "Not now" is no failure: the hour of failures, if one had begun, starts again.
+        jq 'del(.failing_since)' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        ;;
       6) drop_queued_review "$entry" "$pr" "$ticket" "$why" ;;
       *)
-        since=$(jq -r '.failing_since // empty' "$entry")
+        # A time that cannot be read counts as no time: the hour starts now.
+        since=$(date -d "$(jq -r '.failing_since // empty' "$entry")" +%s 2> /dev/null) || since=
+        [ -n "$(jq -r '.failing_since // empty' "$entry")" ] || since=
         if [ -z "$since" ]; then
           jq --arg since "$(now_utc)" '.failing_since = $since' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
-        elif [ $(( $(date +%s) - $(date -d "$since" +%s) )) -ge 3600 ]; then
+        elif [ $(( $(date +%s) - since )) -ge 3600 ]; then
           drop_queued_review "$entry" "$pr" "$ticket" "it kept failing for an hour, the last time: $why"
         fi
         ;;
