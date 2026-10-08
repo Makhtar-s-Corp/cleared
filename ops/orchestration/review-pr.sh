@@ -58,8 +58,10 @@ later() {
     exit 5
   fi
   mkdir -p "$ORCH_STATE_DIR/reviews-queue"
+  # Written under another name, then renamed: a wake never reads half an entry.
   jq -n --arg pr "$pr" --arg ticket "$ticket" --arg author "${author:-$said_author}" --arg at "$(now_utc)" --arg why "$1" \
-    '{pr: ($pr | tonumber), ticket: $ticket, author: $author, at: $at, why: $why}' > "$ORCH_STATE_DIR/reviews-queue/$pr.json"
+    '{pr: ($pr | tonumber), ticket: $ticket, author: $author, at: $at, why: $why}' > "$ORCH_STATE_DIR/reviews-queue/.$pr.part"
+  mv "$ORCH_STATE_DIR/reviews-queue/.$pr.part" "$ORCH_STATE_DIR/reviews-queue/$pr.json"
   echo "Relecture de la PR #$pr mise en file ($1). Elle s'ouvrira d'elle-même dès que possible, sans rien relancer ; son verdict te sera remis à un réveil."
   exit 0
 }

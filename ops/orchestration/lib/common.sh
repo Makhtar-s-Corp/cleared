@@ -158,15 +158,19 @@ flush_outbox() {
 
 # open_queued_reviews: the reviews review-pr.sh could not open at once, opened
 # now if they may, oldest first, one a wake. No model: the same script, with
-# the same rules. One that will never open (already reviewed, pull request
-# closed), or that failed three wakes in a row, leaves the queue: that is
+# the same rules. A failure that may pass (GitHub or the network not
+# answering) is tried again at every wake for an hour. One that will never
+# open (already reviewed, pull request closed), one that kept failing for
+# that hour, and an entry that cannot be read leave the queue: each is
 # written to the ledger (review_dropped) and told to the lead at its next
-# wake. An entry that cannot be read is removed.
+# wake, as a review to ask for again.
 open_queued_reviews() {
-  local queue="$ORCH_STATE_DIR/reviews-queue" entry pr ticket author code limit recent failed why
+  local queue="$ORCH_STATE_DIR/reviews-queue" entry pr ticket author code limit recent since why
   ls "$queue"/*.json > /dev/null 2>&1 || return 0
   for entry in "$queue"/*.json; do
-    jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1 || rm -f "$entry"
+    jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1 && continue
+    ledger event --kind review_dropped --detail "an entry of the queue of reviews ($(basename "$entry")) cannot be read: removed, the review is to be asked for again"
+    rm -f "$entry"
   done
   ls "$queue"/*.json > /dev/null 2>&1 || return 0
   limit=$(conf_get review per_hour)
@@ -182,11 +186,11 @@ open_queued_reviews() {
       5) ;;
       6) drop_queued_review "$entry" "$pr" "$ticket" "$why" ;;
       *)
-        failed=$(( $(jq -r '.failed // 0' "$entry") + 1 ))
-        if [ "$failed" -ge 3 ]; then
-          drop_queued_review "$entry" "$pr" "$ticket" "three tries failed, the last one: $why"
-        else
-          jq --argjson failed "$failed" '.failed = $failed' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        since=$(jq -r '.failing_since // empty' "$entry")
+        if [ -z "$since" ]; then
+          jq --arg since "$(now_utc)" '.failing_since = $since' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        elif [ $(( $(date +%s) - $(date -d "$since" +%s) )) -ge 3600 ]; then
+          drop_queued_review "$entry" "$pr" "$ticket" "it kept failing for an hour, the last time: $why"
         fi
         ;;
     esac

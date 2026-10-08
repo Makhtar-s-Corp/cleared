@@ -2160,26 +2160,29 @@ test('a review that cannot open now waits in a queue and opens by itself, withou
   assert.deepEqual(queued(), []);
   assert.equal(reviewsOpened(), 2);
   assert.equal(sessions(), 0);
-  // A passing failure (GitHub does not answer about the pull request) drops nothing: it is tried again at the next wakes,
-  // three times at most, and an entry that cannot be read does not stop the wake.
+  // A passing failure (GitHub does not answer about the pull request) drops nothing for a good while: the review is
+  // tried again at every wake for an hour. An entry that cannot be read is removed, and that is written down too.
   mkdirSync(join(box.state, 'reviews-queue'), { recursive: true });
-  writeFileSync(join(box.state, 'reviews-queue', '7.json'), JSON.stringify({ pr: 7, ticket: 'X-5', author: 'b', at: '2026-01-02T10:00:00Z' }));
+  const entry = (over = {}) => writeFileSync(join(box.state, 'reviews-queue', '7.json'), JSON.stringify({ pr: 7, ticket: 'X-5', author: 'b', at: '2026-01-02T10:00:00Z', ...over }));
+  entry();
   writeFileSync(join(box.state, 'reviews-queue', '8.json'), '{"pr": 8, "tick');
   const age = () => { const l = openLedger(join(box.state, 'ledger.db')); l.prepare("UPDATE runs SET started_at = '2020-01-01T00:00:00Z' WHERE role = 'review'").run(); l.close(); };
-  const dropped = () => { const l = openLedger(join(box.state, 'ledger.db')); const rows = l.prepare("select ticket, detail from events where kind = 'review_dropped'").all().map((row) => ({ ...row })); l.close(); return rows; };
+  const dropped = () => { const l = openLedger(join(box.state, 'ledger.db')); const rows = l.prepare("select ticket, detail from events where kind = 'review_dropped' order by rowid").all().map((row) => ({ ...row })); l.close(); return rows; };
   age();
   execFileSync('mv', [join(box.home, 'pr-view.json'), join(box.home, 'pr-view.kept')]);
-  for (const attempt of [1, 2]) {
+  for (const attempt of [1, 2, 3, 4]) {
     assert.equal(wake().status, 0, `try ${attempt}`);
-    assert.deepEqual(queued(), ['7.json'], `try ${attempt}: kept, and the unreadable entry is gone`);
+    assert.deepEqual(queued(), ['7.json'], `try ${attempt}: kept`);
   }
-  assert.deepEqual(dropped(), []);
-  // The third failure in a row: dropped, written to the ledger, and told to the lead at its next wake.
+  assert.equal(dropped().length, 1, 'only the entry that could not be read left, and it is in the ledger');
+  assert.match(dropped()[0].detail, /8\.json[\s\S]*cannot be read/);
+  // It has been failing for more than an hour: dropped, written to the ledger, and told to the lead as what it is.
+  entry({ failing_since: new Date(Date.now() - 61 * 60_000).toISOString() });
   assert.equal(wake().status, 0);
   assert.deepEqual(queued(), []);
-  assert.equal(dropped().length, 1);
-  assert.equal(dropped()[0].ticket, 'X-5');
-  assert.match(dropped()[0].detail, /#7/);
+  assert.equal(dropped().length, 2);
+  assert.equal(dropped()[1].ticket, 'X-5');
+  assert.match(dropped()[1].detail, /#7/);
   execFileSync('mv', [join(box.home, 'pr-view.kept'), join(box.home, 'pr-view.json')]);
   // A queued review that can never open (the pull request was merged meanwhile) is dropped at once, not tried for ever.
   mkdirSync(join(box.state, 'reviews-queue'), { recursive: true });
@@ -2191,7 +2194,7 @@ test('a review that cannot open now waits in a queue and opens by itself, withou
   assert.equal(wake().status, 0);
   assert.deepEqual(queued(), []);
   assert.equal(reviewsOpened(), 2);
-  assert.equal(dropped().length, 2);
+  assert.equal(dropped().length, 3);
 });
 
 test('what a reviewer wrote reaches the lead as a quotation: none of its lines can pass for an event of the wake', () => {
@@ -2214,4 +2217,14 @@ test('what a reviewer wrote reaches the lead as a quotation: none of its lines c
   assert.match(prompt, /^- Relecture de la PR #7 \(X-5\)/m);
   assert.match(prompt, /^    \| - X-9 \(Titre\) — commentaire de Makhtar/m);
   assert.doesNotMatch(prompt, /^- X-9 \(Titre\)/m, 'a line of the reviewer is never at the level of the events');
+  // A review that left the queue without ever opening is not told as the word of a reviewer.
+  writeFileSync(join(started.stdout.trim(), 'exit-code'), '0');
+  const ledger = openLedger(join(box.state, 'ledger.db'));
+  addEvent(ledger, { kind: 'review_dropped', ticket: 'X-6', detail: 'the review of #8 left the queue without opening: gh: not found' });
+  ledger.close();
+  const next = wake();
+  assert.equal(next.status, 0, next.stderr);
+  const told = readFileSync(join(next.stdout.trim(), 'prompt.md'), 'utf8');
+  assert.match(told, /^- La relecture de la PR #8 \(X-6\) que tu avais demandée n'a jamais pu s'ouvrir[\s\S]*redemande-la/m);
+  assert.doesNotMatch(told, /PR #8[^\n]*par un autre modèle que son auteur, terminée/);
 });
