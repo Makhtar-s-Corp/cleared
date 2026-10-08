@@ -2964,15 +2964,29 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.equal(comments(), before + 1, 'the same request is not written to him a second time');
   assert.deepEqual(kept(), [{ pr: 7, head: '3333333333333333333333333333333333333333' }]);
   assert.deepEqual(moves().slice(-1), ['X-5 -> À valider']);
-  // What was shown is kept, or the request fails out loud: a record that cannot be written is not a request made.
+  // Nothing can be kept of a request: it is not made at all. He is not written to for a request that could not be finished.
   pull('4444444444444444444444444444444444444444');
-  execFileSync('chmod', ['555', join(box.state, 'validations')]);
+  mkdirSync(join(box.state, 'validations', 'X-5.pending.part'));
+  const nothing = comments();
   const unkept = ask(['--pr', '7'], 'Encore une version. Je la mets en ligne ?');
-  execFileSync('chmod', ['755', join(box.state, 'validations')]);
-  assert.equal(unkept.status, 1, 'not a success when what he was shown could not be kept');
-  assert.match(unkept.stderr, /could not be kept/);
+  assert.equal(unkept.status, 1);
+  assert.match(unkept.stderr, /nothing can be kept[\s\S]*nothing asked/);
+  assert.equal(comments(), nothing, 'nothing was written to him');
+  execFileSync('rmdir', [join(box.state, 'validations', 'X-5.pending.part')]);
+  // The request is written and the card moved, but what he was shown cannot be kept: said out loud, since his agreement
+  // would be bound to no version. Asked again once repaired, it is finished without a second comment.
+  mkdirSync(join(box.state, 'validations', 'X-5.json.part'));
+  const unbound = ask(['--pr', '7'], 'Encore une version. Je la mets en ligne ?');
+  assert.equal(unbound.status, 1, 'not a success when what he was shown could not be kept');
+  assert.match(unbound.stderr, /what he was shown could not be kept/);
+  assert.equal(comments(), nothing + 1);
   assert.deepEqual(kept(), [{ pr: 7, head: '3333333333333333333333333333333333333333' }]);
+  execFileSync('rmdir', [join(box.state, 'validations', 'X-5.json.part')]);
+  assert.equal(ask(['--pr', '7'], 'Encore une version. Je la mets en ligne ?').status, 0);
+  assert.equal(comments(), nothing + 1, 'finished without writing to him again');
+  assert.deepEqual(kept(), [{ pr: 7, head: '4444444444444444444444444444444444444444' }]);
   // A request left unfinished long ago is not taken for the one made now: he is written again.
+  pull('5555555555555555555555555555555555555555');
   const stale = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_LINEAR_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'Une version de plus. Je la mets en ligne ?' });
   assert.equal(stale.status, 1);
   const pendingPath = join(box.state, 'validations', 'X-5.pending');
