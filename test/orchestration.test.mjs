@@ -2085,8 +2085,14 @@ test('what its first review asked: the dependencies come from the base and run n
   ]));
   pull({ headRefOid: first.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   // (its date says « before the session »: only what the session was handed tells what is new)
+  // Dependencies of a lock file no worktree uses any more do not pile up: gone at the next opening of a lane.
+  const stale = join(box.state, 'deps', '0000000000000000');
+  mkdirSync(join(stale, 'node_modules', 'old'), { recursive: true });
+  execFileSync('chmod', ['-R', 'a-w', join(stale, 'node_modules')]);
   assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
   assert.equal(installs().length, 1);
+  assert.deepEqual(readdirSync(join(box.state, 'deps')).filter((name) => /^[0-9a-f]{16}$/.test(name)).length, 1, 'only the one in use is kept');
+  assert.equal(readFileSync(join(record('X-5').worktree, 'node_modules', 'pkg', 'index.js'), 'utf8'), 'installed\n');
   const second = session('X-5', { commit: null, answer: 'Fait.\n\n**Questions pour Makhtar**\n\n1. Le toast se ferme-t-il aussi au survol ? Recommandation : oui.' });
   assert.match(second.prompt, /Les dépendances installées sont celles de la branche principale/);
   assert.doesNotMatch(second.prompt.split('Pourquoi tu es rouverte')[1], /au clic/);
@@ -2097,7 +2103,9 @@ test('what its first review asked: the dependencies come from the base and run n
   pull({ headRefOid: second.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SKIPPED' }] });
   assert.equal(flow().stdout.trim(), '');
   const kept = record('X-5');
-  kept.done[`waits:${second.head}`] = new Date(Date.now() - 31 * 60000).toISOString();
+  // (counted from when it left draft)
+  assert.ok(kept.done[`ready:${second.head}`]);
+  kept.done[`ready:${second.head}`] = new Date(Date.now() - 31 * 60000).toISOString();
   writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
   assert.match(flow().stdout, /X-5: #41 is out of draft and none of its checks ran/);
   assert.equal(flow().stdout.trim(), '');

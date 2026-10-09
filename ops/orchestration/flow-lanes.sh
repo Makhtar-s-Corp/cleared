@@ -298,8 +298,10 @@ one_lane() {
   fi
   if [ "$ran" = 0 ]; then
     # Out of draft and no check ran (all skipped, or none started): it is
-    # given half an hour, then said. Nothing here can start them.
-    asked=$(jq -r --arg key "waits:$head" '.done[$key] // empty' "$record")
+    # given half an hour from when it left draft (from when it was first
+    # seen so, for one somebody else took out), then said. Nothing here can
+    # start them.
+    asked=$(jq -r --arg head "$head" '.done["ready:" + $head] // .done["waits:" + $head] // empty' "$record")
     if [ -z "$asked" ]; then mark "$record" "waits:$head"; return 0; fi
     if [ "$(( $(date +%s) - $(date -d "$asked" +%s) ))" -ge 1800 ] && ! did "$record" "nochecks:$head"; then
       say "$ticket: #$pr is out of draft and none of its checks ran in half an hour"

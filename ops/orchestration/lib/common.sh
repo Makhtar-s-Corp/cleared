@@ -402,10 +402,12 @@ open_terminal() {
 # what a lane may do. No script of a package is run either, and nobody
 # writes in what is shared but for the scratch folders a build needs. A lane
 # whose lock file differs from the one of the base is told (deps_note): what
-# it adds is installed once it is on the base. Nothing to do for a project
-# without a lock file.
+# it adds is installed once it is on the base. A package that needs its own
+# install script to work would fail in the lanes and pass in the checks of
+# the pull request, which install it whole: that is where to look first.
+# Nothing to do for a project without a lock file.
 lane_deps() {
-  local worktree=$1 base hash dir new exclude scratch
+  local worktree=$1 base hash dir new exclude scratch other used
   deps_note=
   base=$(conf_get lanes base)
   git -C "$worktree" cat-file -e "$base:package.json" 2> /dev/null && git -C "$worktree" cat-file -e "$base:package-lock.json" 2> /dev/null || return 0
@@ -433,6 +435,19 @@ lane_deps() {
     fi
   ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
   ln -sfn "$dir/node_modules" "$worktree/node_modules"
+  # Those of a lock file no worktree uses any more go: they are only a
+  # copy of what can be installed again, and they would pile up.
+  used=$(git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r other; do readlink "$other/node_modules" 2> /dev/null || true; done)
+  (
+    flock -w 60 7 || exit 0
+    for other in "$ORCH_STATE_DIR/deps"/*/; do
+      other=${other%/}
+      [[ "$(basename "$other")" =~ ^[0-9a-f]{16}$ ]] && [ "$other" != "$dir" ] || continue
+      grep -qxF -- "$other/node_modules" <<<"$used" && continue
+      chmod -R u+w "$other" 2> /dev/null || true
+      rm -rf "$other"
+    done
+  ) 7> "$ORCH_STATE_DIR/deps/lock" || true
   # The link is not a change of the lane (an ignore rule written for a folder does not hold a link).
   exclude="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
   mkdir -p "$(dirname "$exclude")"
