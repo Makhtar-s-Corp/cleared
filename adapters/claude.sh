@@ -97,10 +97,27 @@ case "${1:-}" in
     # the tool by name leaves it there).
     [ "${ORCH_ADVISOR:-}" = no ] && args+=(--settings '{"advisorModel":""}')
     set +e
-    # The lane shows what the model says and which tools it calls, as it goes.
-    cli "${args[@]}" < "$prompt_file" | tee "$events" | jq -R -r --unbuffered '
-      fromjson? | select(.type == "assistant") | .message.content[]?
-      | if .type == "text" then .text elif .type == "tool_use" then "  > " + .name else empty end' 2>/dev/null
+    # The lane shows, as it goes, what the model says, what it thinks, and
+    # what each of its actions is about (the reason it gave for a command,
+    # else the command; the file, from the folder it works in), one line an
+    # action. What a helper it called says is left out.
+    cli "${args[@]}" < "$prompt_file" | tee "$events" | jq -R -r --unbuffered --arg here "$PWD/" '
+      def line: gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+      def short: line | if length > 160 then .[0:157] + "…" else . end;
+      def file: (. // "") | if startswith($here) then .[($here | length):] else . end;
+      fromjson? | select(.type == "assistant" and (.parent_tool_use_id // null) == null) | .message.content[]?
+      | if .type == "text" then .text
+        elif .type == "thinking" then ((.thinking // "") | short | select(. != "") | "  (réflexion) " + .)
+        elif .type == "tool_use" then
+          (.input // {}) as $in
+          | (if ($in.description // "") != "" then ($in.description | short)
+             elif ($in.command // "") != "" then ($in.command | split("\n")[0] | short)
+             elif ($in.file_path // "") != "" then ($in.file_path | file)
+             elif ($in.pattern // "") != "" then ($in.pattern | short) + (if ($in.path // "") != "" then " (" + ($in.path | file) + ")" else "" end)
+             elif ($in.prompt // "") != "" then ($in.prompt | short)
+             else "" end) as $about
+          | "  > " + .name + (if $about != "" then " : " + $about else "" end)
+        else empty end' 2>/dev/null
     code=${PIPESTATUS[0]}
     set -e
     # Each line is read on its own: one cut short (a CLI stopped while
