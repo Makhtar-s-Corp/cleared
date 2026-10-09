@@ -120,6 +120,10 @@ permissions_env() {
   export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY
   ORCH_ALLOW=$(conf_get "permissions.$1" allow)
   ORCH_DENY=$(conf_get "permissions.$1" deny)
+  # {orch} is where these scripts are: a lane is handed the dispatcher's own
+  # copy of a script, never the one of the branch it works on.
+  ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/$ORCH_HOME}
+  ORCH_DENY=${ORCH_DENY//\{orch\}/$ORCH_HOME}
 }
 
 adapter_path() {
@@ -388,6 +392,101 @@ open_terminal() {
   ledger event --kind orca_terminal_failed --ticket "$ticket" --value "$(( $(date +%s) - started ))" --detail "$title: Orca did not open a terminal in $worktree"
   return 1
 }
+
+# lane_deps <worktree>: the dependencies of the project, at hand in that
+# worktree. A lane has no network command and may install nothing: the
+# dispatcher installs them, once for a given lock file, in the state, and
+# every worktree links to them.
+# What is installed is what the base asks for, never what the lane wrote: an
+# install fetches and runs code with the rights of the dispatcher, outside
+# what a lane may do. No script of a package is run either, and nobody
+# writes in what is shared but for the scratch folders a build needs. A lane
+# whose lock file differs from the one of the base is told (deps_note): what
+# it adds is installed once it is on the base. A package that needs its own
+# install script to work would fail in the lanes and pass in the checks of
+# the pull request, which install it whole: that is where to look first.
+# Nothing to do for a project without a lock file.
+lane_deps() {
+  local worktree=$1 base hash dir new exclude scratch other used
+  deps_note=
+  base=$(conf_get lanes base)
+  git -C "$worktree" cat-file -e "$base:package.json" 2> /dev/null && git -C "$worktree" cat-file -e "$base:package-lock.json" 2> /dev/null || return 0
+  hash=$({ git -C "$worktree" show "$base:package.json"; git -C "$worktree" show "$base:package-lock.json"; } | sha256sum | cut -c1-16)
+  dir="$ORCH_STATE_DIR/deps/$hash"
+  mkdir -p "$ORCH_STATE_DIR/deps"
+  (
+    flock -w 900 7 || exit 1
+    if [ ! -d "$dir/node_modules" ]; then
+      new=$(mktemp -d "$ORCH_STATE_DIR/deps/.new.XXXXXX")
+      git -C "$worktree" show "$base:package.json" > "$new/package.json"
+      git -C "$worktree" show "$base:package-lock.json" > "$new/package-lock.json"
+      if (cd "$new" && npm ci --ignore-scripts --no-audit --no-fund > "$new/install.log" 2>&1) && [ -d "$new/node_modules" ]; then
+        mv "$new" "$dir"
+      else
+        echo "$(basename "$0"): the dependencies could not be installed (see $new/install.log)" >&2
+        exit 1
+      fi
+    fi
+    # Shared by every lane: read-only, but for where a build writes.
+    if [ -w "$dir/node_modules" ]; then
+      for scratch in .vite .vite-temp .cache; do mkdir -p "$dir/node_modules/$scratch"; done
+      chmod -R a-w "$dir/node_modules"
+      for scratch in .vite .vite-temp .cache; do chmod -R u+w "$dir/node_modules/$scratch"; done
+    fi
+    # Linked while the lock is held: the tidying below, run by another lane
+    # being opened, then sees it in use.
+    ln -sfn "$dir/node_modules" "$worktree/node_modules"
+    # Those of a lock file no worktree uses any more go, once older than an
+    # hour: they are only a copy of what can be installed again, and they
+    # would pile up.
+    used=$(git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r other; do readlink "$other/node_modules" 2> /dev/null || true; done)
+    for other in "$ORCH_STATE_DIR/deps"/*/; do
+      other=${other%/}
+      [[ "$(basename "$other")" =~ ^[0-9a-f]{16}$ ]] && [ "$other" != "$dir" ] || continue
+      grep -qxF -- "$other/node_modules" <<<"$used" && continue
+      [ -n "$(find "$other" -maxdepth 0 -mmin +60 2> /dev/null)" ] || continue
+      chmod -R u+w "$other" 2> /dev/null || true
+      rm -rf "$other" 2> /dev/null || true
+    done
+    # A tidying that fails never keeps a lane from opening.
+    true
+  ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
+  # The link is not a change of the lane (an ignore rule written for a folder does not hold a link).
+  exclude="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"
+  grep -qxF '/node_modules' "$exclude" 2> /dev/null || echo '/node_modules' >> "$exclude"
+  if ! git -C "$worktree" show "$base:package.json" | cmp -s - "$worktree/package.json" || ! git -C "$worktree" show "$base:package-lock.json" | cmp -s - "$worktree/package-lock.json"; then
+    deps_note="Les dépendances installées sont celles de la branche principale : ton \`package.json\` ou ton \`package-lock.json\` en diffère. Ce que tu y ajoutes n'est pas installé ici (rien n'est installé à partir de ce qu'une équipe écrit) : dis-le dans ton compte rendu, les vérifications automatiques de ta PR l'installeront."
+  fi
+}
+
+# only_base_merges <commit> <head>: the head holds that commit, and adds on
+# top of it nothing but merges of the base that changed nothing by
+# themselves. A commit of the lane itself would have been seen by nobody;
+# nor would the branch of another lane, which brings commits of its own
+# (of one parent, refused below) or a merge that changed something by
+# itself (refused too).
+only_base_merges() {
+  local added parents auto base
+  base=$(conf_get lanes base)
+  [ "$1" != "$2" ] || return 0
+  git -C "$ORCH_REPO" merge-base --is-ancestor "$1" "$2" 2> /dev/null || return 1
+  while IFS= read -r added; do
+    read -r -a parents < <(git -C "$ORCH_REPO" rev-list --parents -n 1 "$added" | cut -d' ' -f2-)
+    [ "${#parents[@]}" = 2 ] || return 1
+    auto=$(git -C "$ORCH_REPO" merge-tree --write-tree "${parents[0]}" "${parents[1]}" 2> /dev/null) || return 1
+    [ "$auto" = "$(git -C "$ORCH_REPO" rev-parse "$added^{tree}")" ] || return 1
+  done < <(git -C "$ORCH_REPO" rev-list "$1..$2" --not "$base")
+}
+
+# lane_record <ticket>: where what is known of the lane of a ticket is kept
+# (its branch, the branch its work is sent to, its pull request, its runs).
+# It outlives the worktree: a lane the tidying closed is opened again from it.
+lane_record() { echo "$ORCH_STATE_DIR/lanes/$1.json"; }
+
+# quoted <file>: a text handed to a model as what somebody wrote, line by
+# line under a mark: none of its lines is an order of another kind.
+quoted() { sed 's/^/    | /' "$1"; }
 
 # Lanes opened by the dispatcher: branches named <role>/<ticket>.
 dispatcher_lanes() {

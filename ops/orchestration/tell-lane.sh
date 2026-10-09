@@ -7,6 +7,8 @@
 # a few messages an hour go to one lane.
 #
 #   tell-lane.sh <worktree name> <file|->       - reads the message on stdin
+#   tell-lane.sh <ticket> <file|->              a lane the dispatcher opened on that ticket: kept, and
+#                                               handed to it at a session the rules open for that
 #   tell-lane.sh --list                         the lanes that can be told something
 #
 # Every message is kept in state/lane-messages.jsonl.
@@ -14,15 +16,29 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 known="$ORCH_STATE_DIR/lanes.json"
-[ -f "$known" ] || die "no lane is known yet: $known is missing"
+# The lanes the dispatcher opened on a ticket, and that are not over.
+of_tickets() {
+  local record
+  for record in "$ORCH_STATE_DIR/lanes"/*.json; do
+    [ -f "$record" ] || continue
+    jq -r 'select(type == "object" and (.ticket | type) == "string" and (.closed // "") == "") | .ticket' "$record" 2> /dev/null || true
+  done
+}
 if [ "${1:-}" = --list ]; then
-  jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$known"
+  [ ! -f "$known" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$known"
+  of_tickets | sed 's/$/\tlane of the dispatcher: handed at its next session/'
   exit 0
 fi
-[ $# -eq 2 ] || die "usage: tell-lane.sh <worktree name> <file|-> | --list"
+[ $# -eq 2 ] || die "usage: tell-lane.sh <worktree name | ticket> <file|-> | --list"
 lane=$1
-handle=$(jq -r --arg lane "$lane" '.[$lane] // empty' "$known")
-[ -n "$handle" ] || die "\"$lane\" is not a lane that can be told something (known: $(jq -r 'keys | join(" ")' "$known"))"
+ticket=
+! of_tickets | grep -qxF -- "$lane" || ticket=$lane
+handle=
+if [ -z "$ticket" ]; then
+  [ -f "$known" ] || die "\"$lane\" is not a lane that can be told something: no lane is known yet"
+  handle=$(jq -r --arg lane "$lane" '.[$lane] // empty' "$known")
+  [ -n "$handle" ] || die "\"$lane\" is not a lane that can be told something (known: $(jq -r 'keys | join(" ")' "$known") $(of_tickets | tr '\n' ' '))"
+fi
 if [ "$2" = - ]; then text=$(cat); else [ -f "$2" ] || die "no such file: $2"; text=$(cat "$2"); fi
 # One paragraph: a line break would send the message before its end.
 text=$(printf '%s' "$text" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
@@ -38,6 +54,18 @@ fi
 limit=$(conf_get lead messages_per_lane_per_hour)
 recent=$(jq -R -r --arg lane "$lane" --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.lane == $lane and .at > $since) | .at' "$ORCH_STATE_DIR/lane-messages.jsonl" 2> /dev/null | grep -c . || true)
 [ "$recent" -lt "${limit:-6}" ] || die "\"$lane\" was already told $recent times in the last hour: nothing sent, say it to the user instead"
+
+# A lane of the dispatcher runs sessions that read no terminal, and is closed
+# between them: what it is told is kept, and handed to it, quoted, at a
+# session the rules open for that once the one at work is over
+# (flow-lanes.sh). One line, appended: nothing else writes this file.
+if [ -n "$ticket" ]; then
+  at=$(now_utc)
+  jq -nc --arg at "$at" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" '{at: $at, run: $run, text: $text}' >> "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl"
+  jq -nc --arg lane "$lane" --arg at "$at" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" '{lane: $lane, at: $at, run: $run, text: $text}' >> "$ORCH_STATE_DIR/lane-messages.jsonl"
+  echo "kept for the lane of $ticket: handed to it at its next session, which the rules open once the one at work is over"
+  exit 0
+fi
 
 # The terminal must still be there, and be the one of that worktree: the
 # whole path git gives, not a folder of the same name somewhere else.

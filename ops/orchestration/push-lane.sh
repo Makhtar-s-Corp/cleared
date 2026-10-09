@@ -6,7 +6,8 @@
 # A lane has no network command: this script is the one way its work leaves
 # the machine. It only ever does two things, to one place each:
 #   - git push of the lane's own branch <role>/<ticket> to the branch of the
-#     same name on origin, never forced, never the base branch;
+#     same name on origin (or, for a lane that took over a pull request, to
+#     the branch of that pull request), never forced, never the base branch;
 #   - a draft pull request from that branch to the base branch, if none is
 #     open yet.
 # It refuses anything else: another branch, a role that [lanes] push_roles
@@ -24,6 +25,15 @@ grep -qw -- "$role" <<<"$(conf_get lanes push_roles)" || die "lanes of the role 
 base=$(conf_get lanes base)
 target=${base#origin/}
 [ "$branch" != "$target" ] || die "the base branch is never pushed from here"
+# A lane that took over a pull request somebody else began sends its work
+# to the branch of that pull request (the dispatcher says which, never the
+# model): an open pull request must stand on it, and it is never the base.
+push_to=${ORCH_PUSH_BRANCH:-$branch}
+[ "$push_to" != "$target" ] || die "the base branch is never pushed from here"
+if [ "$push_to" != "$branch" ]; then
+  [ -n "$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number | jq -r '.[0].number // empty')" ] \
+    || die "\"$push_to\" is not the branch of an open pull request: nothing is pushed to it"
+fi
 
 ahead=$(git -C "$worktree" rev-list --count "$base..HEAD")
 if [ "$ahead" = 0 ]; then
@@ -50,9 +60,14 @@ guard_text "$out/changes.diff" || die "$branch not pushed: its changes are refus
 
 # The lane's branch to the branch of the same name, and only that. No force
 # in any form: a remote branch that moved makes this fail, on purpose.
-git -C "$worktree" push --quiet origin "HEAD:refs/heads/$branch"
+# A pull request that is not a draft runs its checks at every push, whatever
+# the host is doing: it goes back to draft first, and is taken out of it
+# when the host is free for a run (flow-lanes.sh), like a new one.
+existing=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number,isDraft | jq -r '.[0] | select(.isDraft == false) | .number // empty')
+[ -z "$existing" ] || (cd "$worktree" && gh pr ready "$existing" --undo) > /dev/null 2>&1 || true
+git -C "$worktree" push --quiet origin "HEAD:refs/heads/$push_to"
 
-number=$(cd "$worktree" && gh pr list --head "$branch" --state open --json number | jq -r '.[0].number // empty')
+number=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number | jq -r '.[0].number // empty')
 if [ -z "$number" ]; then
   title=$(git -C "$worktree" log --reverse --format='%s' "$base..HEAD" | sed -n '1p')
   {

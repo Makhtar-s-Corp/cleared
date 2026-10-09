@@ -10,9 +10,13 @@ set -uo pipefail
 
 run_dir=${1:?usage: lane-run.sh <run directory>}
 . "$run_dir/lane.env"
+# Which process this session is: one that dies without a word (its terminal
+# closed, the host restarted) is told from one at work.
+echo $$ > "$run_dir/pid"
 # Whatever stops this script, the run says it is over: a wake waits for it.
 trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
+[ -z "${ORCH_PUSH_BRANCH:-}" ] || export ORCH_PUSH_BRANCH
 # How what this run posts is signed (the acting lead posts by itself).
 [ -z "${ORCH_SIGNED:-}" ] || export ORCH_SIGNED
 signed_as=${ORCH_SIGNED:-}
@@ -128,6 +132,9 @@ if [ "$lane_code" = 0 ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_ro
     pushed=$(sed -n '$p' <<<"$pushed")
     if [[ "$pushed" =~ ^#[0-9]+$ ]]; then
       pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."
+      # Kept with what is known of the lane of this ticket.
+      kept_lane=$(lane_record "$ORCH_TICKET")
+      [ ! -f "$kept_lane" ] || { jq --argjson pr "${pushed#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}' "$kept_lane" > "$kept_lane.part" && mv "$kept_lane.part" "$kept_lane"; } || true
     elif [[ "$pushed" == "nothing to push"* ]]; then
       pushed_note="Rien à pousser : la lane n'a aucun commit."
     else

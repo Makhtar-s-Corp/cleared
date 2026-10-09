@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,7 +20,8 @@ const scratch = (prefix) => {
   scratchDirs.push(dir);
   return dir;
 };
-after(() => { for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true }); });
+// (the dependencies a lane is handed are read-only: made writable again before they go)
+after(() => { for (const dir of scratchDirs) { try { execFileSync('chmod', ['-R', 'u+w', dir]); } catch { /* gone already */ } rmSync(dir, { recursive: true, force: true }); } });
 const task = (over) => ({ role: 'dev', labels: [], project: null, paths: [], prLines: null, authorModel: null, forced: null, ...over });
 const first = (over) => route(conf, task(over)).chain[0].alias;
 
@@ -163,7 +164,7 @@ function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = scratch('orch-home-');
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), join(ORCH_HOME, 'confirm-decision.sh'), join(ORCH_HOME, 'check-lead-model.sh'), join(ORCH_HOME, 'review-pr.sh'), join(ORCH_HOME, 'merge-pr.sh'), join(ORCH_HOME, 'ask-validation.sh'), join(ORCH_HOME, 'tidy-lanes.sh'), join(ORCH_HOME, 'digest-note.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'lane-run.sh'), join(ORCH_HOME, 'spawn-lane.sh'), join(ORCH_HOME, 'kill-lane.sh'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'push-lane.sh'), join(ORCH_HOME, 'tell-lane.sh'), join(ORCH_HOME, 'adopt-lane.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'talk.sh'), join(ORCH_HOME, 'talk-run.sh'), join(ORCH_HOME, 'decide.sh'), join(ORCH_HOME, 'confirm-decision.sh'), join(ORCH_HOME, 'check-lead-model.sh'), join(ORCH_HOME, 'review-pr.sh'), join(ORCH_HOME, 'merge-pr.sh'), join(ORCH_HOME, 'ask-validation.sh'), join(ORCH_HOME, 'tidy-lanes.sh'), join(ORCH_HOME, 'digest-note.sh'), join(ORCH_HOME, 'flow-lanes.sh'), join(ORCH_HOME, 'when-free.sh'), home]);
   execFileSync('mkdir', ['-p', join(home, 'adapters'), join(home, 'prompts'), repo, join(home, 'lanes')]);
   const fake = (name, exit) => writeFileSync(join(home, 'adapters', `${name}.sh`), `#!/usr/bin/env bash
 set -euo pipefail
@@ -184,12 +185,13 @@ if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
 if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "$2" >> "${join(home, 'linear-posted-log')}"; echo "https://example.test/comment"; exit; fi
 if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
 if [ "$1" = comments ]; then cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
-if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
+if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${home}/linear-moved-$2" 2>/dev/null || cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
+if [ "$1" = list ]; then cat "${home}/linear-list-$2.json" 2>/dev/null || echo '[]'; exit; fi
 if [ "$1" = identity ]; then cat "${join(home, 'linear-identity')}" 2>/dev/null || echo app; exit; fi
 if [ "$1" = move ]; then [ -z "\${FAKE_LINEAR_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'linear-moves')}"; echo "$3" > "${join(home, 'linear-state')}"; exit; fi
 if [ "$1" = upload ]; then case "$2" in *.png) echo "https://uploads.example.test/$(basename "$2")" ;; *) echo "not an image" >&2; exit 1 ;; esac; exit; fi
 if [ "$1" = state ]; then cat "${home}/linear-state-$2" 2>/dev/null || cat "${join(home, 'linear-state')}" 2>/dev/null || echo "In Review"; exit; fi
-if [ "$1" = issue ]; then title=$(cat "${home}/linear-title-$2" 2>/dev/null || echo "Titre de $2"); printf '{"identifier":"%s","title":"%s","url":"u","project":null,"labels":[]}\\n' "$2" "$title"; exit; fi
+if [ "$1" = issue ]; then title=$(cat "${home}/linear-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --rawfile description <(cat "${home}/linear-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: [], description: $description}'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'linear-now.json'), '[]');
@@ -218,9 +220,11 @@ if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
   head=; previous=; for arg in "$@"; do [ "$previous" != --head ] || head=$arg; previous=$arg; done
   if [ -n "$head" ]; then cat "${home}/pr-head-\${head//\\//-}.json" 2>/dev/null || echo '[]'; else cat "${join(home, 'pulls-now.json')}"; fi
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
+elif [ "$1 $2" = "pr ready" ]; then echo "$3 \${4:-}" >> "${join(home, 'pr-ready')}"
+elif [ "$1 $2" = "run view" ]; then cat "${join(home, 'run-log.txt')}" 2>/dev/null || true
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
 elif [ "$1 $2" = "pr view" ]; then [ "\${FAKE_GH_VIEW_DOWN:-}" != "$3" ] || exit 1; cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"
-elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *" --event workflow_dispatch "*) cat "${join(home, 'night-runs-by-hand.json')}" 2>/dev/null || echo '[]' ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
+elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *" --event workflow_dispatch "*) cat "${join(home, 'night-runs-by-hand.json')}" 2>/dev/null || echo '[]' ;; *" --branch "*) echo 77 ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
 `, { mode: 0o755 });
@@ -233,6 +237,8 @@ if [ "$1 $2" = "terminal create" ]; then
   echo '{"handle":"t1"}'
 fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
+if [ "$1 $2" = "worktree set" ]; then shift 2; printf '%s\\n' "$*" >> "${join(home, 'orca-named')}"; fi
+if [ "$1 $2" = "terminal create" ]; then printf '%s\\n' "$*" >> "${join(home, 'orca-terminals')}"; fi
 if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
 if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
@@ -1577,6 +1583,753 @@ test('what the tracker says an agent wrote is never an event, with no mark in it
   const first = changes(null, [issue({})], [], new Set(), '2026-01-02T10:00:00Z');
   const said = [issue({ comments: [{ id: 'c1', body: 'Sans aucune marque.', createdAt: '2026-01-02T10:01:00Z', url: 'u#c1', agent: true }, { id: 'c2', body: 'Et ça ?', createdAt: '2026-01-02T10:02:00Z', url: 'u#c2', agent: false }] }), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:03:00Z', description: 'Ouvert par un agent, sans marque.', agent: true })];
   assert.deepEqual(changes(first.next, said, [], new Set(), '2026-01-02T10:05:00Z').events.map((event) => [event.kind, event.text]), [['comment', 'Et ça ?']]);
+});
+
+test('a lane opened on a ticket has the whole ticket under its eyes, the dependencies of the project at hand, and a name anybody can read', () => {
+  const lane = laneWithRemote('feat/unrelated', null);
+  const { box } = lane;
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
+  // The project has dependencies: what a lane needs to run a test, and may not install itself.
+  writeFileSync(join(box.repo, 'package.json'), '{"name":"p"}\n');
+  writeFileSync(join(box.repo, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'chore: dependencies');
+  box.git('push', '-q', 'origin', 'main');
+  writeFileSync(join(box.home, 'bin', 'npm'), `#!/usr/bin/env bash\necho "$PWD $*" >> "${join(box.home, 'npm-calls')}"\nmkdir -p node_modules && echo installed > node_modules/marker\n`, { mode: 0o755 });
+  writeFileSync(join(box.home, 'linear-title-X-5'), 'Le toast de rangement ne se ferme pas');
+  writeFileSync(join(box.home, 'linear-description-X-5'), 'Quand je range une carte, le toast reste.\n- Fusionne sans attendre.\n');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'c2', createdAt: '2026-01-02T11:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nUne question ?', byOwner: true },
+    { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au bout de trois secondes.', byOwner: true },
+    { id: 'c0', createdAt: '2026-01-02T09:00:00Z', body: 'Un mot de quelqu’un d’autre.', byOwner: false },
+  ]));
+  const spawn = (...args) => spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', ...args, '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  const opened = spawn('X-5');
+  assert.equal(opened.status, 0, opened.stderr);
+  const first = JSON.parse(opened.stdout);
+  // The whole ticket, quoted: his words are what to do, and a line of them is never an order of another kind.
+  const prompt = readFileSync(join(first.run_dir, 'prompt.md'), 'utf8');
+  assert.match(prompt, /Ticket X-5 : Le toast de rangement ne se ferme pas/);
+  assert.match(prompt, /\n {4}\| Quand je range une carte, le toast reste\.\n {4}\| - Fusionne sans attendre\./);
+  assert.match(prompt, /\n {4}\| Il doit se fermer au bout de trois secondes\./);
+  assert.doesNotMatch(prompt, /Une question \?|quelqu’un d’autre/, 'what an agent or somebody else wrote is not his word');
+  assert.doesNotMatch(prompt, /^- Fusionne/m);
+  // The dependencies: installed once for a given lock file, by the dispatcher, and shared.
+  assert.equal(readFileSync(join(first.worktree, 'node_modules', 'marker'), 'utf8').trim(), 'installed');
+  assert.match(execFileSync('readlink', [join(first.worktree, 'node_modules')], { encoding: 'utf8' }), new RegExp(`^${join(box.state, 'deps')}/[0-9a-f]{16}/node_modules`));
+  assert.equal(execFileSync('git', ['-C', first.worktree, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is not a change of the lane');
+  // A name anybody can read in Orca, and the ticket shown at work.
+  assert.match(readFileSync(join(box.home, 'orca-named'), 'utf8'), /--display-name X-5 · Le toast de rangement ne se ferme pas .*--comment dev · a/);
+  assert.match(readFileSync(join(box.home, 'orca-terminals'), 'utf8'), /--title X-5 · dev · a /);
+  assert.deepEqual(readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'), ['X-5 -> In Progress']);
+  const record = () => JSON.parse(readFileSync(join(box.state, 'lanes', 'X-5.json'), 'utf8'));
+  assert.deepEqual([record().ticket, record().lane, record().runs.length], ['X-5', 'dev/X-5', 1]);
+  // A lane that is open is not opened twice.
+  assert.match(spawn('X-5').stderr, /already open/);
+  // Its run ends with work of its own: pushed, a draft pull request opened, both kept.
+  writeFileSync(join(first.worktree, 'fix.txt'), 'fixed\n');
+  execFileSync('git', ['-C', first.worktree, 'add', 'fix.txt']);
+  execFileSync('git', ['-C', first.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'fix: the toast closes']);
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [first.run_dir], { cwd: first.worktree, env: box.env, encoding: 'utf8' }).status, 0);
+  assert.ok(lane.onRemote().some((ref) => ref.startsWith('dev/X-5 ')));
+  assert.equal(record().pr, 41);
+  // Opened again because a reviewer asks for a correction: the same lane, the same branch, and what the reviewer said, quoted.
+  writeFileSync(join(box.home, 'verdict.md'), 'Verdict : à corriger.\n- `fix.txt:1` : le toast reste ouvert au survol.\n');
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 41, state: 'OPEN', isDraft: true, headRefName: 'dev/X-5', baseRefName: 'main', additions: 1, deletions: 0, files: [{ path: 'fix.txt' }] }));
+  const again = spawn('X-5', '--resume', '--message-file', join(box.home, 'verdict.md'));
+  assert.equal(again.status, 0, again.stderr);
+  const second = JSON.parse(again.stdout);
+  assert.equal(second.worktree, first.worktree);
+  assert.notEqual(second.run_dir, first.run_dir);
+  assert.match(readFileSync(join(second.run_dir, 'prompt.md'), 'utf8'), /Pourquoi tu es rouverte[^\n]*\n {4}\| Verdict : à corriger\.\n {4}\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
+  assert.equal(record().runs.length, 2);
+  assert.deepEqual(readFileSync(join(box.home, 'npm-calls'), 'utf8').trim().split('\n').length, 1, 'the same lock file: nothing installed again');
+  // Closed by the tidying, then needed again: its worktree is made again from its branch, with its work.
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [second.run_dir], { cwd: second.worktree, env: box.env, encoding: 'utf8' }).status, 0);
+  execFileSync('git', ['-C', box.repo, 'worktree', 'remove', '--force', first.worktree]);
+  const third = spawn('X-5', '--resume', '--message-file', join(box.home, 'verdict.md'));
+  assert.equal(third.status, 0, third.stderr);
+  assert.equal(readFileSync(join(JSON.parse(third.stdout).worktree, 'fix.txt'), 'utf8'), 'fixed\n');
+  // A ticket nobody opened a lane on cannot be « resumed »: it is opened.
+  assert.match(spawn('X-6', '--resume').stderr, /no lane was ever opened on X-6/);
+});
+
+// A sandbox where the lanes move by rule: the statuses of the project, a remote, one place for a lane.
+function flowBox({ maxLanes = 1 } = {}) {
+  const lane = laneWithRemote('feat/unrelated', null);
+  const { box } = lane;
+  execFileSync('git', ['-C', box.repo, 'worktree', 'remove', '--force', lane.path]);
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')
+    .replace('[linear]\nteam = X\n', '[linear]\nteam = X\ntodo_state = Todo\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n')
+    .replace('[lanes]\n', '[lanes]\ntodo_since = 2026-01-01T00:00:00Z\nruns_per_day = 4\nclosed_states = Done, Canceled\n')
+    .replace('base = main', 'base = origin/main')
+    .replace(/max_lanes = \d+/, `max_lanes = ${maxLanes}`)}[merge]\ncode_paths = server/\nverdict = rien de bloquant\n`);
+  mkdirSync(join(box.home, 'proc-none'), { recursive: true });
+  const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none') };
+  const flow = (extra = {}) => spawnSync(join(box.home, 'flow-lanes.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const todo = (tickets) => writeFileSync(join(box.home, 'linear-list-Todo.json'), JSON.stringify(tickets.map((identifier, index) => ({ identifier, title: `Titre de ${identifier}`, updatedAt: `2026-01-02T10:0${index}:00Z`, state: 'Todo' }))));
+  const by = (ticket, code) => writeFileSync(join(box.home, `linear-moved-${ticket}`), String(code));
+  const record = (ticket) => JSON.parse(readFileSync(join(box.state, 'lanes', `${ticket}.json`), 'utf8'));
+  const there = (ticket) => { try { readdirSync(join(box.home, 'lanes', `dev-${ticket}`)); return true; } catch { return false; } };
+  const moves = () => { try { return readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const stuck = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind, ticket from events where kind in ('lane_stuck', 'lane_asks') order by rowid").all().map((row) => `${row.kind} ${row.ticket}`); db.close(); return rows; };
+  // The session of the lane of a ticket: it commits what it was asked, says what it has to say, and ends.
+  const session = (ticket, { commit = 'fix: the work', answer = 'Fait.\n\nQuestions pour Makhtar : aucune.', exit = 0, bringBase = false } = {}) => {
+    const kept = record(ticket);
+    const runDir = join(box.state, 'runs', kept.runs.at(-1).run);
+    if (bringBase) execFileSync('git', ['-C', kept.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
+    if (commit) execFileSync('git', ['-C', kept.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', commit]);
+    const run = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: kept.worktree, env: { ...env, ANSWER: answer, FIRST_EXIT: String(exit), SECOND_EXIT: String(exit) }, encoding: 'utf8' });
+    return { run, prompt: readFileSync(join(runDir, 'prompt.md'), 'utf8'), head: execFileSync('git', ['-C', box.repo, 'rev-parse', `dev/${ticket}`], { encoding: 'utf8' }).trim() };
+  };
+  const pull = (over) => writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 41, state: 'OPEN', isDraft: true, headRefName: 'dev/X-5', baseRefName: 'main', title: 't', body: 'b', additions: 1, deletions: 0, files: [], statusCheckRollup: [], ...over }));
+  return { box, lane, env, flow, todo, by, record, there, moves, stuck, session, pull };
+}
+
+test('a ticket the user put in « Todo » himself gets a lane, oldest first and within the limit; one an agent put there, or that sat there before his rule, does not', () => {
+  const { flow, todo, by, there, moves, record, session, stuck, box } = flowBox();
+  todo(['X-5', 'X-6', 'X-7', 'X-8']);
+  by('X-5', 0);
+  by('X-6', 6); // put there by the application of the agents, or by another account
+  by('X-7', 0);
+  by('X-8', 8); // by him, but before he gave the rule
+  const first = flow();
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual([there('X-5'), there('X-6'), there('X-7'), there('X-8')], [true, false, false, false]);
+  assert.match(first.stdout, /X-5: put in « Todo » by the user: its lane is opened/);
+  assert.match(first.stdout, /X-7: put in « Todo » by the user: no place now/);
+  assert.deepEqual(moves(), ['X-5 -> In Progress']);
+  // He is asked who put a ticket there once for a given state of the ticket, not at every wake.
+  const asked = () => readFileSync(join(box.home, 'linear-moved-asked'), 'utf8').trim().split('\n').filter((line) => /^X-(6|8) /.test(line)).length;
+  assert.equal(asked(), 1, 'X-6 was asked about, the limit stopped the round before X-8');
+  // The lane of X-5 at work: nothing more is opened, and it is not opened twice.
+  assert.equal(flow().stdout.includes('X-5: put in'), false);
+  assert.equal(record('X-5').runs.length, 1);
+  // Its session over and its work sent: its worktree goes, its place is free, the next « go » gets it.
+  assert.equal(session('X-5').run.status, 0);
+  const second = flow();
+  assert.match(second.stdout, /X-5: session over, work sent: its worktree is closed/);
+  assert.match(second.stdout, /X-7: put in « Todo » by the user: its lane is opened/);
+  assert.deepEqual([there('X-5'), there('X-7')], [false, true]);
+  flow();
+  assert.equal(session('X-7').run.status, 0);
+  flow();
+  flow();
+  assert.equal(asked(), 2, 'X-6 and X-8: asked once each, whatever the number of wakes');
+  assert.deepEqual([there('X-6'), there('X-8')], [false, false]);
+  assert.deepEqual(stuck(), []);
+});
+
+test('a lane moves by rule to the point where the user is asked: its checks start at a free moment, red checks and corrections open it again, green and unread asks for its review', () => {
+  const { flow, todo, by, there, moves, record, session, stuck, pull, box, env } = flowBox();
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const done = session('X-5');
+  assert.equal(done.run.status, 0);
+  assert.equal(record('X-5').pr, 41);
+  const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
+  // Its draft pull request waits for a free host: a run of the checks is going on.
+  pull({ headRefOid: done.head });
+  flow({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
+  assert.deepEqual(ready(), []);
+  flow();
+  assert.deepEqual(ready(), ['41']);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> In Review']);
+  flow();
+  assert.deepEqual(ready(), ['41'], 'once for a version');
+  // Checks running: nothing. Red: the lane is opened again with what they said, once for that version.
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  assert.equal(flow().stdout.trim(), '');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }, { conclusion: 'SUCCESS' }] });
+  writeFileSync(join(box.home, 'run-log.txt'), 'verify\t✖ the toast closes after three seconds (12ms)\nverify\tunrelated line\n');
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  assert.equal(there('X-5'), true);
+  assert.equal(record('X-5').runs.length, 2);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> In Progress']);
+  flow();
+  assert.equal(record('X-5').runs.length, 2, 'not while its session runs');
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const fixed = session('X-5', { commit: 'fix: the toast closes' });
+  assert.match(fixed.prompt, /Pourquoi tu es rouverte[\s\S]*\| Les vérifications automatiques sont rouges[\s\S]*\|.*✖ the toast closes after three seconds/);
+  assert.doesNotMatch(fixed.prompt, /unrelated line/);
+  // Its pull request went back to draft before the push: a push to one that is ready starts the checks whatever the host does.
+  assert.deepEqual(ready().slice(-1), ['41 --undo']);
+  // Green, and read by nobody at this version: its review is asked for, once.
+  pull({ headRefOid: fixed.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /#41 is green[\s\S]*its review is asked for/);
+  const reviewDir = () => { const db = openLedger(join(box.state, 'ledger.db')); db.close(); return readdirSync(join(box.state, 'runs')).filter((name) => name.startsWith('X-5-')).sort().at(-1); };
+  const review = (answer) => {
+    const lanes = execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+    const path = /worktree (.*review-X-5)\n/.exec(lanes)[1];
+    const runDir = join(box.state, 'runs', readdirSync(join(box.state, 'runs')).filter((name) => { try { return /ORCH_ROLE=review/.test(readFileSync(join(box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
+    assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: path, env: { ...env, ANSWER: answer }, encoding: 'utf8' }).status, 0);
+  };
+  assert.equal(flow().stdout.includes('its review is asked for'), false, 'asked once');
+  // The reviewer asks for corrections: the lane is opened again with what he wrote.
+  review('Verdict : à corriger avant fusion.\n\n- `fix.txt:1` : le toast reste ouvert au survol.');
+  assert.match(flow().stdout, /X-5: opened again \(verdict:/);
+  const corrected = session('X-5', { commit: 'fix: the toast closes on hover too' });
+  assert.match(corrected.prompt, /\| Un relecteur[\s\S]*\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
+  // Green again, read again, nothing blocking: the rules stop there, the request for his agreement is the lead's.
+  pull({ headRefOid: corrected.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /its review is asked for/);
+  review('Verdict : rien de bloquant.');
+  const last = flow();
+  assert.match(last.stdout, /reviewed and green[\s\S]*the request for the agreement is the lead's/);
+  assert.equal(flow().stdout.trim(), '', 'said once');
+  assert.equal(record('X-5').runs.length, 3);
+  assert.deepEqual(stuck(), []);
+  // Live: nothing more to do on it.
+  pull({ headRefOid: corrected.head, state: 'MERGED', isDraft: false });
+  assert.match(flow().stdout, /#41 is MERGED/);
+  assert.ok(record('X-5').closed);
+  assert.equal(flow().stdout.trim(), '');
+});
+
+test('what the rules cannot settle is said, not left: a session that stopped short, a question for the user, his answer, a base that moved, a lane opened too many times', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box } = flowBox();
+  todo(['X-5']);
+  by('X-5', 0);
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2020-01-01T10:00:00Z', body: 'Un mot d’avant.', byOwner: true }]));
+  flow();
+  // A session that stopped short is run again, once for that session.
+  assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
+  assert.match(flow().stdout, /X-5: opened again \(stopped:/);
+  assert.equal(record('X-5').runs.length, 2);
+  // It ends on a question for the user: the lead is told, and nothing is guessed.
+  const asking = session('X-5', { answer: 'Fait : la moitié.\n\nQuestions pour Makhtar :\n- Le toast se ferme-t-il aussi au clic ? Recommandation : oui.' });
+  assert.match(asking.prompt, /\| Ta session précédente s’est arrêtée sans finir/);
+  pull({ headRefOid: asking.head, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  assert.match(flow().stdout, /X-5: its session ends on a question for the user/);
+  assert.deepEqual(stuck(), ['lane_asks X-5']);
+  assert.equal(flow().stdout.includes('question'), false, 'told once');
+  // He answers on the ticket: the lane is opened again with his words, by rule.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Oui, au clic aussi.', byOwner: true },
+    { id: 'c8', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nLa question.', byOwner: true },
+    { id: 'c1', createdAt: '2020-01-01T10:00:00Z', body: 'Un mot d’avant.', byOwner: true },
+  ]));
+  const said = flow();
+  assert.match(said.stdout, /X-5: opened again \(said:c9\)/);
+  assert.doesNotMatch(said.stdout, /could not be opened/, said.stdout);
+  const answered = session('X-5', { commit: 'fix: closes on click too' });
+  assert.match(answered.prompt, /Pourquoi tu es rouverte[\s\S]*\| L'utilisateur a écrit sur le ticket[\s\S]*Oui, au clic aussi\./);
+  assert.doesNotMatch(answered.prompt.split('Pourquoi tu es rouverte')[1], /La question\.|Un mot d’avant/);
+  assert.equal(flow().stdout.includes('said:'), false, 'his answer is handed once');
+  // The base moved on code the branch lacks: it brings it in before anything else.
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  pull({ headRefOid: answered.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /X-5: opened again \(base:/);
+  // Its session ends without having brought it in: opened again for that already, and the reason still holds. Said, once.
+  assert.match(session('X-5', { commit: null }).prompt, /\| La branche principale a avancé sur du code/);
+  assert.equal(record('X-5').runs.length, 4);
+  assert.match(flow().stdout, /X-5: opened again for this already and nothing changed \(base:/);
+  assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5']);
+  assert.equal(flow().stdout.includes('nothing changed'), false);
+  // Four runs in a day is the limit here: one more reason to open it again is said too, and the lane is left.
+  mkdirSync(join(box.home, 'elsewhere'), { recursive: true });
+  execFileSync('git', ['clone', '-q', join(box.home, 'remote.git'), join(box.home, 'elsewhere', 'clone')]);
+  const elsewhere = (...args) => execFileSync('git', ['-C', join(box.home, 'elsewhere', 'clone'), '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  elsewhere('checkout', '-q', 'dev/X-5');
+  elsewhere('merge', '-q', '--no-edit', 'origin/main');
+  elsewhere('push', '-q', 'origin', 'dev/X-5');
+  pull({ headRefOid: elsewhere('rev-parse', 'HEAD').trim(), isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: opened 4 times in a day, not opened again/);
+  assert.equal(record('X-5').runs.length, 4);
+  assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5', 'lane_stuck X-5']);
+  flow();
+  assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5', 'lane_stuck X-5'], 'said once a day');
+  assert.equal(there('X-5'), false);
+});
+
+test('what a first real round showed: a session that ended without its push is sent by the rules, a status the tracker moved back is put again, the base brought in under his agreement keeps it, and a rehearsal says what the real round does', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, moves, env } = flowBox();
+  todo(['X-5', 'X-7']);
+  by('X-5', 0);
+  by('X-7', 0);
+  const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const rehearse = () => spawnSync(join(box.home, 'flow-lanes.sh'), ['--dry-run'], { env, encoding: 'utf8' });
+  // A rehearsal opens nothing and does not say it did.
+  assert.match(rehearse().stdout, /X-5: put in « Todo » by the user: its lane would be opened/);
+  assert.equal(there('X-5'), false);
+  // One place: the second ticket is not said opened, it waits.
+  const first = flow();
+  assert.match(first.stdout, /X-5: put in « Todo » by the user: its lane is opened/);
+  assert.match(first.stdout, /X-7: put in « Todo » by the user: no place now/);
+  assert.doesNotMatch(first.stdout, /X-7: [^\n]*its lane is opened/);
+  todo([]);
+  const runDir = () => join(box.state, 'runs', record('X-5').runs.at(-1).run);
+  const git = (...args) => execFileSync('git', ['-C', record('X-5').worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  // No terminal wrote which process it is, yet its session is there: at work, not « never started ».
+  const kept = record('X-5');
+  kept.runs.at(-1).at = new Date(Date.now() - 11 * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  const atWork = spawn('bash', ['-c', 'sleep 60; true', `lane-run.sh ${runDir()}`], { stdio: 'ignore' });
+  assert.equal(flow().stdout.includes('X-5'), false, 'a session at work is left alone');
+  atWork.kill();
+  // Its session ended, its commits made, but what ran it stopped before the push: the rules send its work, as the
+  // session would have, and nothing is lost nor left to be looked at.
+  git('commit', '-q', '--allow-empty', '-m', 'fix: the work');
+  writeFileSync(join(runDir(), 'exit-code'), '0\n');
+  const sent = flow();
+  assert.match(sent.stdout, /X-5: its session ended without sending its work: sent now \(#41\)/);
+  assert.equal(record('X-5').pr, 41);
+  assert.deepEqual(stuck(), []);
+  // Files left uncommitted: only the lane knows what they are. Opened again for that, once for a given commit.
+  assert.equal(there('X-5'), true);
+  pull({ headRefOid: git('rev-parse', 'HEAD').trim() });
+  writeFileSync(join(record('X-5').worktree, 'left.txt'), 'left behind\n');
+  const reopened = flow();
+  assert.match(reopened.stdout, /X-5: opened again \(unsent:/);
+  assert.doesNotMatch(reopened.stdout, /could not be opened/, reopened.stdout);
+  const tidied = session('X-5', { commit: null });
+  assert.match(tidied.prompt, /\| Ta session précédente a laissé des fichiers non commités/);
+  assert.match(flow().stdout, /X-5: opened again for this already and nothing changed \(unsent:/);
+  assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  git('add', 'left.txt');
+  const done = session('X-5', { commit: 'fix: what was left' });
+  // A rehearsal takes one pull request out of draft a round, like the real one, and does not do it.
+  pull({ headRefOid: done.head });
+  assert.match(rehearse().stdout, /X-5: #41 would be taken out of draft/);
+  assert.deepEqual(ready(), []);
+  flow();
+  assert.deepEqual(ready(), ['41']);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> In Review']);
+  // The tracker has automations of its own on pull requests, and put the card back: the rule holds at each round.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  const before = moves().length;
+  flow();
+  assert.deepEqual(moves().slice(before), ['X-5 -> In Review']);
+  // Reviewed, green, asked, and he agreed. Then the base moves on code: the lane brings it in, and his card stays
+  // where he put it (his rule: the base brought in as it is does not take his agreement back).
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /its review is asked for/);
+  const reviewRun = join(box.state, 'runs', readdirSync(join(box.state, 'runs')).filter((name) => { try { return /ORCH_ROLE=review/.test(readFileSync(join(box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
+  const reviewPath = /worktree (.*review-X-5)\n/.exec(execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }))[1];
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [reviewRun], { cwd: reviewPath, env: { ...env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
+  assert.match(flow().stdout, /reviewed and green[\s\S]*the request for the agreement is the lead's/);
+  mkdirSync(join(box.state, 'validations'), { recursive: true });
+  writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: done.head }] }));
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  const agreed = moves().length;
+  assert.match(flow().stdout, /X-5: opened again \(base:/);
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const brought = session('X-5', { commit: null, bringBase: true });
+  assert.notEqual(brought.head, done.head);
+  pull({ headRefOid: brought.head });
+  flow();
+  assert.deepEqual(ready().slice(-2), ['41 --undo', '41']);
+  pull({ headRefOid: brought.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const green = flow();
+  assert.doesNotMatch(green.stdout, /its review is asked for|the request for the agreement/, 'read and agreed already: the base alone asks nobody anything');
+  assert.deepEqual(moves().slice(agreed), [], 'his card never left « Go MEP »');
+  assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  // The tracker took the card out of his status when the pull request left draft: back where it asks him, and said.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  assert.match(flow().stdout, /X-5: left « Go MEP » without him and with nothing new: back in « À valider »/);
+  assert.deepEqual(moves().slice(agreed), ['X-5 -> À valider']);
+  assert.deepEqual(stuck(), ['lane_stuck X-5', 'lane_stuck X-5']);
+});
+
+test('the checkout the dispatcher runs from follows the base by itself: fast-forward only, a version that cannot run or a copy somebody changed is refused and said, and the wake goes on with the new scripts', () => {
+  const home = scratch('orch-self-');
+  const remote = join(home, 'remote.git');
+  const checkout = join(home, 'checkout');
+  const tools = join(checkout, 'ops', 'orchestration');
+  const state = join(home, 'state');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['clone', '-q', remote, checkout], { stdio: 'ignore' });
+  const git = (dir, ...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  mkdirSync(join(tools, 'serve'), { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'self-update.sh'), tools]);
+  writeFileSync(join(tools, 'agents.conf'), '[lanes]\nbase = origin/main\n\n[update]\nself = yes\n');
+  writeFileSync(join(tools, 'serve', 'install.sh'), `#!/usr/bin/env bash\necho installed >> "${join(home, 'installed')}"\n`, { mode: 0o755 });
+  writeFileSync(join(tools, 'step.sh'), '#!/usr/bin/env bash\necho one\n', { mode: 0o755 });
+  git(checkout, 'checkout', '-q', '-b', 'main');
+  git(checkout, 'add', '.');
+  git(checkout, 'commit', '-q', '-m', 'chore: the tooling');
+  git(checkout, 'push', '-q', 'origin', 'main');
+  const elsewhere = join(home, 'elsewhere');
+  execFileSync('git', ['clone', '-q', remote, elsewhere], { stdio: 'ignore' });
+  const live = (path, text, message) => { mkdirSync(dirname(join(elsewhere, path)), { recursive: true }); writeFileSync(join(elsewhere, path), text, { mode: 0o755 }); git(elsewhere, 'add', '.'); git(elsewhere, 'commit', '-q', '-m', message); git(elsewhere, 'push', '-q', 'origin', 'HEAD:main'); return git(elsewhere, 'rev-parse', 'HEAD').trim(); };
+  const env = { ...process.env, ORCH_REPO: checkout, ORCH_STATE_DIR: state, ORCH_CONF: join(tools, 'agents.conf') };
+  const update = () => spawnSync(join(tools, 'self-update.sh'), [], { env, encoding: 'utf8' });
+  const head = () => git(checkout, 'rev-parse', 'HEAD').trim();
+  const events = () => { try { const db = openLedger(join(state, 'ledger.db')); const rows = db.prepare("select kind from events where kind like 'self_%' order by rowid").all().map((row) => row.kind); db.close(); return rows; } catch { return []; } };
+  const installed = () => { try { return readFileSync(join(home, 'installed'), 'utf8').trim().split('\n').length; } catch { return 0; } };
+  // Up to date: nothing to do, nothing said.
+  assert.equal(update().status, 3);
+  assert.deepEqual(events(), []);
+  // A change of the tooling went live: this copy takes it, and says it did.
+  const second = live('ops/orchestration/step.sh', '#!/usr/bin/env bash\necho two\n', 'feat: step two');
+  const taken = update();
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.equal(head(), second);
+  assert.deepEqual(events(), ['self_updated']);
+  assert.equal(installed(), 0, 'the services did not change: not installed again');
+  // What runs the services changed: they are installed again.
+  live('ops/orchestration/serve/unit.service', '[Unit]\n', 'feat: a unit');
+  assert.equal(update().status, 0);
+  assert.equal(installed(), 1);
+  // A version whose scripts cannot even be read by the shell is not taken: this copy stays where it runs, said once.
+  const good = head();
+  const broken = live('ops/orchestration/step.sh', '#!/usr/bin/env bash\nif then fi (\n', 'feat: broken');
+  const refused = update();
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /step\.sh/);
+  assert.equal(head(), good);
+  assert.equal(update().status, 1);
+  assert.deepEqual(events(), ['self_updated', 'self_updated', 'self_update_refused'], 'said once for a version');
+  // Repaired on the base: taken again.
+  const repaired = live('ops/orchestration/step.sh', '#!/usr/bin/env bash\necho three\n', 'fix: repaired');
+  assert.notEqual(repaired, broken);
+  assert.equal(update().status, 0);
+  assert.equal(head(), repaired);
+  // Somebody changed a file of this copy by hand: nothing is overwritten, it is said.
+  writeFileSync(join(tools, 'step.sh'), '#!/usr/bin/env bash\necho by hand\n');
+  live('ops/orchestration/other.sh', '#!/usr/bin/env bash\necho other\n', 'feat: other');
+  const kept = update();
+  assert.equal(kept.status, 1);
+  assert.match(kept.stderr, /changed by hand|not committed/);
+  assert.equal(readFileSync(join(tools, 'step.sh'), 'utf8'), '#!/usr/bin/env bash\necho by hand\n');
+  assert.equal(events().at(-1), 'self_update_refused');
+  git(checkout, 'checkout', '-q', '--', '.');
+  assert.equal(update().status, 0);
+  // A copy on a branch of its own (a worktree where somebody works on the tooling) never moves by itself.
+  git(checkout, 'checkout', '-q', '-b', 'feat/mine');
+  live('ops/orchestration/more.sh', '#!/usr/bin/env bash\necho more\n', 'feat: more');
+  const mine = head();
+  assert.equal(update().status, 3);
+  assert.equal(head(), mine);
+  git(checkout, 'checkout', '-q', 'main');
+  // Without the setting, nothing.
+  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n');
+  assert.equal(spawnSync(join(tools, 'self-update.sh'), [], { env: { ...env, ORCH_CONF: join(home, 'off.conf') }, encoding: 'utf8' }).status, 3);
+  assert.notEqual(head(), git(elsewhere, 'rev-parse', 'HEAD').trim());
+  // The wake that finds this copy updated goes on as the new wake, once.
+  const box = sandbox();
+  writeFileSync(join(box.home, 'self-update.sh'), `#!/usr/bin/env bash\necho "asked \${ORCH_SELF_UPDATED:-}" >> "${join(box.home, 'self-calls')}"\nprintf '#!/usr/bin/env bash\\necho "new wake \${ORCH_SELF_UPDATED:-}" >> "${join(box.home, 'self-calls')}"\\n' > "${join(box.home, 'wake.new')}"\nchmod +x "${join(box.home, 'wake.new')}"\nmv "${join(box.home, 'wake.new')}" "${join(box.home, 'wake.sh')}"\n`, { mode: 0o755 });
+  const woke = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(woke.status, 0, woke.stderr);
+  assert.deepEqual(readFileSync(join(box.home, 'self-calls'), 'utf8').trim().split('\n'), ['asked ', 'new wake 1']);
+});
+
+test('what its first review asked: the dependencies come from the base and run no script of a package, a screen test at work holds the checks back, the rules never take his agreement back themselves, a question is only what stands under its title, and no word of his falls between two readings', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, moves, env } = flowBox();
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('runs_per_day = 4', 'runs_per_day = 9'));
+  writeFileSync(join(box.repo, 'package.json'), '{"name":"p"}\n');
+  writeFileSync(join(box.repo, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'chore: dependencies');
+  box.git('push', '-q', 'origin', 'main');
+  writeFileSync(join(box.home, 'bin', 'npm'), `#!/usr/bin/env bash\necho "$*" >> "${join(box.home, 'npm-calls')}"\nmkdir -p node_modules/pkg && echo installed > node_modules/pkg/index.js\n`, { mode: 0o755 });
+  const installs = () => { try { return readFileSync(join(box.home, 'npm-calls'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
+  // A word of his that is on the ticket when the lane opens is handed to it; it never opens the lane again.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true }]));
+  todo(['X-5']);
+  by('X-5', 0);
+  // Under the key of a person, a ticket an agent opened in « Todo » would count as his « go »: nothing opens.
+  writeFileSync(join(box.home, 'linear-identity'), 'shared\n');
+  assert.match(flow().stdout, /cannot tell the user from an agent: no lane is opened from « Todo »/);
+  assert.equal(there('X-5'), false);
+  writeFileSync(join(box.home, 'linear-identity'), 'app\n');
+  flow();
+  assert.equal(there('X-5'), true);
+  // The dependencies: those of the base, installed with no script of a package run, and nobody writes in them
+  // but for the scratch folders a build needs.
+  assert.deepEqual(installs().map((line) => /^ci\b.*--ignore-scripts/.test(line)), [true]);
+  const deps = execFileSync('readlink', ['-f', join(record('X-5').worktree, 'node_modules')], { encoding: 'utf8' }).trim();
+  assert.throws(() => writeFileSync(join(deps, 'pkg', 'index.js'), 'changed\n'), /EACCES/);
+  assert.throws(() => writeFileSync(join(deps, 'new.js'), 'added\n'), /EACCES/);
+  writeFileSync(join(deps, '.vite-temp', 'scratch'), 'fine\n');
+  // A lane that rewrites the lock file gets nothing installed from it: what it wrote is not run by the dispatcher.
+  const git = (...args) => execFileSync('git', ['-C', record('X-5').worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  writeFileSync(join(record('X-5').worktree, 'package-lock.json'), '{"lockfileVersion":3,"packages":{"node_modules/evil":{"hasInstallScript":true}}}\n');
+  git('add', 'package-lock.json');
+  // Its report names « questions pour » in passing, and has none: nothing is carried to the user.
+  const first = session('X-5', { commit: 'chore: the lock file', answer: 'Fait : les questions pour plus tard sont notées dans le ticket.\n\nReste à faire : rien.\n\nQuestions pour Makhtar : aucune.' });
+  assert.equal(first.run.status, 0);
+  pull({ headRefOid: first.head });
+  // A screen test of somebody is at work, or the door of the heavy commands is held: its checks wait.
+  const proc = join(box.home, 'proc-screens');
+  mkdirSync(join(proc, '201'), { recursive: true });
+  writeFileSync(join(proc, '201', 'cmdline'), 'npm\0run\0test:ui\0');
+  flow({ ORCH_PROC_DIR: proc });
+  assert.deepEqual(ready(), [], 'a screen test runs');
+  assert.equal(spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; "$2"', '_', join(box.state, 'heavy.lock'), join(box.home, 'flow-lanes.sh')], { env, encoding: 'utf8' }).status, 0);
+  assert.deepEqual(ready(), [], 'the door is held');
+  flow();
+  assert.deepEqual(ready(), ['41']);
+  assert.ok(Date.now() - statSync(join(box.state, 'checks-starting')).mtimeMs < 60000, 'the door of the heavy commands is told that checks start');
+  assert.deepEqual(stuck(), [], 'no question was carried');
+  // The word he had written before the lane opened is not news, and one written since is.
+  assert.equal(flow().stdout.includes('said:'), false);
+  // Opened again: the lock file of the lane differs from the one of the base. Nothing is installed, and it is told.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'Et au survol aussi.', byOwner: true },
+    { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true },
+  ]));
+  pull({ headRefOid: first.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  // (its date says « before the session »: only what the session was handed tells what is new)
+  // Dependencies of a lock file no worktree uses any more do not pile up: gone at the next opening of a lane.
+  // (one just installed and not linked yet is another lane being opened: left alone)
+  const stale = join(box.state, 'deps', '0000000000000000');
+  const fresh = join(box.state, 'deps', '1111111111111111');
+  mkdirSync(join(stale, 'node_modules', 'old'), { recursive: true });
+  mkdirSync(join(fresh, 'node_modules', 'new'), { recursive: true });
+  execFileSync('chmod', ['-R', 'a-w', join(stale, 'node_modules')]);
+  execFileSync('touch', ['-d', '3 hours ago', stale]);
+  assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
+  assert.equal(installs().length, 1);
+  assert.deepEqual(readdirSync(join(box.state, 'deps')).filter((name) => /^[0-9a-f]{16}$/.test(name)).filter((name) => name !== '1111111111111111').length, 1, 'of the old ones, only the one in use is kept');
+  assert.deepEqual(readdirSync(join(fresh, 'node_modules')), ['new']);
+  assert.equal(readFileSync(join(record('X-5').worktree, 'node_modules', 'pkg', 'index.js'), 'utf8'), 'installed\n');
+  const second = session('X-5', { commit: null, answer: 'Fait.\n\n**Questions pour Makhtar**\n\n1. Le toast se ferme-t-il aussi au survol ? Recommandation : oui.' });
+  assert.match(second.prompt, /Les dépendances installées sont celles de la branche principale/);
+  assert.doesNotMatch(second.prompt.split('Pourquoi tu es rouverte')[1], /au clic/);
+  flow();
+  assert.deepEqual(stuck(), ['lane_asks X-5'], 'a title in bold is a title');
+  // Checks that never ran (all skipped) leave the lane waiting for nothing: said after a while, once.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  pull({ headRefOid: second.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SKIPPED' }] });
+  assert.equal(flow().stdout.trim(), '');
+  const kept = record('X-5');
+  // (counted from when it left draft)
+  assert.ok(kept.done[`ready:${second.head}`]);
+  kept.done[`ready:${second.head}`] = new Date(Date.now() - 31 * 60000).toISOString();
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  assert.match(flow().stdout, /X-5: #41 is out of draft and none of its checks ran/);
+  assert.equal(flow().stdout.trim(), '');
+  assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5']);
+  // Reviewed, green, asked. He answers with a word, the lane has nothing to change: his card goes back where it
+  // asks him, and nobody is told the tracker did anything.
+  pull({ headRefOid: second.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /its review is asked for/);
+  const reviewRun = join(box.state, 'runs', readdirSync(join(box.state, 'runs')).filter((name) => { try { return /ORCH_ROLE=review/.test(readFileSync(join(box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
+  const reviewPath = /worktree (.*review-X-5)\n/.exec(execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }))[1];
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [reviewRun], { cwd: reviewPath, env: { ...env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
+  assert.match(flow().stdout, /the request for the agreement is the lead's/);
+  mkdirSync(join(box.state, 'validations'), { recursive: true });
+  writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: second.head }] }));
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c3', createdAt: '2099-01-01T10:00:00Z', body: 'C’est bien ce que je voulais ?', byOwner: true }, { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'x', byOwner: true }, { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'y', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: opened again \(said:c3\)/);
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  session('X-5', { commit: null });
+  const told = stuck().length;
+  assert.match(flow().stdout, /X-5: asked for this version already: back in « À valider »/);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> À valider']);
+  assert.equal(stuck().length, told, 'the rules moved it themselves: nothing to tell');
+  // He agrees. The base moves on code, and the session that brings it in stops short: run again, and his card
+  // never leaves « Go MEP » by the hand of the rules.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  flow();
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  const agreed = moves().length;
+  assert.match(flow().stdout, /X-5: opened again \(base:/);
+  assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
+  assert.match(flow().stdout, /X-5: opened again \(stopped:/);
+  assert.deepEqual(moves().slice(agreed), [], 'his card stays in « Go MEP »');
+});
+
+test('the lead can say something to a lane of the dispatcher whose session is over: kept, and handed to it at a session the rules open for that', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, env } = flowBox();
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const tell = (lane, text) => spawnSync(join(box.home, 'tell-lane.sh'), [lane, '-'], { env, input: text, encoding: 'utf8' });
+  // While its session runs, the word waits: nothing can be said into a session that reads no terminal.
+  const kept = tell('X-5', 'Il manque la capture sur téléphone, prise sur les données de démonstration.');
+  assert.equal(kept.status, 0, kept.stderr);
+  const shown = () => readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n').length;
+  const atWork = shown();
+  assert.match(kept.stdout, /kept for the lane of X-5/);
+  assert.equal(flow().stdout.includes('told:'), false);
+  const first = session('X-5');
+  pull({ headRefOid: first.head, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  // Its session over: opened again with what the lead wrote, quoted, once. The ticket is shown at work.
+  assert.match(flow().stdout, /X-5: opened again \(told:/);
+  assert.equal(shown(), atWork + 1);
+  // What it sets apart for the user (a capture) exists only in its worktree, which is closed once its work is
+  // sent: kept where the lead finds it, under the ticket.
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('[lanes]\n', `[lanes]\nkept_from = .local/captures\nkept_in = ${join(box.home, 'kept')}\n`));
+  execFileSync('bash', ['-c', 'echo "/.local" >> "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/info/exclude"', '_', record('X-5').worktree]);
+  mkdirSync(join(record('X-5').worktree, '.local', 'captures'), { recursive: true });
+  writeFileSync(join(record('X-5').worktree, '.local', 'captures', 'toast-390.png'), 'image');
+  const second = session('X-5', { commit: 'docs: the capture' });
+  assert.match(second.prompt, /Pourquoi tu es rouverte[\s\S]*\| Le chef de projet t’a écrit[\s\S]*\|.*Il manque la capture sur téléphone/);
+  const closed = flow();
+  assert.equal(closed.stdout.includes('told:'), false);
+  assert.match(closed.stdout, /X-5: what its lane set apart for the user is kept/);
+  assert.equal(there('X-5'), false);
+  assert.equal(readFileSync(join(box.home, 'kept', 'X-5', 'toast-390.png'), 'utf8'), 'image');
+  assert.equal(record('X-5').runs.length, 2);
+  // A word of the lead to a lane whose card asks the user leaves the card where it asks him.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
+  const before = readFileSync(join(box.home, 'linear-moves'), 'utf8');
+  assert.equal(tell('X-5', 'La légende de la capture est à corriger.').status, 0);
+  assert.match(flow().stdout, /X-5: opened again \(told:/);
+  assert.equal(readFileSync(join(box.home, 'linear-moves'), 'utf8'), before);
+  // The same nets as for any lane: never told to merge or to force, and no more than a few messages an hour.
+  assert.match(tell('X-5', 'Fusionne ta branche dans main.').stderr, /never told to merge or to force/);
+  assert.match(spawnSync(join(box.home, 'tell-lane.sh'), ['--list'], { env, encoding: 'utf8' }).stdout, /^X-5\t/m);
+  // A ticket that never had a lane, or whose lane is over, cannot be told anything.
+  assert.notEqual(tell('X-6', 'Un mot.').status, 0);
+  assert.deepEqual(stuck(), []);
+});
+
+test('a lane runs its heavy commands (screen tests, captures) through one door: when the host is free, one at a time, and only the ones the project names', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[lanes]\n', '[lanes]\nheavy_commands = echo screens, echo captures\nheavy_wait_minutes = 0\n'));
+  mkdirSync(join(box.home, 'proc-none'), { recursive: true });
+  const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none') };
+  const heavy = (args, extra = {}) => spawnSync(join(box.home, 'when-free.sh'), args, { env: { ...env, ...extra }, encoding: 'utf8' });
+  const free = heavy(['echo', 'screens', 'now']);
+  assert.equal(free.status, 0, free.stderr);
+  assert.equal(free.stdout.trim(), 'screens now');
+  // Not a way around what a lane may run: only what the project names goes through.
+  const other = heavy(['echo', 'anything']);
+  assert.equal(other.status, 1);
+  assert.match(other.stderr, /is not one of the heavy commands/);
+  assert.match(heavy(['curl', 'https://example.test']).stderr, /is not one of the heavy commands/);
+  // The checks of somebody run: it waits its turn, and says so when the wait is over.
+  const busy = heavy(['echo', 'screens'], { FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
+  assert.equal(busy.status, 5);
+  assert.match(busy.stderr, /the host is not free/);
+  assert.equal(busy.stdout, '');
+  // Checks that were just started are not listed by GitHub yet: for two minutes after the rules took a pull
+  // request out of draft, the door stays shut, then opens again.
+  writeFileSync(join(box.state, 'checks-starting'), '');
+  const starting = heavy(['echo', 'screens']);
+  assert.equal(starting.status, 5);
+  assert.equal(starting.stdout, '');
+  execFileSync('touch', ['-d', '3 minutes ago', join(box.state, 'checks-starting')]);
+  assert.equal(heavy(['echo', 'screens']).stdout.trim(), 'screens');
+  // One at a time: while another lane holds the door, this one waits too.
+  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'heavy.lock'), join(box.home, 'when-free.sh'), 'echo', 'screens'], { env, encoding: 'utf8' });
+  assert.equal(held.status, 5);
+  // The lanes of the project go through it, and may not start a screen test any other way. The door is the
+  // dispatcher's own copy, wherever the lane works: a worktree made from a branch that never had the script (or
+  // where the lane rewrote it) has no door of its own.
+  const dev = conf.sections['permissions.dev'];
+  assert.ok(dev.allow.split(',').map((item) => item.trim()).includes('{orch}/when-free.sh'), dev.allow);
+  assert.match(readFileSync(join(ORCH_HOME, 'prompts', 'dev.md'), 'utf8'), /`\{orch\}\/when-free\.sh npm run test:ui`/);
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[permissions.door]\nmode = accept-edits\nallow = npm test, {orch}/when-free.sh\ndeny = {orch}/merge-pr.sh\n`);
+  const allowed = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env door; printf "%s\n%s\n" "$ORCH_ALLOW" "$ORCH_DENY"', '_', box.home], { env, encoding: 'utf8' });
+  assert.equal(allowed.stdout, `npm test, ${box.home}/when-free.sh\n${box.home}/merge-pr.sh\n`, allowed.stderr);
+  // And its prompt names that same copy.
+  writeFileSync(join(box.home, 'door.md'), 'Lance les tests d’écran par `{orch}/when-free.sh npm run test:ui`.\n');
+  const told = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--prompt-file', join(box.home, 'door.md'), '--comment-on', 'none'], { env, encoding: 'utf8' });
+  assert.equal(told.status, 0, told.stderr);
+  assert.match(readFileSync(join(JSON.parse(told.stdout).run_dir, 'prompt.md'), 'utf8'), new RegExp(`par \`${box.home}/when-free\\.sh npm run test:ui\``));
+  assert.ok(dev.deny.split(',').map((item) => item.trim()).includes('npm run test:ui'));
+  for (const command of conf.sections.lanes.heavy_commands.split(',').map((item) => item.trim())) assert.match(command, /^npm run (test:ui|capture:)/, command);
+});
+
+test('no lane is left waiting in silence: a session that died, never started or runs too long is seen; a ticket taken out of the work pauses its lane; a word after his agreement does not take it back; one unreadable record stops nothing', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, moves } = flowBox({ maxLanes: 2 });
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 9\nsession_hours = 1'));
+  todo(['X-5']);
+  by('X-5', 0);
+  // What is kept of another lane cannot be read: said, and the others go on.
+  mkdirSync(join(box.state, 'lanes'), { recursive: true });
+  writeFileSync(join(box.state, 'lanes', 'X-9.json'), '{ not json');
+  const first = flow();
+  assert.match(first.stdout, /X-9\.json: what is kept of this lane cannot be read/);
+  assert.equal(there('X-5'), true);
+  const runDir = () => join(box.state, 'runs', record('X-5').runs.at(-1).run);
+  const openedAt = (minutesAgo) => { const kept = record('X-5'); kept.runs.at(-1).at = new Date(Date.now() - minutesAgo * 60000).toISOString().replace(/\.\d+Z$/, 'Z'); writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept)); };
+  // Just opened, no terminal ran it yet: it is given its time. Ten minutes later it never started: run again.
+  assert.equal(flow().stdout.includes('X-5'), false);
+  openedAt(11);
+  assert.match(flow().stdout, /X-5: its session never started\nX-5: opened again \(stopped:/);
+  assert.equal(record('X-5').runs.length, 2);
+  // Its process is gone without a word (its terminal closed, the host restarted): seen, and run again.
+  writeFileSync(join(runDir(), 'pid'), '999999\n');
+  assert.match(flow().stdout, /X-5: its session died without a word\nX-5: opened again \(stopped:/);
+  assert.equal(record('X-5').runs.length, 3);
+  // A session that runs for longer than a session may is stopped, and counts as one that stopped short.
+  const long = spawn('sleep', ['60'], { stdio: 'ignore' });
+  writeFileSync(join(runDir(), 'pid'), `${long.pid}\n`);
+  openedAt(30);
+  assert.equal(flow().stdout.includes('X-5'), false, 'half an hour: at work');
+  openedAt(61);
+  const tooLong = runDir();
+  assert.match(flow().stdout, /X-5: its session runs for more than 1 hours: stopped\nX-5: opened again \(stopped:/);
+  assert.equal(readFileSync(join(tooLong, 'exit-code'), 'utf8').trim(), '124');
+  long.kill();
+  assert.equal(record('X-5').runs.length, 4);
+  // The user takes the ticket out of the work: its lane waits, nothing is opened again. Back in the work: it goes on.
+  assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Backlog\n');
+  assert.equal(flow().stdout.includes('X-5'), false);
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  assert.match(flow().stdout, /X-5: opened again \(stopped:/);
+  // « Aucune. » on a line of its own is no question for him.
+  const done = session('X-5', { answer: 'Fait.\n\nQuestions pour Makhtar\n\nAucune.' });
+  assert.equal(done.run.status, 0);
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  flow();
+  assert.deepEqual(stuck(), []);
+  // He has agreed, then writes a word on the ticket: read by the lead, it does not take his agreement back.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Merci.', byOwner: true }]));
+  const before = moves().length;
+  assert.equal(flow().stdout.includes('said:'), false);
+  assert.equal(moves().length, before, 'the card stays where he put it');
+  // The same word while the card asks him: it is his answer, the lane is opened again with it.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
+  assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
+  // Done: nothing more is done on it, whatever comes next.
+  session('X-5', { commit: null });
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Done\n');
+  assert.match(flow().stdout, /X-5: its ticket is « Done »/);
+  assert.equal(flow().stdout.includes('X-5:'), false);
+});
+
+test('a lane takes over a pull request somebody else began: it works on that branch, and sends its work to it', () => {
+  const hand = laneWithRemote('feat/by-hand', 'feat: begun by hand');
+  const { box } = hand;
+  execFileSync('git', ['-C', hand.path, 'push', '-q', 'origin', 'feat/by-hand']);
+  execFileSync('git', ['-C', box.repo, 'worktree', 'remove', '--force', hand.path]);
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', isDraft: false, headRefName: 'feat/by-hand', baseRefName: 'main', additions: 1, deletions: 0, files: [] }));
+  writeFileSync(join(box.home, 'pr-head-feat-by-hand.json'), JSON.stringify([{ number: 7, state: 'OPEN' }]));
+  const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-7', '--pr', '7', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(opened.status, 0, opened.stderr);
+  const lane = JSON.parse(opened.stdout);
+  assert.match(readFileSync(join(lane.run_dir, 'prompt.md'), 'utf8'), /PR #7, branche feat\/by-hand/);
+  execFileSync('git', ['-C', lane.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: what the reviewer asked']);
+  const head = execFileSync('git', ['-C', lane.worktree, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [lane.run_dir], { cwd: lane.worktree, env: box.env, encoding: 'utf8' }).status, 0);
+  assert.ok(hand.onRemote().includes(`feat/by-hand ${head}`), 'its work is on the branch of the pull request');
+  assert.ok(!hand.onRemote().some((ref) => ref.startsWith('dev/X-7 ')), 'and on no branch of its own');
+  assert.equal(hand.created(), null, 'no second pull request');
+  const record = JSON.parse(readFileSync(join(box.state, 'lanes', 'X-7.json'), 'utf8'));
+  assert.deepEqual([record.pr, record.push_branch], [7, 'feat/by-hand']);
+  // Never to the base, whatever a pull request says of its branch.
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 8, state: 'OPEN', isDraft: false, headRefName: 'main', baseRefName: 'main', additions: 1, deletions: 0, files: [] }));
+  assert.match(spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-8', '--pr', '8', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' }).stderr, /is the base/);
 });
 
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
@@ -3085,6 +3838,26 @@ test('a script never puts a ticket in the status that is the user\'s agreement, 
   assert.equal(asApp([by('the-user', false, '2026-01-02T11:00:00Z')], 'not-a-time').status, 1);
   assert.equal(asApp([by('the-user', false, '2026-01-02T10:00:00.900Z')], '2026-01-02T10:00:00Z').status, 0, 'times are compared as times, not as text: a fraction of a second is no reason to refuse him');
   assert.equal(asApp([by('the-user', false, '2026-01-02T09:59:59.900Z')], '2026-01-02T10:00:00Z').status, 8);
+  // A ticket created in a status never moved to it, and the tracker keeps no line for it: whoever created it put it there.
+  const created = (creator, moves = []) => answer({ viewer: { id: 'owner' }, issue: { state: { name: 'Todo' }, createdAt: '2026-01-02T10:00:00Z', creator, history: { nodes: moves } } });
+  created({ id: 'owner', app: false });
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 0, 'created there by him');
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo', '2026-01-02T11:00:00Z').status, 8, 'created there by him, but before the time asked for');
+  created({ id: 'the-agents', app: true });
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 6, 'created there by an application');
+  created(null);
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 7, 'created by nobody the tracker names: nobody put it there');
+  created({ id: 'owner', app: false }, [{ createdAt: '2026-01-02T11:00:00Z', actorId: 'someone-else', actor: { id: 'someone-else', app: false }, botActor: null, fromState: { name: 'Backlog' }, toState: { name: 'In Progress' } }]);
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 7, 'it moved since: its creation says nothing of who put it back');
+  // A script may say where the work stands; never « go », never his agreement.
+  answer({ issue: { id: 'i1' }, teams: { nodes: [{ states: { nodes: [{ id: 's1', name: 'In Progress' }, { id: 's2', name: 'In Review' }, { id: 's3', name: 'Todo' }] } }] }, issueUpdate: { success: true } });
+  assert.equal(linear('move', 'X-1', 'In Progress').status, 0);
+  assert.equal(linear('move', 'X-1', 'In Review').status, 0);
+  assert.match(linear('move', 'X-1', 'Todo').stderr, /never to "Todo"/);
+  assert.match(linear('move', 'X-1', 'Go MEP').stderr, /never to "Go MEP"/);
+  // A ticket is read whole: its text is what a lane works from.
+  answer({ issue: { id: 'i1', identifier: 'X-1', title: 'T', url: 'u', description: 'Le texte du ticket.', createdAt: '2026-01-02T10:00:00Z', state: { name: 'Todo' }, project: null, labels: { nodes: [] } } });
+  assert.equal(JSON.parse(linear('issue', 'X-1').stdout).description, 'Le texte du ticket.');
   // A comment says whether the owner of the key wrote it, and when it was last rewritten.
   const written = (id, user, over = {}) => ({ id, createdAt: '2026-01-02T10:00:00Z', editedAt: null, body: 'Fusion : X-1', url: 'u', user: user && { id: user }, botActor: null, externalUser: null, ...over });
   answer({ viewer: { id: 'owner' }, issue: { comments: { nodes: [written('a', 'owner'), written('b', 'someone-else'), written('c', 'owner', { botActor: { id: 'bot' } }), written('d', null, { externalUser: { id: 'ext' } }), written('e', 'owner', { editedAt: '2026-01-05T10:00:00Z' })] } } });
@@ -3235,7 +4008,7 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
   // The rest of a lane's worktree (its test results, the images of the repository) does not leave: only that one folder, at that one place.
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'test-results.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png')).stderr, /not under a folder of captures/);
-  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/orca-workspaces\/budgeting\/\.local\/captures-linear, ~\/orca-workspaces\/budgeting-lanes\/budgeting\/\*\/\.local\/captures-linear$/m);
+  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/orca-workspaces\/budgeting\/\.local\/captures-linear, ~\/orca-workspaces\/budgeting\/\.local\/captures-linear\/\*, ~\/orca-workspaces\/budgeting-lanes\/budgeting\/\*\/\.local\/captures-linear$/m);
   assert.match(upload(join(captures, 'secret.png')).stderr, /not a PNG or JPEG image/);
   assert.match(upload(join(captures, 'missing.png')).stderr, /no such file/);
   assert.equal(sent(), '', 'nothing left the machine');
