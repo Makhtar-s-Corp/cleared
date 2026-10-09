@@ -2086,12 +2086,17 @@ test('what its first review asked: the dependencies come from the base and run n
   pull({ headRefOid: first.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   // (its date says « before the session »: only what the session was handed tells what is new)
   // Dependencies of a lock file no worktree uses any more do not pile up: gone at the next opening of a lane.
+  // (one just installed and not linked yet is another lane being opened: left alone)
   const stale = join(box.state, 'deps', '0000000000000000');
+  const fresh = join(box.state, 'deps', '1111111111111111');
   mkdirSync(join(stale, 'node_modules', 'old'), { recursive: true });
+  mkdirSync(join(fresh, 'node_modules', 'new'), { recursive: true });
   execFileSync('chmod', ['-R', 'a-w', join(stale, 'node_modules')]);
+  execFileSync('touch', ['-d', '3 hours ago', stale]);
   assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
   assert.equal(installs().length, 1);
-  assert.deepEqual(readdirSync(join(box.state, 'deps')).filter((name) => /^[0-9a-f]{16}$/.test(name)).length, 1, 'only the one in use is kept');
+  assert.deepEqual(readdirSync(join(box.state, 'deps')).filter((name) => /^[0-9a-f]{16}$/.test(name)).filter((name) => name !== '1111111111111111').length, 1, 'of the old ones, only the one in use is kept');
+  assert.deepEqual(readdirSync(join(fresh, 'node_modules')), ['new']);
   assert.equal(readFileSync(join(record('X-5').worktree, 'node_modules', 'pkg', 'index.js'), 'utf8'), 'installed\n');
   const second = session('X-5', { commit: null, answer: 'Fait.\n\n**Questions pour Makhtar**\n\n1. Le toast se ferme-t-il aussi au survol ? Recommandation : oui.' });
   assert.match(second.prompt, /Les dépendances installées sont celles de la branche principale/);
@@ -2160,10 +2165,26 @@ test('the lead can say something to a lane of the dispatcher whose session is ov
   pull({ headRefOid: first.head, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   // Its session over: opened again with what the lead wrote, quoted, once.
   assert.match(flow().stdout, /X-5: opened again \(told:/);
+  // What it sets apart for the user (a capture) exists only in its worktree, which is closed once its work is
+  // sent: kept where the lead finds it, under the ticket.
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('[lanes]\n', `[lanes]\nkept_from = .local/captures\nkept_in = ${join(box.home, 'kept')}\n`));
+  execFileSync('bash', ['-c', 'echo "/.local" >> "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/info/exclude"', '_', record('X-5').worktree]);
+  mkdirSync(join(record('X-5').worktree, '.local', 'captures'), { recursive: true });
+  writeFileSync(join(record('X-5').worktree, '.local', 'captures', 'toast-390.png'), 'image');
   const second = session('X-5', { commit: 'docs: the capture' });
   assert.match(second.prompt, /Pourquoi tu es rouverte[\s\S]*\| Le chef de projet t’a écrit[\s\S]*\|.*Il manque la capture sur téléphone/);
-  assert.equal(flow().stdout.includes('told:'), false);
+  const closed = flow();
+  assert.equal(closed.stdout.includes('told:'), false);
+  assert.match(closed.stdout, /X-5: what its lane set apart for the user is kept/);
+  assert.equal(there('X-5'), false);
+  assert.equal(readFileSync(join(box.home, 'kept', 'X-5', 'toast-390.png'), 'utf8'), 'image');
   assert.equal(record('X-5').runs.length, 2);
+  // A word of the lead to a lane whose card asks the user leaves the card where it asks him.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
+  const before = readFileSync(join(box.home, 'linear-moves'), 'utf8');
+  assert.equal(tell('X-5', 'La légende de la capture est à corriger.').status, 0);
+  assert.match(flow().stdout, /X-5: opened again \(told:/);
+  assert.equal(readFileSync(join(box.home, 'linear-moves'), 'utf8'), before);
   // The same nets as for any lane: never told to merge or to force, and no more than a few messages an hour.
   assert.match(tell('X-5', 'Fusionne ta branche dans main.').stderr, /never told to merge or to force/);
   assert.match(spawnSync(join(box.home, 'tell-lane.sh'), ['--list'], { env, encoding: 'utf8' }).stdout, /^X-5\t/m);
@@ -3975,7 +3996,7 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
   // The rest of a lane's worktree (its test results, the images of the repository) does not leave: only that one folder, at that one place.
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'test-results.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png')).stderr, /not under a folder of captures/);
-  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/orca-workspaces\/budgeting\/\.local\/captures-linear, ~\/orca-workspaces\/budgeting-lanes\/budgeting\/\*\/\.local\/captures-linear$/m);
+  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/orca-workspaces\/budgeting\/\.local\/captures-linear, ~\/orca-workspaces\/budgeting\/\.local\/captures-linear\/\*, ~\/orca-workspaces\/budgeting-lanes\/budgeting\/\*\/\.local\/captures-linear$/m);
   assert.match(upload(join(captures, 'secret.png')).stderr, /not a PNG or JPEG image/);
   assert.match(upload(join(captures, 'missing.png')).stderr, /no such file/);
   assert.equal(sent(), '', 'nothing left the machine');

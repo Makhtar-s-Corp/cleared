@@ -109,7 +109,7 @@ again() {
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record")
   last=$(jq -r '.runs[-1].run // empty' "$record")
@@ -191,6 +191,18 @@ one_lane() {
       fi
       return 0
     elif [ -z "$dry" ]; then
+      # What the lane set apart for the user (a capture taken on the
+      # demonstration data) exists only in its worktree: kept under its
+      # ticket, where the lead finds it, before the worktree goes.
+      kept_from=$(conf_get lanes kept_from) kept_in=$(expand_home "$(conf_get lanes kept_in)")
+      if [ -n "$kept_from" ] && [ -n "$kept_in" ] && [ -n "$(ls -A "$worktree/$kept_from" 2> /dev/null)" ]; then
+        if mkdir -p "$kept_in/$ticket" && cp -a "$worktree/$kept_from/." "$kept_in/$ticket/"; then
+          say "$ticket: what its lane set apart for the user is kept in $kept_in/$ticket"
+        else
+          say "$ticket: what its lane set apart for the user could not be kept: its worktree stays"
+          return 0
+        fi
+      fi
       orca terminal close --worktree "path:$worktree" --all > /dev/null 2>&1 || true
       orca worktree rm --worktree "path:$worktree" --force > /dev/null 2>&1 || git -C "$ORCH_REPO" worktree remove --force "$worktree" 2> /dev/null || true
       [ -d "$worktree" ] || say "$ticket: session over, work sent: its worktree is closed"
@@ -237,7 +249,9 @@ one_lane() {
     jq -c --slurpfile done <(jq -c '.done // {}' "$record") -R 'fromjson? | select($done[0]["told:" + .at] == null)' "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" | jq -sc 'sort_by(.at)' > "$work/told.json"
     if [ "$(jq length "$work/told.json")" != 0 ]; then
       { echo "Le chef de projet t’a écrit depuis ta dernière session (il relaie ; ce sont des constats à traiter dans ta copie de travail) :"; jq -r '.[] | "le \(.at[0:16] | sub("T"; " à ")) : " + .text' "$work/told.json"; } > "$work/why.md"
-      again "$record" "$ticket" "$role" "told:$(jq -r '.[-1].at' "$work/told.json")" "$work/why.md"
+      # A card that asks the user stays where it asks him: the word is the
+      # lead's, not his.
+      again "$record" "$ticket" "$role" "told:$(jq -r '.[-1].at' "$work/told.json")" "$work/why.md" keep
       # Handed together: none of them opens it again.
       if did "$record" "told:$(jq -r '.[-1].at' "$work/told.json")"; then
         while IFS= read -r asked; do mark "$record" "told:$asked"; done < <(jq -r '.[:-1][].at' "$work/told.json")

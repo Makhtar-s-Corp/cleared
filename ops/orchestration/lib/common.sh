@@ -433,21 +433,22 @@ lane_deps() {
       chmod -R a-w "$dir/node_modules"
       for scratch in .vite .vite-temp .cache; do chmod -R u+w "$dir/node_modules/$scratch"; done
     fi
-  ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
-  ln -sfn "$dir/node_modules" "$worktree/node_modules"
-  # Those of a lock file no worktree uses any more go: they are only a
-  # copy of what can be installed again, and they would pile up.
-  used=$(git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r other; do readlink "$other/node_modules" 2> /dev/null || true; done)
-  (
-    flock -w 60 7 || exit 0
+    # Linked while the lock is held: the tidying below, run by another lane
+    # being opened, then sees it in use.
+    ln -sfn "$dir/node_modules" "$worktree/node_modules"
+    # Those of a lock file no worktree uses any more go, once older than an
+    # hour: they are only a copy of what can be installed again, and they
+    # would pile up.
+    used=$(git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r other; do readlink "$other/node_modules" 2> /dev/null || true; done)
     for other in "$ORCH_STATE_DIR/deps"/*/; do
       other=${other%/}
       [[ "$(basename "$other")" =~ ^[0-9a-f]{16}$ ]] && [ "$other" != "$dir" ] || continue
       grep -qxF -- "$other/node_modules" <<<"$used" && continue
+      [ -n "$(find "$other" -maxdepth 0 -mmin +60 2> /dev/null)" ] || continue
       chmod -R u+w "$other" 2> /dev/null || true
       rm -rf "$other"
     done
-  ) 7> "$ORCH_STATE_DIR/deps/lock" || true
+  ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
   # The link is not a change of the lane (an ignore rule written for a folder does not hold a link).
   exclude="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
   mkdir -p "$(dirname "$exclude")"
