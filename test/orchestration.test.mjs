@@ -2702,6 +2702,12 @@ test('the Claude adapter holds a conversation where nothing is asked for: readin
 
 test('talk.sh opens one conversation in the lane of the lead, briefed by scripts; talk-run.sh holds it with the permissions of the discussion and writes it to the ledger as a discussion', () => {
   const box = sandbox();
+  // Its prompt is not there: nothing starts, least of all a discussion with no instruction.
+  execFileSync('mv', [join(box.home, 'prompts', 'talk.md'), join(box.home, 'prompts', 'talk.kept')]);
+  const blind = spawnSync(join(box.home, 'talk.sh'), ['--dry-run'], { env: box.env, encoding: 'utf8' });
+  assert.notEqual(blind.status, 0);
+  assert.match(blind.stderr, /no prompt to read/);
+  execFileSync('mv', [join(box.home, 'prompts', 'talk.kept'), join(box.home, 'prompts', 'talk.md')]);
   const brief = spawnSync(join(box.home, 'talk.sh'), ['--dry-run'], { env: box.env, encoding: 'utf8' });
   assert.equal(brief.status, 0, brief.stderr);
   assert.match(brief.stdout, /talk prompt, decisions in .*\/lanes\/talk-X-100\/docs\/decisions\.md, default ticket X-100/);
@@ -4175,6 +4181,12 @@ test('the project the tool works on is named the same way for every script, its 
   const missing = spawnSync('bash', ['-c', 'set -euo pipefail; . "$1/lib/common.sh"; prompt_text "$1/prompts/absent.md"; echo reached', '_', odd], { env: { ...clean, ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }, encoding: 'utf8' });
   assert.notEqual(missing.status, 0);
   assert.doesNotMatch(missing.stdout, /reached/);
+  // No project named anywhere and the tool sits in no repository: every script stops and says so, none works on
+  // « wherever it was started from ».
+  const nowhere = spawnSync('bash', ['-c', 'set -euo pipefail; . "$1/lib/common.sh"; echo reached', '_', odd], { env: { ...clean, XDG_CONFIG_HOME: join(dir, 'empty') }, cwd: ORCH_HOME, encoding: 'utf8' });
+  assert.notEqual(nowhere.status, 0);
+  assert.match(nowhere.stderr, /no project is named/);
+  assert.doesNotMatch(nowhere.stdout, /reached/);
   // The prompt of the project, when it has one, is the one handed.
   writeFileSync(join(first, '.ferme', 'prompts', 'dev.md'), 'Projet : `{orch}/when-free.sh`.\n');
   assert.match(told({ ORCH_REPO: first, ORCH_CONF: join(odd, 'agents.conf') }), new RegExp(`\\nProjet : \`${odd.replace(/[|&]/g, '\\$&')}/when-free\\.sh\`\\.\\n$`));
@@ -4227,7 +4239,7 @@ test('the installer of the services names one project for the machine and never 
   writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(bin, 'tailscale'), '#!/usr/bin/env bash\necho 100.64.0.1\n', { mode: 0o755 });
   writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> "${join(home, 'systemctl-calls')}"\ncase "$*" in *is-enabled*|*is-active*) [ -f "${join(home, 'old-wake')}" ] && exit 0 || exit 1 ;; esac\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> "${join(home, 'systemctl-calls')}"\nstate=$(cat "${join(home, 'old-wake')}" 2>/dev/null || echo absent)\ncase "$*" in\n  *is-enabled*orchestration-wake.timer*) echo "$state"; case "$state" in enabled|static) exit 0 ;; *) exit 1 ;; esac ;;\n  *is-enabled*) echo static; exit 0 ;;\n  *is-active*) [ "$state" = enabled ] && exit 0 || exit 3 ;;\nesac\nexit 0\n`, { mode: 0o755 });
   const project = fixtureProject();
   const other = scratch('orch-other-project-');
   execFileSync('git', ['-C', other, 'init', '-q', '-b', 'main']);
@@ -4246,12 +4258,13 @@ test('the installer of the services names one project for the machine and never 
   assert.match(install({ ORCH_REPO: join(home, 'nowhere') }).stderr, /is not a folder of this machine/);
   assert.match(install({ ORCH_REPO: bin }).stderr, /is not a git checkout/);
   // An older copy still wakes on this machine: two wakes would run. Refused, and it says what to do.
-  writeFileSync(join(home, 'old-wake'), '');
+  writeFileSync(join(home, 'old-wake'), 'enabled');
   const twice = install({ ORCH_REPO: project });
   assert.notEqual(twice.status, 0);
   assert.match(twice.stderr, /orchestration-wake\.timer/);
   assert.doesNotMatch(calls(), /enable --now/);
-  rmSync(join(home, 'old-wake'));
+  // Stopped: its timer is « disabled », and the service it started is « static » as any unit a timer starts. That is not waking.
+  writeFileSync(join(home, 'old-wake'), 'disabled');
   // Named: written in the one line a terminal reads and in every unit, and the units are started.
   const done = install({ ORCH_REPO: project });
   assert.equal(done.status, 0, done.stderr);

@@ -8,6 +8,9 @@ ORCH_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # project that carries its own copy of the tool).
 ORCH_REPO=${ORCH_REPO:-$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project" 2> /dev/null || true)}
 ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/null | sed -n '1s/^worktree //p' || true)}
+# No project at all (nobody named one, and the tool sits in no repository):
+# nothing is done « wherever this was started from ».
+[ -n "$ORCH_REPO" ] || { echo "$(basename "$0"): no project is named (ORCH_REPO, or the first line of ${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project)" >&2; exit 1; }
 # Its settings: its own (.ferme/agents.conf in that checkout, which no lane
 # writes to), else the example that comes with the tool.
 if [ -z "${ORCH_CONF:-}" ]; then

@@ -64,10 +64,9 @@ trap 'rm -rf "$work"' EXIT
 } > "$work/state.md"
 
 {
-  told=$(prompt_text "$(prompt_file talk)"; printf x)
-  told=${told%x}
+  told=$(prompt_text "$(prompt_file talk)") || exit 1
   told=${told//@DECISIONS@/"$decisions/docs/decisions.md"}
-  printf '%s' "${told//@REPORT_ON@/"$report_on"}"
+  printf '%s\n' "${told//@REPORT_ON@/"$report_on"}"
   printf '\n---\n'
   cat "$work/state.md"
 } > "$work/prompt.md"

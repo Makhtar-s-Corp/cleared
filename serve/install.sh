@@ -37,11 +37,13 @@ done
 # Two wakes never run on one machine: the units of a project that carried
 # its own copy of the tool (orchestration-*) are stopped by whoever
 # switches, not here, so that going back is one command too.
-for old in orchestration-wake.timer orchestration-wake.service; do
-  if systemctl --user is-enabled --quiet "$old" 2> /dev/null || systemctl --user is-active --quiet "$old" 2> /dev/null; then
-    die "an older copy of the tool still wakes on this machine ($old): stop it first (systemctl --user disable --now orchestration-wake.timer orchestration-dashboard.service orchestration-dashboard-refresh.timer orchestration-legacy-import.timer), then run this again"
-  fi
-done
+# (Waking: its timer enabled, or its timer or its service running now. The
+# service a timer starts is « static » for systemd whether the timer is on
+# or off: that says nothing.)
+case "$(systemctl --user is-enabled orchestration-wake.timer 2> /dev/null || true)" in enabled*) waking=1 ;; *) waking= ;; esac
+if [ -n "$waking" ] || systemctl --user is-active --quiet orchestration-wake.timer 2> /dev/null || systemctl --user is-active --quiet orchestration-wake.service 2> /dev/null; then
+  die "an older copy of the tool still wakes on this machine (orchestration-wake.timer): stop it first (systemctl --user disable --now orchestration-wake.timer orchestration-dashboard.service orchestration-dashboard-refresh.timer orchestration-legacy-import.timer), then run this again"
+fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
 units="$HOME/.config/systemd/user"
