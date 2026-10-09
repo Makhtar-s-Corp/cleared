@@ -63,9 +63,14 @@ guard_text "$out/changes.diff" || die "$branch not pushed: its changes are refus
 # A pull request that is not a draft runs its checks at every push, whatever
 # the host is doing: it goes back to draft first, and is taken out of it
 # when the host is free for a run (flow-lanes.sh), like a new one.
-existing=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number,isDraft | jq -r '.[0] | select(.isDraft == false) | .number // empty')
-[ -z "$existing" ] || (cd "$worktree" && gh pr ready "$existing" --undo) > /dev/null 2>&1 || true
-git -C "$worktree" push --quiet origin "HEAD:refs/heads/$push_to"
+# Only when there is something to push: a session that changed nothing
+# leaves its pull request as it is. Sent back to draft for nothing, it
+# would wait for checks that already ran on that very version.
+if [ "$(git -C "$worktree" rev-parse HEAD)" != "$(git -C "$worktree" rev-parse --verify --quiet "refs/remotes/origin/$push_to" || true)" ]; then
+  existing=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number,isDraft | jq -r '.[0] | select(.isDraft == false) | .number // empty')
+  [ -z "$existing" ] || (cd "$worktree" && gh pr ready "$existing" --undo) > /dev/null 2>&1 || true
+  git -C "$worktree" push --quiet origin "HEAD:refs/heads/$push_to"
+fi
 
 number=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number | jq -r '.[0].number // empty')
 if [ -z "$number" ]; then
