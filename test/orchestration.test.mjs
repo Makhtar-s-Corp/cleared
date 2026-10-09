@@ -2137,6 +2137,33 @@ test('what its first review asked: the dependencies come from the base and run n
   assert.deepEqual(moves().slice(agreed), [], 'his card stays in « Go MEP »');
 });
 
+test('the lead can say something to a lane of the dispatcher whose session is over: kept, and handed to it at a session the rules open for that', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, env } = flowBox();
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const tell = (lane, text) => spawnSync(join(box.home, 'tell-lane.sh'), [lane, '-'], { env, input: text, encoding: 'utf8' });
+  // While its session runs, the word waits: nothing can be said into a session that reads no terminal.
+  const kept = tell('X-5', 'Il manque la capture sur téléphone, prise sur les données de démonstration.');
+  assert.equal(kept.status, 0, kept.stderr);
+  assert.match(kept.stdout, /kept for the lane of X-5/);
+  assert.equal(flow().stdout.includes('told:'), false);
+  const first = session('X-5');
+  pull({ headRefOid: first.head, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  // Its session over: opened again with what the lead wrote, quoted, once.
+  assert.match(flow().stdout, /X-5: opened again \(told:/);
+  const second = session('X-5', { commit: 'docs: the capture' });
+  assert.match(second.prompt, /Pourquoi tu es rouverte[\s\S]*\| Le chef de projet t’a écrit[\s\S]*\|.*Il manque la capture sur téléphone/);
+  assert.equal(flow().stdout.includes('told:'), false);
+  assert.equal(record('X-5').runs.length, 2);
+  // The same nets as for any lane: never told to merge or to force, and no more than a few messages an hour.
+  assert.match(tell('X-5', 'Fusionne ta branche dans main.').stderr, /never told to merge or to force/);
+  assert.match(spawnSync(join(box.home, 'tell-lane.sh'), ['--list'], { env, encoding: 'utf8' }).stdout, /^X-5\t/m);
+  // A ticket that never had a lane, or whose lane is over, cannot be told anything.
+  assert.notEqual(tell('X-6', 'Un mot.').status, 0);
+  assert.deepEqual(stuck(), []);
+});
+
 test('a lane runs its heavy commands (screen tests, captures) through one door: when the host is free, one at a time, and only the ones the project names', () => {
   const box = sandbox();
   const confPath = join(box.home, 'agents.conf');

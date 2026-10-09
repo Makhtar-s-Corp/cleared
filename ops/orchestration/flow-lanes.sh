@@ -230,6 +230,22 @@ one_lane() {
     fi
   fi
 
+  # What the lead wrote to the lane (tell-lane.sh <ticket>): its sessions
+  # read no terminal, so it is handed to it here, quoted, once. Not under
+  # the user's agreement, like a word of his.
+  if [ -s "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" ] && [ "$state" != "$(conf_get linear go_state)" ]; then
+    jq -c --slurpfile done <(jq -c '.done // {}' "$record") -R 'fromjson? | select($done[0]["told:" + .at] == null)' "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" | jq -sc 'sort_by(.at)' > "$work/told.json"
+    if [ "$(jq length "$work/told.json")" != 0 ]; then
+      { echo "Le chef de projet t’a écrit depuis ta dernière session (il relaie ; ce sont des constats à traiter dans ta copie de travail) :"; jq -r '.[] | "le \(.at[0:16] | sub("T"; " à ")) : " + .text' "$work/told.json"; } > "$work/why.md"
+      again "$record" "$ticket" "$role" "told:$(jq -r '.[-1].at' "$work/told.json")" "$work/why.md"
+      # Handed together: none of them opens it again.
+      if did "$record" "told:$(jq -r '.[-1].at' "$work/told.json")"; then
+        while IFS= read -r asked; do mark "$record" "told:$asked"; done < <(jq -r '.[:-1][].at' "$work/told.json")
+      fi
+      return 0
+    fi
+  fi
+
   pr=$(jq -r '.pr // empty' "$record")
   [ -n "$pr" ] || return 0
   pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json state,isDraft,headRefOid,headRefName,statusCheckRollup 2> /dev/null) || return 0

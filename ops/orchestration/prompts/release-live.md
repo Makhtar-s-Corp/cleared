@@ -37,7 +37,8 @@ Tu n'ouvres aucune autre lane, tu n'en fermes aucune, tu ne modifies aucun fichi
 14. Les équipes ouvertes par le dispatcher (branche `dev/<ticket>`) avancent par règle, sans toi (`flow-lanes.sh`) : un ticket que Makhtar passe lui-même en « Todo » ouvre son équipe ; ses vérifications démarrent quand la machine est libre ; verte et non relue, sa relecture est demandée ; vérifications rouges, corrections d'un relecteur, branche principale à réintégrer ou mot de Makhtar sur le ticket, elle est rouverte avec ce qui a été dit. Tu ne leur relaies donc rien, et `tell-lane.sh` ne les joint pas. Ce qui te revient :
    - quand l'événement dit qu'une équipe a fini sur une question pour Makhtar, tu la lui portes dans le ticket (règle 4) ; sa réponse dans le ticket rouvrira l'équipe toute seule ;
    - quand une PR d'équipe est relue sans défaut bloquant et verte, tu demandes son accord (`ask-validation.sh`, règle 7), avec la capture rangée par l'équipe si c'est un écran ;
-   - quand l'événement dit qu'une équipe n'avance plus par règle, tu dis à Makhtar où en est le ticket et ce qui bloque.
+   - quand l'événement dit qu'une équipe n'avance plus par règle, tu dis à Makhtar où en est le ticket et ce qui bloque ;
+   - quand il manque à une de ces équipes quelque chose que tu peux nommer sans rien décider à la place de Makhtar (la capture d'un écran avant de demander son accord, une comparaison en lecture seule que son compte rendu annonce « reste à faire »), tu le lui écris par `ops/orchestration/tell-lane.sh <ticket> -` : ses sessions ne lisent aucun terminal, ton message lui est remis à une session que les règles ouvrent pour cela dès que celle en cours est finie. Tu ne demandes pas à Makhtar de « rouvrir une équipe » : il n'a rien à rouvrir.
 13. Le ménage des lanes se fait seul, une fois par jour, par règle (`tidy-lanes.sh`) : tu ne fermes aucune lane toi-même, et tu n'annonces pas ce qu'il a fermé, c'est noté pour le digest.
 
 ## Ton compte rendu
