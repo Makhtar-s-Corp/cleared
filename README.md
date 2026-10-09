@@ -5,11 +5,11 @@ Le dispatcher ouvre une lane par agent, choisit son modèle dans une table, et �
 ## Au quotidien
 
 ```sh
-ops/orchestration/spawn-lane.sh dev SEE-105              # ouvre la lane dev/SEE-105
-ops/orchestration/spawn-lane.sh dev SEE-105 --dry-run    # dit seulement quel modèle serait pris, et pourquoi
-ops/orchestration/spawn-lane.sh mechanical SEE-105 --model codex-heavy  # force un modèle de la table
-ops/orchestration/kill-lane.sh dev/SEE-105               # ferme la lane (terminaux, copie de travail, branche)
-ops/orchestration/dashboard.sh                           # réécrit la page du tableau de bord
+spawn-lane.sh dev SEE-105              # ouvre la lane dev/SEE-105
+spawn-lane.sh dev SEE-105 --dry-run    # dit seulement quel modèle serait pris, et pourquoi
+spawn-lane.sh mechanical SEE-105 --model codex-heavy  # force un modèle de la table
+kill-lane.sh dev/SEE-105               # ferme la lane (terminaux, copie de travail, branche)
+dashboard.sh                           # réécrit la page du tableau de bord
 ```
 
 Une lane est une copie de travail git sur la branche `<rôle>/<ticket>` : Orca l'affiche sous ce nom sans rien lui demander. Son terminal lance le modèle, puis poste le compte rendu dans Linear avec le modèle réellement utilisé.
@@ -53,7 +53,7 @@ adapters/<nom>.sh talk --model <id> --prompt-file <fichier> [--session-id <uuid>
 ## Relire une PR
 
 ```sh
-ops/orchestration/spawn-lane.sh review SEE-112 --pr 257
+spawn-lane.sh review SEE-112 --pr 257
 ```
 
 La lane `review/<ticket>` part de la tête de la PR, en lecture seule. `--since <commit>` limite la relecture à ce qui a changé depuis un commit déjà relu ; `--from <réf>` la fait partir d'une branche locale pas encore poussée. Le modèle vient de la table, avec la taille et les chemins de la PR ; ce n'est jamais celui qui l'a écrite (lu dans le ledger, ou donné par `--author-model`). Sans auteur connu, la relecture ne démarre pas. Son compte rendu est posté tel quel, sans passer par la mise en forme.
@@ -126,7 +126,7 @@ Prendre la suite d'un autre chef de projet : `wake.sh --handover <fichier>` lanc
 Pourquoi une minuterie du serveur et non une automatisation Orca : essayée le 7 octobre, celle-ci lance `claude --dangerously-skip-permissions` dans une session interactive qui ne se termine pas. Le modèle ne viendrait plus de la table, la liste blanche du rôle ne s'appliquerait pas, et la CLI ne rendrait aucun usage à écrire au ledger. Le pré-contrôle sans modèle et la lane stable visible dans Orca sont gardés.
 
 ```sh
-ops/orchestration/wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
+wake.sh --dry-run    # dit ce qui a bougé, ne lance rien
 ```
 
 ## Discuter avec le chef de projet
@@ -138,7 +138,7 @@ La session n'a aucun droit d'action (`[permissions.talk]`). Rien ne lui est dema
 Son seul pouvoir d'écriture est de proposer la transcription d'une décision que l'utilisateur a formulée, et rien ne part sans lui :
 
 1. La session appelle `decide.sh <ticket> - [--adr]`. Le texte passe par le garde-fou et reste en attente dans `state/decisions/pending/`. Rien n'est envoyé.
-2. L'utilisateur confirme lui-même, en tapant dans la conversation `! ops/orchestration/confirm-decision.sh` (ou depuis un autre terminal). La session n'a pas le droit de lancer ce script. `--list` montre ce qui attend, `--drop <numéro>` abandonne.
+2. L'utilisateur confirme lui-même, en tapant dans la conversation `! confirm-decision.sh` (ou depuis un autre terminal). La session n'a pas le droit de lancer ce script. `--list` montre ce qui attend, `--drop <numéro>` abandonne.
 3. Alors seulement : avec `--adr`, la première confirmation montre tout ce qui change dans `docs/decisions.md`, lignes retirées comprises, et n'envoie rien ; la seconde valide ce changement, qui doit être resté celui de la proposition, et l'envoie en PR en brouillon (`push-lane.sh`) ; puis le texte est posté en commentaire du ticket, marqué comme écrit par un agent et confirmé par l'utilisateur ; puis une ligne `decision` est écrite au ledger, source `discussion` (`select at, ticket, detail from events where kind = 'decision'`). Dans cet ordre : ce qui ne peut pas partir arrête tout avant qu'on dise la décision prise, et relancer la confirmation reprend là où elle s'est arrêtée.
 
 `docs/decisions.md` est le seul fichier que la session peut modifier, et dans une copie de travail à part (`talk-<ticket de suivi>`, branche `talk/<ticket de suivi>`) : la lane du chef de projet ne contient jamais de fichier modifié. À chaque discussion, `main` est ramenée dans cette branche ; une branche qui existe n'est jamais recommencée.
@@ -163,7 +163,7 @@ Une lane n'a aucune commande réseau. Quand son run est terminé, `lane-run.sh` 
 Le coût est celui que la CLI rapporte, au tarif de l'API, converti en euros (`[currency]`). Quand elle n'en rapporte pas, il est calculé depuis `[prices]` ; sans prix, il reste vide.
 
 ```sh
-node ops/orchestration/lib/ledger.mjs sql "select model, count(*), sum(cost_eur) from runs group by 1"
+node lib/ledger.mjs sql "select model, count(*), sum(cost_eur) from runs group by 1"
 ```
 
 `import-legacy.mjs` relit les journaux des sessions de l'ancienne organisation (chef de projet et lanes) et les met dans le ledger avec `source = 'legacy'`, pour avoir une base de comparaison. Il peut être relancé.

@@ -2,11 +2,29 @@
 # Nothing here names a model or a provider: both come from agents.conf.
 
 ORCH_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-ORCH_CONF=${ORCH_CONF:-$ORCH_HOME/agents.conf}
-# The main checkout holds the one shared state, whatever worktree runs this.
+# The project these scripts work on, by its main checkout: said by whoever
+# runs them (ORCH_REPO), else once for the machine (first line of
+# ~/.config/ferme/project), else the repository these scripts sit in (a
+# project that carries its own copy of the tool).
+ORCH_REPO=${ORCH_REPO:-$(sed -n '1p' "${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project" 2> /dev/null)}
 ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain | sed -n '1s/^worktree //p')}
-ORCH_STATE_DIR=${ORCH_STATE_DIR:-$ORCH_REPO/ops/orchestration/state}
+# Its settings: its own (.ferme/agents.conf in that checkout, which no lane
+# writes to), else the example that comes with the tool.
+if [ -z "${ORCH_CONF:-}" ]; then
+  if [ -f "$ORCH_REPO/.ferme/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.ferme/agents.conf; else ORCH_CONF=$ORCH_HOME/agents.conf; fi
+fi
+# The state is kept on the machine, outside the repositories: one folder per
+# project, named after its checkout.
+ORCH_STATE_DIR=${ORCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ferme/$(basename "$ORCH_REPO")}
 export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR
+
+# prompt_file <name>: the prompt of that name. The project's own
+# (.ferme/prompts/<name>.md in its main checkout) comes before the one of the
+# tool: what an agent is told about a product is the product's.
+prompt_file() { if [ -f "$ORCH_REPO/.ferme/prompts/$1.md" ]; then printf '%s\n' "$ORCH_REPO/.ferme/prompts/$1.md"; else printf '%s\n' "$ORCH_HOME/prompts/$1.md"; fi; }
+# prompt_text <file>: its text, with {orch} standing for where these scripts
+# are on this machine (the same word as in [permissions.*]).
+prompt_text() { sed "s|{orch}|$ORCH_HOME|g" "$1"; }
 
 die() { echo "$(basename "$0"): $*" >&2; exit 1; }
 
@@ -347,17 +365,43 @@ close_old_terminals() {
 # guard_text <file>: refuses, without showing any value, a text the guard of
 # the repository would not let out (private terms, secrets, IBANs, addresses,
 # phone numbers). For anything a script sends to an outside service: Linear,
-# GitHub. The guard comes from the trusted ref, like scripts/codex-task.sh.
+# GitHub.
 guard_text() {
-  local ref=${ORCH_GUARD_REF:-origin/main} dir part
+  local ref terms allowed dir
+  # The code of the guard is the tool's own (lib/guard/). What it must know
+  # of the project (the fingerprints of its private terms, the values checked
+  # by hand as fictitious) is the project's, read from a ref no lane writes
+  # to: [guard] terms and allowed, at [guard] ref (the base of the lanes by
+  # default). A project that names no list has none: what is refused
+  # everywhere (secrets, IBANs, addresses, phone numbers) still is.
+  ref=${ORCH_GUARD_REF:-$(conf_get guard ref)}
+  ref=${ref:-$(conf_get lanes base)}
+  ref=${ref:-origin/main}
+  terms=$(conf_get guard terms) allowed=$(conf_get guard allowed)
   dir=$(mktemp -d)
-  for part in codex-guard.mjs codex-guard-allow.json private-terms.mjs private-terms.json; do
-    git -C "$ORCH_REPO" show "$ref:scripts/$part" > "$dir/$part" 2>/dev/null || {
+  cp "$ORCH_HOME/lib/guard/codex-guard.mjs" "$ORCH_HOME/lib/guard/private-terms.mjs" "$dir/" 2> /dev/null || {
+    rm -rf "$dir"
+    echo "$(basename "$0"): not sent, the guard of the tool (lib/guard/) could not be read" >&2
+    return 1
+  }
+  if [ -n "$terms" ]; then
+    git -C "$ORCH_REPO" show "$ref:$terms" > "$dir/private-terms.json" 2> /dev/null || {
       rm -rf "$dir"
-      echo "$(basename "$0"): not sent, the guard (scripts/$part on $ref) could not be read" >&2
+      echo "$(basename "$0"): not sent, the private terms of the project ($terms on $ref) could not be read" >&2
       return 1
     }
-  done
+  else
+    echo '[]' > "$dir/private-terms.json"
+  fi
+  if [ -n "$allowed" ]; then
+    git -C "$ORCH_REPO" show "$ref:$allowed" > "$dir/codex-guard-allow.json" 2> /dev/null || {
+      rm -rf "$dir"
+      echo "$(basename "$0"): not sent, the values the project allows ($allowed on $ref) could not be read" >&2
+      return 1
+    }
+  else
+    echo '[]' > "$dir/codex-guard-allow.json"
+  fi
   if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
     rm -rf "$dir"
     echo "$(basename "$0"): not sent, the guard refuses this text" >&2

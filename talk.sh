@@ -64,7 +64,7 @@ trap 'rm -rf "$work"' EXIT
 } > "$work/state.md"
 
 {
-  sed -e "s|@DECISIONS@|$decisions/docs/decisions.md|g" -e "s|@REPORT_ON@|$report_on|g" "$ORCH_HOME/prompts/talk.md"
+  sed -e "s|@DECISIONS@|$decisions/docs/decisions.md|g" -e "s|@REPORT_ON@|$report_on|g" -e "s|{orch}|$ORCH_HOME|g" "$(prompt_file talk)"
   printf '\n---\n'
   cat "$work/state.md"
 } > "$work/prompt.md"

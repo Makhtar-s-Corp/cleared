@@ -22,7 +22,9 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 [ "$(conf_get update self)" = yes ] || exit 3
-base=$(conf_get lanes base)
+# The branch of the tool itself, not the one of the project it works on.
+base=$(conf_get update base)
+base=${base:-origin/main}
 branch=${base#origin/}
 top=$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null) || exit 3
 [ "$(git -C "$top" symbolic-ref --quiet --short HEAD 2> /dev/null)" = "$branch" ] || exit 3

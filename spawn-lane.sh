@@ -131,7 +131,7 @@ if [ -n "$dry_run" ]; then
   exit 0
 fi
 
-prompt_file=${prompt_file:-$ORCH_HOME/prompts/$role.md}
+prompt_file=${prompt_file:-$(prompt_file "$role")}
 [ -f "$prompt_file" ] || die "no prompt for the role \"$role\": $prompt_file"
 
 # 3. The limit on lanes running at once is applied here, not left to a rule.
@@ -223,8 +223,7 @@ if [ -n "$pushed_role" ]; then
 fi
 mv "$available" "$run_dir/chain.json"
 {
-  # {orch}: where these scripts are (the same word as in [permissions.*]).
-  sed "s|{orch}|$ORCH_HOME|g" "$prompt_file"
+  prompt_text "$prompt_file"
   printf '\n---\nTicket %s : %s\n%s\nLane : %s (branche du même nom).\n' "$ticket" "$(jq -r '.title' <<<"$issue")" "$(jq -r '.url' <<<"$issue")" "$lane"
   [ -z "$pr" ] || printf 'PR #%s, branche %s, comparée à %s.\n' "$pr" "$pr_head" "$(conf_get lanes base)"
   [ -z "$since" ] || printf 'Périmètre limité : seulement ce qui a changé depuis le commit %s, déjà traité (`git diff %s..HEAD`, `git log %s..HEAD`). Le reste sert de contexte.\n' "$since" "$since" "$since"

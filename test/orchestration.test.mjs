@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { loadConf, parseConf, ORCH_HOME } from '../ops/orchestration/lib/conf.mjs';
-import { route } from '../ops/orchestration/lib/route.mjs';
-import { openLedger, runStart, runEnd, addEvent, costEur } from '../ops/orchestration/lib/ledger.mjs';
+import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
+import { route } from '../lib/route.mjs';
+import { openLedger, runStart, runEnd, addEvent, costEur } from '../lib/ledger.mjs';
 
 const conf = loadConf(join(ORCH_HOME, 'agents.conf'));
 
@@ -22,6 +22,21 @@ const scratch = (prefix) => {
 };
 // (the dependencies a lane is handed are read-only: made writable again before they go)
 after(() => { for (const dir of scratchDirs) { try { execFileSync('chmod', ['-R', 'u+w', dir]); } catch { /* gone already */ } rmSync(dir, { recursive: true, force: true }); } });
+// A project for the tests that run the real scripts with the example settings: a repository that carries, where
+// those settings name them, the lists the guard reads (invented private terms, as fingerprints).
+let fixtureProjectDir = null;
+function fixtureProject() {
+  if (fixtureProjectDir) return fixtureProjectDir;
+  const dir = scratch('orch-project-');
+  const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
+  git('init', '-q', '-b', 'main');
+  mkdirSync(join(dir, 'scripts'), { recursive: true });
+  for (const file of ['codex-guard-allow.json', 'private-terms.json']) execFileSync('cp', [join(ORCH_HOME, 'test', 'fixtures', 'guard', file), join(dir, 'scripts', file)]);
+  git('add', '.');
+  git('commit', '-q', '-m', 'init');
+  fixtureProjectDir = dir;
+  return dir;
+}
 const task = (over) => ({ role: 'dev', labels: [], project: null, paths: [], prLines: null, authorModel: null, forced: null, ...over });
 const first = (over) => route(conf, task(over)).chain[0].alias;
 
@@ -207,10 +222,11 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
-  // The guard of the repository, as the scripts read it from the trusted ref.
-  const realRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  // What the guard must know of the project (its private terms, as fingerprints, and the values it allows) is the
+  // project's, read from its trusted ref: here, invented ones.
   execFileSync('mkdir', ['-p', join(repo, 'scripts')]);
-  for (const file of ['codex-guard.mjs', 'codex-guard-allow.json', 'private-terms.mjs', 'private-terms.json']) execFileSync('cp', [join(realRoot, 'scripts', file), join(repo, 'scripts', file)]);
+  for (const file of ['codex-guard-allow.json', 'private-terms.json']) execFileSync('cp', [join(ORCH_HOME, 'test', 'fixtures', 'guard', file), join(repo, 'scripts', file)]);
+  writeFileSync(join(home, 'agents.conf'), `${readFileSync(join(home, 'agents.conf'), 'utf8')}\n[guard]\nref = main\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n`);
   git('add', '.');
   git('commit', '-q', '-m', 'init');
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
@@ -455,7 +471,7 @@ test('the spawn lock is released once the lane exists, not held while waiting fo
 test('a comment that the guard refuses never reaches Linear', () => {
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
   const post = (text) => {
     writeFileSync(join(dir, 'comment.md'), text);
@@ -481,7 +497,7 @@ test('a comment that the guard refuses never reaches Linear', () => {
 });
 
 test('the dashboard page is refused to any peer outside the allowed ranges, and only the page is served', async () => {
-  const { dashboardServer, allowed, TAILSCALE } = await import('../ops/orchestration/serve/serve-dashboard.mjs');
+  const { dashboardServer, allowed, TAILSCALE } = await import('../serve/serve-dashboard.mjs');
   for (const peer of ['100.88.1.2', '100.127.255.254', '::ffff:100.64.0.1', 'fd7a:115c:a1e0::1', 'fd7a:115c:a1e0:ab12::9']) assert.ok(allowed(peer, TAILSCALE), peer);
   // A container of a Docker network, the loopback, a public address, the ranges next to Tailscale's, nonsense.
   for (const peer of ['172.18.0.5', '127.0.0.1', '::1', '10.0.1.7', '192.168.1.4', '8.8.8.8', '100.63.255.255', '100.128.0.1', '::ffff:172.18.0.5', 'fd7a:115c:a1e1::1', '', undefined, 'x']) assert.ok(!allowed(peer, TAILSCALE), String(peer));
@@ -538,7 +554,7 @@ test('Linear saying no is an error: nothing is reported as sent or opened', () =
   const no = { data: { issue: { id: 'i' }, teams: { nodes: [{ id: 't' }] }, projects: { nodes: [{ id: 'p' }] }, issueLabels: { nodes: [{ id: 'l' }] }, commentCreate: { success: false, comment: null }, issueCreate: { success: false, issue: null } } };
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '${JSON.stringify(no)}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
   for (const args of [['comment', 'X-1', join(dir, 'text.md'), 'test'], ['create', 'Projet', 'Bug', 'Un titre', join(dir, 'text.md')]]) {
     const run = spawnSync(join(ORCH_HOME, 'linear.sh'), args, { env, encoding: 'utf8' });
@@ -550,7 +566,7 @@ test('Linear saying no is an error: nothing is reported as sent or opened', () =
 });
 
 test('the dashboard server answers 400 to a request it cannot read, and goes on serving', async () => {
-  const { dashboardServer } = await import('../ops/orchestration/serve/serve-dashboard.mjs');
+  const { dashboardServer } = await import('../serve/serve-dashboard.mjs');
   const { connect } = await import('node:net');
   const dir = scratch('orch-serve-');
   writeFileSync(join(dir, 'index.html'), '<p>page</p>');
@@ -630,7 +646,7 @@ test('a comment on a ticket Linear does not know is an error', () => {
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"data":{"issue":null}}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /no such ticket: X-404/);
@@ -680,7 +696,7 @@ test('a lane of a role that is not counted does not take one of the three places
 });
 
 test('the pre-check of the project lead: what the user and the outside world did is an event, what agents wrote is not', async () => {
-  const { changes, checksOf } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes, checksOf } = await import('../lib/wake.mjs');
   const issue = (over) => ({ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments: [], ...over });
   const comment = (id, body, createdAt = '2026-01-02T10:01:00Z') => ({ id, body, createdAt, url: `u#${id}` });
   const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: '2026-01-02T10:00:00Z', statusCheckRollup: [], ...over });
@@ -769,7 +785,7 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
 });
 
 test('the pre-check starts a session only for what is worth one: the rest waits and is handed to the next session, once', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes } = await import('../lib/wake.mjs');
   const worth = new Set(['comment', 'pr_checks']);
   const issue = (over) => ({ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Backlog', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments: [], ...over });
   const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: '2026-01-02T10:01:00Z', statusCheckRollup: [], ...over });
@@ -863,7 +879,7 @@ test('a lane woken again and again keeps the terminals of its last sessions: the
 });
 
 test('while GitHub is down, what its pull requests seem to do is no event and is not forgotten: it is read again once GitHub is back', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes } = await import('../lib/wake.mjs');
   const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: false, state: 'OPEN', updatedAt: '2026-01-02T10:01:00Z', statusCheckRollup: [{ conclusion: 'SUCCESS' }], ...over });
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
   const first = changes(null, issue([]), [pull({})], new Set(), '2026-01-02T10:00:00Z');
@@ -925,7 +941,7 @@ test('host-state says the host is free for nothing while GitHub is down, and the
   assert.equal(state.free_for_a_ci_run, false);
   assert.equal(state.free_for_a_merge, false);
 
-  const { collect, render } = await import('../ops/orchestration/lib/dashboard.mjs');
+  const { collect, render } = await import('../lib/dashboard.mjs');
   const db = openLedger(join(box.state, 'ledger.db'));
   const now = Date.parse('2026-10-07T16:00:00Z');
   addEvent(db, { kind: 'github_down', at: '2026-10-07T15:06:00Z', value: 26, detail: 'from 2026-10-07T15:06:00Z to 2026-10-07T15:32:00Z: Git Operations, Pull Requests, Actions' });
@@ -1102,7 +1118,7 @@ test('every unit that runs a script of the dispatcher finds the tools of the use
 });
 
 test('an old ticket touched again does not bring its old comments back as news; one created while the last wake was reading is not lost', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes } = await import('../lib/wake.mjs');
   const previous = { at: '2026-01-02T10:00:00Z', seen: [], pulls: {} };
   const old = { id: 'i9', identifier: 'X-9', title: 'Vieux', url: 'u', state: 'Done', project: 'P', createdAt: '2025-11-01T00:00:00Z', description: 'd',
     comments: [{ id: 'k1', createdAt: '2025-11-02T00:00:00Z', url: 'u#k1', body: 'un vieux commentaire' }, { id: 'k2', createdAt: '2026-01-02T10:00:30Z', url: 'u#k2', body: 'le nouveau' }] };
@@ -1115,7 +1131,7 @@ test('an old ticket touched again does not bring its old comments back as news; 
 test('Linear is asked for the newest comments of a ticket (first:, which it serves newest first), never the oldest', () => {
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[]},"viewer":{"assignedIssues":{"nodes":[]}}}}'\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') };
   for (const args of [['changes', '2026-01-01T00:00:00Z'], ['waiting']]) assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), args, { env, encoding: 'utf8' }).status, 0, args[0]);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
@@ -1207,7 +1223,7 @@ test('the lane of the project lead: a commit of its own stops the wake even when
 });
 
 test('a state file that cannot be read makes the wake start over as a first one, not fail every minute', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes } = await import('../lib/wake.mjs');
   for (const broken of [{}, { at: 'not a date', seen: [], pulls: {} }, { seen: ['x'] }]) {
     const { events, next } = changes(broken, [{ id: 'i1', identifier: 'X-1', title: 't', url: 'u', state: 's', project: null, createdAt: new Date().toISOString(), description: 'd', comments: [] }], []);
     assert.deepEqual(events, []);
@@ -1332,7 +1348,7 @@ test('the handover wake needs a handover to read, and a ticket to answer in', ()
 test('Linear is asked for the tickets of one state, to check what a handover says', () => {
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"identifier":"X-1","title":"T","url":"u","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"assignee":null}]}}}'\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout), [{ identifier: 'X-1', title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress', project: 'P', assignee: null }]);
@@ -1359,7 +1375,7 @@ test('a listing of tickets that fills the page says it may be cut short', () => 
   const nodes = Array.from({ length: 100 }, (_, i) => ({ identifier: `X-${i}`, title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: { name: 'Done' }, project: null, assignee: null }));
   writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data: { issues: { nodes } } }));
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat "${join(dir, 'answer.json')}"\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['list', 'Done'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0);
   assert.equal(JSON.parse(run.stdout).length, 100);
@@ -1367,7 +1383,7 @@ test('a listing of tickets that fills the page says it may be cut short', () => 
 });
 
 test('the last message of a lane is a report for the lead only when its turn is over and it speaks to the lead', async () => {
-  const { lastReport, laneReports } = await import('../ops/orchestration/lib/lanes.mjs');
+  const { lastReport, laneReports } = await import('../lib/lanes.mjs');
   const say = (uuid, text, more = [], at = new Date(Date.now() - 120000).toISOString()) => JSON.stringify({ type: 'assistant', uuid, timestamp: at, message: { content: [{ type: 'text', text }, ...more] } });
   const user = (content) => JSON.stringify({ type: 'user', message: { content } });
   assert.equal(lastReport([say('a', 'Pour le chef de projet : fini.')]).id, 'a');
@@ -1417,7 +1433,7 @@ test('the lead is not woken by what it wrote itself, nor by a lane it was told t
 });
 
 test('the night checks are followed: green, nothing is said and nobody is woken; red, the lead is woken to open a ticket and keep a note for the morning digest', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes } = await import('../lib/wake.mjs');
   const night = (id, conclusion, updatedAt, status = 'completed') => ({ databaseId: id, status, conclusion, createdAt: updatedAt, updatedAt, url: `https://example.test/runs/${id}`, headSha: 'abc' });
   const worth = new Set(['comment', 'night_check_failed']);
   const first = changes(null, [], [], new Set(), '2026-01-02T10:00:00Z', [], worth, { nights: [night(1, 'failure', '2026-01-02T05:00:00Z')] });
@@ -1452,9 +1468,12 @@ test('the night checks are followed: green, nothing is said and nobody is woken;
   assert.equal(woken.status, 0, woken.stderr);
   const prompt = readFileSync(join(woken.stdout.trim(), 'prompt.md'), 'utf8');
   assert.match(prompt, /Contrôle de nuit rouge[^\n]*https:\/\/example\.test\/runs\/6[^\n]*linear\.sh create "Infra" "Bug"[^\n]*digest-note\.sh/);
+  // The scripts are named where they are on this machine, never by a place inside the project nor by a word left to replace.
+  assert.ok(prompt.includes(`\`${join(box.home, 'linear.sh')} create "Infra" "Bug"`), prompt);
+  assert.doesNotMatch(prompt, /\{orch\}|ops\/orchestration\//);
   const allowed = conf.sections['permissions.release-live'].allow;
-  assert.match(allowed, /ops\/orchestration\/linear\.sh create/);
-  assert.match(allowed, /ops\/orchestration\/digest-note\.sh/);
+  assert.match(allowed, /\{orch\}\/linear\.sh create/);
+  assert.match(allowed, /\{orch\}\/digest-note\.sh/);
   // The note for the digest: kept with the state, read by the guard like anything meant for the user.
   const note = spawnSync(join(box.home, 'digest-note.sh'), ['-'], { env: { ...box.env, ORCH_SIGNED: 'chef de projet' }, encoding: 'utf8', input: 'Le contrôle de nuit est rouge : ticket ouvert (X-9).' });
   assert.equal(note.status, 0, note.stderr);
@@ -1578,7 +1597,7 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
 });
 
 test('what the tracker says an agent wrote is never an event, with no mark in its text and no identifier kept', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
+  const { changes } = await import('../lib/wake.mjs');
   const issue = (over) => ({ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments: [], ...over });
   const first = changes(null, [issue({})], [], new Set(), '2026-01-02T10:00:00Z');
   const said = [issue({ comments: [{ id: 'c1', body: 'Sans aucune marque.', createdAt: '2026-01-02T10:01:00Z', url: 'u#c1', agent: true }, { id: 'c2', body: 'Et ça ?', createdAt: '2026-01-02T10:02:00Z', url: 'u#c2', agent: false }] }), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:03:00Z', description: 'Ouvert par un agent, sans marque.', agent: true })];
@@ -2373,13 +2392,13 @@ test('the acting lead may answer and read, nothing more: its permissions refuse 
   const live = conf.sections['permissions.release-live'];
   const list = (text) => text.split(',').map((item) => item.trim());
   assert.equal(live.mode, 'read-only');
-  const scripts = list(live.allow).filter((item) => item.startsWith('ops/'));
+  const scripts = list(live.allow).filter((item) => item.startsWith('{orch}/'));
   // It answers by two scripts; the rest only reads (what the user wrote in Linear, the state of the host).
   // Since 2026-10-08 it also opens a ticket, for one thing: a night check that came out red (rule of the user), and keeps a note for the digest.
-  assert.deepEqual([...scripts].sort(), ['ops/orchestration/linear.sh create', 'ops/orchestration/digest-note.sh', 'ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh comments', 'ops/orchestration/linear.sh issue', 'ops/orchestration/linear.sh waiting', 'ops/orchestration/tell-lane.sh', 'ops/orchestration/host-state.sh', 'ops/orchestration/review-pr.sh', 'ops/orchestration/ask-validation.sh', 'ops/orchestration/merge-pr.sh'].sort());
+  assert.deepEqual([...scripts].sort(), ['{orch}/linear.sh create', '{orch}/digest-note.sh', '{orch}/linear.sh comment', '{orch}/linear.sh comments', '{orch}/linear.sh issue', '{orch}/linear.sh waiting', '{orch}/tell-lane.sh', '{orch}/host-state.sh', '{orch}/review-pr.sh', '{orch}/ask-validation.sh', '{orch}/merge-pr.sh'].sort());
   // It never changes a status itself: the one script that does only goes to the two statuses a script may set.
-  assert.ok(list(live.deny).includes('ops/orchestration/linear.sh move'));
-  for (const refused of ['ops/orchestration/tidy-lanes.sh', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
+  assert.ok(list(live.deny).includes('{orch}/linear.sh move'));
+  for (const refused of ['{orch}/tidy-lanes.sh', '{orch}/spawn-lane.sh', '{orch}/kill-lane.sh', '{orch}/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
 });
 
 test('tell-lane says it in the terminal written for that lane, and nowhere else', () => {
@@ -2432,7 +2451,7 @@ test('tell-lane says it in the terminal written for that lane, and nowhere else'
 });
 
 test('what a lane may be told: an order to merge or to force is refused in its usual forms, a caution or what the lead will do itself is not', async () => {
-  const { refusedOrder } = await import('../ops/orchestration/lib/lane-message.mjs');
+  const { refusedOrder } = await import('../lib/lane-message.mjs');
   for (const order of [
     'Fusionne #259 maintenant.', 'Tu peux fusionner la PR.', 'Tu peux merge la PR.', 'Il faut merger dès que c’est vert.', 'Lance gh pr merge 259.',
     'Fais un force push.', 'git push --force si besoin.', 'git push --force-with-lease origin', 'git push -f origin ta-branche',
@@ -2477,7 +2496,7 @@ test('adopt-lane writes down the terminal of a lane only when Orca shows it in t
 });
 
 test('host-state sees a screen test from the command that runs it, before any browser, and not from whoever only names one', async () => {
-  const { screenProcesses } = await import('../ops/orchestration/lib/screens.mjs');
+  const { screenProcesses } = await import('../lib/screens.mjs');
   const named = [
     ['claude', 'Lance npm run test:ui puis playwright, et lis scripts/run-ui-tests.mjs'],
     ['bash', '-c', 'pgrep -f "playwright|test:ui|capture-all|run-ui-tests"'],
@@ -2525,10 +2544,10 @@ test('host-state sees a screen test from the command that runs it, before any br
 
 test('the acting lead cannot write down a terminal itself, and a comment made of blanks is not posted', () => {
   const deny = conf.sections['permissions.release-live'].deny.split(',').map((item) => item.trim());
-  assert.ok(deny.includes('ops/orchestration/adopt-lane.sh'));
+  assert.ok(deny.includes('{orch}/adopt-lane.sh'));
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{}'\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 1);
   assert.throws(() => readFileSync(join(dir, 'called')));
@@ -2537,7 +2556,7 @@ test('the acting lead cannot write down a terminal itself, and a comment made of
 test('a comment read on stdin is posted, signed by the one who runs', () => {
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
   assert.equal(run.status, 0, run.stderr);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
@@ -2549,7 +2568,7 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
 test('the user is not written more than a few times an hour by all the agents together: beyond, the comment is refused and is to be grouped', () => {
   const dir = scratch('orch-linear-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const limit = Number(conf.sections.linear.comments_per_hour);
   assert.equal(limit, 6);
   const post = (from) => spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: from } });
@@ -2621,15 +2640,15 @@ test('the discussion has no right to act: its permissions name what it may read 
   assert.ok(conf.models[conf.roles.talk], 'the model of the discussion comes from the table');
   assert.equal(talk.mode, 'read-only');
   assert.deepEqual(list(talk.allow), [
-    'ops/orchestration/decide.sh', 'ops/orchestration/linear.sh issue', 'ops/orchestration/linear.sh comments', 'ops/orchestration/linear.sh list',
-    'ops/orchestration/linear.sh waiting', 'ops/orchestration/host-state.sh', 'ops/orchestration/tell-lane.sh --list',
+    '{orch}/decide.sh', '{orch}/linear.sh issue', '{orch}/linear.sh comments', '{orch}/linear.sh list',
+    '{orch}/linear.sh waiting', '{orch}/host-state.sh', '{orch}/tell-lane.sh --list',
     'git status', 'git log', 'git show', 'git ls-files',
   ]);
-  for (const refused of ['ops/orchestration/confirm-decision.sh', 'ops/orchestration/linear.sh comment', 'ops/orchestration/linear.sh create', 'ops/orchestration/spawn-lane.sh', 'ops/orchestration/kill-lane.sh', 'ops/orchestration/push-lane.sh', 'ops/orchestration/adopt-lane.sh', 'gh', 'orca', 'git push', 'git commit']) assert.ok(list(talk.deny).includes(refused), refused);
+  for (const refused of ['{orch}/confirm-decision.sh', '{orch}/linear.sh comment', '{orch}/linear.sh create', '{orch}/spawn-lane.sh', '{orch}/kill-lane.sh', '{orch}/push-lane.sh', '{orch}/adopt-lane.sh', 'gh', 'orca', 'git push', 'git commit']) assert.ok(list(talk.deny).includes(refused), refused);
   assert.ok(conf.sections.lanes.push_roles.split(/\s+/).includes('talk'), 'the file of the decisions leaves by the narrow push script');
   // Confirming a decision is the user's: no role may run it, whatever else it may do.
   for (const [name, section] of Object.entries(conf.sections).filter(([key]) => key.startsWith('permissions.'))) {
-    assert.ok(list(section.deny).includes('ops/orchestration/confirm-decision.sh'), name);
+    assert.ok(list(section.deny).includes('{orch}/confirm-decision.sh'), name);
     assert.ok(!list(section.allow ?? '').some((item) => item.includes('confirm-decision')), name);
   }
   // A read command of git must not become a way to write a file, or to read one outside the repository.
@@ -2764,7 +2783,7 @@ test('a decision is proposed by the discussion and leaves only when the user con
   // Proposed: kept, and nothing has left.
   const proposed = decide(['X-5', '-'], 'On garde le bouton\nsous la liste.');
   assert.equal(proposed.status, 0, proposed.stderr);
-  assert.match(proposed.stdout, /rien n'est encore parti[\s\S]*! ops\/orchestration\/confirm-decision\.sh/);
+  assert.match(proposed.stdout, /rien n'est encore parti[\s\S]*! \S+\/confirm-decision\.sh/);
   assert.equal(waiting().length, 1);
   assert.equal(posted(), null);
   assert.deepEqual(decisions(), []);
@@ -2877,7 +2896,7 @@ test('the import of the past takes back out the sessions of a worktree the dispa
 });
 
 test('the tokens of a conversation are counted from its own session log, each message once', async () => {
-  const { sessionUsage } = await import('../ops/orchestration/lib/session-usage.mjs');
+  const { sessionUsage } = await import('../lib/session-usage.mjs');
   const message = (id, usage, model = 'm-big') => JSON.stringify({ type: 'assistant', message: { id, model, usage } });
   const usage = sessionUsage([
     message('a', { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 }),
@@ -2892,7 +2911,7 @@ test('the tokens of a conversation are counted from its own session log, each me
 });
 
 test('the sessions of a worktree the dispatcher opened are not the old way of working: the import of the past leaves them out', async () => {
-  const { dispatcherWorktree } = await import('../ops/orchestration/lib/lanes.mjs');
+  const { dispatcherWorktree } = await import('../lib/lanes.mjs');
   const roles = Object.keys(conf.roles);
   for (const name of ['release-lead', 'dev-SEE-105', 'review-SEE-112', 'talk-SEE-112']) assert.equal(dispatcherWorktree(name, roles), true, name);
   for (const name of ['orrchestrator', 'app-rapide', 'release-notes', 'dev-something', 'fiche-enveloppe-projet']) assert.equal(dispatcherWorktree(name, roles), false, name);
@@ -2992,8 +3011,8 @@ test('the lead opens the review of a pull request by a script that never reads t
 });
 
 test('what a review says comes back to the lead at its next wake, once; one that ended before is not told again', async () => {
-  const { changes } = await import('../ops/orchestration/lib/wake.mjs');
-  const { readReport } = await import('../ops/orchestration/lib/reviews.mjs');
+  const { changes } = await import('../lib/wake.mjs');
+  const { readReport } = await import('../lib/reviews.mjs');
   const report = '---\nformat: lane-report/1\ncommit: abc123\noutcome: done\n---\n\n## Compte rendu\n\nVerdict : à corriger avant fusion.\n\n- un défaut\n\n## Fichiers modifiés\n\nAucun.\n';
   assert.deepEqual(readReport(report), { commit: 'abc123', outcome: 'done', ended_at: null, body: 'Verdict : à corriger avant fusion.\n\n- un défaut' });
   const first = changes(null, [], [], new Set(), '2026-01-02T10:00:00Z');
@@ -3013,7 +3032,7 @@ test('what a review says comes back to the lead at its next wake, once; one that
   const listed = changes(first.next, [], [], new Set(), '2026-01-02T10:05:00Z', [], null, { reviews: [{ ...reviews[1], text: 'Défauts :\n- le premier\n- le second\n' }] });
   assert.equal(listed.events[0].text, 'Défauts :\n- le premier\n- le second');
   assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('review_done'));
-  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('ops/orchestration/review-pr.sh'));
+  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('{orch}/review-pr.sh'));
 });
 
 test('a review that fails is tried once more, not for ever: after two tries of the same commit, the script says to tell the user', async () => {
@@ -3038,7 +3057,7 @@ test('a review that fails is tried once more, not for ever: after two tries of t
   assert.equal(db.prepare("select count(*) n from runs where role = 'review' and outcome in ('failed', 'refused')").get().n, 4);
   db.close();
   // A review whose first model could not start and whose second one came to its end is no failed try.
-  const { failedTries } = await import('../ops/orchestration/lib/reviews.mjs');
+  const { failedTries } = await import('../lib/reviews.mjs');
   const ledger = openLedger(join(box.state, 'ledger.db'));
   mkdirSync(join(box.state, 'runs', 'X-5-ended'), { recursive: true });
   writeFileSync(join(box.state, 'runs', 'X-5-ended', 'reviewed-head'), 'another-commit\n');
@@ -3196,7 +3215,7 @@ test('what a reviewer wrote reaches the lead as a quotation: none of its lines c
 });
 
 test('a go-live reads which agreement a change needs, the lines the user wrote before the statuses, and the verdict of the reviewer; it judges none of them', async () => {
-  const { agreementNeeded, lagIsHarmless, fusionLine, verdictIs } = await import('../ops/orchestration/lib/merge.mjs');
+  const { agreementNeeded, lagIsHarmless, fusionLine, verdictIs } = await import('../lib/merge.mjs');
   const merge = conf.sections.merge;
   // How it is read, on a table of its own: every file of a pull request is tooling for it to be tooling, one guarded
   // file makes it guarded, and of two prefixes that hold a file the longer one says what it is.
@@ -3718,7 +3737,7 @@ case " $* " in
      else echo '{"data":{"viewer":{"id":"app-user","app":true},"issue":{"state":{"name":"Todo"}}}}'; fi ;;
 esac
 `, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const secrets = join(dir, 'secrets');
   const base = { PATH: `${dir}:${process.env.PATH}`, HOME: process.env.HOME, ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_SECRETS_FILE: secrets };
   const linear = (env, ...args) => spawnSync(join(ORCH_HOME, 'linear.sh'), args, { encoding: 'utf8', env: { ...base, ...env } });
@@ -3788,7 +3807,7 @@ test('a script never puts a ticket in the status that is the user\'s agreement, 
   const dir = scratch('orch-linear-');
   const answer = (data) => writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data }));
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\ncat "${join(dir, 'answer.json')}"\n`, { mode: 0o755 });
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   // First with the key of a person and nobody named in the settings: the user is the owner of that key.
   const keyConf = join(dir, 'agents-key.conf');
   writeFileSync(keyConf, readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^owner_id = .*\n/m, ''));
@@ -4000,7 +4019,7 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
 `, { mode: 0o755 });
   const confPath = join(dir, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^capture_roots = .*$/m, `capture_roots = ${join(dir, 'lanes')}/*/to-send`)}`);
-  const repoRoot = execFileSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  const repoRoot = fixtureProject();
   const upload = (file) => spawnSync(join(ORCH_HOME, 'linear.sh'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
   const sent = () => { try { return readFileSync(join(dir, 'curl-args'), 'utf8'); } catch { return ''; } };
   assert.match(upload(join(dir, 'elsewhere.png')).stderr, /not under a folder of captures/);

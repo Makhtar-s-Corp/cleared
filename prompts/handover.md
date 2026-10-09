@@ -12,7 +12,7 @@ Ce que j'ai compris :
 - les lanes au travail, ce qu'elles attendent, et comment je saurai qu'elles ont fini ;
 - les engagements pris et non tenus.
 
-Ce que je ne sais pas faire aujourd'hui : dis-le simplement, d'après ce que les règles et les scripts de `ops/orchestration/` te permettent.
+Ce que je ne sais pas faire aujourd'hui : dis-le simplement, d'après ce que les règles et les scripts de `{orch}/` te permettent.
 
 Ce que je ferais en premier : trois actions au plus, dans l'ordre, chacune avec sa raison.
 
