@@ -4411,3 +4411,35 @@ test('the adapter of a provider that says where the subscription is hands it ove
   const usage = JSON.parse(readFileSync(join(dir, 'usage.json'), 'utf8'));
   assert.deepEqual(usage.limits, { windows: { five_hour: { used: 21, resets_at: '2026-10-09T14:00:00Z' }, seven_day: { used: 68, resets_at: '2026-10-13T09:00:00Z' } }, beyond: 'rejected' }, 'the last word of the session, not the first');
 });
+
+test('the terminal of a lane shows what the agent says, what it thinks and what each of its actions is about, not only the names of its tools', () => {
+  const dir = scratch('orch-shown-');
+  const stream = [
+    { type: 'system', subtype: 'init', model: 'm' },
+    { type: 'assistant', message: { model: 'm', content: [{ type: 'thinking', thinking: 'Le test échoue sur l’arrondi : je regarde d’abord le calcul.\nPuis je corrige.' }] } },
+    { type: 'assistant', message: { model: 'm', content: [{ type: 'text', text: 'Je lance les tests de la charge fixe.' }, { type: 'tool_use', name: 'Bash', input: { command: 'npm test -- --test-name-pattern "charge fixe"\necho done', description: 'Run the tests of the fixed charge' } }] } },
+    { type: 'assistant', message: { model: 'm', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'git status --short' } }, { type: 'tool_use', name: 'Read', input: { file_path: `${dir}/server/charges.mjs` } }, { type: 'tool_use', name: 'Edit', input: { file_path: `${dir}/server/charges.mjs`, old_string: 'a', new_string: 'b' } }, { type: 'tool_use', name: 'Grep', input: { pattern: 'arrondi', path: 'server' } }, { type: 'tool_use', name: 'TodoWrite', input: { todos: [] } }] } },
+    { type: 'assistant', parent_tool_use_id: 'sub-1', message: { model: 'm', content: [{ type: 'text', text: 'Un assistant cherche.' }] } },
+    { type: 'result', subtype: 'success', is_error: false, result: '## Compte rendu\n\nFait.\n\n## Fichiers modifiés\n\nAucun.', total_cost_usd: 0.01, modelUsage: { m: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.01 } } },
+  ].map((line) => JSON.stringify(line)).join('\n');
+  writeFileSync(join(dir, 'stream.jsonl'), `${stream}\n`);
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\ncat > /dev/null\ncat "${join(dir, 'stream.jsonl')}"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'prompt\n');
+  const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'report.md'), '--usage', join(dir, 'usage.json')], { cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCH_REPO: fixtureProject(), ORCH_STATE_DIR: join(dir, 'state'), ORCH_RUN_ID: 'r1' }, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const shown = run.stdout;
+  // What it says, whole.
+  assert.match(shown, /^Je lance les tests de la charge fixe\.$/m);
+  // What it thinks, marked as such, on one line.
+  assert.match(shown, /^ {2}\(réflexion\) Le test échoue sur l’arrondi : je regarde d’abord le calcul\. Puis je corrige\.$/m);
+  // Each action with what it is about: the reason the agent gave, else the command; the file, from the folder it works in.
+  assert.match(shown, /^ {2}> Bash : Run the tests of the fixed charge$/m);
+  assert.match(shown, /^ {2}> Bash : git status --short$/m);
+  assert.match(shown, /^ {2}> Read : server\/charges\.mjs$/m);
+  assert.match(shown, /^ {2}> Edit : server\/charges\.mjs$/m);
+  assert.match(shown, /^ {2}> Grep : arrondi \(server\)$/m);
+  assert.match(shown, /^ {2}> TodoWrite$/m);
+  assert.doesNotMatch(shown, /echo done/, 'one line for an action');
+  // What a helper it called says is its own business.
+  assert.doesNotMatch(shown, /Un assistant cherche/);
+});
