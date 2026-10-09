@@ -9,6 +9,8 @@ Description=Orchestration dashboard (refresh)
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # One locale the host has: the session that started the units may carry one
 # it has not, and every shell would say so on every line.
+# The project this copy of the tool works on, written by install.sh.
+Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
 Type=oneshot
 ExecStart=@ORCH_HOME@/dashboard.sh

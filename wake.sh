@@ -237,17 +237,17 @@ acting=
 [ "$live" != yes ] || acting=1
 if [ -n "$handover" ]; then
   {
-    cat "$ORCH_HOME/prompts/handover.md"
+    prompt_text "$(prompt_file handover)"
     printf '\n---\nLa passation, telle qu'"'"'elle a été écrite et vérifiée :\n\n'
     cat "$handover"
   } > "$run_dir/prompt.md"
   comment_on=$(conf_get lead report_on)
 else
   {
-    cat "$ORCH_HOME/prompts/$role${acting:+-live}.md"
+    prompt_text "$(prompt_file "$role${acting:+-live}")"
     printf '\n---\nCe qui a bougé depuis le dernier réveil (%s événement(s)) :\n\n' "$count"
-    jq -r --arg night_ticket "$(conf_get lead night_ticket | awk -F'|' '{ gsub(/^ +| +$/, "", $1); gsub(/^ +| +$/, "", $2); printf "\"%s\" \"%s\"", $1, $2 }')" '.events[] |
-      if .kind == "night_check_failed" then "- Contrôle de nuit rouge : les vérifications que la forge lance d'"'"'elle-même sur la branche principale ont échoué (terminé \(.at), \(.url)). Ce n'"'"'est la PR d'"'"'aucune équipe. Ouvre un ticket en langage produit (ce que ça peut changer pour l'"'"'utilisateur de l'"'"'app, ce qu'"'"'on sait) : `ops/orchestration/linear.sh create \($night_ticket) \"<titre>\" -`, puis garde une ligne pour le digest du matin avec `ops/orchestration/digest-note.sh -`. Aucun autre message."
+    jq -r --arg orch "$ORCH_HOME" --arg night_ticket "$(conf_get lead night_ticket | awk -F'|' '{ gsub(/^ +| +$/, "", $1); gsub(/^ +| +$/, "", $2); printf "\"%s\" \"%s\"", $1, $2 }')" '.events[] |
+      if .kind == "night_check_failed" then "- Contrôle de nuit rouge : les vérifications que la forge lance d'"'"'elle-même sur la branche principale ont échoué (terminé \(.at), \(.url)). Ce n'"'"'est la PR d'"'"'aucune équipe. Ouvre un ticket en langage produit (ce que ça peut changer pour l'"'"'utilisateur de l'"'"'app, ce qu'"'"'on sait) : `\($orch)/linear.sh create \($night_ticket) \"<titre>\" -`, puis garde une ligne pour le digest du matin avec `\($orch)/digest-note.sh -`. Aucun autre message."
       elif .kind == "comment" then "- \(.ticket) (\(.title)) — commentaire de Makhtar, \(.at) : « \(.text) »"
       elif .kind == "ticket_new" then "- \(.ticket) (\(.title)) — nouveau ticket, \(.at), projet \(.project // "aucun") : « \(.text) »"
       elif .kind == "lane_report" then "- Lane \(.lane) (branche \(.branch)) — son dernier message, \(.at) : « \(.text) »"

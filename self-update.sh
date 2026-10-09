@@ -22,7 +22,9 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 [ "$(conf_get update self)" = yes ] || exit 3
-base=$(conf_get lanes base)
+# The branch of the tool itself, not the one of the project it works on.
+base=$(conf_get update base)
+base=${base:-origin/main}
 branch=${base#origin/}
 top=$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null) || exit 3
 [ "$(git -C "$top" symbolic-ref --quiet --short HEAD 2> /dev/null)" = "$branch" ] || exit 3
@@ -30,7 +32,11 @@ top=$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null) || exit 3
 git -C "$top" fetch --quiet origin "$branch" 2> /dev/null || exit 3
 old=$(git -C "$top" rev-parse HEAD) new=$(git -C "$top" rev-parse "$base")
 [ "$old" != "$new" ] || exit 3
-tools=${ORCH_HOME#"$top"/}
+# Where the tool is in that repository: a folder of it, or the whole of it.
+tools=$(cd "$ORCH_HOME" && pwd -P)
+tools=${tools#"$(cd "$top" && pwd -P)"}
+tools=${tools#/}
+tools=${tools:-.}
 
 mark="$ORCH_STATE_DIR/wake/self-update-refused"
 refuse() {

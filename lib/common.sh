@@ -2,11 +2,40 @@
 # Nothing here names a model or a provider: both come from agents.conf.
 
 ORCH_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-ORCH_CONF=${ORCH_CONF:-$ORCH_HOME/agents.conf}
-# The main checkout holds the one shared state, whatever worktree runs this.
-ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain | sed -n '1s/^worktree //p')}
-ORCH_STATE_DIR=${ORCH_STATE_DIR:-$ORCH_REPO/ops/orchestration/state}
+# The project these scripts work on, by its main checkout: said by whoever
+# runs them (ORCH_REPO), else once for the machine (first line of
+# ~/.config/ferme/project), else the repository these scripts sit in (a
+# project that carries its own copy of the tool).
+ORCH_REPO=${ORCH_REPO:-$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project" 2> /dev/null || true)}
+ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/null | sed -n '1s/^worktree //p' || true)}
+# No project at all (nobody named one, and the tool sits in no repository):
+# nothing is done « wherever this was started from ».
+[ -n "$ORCH_REPO" ] || { echo "$(basename "$0"): no project is named (ORCH_REPO, or the first line of ${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project)" >&2; exit 1; }
+# Its settings: its own (.ferme/agents.conf in that checkout, which no lane
+# writes to), else the example that comes with the tool.
+if [ -z "${ORCH_CONF:-}" ]; then
+  if [ -f "$ORCH_REPO/.ferme/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.ferme/agents.conf; else ORCH_CONF=$ORCH_HOME/agents.conf; fi
+fi
+# The state is kept on the machine, outside the repositories: one folder per
+# project, named after its checkout.
+ORCH_STATE_DIR=${ORCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ferme/$(basename "$ORCH_REPO")}
 export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR
+
+# prompt_file <name>: the prompt of that name. The project's own
+# (.ferme/prompts/<name>.md in its main checkout) comes before the one of the
+# tool: what an agent is told about a product is the product's.
+prompt_file() { if [ -f "$ORCH_REPO/.ferme/prompts/$1.md" ]; then printf '%s\n' "$ORCH_REPO/.ferme/prompts/$1.md"; else printf '%s\n' "$ORCH_HOME/prompts/$1.md"; fi; }
+# prompt_text <file>: its text, with {orch} standing for where these scripts
+# are on this machine (the same word as in [permissions.*]).
+# Written as it is, whatever characters the path holds (a quoted replacement
+# is taken literally).
+prompt_text() {
+  local text
+  [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
+  text=$(cat "$1"; printf x)
+  text=${text%x}
+  printf '%s' "${text//\{orch\}/"$ORCH_HOME"}"
+}
 
 die() { echo "$(basename "$0"): $*" >&2; exit 1; }
 
@@ -122,8 +151,8 @@ permissions_env() {
   ORCH_DENY=$(conf_get "permissions.$1" deny)
   # {orch} is where these scripts are: a lane is handed the dispatcher's own
   # copy of a script, never the one of the branch it works on.
-  ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/$ORCH_HOME}
-  ORCH_DENY=${ORCH_DENY//\{orch\}/$ORCH_HOME}
+  ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/"$ORCH_HOME"}
+  ORCH_DENY=${ORCH_DENY//\{orch\}/"$ORCH_HOME"}
 }
 
 adapter_path() {
@@ -347,23 +376,84 @@ close_old_terminals() {
 # guard_text <file>: refuses, without showing any value, a text the guard of
 # the repository would not let out (private terms, secrets, IBANs, addresses,
 # phone numbers). For anything a script sends to an outside service: Linear,
-# GitHub. The guard comes from the trusted ref, like scripts/codex-task.sh.
+# GitHub.
 guard_text() {
-  local ref=${ORCH_GUARD_REF:-origin/main} dir part
+  local dir ref tool_ref settings
   dir=$(mktemp -d)
-  for part in codex-guard.mjs codex-guard-allow.json private-terms.mjs private-terms.json; do
-    git -C "$ORCH_REPO" show "$ref:scripts/$part" > "$dir/$part" 2>/dev/null || {
-      rm -rf "$dir"
-      echo "$(basename "$0"): not sent, the guard (scripts/$part on $ref) could not be read" >&2
-      return 1
-    }
-  done
+  # 1. Its code is the tool's own (lib/guard/). When the tool is a checkout
+  # that follows a branch ([update] base), it is the code of that branch,
+  # not the files of the checkout: a copy edited by hand (which
+  # self-update.sh then refuses to move) does not run an edited guard. When
+  # that cannot be (the branch does not carry the guard yet, the tool is a
+  # folder of a larger repository), the files are what runs, and it is said
+  # each time. ORCH_GUARD_TOOL_REF= (empty) asks for the files: the tests of
+  # a change to the guard itself.
+  if [ -n "${ORCH_GUARD_TOOL_REF+set}" ]; then tool_ref=$ORCH_GUARD_TOOL_REF; else tool_ref=$(conf_get update base 2> /dev/null || true) tool_ref=${tool_ref:-origin/main}; fi
+  if [ -n "$tool_ref" ] && [ "$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null)" = "$(cd "$ORCH_HOME" && pwd -P)" ] \
+    && git -C "$ORCH_HOME" cat-file -e "$tool_ref:lib/guard/codex-guard.mjs" 2> /dev/null; then
+    git -C "$ORCH_HOME" show "$tool_ref:lib/guard/codex-guard.mjs" > "$dir/codex-guard.mjs" 2> /dev/null || true
+    git -C "$ORCH_HOME" show "$tool_ref:lib/guard/private-terms.mjs" > "$dir/private-terms.mjs" 2> /dev/null || true
+    git -C "$ORCH_HOME" show "$tool_ref:agents.conf" > "$dir/tool.conf" 2> /dev/null || true
+  else
+    [ -z "$tool_ref" ] || echo "$(basename "$0"): the guard runs from the files of this checkout ($ORCH_HOME does not follow $tool_ref, or that branch does not carry lib/guard/)" >&2
+    cp "$ORCH_HOME/lib/guard/codex-guard.mjs" "$ORCH_HOME/lib/guard/private-terms.mjs" "$dir/" 2> /dev/null || true
+    cp "$ORCH_HOME/agents.conf" "$dir/tool.conf" 2> /dev/null || true
+  fi
+  [ -s "$dir/codex-guard.mjs" ] && [ -s "$dir/private-terms.mjs" ] || {
+    rm -rf "$dir"
+    echo "$(basename "$0"): not sent, the guard of the tool (lib/guard/) could not be read" >&2
+    return 1
+  }
+  # 2. What it must know of the project (the fingerprints of its private
+  # terms, the values checked by hand as fictitious) is the project's, and
+  # is read from what is committed on the default branch of its remote,
+  # never from the files of a checkout (a session runs code there) and
+  # never at a place a settings file names. Which files: [guard] terms and
+  # allowed, as the project's own settings say there (.ferme/agents.conf),
+  # else as the example of the tool says. Each names a file, or says
+  # « none »; a key left out or misspelt is a refusal, never « no list ».
+  # ORCH_GUARD_REF names another ref: the tests, and a project without a
+  # remote.
+  ref=${ORCH_GUARD_REF:-$(git -C "$ORCH_REPO" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2> /dev/null || true)}
+  ref=${ref:-origin/main}
+  if git -C "$ORCH_REPO" cat-file -e "$ref:.ferme/agents.conf" 2> /dev/null; then
+    git -C "$ORCH_REPO" show "$ref:.ferme/agents.conf" > "$dir/settings.conf" 2> /dev/null || true
+    settings=$dir/settings.conf
+  else
+    settings=$dir/tool.conf
+  fi
+  [ -f "$settings" ] || : > "$settings"
+  guard_list "$dir" "$ref" "$settings" terms private-terms.json "of private terms" \
+    && guard_list "$dir" "$ref" "$settings" allowed codex-guard-allow.json "of allowed values" || {
+    rm -rf "$dir"
+    return 1
+  }
   if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
     rm -rf "$dir"
     echo "$(basename "$0"): not sent, the guard refuses this text" >&2
     return 1
   fi
   rm -rf "$dir"
+}
+
+# guard_list <dir> <ref> <settings> <key> <file> <what>: one list of the
+# project put where the guard reads it, as its settings name it.
+guard_list() {
+  local value
+  value=$(ORCH_CONF=$3 conf_get guard "$4" 2> /dev/null || true)
+  case "$(tr '[:upper:]' '[:lower:]' <<<"$value")" in
+    "")
+      echo "$(basename "$0"): not sent, the project names no list $6 ([guard] $4): write the path of the file, or « none »" >&2
+      return 1
+      ;;
+    none) echo '[]' > "$1/$5" ;;
+    *)
+      git -C "$ORCH_REPO" show "$2:$value" > "$1/$5" 2> /dev/null || {
+        echo "$(basename "$0"): not sent, the list $6 of the project ($value on $2) could not be read" >&2
+        return 1
+      }
+      ;;
+  esac
 }
 
 # open_terminal <worktree> <title> <command> [<ticket>]: opens a terminal of
