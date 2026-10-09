@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
 import { route } from '../lib/route.mjs';
 import { openLedger, runStart, runEnd, addEvent, costEur } from '../lib/ledger.mjs';
@@ -37,6 +37,10 @@ function fixtureProject() {
   fixtureProjectDir = dir;
   return dir;
 }
+// These tests are about the files of this checkout and about nothing of the machine they run on: the guard is the
+// one of the working tree (not the one of the branch the tool follows), and no project is named for the machine.
+process.env.ORCH_GUARD_TOOL_REF = '';
+process.env.XDG_CONFIG_HOME = scratch('orch-config-');
 const task = (over) => ({ role: 'dev', labels: [], project: null, paths: [], prLines: null, authorModel: null, forced: null, ...over });
 const first = (over) => route(conf, task(over)).chain[0].alias;
 
@@ -226,7 +230,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   // project's, read from its trusted ref: here, invented ones.
   execFileSync('mkdir', ['-p', join(repo, 'scripts')]);
   for (const file of ['codex-guard-allow.json', 'private-terms.json']) execFileSync('cp', [join(ORCH_HOME, 'test', 'fixtures', 'guard', file), join(repo, 'scripts', file)]);
-  writeFileSync(join(home, 'agents.conf'), `${readFileSync(join(home, 'agents.conf'), 'utf8')}\n[guard]\nref = main\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n`);
+  writeFileSync(join(home, 'agents.conf'), `${readFileSync(join(home, 'agents.conf'), 'utf8')}\n[guard]\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n`);
   git('add', '.');
   git('commit', '-q', '-m', 'init');
   // No test talks to the real Orca: this one opens a terminal that runs nothing.
@@ -1008,13 +1012,19 @@ test('the lead waits rather than run on another model: when its model is not ava
 
 test('starting the timer of the wakes by hand runs the check of the model first: a timer cannot put a model set aside back to work', () => {
   const dir = join(ORCH_HOME, 'serve');
-  const timer = readFileSync(join(dir, 'orchestration-wake.timer'), 'utf8');
-  assert.match(timer, /^Requires=orchestration-lead-model\.service$/m);
-  assert.match(timer, /^After=orchestration-lead-model\.service$/m);
-  const service = readFileSync(join(dir, 'orchestration-lead-model.service'), 'utf8');
+  const timer = readFileSync(join(dir, 'ferme-wake.timer'), 'utf8');
+  assert.match(timer, /^Requires=ferme-lead-model\.service$/m);
+  assert.match(timer, /^After=ferme-lead-model\.service$/m);
+  const service = readFileSync(join(dir, 'ferme-lead-model.service'), 'utf8');
   assert.match(service, /^Type=oneshot$/m);
   assert.match(service, /^ExecStart=@ORCH_HOME@\/check-lead-model\.sh$/m);
   assert.doesNotMatch(service, /RemainAfterExit/, 'checked again at every start');
+  // Every unit is told which project it works on: a service started by a timer has no other way to know it than
+  // the one line a terminal reads too.
+  for (const unit of readdirSync(dir).filter((name) => name.endsWith('.service'))) assert.match(readFileSync(join(dir, unit), 'utf8'), /^Environment=ORCH_REPO=@ORCH_REPO@$/m, unit);
+  const install = readFileSync(join(dir, 'install.sh'), 'utf8');
+  assert.match(install, /@ORCH_REPO@/);
+  assert.match(install, /ferme\/project/);
 });
 
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
@@ -4035,4 +4045,147 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(ok.stdout.trim(), 'https://uploads.example.test/asset');
   assert.match(sent(), /PUT[\s\S]*x-goog-content-length-range: 25,25[\s\S]*https:\/\/storage\.example\.test\/put/);
+});
+
+test('the guard of what leaves the machine is not weaker for living in the tool: the lists of the project are read at its base, never from files a session could have changed, and a project that names no list is refused, not let through', () => {
+  const box = sandbox();
+  const guard = (text, extra = {}) => {
+    const file = join(box.home, 'out.txt');
+    writeFileSync(file, text);
+    return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', box.home, file], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  };
+  const term = 'Le contrat avec Zorglub Industries est signé.\n';
+  const commit = (message) => { box.git('add', '-A'); box.git('commit', '-q', '-m', message); };
+  assert.equal(guard('Rien de privé ici.\n').status, 0);
+  // An invented private term of the project, which the tool knows only by its fingerprint: refused, and not shown.
+  const refused = guard(term);
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.match(refused.stderr, /terme privé/);
+  assert.doesNotMatch(refused.stderr, /Zorglub/);
+  // The file of the checkout is emptied (a session ran code there): the list read is the one at the base.
+  writeFileSync(join(box.repo, 'scripts', 'private-terms.json'), '[]\n');
+  assert.equal(guard(term).status, 1, 'the list is read at the base, not from the files of the checkout');
+  box.git('checkout', '-q', '--', 'scripts/private-terms.json');
+  // The project carries its own settings: what they say at the base comes before the example of the tool.
+  mkdirSync(join(box.repo, '.ferme'), { recursive: true });
+  const settings = (text) => writeFileSync(join(box.repo, '.ferme', 'agents.conf'), text);
+  settings('[guard]\nterms = none\nallowed = none\n');
+  commit('chore: no private term');
+  assert.equal(guard(term).status, 0, 'this project says it has no private term');
+  // (built at run time so that this file holds nothing the guard would flag)
+  assert.equal(guard(`Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}" est dans le rapport.\n`).status, 1, 'what is refused everywhere still is');
+  settings('[guard]\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n');
+  commit('chore: the lists');
+  // The same file rewritten in the checkout, not at the base: nothing changes.
+  settings('[guard]\nterms = none\nallowed = none\n');
+  assert.equal(guard(term).status, 1, 'settings changed in the checkout do not weaken the guard');
+  box.git('checkout', '-q', '--', '.ferme');
+  // A key misspelt, or a section left out: refused and said, never read as « no list ».
+  settings('[guard]\nterm = scripts/private-terms.json\nallowed = none\n');
+  commit('chore: a typo');
+  const typo = guard('Rien de privé ici.\n');
+  assert.equal(typo.status, 1);
+  assert.match(typo.stderr, /names no list of private terms/);
+  settings('[lanes]\nbase = main\n');
+  commit('chore: no section');
+  assert.match(guard('Rien de privé ici.\n').stderr, /names no list of private terms/);
+  // A list that is named and is not there at the base: refused too.
+  settings('[guard]\nterms = scripts/gone.json\nallowed = none\n');
+  commit('chore: a list that is not there');
+  assert.match(guard('Rien de privé ici.\n').stderr, /could not be read/);
+  // The code of the guard: when the tool is a checkout that follows a branch, it is the one of that branch. A copy
+  // somebody edited by hand (the self-update then refuses to move it) does not run an edited guard.
+  const tool = scratch('orch-tool-');
+  const remote = join(tool, 'remote.git');
+  const copy = join(tool, 'copy');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['clone', '-q', remote, copy], { stdio: 'ignore' });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), copy]);
+  writeFileSync(join(copy, 'agents.conf'), '[lanes]\nbase = main\n\n[guard]\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n');
+  const inTool = (...args) => execFileSync('git', ['-C', copy, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
+  inTool('checkout', '-q', '-b', 'main');
+  inTool('add', '.');
+  inTool('commit', '-q', '-m', 'the tool');
+  inTool('push', '-q', 'origin', 'main');
+  settings('[guard]\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n');
+  commit('chore: the lists again');
+  const fromCopy = (text) => {
+    const file = join(tool, 'out.txt');
+    writeFileSync(file, text);
+    return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, file], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/main' }, encoding: 'utf8' });
+  };
+  assert.equal(fromCopy(term).status, 1);
+  writeFileSync(join(copy, 'lib', 'guard', 'codex-guard.mjs'), 'process.exit(0);\n');
+  assert.equal(fromCopy(term).status, 1, 'the guard that runs is the one of the branch the tool follows');
+});
+
+test('the project the tool works on is named the same way for every script, its own settings and prompts come before the examples of the tool, and a path with odd characters is written as it is', () => {
+  const dir = scratch('orch-named-');
+  const config = join(dir, 'config');
+  const first = join(dir, 'project-a');
+  const second = join(dir, 'project b');
+  for (const made of [join(config, 'ferme'), first, second]) mkdirSync(made, { recursive: true });
+  const clean = { PATH: process.env.PATH, HOME: dir, XDG_CONFIG_HOME: config, XDG_STATE_HOME: join(dir, 'state') };
+  const bash = (env) => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; printf "%s\\n%s\\n%s\\n" "$ORCH_REPO" "$ORCH_CONF" "$ORCH_STATE_DIR"', '_', ORCH_HOME], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
+  const node = (env) => spawnSync('node', ['--no-warnings', '--input-type=module', '-e', `import { projectDir, confPath, stateDir } from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log([projectDir(), confPath(), stateDir()].join('\\n'));`], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
+  const both = (env, expected, why) => { assert.deepEqual(bash(env), expected, `bash: ${why}`); assert.deepEqual(node(env), expected, `node: ${why}`); };
+  // Nobody named a project: the repository the tool sits in (a project that carries its own copy of it).
+  const own = execFileSync('git', ['-C', ORCH_HOME, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).split('\n')[0].replace(/^worktree /, '');
+  both({}, [own, join(ORCH_HOME, 'agents.conf'), join(dir, 'state', 'ferme', basename(own))], 'no project named');
+  // Named once for the machine, in one line, whatever blanks surround it.
+  writeFileSync(join(config, 'ferme', 'project'), `  ${second}  \r\n`);
+  both({}, [second, join(ORCH_HOME, 'agents.conf'), join(dir, 'state', 'ferme', 'project b')], 'named for the machine');
+  // Whoever runs the script may name another one.
+  both({ ORCH_REPO: first }, [first, join(ORCH_HOME, 'agents.conf'), join(dir, 'state', 'ferme', 'project-a')], 'named by the caller');
+  // Its own settings come before the example of the tool.
+  mkdirSync(join(first, '.ferme', 'prompts'), { recursive: true });
+  writeFileSync(join(first, '.ferme', 'agents.conf'), '[lanes]\nbase = main\n');
+  both({ ORCH_REPO: first }, [first, join(first, '.ferme', 'agents.conf'), join(dir, 'state', 'ferme', 'project-a')], 'its own settings');
+  // A tool installed under a path with « & » and « | »: written as it is in the permissions and in a prompt.
+  const odd = join(dir, 'we&ird|tool');
+  mkdirSync(join(odd, 'prompts'), { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), odd]);
+  writeFileSync(join(odd, 'agents.conf'), '[permissions.dev]\nmode = accept-edits\nallow = npm test, {orch}/when-free.sh\ndeny = {orch}/merge-pr.sh\n');
+  writeFileSync(join(odd, 'prompts', 'dev.md'), 'Lance `{orch}/when-free.sh npm run test:ui`.\n');
+  const told = (env) => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env dev; printf "%s\\n%s\\n" "$ORCH_ALLOW" "$ORCH_DENY"; prompt_text "$(prompt_file dev)"', '_', odd], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout;
+  assert.equal(told({ ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }), `npm test, ${odd}/when-free.sh\n${odd}/merge-pr.sh\nLance \`${odd}/when-free.sh npm run test:ui\`.\n`);
+  // The prompt of the project, when it has one, is the one handed.
+  writeFileSync(join(first, '.ferme', 'prompts', 'dev.md'), 'Projet : `{orch}/when-free.sh`.\n');
+  assert.match(told({ ORCH_REPO: first, ORCH_CONF: join(odd, 'agents.conf') }), new RegExp(`\\nProjet : \`${odd.replace(/[|&]/g, '\\$&')}/when-free\\.sh\`\\.\\n$`));
+});
+
+test('a tool that is the whole of its repository updates itself too, and its services are installed again when they change', () => {
+  const home = scratch('orch-root-');
+  const remote = join(home, 'remote.git');
+  const checkout = join(home, 'checkout');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['clone', '-q', remote, checkout], { stdio: 'ignore' });
+  const git = (dir, ...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  mkdirSync(join(checkout, 'serve'), { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'self-update.sh'), checkout]);
+  writeFileSync(join(checkout, 'agents.conf'), '[update]\nself = yes\n');
+  writeFileSync(join(checkout, 'serve', 'install.sh'), `#!/usr/bin/env bash\necho installed >> "${join(home, 'installed')}"\n`, { mode: 0o755 });
+  git(checkout, 'checkout', '-q', '-b', 'main');
+  git(checkout, 'add', '.');
+  git(checkout, 'commit', '-q', '-m', 'the tool');
+  git(checkout, 'push', '-q', 'origin', 'main');
+  const elsewhere = join(home, 'elsewhere');
+  execFileSync('git', ['clone', '-q', remote, elsewhere], { stdio: 'ignore' });
+  const live = (path, text) => { mkdirSync(dirname(join(elsewhere, path)), { recursive: true }); writeFileSync(join(elsewhere, path), text, { mode: 0o755 }); git(elsewhere, 'add', '.'); git(elsewhere, 'commit', '-q', '-m', `change ${path}`); git(elsewhere, 'push', '-q', 'origin', 'HEAD:main'); return git(elsewhere, 'rev-parse', 'HEAD').trim(); };
+  const env = { ...process.env, ORCH_REPO: join(home, 'project'), ORCH_STATE_DIR: join(home, 'state'), ORCH_CONF: join(checkout, 'agents.conf') };
+  const update = () => spawnSync(join(checkout, 'self-update.sh'), [], { env, encoding: 'utf8' });
+  const installed = () => { try { return readFileSync(join(home, 'installed'), 'utf8').trim().split('\n').length; } catch { return 0; } };
+  const second = live('step.sh', '#!/usr/bin/env bash\necho two\n');
+  const taken = update();
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.equal(git(checkout, 'rev-parse', 'HEAD').trim(), second);
+  assert.equal(installed(), 0);
+  live('serve/unit.service', '[Unit]\n');
+  assert.equal(update().status, 0);
+  assert.equal(installed(), 1, 'what runs the services changed');
+  // A script of the new version the shell cannot read is still refused, at the root as elsewhere.
+  live('step.sh', '#!/usr/bin/env bash\nif then fi (\n');
+  const refused = update();
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /step\.sh/);
 });

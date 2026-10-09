@@ -32,7 +32,11 @@ top=$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null) || exit 3
 git -C "$top" fetch --quiet origin "$branch" 2> /dev/null || exit 3
 old=$(git -C "$top" rev-parse HEAD) new=$(git -C "$top" rev-parse "$base")
 [ "$old" != "$new" ] || exit 3
-tools=${ORCH_HOME#"$top"/}
+# Where the tool is in that repository: a folder of it, or the whole of it.
+tools=$(cd "$ORCH_HOME" && pwd -P)
+tools=${tools#"$(cd "$top" && pwd -P)"}
+tools=${tools#/}
+tools=${tools:-.}
 
 mark="$ORCH_STATE_DIR/wake/self-update-refused"
 refuse() {

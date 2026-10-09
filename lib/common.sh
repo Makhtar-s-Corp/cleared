@@ -6,7 +6,7 @@ ORCH_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # runs them (ORCH_REPO), else once for the machine (first line of
 # ~/.config/ferme/project), else the repository these scripts sit in (a
 # project that carries its own copy of the tool).
-ORCH_REPO=${ORCH_REPO:-$(sed -n '1p' "${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project" 2> /dev/null)}
+ORCH_REPO=${ORCH_REPO:-$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project" 2> /dev/null)}
 ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain | sed -n '1s/^worktree //p')}
 # Its settings: its own (.ferme/agents.conf in that checkout, which no lane
 # writes to), else the example that comes with the tool.
@@ -24,7 +24,14 @@ export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR
 prompt_file() { if [ -f "$ORCH_REPO/.ferme/prompts/$1.md" ]; then printf '%s\n' "$ORCH_REPO/.ferme/prompts/$1.md"; else printf '%s\n' "$ORCH_HOME/prompts/$1.md"; fi; }
 # prompt_text <file>: its text, with {orch} standing for where these scripts
 # are on this machine (the same word as in [permissions.*]).
-prompt_text() { sed "s|{orch}|$ORCH_HOME|g" "$1"; }
+# Written as it is, whatever characters the path holds (a quoted replacement
+# is taken literally).
+prompt_text() {
+  local text
+  text=$(cat "$1"; printf x)
+  text=${text%x}
+  printf '%s' "${text//\{orch\}/"$ORCH_HOME"}"
+}
 
 die() { echo "$(basename "$0"): $*" >&2; exit 1; }
 
@@ -140,8 +147,8 @@ permissions_env() {
   ORCH_DENY=$(conf_get "permissions.$1" deny)
   # {orch} is where these scripts are: a lane is handed the dispatcher's own
   # copy of a script, never the one of the branch it works on.
-  ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/$ORCH_HOME}
-  ORCH_DENY=${ORCH_DENY//\{orch\}/$ORCH_HOME}
+  ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/"$ORCH_HOME"}
+  ORCH_DENY=${ORCH_DENY//\{orch\}/"$ORCH_HOME"}
 }
 
 adapter_path() {
@@ -367,41 +374,62 @@ close_old_terminals() {
 # phone numbers). For anything a script sends to an outside service: Linear,
 # GitHub.
 guard_text() {
-  local ref terms allowed dir
-  # The code of the guard is the tool's own (lib/guard/). What it must know
-  # of the project (the fingerprints of its private terms, the values checked
-  # by hand as fictitious) is the project's, read from a ref no lane writes
-  # to: [guard] terms and allowed, at [guard] ref (the base of the lanes by
-  # default). A project that names no list has none: what is refused
-  # everywhere (secrets, IBANs, addresses, phone numbers) still is.
-  ref=${ORCH_GUARD_REF:-$(conf_get guard ref)}
-  ref=${ref:-$(conf_get lanes base)}
-  ref=${ref:-origin/main}
-  terms=$(conf_get guard terms) allowed=$(conf_get guard allowed)
+  local dir ref tool_ref settings terms allowed list value
   dir=$(mktemp -d)
-  cp "$ORCH_HOME/lib/guard/codex-guard.mjs" "$ORCH_HOME/lib/guard/private-terms.mjs" "$dir/" 2> /dev/null || {
+  # 1. Its code is the tool's own (lib/guard/). When the tool is a checkout
+  # that follows a branch, it is the code of that branch, not the files of
+  # the checkout: a copy edited by hand (which self-update.sh then refuses to
+  # move) does not run an edited guard. ORCH_GUARD_TOOL_REF= (empty) says to
+  # take the files: the tests of a change to the guard itself need it.
+  tool_ref=${ORCH_GUARD_TOOL_REF-origin/main}
+  if [ -n "$tool_ref" ] && [ "$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null)" = "$(cd "$ORCH_HOME" && pwd -P)" ] \
+    && git -C "$ORCH_HOME" cat-file -e "$tool_ref:lib/guard/codex-guard.mjs" 2> /dev/null; then
+    git -C "$ORCH_HOME" show "$tool_ref:lib/guard/codex-guard.mjs" > "$dir/codex-guard.mjs" \
+      && git -C "$ORCH_HOME" show "$tool_ref:lib/guard/private-terms.mjs" > "$dir/private-terms.mjs" \
+      && git -C "$ORCH_HOME" show "$tool_ref:agents.conf" > "$dir/tool.conf" 2> /dev/null
+  else
+    cp "$ORCH_HOME/lib/guard/codex-guard.mjs" "$ORCH_HOME/lib/guard/private-terms.mjs" "$dir/" 2> /dev/null \
+      && cp "$ORCH_HOME/agents.conf" "$dir/tool.conf" 2> /dev/null
+  fi
+  [ -s "$dir/codex-guard.mjs" ] && [ -s "$dir/private-terms.mjs" ] || {
     rm -rf "$dir"
     echo "$(basename "$0"): not sent, the guard of the tool (lib/guard/) could not be read" >&2
     return 1
   }
-  if [ -n "$terms" ]; then
-    git -C "$ORCH_REPO" show "$ref:$terms" > "$dir/private-terms.json" 2> /dev/null || {
-      rm -rf "$dir"
-      echo "$(basename "$0"): not sent, the private terms of the project ($terms on $ref) could not be read" >&2
-      return 1
-    }
+  # 2. What it must know of the project (the fingerprints of its private
+  # terms, the values checked by hand as fictitious) is the project's, and
+  # is read at the base of its lanes, never from the files of a checkout: a
+  # session runs code there. Which files: [guard] terms and allowed, as the
+  # project's own settings say at that base (.ferme/agents.conf), else as
+  # the example of the tool says. Each names a file, or says « none »; a
+  # key left out or misspelt is a refusal, never « no list ».
+  ref=${ORCH_GUARD_REF:-$(conf_get lanes base)}
+  ref=${ref:-origin/main}
+  if git -C "$ORCH_REPO" cat-file -e "$ref:.ferme/agents.conf" 2> /dev/null; then
+    git -C "$ORCH_REPO" show "$ref:.ferme/agents.conf" > "$dir/settings.conf"
+    settings=$dir/settings.conf
   else
-    echo '[]' > "$dir/private-terms.json"
+    settings=$dir/tool.conf
   fi
-  if [ -n "$allowed" ]; then
-    git -C "$ORCH_REPO" show "$ref:$allowed" > "$dir/codex-guard-allow.json" 2> /dev/null || {
-      rm -rf "$dir"
-      echo "$(basename "$0"): not sent, the values the project allows ($allowed on $ref) could not be read" >&2
-      return 1
-    }
-  else
-    echo '[]' > "$dir/codex-guard-allow.json"
-  fi
+  terms=$(ORCH_CONF=$settings conf_get guard terms 2> /dev/null) allowed=$(ORCH_CONF=$settings conf_get guard allowed 2> /dev/null)
+  for list in "private-terms.json|$terms|of private terms ([guard] terms)" "codex-guard-allow.json|$allowed|of allowed values ([guard] allowed)"; do
+    value=${list#*|} value=${value%%|*}
+    case "$value" in
+      "")
+        rm -rf "$dir"
+        echo "$(basename "$0"): not sent, the project names no list ${list##*|}: write the path of the file, or « none »" >&2
+        return 1
+        ;;
+      none) echo '[]' > "$dir/${list%%|*}" ;;
+      *)
+        git -C "$ORCH_REPO" show "$ref:$value" > "$dir/${list%%|*}" 2> /dev/null || {
+          rm -rf "$dir"
+          echo "$(basename "$0"): not sent, the list ${list##*|} of the project ($value on $ref) could not be read" >&2
+          return 1
+        }
+        ;;
+    esac
+  done
   if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
     rm -rf "$dir"
     echo "$(basename "$0"): not sent, the guard refuses this text" >&2
