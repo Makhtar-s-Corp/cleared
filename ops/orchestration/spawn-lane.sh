@@ -220,7 +220,8 @@ if [ -n "$pushed_role" ]; then
 fi
 mv "$available" "$run_dir/chain.json"
 {
-  cat "$prompt_file"
+  # {orch}: where these scripts are (the same word as in [permissions.*]).
+  sed "s|{orch}|$ORCH_HOME|g" "$prompt_file"
   printf '\n---\nTicket %s : %s\n%s\nLane : %s (branche du même nom).\n' "$ticket" "$(jq -r '.title' <<<"$issue")" "$(jq -r '.url' <<<"$issue")" "$lane"
   [ -z "$pr" ] || printf 'PR #%s, branche %s, comparée à %s.\n' "$pr" "$pr_head" "$(conf_get lanes base)"
   [ -z "$since" ] || printf 'Périmètre limité : seulement ce qui a changé depuis le commit %s, déjà traité (`git diff %s..HEAD`, `git log %s..HEAD`). Le reste sert de contexte.\n' "$since" "$since" "$since"

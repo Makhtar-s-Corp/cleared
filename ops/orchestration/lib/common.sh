@@ -120,6 +120,10 @@ permissions_env() {
   export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY
   ORCH_ALLOW=$(conf_get "permissions.$1" allow)
   ORCH_DENY=$(conf_get "permissions.$1" deny)
+  # {orch} is where these scripts are: a lane is handed the dispatcher's own
+  # copy of a script, never the one of the branch it works on.
+  ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/$ORCH_HOME}
+  ORCH_DENY=${ORCH_DENY//\{orch\}/$ORCH_HOME}
 }
 
 adapter_path() {

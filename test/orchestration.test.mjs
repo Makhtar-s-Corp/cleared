@@ -1966,9 +1966,20 @@ test('a lane runs its heavy commands (screen tests, captures) through one door: 
   // One at a time: while another lane holds the door, this one waits too.
   const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'heavy.lock'), join(box.home, 'when-free.sh'), 'echo', 'screens'], { env, encoding: 'utf8' });
   assert.equal(held.status, 5);
-  // The lanes of the project go through it, and may not start a screen test any other way.
+  // The lanes of the project go through it, and may not start a screen test any other way. The door is the
+  // dispatcher's own copy, wherever the lane works: a worktree made from a branch that never had the script (or
+  // where the lane rewrote it) has no door of its own.
   const dev = conf.sections['permissions.dev'];
-  assert.match(dev.allow, /ops\/orchestration\/when-free\.sh/);
+  assert.ok(dev.allow.split(',').map((item) => item.trim()).includes('{orch}/when-free.sh'), dev.allow);
+  assert.match(readFileSync(join(ORCH_HOME, 'prompts', 'dev.md'), 'utf8'), /`\{orch\}\/when-free\.sh npm run test:ui`/);
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[permissions.door]\nmode = accept-edits\nallow = npm test, {orch}/when-free.sh\ndeny = {orch}/merge-pr.sh\n`);
+  const allowed = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env door; printf "%s\n%s\n" "$ORCH_ALLOW" "$ORCH_DENY"', '_', box.home], { env, encoding: 'utf8' });
+  assert.equal(allowed.stdout, `npm test, ${box.home}/when-free.sh\n${box.home}/merge-pr.sh\n`, allowed.stderr);
+  // And its prompt names that same copy.
+  writeFileSync(join(box.home, 'door.md'), 'Lance les tests d’écran par `{orch}/when-free.sh npm run test:ui`.\n');
+  const told = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--prompt-file', join(box.home, 'door.md'), '--comment-on', 'none'], { env, encoding: 'utf8' });
+  assert.equal(told.status, 0, told.stderr);
+  assert.match(readFileSync(join(JSON.parse(told.stdout).run_dir, 'prompt.md'), 'utf8'), new RegExp(`par \`${box.home}/when-free\\.sh npm run test:ui\``));
   assert.ok(dev.deny.split(',').map((item) => item.trim()).includes('npm run test:ui'));
   for (const command of conf.sections.lanes.heavy_commands.split(',').map((item) => item.trim())) assert.match(command, /^npm run (test:ui|capture:)/, command);
 });
