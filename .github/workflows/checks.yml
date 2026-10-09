@@ -1,0 +1,38 @@
+name: checks
+
+# The checks of the tool itself. They run on a machine of the forge, never on
+# the host of a project the tool works on: a screen test of that project must
+# not be slowed down by them.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # A draft is not checked: its checks start when it is marked ready.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Syntax of every script
+        run: |
+          for script in *.sh lib/*.sh adapters/*.sh serve/*.sh; do bash -n "$script"; done
+          for module in lib/*.mjs lib/guard/*.mjs serve/*.mjs *.mjs; do node --check "$module"; done
+      - name: Tests
+        run: node --no-warnings --test --test-timeout=120000 test/orchestration.test.mjs
