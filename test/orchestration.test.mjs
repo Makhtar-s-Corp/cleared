@@ -4114,9 +4114,31 @@ test('the guard of what leaves the machine is not weaker for living in the tool:
     writeFileSync(file, text);
     return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, file], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/main' }, encoding: 'utf8' });
   };
-  assert.equal(fromCopy(term).status, 1);
+  assert.match(fromCopy(term).stderr, /terme privé/);
   writeFileSync(join(copy, 'lib', 'guard', 'codex-guard.mjs'), 'process.exit(0);\n');
-  assert.equal(fromCopy(term).status, 1, 'the guard that runs is the one of the branch the tool follows');
+  const edited = fromCopy(term);
+  assert.equal(edited.status, 1, 'the guard that runs is the one of the branch the tool follows');
+  assert.match(edited.stderr, /terme privé/);
+  // When that branch does not carry the guard, the files of the checkout are what runs: said each time, not silent.
+  const elsewhere = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, join(tool, 'out.txt')], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/absent' }, encoding: 'utf8' });
+  assert.match(elsewhere.stderr, /the guard runs from the files of this checkout/);
+  // Where the lists are read is not a setting: a settings file that names a branch of a lane as the base changes nothing.
+  box.git('checkout', '-q', '-b', 'dev/X-9');
+  settings('[guard]\nterms = none\nallowed = none\n');
+  commit('chore: a lane empties the list on its branch');
+  box.git('checkout', '-q', 'main');
+  writeFileSync(join(box.home, 'lane.conf'), `${readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('base = main', 'base = dev/X-9')}`);
+  const { ORCH_GUARD_REF: _unused, ...noRef } = box.env;
+  box.git('update-ref', 'refs/remotes/origin/main', 'main');
+  box.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+  writeFileSync(join(box.home, 'out.txt'), term);
+  const viaSettings = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', box.home, join(box.home, 'out.txt')], { env: { ...noRef, ORCH_CONF: join(box.home, 'lane.conf') }, encoding: 'utf8' });
+  assert.equal(viaSettings.status, 1, viaSettings.stderr);
+  assert.match(viaSettings.stderr, /terme privé/);
+  // « None », however it is written, is none.
+  settings('[guard]\nterms = None\nallowed = NONE\n');
+  commit('chore: none, in capitals');
+  assert.equal(guard(term).status, 0);
 });
 
 test('the project the tool works on is named the same way for every script, its own settings and prompts come before the examples of the tool, and a path with odd characters is written as it is', () => {
@@ -4126,7 +4148,7 @@ test('the project the tool works on is named the same way for every script, its 
   const second = join(dir, 'project b');
   for (const made of [join(config, 'ferme'), first, second]) mkdirSync(made, { recursive: true });
   const clean = { PATH: process.env.PATH, HOME: dir, XDG_CONFIG_HOME: config, XDG_STATE_HOME: join(dir, 'state') };
-  const bash = (env) => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; printf "%s\\n%s\\n%s\\n" "$ORCH_REPO" "$ORCH_CONF" "$ORCH_STATE_DIR"', '_', ORCH_HOME], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
+  const bash = (env) => spawnSync('bash', ['-c', 'set -euo pipefail; . "$1/lib/common.sh"; printf "%s\\n%s\\n%s\\n" "$ORCH_REPO" "$ORCH_CONF" "$ORCH_STATE_DIR"', '_', ORCH_HOME], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
   const node = (env) => spawnSync('node', ['--no-warnings', '--input-type=module', '-e', `import { projectDir, confPath, stateDir } from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log([projectDir(), confPath(), stateDir()].join('\\n'));`], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
   const both = (env, expected, why) => { assert.deepEqual(bash(env), expected, `bash: ${why}`); assert.deepEqual(node(env), expected, `node: ${why}`); };
   // Nobody named a project: the repository the tool sits in (a project that carries its own copy of it).
@@ -4149,6 +4171,10 @@ test('the project the tool works on is named the same way for every script, its 
   writeFileSync(join(odd, 'prompts', 'dev.md'), 'Lance `{orch}/when-free.sh npm run test:ui`.\n');
   const told = (env) => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env dev; printf "%s\\n%s\\n" "$ORCH_ALLOW" "$ORCH_DENY"; prompt_text "$(prompt_file dev)"', '_', odd], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout;
   assert.equal(told({ ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }), `npm test, ${odd}/when-free.sh\n${odd}/merge-pr.sh\nLance \`${odd}/when-free.sh npm run test:ui\`.\n`);
+  // A prompt that is not there is an error, never an empty prompt handed to a model.
+  const missing = spawnSync('bash', ['-c', 'set -euo pipefail; . "$1/lib/common.sh"; prompt_text "$1/prompts/absent.md"; echo reached', '_', odd], { env: { ...clean, ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }, encoding: 'utf8' });
+  assert.notEqual(missing.status, 0);
+  assert.doesNotMatch(missing.stdout, /reached/);
   // The prompt of the project, when it has one, is the one handed.
   writeFileSync(join(first, '.ferme', 'prompts', 'dev.md'), 'Projet : `{orch}/when-free.sh`.\n');
   assert.match(told({ ORCH_REPO: first, ORCH_CONF: join(odd, 'agents.conf') }), new RegExp(`\\nProjet : \`${odd.replace(/[|&]/g, '\\$&')}/when-free\\.sh\`\\.\\n$`));
@@ -4188,4 +4214,62 @@ test('a tool that is the whole of its repository updates itself too, and its ser
   const refused = update();
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /step\.sh/);
+});
+
+test('the installer of the services names one project for the machine and never two wakes: it refuses a tool that would work on itself, a second project, and a machine where an older copy still wakes', () => {
+  const home = scratch('orch-install-');
+  const tool = join(home, 'tool');
+  const bin = join(home, 'bin');
+  for (const made of [tool, bin]) mkdirSync(made, { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'serve'), tool]);
+  writeFileSync(join(tool, 'agents.conf'), '[lanes]\nbase = main\n');
+  writeFileSync(join(tool, 'dashboard.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'tailscale'), '#!/usr/bin/env bash\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> "${join(home, 'systemctl-calls')}"\ncase "$*" in *is-enabled*|*is-active*) [ -f "${join(home, 'old-wake')}" ] && exit 0 || exit 1 ;; esac\nexit 0\n`, { mode: 0o755 });
+  const project = fixtureProject();
+  const other = scratch('orch-other-project-');
+  execFileSync('git', ['-C', other, 'init', '-q', '-b', 'main']);
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_STATE_HOME: join(home, 'state') };
+  const install = (extra = {}) => spawnSync(join(tool, 'serve', 'install.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const named = () => { try { return readFileSync(join(home, 'config', 'ferme', 'project'), 'utf8'); } catch { return null; } };
+  const calls = () => { try { return readFileSync(join(home, 'systemctl-calls'), 'utf8'); } catch { return ''; } };
+  // Nobody named a project and the tool is a repository of its own: it would work on itself. Refused, nothing written.
+  execFileSync('git', ['-C', tool, 'init', '-q', '-b', 'main']);
+  const alone = install();
+  assert.notEqual(alone.status, 0);
+  assert.match(alone.stderr, /no project is named/);
+  assert.equal(named(), null);
+  assert.doesNotMatch(calls(), /enable --now/);
+  // A folder that is not a checkout is not a project.
+  assert.match(install({ ORCH_REPO: join(home, 'nowhere') }).stderr, /is not a folder of this machine/);
+  assert.match(install({ ORCH_REPO: bin }).stderr, /is not a git checkout/);
+  // An older copy still wakes on this machine: two wakes would run. Refused, and it says what to do.
+  writeFileSync(join(home, 'old-wake'), '');
+  const twice = install({ ORCH_REPO: project });
+  assert.notEqual(twice.status, 0);
+  assert.match(twice.stderr, /orchestration-wake\.timer/);
+  assert.doesNotMatch(calls(), /enable --now/);
+  rmSync(join(home, 'old-wake'));
+  // Named: written in the one line a terminal reads and in every unit, and the units are started.
+  const done = install({ ORCH_REPO: project });
+  assert.equal(done.status, 0, done.stderr);
+  assert.equal(named(), `${project}\n`);
+  const units = join(home, '.config', 'systemd', 'user');
+  for (const unit of readdirSync(units).filter((name) => name.endsWith('.service'))) assert.match(readFileSync(join(units, unit), 'utf8'), new RegExp(`^Environment=ORCH_REPO=${project}$`, 'm'), unit);
+  assert.match(readFileSync(join(units, 'ferme-wake.service'), 'utf8'), new RegExp(`^ExecStart=${tool}/wake\\.sh$`, 'm'));
+  assert.match(calls(), /enable --now ferme-dashboard\.service ferme-dashboard-refresh\.timer ferme-wake\.timer/);
+  // Run again for the same project: fine. For another one: refused, the machine already works on one.
+  assert.equal(install({ ORCH_REPO: project }).status, 0);
+  const second = install({ ORCH_REPO: other });
+  assert.notEqual(second.status, 0);
+  assert.match(second.stderr, /already works on/);
+  assert.equal(named(), `${project}\n`);
+  // A path a unit cannot hold as it is: refused, not written half right.
+  const spaced = join(home, 'a project');
+  mkdirSync(spaced);
+  execFileSync('git', ['-C', spaced, 'init', '-q', '-b', 'main']);
+  rmSync(join(home, 'config', 'ferme', 'project'));
+  assert.match(install({ ORCH_REPO: spaced }).stderr, /cannot be written in a unit/);
 });

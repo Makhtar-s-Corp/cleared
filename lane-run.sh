@@ -100,7 +100,7 @@ else
   used=$lane_model
 fi
 writeup_note=
-if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ]; then
+if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ] && [ -r "$(prompt_file writeup)" ]; then
   {
     prompt_text "$(prompt_file writeup)"
     echo
