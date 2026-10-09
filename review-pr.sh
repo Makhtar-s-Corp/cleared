@@ -123,7 +123,11 @@ args=(review "$ticket" --pr "$pr" --comment-on none)
 [ -z "$since" ] || args+=(--since "$since")
 [ -z "$author" ] || args+=(--author-model "$author")
 [ -z "$dry_run" ] || args+=(--dry-run)
-opened=$("$ORCH_HOME/spawn-lane.sh" "${args[@]}")
+code=0
+opened=$("$ORCH_HOME/spawn-lane.sh" "${args[@]}") || code=$?
+# The subscription at its stop: the review waits like one that found no place.
+[ "$code" != 4 ] || later "the subscription the reviewer runs on is at its stop"
+[ "$code" = 0 ] || exit "$code"
 printf '%s\n' "$opened"
 # The commit this review reads, kept with its run: it counts as reviewed even if the report is lost.
 [ -n "$dry_run" ] || printf '%s\n' "$head" > "$(jq -r '.run_dir' <<<"$opened")/reviewed-head" \

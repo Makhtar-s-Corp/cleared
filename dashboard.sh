@@ -34,10 +34,11 @@ jq -n \
   --argjson swap_free_kb "$(awk '/^SwapFree/ {print $2}' /proc/meminfo)" \
   --argjson mem_total_kb "$(awk '/^MemTotal/ {print $2}' /proc/meminfo)" \
   --argjson mem_available_kb "$(awk '/^MemAvailable/ {print $2}' /proc/meminfo)" \
+  --argjson limits "$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" summary 2> /dev/null || echo '[]')" \
   --arg github_down_since "$(sed -n '1p' "$ORCH_STATE_DIR/wake/github-down" 2> /dev/null || true)" \
   '{waiting: $waiting, merged_prs_7d: $merged, cli: $cli, lanes: $lanes, max_lanes: $max_lanes, worktrees: $worktrees,
     load: $load, cores: $cores, swap_total_kb: $swap_total_kb, swap_free_kb: $swap_free_kb,
-    mem_total_kb: $mem_total_kb, mem_available_kb: $mem_available_kb,
+    mem_total_kb: $mem_total_kb, mem_available_kb: $mem_available_kb, limits: $limits,
     github_down_since: (if $github_down_since == "" then null else $github_down_since end)}' > "$inputs"
 
 node --no-warnings "$ORCH_HOME/lib/dashboard.mjs" "$inputs" > "$out.tmp"

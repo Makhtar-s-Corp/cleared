@@ -125,14 +125,20 @@ case "${1:-}" in
       # apart. Tokens and cost are summed over every model the session used.
       # (The messages of a sub-agent are in the stream too: only the main thread counts.)
       wrote=$(jq -R -r 'fromjson? | select(.type == "assistant" and (.parent_tool_use_id // null) == null) | .message.model // empty | select(. != "<synthetic>")' "$events" 2>/dev/null | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')
-      contract_usage "$(jq -c --arg wrote "$wrote" '
+      # Where the subscription stands, as the session said it last (a CLI on
+      # a subscription says it; one on a key says nothing): each window with
+      # the percent used and when it starts over. Kept by whoever ran this.
+      limits=$(jq -R -c 'fromjson? | select(.type == "rate_limit_event") | .rate_limit_info' "$events" 2> /dev/null | tail -n 1 \
+        | jq -c '{windows: ((.unifiedWindows // {}) | with_entries(select((.value.utilization | type) == "number" and (.value.resetsAt | type) == "number") | .value = {used: (.value.utilization * 100 | round), resets_at: (.value.resetsAt | todate)})), beyond: (.overageStatus // null)} | select((.windows | length) > 0)' 2> /dev/null || true)
+      contract_usage "$(jq -c --arg wrote "$wrote" --argjson limits "${limits:-null}" '
         (.modelUsage // {}) as $m
         | {tokens_in: ([$m[].inputTokens] | add), tokens_out: ([$m[].outputTokens] | add),
            tokens_cache: ([$m[].cacheReadInputTokens] | add), tokens_cache_write: ([$m[].cacheCreationInputTokens] | add),
            cost_usd: .total_cost_usd}
         + (if $wrote != "" then {model: $wrote} elif ($m | length) > 0 then {model: ($m | to_entries | max_by(.value.costUSD) | .key)} else {} end)
         + (if $wrote != "" then {helpers: [$m | to_entries[] | select(.key != $wrote) | {model: .key, cost_usd: .value.costUSD}]} else {} end)
-        | .tokens_total = ((.tokens_in // 0) + (.tokens_out // 0) + (.tokens_cache // 0) + (.tokens_cache_write // 0))' <<<"$result")"
+        | .tokens_total = ((.tokens_in // 0) + (.tokens_out // 0) + (.tokens_cache // 0) + (.tokens_cache_write // 0))
+        | . + (if $limits then {limits: $limits} else {} end)' <<<"$result")"
     fi
     # An error the CLI reports before the model produced anything (model
     # gone, quota reached, not signed in) is "cannot start now": the
