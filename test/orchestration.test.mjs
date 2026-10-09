@@ -193,7 +193,7 @@ case "$1" in
   talk) shift; [ ${name} != first ] || [ -z "\${FIRST_CANNOT_TALK:-}" ] || exit 2
     printf '%s\\n' "${name}" "$@" "edit=\${ORCH_EDIT_ONLY:-}" "read=\${ORCH_READ_DIRS:-}" "mode=\${ORCH_PERMISSION_MODE:-}" "allow=\${ORCH_ALLOW:-}" "run=\${ORCH_RUN_ID:-}" > "\${ORCH_STATE_DIR}/talked"; exit 0 ;;
   run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; echo "\${ORCH_SIGNED:-}" > "\${ORCH_STATE_DIR}/signed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "\${ANSWER:-answer of ${name}}" > "$body"
-    contract_usage '{"tokens_total": 10}'; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
+    contract_usage "$(jq -c --argjson limits "\${FAKE_LIMITS:-null}" '. + (if $limits then {limits: $limits} else {} end)' <<<'{"tokens_total": 10}')"; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
   fake('first', '${FIRST_EXIT:-0}');
@@ -954,6 +954,12 @@ test('host-state says the host is free for nothing while GitHub is down, and the
   assert.deepEqual(data.outages, [{ at: '2026-10-07T15:06:00Z', minutes: 26, detail: 'Git Operations, Pull Requests, Actions' }]);
   assert.match(render(data, conf, now), /GitHub en panne[^<]*<\/span>[\s\S]*?26 min[\s\S]*?Git Operations, Pull Requests, Actions/);
   assert.match(render(collect(db, conf, { ...inputs, github_down_since: '2026-10-07T15:50:00Z' }, now), conf, now), /GitHub est en panne depuis/);
+  // Where the subscription is, as the sessions said it: the share of the limit used, what the day took, the pace, and when it starts over.
+  const used = { adapter: 'claude', stop: 80, windows: { seven_day: { used: 68, resets_at: '2026-10-13T09:00:00.000Z', today: 12, pace: 2, hours_to_stop: 6, hours_to_full: 16, stopped: false } } };
+  const shown = render(collect(db, conf, { ...inputs, limits: [used] }, now), conf, now);
+  assert.match(shown, /claude[\s\S]*?68 %[\s\S]*?limite de la semaine[\s\S]*?12 points aujourd[\s\S]*?2 points par heure[\s\S]*?80 % dans 6 h[\s\S]*?13 octobre/);
+  assert.match(render(collect(db, conf, { ...inputs, limits: [{ ...used, windows: { seven_day: { ...used.windows.seven_day, used: 81, stopped: true } } }] }, now), conf, now), /plus aucune équipe ne s’ouvre/);
+  assert.doesNotMatch(render(data, conf, now), /limite de la semaine/, 'nothing is shown when no session said anything');
   db.close();
 });
 
@@ -4285,4 +4291,89 @@ test('the installer of the services names one project for the machine and never 
   execFileSync('git', ['-C', spaced, 'init', '-q', '-b', 'main']);
   rmSync(join(home, 'config', 'ferme', 'project'));
   assert.match(install({ ORCH_REPO: spaced }).stderr, /cannot be written in a unit/);
+});
+
+test('the subscription is watched from what each session says of it: its share used, what the day took and the pace; no lane opens once a window is at the stop, the lead is told once, and lanes open again when the window starts over', async () => {
+  const { summary } = await import('../lib/limits.mjs');
+  // The day and the pace, from the readings kept.
+  const at = (hour) => `2026-10-09T${String(hour).padStart(2, '0')}:00:00Z`;
+  const week = { resets_at: '2026-10-13T09:00:00.000Z' };
+  const history = [
+    { at: '2026-10-08T20:00:00Z', windows: { seven_day: { used: 56, ...week } } },
+    { at: at(5), windows: { seven_day: { used: 57, ...week } } },
+    { at: at(9), windows: { seven_day: { used: 62, ...week } } },
+    { at: at(11), windows: { seven_day: { used: 65, ...week } } },
+    { at: at(12), windows: { seven_day: { used: 68, ...week } } },
+  ];
+  const dayStart = Date.parse('2026-10-08T22:00:00Z');
+  const seen = summary(history, Date.parse(at(12)), 80, dayStart).seven_day;
+  assert.deepEqual([seen.used, seen.today, seen.pace, seen.hours_to_stop, seen.hours_to_full, seen.stopped], [68, 12, 2, 6, 16, false]);
+  assert.equal(summary([...history, { at: at(13), windows: { seven_day: { used: 81, ...week } } }], Date.parse(at(13)), 80, dayStart).seven_day.stopped, true);
+  // Once the window has started over, what was read before says nothing of it.
+  assert.deepEqual(summary(history, Date.parse('2026-10-13T10:00:00Z'), 80, Date.parse('2026-10-12T22:00:00Z')), {});
+  // No pace from one reading; no stop when the project names none.
+  assert.equal(summary(history.slice(-1), Date.parse(at(12)), 80, dayStart).seven_day.pace, null);
+  assert.equal(summary([{ at: at(12), windows: { seven_day: { used: 99, ...week } } }], Date.parse(at(12)), null, dayStart).seven_day.stopped, false);
+
+  // In the flow of the lanes.
+  const { flow, todo, by, there, record, session, box, env } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[limits]\n', '[limits]\nsubscription_stop = 80\n'));
+  const soon = new Date(Date.now() + 3600e3).toISOString();
+  const told = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select detail from events where kind = 'subscription_stop' order by rowid").all().map((row) => row.detail); db.close(); return rows; };
+  todo(['X-5', 'X-7']);
+  by('X-5', 0);
+  by('X-7', 0);
+  // A lane opens, and its session says where the subscription is: kept with the state, for the backend it ran on.
+  flow();
+  assert.equal(there('X-5'), true);
+  assert.equal(session('X-5', { commit: 'fix: the work' }).run.status, 0);
+  const kept = () => readFileSync(join(box.state, 'limits', 'first.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.throws(kept, /ENOENT/, 'a session that says nothing leaves nothing');
+  flow();
+  const lane = record('X-7');
+  const run = spawnSync(join(box.home, 'lane-run.sh'), [join(box.state, 'runs', lane.runs.at(-1).run)], { cwd: lane.worktree, env: { ...env, ANSWER: 'Fait.\n\nQuestions pour Makhtar : aucune.', FAKE_LIMITS: JSON.stringify({ windows: { seven_day: { used: 81, resets_at: soon } }, beyond: 'rejected' }) }, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(kept().map((line) => line.windows.seven_day.used), [81]);
+  // At the stop: nothing opens, not a new ticket, not a lane to open again. Said once to the lead, with the figures.
+  todo(['X-8']);
+  by('X-8', 0);
+  const stopped = flow();
+  assert.match(stopped.stdout, /X-8: put in « Todo » by the user: the subscription is at its stop \(81 % of the seven_day window\), it waits/);
+  assert.equal(there('X-8'), false);
+  assert.equal(told().length, 1);
+  assert.match(told()[0], /81 %[\s\S]*80 %/);
+  flow();
+  assert.equal(told().length, 1, 'said once for a window');
+  const heard = JSON.parse(spawnSync('node', ['--no-warnings', join(box.home, 'lib', 'reviews.mjs'), 'done', '6'], { env, encoding: 'utf8' }).stdout).filter((event) => event.outcome === 'subscription_stop');
+  assert.equal(heard.length, 1, 'the lead hears of it at its next wake');
+  // A review does not open either: it waits in its queue like one that found no place.
+  const refused = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-9', '--comment-on', 'none'], { env, encoding: 'utf8' });
+  assert.equal(refused.status, 4);
+  assert.match(refused.stderr, /the subscription is at its stop/);
+  // The window starts over: what was read no longer holds, lanes open again.
+  writeFileSync(join(box.state, 'limits', 'first.jsonl'), `${JSON.stringify({ at: new Date(Date.now() - 7200e3).toISOString(), windows: { seven_day: { used: 81, resets_at: new Date(Date.now() - 60e3).toISOString() } } })}\n`);
+  assert.match(flow().stdout, /X-8: put in « Todo » by the user: its lane is opened/);
+  // A project that names no stop is never stopped by this.
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('subscription_stop = 80\n', ''));
+  writeFileSync(join(box.state, 'limits', 'first.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), windows: { seven_day: { used: 99, resets_at: soon } } })}\n`);
+  assert.equal(spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-9', '--comment-on', 'none', '--dry-run'], { env, encoding: 'utf8' }).status, 0);
+});
+
+test('the adapter of a provider that says where the subscription is hands it over with the usage of the session', () => {
+  const dir = scratch('orch-limits-');
+  const stream = [
+    { type: 'system', subtype: 'init', model: 'm' },
+    { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', overageStatus: 'rejected', unifiedWindows: { five_hour: { utilization: 0.2, resetsAt: 1791554400 }, seven_day: { utilization: 0.5, resetsAt: 1791882000 } } } },
+    { type: 'assistant', message: { model: 'm', content: [{ type: 'text', text: 'ok' }] } },
+    { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', overageStatus: 'rejected', unifiedWindows: { five_hour: { utilization: 0.21, resetsAt: 1791554400 }, seven_day: { utilization: 0.68, resetsAt: 1791882000 } } } },
+    { type: 'result', subtype: 'success', is_error: false, result: '## Compte rendu\n\nFait.\n\n## Fichiers modifiés\n\nAucun.', total_cost_usd: 0.01, modelUsage: { m: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.01 } } },
+  ].map((line) => JSON.stringify(line)).join('\n');
+  writeFileSync(join(dir, 'stream.jsonl'), `${stream}\n`);
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\ncat "${join(dir, 'stream.jsonl')}"\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'prompt\n');
+  const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'report.md'), '--usage', join(dir, 'usage.json')], { cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCH_REPO: fixtureProject(), ORCH_STATE_DIR: join(dir, 'state'), ORCH_RUN_ID: 'r1' }, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const usage = JSON.parse(readFileSync(join(dir, 'usage.json'), 'utf8'));
+  assert.deepEqual(usage.limits, { windows: { five_hour: { used: 21, resets_at: '2026-10-09T14:00:00Z' }, seven_day: { used: 68, resets_at: '2026-10-13T09:00:00Z' } }, beyond: 'rejected' }, 'the last word of the session, not the first');
 });
