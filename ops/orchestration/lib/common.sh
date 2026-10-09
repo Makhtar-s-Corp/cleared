@@ -389,6 +389,47 @@ open_terminal() {
   return 1
 }
 
+# lane_deps <worktree>: the dependencies of the project, at hand in that
+# worktree. A lane has no network command and may install nothing: the
+# dispatcher installs them, once for a given lock file, in the state, and
+# every worktree with that lock file links to them. A lane that changes the
+# lock file gets its own at its next opening. Nothing to do for a project
+# without a lock file.
+lane_deps() {
+  local worktree=$1 hash dir new
+  [ -f "$worktree/package-lock.json" ] && [ -f "$worktree/package.json" ] || return 0
+  hash=$(cat "$worktree/package.json" "$worktree/package-lock.json" | sha256sum | cut -c1-16)
+  dir="$ORCH_STATE_DIR/deps/$hash"
+  mkdir -p "$ORCH_STATE_DIR/deps"
+  (
+    flock -w 900 7 || exit 1
+    [ -d "$dir/node_modules" ] && exit 0
+    new=$(mktemp -d "$ORCH_STATE_DIR/deps/.new.XXXXXX")
+    cp "$worktree/package.json" "$worktree/package-lock.json" "$new/"
+    if (cd "$new" && npm ci --no-audit --no-fund > "$new/install.log" 2>&1) && [ -d "$new/node_modules" ]; then
+      mv "$new" "$dir"
+    else
+      echo "$(basename "$0"): the dependencies could not be installed (see $new/install.log)" >&2
+      exit 1
+    fi
+  ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
+  ln -sfn "$dir/node_modules" "$worktree/node_modules"
+  # The link is not a change of the lane (an ignore rule written for a folder does not hold a link).
+  local exclude
+  exclude="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"
+  grep -qxF '/node_modules' "$exclude" 2> /dev/null || echo '/node_modules' >> "$exclude"
+}
+
+# lane_record <ticket>: where what is known of the lane of a ticket is kept
+# (its branch, the branch its work is sent to, its pull request, its runs).
+# It outlives the worktree: a lane the tidying closed is opened again from it.
+lane_record() { echo "$ORCH_STATE_DIR/lanes/$1.json"; }
+
+# quoted <file>: a text handed to a model as what somebody wrote, line by
+# line under a mark: none of its lines is an order of another kind.
+quoted() { sed 's/^/    | /' "$1"; }
+
 # Lanes opened by the dispatcher: branches named <role>/<ticket>.
 dispatcher_lanes() {
   local roles

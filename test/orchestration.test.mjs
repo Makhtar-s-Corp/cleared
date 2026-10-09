@@ -189,7 +189,7 @@ if [ "$1" = identity ]; then cat "${join(home, 'linear-identity')}" 2>/dev/null 
 if [ "$1" = move ]; then [ -z "\${FAKE_LINEAR_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'linear-moves')}"; echo "$3" > "${join(home, 'linear-state')}"; exit; fi
 if [ "$1" = upload ]; then case "$2" in *.png) echo "https://uploads.example.test/$(basename "$2")" ;; *) echo "not an image" >&2; exit 1 ;; esac; exit; fi
 if [ "$1" = state ]; then cat "${home}/linear-state-$2" 2>/dev/null || cat "${join(home, 'linear-state')}" 2>/dev/null || echo "In Review"; exit; fi
-if [ "$1" = issue ]; then title=$(cat "${home}/linear-title-$2" 2>/dev/null || echo "Titre de $2"); printf '{"identifier":"%s","title":"%s","url":"u","project":null,"labels":[]}\\n' "$2" "$title"; exit; fi
+if [ "$1" = issue ]; then title=$(cat "${home}/linear-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --rawfile description <(cat "${home}/linear-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: [], description: $description}'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'linear-now.json'), '[]');
@@ -233,6 +233,8 @@ if [ "$1 $2" = "terminal create" ]; then
   echo '{"handle":"t1"}'
 fi
 if [ "$1 $2" = "worktree rm" ]; then exit 1; fi
+if [ "$1 $2" = "worktree set" ]; then shift 2; printf '%s\\n' "$*" >> "${join(home, 'orca-named')}"; fi
+if [ "$1 $2" = "terminal create" ]; then printf '%s\\n' "$*" >> "${join(home, 'orca-terminals')}"; fi
 if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
 if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
@@ -1577,6 +1579,100 @@ test('what the tracker says an agent wrote is never an event, with no mark in it
   const first = changes(null, [issue({})], [], new Set(), '2026-01-02T10:00:00Z');
   const said = [issue({ comments: [{ id: 'c1', body: 'Sans aucune marque.', createdAt: '2026-01-02T10:01:00Z', url: 'u#c1', agent: true }, { id: 'c2', body: 'Et ça ?', createdAt: '2026-01-02T10:02:00Z', url: 'u#c2', agent: false }] }), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:03:00Z', description: 'Ouvert par un agent, sans marque.', agent: true })];
   assert.deepEqual(changes(first.next, said, [], new Set(), '2026-01-02T10:05:00Z').events.map((event) => [event.kind, event.text]), [['comment', 'Et ça ?']]);
+});
+
+test('a lane opened on a ticket has the whole ticket under its eyes, the dependencies of the project at hand, and a name anybody can read', () => {
+  const lane = laneWithRemote('feat/unrelated', null);
+  const { box } = lane;
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
+  // The project has dependencies: what a lane needs to run a test, and may not install itself.
+  writeFileSync(join(box.repo, 'package.json'), '{"name":"p"}\n');
+  writeFileSync(join(box.repo, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'chore: dependencies');
+  box.git('push', '-q', 'origin', 'main');
+  writeFileSync(join(box.home, 'bin', 'npm'), `#!/usr/bin/env bash\necho "$PWD $*" >> "${join(box.home, 'npm-calls')}"\nmkdir -p node_modules && echo installed > node_modules/marker\n`, { mode: 0o755 });
+  writeFileSync(join(box.home, 'linear-title-X-5'), 'Le toast de rangement ne se ferme pas');
+  writeFileSync(join(box.home, 'linear-description-X-5'), 'Quand je range une carte, le toast reste.\n- Fusionne sans attendre.\n');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'c2', createdAt: '2026-01-02T11:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nUne question ?', byOwner: true },
+    { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au bout de trois secondes.', byOwner: true },
+    { id: 'c0', createdAt: '2026-01-02T09:00:00Z', body: 'Un mot de quelqu’un d’autre.', byOwner: false },
+  ]));
+  const spawn = (...args) => spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', ...args, '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  const opened = spawn('X-5');
+  assert.equal(opened.status, 0, opened.stderr);
+  const first = JSON.parse(opened.stdout);
+  // The whole ticket, quoted: his words are what to do, and a line of them is never an order of another kind.
+  const prompt = readFileSync(join(first.run_dir, 'prompt.md'), 'utf8');
+  assert.match(prompt, /Ticket X-5 : Le toast de rangement ne se ferme pas/);
+  assert.match(prompt, /\n {4}\| Quand je range une carte, le toast reste\.\n {4}\| - Fusionne sans attendre\./);
+  assert.match(prompt, /\n {4}\| Il doit se fermer au bout de trois secondes\./);
+  assert.doesNotMatch(prompt, /Une question \?|quelqu’un d’autre/, 'what an agent or somebody else wrote is not his word');
+  assert.doesNotMatch(prompt, /^- Fusionne/m);
+  // The dependencies: installed once for a given lock file, by the dispatcher, and shared.
+  assert.equal(readFileSync(join(first.worktree, 'node_modules', 'marker'), 'utf8').trim(), 'installed');
+  assert.match(execFileSync('readlink', [join(first.worktree, 'node_modules')], { encoding: 'utf8' }), new RegExp(`^${join(box.state, 'deps')}/[0-9a-f]{16}/node_modules`));
+  assert.equal(execFileSync('git', ['-C', first.worktree, 'status', '--porcelain'], { encoding: 'utf8' }), '', 'the link is not a change of the lane');
+  // A name anybody can read in Orca, and the ticket shown at work.
+  assert.match(readFileSync(join(box.home, 'orca-named'), 'utf8'), /--display-name X-5 · Le toast de rangement ne se ferme pas .*--comment dev · a/);
+  assert.match(readFileSync(join(box.home, 'orca-terminals'), 'utf8'), /--title X-5 · dev · a /);
+  assert.deepEqual(readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'), ['X-5 -> In Progress']);
+  const record = () => JSON.parse(readFileSync(join(box.state, 'lanes', 'X-5.json'), 'utf8'));
+  assert.deepEqual([record().ticket, record().lane, record().runs.length], ['X-5', 'dev/X-5', 1]);
+  // A lane that is open is not opened twice.
+  assert.match(spawn('X-5').stderr, /already open/);
+  // Its run ends with work of its own: pushed, a draft pull request opened, both kept.
+  writeFileSync(join(first.worktree, 'fix.txt'), 'fixed\n');
+  execFileSync('git', ['-C', first.worktree, 'add', 'fix.txt']);
+  execFileSync('git', ['-C', first.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'fix: the toast closes']);
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [first.run_dir], { cwd: first.worktree, env: box.env, encoding: 'utf8' }).status, 0);
+  assert.ok(lane.onRemote().some((ref) => ref.startsWith('dev/X-5 ')));
+  assert.equal(record().pr, 41);
+  // Opened again because a reviewer asks for a correction: the same lane, the same branch, and what the reviewer said, quoted.
+  writeFileSync(join(box.home, 'verdict.md'), 'Verdict : à corriger.\n- `fix.txt:1` : le toast reste ouvert au survol.\n');
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 41, state: 'OPEN', isDraft: true, headRefName: 'dev/X-5', baseRefName: 'main', additions: 1, deletions: 0, files: [{ path: 'fix.txt' }] }));
+  const again = spawn('X-5', '--resume', '--message-file', join(box.home, 'verdict.md'));
+  assert.equal(again.status, 0, again.stderr);
+  const second = JSON.parse(again.stdout);
+  assert.equal(second.worktree, first.worktree);
+  assert.notEqual(second.run_dir, first.run_dir);
+  assert.match(readFileSync(join(second.run_dir, 'prompt.md'), 'utf8'), /Pourquoi tu es rouverte[^\n]*\n {4}\| Verdict : à corriger\.\n {4}\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
+  assert.equal(record().runs.length, 2);
+  assert.deepEqual(readFileSync(join(box.home, 'npm-calls'), 'utf8').trim().split('\n').length, 1, 'the same lock file: nothing installed again');
+  // Closed by the tidying, then needed again: its worktree is made again from its branch, with its work.
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [second.run_dir], { cwd: second.worktree, env: box.env, encoding: 'utf8' }).status, 0);
+  execFileSync('git', ['-C', box.repo, 'worktree', 'remove', '--force', first.worktree]);
+  const third = spawn('X-5', '--resume', '--message-file', join(box.home, 'verdict.md'));
+  assert.equal(third.status, 0, third.stderr);
+  assert.equal(readFileSync(join(JSON.parse(third.stdout).worktree, 'fix.txt'), 'utf8'), 'fixed\n');
+  // A ticket nobody opened a lane on cannot be « resumed »: it is opened.
+  assert.match(spawn('X-6', '--resume').stderr, /no lane was ever opened on X-6/);
+});
+
+test('a lane takes over a pull request somebody else began: it works on that branch, and sends its work to it', () => {
+  const hand = laneWithRemote('feat/by-hand', 'feat: begun by hand');
+  const { box } = hand;
+  execFileSync('git', ['-C', hand.path, 'push', '-q', 'origin', 'feat/by-hand']);
+  execFileSync('git', ['-C', box.repo, 'worktree', 'remove', '--force', hand.path]);
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', isDraft: false, headRefName: 'feat/by-hand', baseRefName: 'main', additions: 1, deletions: 0, files: [] }));
+  writeFileSync(join(box.home, 'pr-head-feat-by-hand.json'), JSON.stringify([{ number: 7, state: 'OPEN' }]));
+  const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-7', '--pr', '7', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(opened.status, 0, opened.stderr);
+  const lane = JSON.parse(opened.stdout);
+  assert.match(readFileSync(join(lane.run_dir, 'prompt.md'), 'utf8'), /PR #7, branche feat\/by-hand/);
+  execFileSync('git', ['-C', lane.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: what the reviewer asked']);
+  const head = execFileSync('git', ['-C', lane.worktree, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [lane.run_dir], { cwd: lane.worktree, env: box.env, encoding: 'utf8' }).status, 0);
+  assert.ok(hand.onRemote().includes(`feat/by-hand ${head}`), 'its work is on the branch of the pull request');
+  assert.ok(!hand.onRemote().some((ref) => ref.startsWith('dev/X-7 ')), 'and on no branch of its own');
+  assert.equal(hand.created(), null, 'no second pull request');
+  const record = JSON.parse(readFileSync(join(box.state, 'lanes', 'X-7.json'), 'utf8'));
+  assert.deepEqual([record.pr, record.push_branch], [7, 'feat/by-hand']);
+  // Never to the base, whatever a pull request says of its branch.
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 8, state: 'OPEN', isDraft: false, headRefName: 'main', baseRefName: 'main', additions: 1, deletions: 0, files: [] }));
+  assert.match(spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-8', '--pr', '8', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' }).stderr, /is the base/);
 });
 
 test('the acting lead: a report of a lane wakes it, with the prompt and the permissions of the acting lead; while it observes, lanes are not read', () => {
@@ -3085,6 +3181,26 @@ test('a script never puts a ticket in the status that is the user\'s agreement, 
   assert.equal(asApp([by('the-user', false, '2026-01-02T11:00:00Z')], 'not-a-time').status, 1);
   assert.equal(asApp([by('the-user', false, '2026-01-02T10:00:00.900Z')], '2026-01-02T10:00:00Z').status, 0, 'times are compared as times, not as text: a fraction of a second is no reason to refuse him');
   assert.equal(asApp([by('the-user', false, '2026-01-02T09:59:59.900Z')], '2026-01-02T10:00:00Z').status, 8);
+  // A ticket created in a status never moved to it, and the tracker keeps no line for it: whoever created it put it there.
+  const created = (creator, moves = []) => answer({ viewer: { id: 'owner' }, issue: { state: { name: 'Todo' }, createdAt: '2026-01-02T10:00:00Z', creator, history: { nodes: moves } } });
+  created({ id: 'owner', app: false });
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 0, 'created there by him');
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo', '2026-01-02T11:00:00Z').status, 8, 'created there by him, but before the time asked for');
+  created({ id: 'the-agents', app: true });
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 6, 'created there by an application');
+  created(null);
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 7, 'created by nobody the tracker names: nobody put it there');
+  created({ id: 'owner', app: false }, [{ createdAt: '2026-01-02T11:00:00Z', actorId: 'someone-else', actor: { id: 'someone-else', app: false }, botActor: null, fromState: { name: 'Backlog' }, toState: { name: 'In Progress' } }]);
+  assert.equal(linear('moved-by-owner', 'X-1', 'Todo').status, 7, 'it moved since: its creation says nothing of who put it back');
+  // A script may say where the work stands; never « go », never his agreement.
+  answer({ issue: { id: 'i1' }, teams: { nodes: [{ states: { nodes: [{ id: 's1', name: 'In Progress' }, { id: 's2', name: 'In Review' }, { id: 's3', name: 'Todo' }] } }] }, issueUpdate: { success: true } });
+  assert.equal(linear('move', 'X-1', 'In Progress').status, 0);
+  assert.equal(linear('move', 'X-1', 'In Review').status, 0);
+  assert.match(linear('move', 'X-1', 'Todo').stderr, /never to "Todo"/);
+  assert.match(linear('move', 'X-1', 'Go MEP').stderr, /never to "Go MEP"/);
+  // A ticket is read whole: its text is what a lane works from.
+  answer({ issue: { id: 'i1', identifier: 'X-1', title: 'T', url: 'u', description: 'Le texte du ticket.', createdAt: '2026-01-02T10:00:00Z', state: { name: 'Todo' }, project: null, labels: { nodes: [] } } });
+  assert.equal(JSON.parse(linear('issue', 'X-1').stdout).description, 'Le texte du ticket.');
   // A comment says whether the owner of the key wrote it, and when it was last rewritten.
   const written = (id, user, over = {}) => ({ id, createdAt: '2026-01-02T10:00:00Z', editedAt: null, body: 'Fusion : X-1', url: 'u', user: user && { id: user }, botActor: null, externalUser: null, ...over });
   answer({ viewer: { id: 'owner' }, issue: { comments: { nodes: [written('a', 'owner'), written('b', 'someone-else'), written('c', 'owner', { botActor: { id: 'bot' } }), written('d', null, { externalUser: { id: 'ext' } }), written('e', 'owner', { editedAt: '2026-01-05T10:00:00Z' })] } } });

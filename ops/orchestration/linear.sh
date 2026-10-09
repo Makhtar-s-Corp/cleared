@@ -116,9 +116,9 @@ case "${1:-}" in
     ;;
   issue)
     ticket_ok "$2"
-    gql 'query($id: String!) { issue(id: $id) { id identifier title url state { name } project { name } labels { nodes { name } } } }' \
+    gql 'query($id: String!) { issue(id: $id) { id identifier title url description createdAt state { name } project { name } labels { nodes { name } } } }' \
       "$(jq -nc --arg id "$2" '{id: $id}')" \
-      | jq -c '.data.issue | {id, identifier, title, url, state: .state.name, project: (.project.name // null), labels: [.labels.nodes[].name]}'
+      | jq -c '.data.issue | {id, identifier, title, url, state: .state.name, project: (.project.name // null), labels: [.labels.nodes[].name], createdAt, description: (.description // "")}'
     ;;
   comment)
     ticket_ok "$2"
@@ -265,9 +265,14 @@ case "${1:-}" in
     not_before=${4:-}
     [ -z "$not_before" ] || [[ "$not_before" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || die "\"$not_before\" is not a time"
     owner=$(owner_id) || exit 1
-    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } history(first: 40) { nodes { createdAt actorId actor { id app } botActor { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
+    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } createdAt creator { id app } history(first: 40) { nodes { createdAt actorId actor { id app } botActor { name } fromState { name } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
     [ "$(jq -r '.data.issue.state.name // empty' <<<"$answer")" = "$3" ] || exit 5
     last=$(jq -c --arg status "$3" '[.data.issue.history.nodes[] | select(.toState.name == $status) | . + {at: .createdAt}] | sort_by(.at) | last // empty' <<<"$answer")
+    # A ticket created in that status never moved to it: the tracker keeps no
+    # line for it. Whoever created it put it there, when it was created.
+    if [ -z "$last" ] && [ "$(jq '[.data.issue.history.nodes[] | select(.toState != null or .fromState != null)] | length' <<<"$answer")" = 0 ] && [ "$(jq -r '.data.issue.creator != null' <<<"$answer")" = true ]; then
+      last=$(jq -c '.data.issue | {at: .createdAt, actorId: .creator.id, actor: .creator, botActor: null}' <<<"$answer")
+    fi
     [ -n "$last" ] || exit 7
     [ -n "$owner" ] || owner=$(jq -r '.data.viewer.id' <<<"$answer")
     [ "$(jq -r --arg owner "$owner" '.botActor == null and .actor.app != true and .actorId != null and .actorId == $owner' <<<"$last")" = true ] || exit 6
@@ -275,13 +280,18 @@ case "${1:-}" in
     [ -z "$not_before" ] || [ "$(jq -r --arg from "$not_before" 'def seconds: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601; (.at | seconds) >= ($from | seconds)' <<<"$last")" = true ] || exit 8
     ;;
   move)
-    # A script only ever puts a ticket in the status that asks the user for
-    # his agreement, or in the one that says it is done. Never in the one
-    # that is his agreement.
+    # A script only ever puts a ticket in the statuses that say where the
+    # work stands (at work, being checked), in the one that asks the user
+    # for his agreement, or in the one that says it is done. Never in the
+    # one that is his agreement, nor in the one by which he says « go ».
     ticket_ok "$2"
     target=${3:-}
-    [ -n "$target" ] && { [ "$target" = "$(conf_get linear validate_state)" ] || [ "$target" = "$(conf_get linear done_state)" ]; } \
-      || die "a script may only move a ticket to \"$(conf_get linear validate_state)\" or \"$(conf_get linear done_state)\", never to \"${target:-nothing}\""
+    allowed=
+    for name in progress_state review_state validate_state done_state; do
+      [ -z "$(conf_get linear "$name")" ] || [ "$target" != "$(conf_get linear "$name")" ] || allowed=1
+    done
+    [ -n "$target" ] && [ -n "$allowed" ] && [ "$target" != "$(conf_get linear go_state)" ] \
+      || die "a script may only move a ticket to a status of the work, to \"$(conf_get linear validate_state)\" or to \"$(conf_get linear done_state)\", never to \"${target:-nothing}\""
     found=$(gql 'query($id: String!, $team: String!) { issue(id: $id) { id } teams(filter: {key: {eq: $team}}) { nodes { states { nodes { id name } } } } }' "$(jq -nc --arg id "$2" --arg team "$(conf_get linear team)" '{id: $id, team: $team}')")
     issue_id=$(jq -r '.data.issue.id // empty' <<<"$found") state_id=$(jq -r --arg name "$target" '.data.teams.nodes[0].states.nodes[] | select(.name == $name) | .id' <<<"$found")
     [ -n "$issue_id" ] && [ -n "$state_id" ] || die "ticket \"$2\" or status \"$target\" not found in Linear"
