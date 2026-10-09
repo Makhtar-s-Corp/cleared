@@ -1785,8 +1785,10 @@ test('a lane moves by rule to the point where the user is asked: its checks star
   flow();
   assert.deepEqual(ready(), ['41']);
   assert.deepEqual(moves().slice(-1), ['X-5 -> In Review']);
+  // Out of draft, its checks not listed yet: it is not taken out twice.
+  pull({ headRefOid: done.head, isDraft: false });
   flow();
-  assert.deepEqual(ready(), ['41'], 'once for a version');
+  assert.deepEqual(ready(), ['41'], 'once out of draft, left alone');
   // Checks running: nothing. Red: the lane is opened again with what they said, once for that version.
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   assert.equal(flow().stdout.trim(), '');
@@ -1824,10 +1826,25 @@ test('a lane moves by rule to the point where the user is asked: its checks star
   pull({ headRefOid: corrected.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   assert.match(flow().stdout, /its review is asked for/);
   review('Verdict : rien de bloquant.');
+  // A session that had nothing to change (a word of the lead it answered) pushes nothing: its pull request stays
+  // out of draft. Sent back to draft for nothing, its checks would have to run again for the same version.
+  const undone = () => ready().filter((line) => line === '41 --undo').length;
+  const before = undone();
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const nothing = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--resume', '--comment-on', 'none'], { env, encoding: 'utf8' });
+  assert.equal(nothing.status, 0, nothing.stderr);
+  assert.equal(session('X-5', { commit: null }).head, corrected.head);
+  assert.equal(undone(), before, 'nothing to push: not put back to draft');
+  // One that was put back to draft all the same, at a version whose checks were started once: taken out again.
+  pull({ headRefOid: corrected.head, isDraft: true, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const again = ready().length;
+  assert.match(flow().stdout, /#41 is taken out of draft/);
+  assert.equal(ready().length, again + 1);
+  pull({ headRefOid: corrected.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   const last = flow();
   assert.match(last.stdout, /reviewed and green[\s\S]*the request for the agreement is the lead's/);
   assert.equal(flow().stdout.trim(), '', 'said once');
-  assert.equal(record('X-5').runs.length, 3);
+  assert.equal(record('X-5').runs.length, 4);
   assert.deepEqual(stuck(), []);
   // Live: nothing more to do on it.
   pull({ headRefOid: corrected.head, state: 'MERGED', isDraft: false });

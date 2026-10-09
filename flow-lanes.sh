@@ -302,7 +302,10 @@ one_lane() {
   fi
   if [ "$(jq -r '.isDraft' <<<"$pull")" = true ]; then
     # Out of draft when the host is free for a run of the checks: one at a time.
-    did "$record" "ready:$head" && return 0
+    # (Also one that was taken out of draft at this version already and is
+    # a draft again: something put it back, and nothing else will take it
+    # out. To hold a lane, the ticket is taken out of the statuses of the
+    # work, not its pull request put in draft.)
     free_for_a_run || return 0
     : > "$work/readied"
     if [ -n "$dry" ]; then say "$ticket: #$pr would be taken out of draft, its checks would start"; return 0; fi
