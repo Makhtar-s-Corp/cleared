@@ -27,7 +27,8 @@
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
 #
-# Exit codes: 0 spawned, 3 lane limit reached, 1 anything else (among which:
+# Exit codes: 0 spawned, 3 lane limit reached, 4 the subscription is at its
+# stop, 1 anything else (among which:
 # no model of the chain is available).
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
@@ -118,6 +119,21 @@ if [ "$(jq length "$available")" = 0 ]; then
   die "no model of the chain is available for $lane: $(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed")"
 fi
 chosen=$(jq -r '.[0].alias' "$available")
+# The subscription this lane would run on is at the stop the project set
+# ([limits] subscription_stop, percent of a window, as the sessions say it):
+# no lane opens until that window starts over. The lead is not opened from
+# here, and keeps running. Said to the lead once for a window.
+if reached=$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" reached "$(jq -r '.[0].adapter' "$available")" 2> /dev/null); then
+  IFS=$'\t' read -r window used resets stop <<<"$reached"
+  told="$ORCH_STATE_DIR/limits/$(jq -r '.[0].adapter' "$available").told"
+  if [ -z "$dry_run" ] && [ "$(cat "$told" 2> /dev/null)" != "$window $resets" ]; then
+    ledger event --kind subscription_stop --ticket "$ticket" --value "$used" --detail "the subscription the lanes run on ($(jq -r '.[0].adapter' "$available")) is at $used % of its $window window, at or over the stop of $stop % set for the project: no lane opens until that window starts over ($resets). The lead keeps running. What a session says beyond the limit: $(jq -r '.beyond // "not said"' <<<"$(tail -n 1 "$ORCH_STATE_DIR/limits/$(jq -r '.[0].adapter' "$available").jsonl" 2> /dev/null || echo '{}')")"
+    echo "$window $resets" > "$told"
+  fi
+  rm -f "$available"
+  echo "$(basename "$0"): the subscription is at its stop ($used % of the $window window): $lane not opened until $resets" >&2
+  exit 4
+fi
 if [ "$chosen" != "$requested" ]; then
   spawn_note="$requested indisponible au lancement. Repli déclaré pris : $chosen."
   [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$lane: $requested unavailable at spawn, fallback $chosen"

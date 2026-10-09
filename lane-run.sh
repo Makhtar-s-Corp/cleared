@@ -47,6 +47,8 @@ attempt() {
   code=$?
   case "$code" in 0) outcome=done; model_seen "$adapter" "$model" ;; 2 | 3) outcome=refused ;; *) outcome=failed ;; esac
   [ -f "$usage_file" ] || echo '{}' > "$usage_file"
+  # Where the subscription stands, if this backend said it: kept for the rules and the dashboard.
+  node --no-warnings "$ORCH_HOME/lib/limits.mjs" note "$adapter" "$usage_file" 2> /dev/null || true
   ledger run-end --run-id "$run_id" --outcome "$outcome" --exit-code "$code" --usage-file "$usage_file"
   if [ -n "${ORCH_PR:-}" ]; then ledger run-set --run-id "$run_id" --pr-number "$ORCH_PR" --lines-changed "${ORCH_PR_LINES:-0}"; fi
 }

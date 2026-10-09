@@ -101,7 +101,7 @@ again() {
   "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none ${keep:+--keep-status} > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
     0) mark "$record" "$key" ;;
-    3) : ;; # no place now: tried again at the next wake
+    3 | 4) : ;; # no place now, or the subscription at its stop: tried again at the next wake
     *) say "$ticket: could not be opened again: $(sed -n '$p' "$work/spawn.err")" ;;
   esac
 }
@@ -449,6 +449,7 @@ while IFS=$'\t' read -r ticket updated; do
   case "$code" in
     0) say "$ticket: put in « $todo » by the user: its lane is opened" ;;
     3) say "$ticket: put in « $todo » by the user: no place now (the limit of lanes), it waits"; break ;;
+    4) say "$ticket: put in « $todo » by the user: the subscription is at its stop ($(sed -n 's/.*at its stop (\([^)]*\)).*/\1/p' "$work/spawn.err" | sed -n '$p')), it waits"; break ;;
     *) say "$ticket: put in « $todo » by the user: its lane could not be opened: $(sed -n '$p' "$work/spawn.err")" ;;
   esac
 done < <(jq -r 'sort_by(.updatedAt) | .[] | [.identifier, .updatedAt] | @tsv' "$work/todo.json")
