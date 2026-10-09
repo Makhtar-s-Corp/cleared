@@ -79,6 +79,9 @@ case "${1:-}" in
         < <(tr ',' '\n' <<<"${ORCH_ALLOW:-}" | sed 's/^ *//; s/ *$//')
       while IFS= read -r prefix; do [ -n "$prefix" ] && denied+=("Bash($prefix)" "Bash($prefix *)"); done \
         < <(tr ',' '\n' <<<"${ORCH_DENY:-}" | sed 's/^ *//; s/ *$//')
+      # Folders the role may read beyond its own worktree, and those only.
+      while IFS= read -r folder; do [ -n "$folder" ] && allowed+=("Read(/$folder/**)"); done \
+        < <(tr ',' '\n' <<<"${ORCH_READ:-}" | sed 's/^ *//; s/ *$//')
       for tool in ${ADAPTER_DENY_TOOLS:-}; do denied+=("$tool"); done
       case "$ORCH_PERMISSION_MODE" in
         accept-edits) args+=(--permission-mode acceptEdits) ;;
