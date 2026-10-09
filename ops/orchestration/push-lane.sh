@@ -60,6 +60,11 @@ guard_text "$out/changes.diff" || die "$branch not pushed: its changes are refus
 
 # The lane's branch to the branch of the same name, and only that. No force
 # in any form: a remote branch that moved makes this fail, on purpose.
+# A pull request that is not a draft runs its checks at every push, whatever
+# the host is doing: it goes back to draft first, and is taken out of it
+# when the host is free for a run (flow-lanes.sh), like a new one.
+existing=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number,isDraft | jq -r '.[0] | select(.isDraft == false) | .number // empty')
+[ -z "$existing" ] || (cd "$worktree" && gh pr ready "$existing" --undo) > /dev/null 2>&1 || true
 git -C "$worktree" push --quiet origin "HEAD:refs/heads/$push_to"
 
 number=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number | jq -r '.[0].number // empty')
