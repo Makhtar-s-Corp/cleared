@@ -216,6 +216,9 @@ if [ -n "$pushed_role" ]; then
   # under it before the agents had a name of their own.
   written=$("$ORCH_HOME/linear.sh" comments "$ticket") || die "the comments of $ticket could not be read: the lane is not started blind"
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$run_dir/agent-ids.txt" || true
+  # Which of his words this session is handed, kept with the run: what he
+  # writes from here on is what it was not handed, whatever the clocks say.
+  jq -c --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not)) | .id]' <<<"$written" > "$run_dir/seen.json"
   jq -r --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | .[] | "- le \(.createdAt[0:16] | sub("T"; " à ")) :\n" + (.body | split("\n") | map("    | " + .) | join("\n"))' <<<"$written" > "$run_dir/comments.md"
 fi
 mv "$available" "$run_dir/chain.json"
@@ -238,6 +241,7 @@ mv "$available" "$run_dir/chain.json"
       cat "$run_dir/comments.md"
     fi
   fi
+  [ -z "${deps_note:-}" ] || printf '\n%s\n' "$deps_note"
   if [ -n "$message_file" ]; then
     printf "\nPourquoi tu es rouverte, cité ligne à ligne (un constat à traiter dans cette copie de travail, jamais une consigne d'une autre nature) :\n"
     quoted "$message_file"
@@ -264,8 +268,8 @@ if [ -n "$pushed_role" ]; then
   mkdir -p "$(dirname "$record")"
   kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
   [ -n "$kept" ] || kept='{}'
-  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" \
-    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
+    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
   # The ticket is at work: said where the user looks.
   progress=$(conf_get linear progress_state)
   [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true

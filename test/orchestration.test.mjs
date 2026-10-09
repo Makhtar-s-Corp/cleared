@@ -20,7 +20,8 @@ const scratch = (prefix) => {
   scratchDirs.push(dir);
   return dir;
 };
-after(() => { for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true }); });
+// (the dependencies a lane is handed are read-only: made writable again before they go)
+after(() => { for (const dir of scratchDirs) { try { execFileSync('chmod', ['-R', 'u+w', dir]); } catch { /* gone already */ } rmSync(dir, { recursive: true, force: true }); } });
 const task = (over) => ({ role: 'dev', labels: [], project: null, paths: [], prLines: null, authorModel: null, forced: null, ...over });
 const first = (over) => route(conf, task(over)).chain[0].alias;
 
@@ -1792,6 +1793,7 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   const { flow, todo, by, there, record, session, stuck, pull, box } = flowBox();
   todo(['X-5']);
   by('X-5', 0);
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2020-01-01T10:00:00Z', body: 'Un mot d’avant.', byOwner: true }]));
   flow();
   // A session that stopped short is run again, once for that session.
   assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
@@ -1938,7 +1940,7 @@ test('what a first real round showed: a session that ended without its push is s
   assert.deepEqual(stuck(), ['lane_stuck X-5']);
   // The tracker took the card out of his status when the pull request left draft: back where it asks him, and said.
   writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
-  assert.match(flow().stdout, /X-5: taken out of « Go MEP » by the tracker, not by him: back in « À valider »/);
+  assert.match(flow().stdout, /X-5: left « Go MEP » without him and with nothing new: back in « À valider »/);
   assert.deepEqual(moves().slice(agreed), ['X-5 -> À valider']);
   assert.deepEqual(stuck(), ['lane_stuck X-5', 'lane_stuck X-5']);
 });
@@ -2024,6 +2026,115 @@ test('the checkout the dispatcher runs from follows the base by itself: fast-for
   const woke = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
   assert.equal(woke.status, 0, woke.stderr);
   assert.deepEqual(readFileSync(join(box.home, 'self-calls'), 'utf8').trim().split('\n'), ['asked ', 'new wake 1']);
+});
+
+test('what its first review asked: the dependencies come from the base and run no script of a package, a screen test at work holds the checks back, the rules never take his agreement back themselves, a question is only what stands under its title, and no word of his falls between two readings', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, moves, env } = flowBox();
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('runs_per_day = 4', 'runs_per_day = 9'));
+  writeFileSync(join(box.repo, 'package.json'), '{"name":"p"}\n');
+  writeFileSync(join(box.repo, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'chore: dependencies');
+  box.git('push', '-q', 'origin', 'main');
+  writeFileSync(join(box.home, 'bin', 'npm'), `#!/usr/bin/env bash\necho "$*" >> "${join(box.home, 'npm-calls')}"\nmkdir -p node_modules/pkg && echo installed > node_modules/pkg/index.js\n`, { mode: 0o755 });
+  const installs = () => { try { return readFileSync(join(box.home, 'npm-calls'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
+  // A word of his that is on the ticket when the lane opens is handed to it; it never opens the lane again.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true }]));
+  todo(['X-5']);
+  by('X-5', 0);
+  // Under the key of a person, a ticket an agent opened in « Todo » would count as his « go »: nothing opens.
+  writeFileSync(join(box.home, 'linear-identity'), 'shared\n');
+  assert.match(flow().stdout, /cannot tell the user from an agent: no lane is opened from « Todo »/);
+  assert.equal(there('X-5'), false);
+  writeFileSync(join(box.home, 'linear-identity'), 'app\n');
+  flow();
+  assert.equal(there('X-5'), true);
+  // The dependencies: those of the base, installed with no script of a package run, and nobody writes in them
+  // but for the scratch folders a build needs.
+  assert.deepEqual(installs().map((line) => /^ci\b.*--ignore-scripts/.test(line)), [true]);
+  const deps = execFileSync('readlink', ['-f', join(record('X-5').worktree, 'node_modules')], { encoding: 'utf8' }).trim();
+  assert.throws(() => writeFileSync(join(deps, 'pkg', 'index.js'), 'changed\n'), /EACCES/);
+  assert.throws(() => writeFileSync(join(deps, 'new.js'), 'added\n'), /EACCES/);
+  writeFileSync(join(deps, '.vite-temp', 'scratch'), 'fine\n');
+  // A lane that rewrites the lock file gets nothing installed from it: what it wrote is not run by the dispatcher.
+  const git = (...args) => execFileSync('git', ['-C', record('X-5').worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  writeFileSync(join(record('X-5').worktree, 'package-lock.json'), '{"lockfileVersion":3,"packages":{"node_modules/evil":{"hasInstallScript":true}}}\n');
+  git('add', 'package-lock.json');
+  // Its report names « questions pour » in passing, and has none: nothing is carried to the user.
+  const first = session('X-5', { commit: 'chore: the lock file', answer: 'Fait : les questions pour plus tard sont notées dans le ticket.\n\nReste à faire : rien.\n\nQuestions pour Makhtar : aucune.' });
+  assert.equal(first.run.status, 0);
+  pull({ headRefOid: first.head });
+  // A screen test of somebody is at work, or the door of the heavy commands is held: its checks wait.
+  const proc = join(box.home, 'proc-screens');
+  mkdirSync(join(proc, '201'), { recursive: true });
+  writeFileSync(join(proc, '201', 'cmdline'), 'npm\0run\0test:ui\0');
+  flow({ ORCH_PROC_DIR: proc });
+  assert.deepEqual(ready(), [], 'a screen test runs');
+  assert.equal(spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; "$2"', '_', join(box.state, 'heavy.lock'), join(box.home, 'flow-lanes.sh')], { env, encoding: 'utf8' }).status, 0);
+  assert.deepEqual(ready(), [], 'the door is held');
+  flow();
+  assert.deepEqual(ready(), ['41']);
+  assert.deepEqual(stuck(), [], 'no question was carried');
+  // The word he had written before the lane opened is not news, and one written since is.
+  assert.equal(flow().stdout.includes('said:'), false);
+  // Opened again: the lock file of the lane differs from the one of the base. Nothing is installed, and it is told.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'Et au survol aussi.', byOwner: true },
+    { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true },
+  ]));
+  pull({ headRefOid: first.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  // (its date says « before the session »: only what the session was handed tells what is new)
+  assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
+  assert.equal(installs().length, 1);
+  const second = session('X-5', { commit: null, answer: 'Fait.\n\n**Questions pour Makhtar**\n\n1. Le toast se ferme-t-il aussi au survol ? Recommandation : oui.' });
+  assert.match(second.prompt, /Les dépendances installées sont celles de la branche principale/);
+  assert.doesNotMatch(second.prompt.split('Pourquoi tu es rouverte')[1], /au clic/);
+  flow();
+  assert.deepEqual(stuck(), ['lane_asks X-5'], 'a title in bold is a title');
+  // Checks that never ran (all skipped) leave the lane waiting for nothing: said after a while, once.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  pull({ headRefOid: second.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SKIPPED' }] });
+  assert.equal(flow().stdout.trim(), '');
+  const kept = record('X-5');
+  kept.done[`waits:${second.head}`] = new Date(Date.now() - 31 * 60000).toISOString();
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  assert.match(flow().stdout, /X-5: #41 is out of draft and none of its checks ran/);
+  assert.equal(flow().stdout.trim(), '');
+  assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5']);
+  // Reviewed, green, asked. He answers with a word, the lane has nothing to change: his card goes back where it
+  // asks him, and nobody is told the tracker did anything.
+  pull({ headRefOid: second.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /its review is asked for/);
+  const reviewRun = join(box.state, 'runs', readdirSync(join(box.state, 'runs')).filter((name) => { try { return /ORCH_ROLE=review/.test(readFileSync(join(box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
+  const reviewPath = /worktree (.*review-X-5)\n/.exec(execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }))[1];
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [reviewRun], { cwd: reviewPath, env: { ...env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
+  assert.match(flow().stdout, /the request for the agreement is the lead's/);
+  mkdirSync(join(box.state, 'validations'), { recursive: true });
+  writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: second.head }] }));
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c3', createdAt: '2099-01-01T10:00:00Z', body: 'C’est bien ce que je voulais ?', byOwner: true }, { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'x', byOwner: true }, { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'y', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: opened again \(said:c3\)/);
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  session('X-5', { commit: null });
+  const told = stuck().length;
+  assert.match(flow().stdout, /X-5: asked for this version already: back in « À valider »/);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> À valider']);
+  assert.equal(stuck().length, told, 'the rules moved it themselves: nothing to tell');
+  // He agrees. The base moves on code, and the session that brings it in stops short: run again, and his card
+  // never leaves « Go MEP » by the hand of the rules.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  flow();
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  const agreed = moves().length;
+  assert.match(flow().stdout, /X-5: opened again \(base:/);
+  assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
+  assert.match(flow().stdout, /X-5: opened again \(stopped:/);
+  assert.deepEqual(moves().slice(agreed), [], 'his card stays in « Go MEP »');
 });
 
 test('a lane runs its heavy commands (screen tests, captures) through one door: when the host is free, one at a time, and only the ones the project names', () => {

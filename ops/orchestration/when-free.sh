@@ -32,7 +32,7 @@ while :; do
   if flock -n 8 && [ "$("$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '.free_for_a_ci_run // false')" = true ]; then break; fi
   flock -u 8 || true
   if [ "$(date +%s)" -ge "$deadline" ]; then
-    echo "$(basename "$0"): the host is not free for a heavy command (checks, a deployment or another screen test are running), and the wait of $wait_minutes minutes is over: \"$asked\" was not run. Say so in your report; it is run again when the lane is opened again" >&2
+    echo "$(basename "$0"): the host is not free for a heavy command (checks, a deployment or another screen test are running), and the wait of $wait_minutes minutes is over: \"$asked\" was not run. Say so in your report: the checks of your pull request run the screen tests, and a capture for the user is still to be taken" >&2
     exit 5
   fi
   sleep 20

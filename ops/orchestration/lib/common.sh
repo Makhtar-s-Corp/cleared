@@ -396,33 +396,50 @@ open_terminal() {
 # lane_deps <worktree>: the dependencies of the project, at hand in that
 # worktree. A lane has no network command and may install nothing: the
 # dispatcher installs them, once for a given lock file, in the state, and
-# every worktree with that lock file links to them. A lane that changes the
-# lock file gets its own at its next opening. Nothing to do for a project
+# every worktree links to them.
+# What is installed is what the base asks for, never what the lane wrote: an
+# install fetches and runs code with the rights of the dispatcher, outside
+# what a lane may do. No script of a package is run either, and nobody
+# writes in what is shared but for the scratch folders a build needs. A lane
+# whose lock file differs from the one of the base is told (deps_note): what
+# it adds is installed once it is on the base. Nothing to do for a project
 # without a lock file.
 lane_deps() {
-  local worktree=$1 hash dir new
-  [ -f "$worktree/package-lock.json" ] && [ -f "$worktree/package.json" ] || return 0
-  hash=$(cat "$worktree/package.json" "$worktree/package-lock.json" | sha256sum | cut -c1-16)
+  local worktree=$1 base hash dir new exclude scratch
+  deps_note=
+  base=$(conf_get lanes base)
+  git -C "$worktree" cat-file -e "$base:package.json" 2> /dev/null && git -C "$worktree" cat-file -e "$base:package-lock.json" 2> /dev/null || return 0
+  hash=$({ git -C "$worktree" show "$base:package.json"; git -C "$worktree" show "$base:package-lock.json"; } | sha256sum | cut -c1-16)
   dir="$ORCH_STATE_DIR/deps/$hash"
   mkdir -p "$ORCH_STATE_DIR/deps"
   (
     flock -w 900 7 || exit 1
-    [ -d "$dir/node_modules" ] && exit 0
-    new=$(mktemp -d "$ORCH_STATE_DIR/deps/.new.XXXXXX")
-    cp "$worktree/package.json" "$worktree/package-lock.json" "$new/"
-    if (cd "$new" && npm ci --no-audit --no-fund > "$new/install.log" 2>&1) && [ -d "$new/node_modules" ]; then
-      mv "$new" "$dir"
-    else
-      echo "$(basename "$0"): the dependencies could not be installed (see $new/install.log)" >&2
-      exit 1
+    if [ ! -d "$dir/node_modules" ]; then
+      new=$(mktemp -d "$ORCH_STATE_DIR/deps/.new.XXXXXX")
+      git -C "$worktree" show "$base:package.json" > "$new/package.json"
+      git -C "$worktree" show "$base:package-lock.json" > "$new/package-lock.json"
+      if (cd "$new" && npm ci --ignore-scripts --no-audit --no-fund > "$new/install.log" 2>&1) && [ -d "$new/node_modules" ]; then
+        mv "$new" "$dir"
+      else
+        echo "$(basename "$0"): the dependencies could not be installed (see $new/install.log)" >&2
+        exit 1
+      fi
+    fi
+    # Shared by every lane: read-only, but for where a build writes.
+    if [ -w "$dir/node_modules" ]; then
+      for scratch in .vite .vite-temp .cache; do mkdir -p "$dir/node_modules/$scratch"; done
+      chmod -R a-w "$dir/node_modules"
+      for scratch in .vite .vite-temp .cache; do chmod -R u+w "$dir/node_modules/$scratch"; done
     fi
   ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
   ln -sfn "$dir/node_modules" "$worktree/node_modules"
   # The link is not a change of the lane (an ignore rule written for a folder does not hold a link).
-  local exclude
   exclude="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
   mkdir -p "$(dirname "$exclude")"
   grep -qxF '/node_modules' "$exclude" 2> /dev/null || echo '/node_modules' >> "$exclude"
+  if ! git -C "$worktree" show "$base:package.json" | cmp -s - "$worktree/package.json" || ! git -C "$worktree" show "$base:package-lock.json" | cmp -s - "$worktree/package-lock.json"; then
+    deps_note="Les dépendances installées sont celles de la branche principale : ton \`package.json\` ou ton \`package-lock.json\` en diffère. Ce que tu y ajoutes n'est pas installé ici (rien n'est installé à partir de ce qu'une équipe écrit) : dis-le dans ton compte rendu, les vérifications automatiques de ta PR l'installeront."
+  fi
 }
 
 # only_base_merges <commit> <head>: the head holds that commit, and adds on

@@ -53,10 +53,14 @@ did() { [ "$(jq -r --arg key "$2" '.done[$key] // empty' "$1")" != "" ]; }
 mark() { [ -n "$dry" ] || { jq --arg key "$2" --arg at "$(now_utc)" '.done = ((.done // {}) + {($key): $at})' "$1" > "$1.part" && mv "$1.part" "$1"; }; }
 # The host is asked once a round, and one pull request a round is taken out
 # of draft: the next one waits for the checks of this one.
+# Free: no checks running, no deployment settling, no screen test or capture
+# at work, and nobody holding the door of the heavy commands (when-free.sh):
+# checks that start under a screen test break both.
 free_for_a_run() {
   [ ! -f "$work/readied" ] || return 1
-  [ -f "$work/host" ] || { "$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '.free_for_a_ci_run // false' > "$work/host" || echo false > "$work/host"; }
-  [ "$(cat "$work/host")" = true ]
+  [ -f "$work/host" ] || { "$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '(.free_for_a_ci_run // false) and ((.screen_tests_or_captures_running // 0) == 0)' > "$work/host" || echo false > "$work/host"; }
+  [ "$(cat "$work/host")" = true ] || return 1
+  ( exec 6>> "$ORCH_STATE_DIR/heavy.lock" && flock -n 6 ) 2> /dev/null
 }
 session_hours=$(conf_get lanes session_hours)
 [[ "$session_hours" =~ ^[0-9]+$ ]] || session_hours=6
@@ -69,6 +73,10 @@ end_runs() { ledger sql "select run_id from runs where lane = '$1' and outcome =
 # « keep », the ticket stays in the status it is in.
 again() {
   local record=$1 ticket=$2 role=$3 key=$4 why=$5 keep=${6:-} today code=0
+  # Whatever opens the lane again, a card the user put in the status of his
+  # agreement stays there: only he, or a version he was not shown, takes it
+  # out (merge-pr.sh).
+  [ "${state:-}" != "$(conf_get linear go_state)" ] || keep=keep
   if did "$record" "$key"; then
     # Opened again for that already, its session is over, and the reason
     # still holds: the rules cannot move it. Said once, and left.
@@ -195,7 +203,7 @@ one_lane() {
   if ! did "$record" "asked:$last"; then
     report="$ORCH_STATE_DIR/reports/$last-$role-a1.md"
     for candidate in "$ORCH_STATE_DIR/reports/$last-$role"-a*.md; do [ ! -f "$candidate" ] || report=$candidate; done
-    asked=$(sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$report" 2> /dev/null | awk 'tolower($0) ~ /questions pour/ {inside = 1; next} inside' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question)\b' | sed '/^## /d' | head -n 20 || true)
+    asked=$(sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions pour/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions pour[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question)\b' | sed '/^## /d' | head -n 20 || true)
     if [ -n "$asked" ]; then
       say "$ticket: its session ends on a question for the user"
       [ -n "$dry" ] || ledger event --kind lane_asks --ticket "$ticket" --detail "$(printf '%s' "$asked" | cut -c1-1500)"
@@ -203,13 +211,14 @@ one_lane() {
     mark "$record" "asked:$last"
   fi
 
-  # What the user wrote on the ticket since its last session was opened
-  # (that session was handed what he had written before; a word of his that
-  # came while it ran was seen by nobody): his word goes to the lane, once.
+  # What the user wrote on the ticket that its last session was not handed
+  # (the run keeps which of his words it was given: a word that came while
+  # it was being opened, or while it ran, was seen by nobody; a record from
+  # before runs kept that goes by the time): his word goes to the lane, once.
   ended=$(jq -r '.runs[-1].at' "$record")
   if "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/comments.json" 2> /dev/null; then
     cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-    jq -c --arg since "$ended" --rawfile ids "$work/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and .createdAt > $since and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
+    jq -c --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
     # Not once he has agreed: a word of his after his « go » for the go-live
     # is read by the lead, it does not take his agreement back.
     if [ "$(jq length "$work/his.json")" != 0 ] && [ "$state" != "$(conf_get linear go_state)" ]; then
@@ -271,7 +280,18 @@ one_lane() {
     [ -z "$review_state" ] || [ "$state" != "$progress_state" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
     return 0
   fi
-  [ "$ran" != 0 ] || return 0
+  if [ "$ran" = 0 ]; then
+    # Out of draft and no check ran (all skipped, or none started): it is
+    # given half an hour, then said. Nothing here can start them.
+    asked=$(jq -r --arg key "waits:$head" '.done[$key] // empty' "$record")
+    if [ -z "$asked" ]; then mark "$record" "waits:$head"; return 0; fi
+    if [ "$(( $(date +%s) - $(date -d "$asked" +%s) ))" -ge 1800 ] && ! did "$record" "nochecks:$head"; then
+      say "$ticket: #$pr is out of draft and none of its checks ran in half an hour"
+      [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --value "$pr" --detail "#$pr of $ticket is out of draft for half an hour and none of its checks ran (all skipped, or none started): no review is asked for and nothing can go live. Tell the user where the ticket stands"
+      mark "$record" "nochecks:$head"
+    fi
+    return 0
+  fi
   if [ "$(jq 'map(select(. == "FAILURE" or . == "TIMED_OUT")) | length' <<<"$checks")" != 0 ]; then
     {
       echo "Les vérifications automatiques sont rouges sur la version ${head:0:8} de ta branche. Ce qu'elles ont dit (extrait) :"
@@ -317,13 +337,22 @@ one_lane() {
   covered=
   [ -z "$shown" ] || ! only_base_merges "$shown" "$head" || covered=1
   if [ -n "$covered" ]; then
-    if [ "$state" != "$validate_state" ] && [ "$state" != "$go_state" ] && ! did "$record" "back:$head"; then
-      say "$ticket: taken out of « $go_state » by the tracker, not by him: back in « $validate_state »"
-      if [ -z "$dry" ]; then
-        "$ORCH_HOME/linear.sh" move "$ticket" "$validate_state" > /dev/null 2>&1 || return 0
-        ledger event --kind lane_stuck --ticket "$ticket" --value "$pr" --detail "the user was asked for #$pr of $ticket, the base was then brought in with nothing else changed, and the ticket left his statuses by another hand than his (an automation of the tracker on pull requests): it is back in « $validate_state ». The request made to him stands, nothing is to be asked again; if he had agreed already, tell him his card must be put in « $go_state » once more"
+    if [ "$state" = "$go_state" ]; then
+      # He has agreed to it: kept, to tell a card that leaves his status
+      # without him from one that only waited.
+      did "$record" "agreed:$shown" || mark "$record" "agreed:$shown"
+    elif [ "$state" != "$validate_state" ] && ! did "$record" "back:$head:$(jq -r '.runs | length' "$record")"; then
+      if did "$record" "agreed:$shown"; then
+        say "$ticket: left « $go_state » without him and with nothing new: back in « $validate_state »"
+        [ -n "$dry" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate_state" > /dev/null 2>&1 || return 0
+        [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --value "$pr" --detail "the user had put $ticket in « $go_state » for #$pr; the ticket then left that status by another hand than his, with nothing new in the pull request but the base brought in (an automation of the tracker on pull requests does that). It is back in « $validate_state »: the request made to him stands, nothing is to be asked again. Tell him his card must be put in « $go_state » once more"
+      else
+        # A lane opened again that had nothing to change (a word of his it
+        # answered): the request made to him still holds.
+        say "$ticket: asked for this version already: back in « $validate_state »"
+        [ -n "$dry" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate_state" > /dev/null 2>&1 || return 0
       fi
-      mark "$record" "back:$head"
+      mark "$record" "back:$head:$(jq -r '.runs | length' "$record")"
     fi
     return 0
   fi
@@ -342,6 +371,13 @@ done
 # 2. The tickets the user said « go » on, oldest first, within the limit.
 todo=$(conf_get linear todo_state)
 [ -n "$todo" ] || exit 0
+# His « go » is read from the tracker: not from one that cannot tell him from
+# an agent (a ticket an agent opened in the status would count as his),
+# unless the project says it accepts that, as for a go-live.
+if [ "$(conf_get merge separate_identity)" != no ] && [ "$("$ORCH_HOME/linear.sh" identity 2> /dev/null)" != app ]; then
+  say "the tracker cannot tell the user from an agent: no lane is opened from « $todo » ([merge] separate_identity)"
+  exit 0
+fi
 since=$(conf_get lanes todo_since)
 "$ORCH_HOME/linear.sh" list "$todo" > "$work/todo.json" 2> /dev/null || exit 0
 seen="$ORCH_STATE_DIR/lanes/.not-his"
