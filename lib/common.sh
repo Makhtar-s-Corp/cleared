@@ -140,7 +140,7 @@ adapter_env() {
 # separated command prefixes). No section: nothing is set, and the CLI keeps
 # the settings of the user.
 permissions_env() {
-  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR
+  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR ORCH_READ
   local mode
   # advisor = no: the role runs without the helper model the CLI may consult.
   [ "$(conf_get "permissions.$1" advisor)" != no ] || export ORCH_ADVISOR=no
@@ -153,6 +153,14 @@ permissions_env() {
   # copy of a script, never the one of the branch it works on.
   ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/"$ORCH_HOME"}
   ORCH_DENY=${ORCH_DENY//\{orch\}/"$ORCH_HOME"}
+  # read: folders the role may read beyond its own worktree, separated by
+  # commas. {kept} is where what the lanes set apart for the user is kept
+  # ([lanes] kept_in): the lead shows it to him. Nothing else is opened.
+  ORCH_READ=$(conf_get "permissions.$1" read)
+  if [ -n "$ORCH_READ" ]; then
+    ORCH_READ=${ORCH_READ//\{kept\}/"$(expand_home "$(conf_get lanes kept_in)")"}
+    export ORCH_READ
+  fi
 }
 
 adapter_path() {

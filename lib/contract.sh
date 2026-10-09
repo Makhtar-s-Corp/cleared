@@ -21,6 +21,9 @@
 #       ORCH_EDIT_ONLY names the one file the session may edit, and
 #       ORCH_READ_DIRS (separated by colons) the folders it may read.
 #
+# ORCH_READ (separated by commas): folders a run may read beyond the one it
+# works in, and those only.
+#
 # ORCH_PERMISSION_MODE (read-only or accept-edits), ORCH_ALLOW and ORCH_DENY
 # (comma separated command prefixes) say what the run may do without a
 # screen; an adapter that isolates its CLI otherwise may ignore them.

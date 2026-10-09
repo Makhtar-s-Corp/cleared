@@ -392,6 +392,18 @@ test('the Claude adapter turns the permissions of a role into the allow and deny
   const allowed = edits.slice(edits.indexOf('--allowedTools') + 1, edits.indexOf('--disallowedTools'));
   assert.deepEqual(allowed, ['Bash(git status)', 'Bash(git status *)', 'Bash(npm test)', 'Bash(npm test *)']);
   assert.equal(edits[edits.indexOf('--permission-mode') + 1], 'acceptEdits');
+  // Folders a role may read beyond its own worktree (what the lanes set apart for the user): named, never « everything ».
+  const reads = (() => {
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'r.md'), '--usage', join(dir, 'u.json')], {
+      cwd: dir, encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCH_PERMISSION_MODE: 'read-only', ORCH_ALLOW: 'git status', ORCH_DENY: '', ORCH_READ: '/somewhere/kept captures, /elsewhere/notes' },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    const args = readFileSync(join(dir, 'args'), 'utf8').split('\n');
+    return args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
+  })();
+  assert.deepEqual(reads, ['Bash(git status)', 'Bash(git status *)', 'Read(//somewhere/kept captures/**)', 'Read(//elsewhere/notes/**)']);
+  assert.ok(!allowed.some((tool) => tool.startsWith('Read(')), 'a role that names no folder gets none');
   for (const denied of ['Bash(curl)', 'Bash(curl *)', 'Bash(git push)', 'Bash(git push *)', 'WebFetch']) assert.ok(edits.includes(denied), denied);
   assert.ok(edits.includes('--strict-mcp-config'));
   const readOnly = call('read-only');
@@ -2402,6 +2414,7 @@ test('the acting lead may answer and read, nothing more: its permissions refuse 
   const live = conf.sections['permissions.release-live'];
   const list = (text) => text.split(',').map((item) => item.trim());
   assert.equal(live.mode, 'read-only');
+  assert.equal(live.read, '{kept}', 'it reads the captures the lanes set apart for the user, to show them to him');
   const scripts = list(live.allow).filter((item) => item.startsWith('{orch}/'));
   // It answers by two scripts; the rest only reads (what the user wrote in Linear, the state of the host).
   // Since 2026-10-08 it also opens a ticket, for one thing: a night check that came out red (rule of the user), and keeps a note for the digest.
@@ -4177,6 +4190,10 @@ test('the project the tool works on is named the same way for every script, its 
   writeFileSync(join(odd, 'prompts', 'dev.md'), 'Lance `{orch}/when-free.sh npm run test:ui`.\n');
   const told = (env) => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env dev; printf "%s\\n%s\\n" "$ORCH_ALLOW" "$ORCH_DENY"; prompt_text "$(prompt_file dev)"', '_', odd], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout;
   assert.equal(told({ ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }), `npm test, ${odd}/when-free.sh\n${odd}/merge-pr.sh\nLance \`${odd}/when-free.sh npm run test:ui\`.\n`);
+  // {kept} in what a role may read: the folder where what the lanes set apart for the user is kept.
+  writeFileSync(join(odd, 'agents.conf'), `${readFileSync(join(odd, 'agents.conf'), 'utf8')}read = {kept}\n\n[lanes]\nkept_in = ~/kept for him\n`);
+  const may = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env dev; printf "%s\\n" "$ORCH_READ"', '_', odd], { env: { ...clean, ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }, encoding: 'utf8' });
+  assert.equal(may.stdout, `${join(dir, 'kept for him')}\n`, may.stderr);
   // A prompt that is not there is an error, never an empty prompt handed to a model.
   const missing = spawnSync('bash', ['-c', 'set -euo pipefail; . "$1/lib/common.sh"; prompt_text "$1/prompts/absent.md"; echo reached', '_', odd], { env: { ...clean, ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }, encoding: 'utf8' });
   assert.notEqual(missing.status, 0);
