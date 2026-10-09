@@ -56,7 +56,9 @@ flock -n 8 || busy "another wake is at work"
 # user said « go » on, their checks started, their review asked for, opened
 # again when something asks for it. Only once the lead acts.
 if [ -z "$handover" ] && [ "$(conf_get lead live)" = yes ] && [ -n "$(conf_get linear todo_state)" ]; then
-  "$ORCH_HOME/flow-lanes.sh" >> "$ORCH_STATE_DIR/flow.log" 2>&1 || true
+  "$ORCH_HOME/flow-lanes.sh" 2>&1 | sed "s/^/$(now_utc) /" >> "$ORCH_STATE_DIR/flow.log" || true
+  # What it did is kept for a while, not for ever.
+  [ "$(wc -l < "$ORCH_STATE_DIR/flow.log" 2> /dev/null || echo 0)" -le 4000 ] || { tail -n 2000 "$ORCH_STATE_DIR/flow.log" > "$ORCH_STATE_DIR/flow.log.part" && mv "$ORCH_STATE_DIR/flow.log.part" "$ORCH_STATE_DIR/flow.log"; }
 fi
 # The lanes are tidied by rule once a day, after [lanes] tidy_hour: with no
 # model, like the queues. Only once the lead acts; without the setting, no

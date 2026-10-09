@@ -15,6 +15,11 @@
 #     the ticket: the lane is opened again, with what was said, quoted;
 #   - green checks on a version no reviewer read: the review is asked for.
 #
+# What a lane says at the end of a session stays with the state (its report):
+# the user is not written at every session. He is written by the lead, when
+# there is something for him: a question of the lane, the request for his
+# agreement, a lane the rules cannot move.
+#
 # What it never does: judge. A review that finds nothing blocking on green
 # checks is where it stops; asking the user for his agreement, in product
 # language, is the lead's. Each step is done once for a given version
@@ -29,6 +34,9 @@ dry=
 [ "${1:-}" != --dry-run ] || dry=1
 ledger init > /dev/null
 mkdir -p "$ORCH_STATE_DIR/lanes"
+# One at a time: two rounds at once would both open the same lane again.
+exec 7> "$ORCH_STATE_DIR/flow.lock"
+flock -n 7 || exit 0
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 base=$(conf_get lanes base)
@@ -37,11 +45,18 @@ cap=$(conf_get lanes runs_per_day)
 say() { echo "$*"; }
 did() { [ "$(jq -r --arg key "$2" '.done[$key] // empty' "$1")" != "" ]; }
 mark() { [ -n "$dry" ] || { jq --arg key "$2" --arg at "$(now_utc)" '.done = ((.done // {}) + {($key): $at})' "$1" > "$1.part" && mv "$1.part" "$1"; }; }
-host_free=
+# The host is asked once a round, and one pull request a round is taken out
+# of draft: the next one waits for the checks of this one.
 free_for_a_run() {
-  [ -n "$host_free" ] || host_free=$("$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '.free_for_a_ci_run // false') || host_free=false
-  [ "$host_free" = true ]
+  [ ! -f "$work/readied" ] || return 1
+  [ -f "$work/host" ] || { "$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '.free_for_a_ci_run // false' > "$work/host" || echo false > "$work/host"; }
+  [ "$(cat "$work/host")" = true ]
 }
+session_hours=$(conf_get lanes session_hours)
+[[ "$session_hours" =~ ^[0-9]+$ ]] || session_hours=6
+states_of_work="$(conf_get linear todo_state), $(conf_get linear progress_state), $(conf_get linear review_state), $(conf_get linear validate_state), $(conf_get linear go_state)"
+in_list() { tr ',' '\n' <<<"$2" | sed 's/^ *//; s/ *$//' | grep -qxF -- "$1"; }
+end_runs() { ledger sql "select run_id from runs where lane = '$1' and outcome = 'running'" | jq -r '.[].run_id' | while IFS= read -r run_id; do ledger run-end --run-id "$run_id" --outcome killed; done; }
 
 # again <record> <ticket> <role> <key> <file that says why>: one more run of
 # the lane, once for that key, within the runs of the day.
@@ -68,7 +83,7 @@ again() {
   fi
   say "$ticket: opened again ($key)"
   [ -z "$dry" ] || return 0
-  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" > /dev/null 2> "$work/spawn.err" || code=$?
+  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
     0) mark "$record" "$key" ;;
     3) : ;; # no place now: tried again at the next wake
@@ -76,32 +91,62 @@ again() {
   esac
 }
 
-# 1. The lanes that exist.
-for record in "$ORCH_STATE_DIR/lanes"/*.json; do
-  [ -f "$record" ] || continue
-  [ "$(jq -r '.closed // empty' "$record")" = "" ] || continue
+# 1. The lanes that exist: one step each. What goes wrong with one is said
+# and looked at again at the next wake; it does not stop the others.
+one_lane() {
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age review_state
+  [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record")
   last=$(jq -r '.runs[-1].run // empty' "$record")
-  # A session not over yet (or not started yet): nothing to do before it is.
-  [ -n "$last" ] && [ -f "$ORCH_STATE_DIR/runs/$last/exit-code" ] || continue
+  [ -n "$last" ] || return 0
+  # A session that is not over: at work, unless it died without a word (its
+  # terminal closed, the host restarted), never started (no terminal ever
+  # ran it), or runs for longer than a session may. Each is then a session
+  # that stopped short.
+  if [ ! -f "$ORCH_STATE_DIR/runs/$last/exit-code" ]; then
+    pid=$(cat "$ORCH_STATE_DIR/runs/$last/pid" 2> /dev/null) || pid=
+    age=$(( ( $(date +%s) - $(date -d "$(jq -r '.runs[-1].at' "$record")" +%s) ) / 60 ))
+    if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
+      [ "$age" -ge $(( session_hours * 60 )) ] || return 0
+      say "$ticket: its session runs for more than $session_hours hours: stopped"
+      [ -z "$dry" ] || return 0
+      orca terminal close --terminal "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" > /dev/null 2>&1 || true
+      kill "$pid" 2> /dev/null || true
+      echo 124 > "$ORCH_STATE_DIR/runs/$last/exit-code"
+    elif [ -n "$pid" ]; then
+      say "$ticket: its session died without a word"
+      [ -z "$dry" ] || return 0
+      echo 137 > "$ORCH_STATE_DIR/runs/$last/exit-code"
+    elif [ "$age" -ge 10 ]; then
+      say "$ticket: its session never started"
+      [ -z "$dry" ] || return 0
+      echo 97 > "$ORCH_STATE_DIR/runs/$last/exit-code"
+    else
+      return 0
+    fi
+    end_runs "$lane"
+  fi
   code=$(cat "$ORCH_STATE_DIR/runs/$last/exit-code")
   worktree=$(jq -r '.worktree' "$record")
 
   # A ticket that is done or given up has no lane any more.
   state=$("$ORCH_HOME/linear.sh" state "$ticket" 2> /dev/null) || state=
-  [ -n "$state" ] || continue
+  [ -n "$state" ] || return 0
   if tr ',' '\n' <<<"$(conf_get lanes closed_states), $(conf_get linear done_state)" | sed 's/^ *//; s/ *$//' | grep -qxF -- "$state"; then
     say "$ticket: its ticket is « $state »: nothing more to do"
     mark "$record" "over"
     [ -n "$dry" ] || { jq --arg at "$(now_utc)" '. + {closed: $at}' "$record" > "$record.part" && mv "$record.part" "$record"; }
-    continue
+    return 0
   fi
+  # A ticket the user took out of the work (back to the backlog, or any
+  # status that is not one of the work): its lane waits, nothing is opened.
+  in_list "$state" "$states_of_work" || return 0
 
   # A session that stopped short is run again.
   if [ "$code" != 0 ]; then
     printf 'Ta session précédente s’est arrêtée sans finir (code %s). Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' "$code" > "$work/why.md"
     again "$record" "$ticket" "$role" "stopped:$last" "$work/why.md"
-    continue
+    return 0
   fi
 
   # Its session is over: its worktree goes once nothing in it is unsent. The
@@ -141,58 +186,60 @@ for record in "$ORCH_STATE_DIR/lanes"/*.json; do
   if "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/comments.json" 2> /dev/null; then
     cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
     jq -c --arg since "$ended" --rawfile ids "$work/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and .createdAt > $since and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
-    if [ "$(jq length "$work/his.json")" != 0 ]; then
+    # Not once he has agreed: a word of his after his « go » for the go-live
+    # is read by the lead, it does not take his agreement back.
+    if [ "$(jq length "$work/his.json")" != 0 ] && [ "$state" != "$(conf_get linear go_state)" ]; then
       { echo "L'utilisateur a écrit sur le ticket depuis ta dernière session :"; jq -r '.[] | "le \(.createdAt[0:16] | sub("T"; " à ")) : " + .body' "$work/his.json"; } > "$work/why.md"
       if ! did "$record" "said:$(jq -r '.[-1].id' "$work/his.json")"; then
         again "$record" "$ticket" "$role" "said:$(jq -r '.[-1].id' "$work/his.json")" "$work/why.md"
-        continue
+        return 0
       fi
     fi
   fi
 
   pr=$(jq -r '.pr // empty' "$record")
-  [ -n "$pr" ] || continue
-  pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json state,isDraft,headRefOid,headRefName,statusCheckRollup 2> /dev/null) || continue
+  [ -n "$pr" ] || return 0
+  pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json state,isDraft,headRefOid,headRefName,statusCheckRollup 2> /dev/null) || return 0
   case "$(jq -r '.state' <<<"$pull")" in
     MERGED | CLOSED)
       say "$ticket: its pull request #$pr is $(jq -r '.state' <<<"$pull")"
       [ -n "$dry" ] || { jq --arg at "$(now_utc)" '. + {closed: $at}' "$record" > "$record.part" && mv "$record.part" "$record"; }
-      continue
+      return 0
       ;;
   esac
   head=$(jq -r '.headRefOid' <<<"$pull") branch=$(jq -r '.headRefName' <<<"$pull")
 
   # A branch that lacks code of the base brings it in first.
-  git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" "$branch" 2> /dev/null || continue
+  git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" "$branch" 2> /dev/null || return 0
   if ! git -C "$ORCH_REPO" merge-base --is-ancestor "$base" "$head" 2> /dev/null; then
     git -C "$ORCH_REPO" diff --name-only --no-renames "$head...$base" | jq -R . | jq -sc . > "$work/lag.json"
     if ! node --no-warnings "$ORCH_HOME/lib/merge.mjs" lag "$work/lag.json"; then
       printf 'La branche principale a avancé sur du code depuis ta dernière session. Réintègre-la dans ta branche (`git merge %s`), résous les conflits s’il y en a en gardant ce que fait chaque côté, relance les tests de ce que tu touches, et commite.\n' "$base" > "$work/why.md"
       again "$record" "$ticket" "$role" "base:$(git -C "$ORCH_REPO" rev-parse --short "$base")" "$work/why.md"
-      continue
+      return 0
     fi
   fi
 
   checks=$(jq -c '[.statusCheckRollup[] | (.conclusion // .status // "") | ascii_upcase]' <<<"$pull")
   ran=$(jq 'map(select(. == "SUCCESS" or . == "FAILURE" or . == "TIMED_OUT" or . == "CANCELLED")) | length' <<<"$checks")
   if [ "$(jq 'map(select(. == "IN_PROGRESS" or . == "QUEUED" or . == "PENDING" or . == "WAITING")) | length' <<<"$checks")" != 0 ]; then
-    continue
+    return 0
   fi
   if [ "$(jq -r '.isDraft' <<<"$pull")" = true ]; then
     # Out of draft when the host is free for a run of the checks: one at a time.
-    did "$record" "ready:$head" && continue
-    free_for_a_run || continue
+    did "$record" "ready:$head" && return 0
+    free_for_a_run || return 0
     say "$ticket: #$pr is taken out of draft, its checks start"
     if [ -z "$dry" ]; then
-      (cd "$ORCH_REPO" && gh pr ready "$pr") > /dev/null 2>&1 || continue
+      (cd "$ORCH_REPO" && gh pr ready "$pr") > /dev/null 2>&1 || return 0
       mark "$record" "ready:$head"
+      : > "$work/readied"
       review_state=$(conf_get linear review_state)
       [ -z "$review_state" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
     fi
-    host_free=false
-    continue
+    return 0
   fi
-  [ "$ran" != 0 ] || continue
+  [ "$ran" != 0 ] || return 0
   if [ "$(jq 'map(select(. == "FAILURE" or . == "TIMED_OUT")) | length' <<<"$checks")" != 0 ]; then
     {
       echo "Les vérifications automatiques sont rouges sur la version ${head:0:8} de ta branche. Ce qu'elles ont dit (extrait) :"
@@ -200,9 +247,9 @@ for record in "$ORCH_STATE_DIR/lanes"/*.json; do
       [ -z "$run" ] || (cd "$ORCH_REPO" && gh run view "$run" --log-failed 2> /dev/null) | grep -E '✖|not ok|Error|error:|failing|expected|actual|\.mjs:[0-9]+' | cut -c1-400 | tail -n 80 || true
     } > "$work/why.md"
     again "$record" "$ticket" "$role" "checks:$head" "$work/why.md"
-    continue
+    return 0
   fi
-  [ "$(jq 'map(select(. != "SUCCESS" and . != "SKIPPED" and . != "NEUTRAL")) | length' <<<"$checks")" = 0 ] || continue
+  [ "$(jq 'map(select(. != "SUCCESS" and . != "SKIPPED" and . != "NEUTRAL")) | length' <<<"$checks")" = 0 ] || return 0
 
   # Green: read by a reviewer, at this version?
   verdict= reviewed_by=
@@ -214,10 +261,10 @@ for record in "$ORCH_STATE_DIR/lanes"/*.json; do
     break
   done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket' order by started_at desc" | jq -r '.[].run_id')
   if [ -z "$reviewed_by" ]; then
-    did "$record" "review:$head" && continue
+    did "$record" "review:$head" && return 0
     say "$ticket: #$pr is green at ${head:0:8}: its review is asked for"
     [ -n "$dry" ] || { "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" > /dev/null 2>&1 && mark "$record" "review:$head"; } || true
-    continue
+    return 0
   fi
   if [ "$verdict" = corrections ]; then
     {
@@ -225,10 +272,18 @@ for record in "$ORCH_STATE_DIR/lanes"/*.json; do
       sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
     } > "$work/why.md"
     again "$record" "$ticket" "$role" "verdict:$reviewed_by" "$work/why.md"
-    continue
+    return 0
   fi
   # Reviewed, nothing blocking, green: the lead asks the user for his agreement.
   did "$record" "ok:$head" || { say "$ticket: #$pr is reviewed and green at ${head:0:8}: the request for the agreement is the lead's"; mark "$record" "ok:$head"; }
+}
+for record in "$ORCH_STATE_DIR/lanes"/*.json; do
+  [ -f "$record" ] || continue
+  if ! jq -e 'type == "object" and (.ticket | type) == "string"' "$record" > /dev/null 2>&1; then
+    say "$(basename "$record"): what is kept of this lane cannot be read: left aside"
+    continue
+  fi
+  ( one_lane "$record" ) || say "$(jq -r '.ticket' "$record"): its step failed: looked at again at the next wake"
 done
 
 # 2. The tickets the user said « go » on, oldest first, within the limit.
@@ -265,7 +320,7 @@ while IFS=$'\t' read -r ticket updated; do
   say "$ticket: put in « $todo » by the user: its lane is opened"
   [ -z "$dry" ] || continue
   code=0
-  "$ORCH_HOME/spawn-lane.sh" dev "$ticket" > /dev/null 2> "$work/spawn.err" || code=$?
+  "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
     0) ;;
     3) say "$ticket: no place now (the limit of lanes): it waits"; break ;;

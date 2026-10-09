@@ -190,11 +190,20 @@ exec 9>&-
 
 # The dependencies of the project, at hand: a lane may install nothing.
 if [ -n "$pushed_role" ]; then
-  lane_deps "$worktree" || die "the worktree $worktree exists, but the dependencies of the project could not be put in it"
+  if ! lane_deps "$worktree"; then
+    # A lane without its dependencies is no lane: what was just made for it goes, and the next attempt starts clean.
+    if [ -z "$there" ]; then
+      git -C "$ORCH_REPO" worktree remove --force "$worktree" 2> /dev/null || true
+      [ -n "$resume" ] || git -C "$ORCH_REPO" branch -D "$lane" > /dev/null 2>&1 || true
+    fi
+    die "the dependencies of the project could not be put in the worktree of $lane: it is not opened"
+  fi
 fi
 
 # 5. What the terminal of the lane will run.
 run_base="$ticket-$(date -u +%Y%m%dT%H%M%SZ)"
+# One folder a session: two openings of the same ticket in the same second do not share theirs.
+while [ -e "$ORCH_STATE_DIR/runs/$run_base" ]; do sleep 1; run_base="$ticket-$(date -u +%Y%m%dT%H%M%SZ)"; done
 run_dir="$ORCH_STATE_DIR/runs/$run_base"
 mkdir -p "$run_dir"
 if [ -n "$pushed_role" ]; then
@@ -243,13 +252,8 @@ fi
   printf 'ORCH_PROJECT=%q\nORCH_LABEL=%q\n' "$(jq -r '.project // ""' <<<"$issue")" "$(jq -r '.labels[0] // ""' <<<"$issue")"
 } > "$run_dir/lane.env"
 
-# 6. The terminal, visible in Orca under the lane.
-handle=$(open_terminal "$worktree" "$ticket · $role · $chosen" "$ORCH_HOME/lane-run.sh $run_dir" "$ticket") \
-  || die "the worktree $worktree exists but Orca did not open a terminal in it; run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir)"
-# Orca knows the worktree by now: link it to its ticket.
-# A name anybody can read: the ticket and its title, then who works in it.
-orca worktree set --worktree "path:$worktree" --display-name "$ticket · $(jq -r '.title' <<<"$issue" | cut -c1-70)" --linear-issue "$ticket" --comment "$role · $chosen · ouverte par le dispatcher" > /dev/null 2>&1 || true
-echo "$handle" > "$run_dir/terminal.handle"
+# What is kept of the lane comes first: a terminal that never opens then
+# leaves a session that never started, which the rules see and run again.
 if [ -n "$pushed_role" ]; then
   # What is known of the lane of this ticket, kept beyond its worktree.
   mkdir -p "$(dirname "$record")"
@@ -261,6 +265,14 @@ if [ -n "$pushed_role" ]; then
   progress=$(conf_get linear progress_state)
   [ -z "$progress" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
 fi
+
+# 6. The terminal, visible in Orca under the lane.
+handle=$(open_terminal "$worktree" "$ticket · $role · $chosen" "$ORCH_HOME/lane-run.sh $run_dir" "$ticket") \
+  || { echo 97 > "$run_dir/exit-code"; die "the worktree $worktree exists but Orca did not open a terminal in it: the session never started (flow-lanes.sh runs it again; to run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir))"; }
+# Orca knows the worktree by now: link it to its ticket.
+# A name anybody can read: the ticket and its title, then who works in it.
+orca worktree set --worktree "path:$worktree" --display-name "$ticket · $(jq -r '.title' <<<"$issue" | cut -c1-70)" --linear-issue "$ticket" --comment "$role · $chosen · ouverte par le dispatcher" > /dev/null 2>&1 || true
+echo "$handle" > "$run_dir/terminal.handle"
 
 jq -n --arg lane "$lane" --arg worktree "$worktree" --arg requested "$requested" --arg chosen "$chosen" --arg rule "$rule" --arg run "$run_dir" --arg terminal "$handle" \
   '{lane: $lane, worktree: $worktree, requested: $requested, model: $chosen, rule: $rule, run_dir: $run, terminal: $terminal}'

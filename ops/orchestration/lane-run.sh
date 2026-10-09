@@ -10,6 +10,9 @@ set -uo pipefail
 
 run_dir=${1:?usage: lane-run.sh <run directory>}
 . "$run_dir/lane.env"
+# Which process this session is: one that dies without a word (its terminal
+# closed, the host restarted) is told from one at work.
+echo $$ > "$run_dir/pid"
 # Whatever stops this script, the run says it is over: a wake waits for it.
 trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
