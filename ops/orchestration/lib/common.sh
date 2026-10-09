@@ -446,8 +446,10 @@ lane_deps() {
       grep -qxF -- "$other/node_modules" <<<"$used" && continue
       [ -n "$(find "$other" -maxdepth 0 -mmin +60 2> /dev/null)" ] || continue
       chmod -R u+w "$other" 2> /dev/null || true
-      rm -rf "$other"
+      rm -rf "$other" 2> /dev/null || true
     done
+    # A tidying that fails never keeps a lane from opening.
+    true
   ) 7> "$ORCH_STATE_DIR/deps/lock" || return 1
   # The link is not a change of the lane (an ignore rule written for a folder does not hold a link).
   exclude="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)/info/exclude"

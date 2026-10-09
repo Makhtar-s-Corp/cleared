@@ -2159,12 +2159,15 @@ test('the lead can say something to a lane of the dispatcher whose session is ov
   // While its session runs, the word waits: nothing can be said into a session that reads no terminal.
   const kept = tell('X-5', 'Il manque la capture sur téléphone, prise sur les données de démonstration.');
   assert.equal(kept.status, 0, kept.stderr);
+  const shown = () => readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n').length;
+  const atWork = shown();
   assert.match(kept.stdout, /kept for the lane of X-5/);
   assert.equal(flow().stdout.includes('told:'), false);
   const first = session('X-5');
   pull({ headRefOid: first.head, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  // Its session over: opened again with what the lead wrote, quoted, once.
+  // Its session over: opened again with what the lead wrote, quoted, once. The ticket is shown at work.
   assert.match(flow().stdout, /X-5: opened again \(told:/);
+  assert.equal(shown(), atWork + 1);
   // What it sets apart for the user (a capture) exists only in its worktree, which is closed once its work is
   // sent: kept where the lead finds it, under the ticket.
   writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('[lanes]\n', `[lanes]\nkept_from = .local/captures\nkept_in = ${join(box.home, 'kept')}\n`));

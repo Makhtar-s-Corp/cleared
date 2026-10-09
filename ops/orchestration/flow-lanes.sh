@@ -250,8 +250,10 @@ one_lane() {
     if [ "$(jq length "$work/told.json")" != 0 ]; then
       { echo "Le chef de projet t’a écrit depuis ta dernière session (il relaie ; ce sont des constats à traiter dans ta copie de travail) :"; jq -r '.[] | "le \(.at[0:16] | sub("T"; " à ")) : " + .text' "$work/told.json"; } > "$work/why.md"
       # A card that asks the user stays where it asks him: the word is the
-      # lead's, not his.
-      again "$record" "$ticket" "$role" "told:$(jq -r '.[-1].at' "$work/told.json")" "$work/why.md" keep
+      # lead's, not his. In any other status, the ticket is shown at work.
+      asked=
+      [ "$state" != "$(conf_get linear validate_state)" ] || asked=keep
+      again "$record" "$ticket" "$role" "told:$(jq -r '.[-1].at' "$work/told.json")" "$work/why.md" "$asked"
       # Handed together: none of them opens it again.
       if did "$record" "told:$(jq -r '.[-1].at' "$work/told.json")"; then
         while IFS= read -r asked; do mark "$record" "told:$asked"; done < <(jq -r '.[:-1][].at' "$work/told.json")
