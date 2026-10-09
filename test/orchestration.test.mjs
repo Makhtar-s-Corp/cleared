@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -2075,6 +2075,7 @@ test('what its first review asked: the dependencies come from the base and run n
   assert.deepEqual(ready(), [], 'the door is held');
   flow();
   assert.deepEqual(ready(), ['41']);
+  assert.ok(Date.now() - statSync(join(box.state, 'checks-starting')).mtimeMs < 60000, 'the door of the heavy commands is told that checks start');
   assert.deepEqual(stuck(), [], 'no question was carried');
   // The word he had written before the lane opened is not news, and one written since is.
   assert.equal(flow().stdout.includes('said:'), false);
@@ -2216,6 +2217,14 @@ test('a lane runs its heavy commands (screen tests, captures) through one door: 
   assert.equal(busy.status, 5);
   assert.match(busy.stderr, /the host is not free/);
   assert.equal(busy.stdout, '');
+  // Checks that were just started are not listed by GitHub yet: for two minutes after the rules took a pull
+  // request out of draft, the door stays shut, then opens again.
+  writeFileSync(join(box.state, 'checks-starting'), '');
+  const starting = heavy(['echo', 'screens']);
+  assert.equal(starting.status, 5);
+  assert.equal(starting.stdout, '');
+  execFileSync('touch', ['-d', '3 minutes ago', join(box.state, 'checks-starting')]);
+  assert.equal(heavy(['echo', 'screens']).stdout.trim(), 'screens');
   // One at a time: while another lane holds the door, this one waits too.
   const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'heavy.lock'), join(box.home, 'when-free.sh'), 'echo', 'screens'], { env, encoding: 'utf8' });
   assert.equal(held.status, 5);

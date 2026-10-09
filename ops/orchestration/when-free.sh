@@ -29,7 +29,9 @@ deadline=$(( $(date +%s) + wait_minutes * 60 ))
 mkdir -p "$ORCH_STATE_DIR"
 exec 8> "$ORCH_STATE_DIR/heavy.lock"
 while :; do
-  if flock -n 8 && [ "$("$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '.free_for_a_ci_run // false')" = true ]; then break; fi
+  # Checks the rules have just started (flow-lanes.sh) are not listed by
+  # GitHub for some seconds: for two minutes after it, the host is not free.
+  if flock -n 8 && [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2> /dev/null)" ] && [ "$("$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '.free_for_a_ci_run // false')" = true ]; then break; fi
   flock -u 8 || true
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "$(basename "$0"): the host is not free for a heavy command (checks, a deployment or another screen test are running), and the wait of $wait_minutes minutes is over: \"$asked\" was not run. Say so in your report: the checks of your pull request run the screen tests, and a capture for the user is still to be taken" >&2

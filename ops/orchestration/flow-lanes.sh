@@ -307,6 +307,9 @@ one_lane() {
     : > "$work/readied"
     if [ -n "$dry" ]; then say "$ticket: #$pr would be taken out of draft, its checks would start"; return 0; fi
     say "$ticket: #$pr is taken out of draft, its checks start"
+    # Said to the door of the heavy commands before the checks start: a
+    # screen test must not begin in the seconds GitHub takes to list them.
+    : > "$ORCH_STATE_DIR/checks-starting"
     (cd "$ORCH_REPO" && gh pr ready "$pr") > /dev/null 2>&1 || return 0
     mark "$record" "ready:$head"
     [ -z "$review_state" ] || [ "$state" != "$progress_state" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
