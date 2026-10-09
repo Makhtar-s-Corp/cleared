@@ -1698,7 +1698,7 @@ test('a ticket the user put in « Todo » himself gets a lane, oldest first and 
   assert.equal(first.status, 0, first.stderr);
   assert.deepEqual([there('X-5'), there('X-6'), there('X-7'), there('X-8')], [true, false, false, false]);
   assert.match(first.stdout, /X-5: put in « Todo » by the user: its lane is opened/);
-  assert.match(first.stdout, /X-7: no place now/);
+  assert.match(first.stdout, /X-7: put in « Todo » by the user: no place now/);
   assert.deepEqual(moves(), ['X-5 -> In Progress']);
   // He is asked who put a ticket there once for a given state of the ticket, not at every wake.
   const asked = () => readFileSync(join(box.home, 'linear-moved-asked'), 'utf8').trim().split('\n').filter((line) => /^X-(6|8) /.test(line)).length;
@@ -1845,6 +1845,102 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   flow();
   assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5', 'lane_stuck X-5'], 'said once a day');
   assert.equal(there('X-5'), false);
+});
+
+test('what a first real round showed: a session that ended without its push is sent by the rules, a status the tracker moved back is put again, the base brought in under his agreement keeps it, and a rehearsal says what the real round does', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, moves, env } = flowBox();
+  todo(['X-5', 'X-7']);
+  by('X-5', 0);
+  by('X-7', 0);
+  const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const rehearse = () => spawnSync(join(box.home, 'flow-lanes.sh'), ['--dry-run'], { env, encoding: 'utf8' });
+  // A rehearsal opens nothing and does not say it did.
+  assert.match(rehearse().stdout, /X-5: put in « Todo » by the user: its lane would be opened/);
+  assert.equal(there('X-5'), false);
+  // One place: the second ticket is not said opened, it waits.
+  const first = flow();
+  assert.match(first.stdout, /X-5: put in « Todo » by the user: its lane is opened/);
+  assert.match(first.stdout, /X-7: put in « Todo » by the user: no place now/);
+  assert.doesNotMatch(first.stdout, /X-7: [^\n]*its lane is opened/);
+  todo([]);
+  const runDir = () => join(box.state, 'runs', record('X-5').runs.at(-1).run);
+  const git = (...args) => execFileSync('git', ['-C', record('X-5').worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  // No terminal wrote which process it is, yet its session is there: at work, not « never started ».
+  const kept = record('X-5');
+  kept.runs.at(-1).at = new Date(Date.now() - 11 * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  const atWork = spawn('bash', ['-c', 'sleep 60; true', `lane-run.sh ${runDir()}`], { stdio: 'ignore' });
+  assert.equal(flow().stdout.includes('X-5'), false, 'a session at work is left alone');
+  atWork.kill();
+  // Its session ended, its commits made, but what ran it stopped before the push: the rules send its work, as the
+  // session would have, and nothing is lost nor left to be looked at.
+  git('commit', '-q', '--allow-empty', '-m', 'fix: the work');
+  writeFileSync(join(runDir(), 'exit-code'), '0\n');
+  const sent = flow();
+  assert.match(sent.stdout, /X-5: its session ended without sending its work: sent now \(#41\)/);
+  assert.equal(record('X-5').pr, 41);
+  assert.deepEqual(stuck(), []);
+  // Files left uncommitted: only the lane knows what they are. Opened again for that, once for a given commit.
+  assert.equal(there('X-5'), true);
+  pull({ headRefOid: git('rev-parse', 'HEAD').trim() });
+  writeFileSync(join(record('X-5').worktree, 'left.txt'), 'left behind\n');
+  const reopened = flow();
+  assert.match(reopened.stdout, /X-5: opened again \(unsent:/);
+  assert.doesNotMatch(reopened.stdout, /could not be opened/, reopened.stdout);
+  const tidied = session('X-5', { commit: null });
+  assert.match(tidied.prompt, /\| Ta session précédente a laissé des fichiers non commités/);
+  assert.match(flow().stdout, /X-5: opened again for this already and nothing changed \(unsent:/);
+  assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  git('add', 'left.txt');
+  const done = session('X-5', { commit: 'fix: what was left' });
+  // A rehearsal takes one pull request out of draft a round, like the real one, and does not do it.
+  pull({ headRefOid: done.head });
+  assert.match(rehearse().stdout, /X-5: #41 would be taken out of draft/);
+  assert.deepEqual(ready(), []);
+  flow();
+  assert.deepEqual(ready(), ['41']);
+  assert.deepEqual(moves().slice(-1), ['X-5 -> In Review']);
+  // The tracker has automations of its own on pull requests, and put the card back: the rule holds at each round.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  const before = moves().length;
+  flow();
+  assert.deepEqual(moves().slice(before), ['X-5 -> In Review']);
+  // Reviewed, green, asked, and he agreed. Then the base moves on code: the lane brings it in, and his card stays
+  // where he put it (his rule: the base brought in as it is does not take his agreement back).
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /its review is asked for/);
+  const reviewRun = join(box.state, 'runs', readdirSync(join(box.state, 'runs')).filter((name) => { try { return /ORCH_ROLE=review/.test(readFileSync(join(box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
+  const reviewPath = /worktree (.*review-X-5)\n/.exec(execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }))[1];
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [reviewRun], { cwd: reviewPath, env: { ...env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
+  assert.match(flow().stdout, /reviewed and green[\s\S]*the request for the agreement is the lead's/);
+  mkdirSync(join(box.state, 'validations'), { recursive: true });
+  writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: done.head }] }));
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  const agreed = moves().length;
+  assert.match(flow().stdout, /X-5: opened again \(base:/);
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const brought = session('X-5', { commit: null, bringBase: true });
+  assert.notEqual(brought.head, done.head);
+  pull({ headRefOid: brought.head });
+  flow();
+  assert.deepEqual(ready().slice(-2), ['41 --undo', '41']);
+  pull({ headRefOid: brought.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const green = flow();
+  assert.doesNotMatch(green.stdout, /its review is asked for|the request for the agreement/, 'read and agreed already: the base alone asks nobody anything');
+  assert.deepEqual(moves().slice(agreed), [], 'his card never left « Go MEP »');
+  assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  // The tracker took the card out of his status when the pull request left draft: back where it asks him, and said.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  assert.match(flow().stdout, /X-5: taken out of « Go MEP » by the tracker, not by him: back in « À valider »/);
+  assert.deepEqual(moves().slice(agreed), ['X-5 -> À valider']);
+  assert.deepEqual(stuck(), ['lane_stuck X-5', 'lane_stuck X-5']);
 });
 
 test('a lane runs its heavy commands (screen tests, captures) through one door: when the host is free, one at a time, and only the ones the project names', () => {

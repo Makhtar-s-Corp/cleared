@@ -7,13 +7,19 @@
 #     there, by him, since [lanes] todo_since) gets a lane, oldest first,
 #     within the limit of lanes; the others wait where they are;
 #   - a lane whose session is over, its work sent, is closed (its branch and
-#     what is known of it stay: it is opened again from them);
+#     what is known of it stay: it is opened again from them); work a
+#     session left unsent is sent here, as the session would have;
 #   - its pull request is taken out of draft when the host is free for a run
 #     of the checks, one at a time;
 #   - red checks, a branch that lacks code of the base, a reviewer that asks
 #     for corrections, a session that stopped short, a word of the user on
 #     the ticket: the lane is opened again, with what was said, quoted;
 #   - green checks on a version no reviewer read: the review is asked for.
+#
+# The status of the ticket says where it is, and is put again at each round
+# when something else moved it (a tracker has automations of its own on pull
+# requests). The status the user agrees with is never touched: the base
+# brought in as it is leaves his card where he put it.
 #
 # What a lane says at the end of a session stays with the state (its report):
 # the user is not written at every session. He is written by the lead, when
@@ -58,10 +64,11 @@ states_of_work="$(conf_get linear todo_state), $(conf_get linear progress_state)
 in_list() { tr ',' '\n' <<<"$2" | sed 's/^ *//; s/ *$//' | grep -qxF -- "$1"; }
 end_runs() { ledger sql "select run_id from runs where lane = '$1' and outcome = 'running'" | jq -r '.[].run_id' | while IFS= read -r run_id; do ledger run-end --run-id "$run_id" --outcome killed; done; }
 
-# again <record> <ticket> <role> <key> <file that says why>: one more run of
-# the lane, once for that key, within the runs of the day.
+# again <record> <ticket> <role> <key> <file that says why> [keep]: one more
+# run of the lane, once for that key, within the runs of the day. With
+# « keep », the ticket stays in the status it is in.
 again() {
-  local record=$1 ticket=$2 role=$3 key=$4 why=$5 today code=0
+  local record=$1 ticket=$2 role=$3 key=$4 why=$5 keep=${6:-} today code=0
   if did "$record" "$key"; then
     # Opened again for that already, its session is over, and the reason
     # still holds: the rules cannot move it. Said once, and left.
@@ -83,7 +90,7 @@ again() {
   fi
   say "$ticket: opened again ($key)"
   [ -z "$dry" ] || return 0
-  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none > /dev/null 2> "$work/spawn.err" || code=$?
+  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none ${keep:+--keep-status} > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
     0) mark "$record" "$key" ;;
     3) : ;; # no place now: tried again at the next wake
@@ -94,7 +101,7 @@ again() {
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age review_state
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record")
   last=$(jq -r '.runs[-1].run // empty' "$record")
@@ -117,6 +124,9 @@ one_lane() {
       say "$ticket: its session died without a word"
       [ -z "$dry" ] || return 0
       echo 137 > "$ORCH_STATE_DIR/runs/$last/exit-code"
+    elif pgrep -f -- "lane-run.sh $ORCH_STATE_DIR/runs/$last\$" > /dev/null 2>&1; then
+      # No word of which process it is, yet it is there: at work.
+      return 0
     elif [ "$age" -ge 10 ]; then
       say "$ticket: its session never started"
       [ -z "$dry" ] || return 0
@@ -152,12 +162,26 @@ one_lane() {
   # Its session is over: its worktree goes once nothing in it is unsent. The
   # branch and this record stay; it is opened again from them.
   if [ -d "$worktree" ]; then
-    if [ -n "$(git -C "$worktree" status --porcelain 2> /dev/null)" ] || [ "$(git -C "$worktree" rev-list --count HEAD --not --remotes 2> /dev/null || echo 1)" != 0 ]; then
-      if ! did "$record" "unsent:$last"; then
-        say "$ticket: its session is over but its work is not all sent: left open, to be looked at"
-        [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --detail "the session of the lane of $ticket is over, but its work is not all on the remote (uncommitted files, or a push the guard refused): its worktree is kept, to be looked at"
-        mark "$record" "unsent:$last"
+    own=$(git -C "$worktree" rev-parse HEAD 2> /dev/null) || own=
+    if [ -n "$(git -C "$worktree" status --porcelain 2> /dev/null)" ]; then
+      # Files left uncommitted: only the lane knows what they are.
+      printf 'Ta session précédente a laissé des fichiers non commités dans ton worktree (`git status` les montre). Commite ce qui fait partie de ton travail, retire le reste, et rends ton compte rendu.\n' > "$work/why.md"
+      again "$record" "$ticket" "$role" "unsent:$own" "$work/why.md"
+      return 0
+    elif [ "$(git -C "$worktree" rev-list --count HEAD --not --remotes 2> /dev/null || echo 1)" != 0 ]; then
+      # Commits no remote has: what ran the session stopped before its push
+      # (or the push was refused). Sent here, the way the session would
+      # have; a refusal goes back to the lane, with what was refused.
+      did "$record" "push:$own" && return 0
+      if [ -n "$dry" ]; then say "$ticket: its session ended without sending its work: it would be sent now"; return 0; fi
+      if sent=$( (set -a; . "$ORCH_STATE_DIR/runs/$last/lane.env"; set +a; "$ORCH_HOME/push-lane.sh" "$worktree") 2> "$work/push.err" | sed -n '$p') && [[ "$sent" =~ ^#[0-9]+$ ]]; then
+        say "$ticket: its session ended without sending its work: sent now ($sent)"
+        jq --argjson pr "${sent#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}' "$record" > "$record.part" && mv "$record.part" "$record"
+      else
+        { echo "Ton travail n'a pas pu être envoyé : le script de push l'a refusé. Ce qu'il a dit :"; sed -n '$p' "$work/push.err"; echo "Corrige ce qui est refusé (sans rien contourner), commite, et rends ton compte rendu."; } > "$work/why.md"
+        again "$record" "$ticket" "$role" "push:$own" "$work/why.md"
       fi
+      return 0
     elif [ -z "$dry" ]; then
       orca terminal close --worktree "path:$worktree" --all > /dev/null 2>&1 || true
       orca worktree rm --worktree "path:$worktree" --force > /dev/null 2>&1 || git -C "$ORCH_REPO" worktree remove --force "$worktree" 2> /dev/null || true
@@ -215,9 +239,19 @@ one_lane() {
     git -C "$ORCH_REPO" diff --name-only --no-renames "$head...$base" | jq -R . | jq -sc . > "$work/lag.json"
     if ! node --no-warnings "$ORCH_HOME/lib/merge.mjs" lag "$work/lag.json"; then
       printf 'La branche principale a avancé sur du code depuis ta dernière session. Réintègre-la dans ta branche (`git merge %s`), résous les conflits s’il y en a en gardant ce que fait chaque côté, relance les tests de ce que tu touches, et commite.\n' "$base" > "$work/why.md"
-      again "$record" "$ticket" "$role" "base:$(git -C "$ORCH_REPO" rev-parse --short "$base")" "$work/why.md"
+      # His card stays where it is: the base brought in as it is changes
+      # nothing of what he agreed to, or is asked.
+      again "$record" "$ticket" "$role" "base:$(git -C "$ORCH_REPO" rev-parse --short "$base")" "$work/why.md" keep
       return 0
     fi
+  fi
+
+  # Out of draft: the ticket is where the agents check, and is put there
+  # again when something else took it back to the status of the work.
+  progress_state=$(conf_get linear progress_state) review_state=$(conf_get linear review_state)
+  if [ "$(jq -r '.isDraft' <<<"$pull")" = false ] && [ -n "$review_state" ] && [ "$state" = "$progress_state" ]; then
+    [ -n "$dry" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
+    state=$review_state
   fi
 
   checks=$(jq -c '[.statusCheckRollup[] | (.conclusion // .status // "") | ascii_upcase]' <<<"$pull")
@@ -229,14 +263,12 @@ one_lane() {
     # Out of draft when the host is free for a run of the checks: one at a time.
     did "$record" "ready:$head" && return 0
     free_for_a_run || return 0
+    : > "$work/readied"
+    if [ -n "$dry" ]; then say "$ticket: #$pr would be taken out of draft, its checks would start"; return 0; fi
     say "$ticket: #$pr is taken out of draft, its checks start"
-    if [ -z "$dry" ]; then
-      (cd "$ORCH_REPO" && gh pr ready "$pr") > /dev/null 2>&1 || return 0
-      mark "$record" "ready:$head"
-      : > "$work/readied"
-      review_state=$(conf_get linear review_state)
-      [ -z "$review_state" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
-    fi
+    (cd "$ORCH_REPO" && gh pr ready "$pr") > /dev/null 2>&1 || return 0
+    mark "$record" "ready:$head"
+    [ -z "$review_state" ] || [ "$state" != "$progress_state" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
     return 0
   fi
   [ "$ran" != 0 ] || return 0
@@ -255,7 +287,8 @@ one_lane() {
   verdict= reviewed_by=
   while IFS= read -r run_id; do
     [ -n "$run_id" ] || continue
-    [ "$(sed -n 's/^commit: //p' "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null | sed -n '1p')" = "$head" ] || continue
+    # Read at this version, or at one this version only adds the base to.
+    only_base_merges "$(sed -n 's/^commit: //p' "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null | sed -n '1p')" "$head" || continue
     reviewed_by=$run_id
     if node --no-warnings "$ORCH_HOME/lib/merge.mjs" verdict "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null; then verdict=ok; else verdict=corrections; fi
     break
@@ -274,7 +307,27 @@ one_lane() {
     again "$record" "$ticket" "$role" "verdict:$reviewed_by" "$work/why.md"
     return 0
   fi
-  # Reviewed, nothing blocking, green: the lead asks the user for his agreement.
+  # Reviewed, nothing blocking, green. Was the user asked for this version
+  # already (or for one this version only adds the base to)? Then nothing
+  # is asked again: his card waits for him, or he has agreed and the
+  # go-live takes it from there. A card that left his statuses by another
+  # hand than his (an automation of the tracker) goes back where it asks him.
+  validate_state=$(conf_get linear validate_state) go_state=$(conf_get linear go_state)
+  shown=$(jq -r --argjson pr "$pr" '.pulls[]? | select(.pr == $pr) | .head' "$ORCH_STATE_DIR/validations/$ticket.json" 2> /dev/null | sed -n '1p') || shown=
+  covered=
+  [ -z "$shown" ] || ! only_base_merges "$shown" "$head" || covered=1
+  if [ -n "$covered" ]; then
+    if [ "$state" != "$validate_state" ] && [ "$state" != "$go_state" ] && ! did "$record" "back:$head"; then
+      say "$ticket: taken out of « $go_state » by the tracker, not by him: back in « $validate_state »"
+      if [ -z "$dry" ]; then
+        "$ORCH_HOME/linear.sh" move "$ticket" "$validate_state" > /dev/null 2>&1 || return 0
+        ledger event --kind lane_stuck --ticket "$ticket" --value "$pr" --detail "the user was asked for #$pr of $ticket, the base was then brought in with nothing else changed, and the ticket left his statuses by another hand than his (an automation of the tracker on pull requests): it is back in « $validate_state ». The request made to him stands, nothing is to be asked again; if he had agreed already, tell him his card must be put in « $go_state » once more"
+      fi
+      mark "$record" "back:$head"
+    fi
+    return 0
+  fi
+  # Never asked for this version: the lead asks the user for his agreement.
   did "$record" "ok:$head" || { say "$ticket: #$pr is reviewed and green at ${head:0:8}: the request for the agreement is the lead's"; mark "$record" "ok:$head"; }
 }
 for record in "$ORCH_STATE_DIR/lanes"/*.json; do
@@ -317,13 +370,12 @@ while IFS=$'\t' read -r ticket updated; do
     5 | 6 | 8) [ -n "$dry" ] || echo "$ticket $updated" >> "$seen"; continue ;;
     *) continue ;;
   esac
-  say "$ticket: put in « $todo » by the user: its lane is opened"
-  [ -z "$dry" ] || continue
+  if [ -n "$dry" ]; then say "$ticket: put in « $todo » by the user: its lane would be opened, if there is a place"; continue; fi
   code=0
   "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
-    0) ;;
-    3) say "$ticket: no place now (the limit of lanes): it waits"; break ;;
-    *) say "$ticket: its lane could not be opened: $(sed -n '$p' "$work/spawn.err")" ;;
+    0) say "$ticket: put in « $todo » by the user: its lane is opened" ;;
+    3) say "$ticket: put in « $todo » by the user: no place now (the limit of lanes), it waits"; break ;;
+    *) say "$ticket: put in « $todo » by the user: its lane could not be opened: $(sed -n '$p' "$work/spawn.err")" ;;
   esac
 done < <(jq -r 'sort_by(.updatedAt) | .[] | [.identifier, .updatedAt] | @tsv' "$work/todo.json")

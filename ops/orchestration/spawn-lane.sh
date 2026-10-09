@@ -6,6 +6,7 @@
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
 #                 [--since <commit>] [--from <ref>] [--resume] [--message-file <file>]
+#                 [--keep-status]
 #                 [--path <touched path>]... [--pr-lines <n>] [--wait] [--dry-run]
 #
 # With --pr, the lane starts from the head of that pull request, and its size
@@ -20,6 +21,8 @@
 # that had one (its worktree if it is still there, made again from its
 # branch otherwise), for one more run; --message-file says why, quoted too
 # (what a reviewer found, what the checks said, what the user answered).
+# --keep-status leaves the ticket in the status it is in (a run that brings
+# the base in changes nothing of what the user agreed to).
 #
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
@@ -33,7 +36,7 @@ usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 [ $# -ge 2 ] || usage
 role=$1 ticket=$2
 shift 2
-forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file=
+forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status=
 paths=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,6 +48,7 @@ while [ $# -gt 0 ]; do
     --since) since=$2; shift 2 ;;
     --from) from=$2; shift 2 ;;
     --resume) resume=1; shift ;;
+    --keep-status) keep_status=1; shift ;;
     --message-file) message_file=$2; shift 2 ;;
     --path) paths+=(--path "$2"); shift 2 ;;
     --pr-lines) pr_lines=$2; shift 2 ;;
@@ -263,7 +267,7 @@ if [ -n "$pushed_role" ]; then
     '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
   # The ticket is at work: said where the user looks.
   progress=$(conf_get linear progress_state)
-  [ -z "$progress" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
+  [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
 fi
 
 # 6. The terminal, visible in Orca under the lane.

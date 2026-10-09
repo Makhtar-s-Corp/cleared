@@ -421,6 +421,25 @@ lane_deps() {
   grep -qxF '/node_modules' "$exclude" 2> /dev/null || echo '/node_modules' >> "$exclude"
 }
 
+# only_base_merges <commit> <head>: the head holds that commit, and adds on
+# top of it nothing but merges of the base that changed nothing by
+# themselves. A commit of the lane itself would have been seen by nobody;
+# nor would the branch of another lane, which brings commits of its own
+# (of one parent, refused below) or a merge that changed something by
+# itself (refused too).
+only_base_merges() {
+  local added parents auto base
+  base=$(conf_get lanes base)
+  [ "$1" != "$2" ] || return 0
+  git -C "$ORCH_REPO" merge-base --is-ancestor "$1" "$2" 2> /dev/null || return 1
+  while IFS= read -r added; do
+    read -r -a parents < <(git -C "$ORCH_REPO" rev-list --parents -n 1 "$added" | cut -d' ' -f2-)
+    [ "${#parents[@]}" = 2 ] || return 1
+    auto=$(git -C "$ORCH_REPO" merge-tree --write-tree "${parents[0]}" "${parents[1]}" 2> /dev/null) || return 1
+    [ "$auto" = "$(git -C "$ORCH_REPO" rev-parse "$added^{tree}")" ] || return 1
+  done < <(git -C "$ORCH_REPO" rev-list "$1..$2" --not "$base")
+}
+
 # lane_record <ticket>: where what is known of the lane of a ticket is kept
 # (its branch, the branch its work is sent to, its pull request, its runs).
 # It outlives the worktree: a lane the tidying closed is opened again from it.
