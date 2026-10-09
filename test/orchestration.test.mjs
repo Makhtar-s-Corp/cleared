@@ -1943,6 +1943,89 @@ test('what a first real round showed: a session that ended without its push is s
   assert.deepEqual(stuck(), ['lane_stuck X-5', 'lane_stuck X-5']);
 });
 
+test('the checkout the dispatcher runs from follows the base by itself: fast-forward only, a version that cannot run or a copy somebody changed is refused and said, and the wake goes on with the new scripts', () => {
+  const home = scratch('orch-self-');
+  const remote = join(home, 'remote.git');
+  const checkout = join(home, 'checkout');
+  const tools = join(checkout, 'ops', 'orchestration');
+  const state = join(home, 'state');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['clone', '-q', remote, checkout], { stdio: 'ignore' });
+  const git = (dir, ...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  mkdirSync(join(tools, 'serve'), { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'self-update.sh'), tools]);
+  writeFileSync(join(tools, 'agents.conf'), '[lanes]\nbase = origin/main\n\n[update]\nself = yes\n');
+  writeFileSync(join(tools, 'serve', 'install.sh'), `#!/usr/bin/env bash\necho installed >> "${join(home, 'installed')}"\n`, { mode: 0o755 });
+  writeFileSync(join(tools, 'step.sh'), '#!/usr/bin/env bash\necho one\n', { mode: 0o755 });
+  git(checkout, 'checkout', '-q', '-b', 'main');
+  git(checkout, 'add', '.');
+  git(checkout, 'commit', '-q', '-m', 'chore: the tooling');
+  git(checkout, 'push', '-q', 'origin', 'main');
+  const elsewhere = join(home, 'elsewhere');
+  execFileSync('git', ['clone', '-q', remote, elsewhere], { stdio: 'ignore' });
+  const live = (path, text, message) => { mkdirSync(dirname(join(elsewhere, path)), { recursive: true }); writeFileSync(join(elsewhere, path), text, { mode: 0o755 }); git(elsewhere, 'add', '.'); git(elsewhere, 'commit', '-q', '-m', message); git(elsewhere, 'push', '-q', 'origin', 'HEAD:main'); return git(elsewhere, 'rev-parse', 'HEAD').trim(); };
+  const env = { ...process.env, ORCH_REPO: checkout, ORCH_STATE_DIR: state, ORCH_CONF: join(tools, 'agents.conf') };
+  const update = () => spawnSync(join(tools, 'self-update.sh'), [], { env, encoding: 'utf8' });
+  const head = () => git(checkout, 'rev-parse', 'HEAD').trim();
+  const events = () => { try { const db = openLedger(join(state, 'ledger.db')); const rows = db.prepare("select kind from events where kind like 'self_%' order by rowid").all().map((row) => row.kind); db.close(); return rows; } catch { return []; } };
+  const installed = () => { try { return readFileSync(join(home, 'installed'), 'utf8').trim().split('\n').length; } catch { return 0; } };
+  // Up to date: nothing to do, nothing said.
+  assert.equal(update().status, 3);
+  assert.deepEqual(events(), []);
+  // A change of the tooling went live: this copy takes it, and says it did.
+  const second = live('ops/orchestration/step.sh', '#!/usr/bin/env bash\necho two\n', 'feat: step two');
+  const taken = update();
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.equal(head(), second);
+  assert.deepEqual(events(), ['self_updated']);
+  assert.equal(installed(), 0, 'the services did not change: not installed again');
+  // What runs the services changed: they are installed again.
+  live('ops/orchestration/serve/unit.service', '[Unit]\n', 'feat: a unit');
+  assert.equal(update().status, 0);
+  assert.equal(installed(), 1);
+  // A version whose scripts cannot even be read by the shell is not taken: this copy stays where it runs, said once.
+  const good = head();
+  const broken = live('ops/orchestration/step.sh', '#!/usr/bin/env bash\nif then fi (\n', 'feat: broken');
+  const refused = update();
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /step\.sh/);
+  assert.equal(head(), good);
+  assert.equal(update().status, 1);
+  assert.deepEqual(events(), ['self_updated', 'self_updated', 'self_update_refused'], 'said once for a version');
+  // Repaired on the base: taken again.
+  const repaired = live('ops/orchestration/step.sh', '#!/usr/bin/env bash\necho three\n', 'fix: repaired');
+  assert.notEqual(repaired, broken);
+  assert.equal(update().status, 0);
+  assert.equal(head(), repaired);
+  // Somebody changed a file of this copy by hand: nothing is overwritten, it is said.
+  writeFileSync(join(tools, 'step.sh'), '#!/usr/bin/env bash\necho by hand\n');
+  live('ops/orchestration/other.sh', '#!/usr/bin/env bash\necho other\n', 'feat: other');
+  const kept = update();
+  assert.equal(kept.status, 1);
+  assert.match(kept.stderr, /changed by hand|not committed/);
+  assert.equal(readFileSync(join(tools, 'step.sh'), 'utf8'), '#!/usr/bin/env bash\necho by hand\n');
+  assert.equal(events().at(-1), 'self_update_refused');
+  git(checkout, 'checkout', '-q', '--', '.');
+  assert.equal(update().status, 0);
+  // A copy on a branch of its own (a worktree where somebody works on the tooling) never moves by itself.
+  git(checkout, 'checkout', '-q', '-b', 'feat/mine');
+  live('ops/orchestration/more.sh', '#!/usr/bin/env bash\necho more\n', 'feat: more');
+  const mine = head();
+  assert.equal(update().status, 3);
+  assert.equal(head(), mine);
+  git(checkout, 'checkout', '-q', 'main');
+  // Without the setting, nothing.
+  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n');
+  assert.equal(spawnSync(join(tools, 'self-update.sh'), [], { env: { ...env, ORCH_CONF: join(home, 'off.conf') }, encoding: 'utf8' }).status, 3);
+  assert.notEqual(head(), git(elsewhere, 'rev-parse', 'HEAD').trim());
+  // The wake that finds this copy updated goes on as the new wake, once.
+  const box = sandbox();
+  writeFileSync(join(box.home, 'self-update.sh'), `#!/usr/bin/env bash\necho "asked \${ORCH_SELF_UPDATED:-}" >> "${join(box.home, 'self-calls')}"\nprintf '#!/usr/bin/env bash\\necho "new wake \${ORCH_SELF_UPDATED:-}" >> "${join(box.home, 'self-calls')}"\\n' > "${join(box.home, 'wake.new')}"\nchmod +x "${join(box.home, 'wake.new')}"\nmv "${join(box.home, 'wake.new')}" "${join(box.home, 'wake.sh')}"\n`, { mode: 0o755 });
+  const woke = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(woke.status, 0, woke.stderr);
+  assert.deepEqual(readFileSync(join(box.home, 'self-calls'), 'utf8').trim().split('\n'), ['asked ', 'new wake 1']);
+});
+
 test('a lane runs its heavy commands (screen tests, captures) through one door: when the host is free, one at a time, and only the ones the project names', () => {
   const box = sandbox();
   const confPath = join(box.home, 'agents.conf');

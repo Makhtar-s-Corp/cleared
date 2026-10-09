@@ -34,6 +34,8 @@ export const EVENT_KINDS = [
   'merge_refused', // a go-live asked for was refused for good, or left the queue: the detail says why
   'ticket_left_open', // a go-live was done but GitHub could not say what became of another pull request shown on the ticket: the wake asks again
   'lane_stuck', // a lane the rules cannot move forward (opened too many times a day, work that could not be sent, a ticket put back after its lane was over): the lead is told
+  'self_updated', // the checkout the dispatcher runs from took a newer version of the base
+  'self_update_refused', // it did not (changed by hand, or a script of the new version cannot be read): the lead is told
   'lane_asks', // the session of a lane ended on a question for the user: the detail is the question, the lead carries it to him
   'lanes_tidied', // tidy-lanes.sh closed lanes by rule: value is how many, the detail says which and why
   'review_dropped', // a review asked for left the queue without opening; the detail says which and why
