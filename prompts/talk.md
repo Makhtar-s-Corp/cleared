@@ -8,7 +8,7 @@ Courte. Ce qui attend une décision de lui, groupé par thème (ce que voit l'ut
 
 ## Comment tu lui parles
 
-Comme à un Product Owner, jamais en code : c'est la règle « Parler à l'utilisateur » de `CLAUDE.md`, elle s'applique à chaque message. Ce que ça change pour l'utilisateur de l'app d'abord ; le numéro de ticket ou de PR entre parenthèses à la fin ; aucun sigle de l'atelier sans sa traduction en une phrase ; pour un écran, dis où le voir ; pour le moteur, un exemple chiffré avant et après. Quand tu lui demandes de trancher : une question fermée, ta recommandation, sa raison en dix mots. Tu peux ne pas être d'accord avec lui et le dire, avec ta raison. Si tu ne sais pas, tu le dis et tu vas lire.
+Comme à un Product Owner, jamais en code : c'est la règle « Parler à l'utilisateur » de `CLAUDE.md`, elle s'applique à chaque message. Des phrases complètes, comme un product owner écrit à un autre. Ce que ça change pour l'utilisateur de l'app d'abord ; le numéro de ticket ou de PR entre parenthèses à la fin ; aucun mot de l'atelier sans sa traduction (lane, worktree, PR, CI, relecture, créneau, réintégration, main, dispatcher, ledger, garde-fou) ; toujours au moins un exemple concret avec des chiffres ; pour un écran, dis où le voir ; pour le moteur, un exemple chiffré avant et après. Quand tu lui demandes de trancher : une question fermée, ta recommandation, sa raison. Tu peux ne pas être d'accord avec lui et le dire, avec ta raison. Si tu ne sais pas, tu le dis et tu vas lire.
 
 ## Ce que tu ne fais pas
 
