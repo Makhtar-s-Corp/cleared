@@ -143,7 +143,10 @@ if [ -z "$forced" ] && [ -n "$other" ]; then
       stopped_adapters=$(jq -r '.[].adapter' "$other_available" "$available" | sort -u | while IFS= read -r one; do [ "$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" standing "$one" 2> /dev/null | cut -f1)" != stopped ] || echo "$one"; done | jq -R . | jq -sc .)
       jq -sc --argjson stopped "$stopped_adapters" '(.[0] + .[1]) | map(select(.adapter as $a | $stopped | index($a) | not)) | reduce .[] as $one ([]; if (map(.alias) | index($one.alias)) then . else . + [$one] end)' "$other_available" "$available" > "$available.next" && mv "$available.next" "$available"
       switched="$first est à $first_used % de sa période ($first_window) : équipe ouverte sur $(jq -r '.[0].alias' "$available") ($second)."
-      [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$lane: the subscription of $first is $first_state ($first_used % of its $first_window window): opened on $(jq -r '.[0].alias' "$available") ($second) instead of $requested"
+      # Written once the lane does open (below, past the limit of lanes).
+      switched_event="$lane: the subscription of $first is $first_state ($first_used % of its $first_window window): opened on $(jq -r '.[0].alias' "$available") ($second) instead of $requested"
+    elif [ -z "$second" ]; then
+      echo "$(basename "$0"): [harness] $role = $other names no model that is available now: $lane stays on $first" >&2
     fi
     rm -f "$other_available"
   fi
@@ -203,6 +206,7 @@ if [ -z "$there" ] && [ "$open" -ge "$max" ] && takes_a_place "$role"; then
   echo "$(basename "$0"): lane limit reached ($open open, limit $max): $lane not opened" >&2
   exit 3
 fi
+[ -z "${switched_event:-}" ] || [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$switched_event"
 
 # 4. The worktree. Orca lists any git worktree of the repository by itself.
 root=$(expand_home "$(conf_get lanes root)")

@@ -475,6 +475,12 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   assert.equal(limited.status, 0);
   assert.deepEqual(limited.usage.limits, { windows: { seven_day: { used: 41.5, resets_at: new Date(resets * 1000).toISOString().replace('.000Z', 'Z') }, five_hour: { used: 7, resets_at: new Date(resets * 1000).toISOString().replace('.000Z', 'Z') } } });
   assert.equal(call({ script: `printf "ok"; printf 'rate limits not json\\n' >&2` }).usage.limits, undefined);
+  // A window whose figures cannot be read does not take the other with it; two windows of the same length keep the fuller one.
+  const odd = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":93,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":5,"window_minutes":300,"resets_at":1e30}}\\n' >&2` });
+  assert.deepEqual(Object.keys(odd.usage.limits.windows), ['seven_day']);
+  assert.equal(odd.usage.limits.windows.seven_day.used, 93);
+  const twin = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":93,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":12,"window_minutes":10080,"resets_at":${resets}}}\\n' >&2` });
+  assert.equal(twin.usage.limits.windows.seven_day.used, 93);
   assert.match(done.report, /## Compte rendu\n\nthe answer\n\n## Fichiers modifiés/);
 });
 
@@ -5081,6 +5087,13 @@ test('the harness of a lane is chosen by what is left of each subscription: a ro
   // A model somebody named for this lane is not changed.
   assert.equal(open('X-3', '--model', 'a').status, 0);
   assert.equal(chain('X-3')[0], 'a');
+  // A lane the limit of lanes refuses writes nothing of a switch it did not make, and a rehearsal neither.
+  const before = events().length;
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 1'));
+  assert.equal(open('X-30').status, 3);
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 9'));
+  assert.equal(open('X-31', '--dry-run').status, 0);
+  assert.equal(events().length, before);
   // At its stop: the other harness alone; a stopped subscription is no fallback.
   said('first', 95);
   assert.equal(open('X-4').status, 0);
