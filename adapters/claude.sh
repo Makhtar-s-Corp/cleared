@@ -91,6 +91,9 @@ case "${1:-}" in
       [ ${#allowed[@]} -gt 0 ] && args+=(--allowedTools "${allowed[@]}")
       [ ${#denied[@]} -gt 0 ] && args+=(--disallowedTools "${denied[@]}")
     fi
+    # What the session may still cost (the cap of its ticket, less what was
+    # spent): the CLI stops by itself there.
+    [ -z "${ORCH_BUDGET_USD:-}" ] || args+=(--max-budget-usd "$ORCH_BUDGET_USD")
     [ "${ADAPTER_CONNECTORS:-}" = none ] && args+=(--strict-mcp-config)
     [ -n "${ORCH_TEXT_ONLY:-}" ] && args+=(--tools "" --no-session-persistence)
     # Without the helper model: only its setting removes it (tried: refusing
@@ -163,6 +166,13 @@ case "${1:-}" in
     # worked is a failure.
     if [ -n "$refused" ]; then
       if [ "$worked" = 0 ]; then code=2; elif [ "$code" = 0 ]; then code=1; fi
+    fi
+    # Stopped by its budget: neither a failure nor a refusal. Said with a
+    # code of its own (5): what it committed is still sent, and it is not
+    # run again as a session that stopped short.
+    if [ -n "$result" ] && [ "$(jq -r '.subtype // ""' <<<"$result")" = error_max_budget_usd ]; then
+      code=5
+      echo "La session a été arrêtée : le plafond de coût de son ticket est atteint. Ce qu'elle avait enregistré est gardé." > "$body"
     fi
     contract_report claude "$code" "$body"
     exit "$code"

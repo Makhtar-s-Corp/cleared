@@ -590,7 +590,9 @@ quoted() { sed 's/^/    | /' "$1"; }
 dispatcher_lanes() {
   local roles
   roles=$(conf_keys roles | paste -sd'|')
-  git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's#^branch refs/heads/##p' | grep -E "^($roles)/" || true
+  # A worktree named .base-<ticket> is the dispatcher's own, for the time of
+  # a merge (flow-lanes.sh): it has the branch of a lane, and is not one.
+  git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{n = split($0, part, "/"); own = part[n] ~ /^\.base-/} /^branch refs\/heads\//{if (!own) print substr($0, 19)}' | grep -E "^($roles)/" || true
 }
 
 # Those that take one of the max_lanes places: the roles of [limits]
@@ -600,4 +602,22 @@ counted_lanes() {
   local counted
   counted=$(conf_get limits counted_roles | tr -s ' ' '|')
   if [ -z "$counted" ]; then dispatcher_lanes; else dispatcher_lanes | grep -E "^($counted)/" || true; fi
+}
+
+# The line by which the user says what a ticket may cost, as he writes it:
+# « Plafond 80 », « Plafond : 80 $ », « plafond: 80,5 », alone on its line
+# (the spaces a French keyboard puts before « : » and « $ » included).
+# A line that goes on is a sentence, and sets nothing (« plafond 80 % de
+# l'abonnement », « plafond 3 niveaux de prix »). cap_line is the pattern,
+# given to jq as $cap; cap_only is the jq test of a comment that says
+# nothing else: it sets the cap, and is no word for the lane.
+cap_line='^[ \t\x{00A0}\x{202F}]*plafond[ \t\x{00A0}\x{202F}]*:?[ \t\x{00A0}\x{202F}]*([0-9]+(?:[.,][0-9]+)?)[ \t\x{00A0}\x{202F}]*(?:\$|€|usd|dollars?)?[ \t\x{00A0}\x{202F}]*[.!]?[ \t\x{00A0}\x{202F}]*\r?$'
+cap_only='(.body | [split("\n")[] | select(test("^\\s*$") | not)] | (length > 0 and all(.[]; test("(?i)" + $cap))))'
+
+# takes_a_place <role>: whether a lane of that role holds one of them, by the
+# same rule: its exact name in counted_roles, or any role when none is set.
+takes_a_place() {
+  local counted
+  counted=$(conf_get limits counted_roles)
+  [ -z "$counted" ] || tr -s ' ' '\n' <<<"$counted" | grep -qxF -- "$1"
 }

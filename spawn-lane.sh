@@ -6,7 +6,7 @@
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
 #                 [--since <commit>] [--from <ref>] [--resume] [--message-file <file>]
-#                 [--keep-status]
+#                 [--keep-status] [--budget <amount>]
 #                 [--path <touched path>]... [--pr-lines <n>] [--wait] [--dry-run]
 #
 # With --pr, the lane starts from the head of that pull request, and its size
@@ -22,7 +22,8 @@
 # branch otherwise), for one more run; --message-file says why, quoted too
 # (what a reviewer found, what the checks said, what the user answered).
 # --keep-status leaves the ticket in the status it is in (a run that brings
-# the base in changes nothing of what the user agreed to).
+# the base in changes nothing of what the user agreed to). --budget is what
+# the session may still cost (the cap of its ticket, less what was spent).
 #
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
@@ -37,7 +38,7 @@ usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 [ $# -ge 2 ] || usage
 role=$1 ticket=$2
 shift 2
-forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status=
+forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status= budget=
 paths=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -50,6 +51,7 @@ while [ $# -gt 0 ]; do
     --from) from=$2; shift 2 ;;
     --resume) resume=1; shift ;;
     --keep-status) keep_status=1; shift ;;
+    --budget) budget=$2; shift 2 ;;
     --message-file) message_file=$2; shift 2 ;;
     --path) paths+=(--path "$2"); shift 2 ;;
     --pr-lines) pr_lines=$2; shift 2 ;;
@@ -164,7 +166,9 @@ if grep -qxF -- "$lane" <<<"$lanes"; then
   [ -n "$resume" ] || die "the lane $lane is already open"
   there=1
 fi
-if [ -z "$there" ] && [ "$open" -ge "$max" ]; then
+# Only a role that takes a place is refused for want of one: a review reads,
+# and opens whatever the number of lanes at work.
+if [ -z "$there" ] && [ "$open" -ge "$max" ] && takes_a_place "$role"; then
   ledger event --kind lane_limit_reached --ticket "$ticket" --detail "$lane refused: $open lanes open for a limit of $max" --value "$open"
   echo "$(basename "$0"): lane limit reached ($open open, limit $max): $lane not opened" >&2
   exit 3
@@ -184,12 +188,28 @@ elif [ -n "$resume" ]; then
   # from its branch, with its work.
   [ -e "$worktree" ] && die "$worktree already exists"
   remote_branch=${push_branch:-$lane}
-  git -C "$ORCH_REPO" fetch --quiet origin "$remote_branch" || die "the branch $remote_branch could not be fetched: $lane is not opened again"
-  if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
-    git -C "$ORCH_REPO" worktree add --quiet "$worktree" "$lane"
-    git -C "$worktree" merge --quiet --ff-only "origin/$remote_branch" 2> /dev/null || true
+  sent=0
+  git -C "$ORCH_REPO" ls-remote --exit-code --heads origin "$remote_branch" > /dev/null 2>&1 || sent=$?
+  if [ "$sent" = 2 ] && [ -z "$push_branch" ]; then
+    # Its sessions never sent anything (the first one ended on a question,
+    # with no commit): there is no branch on the remote to come back to. It
+    # starts again from the branch it left here, or from the base, like a
+    # lane that opens.
+    if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
+      git -C "$ORCH_REPO" worktree add --quiet "$worktree" "$lane"
+    else
+      git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
+      git -C "$ORCH_REPO" rev-parse --verify --quiet "$base^{commit}" > /dev/null || die "no such ref to start from: $base"
+      git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "$base"
+    fi
   else
-    git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "origin/$remote_branch"
+    git -C "$ORCH_REPO" fetch --quiet origin "$remote_branch" || die "the branch $remote_branch could not be fetched: $lane is not opened again"
+    if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
+      git -C "$ORCH_REPO" worktree add --quiet "$worktree" "$lane"
+      git -C "$worktree" merge --quiet --ff-only "origin/$remote_branch" 2> /dev/null || true
+    else
+      git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "origin/$remote_branch"
+    fi
   fi
 else
   [ -e "$worktree" ] && die "$worktree already exists"
@@ -234,8 +254,11 @@ if [ -n "$pushed_role" ]; then
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$run_dir/agent-ids.txt" || true
   # Which of his words this session is handed, kept with the run: what he
   # writes from here on is what it was not handed, whatever the clocks say.
+  # A comment that only sets the cap of the ticket is not shown to the
+  # lane: it is the dispatcher's to read, and a lane takes it for a figure
+  # of the product.
   jq -c --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not)) | .id]' <<<"$written" > "$run_dir/seen.json"
-  jq -r --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | .[] | "- le \(.createdAt[0:16] | sub("T"; " à ")) :\n" + (.body | split("\n") | map("    | " + .) | join("\n"))' <<<"$written" > "$run_dir/comments.md"
+  jq -r --arg cap "$cap_line" --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt) | .[] | "- le \(.createdAt[0:16] | sub("T"; " à ")) :\n" + (.body | split("\n") | map("    | " + .) | join("\n"))' <<<"$written" > "$run_dir/comments.md"
 fi
 mv "$available" "$run_dir/chain.json"
 {
@@ -273,6 +296,7 @@ fi
   printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$requested" "règle : $rule${route_notes:+ ; $route_notes}" "$spawn_note"
   printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\n' "$comment_on" "$writeup_role"
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PUSH_BRANCH=%q\n' "$pr" "$pr_lines" "$push_branch"
+  printf 'ORCH_BUDGET_USD=%q\n' "$budget"
   printf 'ORCH_PROJECT=%q\nORCH_LABEL=%q\n' "$(jq -r '.project // ""' <<<"$issue")" "$(jq -r '.labels[0] // ""' <<<"$issue")"
 } > "$run_dir/lane.env"
 

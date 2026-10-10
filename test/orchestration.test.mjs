@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -193,7 +193,7 @@ case "$1" in
   talk) shift; [ ${name} != first ] || [ -z "\${FIRST_CANNOT_TALK:-}" ] || exit 2
     printf '%s\\n' "${name}" "$@" "edit=\${ORCH_EDIT_ONLY:-}" "read=\${ORCH_READ_DIRS:-}" "mode=\${ORCH_PERMISSION_MODE:-}" "allow=\${ORCH_ALLOW:-}" "run=\${ORCH_RUN_ID:-}" > "\${ORCH_STATE_DIR}/talked"; exit 0 ;;
   run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; echo "\${ORCH_SIGNED:-}" > "\${ORCH_STATE_DIR}/signed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "\${ANSWER:-answer of ${name}}" > "$body"
-    contract_usage "$(jq -c --argjson limits "\${FAKE_LIMITS:-null}" '. + (if $limits then {limits: $limits} else {} end)' <<<'{"tokens_total": 10}')"; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
+    contract_usage "$(jq -c --argjson limits "\${FAKE_LIMITS:-null}" '. + (if $limits then {limits: $limits} else {} end) + (if $cost then {cost_usd: $cost} else {} end)' --argjson cost "\${FAKE_COST:-null}" <<<'{"tokens_total": 10}')"; echo "budget=\${ORCH_BUDGET_USD:-none}" > "\${ORCH_STATE_DIR}/budget-${name}"; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
   fake('first', '${FIRST_EXIT:-0}');
@@ -203,7 +203,7 @@ esac
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
 if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "$2" >> "${join(home, 'linear-posted-log')}"; echo "https://example.test/comment"; exit; fi
 if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
-if [ "$1" = comments ]; then cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
+if [ "$1" = comments ]; then [ -z "\${FAKE_LINEAR_COMMENTS_DOWN:-}" ] || exit 1; cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${home}/linear-moved-$2" 2>/dev/null || cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
 if [ "$1" = list ]; then cat "${home}/linear-list-$2.json" 2>/dev/null || echo '[]'; exit; fi
 if [ "$1" = identity ]; then cat "${join(home, 'linear-identity')}" 2>/dev/null || echo app; exit; fi
@@ -709,6 +709,25 @@ test('a lane of a role that is not counted does not take one of the three places
   box.git('worktree', 'add', '-q', '-b', 'release/X-9', join(box.home, 'lanes', 'release-X-9'), 'main');
   const run = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
+  // And it is not refused a place it does not take: the one place is held by X-2, a lane of a role that reads opens all the same.
+  assert.equal(spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-3', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' }).status, 3, 'a second lane that takes a place is refused');
+  const reads = spawnSync(join(box.home, 'spawn-lane.sh'), ['review', 'X-4', '--comment-on', 'none', '--author-model', 'a'], { env: box.env, encoding: 'utf8' });
+  assert.equal(reads.status, 0, reads.stderr);
+  // A role is counted by its exact name: « dev-x » is not « dev ».
+  const confPath = join(box.home, 'agents.conf');
+  const conf = readFileSync(confPath, 'utf8');
+  writeFileSync(confPath, conf.replace('[roles]\ndev = a\n', '[roles]\ndev = a\ndev-x = a\n').replace('push_roles = dev talk', 'push_roles = dev talk dev-x'));
+  writeFileSync(join(box.home, 'prompts', 'dev-x.md'), readFileSync(join(box.home, 'prompts', 'dev.md'), 'utf8'));
+  const near = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev-x', 'X-6', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(near.status, 0, near.stderr);
+  // And « dev » is not counted because a counted role has that word in its name.
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('counted_roles = dev\n', 'counted_roles = dev-x\n'));
+  const plain = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-8', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(plain.status, 0, plain.stderr);
+  // A project that names no counted role counts every role, here as in the count itself: the limit is never lost.
+  writeFileSync(confPath, conf.replace('counted_roles = dev\n', ''));
+  const none = spawnSync(join(box.home, 'spawn-lane.sh'), ['review', 'X-7', '--comment-on', 'none', '--author-model', 'a'], { env: box.env, encoding: 'utf8' });
+  assert.equal(none.status, 3, none.stderr);
 });
 
 test('the pre-check of the project lead: what the user and the outside world did is an event, what agents wrote is not', async () => {
@@ -1710,7 +1729,7 @@ function flowBox({ maxLanes = 1 } = {}) {
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8')
     .replace('[linear]\nteam = X\n', '[linear]\nteam = X\ntodo_state = Todo\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n')
-    .replace('[lanes]\n', '[lanes]\ntodo_since = 2026-01-01T00:00:00Z\nruns_per_day = 4\nclosed_states = Done, Canceled\n')
+    .replace('[lanes]\n', '[lanes]\ntodo_since = 2026-01-01T00:00:00Z\nruns_per_day = 4\nbase_without_model = no\nclosed_states = Done, Canceled\n')
     .replace('base = main', 'base = origin/main')
     .replace(/max_lanes = \d+/, `max_lanes = ${maxLanes}`)}[merge]\ncode_paths = server/\nverdict = rien de bloquant\n`);
   mkdirSync(join(box.home, 'proc-none'), { recursive: true });
@@ -1837,6 +1856,7 @@ test('a lane moves by rule to the point where the user is asked: its checks star
   assert.equal(undone(), before, 'nothing to push: not put back to draft');
   // One that was put back to draft all the same, at a version whose checks were started once: taken out again.
   pull({ headRefOid: corrected.head, isDraft: true, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  execFileSync('touch', ['-d', '3 minutes ago', join(box.state, 'checks-starting')]);
   const again = ready().length;
   assert.match(flow().stdout, /#41 is taken out of draft/);
   assert.equal(ready().length, again + 1);
@@ -1995,6 +2015,10 @@ test('what a first real round showed: a session that ended without its push is s
   const brought = session('X-5', { commit: null, bringBase: true });
   assert.notEqual(brought.head, done.head);
   pull({ headRefOid: brought.head });
+  // Checks started less than two minutes ago hold the next pull request back: not yet.
+  flow();
+  assert.deepEqual(ready().slice(-1), ['41 --undo']);
+  execFileSync('touch', ['-d', '3 minutes ago', join(box.state, 'checks-starting')]);
   flow();
   assert.deepEqual(ready().slice(-2), ['41 --undo', '41']);
   pull({ headRefOid: brought.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
@@ -2349,6 +2373,8 @@ test('no lane is left waiting in silence: a session that died, never started or 
   writeFileSync(join(box.home, 'linear-state-X-5'), 'Backlog\n');
   assert.equal(flow().stdout.includes('X-5'), false);
   writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  // (the day after: a fourth session that stops in one day is a loop, and is said instead)
+  { const aged = record('X-5'); for (const key of Object.keys(aged.done)) if (key.startsWith('stopped:')) aged.done[key] = new Date(Date.now() - 25 * 3600e3).toISOString(); writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(aged)); }
   assert.match(flow().stdout, /X-5: opened again \(stopped:/);
   // « Aucune. » on a line of its own is no question for him.
   const done = session('X-5', { answer: 'Fait.\n\nQuestions pour Makhtar\n\nAucune.' });
@@ -4442,4 +4468,387 @@ test('the terminal of a lane shows what the agent says, what it thinks and what 
   assert.doesNotMatch(shown, /echo done/, 'one line for an action');
   // What a helper it called says is its own business.
   assert.doesNotMatch(shown, /Un assistant cherche/);
+});
+
+test('a lane that cannot be opened again is not left with its finished work unshown: what waits for a place does not hold back the checks, the review nor the request; his word and the lead\'s go to it together', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, env } = flowBox({ maxLanes: 1 });
+  const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const tell = (ticket, text) => spawnSync(join(box.home, 'tell-lane.sh'), [ticket, '-'], { env, input: text, encoding: 'utf8' });
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const done = session('X-5');
+  pull({ headRefOid: done.head });
+  // Its session is over, its pull request is a draft; another ticket takes the one place.
+  flow({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
+  assert.equal(there('X-5'), false);
+  todo(['X-7']);
+  by('X-7', 0);
+  flow({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
+  assert.equal(there('X-7'), true);
+  // The lead leaves a word for the first lane: no place to open it again. Its pull request leaves draft all the same.
+  assert.equal(tell('X-5', 'Il manque la capture sur téléphone.').status, 0);
+  const waiting = flow();
+  assert.doesNotMatch(waiting.stdout, /X-5: opened again/, 'nothing is said opened that was not');
+  assert.match(waiting.stdout, /X-5: #41 is taken out of draft/);
+  assert.deepEqual(ready(), ['41']);
+  assert.equal(record('X-5').runs.length, 1);
+  // The place frees, and meanwhile the user wrote on the ticket too: one session, with his word and the lead's.
+  assert.equal(session('X-7', { commit: 'fix: the other work' }).run.status, 0);
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Et vérifie aussi le mode sombre.', byOwner: true }]));
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  writeFileSync(join(box.home, 'pr-view-42.json'), JSON.stringify({ number: 42, state: 'OPEN', isDraft: true, headRefName: 'dev/X-7', baseRefName: 'main', title: 't', body: 'b', additions: 1, deletions: 0, files: [], statusCheckRollup: [] }));
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 3'));
+  const together = flow();
+  assert.match(together.stdout, /X-5: opened again \(said:c9\)/);
+  assert.equal(record('X-5').runs.length, 2);
+  const told = session('X-5', { commit: null });
+  assert.match(told.prompt, /\| L'utilisateur a écrit sur le ticket[\s\S]*Et vérifie aussi le mode sombre\./);
+  assert.match(told.prompt, /\| Le chef de projet t’a écrit[\s\S]*Il manque la capture sur téléphone\./);
+  flow();
+  assert.equal(record('X-5').runs.length, 2, 'both were handed in that one session');
+  assert.deepEqual(stuck(), []);
+});
+
+test('a lane is not opened again for ever for one reason: three times in a day for the checks, a reviewer or a session that stops, then it is said; a word of the user is never a loop', () => {
+  const { flow, todo, by, record, session, stuck, pull, box } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30'));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  let last = session('X-5');
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const red = () => { pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] }); return flow().stdout; };
+  // Red three times, each on a new version: opened again three times.
+  for (let turn = 1; turn <= 3; turn += 1) {
+    assert.match(red(), /X-5: opened again \(checks:/, `turn ${turn}`);
+    last = session('X-5', { commit: `fix: attempt ${turn}` });
+  }
+  assert.equal(record('X-5').runs.length, 4);
+  // Red a fourth time: not opened again, and the lead is told which reason, once.
+  assert.match(red(), /X-5: opened again 3 times in a day for the same reason \(checks\): left as it is/);
+  assert.equal(record('X-5').runs.length, 4);
+  assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  red();
+  assert.deepEqual(stuck(), ['lane_stuck X-5'], 'said once');
+  // He writes on the ticket: that is no loop, the lane is opened with his words.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Laisse ce test de côté.', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
+  assert.equal(record('X-5').runs.length, 5);
+});
+
+test('the base is brought into a lane without a model when nothing has to be decided: merged and sent by the rules, its review and the agreement kept; a conflict goes to the lane', () => {
+  const { flow, todo, by, there, record, session, stuck, pull, box, lane } = flowBox();
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('base_without_model = no\n', ''));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  mkdirSync(join(kept.worktree, 'server'), { recursive: true });
+  writeFileSync(join(kept.worktree, 'server', 'toast.mjs'), 'export const toast = 1;\n');
+  execFileSync('git', ['-C', kept.worktree, 'add', 'server/toast.mjs']);
+  const done = session('X-5', { commit: 'fix: the toast closes' });
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  flow();
+  assert.equal(there('X-5'), false, 'its worktree is closed');
+  // The base moves on code, in files the lane did not touch.
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  const merged = flow();
+  assert.match(merged.stdout, /X-5: the base is brought in without a model \(#41\)/);
+  assert.equal(record('X-5').runs.length, 1, 'no session was opened for it');
+  assert.equal(there('X-5'), false, 'nothing is left behind');
+  const remoteHead = execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+  assert.notEqual(remoteHead, done.head);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'show', `${remoteHead}:server/core.mjs`], { encoding: 'utf8' }), 'export const x = 1;\n');
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'show', `${remoteHead}:server/toast.mjs`], { encoding: 'utf8' }), 'export const toast = 1;\n');
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-list', '--parents', '-n', '1', remoteHead], { encoding: 'utf8' }).trim().split(' ').length, 3, 'a merge of the base, nothing else');
+  // The base moves again, on the very file of the lane: nothing can be decided without a model.
+  writeFileSync(join(box.repo, 'server', 'toast.mjs'), 'export const toast = 2;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: the base changes the same file');
+  box.git('push', '-q', 'origin', 'main');
+  pull({ headRefOid: remoteHead, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const conflict = flow();
+  assert.match(conflict.stdout, /X-5: opened again \(base:/);
+  assert.equal(record('X-5').runs.length, 2);
+  assert.match(session('X-5', { commit: null }).prompt, /\| La branche principale a avancé sur du code/);
+  assert.deepEqual(stuck(), []);
+  assert.equal(execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim(), remoteHead, 'the merge git could not make is not left on the branch');
+});
+
+test('a base brought in without a model leaves nothing behind when it cannot be sent: the branch is where it was, the refusal is not asked again every minute, and what a dead round left is cleared and never counted as a lane', () => {
+  const { flow, todo, by, there, record, session, pull, box, env } = flowBox();
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('base_without_model = no\n', ''));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  mkdirSync(join(kept.worktree, 'server'), { recursive: true });
+  writeFileSync(join(kept.worktree, 'server', 'toast.mjs'), 'export const toast = 1;\n');
+  execFileSync('git', ['-C', kept.worktree, 'add', 'server/toast.mjs']);
+  const done = session('X-5', { commit: 'fix: the toast closes' });
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  flow();
+  assert.equal(there('X-5'), false);
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  // The push is refused (here: the remote does not take it).
+  const hook = join(box.home, 'remote.git', 'hooks', 'pre-receive');
+  mkdirSync(join(box.home, 'remote.git', 'hooks'), { recursive: true });
+  writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const tip = () => execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+  const worktrees = () => execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const refused = flow();
+  assert.doesNotMatch(refused.stdout, /brought in without a model/);
+  assert.match(refused.stdout, /X-5: opened again \(base:/, 'the lane takes it');
+  assert.doesNotMatch(worktrees(), /\.base-X-5/);
+  assert.equal(Object.keys(record('X-5').done).filter((key) => key.startsWith('nobase:')).length, 1, 'tried once for that state of the branch and of the base');
+  rmSync(hook);
+  // Its session brings the base in itself; the merge of the rules is not found under it.
+  const again = session('X-5', { commit: null, bringBase: true });
+  assert.equal(execFileSync('git', ['-C', box.repo, 'rev-list', '--count', '--merges', `${done.head}..${again.head}`], { encoding: 'utf8' }).trim(), '1', 'one merge, the one of the session');
+  pull({ headRefOid: again.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  flow();
+  assert.equal(there('X-5'), false);
+  // A round that died in the middle: its worktree, on the branch of the lane, with a merge no remote has.
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 2;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: more code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  box.git('fetch', '-q', 'origin');
+  const spot = join(box.home, 'lanes', '.base-X-5');
+  box.git('worktree', 'add', '-q', spot, 'dev/X-5');
+  writeFileSync(join(execFileSync('git', ['-C', spot, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim(), 'base-before'), `${again.head}\n`);
+  execFileSync('git', ['-C', spot, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
+  assert.notEqual(tip(), again.head);
+  // It is no lane: it takes no place, and is not the worktree a lane is opened again in.
+  const counted = spawnSync('bash', ['-c', '. "$ORCH_HOME/lib/common.sh"; dispatcher_lanes'], { env: { ...env, ORCH_HOME: box.home }, encoding: 'utf8' });
+  assert.equal(counted.status, 0, counted.stderr);
+  assert.doesNotMatch(counted.stdout, /dev\/X-5/);
+  const cleared = flow();
+  assert.match(cleared.stdout, /what a round left of a base brought in without a model is cleared \(\.base-X-5\)/);
+  assert.match(cleared.stdout, /X-5: the base is brought in without a model \(#41\)/, 'and the round goes on from the branch as it was');
+  assert.doesNotMatch(worktrees(), /\.base-X-5/);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-list', '--count', '--merges', `${again.head}..dev/X-5`], { encoding: 'utf8' }).trim(), '1', 'one merge left, the one that was sent');
+  // A directory of that name git no longer knows as a worktree goes too; one that cannot be removed is said, and the round goes on.
+  const stray = join(box.home, 'lanes', '.base-X-9');
+  mkdirSync(stray, { recursive: true });
+  writeFileSync(join(stray, '.git'), 'gitdir: /nowhere\n');
+  assert.match(flow().stdout, /is cleared \(\.base-X-9\)/);
+  assert.throws(() => readdirSync(stray));
+  if (process.getuid() !== 0) {
+    mkdirSync(join(stray, 'held'), { recursive: true });
+    writeFileSync(join(stray, '.git'), 'gitdir: /nowhere\n');
+    writeFileSync(join(stray, 'held', 'file'), 'x\n');
+    chmodSync(join(stray, 'held'), 0o500);
+    const held = flow();
+    chmodSync(join(stray, 'held'), 0o700);
+    rmSync(stray, { recursive: true, force: true });
+    assert.equal(held.status, 0, held.stderr);
+    assert.match(held.stdout, /could not be cleared \(.*\.base-X-9\)/);
+    assert.match(held.stdout, /X-5: /, 'the lanes are looked at all the same');
+  }
+  // A merge that is not the one the rules wrote down is somebody's work: it is not taken back.
+  const sent = execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 3;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: still more code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  box.git('fetch', '-q', 'origin');
+  box.git('worktree', 'add', '-q', spot, 'dev/X-5');
+  execFileSync('git', ['-C', spot, 'merge', '-q', '--ff-only', 'origin/dev/X-5']);
+  // The tip written down is an older one: this merge does not sit on it.
+  writeFileSync(join(execFileSync('git', ['-C', spot, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim(), 'base-before'), `${again.head}\n`);
+  execFileSync('git', ['-C', spot, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
+  const theirs = tip();
+  assert.notEqual(theirs, sent);
+  pull({ headRefOid: sent, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /is cleared \(\.base-X-5\)/);
+  assert.equal(tip(), theirs, 'the branch still has it');
+});
+
+test('a ticket has a cap on what it may cost: a session is given what is left, a lane that reached it is not opened again and the lead is told once with the figures, and a line of the user raises it for that ticket', () => {
+  const { flow, todo, by, there, record, session, pull, box, env } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[limits]\n', '[limits]\nticket_cost_usd = 1\n').replace('runs_per_day = 4', 'runs_per_day = 30').replace('usd_eur = 1', 'usd_eur = 0.5'));
+  const budget = () => readFileSync(join(box.state, 'budget-first'), 'utf8').trim();
+  const told = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select detail from events where kind = 'ticket_cost' order by rowid").all().map((row) => row.detail); db.close(); return rows; };
+  const run = (ticket, extra, options = {}) => {
+    const kept = record(ticket);
+    if (options.commit) execFileSync('git', ['-C', kept.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', options.commit]);
+    const done = spawnSync(join(box.home, 'lane-run.sh'), [join(box.state, 'runs', kept.runs.at(-1).run)], { cwd: kept.worktree, env: { ...env, ANSWER: 'Fait.\n\nQuestions pour Makhtar : aucune.', ...extra }, encoding: 'utf8' });
+    return { done, head: execFileSync('git', ['-C', box.repo, 'rev-parse', `dev/${ticket}`], { encoding: 'utf8' }).trim() };
+  };
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  // Its first session is given the whole cap, and costs 0.60 $.
+  let last = run('X-5', { FAKE_COST: '0.6' }, { commit: 'fix: the work' });
+  assert.equal(last.done.status, 0, last.done.stderr);
+  assert.equal(budget(), 'budget=1');
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  // Red checks: opened again, with what is left of the cap.
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  // That session reaches the cap while it works: it is stopped, and what it had committed is sent all the same.
+  last = run('X-5', { FAKE_COST: '0.5', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: half of the correction' });
+  assert.equal(budget(), 'budget=0.4');
+  assert.equal(last.done.status, 5);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim(), last.head, 'nothing it committed is lost');
+  // At the cap: not « a session that stopped short » to run again; nothing opens it, the lead is told once, with the figures.
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  const capped = flow();
+  assert.doesNotMatch(capped.stdout, /X-5: opened again \(/);
+  assert.match(capped.stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again/);
+  assert.equal(record('X-5').runs.length, 2);
+  assert.equal(told().length, 1);
+  assert.match(told()[0], /1\.10 \$[\s\S]*1 \$/);
+  flow();
+  assert.equal(told().length, 1, 'said once for a cap');
+  // A line an agent wrote does not raise it; a line of the user does, for this ticket.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'a1', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nPlafond : 50 $', byOwner: true },
+  ]));
+  assert.doesNotMatch(flow().stdout, /X-5: opened again \(/);
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+    { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true },
+    { id: 'a1', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nPlafond : 50 $', byOwner: true },
+  ]));
+  const raised = flow();
+  assert.match(raised.stdout, /X-5: opened again \(said:c9\)/);
+  assert.doesNotMatch(raised.stdout, /at its cap/, 'a cap he just raised is not a stop to tell');
+  assert.equal(told().length, 1, 'the lead is not told of a cap that is no longer reached');
+  last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: the rest' });
+  assert.equal(budget(), 'budget=1.9');
+  assert.equal(record('X-5').runs.length, 3);
+  // The tracker does not answer: the cap he may have written cannot be read, and nothing is opened on a guess.
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow({ FAKE_LINEAR_COMMENTS_DOWN: '1' }).stdout, /X-5: its cap or what it has cost cannot be read: not opened again \(checks:/);
+  assert.equal(record('X-5').runs.length, 3);
+  // Nor what it cost (here: a record whose date is no date).
+  const path = join(box.state, 'lanes', 'X-5.json');
+  const whole = record('X-5');
+  writeFileSync(path, JSON.stringify({ ...whole, opened_at: "2026' or 1 --" }));
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  const blind = flow();
+  assert.match(blind.stdout, /X-5: its cap or what it has cost cannot be read: not opened again \(checks:/);
+  assert.equal(record('X-5').runs.length, 3);
+  writeFileSync(path, JSON.stringify({ ...record('X-5'), opened_at: whole.opened_at }));
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  // That session is stopped by its budget though the ticket has something left (it cost less than it was given): no cap is told, it goes on.
+  last = run('X-5', { FAKE_COST: '0.2', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: more' });
+  assert.equal(last.done.status, 5);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const more = flow();
+  assert.match(more.stdout, /X-5: opened again \(budget:/);
+  assert.doesNotMatch(more.stdout, /at its cap/);
+  assert.equal(told().length, 1);
+  assert.match(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'prompt.md'), 'utf8'), /arrêtée à la limite de son budget/);
+  // This one spends the cap he set: said once for that cap, and nothing opens the lane.
+  last = run('X-5', { FAKE_COST: '1.7', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: still more' });
+  assert.equal(budget(), 'budget=1.6');
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /X-5: at its cap \(3\.10 \$ of 3 \$\): not opened again/);
+  assert.equal(told().length, 2);
+  const atCap = record('X-5').runs.length;
+  flow();
+  assert.equal(told().length, 2);
+  assert.equal(record('X-5').runs.length, atCap);
+  // He lifts it the way he writes: « Plafond 4 », alone, without a colon. That comment is no word for the lane and is not shown to it;
+  // a sentence about a share (« plafond 80 % ») sets no cap, and is a word like any other.
+  const comments = (list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const c9 = { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true };
+  const c10 = { id: 'c10', createdAt: '2099-01-01T11:00:00Z', body: 'plafond 80 % de mon abonnement, on est bien d’accord', byOwner: true };
+  const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Plafond 4', byOwner: true };
+  comments([c11, c9]);
+  const lifted = flow();
+  assert.match(lifted.stdout, /X-5: opened again \(budget:/);
+  assert.doesNotMatch(lifted.stdout, /said:c11/);
+  assert.equal(told().length, 2, 'a cap he lifted is not told as reached');
+  assert.doesNotMatch(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'comments.md'), 'utf8'), /Plafond 4/);
+  last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: finished' });
+  assert.equal(budget(), 'budget=0.9');
+  // A lane that was not stopped is not opened by a line that only sets the cap; it is by a sentence of his.
+  const c12 = { id: 'c12', createdAt: '2099-01-01T13:00:00Z', body: 'Plafond : 9 $\r\n', byOwner: true };
+  comments([c12, c11, c9]);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.doesNotMatch(flow().stdout, /X-5: opened again/);
+  comments([c12, c11, { ...c10, createdAt: '2099-01-01T14:00:00Z' }, c9]);
+  assert.match(flow().stdout, /X-5: opened again \(said:c10\)/);
+  last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: answered' });
+  assert.equal(budget(), 'budget=5.8', 'the cap is the 9 he wrote last, not 80');
+  // What is left when its budget stops it would buy no session (0.20 $ of 9 $): the cap counts as spent, and is told.
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  last = run('X-5', { FAKE_COST: '5.5', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: nearly all of it' });
+  assert.equal(budget(), 'budget=5.7');
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const sliver = flow();
+  assert.match(sliver.stdout, /X-5: at its cap \(8\.80 \$ of 9 \$\): not opened again/);
+  assert.doesNotMatch(sliver.stdout, /opened again \(/);
+  assert.equal(told().length, 3);
+  comments([c9]);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  // A ticket he puts in « Todo » while the tracker does not give its comments waits; it is opened once they are read, with the cap he wrote on it.
+  todo(['X-6']);
+  by('X-6', 0);
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 5'));
+  const waits = flow({ FAKE_LINEAR_COMMENTS_DOWN: '1' });
+  assert.match(waits.stdout, /X-6: put in « Todo » by the user: its cap or what it has cost cannot be read, it waits/);
+  assert.throws(() => record('X-6'));
+  assert.match(flow().stdout, /X-6: put in « Todo » by the user: its lane is opened/);
+  run('X-6', { FAKE_COST: '0.1' }, { commit: 'fix: other work' });
+  assert.equal(budget(), 'budget=3', 'the line he wrote, read before the first session');
+});
+
+test('a lane whose first session sent nothing (it ended on a question, with no commit) is opened again all the same: from the branch it left, or from the base when there is none', () => {
+  const { flow, todo, by, there, record, session, box } = flowBox();
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const asked = session('X-5', { commit: null, answer: 'Rien de fait.\n\nQuestions pour Makhtar :\n1. Quelle direction ?' });
+  assert.equal(asked.run.status, 0, asked.run.stderr);
+  assert.match(flow().stdout, /X-5: its session ends on a question for the user/);
+  assert.equal(there('X-5'), false, 'its worktree is closed');
+  assert.equal(spawnSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', '--verify', '--quiet', 'dev/X-5']).status, 1, 'nothing of it is on the remote');
+  // He answers: the lane is opened again, though there is no branch on the remote to come back to.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
+  const first = flow();
+  assert.match(first.stdout, /X-5: opened again \(said:c1\)/);
+  assert.equal(there('X-5'), true);
+  // The same when even the local branch is gone: it starts again from the base.
+  assert.equal(session('X-5', { commit: null, answer: 'Rien de fait.\n\nQuestions pour Makhtar :\n1. Et la couleur ?' }).run.status, 0);
+  flow();
+  assert.equal(there('X-5'), false);
+  box.git('branch', '-D', 'dev/X-5');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c2', createdAt: '2099-01-02T10:00:00Z', body: 'Bleu.', byOwner: true }, { id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
+  assert.equal(execFileSync('git', ['-C', record('X-5').worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }), execFileSync('git', ['-C', box.repo, 'rev-parse', 'origin/main'], { encoding: 'utf8' }));
+  assert.match(session('X-5', { commit: 'fix: the first one, in blue' }).prompt, /Bleu\./);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'log', '-1', '--format=%s', 'dev/X-5'], { encoding: 'utf8' }).trim(), 'fix: the first one, in blue');
+});
+
+test('the adapter hands a session its budget, and a session stopped by it ends with a code of its own', () => {
+  const dir = scratch('orch-budget-');
+  writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(dir, 'args')}"\ncat > /dev/null\necho '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":0.41,"errors":["Reached maximum budget ($0.4)"],"modelUsage":{"m":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"costUSD":0.41}}}'\nexit 1\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'prompt.md'), 'prompt\n');
+  const call = (extra) => spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['run', '--model', 'm', '--prompt-file', join(dir, 'prompt.md'), '--report', join(dir, 'report.md'), '--usage', join(dir, 'usage.json')], { cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCH_REPO: fixtureProject(), ORCH_STATE_DIR: join(dir, 'state'), ORCH_RUN_ID: 'r1', ...extra }, encoding: 'utf8' });
+  const capped = call({ ORCH_BUDGET_USD: '0.4' });
+  const args = readFileSync(join(dir, 'args'), 'utf8').split('\n');
+  assert.equal(args[args.indexOf('--max-budget-usd') + 1], '0.4');
+  assert.equal(capped.status, 5, capped.stderr);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'usage.json'), 'utf8')).cost_usd, 0.41, 'what it cost is still counted');
+  // No budget given: none asked of the CLI.
+  call({});
+  assert.equal(readFileSync(join(dir, 'args'), 'utf8').split('\n').includes('--max-budget-usd'), false);
 });

@@ -60,6 +60,9 @@ free_for_a_run() {
   [ ! -f "$work/readied" ] || return 1
   [ -f "$work/host" ] || { "$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '(.free_for_a_ci_run // false) and ((.screen_tests_or_captures_running // 0) == 0)' > "$work/host" || echo false > "$work/host"; }
   [ "$(cat "$work/host")" = true ] || return 1
+  # Checks started in the last two minutes (by a round before this one) may
+  # not be listed by the forge yet: not a second pull request on top of them.
+  [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2> /dev/null)" ] || return 1
   ( exec 6>> "$ORCH_STATE_DIR/heavy.lock" && flock -n 6 ) 2> /dev/null
 }
 session_hours=$(conf_get lanes session_hours)
@@ -68,11 +71,65 @@ states_of_work="$(conf_get linear todo_state), $(conf_get linear progress_state)
 in_list() { tr ',' '\n' <<<"$2" | sed 's/^ *//; s/ *$//' | grep -qxF -- "$1"; }
 end_runs() { ledger sql "select run_id from runs where lane = '$1' and outcome = 'running'" | jq -r '.[].run_id' | while IFS= read -r run_id; do ledger run-end --run-id "$run_id" --outcome killed; done; }
 
+# cost_left <record> <ticket>: sets cost_rest to what the ticket may still
+# cost, or to nothing when it has no cap. The cap is [limits] ticket_cost_usd, or for
+# one ticket the last line « Plafond <n> » the user wrote on it (his own
+# comments only: a line an agent wrote changes nothing). What it cost: every
+# run of the ticket since its lane was first opened, as the ledger has it.
+# Sets cost_cap and cost_spent too, for whoever says it, and cost_out to
+# « true » when the cap counts as spent. Called as it is,
+# never inside $( ): it speaks through those three. Returns 1 when its cap
+# or what it cost cannot be read (the tracker or the ledger does not
+# answer): cost_rest is then empty, and nothing may be opened on a guess. Without a
+# record (a ticket no lane was opened on yet), every run of the ticket counts.
+cost_left() {
+  local record=$1 ticket=$2 own rate from=1970
+  cost_cap=$(conf_get limits ticket_cost_usd) cost_spent= cost_rest= cost_out=
+  [[ "$ticket" =~ ^[A-Z]+-[0-9]+$ ]] || return 1
+  # The cap he wrote on the ticket is part of the answer: when his comments
+  # cannot be read, the cap is not known either.
+  "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/cap-comments.json" 2> /dev/null || return 1
+  jq -e 'type == "array"' "$work/cap-comments.json" > /dev/null 2>&1 || return 1
+  cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/cap-agents.txt" || true
+  own=$(jq -r --arg cap "$cap_line" --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)" + $cap)] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
+  [ -z "$own" ] || cost_cap=$own
+  [[ "$cost_cap" =~ ^[0-9]+([.][0-9]+)?$ ]] || { cost_cap=; return 0; }
+  rate=$(conf_get currency usd_eur)
+  [[ "$rate" =~ ^[0-9]+([.][0-9]+)?$ ]] || rate=1
+  [ -z "$record" ] || from=$(jq -r '(.opened_at // "1970")[0:19]' "$record" 2> /dev/null) || from=
+  [[ "$from" =~ ^[0-9T:-]+$ ]] || return 1
+  cost_spent=$(ledger sql "select coalesce(sum(cost_eur), 0) as spent from runs where ticket = '$ticket' and substr(started_at, 1, 19) >= '$from'" 2> /dev/null | jq -r --argjson rate "$rate" '.[0].spent / $rate | . * 100 | round / 100' 2> /dev/null) || cost_spent=
+  [[ "$cost_spent" =~ ^[0-9]+([.][0-9]+)?$ ]] || { cost_spent=; return 1; }
+  cost_rest=$(jq -nr --argjson cap "$cost_cap" --argjson spent "$cost_spent" '$cap - $spent | . * 100 | round / 100') || cost_rest=
+  [[ "$cost_rest" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { cost_rest=; return 1; }
+  # Spent: nothing left, or less than a twentieth of the cap, which buys no
+  # session worth opening.
+  cost_out=$(jq -n --argjson cap "$cost_cap" --argjson rest "$cost_rest" '$rest <= $cap / 20')
+}
+
+# at_cost_cap <record> <ticket>: said, and told to the lead once for a given
+# cap, when the ticket has reached it.
+at_cost_cap() {
+  local record=$1 ticket=$2
+  did "$record" "cost:$cost_cap" && return 0
+  say "$ticket: at its cap ($(printf '%.2f' "$cost_spent") \$ of $cost_cap \$): not opened again"
+  [ -n "$dry" ] || ledger event --kind ticket_cost --ticket "$ticket" --value "$cost_spent" --detail "the lane of $ticket has cost $(printf '%.2f' "$cost_spent") \$ at list price, for a cap of $cost_cap \$ on this ticket: it is stopped and not opened again, what it had committed is on its branch. Tell the user what was done and what is left (its last report says), and ask him one closed question: raise the cap of this ticket, yes or no, with your recommendation and an amount; he answers by writing a line « Plafond <amount> » on the ticket"
+  mark "$record" "cost:$cost_cap"
+}
+
 # again <record> <ticket> <role> <key> <file that says why> [keep]: one more
-# run of the lane, once for that key, within the runs of the day. With
-# « keep », the ticket stays in the status it is in.
+# run of the lane, once for that key. With « keep », the ticket stays in the
+# status it is in. Returns 0 when the lane was opened (in a rehearsal: would
+# be), 1 when it was not: no place now, the subscription at its stop, opened
+# for that already, or a loop.
+# No loop: for a given kind of reason (its checks, a reviewer, the base, a
+# session that stopped or that its budget stopped, work that would not
+# leave), three runs in a day;
+# then it is said, and left. A word of the user or of the lead is not a
+# loop. [lanes] runs_per_day is the net under all of it.
 again() {
-  local record=$1 ticket=$2 role=$3 key=$4 why=$5 keep=${6:-} today code=0
+  local record=$1 ticket=$2 role=$3 key=$4 why=$5 keep=${6:-} today same kind code=0 since left
+  kind=${key%%:*}
   # Whatever opens the lane again, a card the user put in the status of his
   # agreement stays there: only he, or a version he was not shown, takes it
   # out (merge-pr.sh).
@@ -85,31 +142,125 @@ again() {
       [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --detail "the lane of $ticket was opened again ($key), its session ended, and the reason still holds: the rules cannot move it further. Tell the user where the ticket stands"
       mark "$record" "still:$key"
     fi
-    return 0
+    return 1
   fi
-  today=$(jq --arg since "$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)" '[.runs[]? | select(.at >= $since)] | length' "$record")
+  since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+  case "$kind" in
+    said | told) ;;
+    *)
+      same=$(jq --arg kind "$kind:" --arg since "$since" '[(.done // {}) | to_entries[] | select((.key | startswith($kind)) and .value >= $since)] | length' "$record")
+      if [ "$same" -ge 3 ]; then
+        if ! did "$record" "loop:$kind:$(date -u +%F)"; then
+          say "$ticket: opened again $same times in a day for the same reason ($kind): left as it is"
+          [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --value "$same" --detail "the lane of $ticket was opened again $same times in a day for the same reason ($kind) and it holds again ($key): it is not opened a fourth time. Tell the user which reason, what the lane did about it each time, and ask him whether to go on"
+          mark "$record" "loop:$kind:$(date -u +%F)"
+        fi
+        return 1
+      fi
+      ;;
+  esac
+  today=$(jq --arg since "$since" '[.runs[]? | select(.at >= $since)] | length' "$record")
   if [ "$today" -ge "$cap" ]; then
     if ! did "$record" "stuck:$(date -u +%F)"; then
       say "$ticket: opened $today times in a day, not opened again ($key)"
       [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --value "$today" --detail "the lane of $ticket was opened $today times in a day and still needs one more run ($key): it is left as it is. Tell the user where the ticket stands"
       mark "$record" "stuck:$(date -u +%F)"
     fi
+    return 1
+  fi
+  # The cap of the ticket: nothing opens it once reached; else the session
+  # is given what is left.
+  if ! cost_left "$record" "$ticket"; then
+    say "$ticket: its cap or what it has cost cannot be read: not opened again ($key)"
+    return 1
+  fi
+  left=$cost_rest
+  if [ "$cost_out" = true ]; then
+    at_cost_cap "$record" "$ticket"
+    return 1
+  fi
+  if [ -n "$dry" ]; then say "$ticket: opened again ($key)"; return 0; fi
+  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none ${keep:+--keep-status} ${left:+--budget "$left"} > /dev/null 2> "$work/spawn.err" || code=$?
+  case "$code" in
+    0)
+      say "$ticket: opened again ($key)"
+      mark "$record" "$key"
+      return 0
+      ;;
+    3 | 4) return 1 ;; # no place now, or the subscription at its stop: tried again at the next wake
+    *)
+      say "$ticket: could not be opened again: $(sed -n '$p' "$work/spawn.err")"
+      return 1
+      ;;
+  esac
+}
+
+# base_without_model <record> <ticket> <role> <lane> <pr>: the base brought
+# into the branch of a lane by the rules, when nothing has to be decided: a
+# merge git makes by itself, in a worktree made for it, sent the way a
+# session sends its work (push-lane.sh: the guard, never forced). Returns 1,
+# with nothing changed, when the merge needs somebody: the lane is opened.
+# Tried once for a given state of the branch and of the base: what git or
+# the push refused is not asked again at every wake. Whatever fails, the
+# branch is left where it was: a merge that did not leave is nobody's work.
+base_without_model() {
+  local record=$1 ticket=$2 role=$3 lane=$4 pr=$5 spot sent push_branch before tried
+  [ -z "$dry" ] || return 1
+  # A project may want a session of the lane every time ([lanes]
+  # base_without_model = no): its tests run again on what the merge gave.
+  [ "$(conf_get lanes base_without_model)" != no ] || return 1
+  push_branch=$(jq -r '.push_branch // empty' "$record")
+  tried="nobase:$(git -C "$ORCH_REPO" rev-parse --short "origin/${push_branch:-$lane}" 2> /dev/null):$(git -C "$ORCH_REPO" rev-parse --short "$base" 2> /dev/null)"
+  ! did "$record" "$tried" || return 1
+  spot="$(dirname "$(jq -r '.worktree' "$record")")/.base-$ticket"
+  git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
+  git -C "$ORCH_REPO" worktree add --quiet "$spot" "$lane" 2> /dev/null || return 1
+  before=$(git -C "$spot" rev-parse HEAD)
+  if git -C "$spot" merge --quiet --ff-only "origin/${push_branch:-$lane}" 2> /dev/null \
+    && before=$(git -C "$spot" rev-parse HEAD) && echo "$before" > "$(git -C "$spot" rev-parse --absolute-git-dir)/base-before" \
+    && git -C "$spot" -c user.name="$(git -C "$ORCH_REPO" config user.name || echo dispatcher)" -c user.email="$(git -C "$ORCH_REPO" config user.email || echo dispatcher@localhost)" merge --quiet --no-edit "$base" > /dev/null 2>&1 \
+    && sent=$(ORCH_TICKET=$ticket ORCH_ROLE=$role ORCH_LANE=$lane ORCH_PUSH_BRANCH=$push_branch "$ORCH_HOME/push-lane.sh" "$spot" 2> /dev/null | sed -n '$p') && [[ "$sent" =~ ^#[0-9]+$ ]]; then
+    git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
+    jq --arg at "$(now_utc)" '. + {pushed_at: $at}' "$record" > "$record.part" && mv "$record.part" "$record"
     return 0
   fi
-  say "$ticket: opened again ($key)"
+  git -C "$spot" merge --abort > /dev/null 2>&1 || true
+  git -C "$spot" reset --quiet --hard "$before" > /dev/null 2>&1 || true
+  git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
+  mark "$record" "$tried"
+  return 1
+}
+
+# What a round that died in the middle of that left: its worktree, and at
+# most the merge it had made on the tip it wrote down (base-before), that no
+# remote has. Both go before anything is counted (one round at a time:
+# nothing of this round is in there yet). Any other commit is somebody's
+# work, and stays.
+base_leftovers() {
+  local root spot before
   [ -z "$dry" ] || return 0
-  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none ${keep:+--keep-status} > /dev/null 2> "$work/spawn.err" || code=$?
-  case "$code" in
-    0) mark "$record" "$key" ;;
-    3 | 4) : ;; # no place now, or the subscription at its stop: tried again at the next wake
-    *) say "$ticket: could not be opened again: $(sed -n '$p' "$work/spawn.err")" ;;
-  esac
+  root=$(expand_home "$(conf_get lanes root)")
+  for spot in "$root"/.base-*; do
+    [ -d "$spot" ] || continue
+    git -C "$spot" merge --abort > /dev/null 2>&1 || true
+    before=$(cat "$(git -C "$spot" rev-parse --absolute-git-dir 2> /dev/null)/base-before" 2> /dev/null) || before=
+    if [ -n "$before" ] && [ "$(git -C "$spot" rev-parse --verify --quiet 'HEAD^1')" = "$before" ] && git -C "$spot" rev-parse --verify --quiet 'HEAD^2' > /dev/null \
+      && [ "$(git -C "$spot" rev-list --count HEAD --not --remotes 2> /dev/null)" = 1 ]; then
+      git -C "$spot" reset --quiet --hard "$before" > /dev/null 2>&1 || true
+    fi
+    if ! git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1; then
+      # No longer a worktree git knows: only the directory this script made is taken away.
+      if [[ "$(basename "$spot")" =~ ^\.base-[A-Z]+-[0-9]+$ ]] && [ -f "$spot/.git" ]; then rm -rf -- "$spot" 2> /dev/null || true; fi
+      git -C "$ORCH_REPO" worktree prune > /dev/null 2>&1 || true
+    fi
+    if [ -e "$spot" ]; then say "what a round left of a base brought in without a model could not be cleared ($spot)"; else say "what a round left of a base brought in without a model is cleared ($(basename "$spot"))"; fi
+  done
 }
 
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more=
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record")
   last=$(jq -r '.runs[-1].run // empty' "$record")
@@ -160,8 +311,17 @@ one_lane() {
   # status that is not one of the work): its lane waits, nothing is opened.
   in_list "$state" "$states_of_work" || return 0
 
-  # A session that stopped short is run again.
-  if [ "$code" != 0 ]; then
+  # A session its budget stopped is over, like any other: what it committed
+  # was sent. When the cap of the ticket is spent, that is said here, and
+  # nothing opens the lane. When something is left (he lifted the cap since,
+  # or the session cost less than it was given), it goes on from where it
+  # was, further down: with his word, when he wrote one beside the cap. Any
+  # other session that stopped short is run again.
+  if [ "$code" = 5 ]; then
+    if cost_left "$record" "$ticket"; then
+      if [ "$cost_out" = true ]; then at_cost_cap "$record" "$ticket"; else more=1; fi
+    fi
+  elif [ "$code" != 0 ]; then
     printf 'Ta session précédente s’est arrêtée sans finir (code %s). Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' "$code" > "$work/why.md"
     again "$record" "$ticket" "$role" "stopped:$last" "$work/why.md"
     return 0
@@ -226,40 +386,60 @@ one_lane() {
   # What the user wrote on the ticket that its last session was not handed
   # (the run keeps which of his words it was given: a word that came while
   # it was being opened, or while it ran, was seen by nobody; a record from
-  # before runs kept that goes by the time): his word goes to the lane, once.
+  # before runs kept that goes by the time), and what the lead wrote to the
+  # lane (tell-lane.sh <ticket>: its sessions read no terminal). Both go to
+  # the lane together, quoted, in one session. Not under the user's
+  # agreement: a word after his « go » is read by the lead and does not take
+  # it back. When the lane cannot be opened now (no place, the subscription
+  # at its stop), the rest of its step goes on: work that is finished is
+  # not held back by a word that waits.
+  # A comment that only sets the cap of the ticket (« Plafond 80 ») is read
+  # by cost_left, and is no word for the lane.
   ended=$(jq -r '.runs[-1].at' "$record")
+  echo '[]' > "$work/his.json"
+  echo '[]' > "$work/told.json"
   if "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/comments.json" 2> /dev/null; then
     cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-    jq -c --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
-    # Not once he has agreed: a word of his after his « go » for the go-live
-    # is read by the lead, it does not take his agreement back.
-    if [ "$(jq length "$work/his.json")" != 0 ] && [ "$state" != "$(conf_get linear go_state)" ]; then
-      { echo "L'utilisateur a écrit sur le ticket depuis ta dernière session :"; jq -r '.[] | "le \(.createdAt[0:16] | sub("T"; " à ")) : " + .body' "$work/his.json"; } > "$work/why.md"
-      if ! did "$record" "said:$(jq -r '.[-1].id' "$work/his.json")"; then
-        again "$record" "$ticket" "$role" "said:$(jq -r '.[-1].id' "$work/his.json")" "$work/why.md"
-        return 0
-      fi
-    fi
+    jq -c --arg cap "$cap_line" --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
+    [ "$(jq length "$work/his.json")" = 0 ] || ! did "$record" "said:$(jq -r '.[-1].id' "$work/his.json")" || echo '[]' > "$work/his.json"
   fi
-
-  # What the lead wrote to the lane (tell-lane.sh <ticket>): its sessions
-  # read no terminal, so it is handed to it here, quoted, once. Not under
-  # the user's agreement, like a word of his.
-  if [ -s "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" ] && [ "$state" != "$(conf_get linear go_state)" ]; then
+  if [ -s "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" ]; then
     jq -c --slurpfile done <(jq -c '.done // {}' "$record") -R 'fromjson? | select($done[0]["told:" + .at] == null)' "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" | jq -sc 'sort_by(.at)' > "$work/told.json"
-    if [ "$(jq length "$work/told.json")" != 0 ]; then
-      { echo "Le chef de projet t’a écrit depuis ta dernière session (il relaie ; ce sont des constats à traiter dans ta copie de travail) :"; jq -r '.[] | "le \(.at[0:16] | sub("T"; " à ")) : " + .text' "$work/told.json"; } > "$work/why.md"
-      # A card that asks the user stays where it asks him: the word is the
-      # lead's, not his. In any other status, the ticket is shown at work.
-      asked=
+  fi
+  if [ "$state" != "$(conf_get linear go_state)" ] && [ "$(jq -s 'map(length) | add' "$work/his.json" "$work/told.json")" != 0 ]; then
+    {
+      if [ "$(jq length "$work/his.json")" != 0 ]; then
+        echo "L'utilisateur a écrit sur le ticket depuis ta dernière session :"
+        jq -r '.[] | "le \(.createdAt[0:16] | sub("T"; " à ")) : " + .body' "$work/his.json"
+      fi
+      if [ "$(jq length "$work/told.json")" != 0 ]; then
+        echo "Le chef de projet t’a écrit depuis ta dernière session (il relaie ; ce sont des constats à traiter dans ta copie de travail) :"
+        jq -r '.[] | "le \(.at[0:16] | sub("T"; " à ")) : " + .text' "$work/told.json"
+      fi
+    } > "$work/why.md"
+    # His word shows the ticket at work. The lead's alone leaves a card
+    # that asks the user where it asks him.
+    asked=
+    if [ "$(jq length "$work/his.json")" != 0 ]; then
+      key="said:$(jq -r '.[-1].id' "$work/his.json")"
+    else
+      key="told:$(jq -r '.[-1].at' "$work/told.json")"
       [ "$state" != "$(conf_get linear validate_state)" ] || asked=keep
-      again "$record" "$ticket" "$role" "told:$(jq -r '.[-1].at' "$work/told.json")" "$work/why.md" "$asked"
+    fi
+    if again "$record" "$ticket" "$role" "$key" "$work/why.md" "$asked"; then
       # Handed together: none of them opens it again.
-      if did "$record" "told:$(jq -r '.[-1].at' "$work/told.json")"; then
-        while IFS= read -r asked; do mark "$record" "told:$asked"; done < <(jq -r '.[:-1][].at' "$work/told.json")
+      if [ -z "$dry" ]; then
+        while IFS= read -r asked; do mark "$record" "told:$asked"; done < <(jq -r '.[].at' "$work/told.json")
       fi
       return 0
     fi
+  fi
+  # Its budget had stopped it, and the ticket has something left: it goes on
+  # from where it was (three times a day at most, like any other reason).
+  if [ -n "$more" ]; then
+    printf 'Ta session précédente s’est arrêtée à la limite de son budget, et ce ticket a encore de quoi continuer. Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' > "$work/why.md"
+    again "$record" "$ticket" "$role" "budget:$last" "$work/why.md" || true
+    return 0
   fi
 
   pr=$(jq -r '.pr // empty' "$record")
@@ -279,6 +459,12 @@ one_lane() {
   if ! git -C "$ORCH_REPO" merge-base --is-ancestor "$base" "$head" 2> /dev/null; then
     git -C "$ORCH_REPO" diff --name-only --no-renames "$head...$base" | jq -R . | jq -sc . > "$work/lag.json"
     if ! node --no-warnings "$ORCH_HOME/lib/merge.mjs" lag "$work/lag.json"; then
+      # Without a model when nothing has to be decided: the review and the
+      # agreement given for the version before still hold (only_base_merges).
+      if base_without_model "$record" "$ticket" "$role" "$lane" "$pr"; then
+        say "$ticket: the base is brought in without a model (#$pr)"
+        return 0
+      fi
       printf 'La branche principale a avancé sur du code depuis ta dernière session. Réintègre-la dans ta branche (`git merge %s`), résous les conflits s’il y en a en gardant ce que fait chaque côté, relance les tests de ce que tu touches, et commite.\n' "$base" > "$work/why.md"
       # His card stays where it is: the base brought in as it is changes
       # nothing of what he agreed to, or is asked.
@@ -399,6 +585,7 @@ one_lane() {
   # Never asked for this version: the lead asks the user for his agreement.
   did "$record" "ok:$head" || { say "$ticket: #$pr is reviewed and green at ${head:0:8}: the request for the agreement is the lead's"; mark "$record" "ok:$head"; }
 }
+base_leftovers || say "what a round left of a base brought in without a model could not be looked at"
 for record in "$ORCH_STATE_DIR/lanes"/*.json; do
   [ -f "$record" ] || continue
   if ! jq -e 'type == "object" and (.ticket | type) == "string"' "$record" > /dev/null 2>&1; then
@@ -448,7 +635,12 @@ while IFS=$'\t' read -r ticket updated; do
   esac
   if [ -n "$dry" ]; then say "$ticket: put in « $todo » by the user: its lane would be opened, if there is a place"; continue; fi
   code=0
-  "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none > /dev/null 2> "$work/spawn.err" || code=$?
+  # Its cap, the one of the project or the one he wrote on this ticket, less
+  # what the ticket already cost (a review before any lane).
+  if ! cost_left "" "$ticket"; then say "$ticket: put in « $todo » by the user: its cap or what it has cost cannot be read, it waits"; continue; fi
+  whole=$cost_rest
+  if [ "$cost_out" = true ]; then say "$ticket: put in « $todo » by the user: at its cap ($cost_spent \$ of $cost_cap \$) before any lane, it waits"; continue; fi
+  "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none ${whole:+--budget "$whole"} > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
     0) say "$ticket: put in « $todo » by the user: its lane is opened" ;;
     3) say "$ticket: put in « $todo » by the user: no place now (the limit of lanes), it waits"; break ;;
