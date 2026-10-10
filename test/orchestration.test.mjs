@@ -509,15 +509,26 @@ test('the Codex adapter gives the work of a lane its tools through the door of t
   assert.equal(held.status, 2, held.stderr);
   assert.throws(() => readFileSync(join(box.home, 'task-args')));
   assert.match(readFileSync(join(box.home, 'r.md'), 'utf8'), /^outcome: refused$/m);
-  // A project that did not name the script among its heavy commands: said, and « cannot start now » too.
+  // A session that ran is never taken for a door that stayed shut: whatever it printed (the door's own words, read in a file), and whatever its code (5 is its own: a budget, elsewhere).
+  writeFileSync(task, `#!/usr/bin/env bash\necho ran > "${join(box.home, 'task-args')}"\necho 'when-free.sh: "x" is not one of the heavy commands of the project' >&2\necho 'and it went on' >&2\nprintf 'done'\n`, { mode: 0o755 });
+  const echoed = call({ ADAPTER_TASK_TOOLS: 'yes' });
+  assert.equal(echoed.status, 0, echoed.stderr);
+  assert.match(echoed.report, /^outcome: done$/m);
+  writeFileSync(task, `#!/usr/bin/env bash\necho ran > "${join(box.home, 'task-args')}"\necho 'stopped by its budget' >&2\nexit 5\n`, { mode: 0o755 });
+  const five = call({ ADAPTER_TASK_TOOLS: 'yes' });
+  assert.equal(five.status, 5);
+  assert.deepEqual(five.args, ['ran']);
+  // A project that did not name the script among its heavy commands: said by the door, and « cannot start now » too.
+  rmSync(join(box.home, 'task-args'));
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/heavy_commands = .*\n/, 'heavy_commands = echo screens\n'));
   const unnamed = call({ ADAPTER_TASK_TOOLS: 'yes' });
   assert.equal(unnamed.status, 2);
-  assert.match(unnamed.report, /commandes lourdes/);
+  assert.match(unnamed.report, /is not one of the heavy commands/);
+  assert.deepEqual(unnamed.args, [''], 'the script never ran');
 });
 
 test('what a backend that cannot commit brings back is committed by the rules, under the message it wrote, and sent like any work; a backend that commits by itself is left alone', () => {
-  const { flow, todo, by, record, box, env, stuck } = flowBox();
+  const { flow, todo, by, record, box, env, stuck, pull } = flowBox();
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[adapter.first]\ncommits = no\n`);
   todo(['X-5']);
@@ -537,6 +548,22 @@ test('what a backend that cannot commit brings back is committed by the rules, u
   const after = flow();
   assert.doesNotMatch(after.stdout, /X-5: opened again \(unsent/);
   assert.deepEqual(stuck(), []);
+  // A message that says nothing: the default subject, and the work is committed all the same.
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: true }]));
+  const next = () => { pull({ headRefOid: remote('rev-parse', 'dev/X-5'), isDraft: true }); return spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--resume', '--comment-on', 'none', '--keep-status'], { env, encoding: 'utf8' }); };
+  const again = next();
+  assert.equal(again.status, 0, again.stderr);
+  const blank = run(`echo 'export const note = 2;' > server/note.mjs; printf '  \\n\\n' > .commit-message`);
+  assert.equal(blank.status, 0, blank.stderr);
+  assert.match(remote('log', '-1', '--format=%s', 'dev/X-5'), /^chore: the work of a on X-5$/);
+  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 2;');
+  // A backend that commits by itself is left alone: what it did not commit stays its own to sort out.
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[adapter.first]\ncommits = no\n', ''));
+  assert.equal(next().status, 0);
+  const own = run(`echo 'export const note = 3;' > server/note.mjs`);
+  assert.equal(own.status, 0, own.stderr);
+  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 2;', 'nothing was committed for it');
+  assert.match(execFileSync('git', ['-C', record('X-5').worktree, 'status', '--porcelain'], { encoding: 'utf8' }), /server\/note\.mjs/);
 });
 
 test('the spawn lock is released once the lane exists, not held while waiting for it', async () => {

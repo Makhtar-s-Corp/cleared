@@ -93,9 +93,12 @@ case "${1:-}" in
     kill "$follow" 2> /dev/null || true
     wait "$follow" 2> /dev/null || true
     # The door did not open within its wait (5), or does not know the task
-    # script (1, before anything ran): it could not start now.
-    if [ -n "$tools" ] && { [ "$code" = 5 ] || grep -q 'is not one of the heavy commands' "$err"; }; then
-      refuse "la machine n'était pas libre pour une session avec outils, ou le script de tâche n'est pas nommé parmi les commandes lourdes du projet : $(sed -n '$p' "$err")"
+    # script (1): it could not start now. Only the door's own last word says
+    # so: nothing runs after it refuses, while a session that did run may
+    # end with any code and print anything.
+    last=$(sed -n '$p' "$err")
+    if [ -n "$tools" ] && { [ "$code" = 5 ] || [ "$code" = 1 ]; } && [[ "$last" == "when-free.sh: "* ]]; then
+      refuse "la machine n'était pas libre pour une session avec outils, ou le script de tâche n'est pas nommé parmi les commandes lourdes du projet : $last"
     fi
     if [ "$code" != 0 ] && grep -q -E '^(Refus|Refused)' "$err"; then
       {

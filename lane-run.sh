@@ -99,8 +99,10 @@ lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lan
 # not commit is its to sort out.
 if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   message=$(mktemp)
-  if [ -s .commit-message ] && [ ! -L .commit-message ]; then head -c 4000 .commit-message > "$message"; fi
-  rm -f .commit-message
+  # A real file that says something: a blank one, or anything else by that
+  # name, leaves the default subject.
+  if [ -f .commit-message ] && [ ! -L .commit-message ] && grep -q '[^[:space:]]' .commit-message; then head -c 4000 .commit-message > "$message"; fi
+  rm -rf .commit-message
   if [ -n "$(git status --porcelain 2> /dev/null)" ]; then
     [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
     git add -A
