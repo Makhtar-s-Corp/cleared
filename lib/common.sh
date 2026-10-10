@@ -63,6 +63,17 @@ orca_terminal() {
   jq -r --arg handle "$1" '(.result.terminals // .result)[] | select(.handle == $handle) | "\(.connected) \(.worktreePath)"' <<<"$listed" | sed -n '1p'
 }
 
+# update_setting <key>: a setting of [update]. How the checkouts on this
+# machine follow their bases is said by the project when it says it, else by
+# the settings that come with the tool: a project that keeps its own file
+# and says nothing of it does not switch the updates off by leaving it out.
+update_setting() {
+  local value
+  value=$(conf_get update "$1")
+  [ -n "$value" ] || [ ! -f "$ORCH_HOME/agents.conf" ] || value=$(ORCH_CONF=$ORCH_HOME/agents.conf conf_get update "$1")
+  echo "$value"
+}
+
 # conf_get <section> <key>: one value of agents.conf (empty when absent).
 conf_get() {
   awk -v section="[$1]" -v wanted="$2" '
@@ -355,7 +366,8 @@ github_down() {
 # given to something else), or an opening that never came, holds nothing.
 talk_open() {
   local mark="$ORCH_STATE_DIR/wake/talk" first second
-  read -r first second < "$mark" 2> /dev/null || return 1
+  [ -r "$mark" ] || return 1
+  read -r first second 2> /dev/null < "$mark" || return 1
   if [ "$first" = opening ]; then
     [ $(( $(date +%s) - ${second:-0} )) -lt "${ORCH_TALK_OPENING:-300}" ]
   else

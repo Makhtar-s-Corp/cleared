@@ -2033,6 +2033,110 @@ test('what a first real round showed: a session that ended without its push is s
   assert.deepEqual(stuck(), ['lane_stuck X-5', 'lane_stuck X-5']);
 });
 
+test('the checkout of the project follows its base by itself: fast-forward only, never a copy somebody changed or works in, what is not tracked left alone, a refusal said once', () => {
+  const home = scratch('orch-project-');
+  const remote = join(home, 'remote.git');
+  const project = join(home, 'project');
+  const tools = join(home, 'tool');
+  const state = join(home, 'state');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['clone', '-q', remote, project], { stdio: 'ignore' });
+  const git = (dir, ...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  mkdirSync(tools, { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'project-update.sh'), tools]);
+  writeFileSync(join(tools, 'agents.conf'), '[lanes]\nbase = origin/main\n\n[update]\nproject = yes\n');
+  mkdirSync(join(project, '.ferme'), { recursive: true });
+  writeFileSync(join(project, 'rules.md'), 'one\n');
+  git(project, 'checkout', '-q', '-b', 'main');
+  git(project, 'add', '.');
+  git(project, 'commit', '-q', '-m', 'chore: the project');
+  git(project, 'push', '-q', 'origin', 'main');
+  writeFileSync(join(project, '.env.local'), 'SECRET=kept\n');
+  const elsewhere = join(home, 'elsewhere');
+  execFileSync('git', ['clone', '-q', remote, elsewhere], { stdio: 'ignore' });
+  const live = (path, text, message) => { mkdirSync(dirname(join(elsewhere, path)), { recursive: true }); writeFileSync(join(elsewhere, path), text); git(elsewhere, 'add', '.'); git(elsewhere, 'commit', '-q', '-m', message); git(elsewhere, 'push', '-q', 'origin', 'HEAD:main'); return git(elsewhere, 'rev-parse', 'HEAD').trim(); };
+  const env = { ...process.env, ORCH_REPO: project, ORCH_STATE_DIR: state, ORCH_CONF: join(tools, 'agents.conf') };
+  const update = (extra = {}) => spawnSync(join(tools, 'project-update.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const head = () => git(project, 'rev-parse', 'HEAD').trim();
+  const events = () => { try { const db = openLedger(join(state, 'ledger.db')); const rows = db.prepare("select kind from events where kind like 'project_%' order by rowid").all().map((row) => row.kind); db.close(); return rows; } catch { return []; } };
+  // Up to date: nothing to do, nothing said.
+  assert.equal(update().status, 3);
+  assert.deepEqual(events(), []);
+  // Something of the project went live, its settings for the tool among it: this copy takes it, and says it did.
+  const second = live('.ferme/agents.conf', '[limits]\nmax_lanes = 2\n', 'chore: the settings of the project');
+  const taken = update();
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.equal(head(), second);
+  assert.equal(readFileSync(join(project, '.ferme', 'agents.conf'), 'utf8'), '[limits]\nmax_lanes = 2\n');
+  assert.equal(readFileSync(join(project, '.env.local'), 'utf8'), 'SECRET=kept\n', 'what is not tracked is left alone');
+  assert.deepEqual(events(), ['project_updated']);
+  // Switched off by the settings: nothing moves.
+  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n[update]\nproject = no\n');
+  const third = live('rules.md', 'two\n', 'docs: a rule');
+  assert.equal(update({ ORCH_CONF: join(home, 'off.conf') }).status, 3);
+  assert.equal(head(), second);
+  // Somebody works in it on a branch: it never moves by itself, and nothing is said.
+  git(project, 'checkout', '-q', '-b', 'work');
+  assert.equal(update().status, 3);
+  assert.deepEqual(events(), ['project_updated']);
+  git(project, 'checkout', '-q', 'main');
+  // A tracked file changed by hand: nothing is overwritten, said once for that version of the base.
+  writeFileSync(join(project, 'rules.md'), 'by hand\n');
+  const kept = update();
+  assert.equal(kept.status, 1);
+  assert.match(kept.stderr, /changed by hand/);
+  assert.equal(readFileSync(join(project, 'rules.md'), 'utf8'), 'by hand\n');
+  assert.equal(update().status, 1);
+  assert.deepEqual(events(), ['project_updated', 'project_update_refused']);
+  // Put back: taken at the next wake.
+  git(project, 'checkout', '-q', '--', 'rules.md');
+  assert.equal(update().status, 0);
+  assert.equal(head(), third);
+  // Commits of its own that the base does not have: refused too.
+  writeFileSync(join(project, 'rules.md'), 'mine\n');
+  git(project, 'commit', '-q', '-am', 'wip: mine');
+  live('other.md', 'x\n', 'docs: other');
+  const ahead = update();
+  assert.equal(ahead.status, 1);
+  assert.match(ahead.stderr, /holds commits/);
+  // A file that is not tracked stands where a tracked one comes in: nothing is overwritten, and what git said is told.
+  git(project, 'reset', '-q', '--hard', third);
+  writeFileSync(join(project, 'notes.md'), 'not tracked\n');
+  live('notes.md', 'tracked\n', 'docs: notes');
+  const blocked = update();
+  assert.equal(blocked.status, 1);
+  assert.match(blocked.stderr, /did not go through: .*notes\.md/);
+  assert.equal(readFileSync(join(project, 'notes.md'), 'utf8'), 'not tracked\n');
+  rmSync(join(project, 'notes.md'));
+  assert.equal(update().status, 0);
+  const fourth = head();
+  // A project that keeps its own settings and says nothing of the updates does not switch them off: the tool's own say.
+  writeFileSync(join(home, 'project.conf'), '[lanes]\nbase = origin/main\n[limits]\nmax_lanes = 2\n');
+  const fifth = live('rules.md', 'three\n', 'docs: one more rule');
+  assert.equal(update({ ORCH_CONF: join(home, 'project.conf') }).status, 0);
+  assert.equal(head(), fifth);
+  assert.notEqual(fifth, fourth);
+  // A base named without its remote, or unknown here, is nothing to follow, and stops nothing.
+  writeFileSync(join(home, 'odd.conf'), '[lanes]\nbase = origin/nowhere\n[update]\nproject = yes\n');
+  assert.equal(update({ ORCH_CONF: join(home, 'odd.conf') }).status, 3);
+  // A project the tool lives inside of is left to the update of the tool itself.
+  const inside = join(project, 'tool-inside');
+  mkdirSync(inside, { recursive: true });
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'project-update.sh'), inside]);
+  live('other-again.md', 'x\n', 'docs: other again');
+  assert.equal(spawnSync(join(inside, 'project-update.sh'), [], { env, encoding: 'utf8' }).status, 3);
+  assert.equal(head(), fifth);
+  // Each wake asks for it, and goes on whatever it answers: a copy that could not move stops nothing.
+  const box = sandbox();
+  writeFileSync(join(box.home, 'project-update.sh'), `#!/usr/bin/env bash\necho asked >> "${join(box.home, 'project-calls')}"\nexit 1\n`, { mode: 0o755 });
+  const woke = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(woke.status, 0, woke.stderr);
+  assert.deepEqual(readFileSync(join(box.home, 'project-calls'), 'utf8').trim().split('\n'), ['asked']);
+  // And the lead is told of a copy that did not move, in its own words.
+  assert.match(readFileSync(join(ORCH_HOME, 'wake.sh'), 'utf8'), /project_update_refused/);
+  assert.match(readFileSync(join(ORCH_HOME, 'lib', 'reviews.mjs'), 'utf8'), /'project_update_refused'/);
+});
+
 test('the checkout the dispatcher runs from follows the base by itself: fast-forward only, a version that cannot run or a copy somebody changed is refused and said, and the wake goes on with the new scripts', () => {
   const home = scratch('orch-self-');
   const remote = join(home, 'remote.git');
@@ -2104,8 +2208,8 @@ test('the checkout the dispatcher runs from follows the base by itself: fast-for
   assert.equal(update().status, 3);
   assert.equal(head(), mine);
   git(checkout, 'checkout', '-q', 'main');
-  // Without the setting, nothing.
-  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n');
+  // Switched off by the settings, nothing. (A project's file that says nothing of it leaves the tool's own setting in force.)
+  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n[update]\nself = no\n');
   assert.equal(spawnSync(join(tools, 'self-update.sh'), [], { env: { ...env, ORCH_CONF: join(home, 'off.conf') }, encoding: 'utf8' }).status, 3);
   assert.notEqual(head(), git(elsewhere, 'rev-parse', 'HEAD').trim());
   // The wake that finds this copy updated goes on as the new wake, once.
@@ -4559,6 +4663,8 @@ test('the base is brought into a lane without a model when nothing has to be dec
   box.git('add', '.');
   box.git('commit', '-q', '-m', 'feat: code on the base');
   box.git('push', '-q', 'origin', 'main');
+  // The branch of the lane is gone from this checkout (seen live: a lane that took up an older pull request): it is made again from the remote.
+  box.git('branch', '-D', 'dev/X-5');
   const merged = flow();
   assert.match(merged.stdout, /X-5: the base is brought in without a model \(#41\)/);
   assert.equal(record('X-5').runs.length, 1, 'no session was opened for it');

@@ -21,9 +21,9 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
-[ "$(conf_get update self)" = yes ] || exit 3
+[ "$(update_setting self)" = yes ] || exit 3
 # The branch of the tool itself, not the one of the project it works on.
-base=$(conf_get update base)
+base=$(update_setting base)
 base=${base:-origin/main}
 branch=${base#origin/}
 top=$(git -C "$ORCH_HOME" rev-parse --show-toplevel 2> /dev/null) || exit 3

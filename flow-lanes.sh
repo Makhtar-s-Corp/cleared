@@ -214,7 +214,14 @@ base_without_model() {
   ! did "$record" "$tried" || return 1
   spot="$(dirname "$(jq -r '.worktree' "$record")")/.base-$ticket"
   git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
-  git -C "$ORCH_REPO" worktree add --quiet "$spot" "$lane" 2> /dev/null || return 1
+  # The branch of the lane may be gone from here (its worktree was closed
+  # long ago, or the lane took up a pull request that was there before it):
+  # it is made again from what the remote has.
+  if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
+    git -C "$ORCH_REPO" worktree add --quiet "$spot" "$lane" 2> /dev/null || return 1
+  else
+    git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$spot" "origin/${push_branch:-$lane}" 2> /dev/null || return 1
+  fi
   before=$(git -C "$spot" rev-parse HEAD)
   if git -C "$spot" merge --quiet --ff-only "origin/${push_branch:-$lane}" 2> /dev/null \
     && before=$(git -C "$spot" rev-parse HEAD) && echo "$before" > "$(git -C "$spot" rev-parse --absolute-git-dir)/base-before" \
