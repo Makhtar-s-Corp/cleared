@@ -4779,7 +4779,7 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: finished' });
   assert.equal(budget(), 'budget=0.9');
   // A lane that was not stopped is not opened by a line that only sets the cap; it is by a sentence of his.
-  const c12 = { id: 'c12', createdAt: '2099-01-01T13:00:00Z', body: 'Plafond 9\n', byOwner: true };
+  const c12 = { id: 'c12', createdAt: '2099-01-01T13:00:00Z', body: 'Plafond : 9 $\r\n', byOwner: true };
   comments([c12, c11, c9]);
   pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   assert.doesNotMatch(flow().stdout, /X-5: opened again/);
