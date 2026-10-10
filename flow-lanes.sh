@@ -77,19 +77,20 @@ end_runs() { ledger sql "select run_id from runs where lane = '$1' and outcome =
 # comments only: a line an agent wrote changes nothing). What it cost: every
 # run of the ticket since its lane was first opened, as the ledger has it.
 # Sets cost_cap and cost_spent too, for whoever says it. Called as it is,
-# never inside $( ): it speaks through those three. Returns 1 when the ticket
-# has a cap and what it cost cannot be read (the ledger does not answer):
-# cost_rest is then empty, and nothing may be opened on a guess. Without a
+# never inside $( ): it speaks through those three. Returns 1 when its cap
+# or what it cost cannot be read (the tracker or the ledger does not
+# answer): cost_rest is then empty, and nothing may be opened on a guess. Without a
 # record (a ticket no lane was opened on yet), every run of the ticket counts.
 cost_left() {
   local record=$1 ticket=$2 own rate from=1970
   cost_cap=$(conf_get limits ticket_cost_usd) cost_spent= cost_rest=
   [[ "$ticket" =~ ^[A-Z]+-[0-9]+$ ]] || return 1
-  if "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/cap-comments.json" 2> /dev/null; then
-    cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/cap-agents.txt" || true
-    own=$(jq -r --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)^\\s*plafond\\s*:\\s*([0-9]+(?:[.,][0-9]+)?)")] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || own=
-    [ -z "$own" ] || cost_cap=$own
-  fi
+  # The cap he wrote on the ticket is part of the answer: when his comments
+  # cannot be read, the cap is not known either.
+  "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/cap-comments.json" 2> /dev/null || return 1
+  cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/cap-agents.txt" || true
+  own=$(jq -r --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)^\\s*plafond\\s*:\\s*([0-9]+(?:[.,][0-9]+)?)")] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
+  [ -z "$own" ] || cost_cap=$own
   [[ "$cost_cap" =~ ^[0-9]+([.][0-9]+)?$ ]] || { cost_cap=; return 0; }
   rate=$(conf_get currency usd_eur)
   [[ "$rate" =~ ^[0-9]+([.][0-9]+)?$ ]] || rate=1
@@ -164,7 +165,7 @@ again() {
   # The cap of the ticket: nothing opens it once reached; else the session
   # is given what is left.
   if ! cost_left "$record" "$ticket"; then
-    say "$ticket: what it has cost cannot be read: not opened again ($key)"
+    say "$ticket: its cap or what it has cost cannot be read: not opened again ($key)"
     return 1
   fi
   left=$cost_rest
@@ -212,7 +213,7 @@ base_without_model() {
   git -C "$ORCH_REPO" worktree add --quiet "$spot" "$lane" 2> /dev/null || return 1
   before=$(git -C "$spot" rev-parse HEAD)
   if git -C "$spot" merge --quiet --ff-only "origin/${push_branch:-$lane}" 2> /dev/null \
-    && before=$(git -C "$spot" rev-parse HEAD) \
+    && before=$(git -C "$spot" rev-parse HEAD) && echo "$before" > "$(git -C "$spot" rev-parse --absolute-git-dir)/base-before" \
     && git -C "$spot" -c user.name="$(git -C "$ORCH_REPO" config user.name || echo dispatcher)" -c user.email="$(git -C "$ORCH_REPO" config user.email || echo dispatcher@localhost)" merge --quiet --no-edit "$base" > /dev/null 2>&1 \
     && sent=$(ORCH_TICKET=$ticket ORCH_ROLE=$role ORCH_LANE=$lane ORCH_PUSH_BRANCH=$push_branch "$ORCH_HOME/push-lane.sh" "$spot" 2> /dev/null | sed -n '$p') && [[ "$sent" =~ ^#[0-9]+$ ]]; then
     git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
@@ -227,19 +228,28 @@ base_without_model() {
 }
 
 # What a round that died in the middle of that left: its worktree, and at
-# most one merge commit no remote has. Both go before anything is counted
-# (one round at a time: nothing of this round is in there yet).
+# most the merge it had made on the tip it wrote down (base-before), that no
+# remote has. Both go before anything is counted (one round at a time:
+# nothing of this round is in there yet). Any other commit is somebody's
+# work, and stays.
 base_leftovers() {
-  local spot
+  local root spot before
   [ -z "$dry" ] || return 0
-  for spot in "$(expand_home "$(conf_get lanes root)")"/.base-*; do
+  root=$(expand_home "$(conf_get lanes root)")
+  for spot in "$root"/.base-*; do
     [ -d "$spot" ] || continue
     git -C "$spot" merge --abort > /dev/null 2>&1 || true
-    if [ "$(git -C "$spot" rev-list --count HEAD --not --remotes 2> /dev/null)" = 1 ] && git -C "$spot" rev-parse --verify --quiet 'HEAD^2' > /dev/null; then
-      git -C "$spot" reset --quiet --hard 'HEAD^1' > /dev/null 2>&1 || true
+    before=$(cat "$(git -C "$spot" rev-parse --absolute-git-dir 2> /dev/null)/base-before" 2> /dev/null) || before=
+    if [ -n "$before" ] && [ "$(git -C "$spot" rev-parse --verify --quiet 'HEAD^1')" = "$before" ] && git -C "$spot" rev-parse --verify --quiet 'HEAD^2' > /dev/null \
+      && [ "$(git -C "$spot" rev-list --count HEAD --not --remotes 2> /dev/null)" = 1 ]; then
+      git -C "$spot" reset --quiet --hard "$before" > /dev/null 2>&1 || true
     fi
-    git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
-    say "what a round left of a base brought in without a model is cleared ($(basename "$spot"))"
+    if ! git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1; then
+      # No longer a worktree git knows: only the directory this script made is taken away.
+      [[ "$(basename "$spot")" =~ ^\.base-[A-Z]+-[0-9]+$ ]] && [ -f "$spot/.git" ] && rm -rf -- "$spot"
+      git -C "$ORCH_REPO" worktree prune > /dev/null 2>&1 || true
+    fi
+    if [ -e "$spot" ]; then say "what a round left of a base brought in without a model could not be cleared ($spot)"; else say "what a round left of a base brought in without a model is cleared ($(basename "$spot"))"; fi
   done
 }
 
@@ -613,7 +623,7 @@ while IFS=$'\t' read -r ticket updated; do
   code=0
   # Its cap, the one of the project or the one he wrote on this ticket, less
   # what the ticket already cost (a review before any lane).
-  if ! cost_left "" "$ticket"; then say "$ticket: put in « $todo » by the user: what it has cost cannot be read, it waits"; continue; fi
+  if ! cost_left "" "$ticket"; then say "$ticket: put in « $todo » by the user: its cap or what it has cost cannot be read, it waits"; continue; fi
   whole=$cost_rest
   if [ -n "$whole" ] && [ "$(jq -n --argjson left "$whole" '$left <= 0')" = true ]; then say "$ticket: put in « $todo » by the user: at its cap ($cost_spent \$ of $cost_cap \$) before any lane, it waits"; continue; fi
   "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none ${whole:+--budget "$whole"} > /dev/null 2> "$work/spawn.err" || code=$?

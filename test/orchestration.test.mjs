@@ -203,7 +203,7 @@ esac
 if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
 if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "$2" >> "${join(home, 'linear-posted-log')}"; echo "https://example.test/comment"; exit; fi
 if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
-if [ "$1" = comments ]; then cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
+if [ "$1" = comments ]; then [ -z "\${FAKE_LINEAR_COMMENTS_DOWN:-}" ] || exit 1; cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${home}/linear-moved-$2" 2>/dev/null || cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
 if [ "$1" = list ]; then cat "${home}/linear-list-$2.json" 2>/dev/null || echo '[]'; exit; fi
 if [ "$1" = identity ]; then cat "${join(home, 'linear-identity')}" 2>/dev/null || echo app; exit; fi
@@ -720,6 +720,10 @@ test('a lane of a role that is not counted does not take one of the three places
   writeFileSync(join(box.home, 'prompts', 'dev-x.md'), readFileSync(join(box.home, 'prompts', 'dev.md'), 'utf8'));
   const near = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev-x', 'X-6', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
   assert.equal(near.status, 0, near.stderr);
+  // And « dev » is not counted because a counted role has that word in its name.
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('counted_roles = dev\n', 'counted_roles = dev-x\n'));
+  const plain = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-8', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(plain.status, 0, plain.stderr);
   // A project that names no counted role counts every role, here as in the count itself: the limit is never lost.
   writeFileSync(confPath, conf.replace('counted_roles = dev\n', ''));
   const none = spawnSync(join(box.home, 'spawn-lane.sh'), ['review', 'X-7', '--comment-on', 'none', '--author-model', 'a'], { env: box.env, encoding: 'utf8' });
@@ -4624,6 +4628,7 @@ test('a base brought in without a model leaves nothing behind when it cannot be 
   box.git('fetch', '-q', 'origin');
   const spot = join(box.home, 'lanes', '.base-X-5');
   box.git('worktree', 'add', '-q', spot, 'dev/X-5');
+  writeFileSync(join(execFileSync('git', ['-C', spot, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim(), 'base-before'), `${again.head}\n`);
   execFileSync('git', ['-C', spot, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
   assert.notEqual(tip(), again.head);
   // It is no lane: it takes no place, and is not the worktree a lane is opened again in.
@@ -4691,13 +4696,17 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: the rest' });
   assert.equal(budget(), 'budget=1.9');
   assert.equal(record('X-5').runs.length, 3);
-  // What it cost cannot be read (here: a record whose date is no date): nothing is opened on a guess.
+  // The tracker does not answer: the cap he may have written cannot be read, and nothing is opened on a guess.
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow({ FAKE_LINEAR_COMMENTS_DOWN: '1' }).stdout, /X-5: its cap or what it has cost cannot be read: not opened again \(checks:/);
+  assert.equal(record('X-5').runs.length, 3);
+  // Nor what it cost (here: a record whose date is no date).
   const path = join(box.state, 'lanes', 'X-5.json');
   const whole = record('X-5');
   writeFileSync(path, JSON.stringify({ ...whole, opened_at: "2026' or 1 --" }));
   pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
   const blind = flow();
-  assert.match(blind.stdout, /X-5: what it has cost cannot be read: not opened again \(checks:/);
+  assert.match(blind.stdout, /X-5: its cap or what it has cost cannot be read: not opened again \(checks:/);
   assert.equal(record('X-5').runs.length, 3);
   writeFileSync(path, JSON.stringify({ ...record('X-5'), opened_at: whole.opened_at }));
   assert.match(flow().stdout, /X-5: opened again \(checks:/);
@@ -4709,6 +4718,16 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.equal(told().length, 2);
   flow();
   assert.equal(told().length, 2);
+  // A ticket he puts in « Todo » while the tracker does not give its comments waits; it is opened once they are read, with the cap he wrote on it.
+  todo(['X-6']);
+  by('X-6', 0);
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 5'));
+  const waits = flow({ FAKE_LINEAR_COMMENTS_DOWN: '1' });
+  assert.match(waits.stdout, /X-6: put in « Todo » by the user: its cap or what it has cost cannot be read, it waits/);
+  assert.throws(() => record('X-6'));
+  assert.match(flow().stdout, /X-6: put in « Todo » by the user: its lane is opened/);
+  run('X-6', { FAKE_COST: '0.1' }, { commit: 'fix: other work' });
+  assert.equal(budget(), 'budget=3', 'the line he wrote, read before the first session');
 });
 
 test('the adapter hands a session its budget, and a session stopped by it ends with a code of its own', () => {
