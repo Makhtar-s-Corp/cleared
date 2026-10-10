@@ -19,7 +19,7 @@ set -euo pipefail
 [ $# -eq 1 ] && [ -d "$1" ] || die "usage: push-lane.sh <worktree of the lane>"
 worktree=$(cd "$1" && pwd)
 branch=$(git -C "$worktree" symbolic-ref --quiet --short HEAD) || die "$worktree is not on a branch"
-[[ "$branch" =~ ^([a-z][a-z-]*)/([A-Z]+-[0-9]+)$ ]] || die "\"$branch\" is not the branch of a lane (<role>/<ticket>)"
+[[ "$branch" =~ ^([a-z][a-z-]*)/([A-Z]+-[0-9]+)(\.2)?$ ]] || die "\"$branch\" is not the branch of a lane (<role>/<ticket>, or <role>/<ticket>.2 for a second team)"
 role=${BASH_REMATCH[1]}
 grep -qw -- "$role" <<<"$(conf_get lanes push_roles)" || die "lanes of the role \"$role\" are not pushed (see [lanes] push_roles)"
 base=$(conf_get lanes base)

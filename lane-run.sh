@@ -158,7 +158,7 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && grep -qw -- "$ORCH_ROLE"
     if [[ "$pushed" =~ ^#[0-9]+$ ]]; then
       pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."
       # Kept with what is known of the lane of this ticket.
-      kept_lane=$(lane_record "$ORCH_TICKET")
+      kept_lane=$(lane_record "${ORCH_LANE#*/}")
       [ ! -f "$kept_lane" ] || { jq --argjson pr "${pushed#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}' "$kept_lane" > "$kept_lane.part" && mv "$kept_lane.part" "$kept_lane"; } || true
     elif [[ "$pushed" == "nothing to push"* ]]; then
       pushed_note="Rien à pousser : la lane n'a aucun commit."

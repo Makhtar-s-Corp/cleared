@@ -55,6 +55,25 @@ for pr in "${pulls[@]}"; do
   versions="${versions:+$versions, }PR $pr à ${head:0:8}"
   asked_pulls="${asked_pulls:+$asked_pulls }$pr:$head"
 done
+# A ticket he gave to two teams is asked for once, with both results: a
+# request that shows one of them alone is refused while the other is still
+# at work (its lane closed, by him or because it gave up, the one that is
+# left is asked for alone). What he is shown then says which team made
+# which pull request, and how he chooses.
+teams='{}' choice=
+while read -r team theirs; do
+  [ -n "$team" ] || continue
+  teams=$(jq -c --arg team "$team" --argjson pr "$theirs" '. + {($team): $pr}' <<<"$teams")
+done < <(teams_of "$ticket")
+if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
+  [ "$(jq '[.[] | select(. == 0)] | length' <<<"$teams")" = 0 ] \
+    || die "$ticket was given to two teams, and one of them has no pull request yet: he is asked once, with both results. Wait for it (the rules say when both are ready), or close its lane to ask for the other alone"
+  [ "$(jq -c --argjson shown "$shown" '[.[]] - ($shown | map(.pr)) | length' <<<"$teams")" = 0 ] \
+    || die "$ticket was given to two teams (#$(jq -r '."1"' <<<"$teams") and #$(jq -r '."2"' <<<"$teams")): he is asked once, with both results side by side (--pr $(jq -r '."1"' <<<"$teams") --pr $(jq -r '."2"' <<<"$teams")). To ask for one alone, the lane of the other must be closed first"
+  choice=$(printf 'Deux équipes ont travaillé ce ticket, chacune de son côté : équipe 1, PR %s ; équipe 2, PR %s. Pour choisir, écris sur le ticket une ligne « Équipe 1 » ou « Équipe 2 », puis glisse la carte dans « %s » : seule celle que tu choisis part en ligne, l'"'"'autre est fermée.' "$(jq -r '."1"' <<<"$teams")" "$(jq -r '."2"' <<<"$teams")" "$(conf_get linear go_state)")
+else
+  teams='{}'
+fi
 # Asked once for a version: a ticket that already waits for him with these
 # very versions is not asked again. A version pushed since is a new request.
 # What he was shown before of the other pull requests of the ticket stays:
@@ -79,7 +98,7 @@ all=$(jq -c --argjson shown "$shown" '[.[] | select(.pr as $pr | $shown | map(.p
 # between the comment and the mark that it was written (a kill, the host
 # going down) writes to him again when asked again.
 pending="$ORCH_STATE_DIR/validations/$ticket.pending"
-request=$({ cat "$text"; echo "$shown"; printf '%s\n' ${captures[@]+"${captures[@]}"}; } | sha256sum | cut -d' ' -f1)
+request=$({ cat "$text"; echo "$shown"; echo "$choice"; printf '%s\n' ${captures[@]+"${captures[@]}"}; } | sha256sum | cut -d' ' -f1)
 note() { { jq -n --arg request "$request" --arg at "$(now_utc)" --argjson written "$1" '{request: $request, at: $at, written: $written}' > "$pending.part" && mv "$pending.part" "$pending"; } 2> /dev/null; }
 written=$(jq -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'select((.at // "") > $since and .written == true) | .request // empty' "$pending" 2> /dev/null) || written=
 if [ "$written" != "$request" ]; then
@@ -96,6 +115,7 @@ if [ "$written" != "$request" ]; then
     was=$(jq -r --argjson pr "${one%%:*}" '.[] | select(.pr == $pr) | .head' <<<"$before" | sed -n '1p')
     [ -z "$was" ] || [ "$was" = "${one#*:}" ] || earlier="${earlier:+$earlier, }${was:0:8}"
   done
+  [ -z "$choice" ] || printf '\n\n%s\n' "$choice" >> "$text"
   printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
   "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
   note true || die "the request is written on $ticket, but that could not be noted: the card is not moved and what he was shown is not kept. Asked again, it will be written to him a second time: repair $ORCH_STATE_DIR/validations first"
@@ -105,6 +125,6 @@ fi
 # What else the record holds (a ticket the wake still has to close) is kept.
 record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
 [ -n "$record" ] || record='{}'
-{ jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" '. + {ticket: $ticket, at: $at, pulls: $pulls}' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"; } 2> /dev/null \
+{ jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" --argjson teams "$teams" '. + {ticket: $ticket, at: $at, pulls: $pulls} + (if ($teams | length) == 2 then {teams: $teams} else {} end) | if ($teams | length) == 2 then . else del(.teams) end' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"; } 2> /dev/null \
   || die "the card of $ticket is in « $validate », but what he was shown could not be kept in $kept: his agreement would be bound to no version, and no go-live will read it. Repair the folder and ask again with the same request: it will be finished without being written to him a second time"
 rm -f "$pending"

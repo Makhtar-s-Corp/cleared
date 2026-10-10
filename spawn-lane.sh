@@ -6,7 +6,7 @@
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
 #                 [--since <commit>] [--from <ref>] [--resume] [--message-file <file>]
-#                 [--keep-status] [--budget <amount>]
+#                 [--keep-status] [--budget <amount>] [--team 2]
 #                 [--path <touched path>]... [--pr-lines <n>] [--wait] [--dry-run]
 #
 # With --pr, the lane starts from the head of that pull request, and its size
@@ -24,6 +24,9 @@
 # --keep-status leaves the ticket in the status it is in (a run that brings
 # the base in changes nothing of what the user agreed to). --budget is what
 # the session may still cost (the cap of its ticket, less what was spent).
+# --team 2 opens the second team of a ticket two teams work on, each on its
+# own: its lane is <role>/<ticket>.2, with a record, a branch and a worktree
+# of its own, and it is the same ticket for everything else.
 #
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
@@ -34,11 +37,11 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 [ $# -ge 2 ] || usage
 role=$1 ticket=$2
 shift 2
-forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status= budget=
+forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status= budget= team=
 paths=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -52,6 +55,7 @@ while [ $# -gt 0 ]; do
     --resume) resume=1; shift ;;
     --keep-status) keep_status=1; shift ;;
     --budget) budget=$2; shift 2 ;;
+    --team) team=$2; shift 2 ;;
     --message-file) message_file=$2; shift 2 ;;
     --path) paths+=(--path "$2"); shift 2 ;;
     --pr-lines) pr_lines=$2; shift 2 ;;
@@ -64,16 +68,22 @@ done
 [ -n "$(conf_get roles "$role")" ] || die "unknown role \"$role\" (roles of agents.conf: $(conf_keys roles | paste -sd' '))"
 
 [ -z "$message_file" ] || [ -f "$message_file" ] || die "no such file: $message_file"
-lane="$role/$ticket"
+[ -z "$team" ] || [ "$team" = 2 ] || die "\"$team\" is not a team of a ticket (the second one is 2; the first has no number)"
+# What names the lane: its ticket, and its number when it is the second team.
+key=$ticket${team:+.$team}
+lane="$role/$key"
 ledger init > /dev/null
-record=$(lane_record "$ticket")
+record=$(lane_record "$key")
 pushed_role=
 ! grep -qw -- "$role" <<<"$(conf_get lanes push_roles)" || pushed_role=1
 push_branch=
 if [ -n "$resume" ]; then
-  [ -f "$record" ] && [ "$(jq -r '.lane // empty' "$record")" = "$lane" ] || die "no lane was ever opened on $ticket: there is nothing to open again (open it without --resume)"
+  [ -f "$record" ] && [ "$(jq -r '.lane // empty' "$record")" = "$lane" ] || die "no lane was ever opened on $key: there is nothing to open again (open it without --resume)"
   [ "$(ledger sql "select count(*) n from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[0].n')" = 0 ] || die "a session of $lane is still running: it is not opened again over it"
   push_branch=$(jq -r '.push_branch // empty' "$record")
+  # A team of a ticket given to two is opened again on the model it was
+  # given: two teams that end up on one harness are no longer two.
+  [ -n "$forced" ] || forced=$(jq -r '.team_model // empty' "$record")
   [ -n "$pr" ] || pr=$(jq -r '.pr // empty' "$record")
 fi
 
@@ -212,7 +222,7 @@ fi
 root=$(expand_home "$(conf_get lanes root)")
 base=$(conf_get lanes base)
 [ -n "$pr_head" ] && base="origin/$pr_head"
-worktree="$root/$role-$ticket"
+worktree="$root/$role-$key"
 if [ -n "$there" ]; then
   # Still there: one more run in it.
   worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs/heads/$lane" '/^worktree /{w = substr($0, 10)} $0 == b {print w}')
@@ -298,6 +308,7 @@ mv "$available" "$run_dir/chain.json"
 {
   prompt_text "$prompt_file"
   printf '\n---\nTicket %s : %s\n%s\nLane : %s (branche du même nom).\n' "$ticket" "$(jq -r '.title' <<<"$issue")" "$(jq -r '.url' <<<"$issue")" "$lane"
+  [ -z "$team" ] || printf "Ce ticket est confié à deux équipes, chacune de son côté : tu es la deuxième. Tu ne lis pas le travail de l'autre et tu ne t'en sers pas ; l'utilisateur choisira entre les deux résultats.\n"
   [ -z "$pr" ] || printf 'PR #%s, branche %s, comparée à %s.\n' "$pr" "$pr_head" "$(conf_get lanes base)"
   [ -z "$since" ] || printf 'Périmètre limité : seulement ce qui a changé depuis le commit %s, déjà traité (`git diff %s..HEAD`, `git log %s..HEAD`). Le reste sert de contexte.\n' "$since" "$since" "$since"
   if [ -n "$pushed_role" ]; then
@@ -330,7 +341,7 @@ fi
   printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$requested" "règle : $rule${route_notes:+ ; $route_notes}" "$spawn_note"
   printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\n' "$comment_on" "$writeup_role"
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PUSH_BRANCH=%q\n' "$pr" "$pr_lines" "$push_branch"
-  printf 'ORCH_BUDGET_USD=%q\n' "$budget"
+  printf 'ORCH_BUDGET_USD=%q\nORCH_TEAM=%q\n' "$budget" "$team"
   printf 'ORCH_PROJECT=%q\nORCH_LABEL=%q\n' "$(jq -r '.project // ""' <<<"$issue")" "$(jq -r '.labels[0] // ""' <<<"$issue")"
 } > "$run_dir/lane.env"
 
@@ -341,8 +352,8 @@ if [ -n "$pushed_role" ]; then
   mkdir -p "$(dirname "$record")"
   kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
   [ -n "$kept" ] || kept='{}'
-  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
-    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
+    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
   # The ticket is at work: said where the user looks.
   progress=$(conf_get linear progress_state)
   [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
@@ -353,7 +364,7 @@ handle=$(open_terminal "$worktree" "$ticket · $role · $chosen" "$ORCH_HOME/lan
   || { echo 97 > "$run_dir/exit-code"; die "the worktree $worktree exists but Orca did not open a terminal in it: the session never started (flow-lanes.sh runs it again; to run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir))"; }
 # Orca knows the worktree by now: link it to its ticket.
 # A name anybody can read: the ticket and its title, then who works in it.
-orca worktree set --worktree "path:$worktree" --display-name "$ticket · $(jq -r '.title' <<<"$issue" | cut -c1-70)" --linear-issue "$ticket" --comment "$role · $chosen · ouverte par le dispatcher" > /dev/null 2>&1 || true
+orca worktree set --worktree "path:$worktree" --display-name "$ticket${team:+ (équipe $team)} · $(jq -r '.title' <<<"$issue" | cut -c1-70)" --linear-issue "$ticket" --comment "$role · $chosen · ouverte par le dispatcher" > /dev/null 2>&1 || true
 echo "$handle" > "$run_dir/terminal.handle"
 
 jq -n --arg lane "$lane" --arg worktree "$worktree" --arg requested "$requested" --arg chosen "$chosen" --arg rule "$rule" --arg run "$run_dir" --arg terminal "$handle" \
