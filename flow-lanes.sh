@@ -109,23 +109,24 @@ cost_left() {
 
 # at_cost_cap <record> <ticket> [<kind of reason>]: said, and told to the
 # lead once for a given cap, when the ticket has reached it. A word written
-# to a lane that stays at that cap (the user's on the ticket, the lead's by
-# tell-lane.sh) is not handed over, and somebody waits for its effect: that
-# is said again, once a day for his words and once for the lead's. Red
-# checks or a review on a lane already said to be stopped tell the lead
-# nothing new, and are not.
+# to a lane that is at its cap (the user's on the ticket, the lead's by
+# tell-lane.sh) is not handed over, and somebody waits for its effect: the
+# telling says so, and a word that comes once the cap was said is told
+# again, once a day for his words and once for the lead's. Red checks or a
+# review on a lane already said to be stopped tell the lead nothing new.
 at_cost_cap() {
-  local record=$1 ticket=$2 kind=${3:-} key again_for=
+  local record=$1 ticket=$2 kind=${3:-} key word= unheard=
   key="cost:$cost_cap"
+  case "$kind" in said | told) word="$key:$kind:$(date -u +%F)" ;; esac
   if did "$record" "$key"; then
-    case "$kind" in said | told) ;; *) return 0 ;; esac
-    key="cost:$cost_cap:$kind:$(date -u +%F)"
-    ! did "$record" "$key" || return 0
-    again_for=" It was already said to be at this cap. Since then $([ "$kind" = said ] && echo 'the user wrote on the ticket' || echo 'you wrote to the lane'), and that word was not handed to it: no session opens at the cap. Say so to the user in the same question."
+    [ -n "$word" ] && ! did "$record" "$word" || return 0
+    unheard=" It was already said to be at this cap."
   fi
-  say "$ticket: at its cap ($(printf '%.2f' "$cost_spent") \$ of $cost_cap \$): not opened again${kind:+ ($kind)}"
-  [ -n "$dry" ] || ledger event --kind ticket_cost --ticket "$ticket" --value "$cost_spent" --detail "the lane of $ticket has cost $(printf '%.2f' "$cost_spent") \$ at list price, for a cap of $cost_cap \$ on this ticket: it is stopped and not opened again, what it had committed is on its branch.$again_for Tell the user what was done and what is left (its last report says), and ask him one closed question: raise the cap of this ticket, yes or no, with your recommendation and an amount; he answers by writing a line « Plafond <amount> » on the ticket"
+  [ -z "$word" ] || unheard="$unheard Since its last session $([ "$kind" = said ] && echo 'the user wrote on the ticket' || echo 'you wrote to the lane'), and that word was not handed to it: no session opens at the cap. Say so to the user in the same question."
+  say "$ticket: at its cap ($(printf '%.2f' "$cost_spent") \$ of $cost_cap \$): not opened again${word:+ ($kind)}"
+  [ -n "$dry" ] || ledger event --kind ticket_cost --ticket "$ticket" --value "$cost_spent" --detail "the lane of $ticket has cost $(printf '%.2f' "$cost_spent") \$ at list price, for a cap of $cost_cap \$ on this ticket: it is stopped and not opened again, what it had committed is on its branch.$unheard Tell the user what was done and what is left (its last report says), and ask him one closed question: raise the cap of this ticket, yes or no, with your recommendation and an amount; he answers by writing a line « Plafond <amount> » on the ticket"
   mark "$record" "$key"
+  [ -z "$word" ] || mark "$record" "$word"
 }
 
 # again <record> <ticket> <role> <key> <file that says why> [keep]: one more
@@ -278,7 +279,7 @@ base_leftovers() {
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more=
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped=
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record")
   last=$(jq -r '.runs[-1].run // empty' "$record")
@@ -337,7 +338,7 @@ one_lane() {
   # other session that stopped short is run again.
   if [ "$code" = 5 ]; then
     if cost_left "$record" "$ticket"; then
-      if [ "$cost_out" = true ]; then at_cost_cap "$record" "$ticket"; else more=1; fi
+      if [ "$cost_out" = true ]; then capped=1; else more=1; fi
     fi
   elif [ "$code" != 0 ]; then
     printf 'Ta session précédente s’est arrêtée sans finir (code %s). Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' "$code" > "$work/why.md"
@@ -456,6 +457,9 @@ one_lane() {
       return 0
     fi
   fi
+  # Stopped at the cap of its ticket, and no word waits that would have said
+  # it above, in one telling with the word.
+  [ -z "$capped" ] || at_cost_cap "$record" "$ticket"
   # Its budget had stopped it, and the ticket has something left: it goes on
   # from where it was (three times a day at most, like any other reason).
   if [ -n "$more" ]; then

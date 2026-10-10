@@ -4803,7 +4803,7 @@ test('a word written to a lane that stays at its cap is not lost in silence: the
   assert.match(unheard.stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(told\)/);
   assert.doesNotMatch(unheard.stdout, /X-5: opened again \(/);
   assert.equal(told().length, 2);
-  assert.match(told()[1], /already said to be at this cap\. Since then you wrote to the lane, and that word was not handed to it/);
+  assert.match(told()[1], /already said to be at this cap\. Since its last session you wrote to the lane, and that word was not handed to it/);
   tell('Et le mode sombre.');
   flow();
   assert.equal(told().length, 2, 'once a day for the words of the lead');
@@ -4811,7 +4811,7 @@ test('a word written to a lane that stays at its cap is not lost in silence: the
   writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }]));
   assert.match(flow().stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(said\)/);
   assert.equal(told().length, 3);
-  assert.match(told()[2], /Since then the user wrote on the ticket, and that word was not handed to it/);
+  assert.match(told()[2], /Since its last session the user wrote on the ticket, and that word was not handed to it/);
   flow();
   assert.equal(told().length, 3, 'once a day for his words');
   assert.equal(record('X-5').runs.length, 1, 'nothing was opened at the cap');
@@ -4820,6 +4820,29 @@ test('a word written to a lane that stays at its cap is not lost in silence: the
   assert.match(flow().stdout, /X-5: opened again \(said:c7\)/);
   assert.equal(told().length, 3);
   const heard = session('X-5', { commit: null });
+
+test('a session stopped at the cap of its ticket while a word waits for the lane is told to the lead once, with the word: not once for the cap and once more for the word', () => {
+  const { flow, todo, by, record, box, env } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[limits]\n', '[limits]\nticket_cost_usd = 1\n').replace('runs_per_day = 4', 'runs_per_day = 30'));
+  const told = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select detail from events where kind = 'ticket_cost' order by rowid").all().map((row) => row.detail); db.close(); return rows; };
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  execFileSync('git', ['-C', kept.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: half of the work']);
+  // The lead writes to the lane while its session runs; the session is then stopped by its budget, at the cap.
+  assert.equal(spawnSync(join(box.home, 'tell-lane.sh'), ['X-5', '-'], { env, input: 'Corrige aussi le survol.', encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [join(box.state, 'runs', kept.runs.at(-1).run)], { cwd: kept.worktree, env: { ...env, ANSWER: 'Fait.\n\nQuestions pour Makhtar : aucune.', FAKE_COST: '1.1', FIRST_EXIT: '5', SECOND_EXIT: '5' }, encoding: 'utf8' }).status, 5);
+  const stopped = flow();
+  assert.equal(stopped.stdout.match(/X-5: at its cap/g).length, 1, stopped.stdout);
+  assert.match(stopped.stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(told\)/);
+  assert.equal(told().length, 1);
+  assert.match(told()[0], /on its branch\. Since its last session you wrote to the lane, and that word was not handed to it/);
+  assert.doesNotMatch(told()[0], /already said/);
+  flow();
+  assert.equal(told().length, 1);
+});
   assert.match(heard.prompt, /\| L'utilisateur a écrit sur le ticket[\s\S]*Tu en es où \?/);
   assert.match(heard.prompt, /\| Le chef de projet t’a écrit[\s\S]*Corrige aussi le survol\.[\s\S]*Et le mode sombre\./);
 });
