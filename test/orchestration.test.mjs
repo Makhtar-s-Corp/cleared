@@ -192,7 +192,7 @@ case "$1" in
   list-models) shift; [ ${name} != first ] || [ -z "\${FIRST_GONE:-}" ] || exit 0; printf '%s\\n' "$@" ;;
   talk) shift; [ ${name} != first ] || [ -z "\${FIRST_CANNOT_TALK:-}" ] || exit 2
     printf '%s\\n' "${name}" "$@" "edit=\${ORCH_EDIT_ONLY:-}" "read=\${ORCH_READ_DIRS:-}" "mode=\${ORCH_PERMISSION_MODE:-}" "allow=\${ORCH_ALLOW:-}" "run=\${ORCH_RUN_ID:-}" > "\${ORCH_STATE_DIR}/talked"; exit 0 ;;
-  run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; echo "\${ORCH_SIGNED:-}" > "\${ORCH_STATE_DIR}/signed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "\${ANSWER:-answer of ${name}}" > "$body"
+  run) shift; contract_parse_run "$@"; printf '%s|%s|%s\\n' "\${ORCH_PERMISSION_MODE:-}" "\${ORCH_ALLOW:-}" "\${ORCH_DENY:-}" > "\${ORCH_STATE_DIR}/allowed-${name}"; echo "\${ORCH_SIGNED:-}" > "\${ORCH_STATE_DIR}/signed-${name}"; [ -z "\${FIRST_DIES:-}" ] || [ ${name} != first ] || exit 141; body=$(mktemp); echo "\${ANSWER:-answer of ${name}}" > "$body"; [ -z "\${FAKE_LEAVES:-}" ] || eval "\$FAKE_LEAVES"
     contract_usage "$(jq -c --argjson limits "\${FAKE_LIMITS:-null}" '. + (if $limits then {limits: $limits} else {} end) + (if $cost then {cost_usd: $cost} else {} end)' --argjson cost "\${FAKE_COST:-null}" <<<'{"tokens_total": 10}')"; echo "budget=\${ORCH_BUDGET_USD:-none}" > "\${ORCH_STATE_DIR}/budget-${name}"; code=${exit}; contract_report ${name} "$code" "$body"; exit "$code" ;;
 esac
 `, { mode: 0o755 });
@@ -469,6 +469,101 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   assert.equal(done.status, 0);
   assert.equal(done.usage.tokens_total, 1234);
   assert.match(done.report, /## Compte rendu\n\nthe answer\n\n## Fichiers modifiés/);
+});
+
+test('the Codex adapter gives the work of a lane its tools through the door of the heavy commands, for the whole session; a text-only run gets none; a host that is not free is « cannot start now »', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  const task = join(box.home, 'task.sh');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[lanes]\n', `[lanes]\nheavy_commands = echo screens, ${task.replace(box.home, '~')}\nheavy_wait_minutes = 0\n`));
+  mkdirSync(join(box.home, 'proc-none'), { recursive: true });
+  mkdirSync(box.state, { recursive: true });
+  writeFileSync(join(box.home, 'prompt.md'), 'the prompt of the lane\n');
+  writeFileSync(task, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(box.home, 'task-args')}"\ncp "$2" "${join(box.home, 'task-prompt')}"\n(flock -n 9 && echo free || echo held) 9> "${join(box.state, 'heavy.lock')}" > "${join(box.home, 'door')}"\nprintf 'done'\n`, { mode: 0o755 });
+  const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none'), ADAPTER_TASK_SCRIPT: task };
+  const call = (extra = {}, ci = 0) => {
+    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\necho ${ci}\n`, { mode: 0o755 });
+    const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], { cwd: box.repo, encoding: 'utf8', env: { ...env, ...extra } });
+    const read = (name) => { try { return readFileSync(join(box.home, name), 'utf8'); } catch { return ''; } };
+    return { status: run.status, stderr: run.stderr, args: read('task-args').trim().split('\n'), prompt: read('task-prompt'), door: read('door').trim(), report: read('r.md') };
+  };
+  // Without the setting: the plain run, as before.
+  const plain = call();
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.deepEqual(plain.args.slice(2), ['m']);
+  assert.equal(plain.door, 'free', 'the plain run does not hold the door');
+  // With it: the script is asked for its tools, the door is held while it runs, and the model is told how its work will be committed.
+  const tools = call({ ADAPTER_TASK_TOOLS: 'yes' });
+  assert.equal(tools.status, 0, tools.stderr);
+  assert.deepEqual(tools.args.slice(2), ['m', '--tools']);
+  assert.equal(tools.door, 'held');
+  assert.match(tools.prompt, /^the prompt of the lane\n/);
+  assert.match(tools.prompt, /\.commit-message/);
+  // The write-up of a report is text only: no tools, no door.
+  const text = call({ ADAPTER_TASK_TOOLS: 'yes', ORCH_TEXT_ONLY: '1' });
+  assert.deepEqual(text.args.slice(2), ['m']);
+  assert.equal(text.door, 'free');
+  // Somebody holds the door (a screen test of another lane): this session could not start now, and nothing ran.
+  rmSync(join(box.home, 'task-args'));
+  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'heavy.lock'), join(ORCH_HOME, 'adapters', 'codex.sh'), 'run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], { cwd: box.repo, encoding: 'utf8', env: { ...env, ADAPTER_TASK_TOOLS: 'yes' } });
+  assert.equal(held.status, 2, held.stderr);
+  assert.throws(() => readFileSync(join(box.home, 'task-args')));
+  assert.match(readFileSync(join(box.home, 'r.md'), 'utf8'), /^outcome: refused$/m);
+  // A session that ran is never taken for a door that stayed shut: whatever it printed (the door's own words, read in a file), and whatever its code (5 is its own: a budget, elsewhere).
+  writeFileSync(task, `#!/usr/bin/env bash\necho ran > "${join(box.home, 'task-args')}"\necho 'when-free.sh: "x" is not one of the heavy commands of the project' >&2\necho 'and it went on' >&2\nprintf 'done'\n`, { mode: 0o755 });
+  const echoed = call({ ADAPTER_TASK_TOOLS: 'yes' });
+  assert.equal(echoed.status, 0, echoed.stderr);
+  assert.match(echoed.report, /^outcome: done$/m);
+  writeFileSync(task, `#!/usr/bin/env bash\necho ran > "${join(box.home, 'task-args')}"\necho 'stopped by its budget' >&2\nexit 5\n`, { mode: 0o755 });
+  const five = call({ ADAPTER_TASK_TOOLS: 'yes' });
+  assert.equal(five.status, 5);
+  assert.deepEqual(five.args, ['ran']);
+  // A project that did not name the script among its heavy commands: said by the door, and « cannot start now » too.
+  rmSync(join(box.home, 'task-args'));
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/heavy_commands = .*\n/, 'heavy_commands = echo screens\n'));
+  const unnamed = call({ ADAPTER_TASK_TOOLS: 'yes' });
+  assert.equal(unnamed.status, 2);
+  assert.match(unnamed.report, /is not one of the heavy commands/);
+  assert.deepEqual(unnamed.args, [''], 'the script never ran');
+});
+
+test('what a backend that cannot commit brings back is committed by the rules, under the message it wrote, and sent like any work; a backend that commits by itself is left alone', () => {
+  const { flow, todo, by, record, box, env, stuck, pull } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[adapter.first]\ncommits = no\n`);
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  const run = (leaves, extra = {}) => spawnSync(join(box.home, 'lane-run.sh'), [join(box.state, 'runs', record('X-5').runs.at(-1).run)], { cwd: kept.worktree, env: { ...env, ANSWER: 'Fait.\n\nQuestions pour Makhtar : aucune.', FAKE_LEAVES: leaves, ...extra }, encoding: 'utf8' });
+  const remote = (...args) => execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), ...args], { encoding: 'utf8' }).trim();
+  // Its work comes back as files changed in the worktree, with the message it wrote.
+  const first = run(`mkdir -p server; echo 'export const note = 1;' > server/note.mjs; printf 'feat(notes): a first note\\n\\nWhy it is there.\\n' > .commit-message`);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(remote('log', '-1', '--format=%s', 'dev/X-5'), 'feat(notes): a first note');
+  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 1;');
+  assert.notEqual(spawnSync('git', ['--git-dir', join(box.home, 'remote.git'), 'cat-file', '-e', 'dev/X-5:.commit-message']).status, 0, 'the message file is not part of its work');
+  assert.equal(execFileSync('git', ['-C', kept.worktree, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+  // The rules find nothing left to send, and open no session to commit it.
+  const after = flow();
+  assert.doesNotMatch(after.stdout, /X-5: opened again \(unsent/);
+  assert.deepEqual(stuck(), []);
+  // A message that says nothing: the default subject, and the work is committed all the same.
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: true }]));
+  const next = () => { pull({ headRefOid: remote('rev-parse', 'dev/X-5'), isDraft: true }); return spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--resume', '--comment-on', 'none', '--keep-status'], { env, encoding: 'utf8' }); };
+  const again = next();
+  assert.equal(again.status, 0, again.stderr);
+  const blank = run(`echo 'export const note = 2;' > server/note.mjs; printf '  \\n\\n' > .commit-message`);
+  assert.equal(blank.status, 0, blank.stderr);
+  assert.match(remote('log', '-1', '--format=%s', 'dev/X-5'), /^chore: the work of a on X-5$/);
+  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 2;');
+  // A backend that commits by itself is left alone: what it did not commit stays its own to sort out.
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[adapter.first]\ncommits = no\n', ''));
+  assert.equal(next().status, 0);
+  const own = run(`echo 'export const note = 3;' > server/note.mjs`);
+  assert.equal(own.status, 0, own.stderr);
+  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 2;', 'nothing was committed for it');
+  assert.match(execFileSync('git', ['-C', record('X-5').worktree, 'status', '--porcelain'], { encoding: 'utf8' }), /server\/note\.mjs/);
 });
 
 test('the spawn lock is released once the lane exists, not held while waiting for it', async () => {
@@ -2435,7 +2530,8 @@ test('a lane runs its heavy commands (screen tests, captures) through one door: 
   assert.equal(told.status, 0, told.stderr);
   assert.match(readFileSync(join(JSON.parse(told.stdout).run_dir, 'prompt.md'), 'utf8'), new RegExp(`par \`${box.home}/when-free\\.sh npm run test:ui\``));
   assert.ok(dev.deny.split(',').map((item) => item.trim()).includes('npm run test:ui'));
-  for (const command of conf.sections.lanes.heavy_commands.split(',').map((item) => item.trim())) assert.match(command, /^npm run (test:ui|capture:)/, command);
+  // The heavy commands of the project: its screen tests and captures, and the one task script of a backend whose whole session is one (it is named by its place, never by a pattern).
+  for (const command of conf.sections.lanes.heavy_commands.split(',').map((item) => item.trim())) assert.ok(/^npm run (test:ui|capture:)/.test(command) || command === conf.sections['adapter.codex'].task_script, command);
 });
 
 test('no lane is left waiting in silence: a session that died, never started or runs too long is seen; a ticket taken out of the work pauses its lane; a word after his agreement does not take it back; one unreadable record stops nothing', () => {
