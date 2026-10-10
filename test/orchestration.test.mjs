@@ -4908,7 +4908,7 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   view(42, two.head);
   read(42, two.head);
   const both = flow();
-  assert.match(both.stdout, /X-5: its two teams are reviewed and green \(#42 and #41\): one request with both results is the lead's/);
+  assert.match(both.stdout, /X-5\.2: its two teams are reviewed and green \(#42 and #41\): one request with both results is the lead's/);
   assert.equal(events('teams_ready').length, 1);
   assert.match(events('teams_ready')[0], /#41 \(team 1\) and #42 \(team 2\)[\s\S]*ask-validation\.sh X-5 - --pr 41 --pr 42/);
   assert.equal(flow().stdout.trim(), '', 'said once');
@@ -4996,7 +4996,7 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
   // The second is ready in its turn: the lead is told, though the first had been ready long before the ticket had two teams.
   view(42, two.head);
   read(42, two.head);
-  assert.match(flow().stdout, /X-5: its two teams are reviewed and green \(#42 and #41\): one request with both results is the lead's/);
+  assert.match(flow().stdout, /X-5\.2: its two teams are reviewed and green \(#42 and #41\): one request with both results is the lead's/);
   assert.equal(events('teams_ready').length, 1);
   assert.equal(flow().stdout.trim(), '', 'said once');
   assert.equal(events('teams_ready').length, 1);

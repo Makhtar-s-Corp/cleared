@@ -357,6 +357,13 @@ one_lane() {
   local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record") team=$(jq -r '.team // empty' "$record")
+  # What is said of the second team of a ticket names it (<ticket>.2): two
+  # lanes of one ticket are told apart in the log. (one_lane runs in a
+  # shell of its own: this goes no further than this lane.)
+  if [ -n "$team" ]; then
+    eval "$(declare -f say | sed '1s/^say /say_as_it_is /')"
+    say() { say_as_it_is "${1/#"$ticket":/"$ticket.$team":}"; }
+  fi
   last=$(jq -r '.runs[-1].run // empty' "$record")
   [ -n "$last" ] || return 0
   # A session that is not over: at work, unless it died without a word (its
