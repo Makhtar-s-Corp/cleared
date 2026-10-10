@@ -605,12 +605,13 @@ counted_lanes() {
 }
 
 # The line by which the user says what a ticket may cost, as he writes it:
-# « Plafond 80 », « Plafond : 80 $ », « plafond: 80,5 ». Never a share
-# (« plafond 80 % » is about something else). cap_line is the pattern, given
-# to jq as $cap; cap_only is the jq test of a comment that says nothing
-# else: it sets the cap, and is no word for the lane.
-cap_line='^\s*plafond\s*:?\s*([0-9]+(?:[.,][0-9]+)?)(?![0-9.,]*\s*%)'
-cap_only='(.body | [split("\n")[] | select(test("^\\s*$") | not)] | (length > 0 and all(.[]; test("(?i)" + $cap + "\\s*(\\$|€|usd|dollars?)?\\s*[.!]?\\s*$"))))'
+# « Plafond 80 », « Plafond : 80 $ », « plafond: 80,5 », alone on its line.
+# A line that goes on is a sentence, and sets nothing (« plafond 80 % de
+# l'abonnement », « plafond 3 niveaux de prix »). cap_line is the pattern,
+# given to jq as $cap; cap_only is the jq test of a comment that says
+# nothing else: it sets the cap, and is no word for the lane.
+cap_line='^[ \t]*plafond[ \t]*:?[ \t]*([0-9]+(?:[.,][0-9]+)?)[ \t]*(?:\$|€|usd|dollars?)?[ \t]*[.!]?[ \t]*\r?$'
+cap_only='(.body | [split("\n")[] | select(test("^\\s*$") | not)] | (length > 0 and all(.[]; test("(?i)" + $cap))))'
 
 # takes_a_place <role>: whether a lane of that role holds one of them, by the
 # same rule: its exact name in counted_roles, or any role when none is set.

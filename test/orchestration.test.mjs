@@ -4787,6 +4787,16 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.match(flow().stdout, /X-5: opened again \(said:c10\)/);
   last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: answered' });
   assert.equal(budget(), 'budget=5.8', 'the cap is the 9 he wrote last, not 80');
+  // What is left when its budget stops it would buy no session (0.20 $ of 9 $): the cap counts as spent, and is told.
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  last = run('X-5', { FAKE_COST: '5.5', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: nearly all of it' });
+  assert.equal(budget(), 'budget=5.7');
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const sliver = flow();
+  assert.match(sliver.stdout, /X-5: at its cap \(8\.80 \$ of 9 \$\): not opened again/);
+  assert.doesNotMatch(sliver.stdout, /opened again \(/);
+  assert.equal(told().length, 3);
   comments([c9]);
   pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   // A ticket he puts in « Todo » while the tracker does not give its comments waits; it is opened once they are read, with the cap he wrote on it.
@@ -4799,6 +4809,33 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.match(flow().stdout, /X-6: put in « Todo » by the user: its lane is opened/);
   run('X-6', { FAKE_COST: '0.1' }, { commit: 'fix: other work' });
   assert.equal(budget(), 'budget=3', 'the line he wrote, read before the first session');
+});
+
+test('a lane whose first session sent nothing (it ended on a question, with no commit) is opened again all the same: from the branch it left, or from the base when there is none', () => {
+  const { flow, todo, by, there, record, session, box } = flowBox();
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const asked = session('X-5', { commit: null, answer: 'Rien de fait.\n\nQuestions pour Makhtar :\n1. Quelle direction ?' });
+  assert.equal(asked.run.status, 0, asked.run.stderr);
+  assert.match(flow().stdout, /X-5: its session ends on a question for the user/);
+  assert.equal(there('X-5'), false, 'its worktree is closed');
+  assert.equal(spawnSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', '--verify', '--quiet', 'dev/X-5']).status, 1, 'nothing of it is on the remote');
+  // He answers: the lane is opened again, though there is no branch on the remote to come back to.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
+  const first = flow();
+  assert.match(first.stdout, /X-5: opened again \(said:c1\)/);
+  assert.equal(there('X-5'), true);
+  // The same when even the local branch is gone: it starts again from the base.
+  assert.equal(session('X-5', { commit: null, answer: 'Rien de fait.\n\nQuestions pour Makhtar :\n1. Et la couleur ?' }).run.status, 0);
+  flow();
+  assert.equal(there('X-5'), false);
+  box.git('branch', '-D', 'dev/X-5');
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c2', createdAt: '2099-01-02T10:00:00Z', body: 'Bleu.', byOwner: true }, { id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
+  assert.equal(execFileSync('git', ['-C', record('X-5').worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }), execFileSync('git', ['-C', box.repo, 'rev-parse', 'origin/main'], { encoding: 'utf8' }));
+  assert.match(session('X-5', { commit: 'fix: the first one, in blue' }).prompt, /Bleu\./);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'log', '-1', '--format=%s', 'dev/X-5'], { encoding: 'utf8' }).trim(), 'fix: the first one, in blue');
 });
 
 test('the adapter hands a session its budget, and a session stopped by it ends with a code of its own', () => {

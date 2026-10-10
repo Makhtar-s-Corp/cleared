@@ -76,14 +76,15 @@ end_runs() { ledger sql "select run_id from runs where lane = '$1' and outcome =
 # one ticket the last line « Plafond <n> » the user wrote on it (his own
 # comments only: a line an agent wrote changes nothing). What it cost: every
 # run of the ticket since its lane was first opened, as the ledger has it.
-# Sets cost_cap and cost_spent too, for whoever says it. Called as it is,
+# Sets cost_cap and cost_spent too, for whoever says it, and cost_out to
+# « true » when the cap counts as spent. Called as it is,
 # never inside $( ): it speaks through those three. Returns 1 when its cap
 # or what it cost cannot be read (the tracker or the ledger does not
 # answer): cost_rest is then empty, and nothing may be opened on a guess. Without a
 # record (a ticket no lane was opened on yet), every run of the ticket counts.
 cost_left() {
   local record=$1 ticket=$2 own rate from=1970
-  cost_cap=$(conf_get limits ticket_cost_usd) cost_spent= cost_rest=
+  cost_cap=$(conf_get limits ticket_cost_usd) cost_spent= cost_rest= cost_out=
   [[ "$ticket" =~ ^[A-Z]+-[0-9]+$ ]] || return 1
   # The cap he wrote on the ticket is part of the answer: when his comments
   # cannot be read, the cap is not known either.
@@ -101,6 +102,9 @@ cost_left() {
   [[ "$cost_spent" =~ ^[0-9]+([.][0-9]+)?$ ]] || { cost_spent=; return 1; }
   cost_rest=$(jq -nr --argjson cap "$cost_cap" --argjson spent "$cost_spent" '$cap - $spent | . * 100 | round / 100') || cost_rest=
   [[ "$cost_rest" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { cost_rest=; return 1; }
+  # Spent: nothing left, or less than a twentieth of the cap, which buys no
+  # session worth opening.
+  cost_out=$(jq -n --argjson cap "$cost_cap" --argjson rest "$cost_rest" '$rest <= $cap / 20')
 }
 
 # at_cost_cap <record> <ticket>: said, and told to the lead once for a given
@@ -171,7 +175,7 @@ again() {
     return 1
   fi
   left=$cost_rest
-  if [ -n "$left" ] && [ "$(jq -n --argjson left "$left" '$left <= 0')" = true ]; then
+  if [ "$cost_out" = true ]; then
     at_cost_cap "$record" "$ticket"
     return 1
   fi
@@ -315,7 +319,7 @@ one_lane() {
   # other session that stopped short is run again.
   if [ "$code" = 5 ]; then
     if cost_left "$record" "$ticket"; then
-      if [ -n "$cost_cap" ] && [ "$(jq -n --argjson left "$cost_rest" '$left <= 0')" = true ]; then at_cost_cap "$record" "$ticket"; else more=1; fi
+      if [ "$cost_out" = true ]; then at_cost_cap "$record" "$ticket"; else more=1; fi
     fi
   elif [ "$code" != 0 ]; then
     printf 'Ta session précédente s’est arrêtée sans finir (code %s). Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' "$code" > "$work/why.md"
@@ -635,7 +639,7 @@ while IFS=$'\t' read -r ticket updated; do
   # what the ticket already cost (a review before any lane).
   if ! cost_left "" "$ticket"; then say "$ticket: put in « $todo » by the user: its cap or what it has cost cannot be read, it waits"; continue; fi
   whole=$cost_rest
-  if [ -n "$whole" ] && [ "$(jq -n --argjson left "$whole" '$left <= 0')" = true ]; then say "$ticket: put in « $todo » by the user: at its cap ($cost_spent \$ of $cost_cap \$) before any lane, it waits"; continue; fi
+  if [ "$cost_out" = true ]; then say "$ticket: put in « $todo » by the user: at its cap ($cost_spent \$ of $cost_cap \$) before any lane, it waits"; continue; fi
   "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none ${whole:+--budget "$whole"} > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
     0) say "$ticket: put in « $todo » by the user: its lane is opened" ;;

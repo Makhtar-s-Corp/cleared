@@ -188,12 +188,28 @@ elif [ -n "$resume" ]; then
   # from its branch, with its work.
   [ -e "$worktree" ] && die "$worktree already exists"
   remote_branch=${push_branch:-$lane}
-  git -C "$ORCH_REPO" fetch --quiet origin "$remote_branch" || die "the branch $remote_branch could not be fetched: $lane is not opened again"
-  if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
-    git -C "$ORCH_REPO" worktree add --quiet "$worktree" "$lane"
-    git -C "$worktree" merge --quiet --ff-only "origin/$remote_branch" 2> /dev/null || true
+  sent=0
+  git -C "$ORCH_REPO" ls-remote --exit-code --heads origin "$remote_branch" > /dev/null 2>&1 || sent=$?
+  if [ "$sent" = 2 ] && [ -z "$push_branch" ]; then
+    # Its sessions never sent anything (the first one ended on a question,
+    # with no commit): there is no branch on the remote to come back to. It
+    # starts again from the branch it left here, or from the base, like a
+    # lane that opens.
+    if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
+      git -C "$ORCH_REPO" worktree add --quiet "$worktree" "$lane"
+    else
+      git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
+      git -C "$ORCH_REPO" rev-parse --verify --quiet "$base^{commit}" > /dev/null || die "no such ref to start from: $base"
+      git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "$base"
+    fi
   else
-    git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "origin/$remote_branch"
+    git -C "$ORCH_REPO" fetch --quiet origin "$remote_branch" || die "the branch $remote_branch could not be fetched: $lane is not opened again"
+    if git -C "$ORCH_REPO" show-ref --verify --quiet "refs/heads/$lane"; then
+      git -C "$ORCH_REPO" worktree add --quiet "$worktree" "$lane"
+      git -C "$worktree" merge --quiet --ff-only "origin/$remote_branch" 2> /dev/null || true
+    else
+      git -C "$ORCH_REPO" worktree add --quiet -b "$lane" "$worktree" "origin/$remote_branch"
+    fi
   fi
 else
   [ -e "$worktree" ] && die "$worktree already exists"
