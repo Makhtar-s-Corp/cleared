@@ -168,7 +168,7 @@ if grep -qxF -- "$lane" <<<"$lanes"; then
 fi
 # Only a role that takes a place is refused for want of one: a review reads,
 # and opens whatever the number of lanes at work.
-if [ -z "$there" ] && [ "$open" -ge "$max" ] && grep -qw -- "$role" <<<"$(conf_get limits counted_roles)"; then
+if [ -z "$there" ] && [ "$open" -ge "$max" ] && takes_a_place "$role"; then
   ledger event --kind lane_limit_reached --ticket "$ticket" --detail "$lane refused: $open lanes open for a limit of $max" --value "$open"
   echo "$(basename "$0"): lane limit reached ($open open, limit $max): $lane not opened" >&2
   exit 3

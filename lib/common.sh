@@ -590,7 +590,9 @@ quoted() { sed 's/^/    | /' "$1"; }
 dispatcher_lanes() {
   local roles
   roles=$(conf_keys roles | paste -sd'|')
-  git -C "$ORCH_REPO" worktree list --porcelain | sed -n 's#^branch refs/heads/##p' | grep -E "^($roles)/" || true
+  # A worktree named .base-<ticket> is the dispatcher's own, for the time of
+  # a merge (flow-lanes.sh): it has the branch of a lane, and is not one.
+  git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{n = split($0, part, "/"); own = part[n] ~ /^\.base-/} /^branch refs\/heads\//{if (!own) print substr($0, 19)}' | grep -E "^($roles)/" || true
 }
 
 # Those that take one of the max_lanes places: the roles of [limits]
@@ -600,4 +602,12 @@ counted_lanes() {
   local counted
   counted=$(conf_get limits counted_roles | tr -s ' ' '|')
   if [ -z "$counted" ]; then dispatcher_lanes; else dispatcher_lanes | grep -E "^($counted)/" || true; fi
+}
+
+# takes_a_place <role>: whether a lane of that role holds one of them, by the
+# same rule: its exact name in counted_roles, or any role when none is set.
+takes_a_place() {
+  local counted
+  counted=$(conf_get limits counted_roles)
+  [ -z "$counted" ] || tr -s ' ' '\n' <<<"$counted" | grep -qxF -- "$1"
 }

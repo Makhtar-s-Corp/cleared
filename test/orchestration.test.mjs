@@ -713,6 +713,17 @@ test('a lane of a role that is not counted does not take one of the three places
   assert.equal(spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-3', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' }).status, 3, 'a second lane that takes a place is refused');
   const reads = spawnSync(join(box.home, 'spawn-lane.sh'), ['review', 'X-4', '--comment-on', 'none', '--author-model', 'a'], { env: box.env, encoding: 'utf8' });
   assert.equal(reads.status, 0, reads.stderr);
+  // A role is counted by its exact name: « dev-x » is not « dev ».
+  const confPath = join(box.home, 'agents.conf');
+  const conf = readFileSync(confPath, 'utf8');
+  writeFileSync(confPath, conf.replace('[roles]\ndev = a\n', '[roles]\ndev = a\ndev-x = a\n').replace('push_roles = dev talk', 'push_roles = dev talk dev-x'));
+  writeFileSync(join(box.home, 'prompts', 'dev-x.md'), readFileSync(join(box.home, 'prompts', 'dev.md'), 'utf8'));
+  const near = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev-x', 'X-6', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(near.status, 0, near.stderr);
+  // A project that names no counted role counts every role, here as in the count itself: the limit is never lost.
+  writeFileSync(confPath, conf.replace('counted_roles = dev\n', ''));
+  const none = spawnSync(join(box.home, 'spawn-lane.sh'), ['review', 'X-7', '--comment-on', 'none', '--author-model', 'a'], { env: box.env, encoding: 'utf8' });
+  assert.equal(none.status, 3, none.stderr);
 });
 
 test('the pre-check of the project lead: what the user and the outside world did is an event, what agents wrote is not', async () => {
@@ -4564,6 +4575,66 @@ test('the base is brought into a lane without a model when nothing has to be dec
   assert.equal(record('X-5').runs.length, 2);
   assert.match(session('X-5', { commit: null }).prompt, /\| La branche principale a avancé sur du code/);
   assert.deepEqual(stuck(), []);
+  assert.equal(execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim(), remoteHead, 'the merge git could not make is not left on the branch');
+});
+
+test('a base brought in without a model leaves nothing behind when it cannot be sent: the branch is where it was, the refusal is not asked again every minute, and what a dead round left is cleared and never counted as a lane', () => {
+  const { flow, todo, by, there, record, session, pull, box, env } = flowBox();
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace('base_without_model = no\n', ''));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  mkdirSync(join(kept.worktree, 'server'), { recursive: true });
+  writeFileSync(join(kept.worktree, 'server', 'toast.mjs'), 'export const toast = 1;\n');
+  execFileSync('git', ['-C', kept.worktree, 'add', 'server/toast.mjs']);
+  const done = session('X-5', { commit: 'fix: the toast closes' });
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  flow();
+  assert.equal(there('X-5'), false);
+  mkdirSync(join(box.repo, 'server'), { recursive: true });
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  // The push is refused (here: the remote does not take it).
+  const hook = join(box.home, 'remote.git', 'hooks', 'pre-receive');
+  mkdirSync(join(box.home, 'remote.git', 'hooks'), { recursive: true });
+  writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const tip = () => execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+  const worktrees = () => execFileSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const refused = flow();
+  assert.doesNotMatch(refused.stdout, /brought in without a model/);
+  assert.match(refused.stdout, /X-5: opened again \(base:/, 'the lane takes it');
+  assert.doesNotMatch(worktrees(), /\.base-X-5/);
+  assert.equal(Object.keys(record('X-5').done).filter((key) => key.startsWith('nobase:')).length, 1, 'tried once for that state of the branch and of the base');
+  rmSync(hook);
+  // Its session brings the base in itself; the merge of the rules is not found under it.
+  const again = session('X-5', { commit: null, bringBase: true });
+  assert.equal(execFileSync('git', ['-C', box.repo, 'rev-list', '--count', '--merges', `${done.head}..${again.head}`], { encoding: 'utf8' }).trim(), '1', 'one merge, the one of the session');
+  pull({ headRefOid: again.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  flow();
+  assert.equal(there('X-5'), false);
+  // A round that died in the middle: its worktree, on the branch of the lane, with a merge no remote has.
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 2;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: more code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  box.git('fetch', '-q', 'origin');
+  const spot = join(box.home, 'lanes', '.base-X-5');
+  box.git('worktree', 'add', '-q', spot, 'dev/X-5');
+  execFileSync('git', ['-C', spot, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
+  assert.notEqual(tip(), again.head);
+  // It is no lane: it takes no place, and is not the worktree a lane is opened again in.
+  const counted = spawnSync('bash', ['-c', '. "$ORCH_HOME/lib/common.sh"; dispatcher_lanes'], { env: { ...env, ORCH_HOME: box.home }, encoding: 'utf8' });
+  assert.equal(counted.status, 0, counted.stderr);
+  assert.doesNotMatch(counted.stdout, /dev\/X-5/);
+  const cleared = flow();
+  assert.match(cleared.stdout, /what a round left of a base brought in without a model is cleared \(\.base-X-5\)/);
+  assert.match(cleared.stdout, /X-5: the base is brought in without a model \(#41\)/, 'and the round goes on from the branch as it was');
+  assert.doesNotMatch(worktrees(), /\.base-X-5/);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-list', '--count', '--merges', `${again.head}..dev/X-5`], { encoding: 'utf8' }).trim(), '1', 'one merge left, the one that was sent');
 });
 
 test('a ticket has a cap on what it may cost: a session is given what is left, a lane that reached it is not opened again and the lead is told once with the figures, and a line of the user raises it for that ticket', () => {
@@ -4613,10 +4684,31 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
     { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true },
     { id: 'a1', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nPlafond : 50 $', byOwner: true },
   ]));
-  assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
+  const raised = flow();
+  assert.match(raised.stdout, /X-5: opened again \(said:c9\)/);
+  assert.doesNotMatch(raised.stdout, /at its cap/, 'a cap he just raised is not a stop to tell');
+  assert.equal(told().length, 1, 'the lead is not told of a cap that is no longer reached');
   last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: the rest' });
   assert.equal(budget(), 'budget=1.9');
   assert.equal(record('X-5').runs.length, 3);
+  // What it cost cannot be read (here: a record whose date is no date): nothing is opened on a guess.
+  const path = join(box.state, 'lanes', 'X-5.json');
+  const whole = record('X-5');
+  writeFileSync(path, JSON.stringify({ ...whole, opened_at: "2026' or 1 --" }));
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  const blind = flow();
+  assert.match(blind.stdout, /X-5: what it has cost cannot be read: not opened again \(checks:/);
+  assert.equal(record('X-5').runs.length, 3);
+  writeFileSync(path, JSON.stringify({ ...record('X-5'), opened_at: whole.opened_at }));
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  // That session is stopped by its budget under the cap he set: said once for that cap, even when the ledger counts a little less than the CLI did.
+  last = run('X-5', { FAKE_COST: '0.2', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: more' });
+  assert.equal(last.done.status, 5);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: at its cap \(1\.40 \$ of 3 \$\): not opened again/);
+  assert.equal(told().length, 2);
+  flow();
+  assert.equal(told().length, 2);
 });
 
 test('the adapter hands a session its budget, and a session stopped by it ends with a code of its own', () => {
