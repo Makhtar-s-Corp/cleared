@@ -241,10 +241,10 @@ if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
   if [ -n "$head" ]; then cat "${home}/pr-head-\${head//\\//-}.json" 2>/dev/null || echo '[]'; else cat "${join(home, 'pulls-now.json')}"; fi
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr ready" ]; then echo "$3 \${4:-}" >> "${join(home, 'pr-ready')}"
-elif [ "$1 $2" = "run view" ]; then cat "${join(home, 'run-log.txt')}" 2>/dev/null || true
+elif [ "$1 $2" = "run view" ]; then echo "$3" >> "${join(home, 'run-viewed')}"; cat "${join(home, 'run-log.txt')}" 2>/dev/null || true
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
 elif [ "$1 $2" = "pr view" ]; then [ "\${FAKE_GH_VIEW_DOWN:-}" != "$3" ] || exit 1; cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"
-elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *" --event workflow_dispatch "*) cat "${join(home, 'night-runs-by-hand.json')}" 2>/dev/null || echo '[]' ;; *" --branch "*) echo 77 ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
+elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *" --event workflow_dispatch "*) cat "${join(home, 'night-runs-by-hand.json')}" 2>/dev/null || echo '[]' ;; *" --branch "*) if [ -f "${join(home, 'runs-of-branch.json')}" ]; then filter=; previous=; for arg in "$@"; do [ "$previous" != --jq ] || filter=$arg; previous=$arg; done; jq -r "$filter" "${join(home, 'runs-of-branch.json')}"; else echo 77; fi ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
 elif [ "$1" = api ]; then echo 2020-01-01T00:00:00Z
 else echo 0; fi
 `, { mode: 0o755 });
@@ -1702,7 +1702,7 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   // Nothing lost: the commits are on the remote, the unsaved work too as « wip », the file that existed nowhere else is archived.
   for (const branch of ['feat/a', 'test/c', 'feat/d']) assert.match(remote(), new RegExp(`^${branch} `, 'm'), branch);
   assert.match(execFileSync('git', ['--git-dir', lane.remote, 'log', '-1', '--format=%s', 'test/c'], { encoding: 'utf8' }), /^wip: /);
-  assert.equal(readFileSync(join(box.repo, '.local', 'lane-archives', 'feat-a', `menage-${new Date().toISOString().slice(0, 10)}`, '.local', 'notes', 'capture d’écran.txt'), 'utf8'), 'only here\n');
+  assert.equal(readFileSync(join(box.repo, '.local', 'lane-archives', 'feat-a', `menage-${new Date().toLocaleDateString('sv-SE')}`, '.local', 'notes', 'capture d’écran.txt'), 'utf8'), 'only here\n');
   // Kept: in the ledger, and as a note for the digest in the words of the project.
   const db = openLedger(join(box.state, 'ledger.db'));
   assert.equal(db.prepare("select value from events where kind = 'lanes_tidied'").get().value, 4);
@@ -1747,7 +1747,7 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   assert.equal(there(fresh), true, 'a new lane');
   assert.equal(there(gone), false);
   assert.doesNotMatch(remote(), /^feat\/gone /m, 'not put back on the remote');
-  const bundle = join(box.repo, '.local', 'lane-archives', 'feat-gone', `menage-${new Date().toISOString().slice(0, 10)}`, 'unpushed.bundle');
+  const bundle = join(box.repo, '.local', 'lane-archives', 'feat-gone', `menage-${new Date().toLocaleDateString('sv-SE')}`, 'unpushed.bundle');
   assert.match(execFileSync('git', ['-C', box.repo, 'bundle', 'list-heads', bundle], { encoding: 'utf8' }), /feat\/gone/);
 });
 
@@ -1920,8 +1920,17 @@ test('a lane moves by rule to the point where the user is asked: its checks star
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   assert.equal(flow().stdout.trim(), '');
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }, { conclusion: 'SUCCESS' }] });
-  writeFileSync(join(box.home, 'run-log.txt'), 'verify\t✖ the toast closes after three seconds (12ms)\nverify\tunrelated line\n');
+  // The forge lists runs that were skipped and runs of an older version: the one read is the one that failed on this version.
+  // Not listed yet: asked again at the next wake, once, rather than a lane opened blind.
+  const runsOf = (...runs) => writeFileSync(join(box.home, 'runs-of-branch.json'), JSON.stringify(runs));
+  runsOf({ databaseId: 3, headSha: done.head, conclusion: 'skipped' }, { databaseId: 1, headSha: 'older', conclusion: 'failure' });
+  writeFileSync(join(box.home, 'run-log.txt'), 'verify (1/2)\tUNKNOWN STEP\t2026-01-02T10:00:00.0000000Z ✖ the toast closes after three seconds (12ms)\nverify (1/2)\tUNKNOWN STEP\t2026-01-02T10:00:01.0000000Z unrelated line\n');
+  assert.match(flow().stdout, /X-5: red at [0-9a-f]{8} and the run that failed is not listed yet: asked again at the next wake/);
+  assert.equal(record('X-5').runs.length, 1);
+  runsOf({ databaseId: 3, headSha: done.head, conclusion: 'skipped' }, { databaseId: 2, headSha: done.head, conclusion: 'failure' }, { databaseId: 1, headSha: 'older', conclusion: 'failure' });
   assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  assert.deepEqual(readFileSync(join(box.home, 'run-viewed'), 'utf8').trim().split('\n'), ['2']);
+  rmSync(join(box.home, 'runs-of-branch.json'));
   assert.equal(there('X-5'), true);
   assert.equal(record('X-5').runs.length, 2);
   assert.deepEqual(moves().slice(-1), ['X-5 -> In Progress']);
@@ -2595,8 +2604,21 @@ test('no lane is left waiting in silence: a session that died, never started or 
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   flow();
   assert.deepEqual(stuck(), []);
-  // He has agreed, then writes a word on the ticket: read by the lead, it does not take his agreement back.
+  // He put the card in the status of his agreement before anything was asked of him, and the lead writes to
+  // the lane: there is no agreement to keep yet, the word is handed over, and his card stays where he put it.
   writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  assert.equal(spawnSync(join(box.home, 'tell-lane.sh'), ['X-5', '-'], { env: box.env, input: 'Il manque la capture sur téléphone.', encoding: 'utf8' }).status, 0);
+  const early = moves().length;
+  assert.match(flow().stdout, /X-5: opened again \(told:/);
+  assert.equal(moves().length, early, 'the card stays where he put it');
+  const handed = session('X-5', { answer: 'Fait.\n\nQuestions pour Makhtar : aucune.' });
+  assert.match(handed.prompt, /\| Le chef de projet t’a écrit[\s\S]*Il manque la capture sur téléphone\./);
+  pull({ headRefOid: handed.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  flow();
+  assert.deepEqual(stuck(), []);
+  // He was asked, and has agreed, then writes a word on the ticket: read by the lead, it does not take his agreement back.
+  mkdirSync(join(box.state, 'validations'), { recursive: true });
+  writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: handed.head }] }));
   writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Merci.', byOwner: true }]));
   const before = moves().length;
   assert.equal(flow().stdout.includes('said:'), false);
@@ -4721,6 +4743,85 @@ test('a lane that cannot be opened again is not left with its finished work unsh
   flow();
   assert.equal(record('X-5').runs.length, 2, 'both were handed in that one session');
   assert.deepEqual(stuck(), []);
+});
+
+test('a lane opened again on red checks is told what failed: the list of the test runner when it gives one, what came just before the step failed when it is no test, and that the log could not be read when it could not', () => {
+  const { flow, todo, by, session, pull, box } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30'));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  let last = session('X-5');
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const log = (lines) => writeFileSync(join(box.home, 'run-log.txt'), lines.map((line, index) => `verify (2/2)\tUNKNOWN STEP\t${index === 0 ? '\uFEFF' : ''}2026-01-02T10:00:${String(index).padStart(2, '0')}.0000000Z ${line}\n`).join(''));
+  const red = (turn) => {
+    pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+    assert.match(flow().stdout, /X-5: opened again \(checks:/);
+    last = session('X-5', { commit: `fix: attempt ${turn}` });
+    return last.prompt;
+  };
+  // The test runner lists its failures at the end: that list, without the stack frames, and nothing of the thousand lines before.
+  log(['Current runner version', '✖ an early line of the run (3ms)', '  Error: far above', 'ℹ tests 900', 'ℹ fail 1', '', '✖ failing tests:', '', 'test at test/toast.test.mjs:12:1', '✖ the toast closes after three seconds (12ms)', "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:", '  3000 !== 5000', '      at TestContext.<anonymous> (file:///repo/test/toast.test.mjs:14:10)', '##[error]Process completed with exit code 1.', '##[group]Run echo "what the next step of the job prints"', 'Error: a line of the cleanup']);
+  const listed = red(1);
+  assert.match(listed, /\| ✖ failing tests:\n {4}\| test at test\/toast\.test\.mjs:12:1\n {4}\| ✖ the toast closes after three seconds \(12ms\)\n[\s\S]*\| {3}3000 !== 5000\n/);
+  assert.doesNotMatch(listed, /an early line of the run|far above|at TestContext|2026-01-02T10|the next step of the job|a line of the cleanup/);
+  // No test failed: the install did. What came before the step failed says so.
+  log(['Current runner version', '##[group]Run npm ci', 'npm error Error: spawnSync /work/node_modules/esbuild/bin/esbuild ETXTBSY', 'npm error Node.js v24', '##[error]Process completed with exit code 1.', 'Post job cleanup.', 'LOG:  background worker exited with exit code 1']);
+  const install = red(2);
+  assert.match(install, /\| ##\[group\]Run npm ci\n {4}\| npm error Error: spawnSync [^\n]*ETXTBSY\n[\s\S]*\| ##\[error\]Process completed with exit code 1\./);
+  assert.doesNotMatch(install, /Post job cleanup|background worker/);
+  // The forge gives no log: the lane is told so rather than handed an empty extract.
+  writeFileSync(join(box.home, 'run-log.txt'), '');
+  assert.match(red(3), /\| \(le journal des vérifications n'a pas pu être lu : relance chez toi les tests des fichiers que tu as touchés/);
+});
+
+test('a word written to a lane that stays at its cap is not lost in silence: the lead is told it was not handed over, once a day for his own words and once for those of the user, and red checks on a lane already said to be stopped tell him nothing new', () => {
+  const { flow, todo, by, record, session, pull, box, env } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[limits]\n', '[limits]\nticket_cost_usd = 1\n').replace('runs_per_day = 4', 'runs_per_day = 30'));
+  const told = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select detail from events where kind = 'ticket_cost' order by rowid").all().map((row) => row.detail); db.close(); return rows; };
+  const tell = (text) => assert.equal(spawnSync(join(box.home, 'tell-lane.sh'), ['X-5', '-'], { env, input: text, encoding: 'utf8' }).status, 0);
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  // Its first session costs more than the cap of the ticket: said once.
+  const kept = record('X-5');
+  execFileSync('git', ['-C', kept.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: the work']);
+  assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [join(box.state, 'runs', kept.runs.at(-1).run)], { cwd: kept.worktree, env: { ...env, ANSWER: 'Fait.\n\nQuestions pour Makhtar : aucune.', FAKE_COST: '1.1' }, encoding: 'utf8' }).status, 0);
+  const head = execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  pull({ headRefOid: head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again/);
+  assert.equal(told().length, 1);
+  // Red checks, again and again: the lead already knows it is stopped.
+  flow();
+  assert.equal(told().length, 1);
+  // The lead writes to the lane all the same: the word cannot be handed over, and that is said instead of a silence.
+  tell('Corrige aussi le survol.');
+  const unheard = flow();
+  assert.match(unheard.stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(told\)/);
+  assert.doesNotMatch(unheard.stdout, /X-5: opened again \(/);
+  assert.equal(told().length, 2);
+  assert.match(told()[1], /already said to be at this cap\. Since then you wrote to the lane, and that word was not handed to it/);
+  tell('Et le mode sombre.');
+  flow();
+  assert.equal(told().length, 2, 'once a day for the words of the lead');
+  // The user writes on the ticket, without lifting the cap: his word is not handed over either, and that is said too.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(said\)/);
+  assert.equal(told().length, 3);
+  assert.match(told()[2], /Since then the user wrote on the ticket, and that word was not handed to it/);
+  flow();
+  assert.equal(told().length, 3, 'once a day for his words');
+  assert.equal(record('X-5').runs.length, 1, 'nothing was opened at the cap');
+  // He lifts the cap: the lane opens with every word that waited, and nothing more is said of the cap.
+  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }, { id: 'c8', createdAt: '2099-01-01T11:00:00Z', body: 'Plafond 5', byOwner: true }]));
+  assert.match(flow().stdout, /X-5: opened again \(said:c7\)/);
+  assert.equal(told().length, 3);
+  const heard = session('X-5', { commit: null });
+  assert.match(heard.prompt, /\| L'utilisateur a écrit sur le ticket[\s\S]*Tu en es où \?/);
+  assert.match(heard.prompt, /\| Le chef de projet t’a écrit[\s\S]*Corrige aussi le survol\.[\s\S]*Et le mode sombre\./);
 });
 
 test('a lane is not opened again for ever for one reason: three times in a day for the checks, a reviewer or a session that stops, then it is said; a word of the user is never a loop', () => {

@@ -107,14 +107,25 @@ cost_left() {
   cost_out=$(jq -n --argjson cap "$cost_cap" --argjson rest "$cost_rest" '$rest <= $cap / 20')
 }
 
-# at_cost_cap <record> <ticket>: said, and told to the lead once for a given
-# cap, when the ticket has reached it.
+# at_cost_cap <record> <ticket> [<kind of reason>]: said, and told to the
+# lead once for a given cap, when the ticket has reached it. A word written
+# to a lane that stays at that cap (the user's on the ticket, the lead's by
+# tell-lane.sh) is not handed over, and somebody waits for its effect: that
+# is said again, once a day for his words and once for the lead's. Red
+# checks or a review on a lane already said to be stopped tell the lead
+# nothing new, and are not.
 at_cost_cap() {
-  local record=$1 ticket=$2
-  did "$record" "cost:$cost_cap" && return 0
-  say "$ticket: at its cap ($(printf '%.2f' "$cost_spent") \$ of $cost_cap \$): not opened again"
-  [ -n "$dry" ] || ledger event --kind ticket_cost --ticket "$ticket" --value "$cost_spent" --detail "the lane of $ticket has cost $(printf '%.2f' "$cost_spent") \$ at list price, for a cap of $cost_cap \$ on this ticket: it is stopped and not opened again, what it had committed is on its branch. Tell the user what was done and what is left (its last report says), and ask him one closed question: raise the cap of this ticket, yes or no, with your recommendation and an amount; he answers by writing a line « Plafond <amount> » on the ticket"
-  mark "$record" "cost:$cost_cap"
+  local record=$1 ticket=$2 kind=${3:-} key again_for=
+  key="cost:$cost_cap"
+  if did "$record" "$key"; then
+    case "$kind" in said | told) ;; *) return 0 ;; esac
+    key="cost:$cost_cap:$kind:$(date -u +%F)"
+    ! did "$record" "$key" || return 0
+    again_for=" It was already said to be at this cap. Since then $([ "$kind" = said ] && echo 'the user wrote on the ticket' || echo 'you wrote to the lane'), and that word was not handed to it: no session opens at the cap. Say so to the user in the same question."
+  fi
+  say "$ticket: at its cap ($(printf '%.2f' "$cost_spent") \$ of $cost_cap \$): not opened again${kind:+ ($kind)}"
+  [ -n "$dry" ] || ledger event --kind ticket_cost --ticket "$ticket" --value "$cost_spent" --detail "the lane of $ticket has cost $(printf '%.2f' "$cost_spent") \$ at list price, for a cap of $cost_cap \$ on this ticket: it is stopped and not opened again, what it had committed is on its branch.$again_for Tell the user what was done and what is left (its last report says), and ask him one closed question: raise the cap of this ticket, yes or no, with your recommendation and an amount; he answers by writing a line « Plafond <amount> » on the ticket"
+  mark "$record" "$key"
 }
 
 # again <record> <ticket> <role> <key> <file that says why> [keep]: one more
@@ -176,7 +187,7 @@ again() {
   fi
   left=$cost_rest
   if [ "$cost_out" = true ]; then
-    at_cost_cap "$record" "$ticket"
+    at_cost_cap "$record" "$ticket" "$kind"
     return 1
   fi
   if [ -n "$dry" ]; then say "$ticket: opened again ($key)"; return 0; fi
@@ -413,7 +424,11 @@ one_lane() {
   if [ -s "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" ]; then
     jq -c --slurpfile done <(jq -c '.done // {}' "$record") -R 'fromjson? | select($done[0]["told:" + .at] == null)' "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" | jq -sc 'sort_by(.at)' > "$work/told.json"
   fi
-  if [ "$state" != "$(conf_get linear go_state)" ] && [ "$(jq -s 'map(length) | add' "$work/his.json" "$work/told.json")" != 0 ]; then
+  # (A card he put there before anything was asked of him answers nothing
+  # yet: there is no agreement to keep, and a word that waits is handed
+  # over. Seen twice on 10 October: a lane the lead had written to never got
+  # the word, and his card sat there for hours.)
+  if { [ "$state" != "$(conf_get linear go_state)" ] || [ ! -s "$ORCH_STATE_DIR/validations/$ticket.json" ]; } && [ "$(jq -s 'map(length) | add' "$work/his.json" "$work/told.json")" != 0 ]; then
     {
       if [ "$(jq length "$work/his.json")" != 0 ]; then
         echo "L'utilisateur a écrit sur le ticket depuis ta dernière session :"
@@ -526,10 +541,32 @@ one_lane() {
     return 0
   fi
   if [ "$(jq 'map(select(. == "FAILURE" or . == "TIMED_OUT")) | length' <<<"$checks")" != 0 ]; then
+    # What they said: the log of the run that failed on this very version
+    # (a branch has runs that were skipped, or of an older version). From
+    # where the test runner lists its failures when it does; else what came
+    # just before the step failed (an install that broke is not a test that
+    # failed, and the lane must be able to tell); else the lines that look
+    # like a failure. A run the forge does not list yet is asked for again
+    # at the next wake, once: a lane opened on red checks it cannot read
+    # works blind (seen on 10 October).
+    run=$(cd "$ORCH_REPO" && gh run list --branch "$branch" --limit 12 --json databaseId,headSha,conclusion --jq "[.[] | select(.headSha == \"$head\" and (.conclusion == \"failure\" or .conclusion == \"timed_out\"))][0].databaseId // empty" 2> /dev/null) || run=
+    if [ -z "$run" ] && ! did "$record" "nolog:$head"; then
+      say "$ticket: red at ${head:0:8} and the run that failed is not listed yet: asked again at the next wake"
+      mark "$record" "nolog:$head"
+      return 0
+    fi
+    : > "$work/failed.log"
+    [ -z "$run" ] || (cd "$ORCH_REPO" && gh run view "$run" --log-failed 2> /dev/null) | cut -f3- | sed -E 's/^[^ ]*[0-9]T[0-9:.]+Z //' > "$work/failed.log" || true
+    if grep -q 'failing tests' "$work/failed.log"; then
+      sed -n '/failing tests/,/^##\[error\]/p' "$work/failed.log" | grep -v '^[[:space:]]*at \|^[[:space:]]*$' | cut -c1-400 | sed -n '1,120p' > "$work/failed.txt" || true
+    elif grep -q '^##\[error\]' "$work/failed.log"; then
+      grep -m 1 -B 40 '^##\[error\]' "$work/failed.log" | grep -v '^[[:space:]]*$' | cut -c1-400 > "$work/failed.txt" || true
+    else
+      grep -E '✖|not ok|Error|error:|failing|expected|actual|\.mjs:[0-9]+' "$work/failed.log" | cut -c1-400 | tail -n 80 > "$work/failed.txt" || true
+    fi
     {
       echo "Les vérifications automatiques sont rouges sur la version ${head:0:8} de ta branche. Ce qu'elles ont dit (extrait) :"
-      run=$(cd "$ORCH_REPO" && gh run list --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId' 2> /dev/null) || run=
-      [ -z "$run" ] || (cd "$ORCH_REPO" && gh run view "$run" --log-failed 2> /dev/null) | grep -E '✖|not ok|Error|error:|failing|expected|actual|\.mjs:[0-9]+' | cut -c1-400 | tail -n 80 || true
+      if [ -s "$work/failed.txt" ]; then cat "$work/failed.txt"; else echo "(le journal des vérifications n'a pas pu être lu : relance chez toi les tests des fichiers que tu as touchés, et dis-le dans ton compte rendu.)"; fi
     } > "$work/why.md"
     again "$record" "$ticket" "$role" "checks:$head" "$work/why.md"
     return 0
