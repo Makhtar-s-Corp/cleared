@@ -88,6 +88,7 @@ cost_left() {
   # The cap he wrote on the ticket is part of the answer: when his comments
   # cannot be read, the cap is not known either.
   "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/cap-comments.json" 2> /dev/null || return 1
+  jq -e 'type == "array"' "$work/cap-comments.json" > /dev/null 2>&1 || return 1
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/cap-agents.txt" || true
   own=$(jq -r --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)^\\s*plafond\\s*:\\s*([0-9]+(?:[.,][0-9]+)?)")] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
   [ -z "$own" ] || cost_cap=$own
@@ -246,7 +247,7 @@ base_leftovers() {
     fi
     if ! git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1; then
       # No longer a worktree git knows: only the directory this script made is taken away.
-      [[ "$(basename "$spot")" =~ ^\.base-[A-Z]+-[0-9]+$ ]] && [ -f "$spot/.git" ] && rm -rf -- "$spot"
+      if [[ "$(basename "$spot")" =~ ^\.base-[A-Z]+-[0-9]+$ ]] && [ -f "$spot/.git" ]; then rm -rf -- "$spot" 2> /dev/null || true; fi
       git -C "$ORCH_REPO" worktree prune > /dev/null 2>&1 || true
     fi
     if [ -e "$spot" ]; then say "what a round left of a base brought in without a model could not be cleared ($spot)"; else say "what a round left of a base brought in without a model is cleared ($(basename "$spot"))"; fi
@@ -571,7 +572,7 @@ one_lane() {
   # Never asked for this version: the lead asks the user for his agreement.
   did "$record" "ok:$head" || { say "$ticket: #$pr is reviewed and green at ${head:0:8}: the request for the agreement is the lead's"; mark "$record" "ok:$head"; }
 }
-base_leftovers
+base_leftovers || say "what a round left of a base brought in without a model could not be looked at"
 for record in "$ORCH_STATE_DIR/lanes"/*.json; do
   [ -f "$record" ] || continue
   if ! jq -e 'type == "object" and (.ticket | type) == "string"' "$record" > /dev/null 2>&1; then

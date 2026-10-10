@@ -4640,6 +4640,27 @@ test('a base brought in without a model leaves nothing behind when it cannot be 
   assert.match(cleared.stdout, /X-5: the base is brought in without a model \(#41\)/, 'and the round goes on from the branch as it was');
   assert.doesNotMatch(worktrees(), /\.base-X-5/);
   assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-list', '--count', '--merges', `${again.head}..dev/X-5`], { encoding: 'utf8' }).trim(), '1', 'one merge left, the one that was sent');
+  // A directory of that name git no longer knows as a worktree goes too; one that cannot be removed is said, and the round goes on.
+  const stray = join(box.home, 'lanes', '.base-X-9');
+  mkdirSync(stray, { recursive: true });
+  writeFileSync(join(stray, '.git'), 'gitdir: /nowhere\n');
+  assert.match(flow().stdout, /is cleared \(\.base-X-9\)/);
+  assert.throws(() => readdirSync(stray));
+  // A merge that is not the one the rules wrote down is somebody's work: it is not taken back.
+  const sent = execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 3;\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'feat: still more code on the base');
+  box.git('push', '-q', 'origin', 'main');
+  box.git('fetch', '-q', 'origin');
+  box.git('worktree', 'add', '-q', spot, 'dev/X-5');
+  execFileSync('git', ['-C', spot, 'merge', '-q', '--ff-only', 'origin/dev/X-5']);
+  execFileSync('git', ['-C', spot, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
+  const theirs = tip();
+  assert.notEqual(theirs, sent);
+  pull({ headRefOid: sent, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /is cleared \(\.base-X-5\)/);
+  assert.equal(tip(), theirs, 'the branch still has it');
 });
 
 test('a ticket has a cap on what it may cost: a session is given what is left, a lane that reached it is not opened again and the lead is told once with the figures, and a line of the user raises it for that ticket', () => {
