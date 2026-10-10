@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -4646,6 +4646,18 @@ test('a base brought in without a model leaves nothing behind when it cannot be 
   writeFileSync(join(stray, '.git'), 'gitdir: /nowhere\n');
   assert.match(flow().stdout, /is cleared \(\.base-X-9\)/);
   assert.throws(() => readdirSync(stray));
+  if (process.getuid() !== 0) {
+    mkdirSync(join(stray, 'held'), { recursive: true });
+    writeFileSync(join(stray, '.git'), 'gitdir: /nowhere\n');
+    writeFileSync(join(stray, 'held', 'file'), 'x\n');
+    chmodSync(join(stray, 'held'), 0o500);
+    const held = flow();
+    chmodSync(join(stray, 'held'), 0o700);
+    rmSync(stray, { recursive: true, force: true });
+    assert.equal(held.status, 0, held.stderr);
+    assert.match(held.stdout, /could not be cleared \(.*\.base-X-9\)/);
+    assert.match(held.stdout, /X-5: /, 'the lanes are looked at all the same');
+  }
   // A merge that is not the one the rules wrote down is somebody's work: it is not taken back.
   const sent = execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
   writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 3;\n');
@@ -4655,6 +4667,8 @@ test('a base brought in without a model leaves nothing behind when it cannot be 
   box.git('fetch', '-q', 'origin');
   box.git('worktree', 'add', '-q', spot, 'dev/X-5');
   execFileSync('git', ['-C', spot, 'merge', '-q', '--ff-only', 'origin/dev/X-5']);
+  // The tip written down is an older one: this merge does not sit on it.
+  writeFileSync(join(execFileSync('git', ['-C', spot, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim(), 'base-before'), `${again.head}\n`);
   execFileSync('git', ['-C', spot, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-edit', 'origin/main']);
   const theirs = tip();
   assert.notEqual(theirs, sent);
