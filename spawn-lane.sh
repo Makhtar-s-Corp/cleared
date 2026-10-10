@@ -238,8 +238,11 @@ if [ -n "$pushed_role" ]; then
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$run_dir/agent-ids.txt" || true
   # Which of his words this session is handed, kept with the run: what he
   # writes from here on is what it was not handed, whatever the clocks say.
+  # A comment that only sets the cap of the ticket is not shown to the
+  # lane: it is the dispatcher's to read, and a lane takes it for a figure
+  # of the product.
   jq -c --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not)) | .id]' <<<"$written" > "$run_dir/seen.json"
-  jq -r --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | .[] | "- le \(.createdAt[0:16] | sub("T"; " à ")) :\n" + (.body | split("\n") | map("    | " + .) | join("\n"))' <<<"$written" > "$run_dir/comments.md"
+  jq -r --arg cap "$cap_line" --rawfile ids "$run_dir/agent-ids.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt) | .[] | "- le \(.createdAt[0:16] | sub("T"; " à ")) :\n" + (.body | split("\n") | map("    | " + .) | join("\n"))' <<<"$written" > "$run_dir/comments.md"
 fi
 mv "$available" "$run_dir/chain.json"
 {

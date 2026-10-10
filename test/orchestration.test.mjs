@@ -4745,14 +4745,50 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.equal(record('X-5').runs.length, 3);
   writeFileSync(path, JSON.stringify({ ...record('X-5'), opened_at: whole.opened_at }));
   assert.match(flow().stdout, /X-5: opened again \(checks:/);
-  // That session is stopped by its budget under the cap he set: said once for that cap, even when the ledger counts a little less than the CLI did.
+  // That session is stopped by its budget though the ticket has something left (it cost less than it was given): no cap is told, it goes on.
   last = run('X-5', { FAKE_COST: '0.2', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: more' });
   assert.equal(last.done.status, 5);
-  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
-  assert.match(flow().stdout, /X-5: at its cap \(1\.40 \$ of 3 \$\): not opened again/);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  const more = flow();
+  assert.match(more.stdout, /X-5: opened again \(budget:/);
+  assert.doesNotMatch(more.stdout, /at its cap/);
+  assert.equal(told().length, 1);
+  assert.match(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'prompt.md'), 'utf8'), /arrêtée à la limite de son budget/);
+  // This one spends the cap he set: said once for that cap, and nothing opens the lane.
+  last = run('X-5', { FAKE_COST: '1.7', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: still more' });
+  assert.equal(budget(), 'budget=1.6');
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(flow().stdout, /X-5: at its cap \(3\.10 \$ of 3 \$\): not opened again/);
   assert.equal(told().length, 2);
+  const atCap = record('X-5').runs.length;
   flow();
   assert.equal(told().length, 2);
+  assert.equal(record('X-5').runs.length, atCap);
+  // He lifts it the way he writes: « Plafond 4 », alone, without a colon. That comment is no word for the lane and is not shown to it;
+  // a sentence about a share (« plafond 80 % ») sets no cap, and is a word like any other.
+  const comments = (list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const c9 = { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true };
+  const c10 = { id: 'c10', createdAt: '2099-01-01T11:00:00Z', body: 'plafond 80 % de mon abonnement, on est bien d’accord', byOwner: true };
+  const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Plafond 4', byOwner: true };
+  comments([c11, c9]);
+  const lifted = flow();
+  assert.match(lifted.stdout, /X-5: opened again \(budget:/);
+  assert.doesNotMatch(lifted.stdout, /said:c11/);
+  assert.equal(told().length, 2, 'a cap he lifted is not told as reached');
+  assert.doesNotMatch(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'comments.md'), 'utf8'), /Plafond 4/);
+  last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: finished' });
+  assert.equal(budget(), 'budget=0.9');
+  // A lane that was not stopped is not opened by a line that only sets the cap; it is by a sentence of his.
+  const c12 = { id: 'c12', createdAt: '2099-01-01T13:00:00Z', body: 'Plafond 9\n', byOwner: true };
+  comments([c12, c11, c9]);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.doesNotMatch(flow().stdout, /X-5: opened again/);
+  comments([c12, c11, { ...c10, createdAt: '2099-01-01T14:00:00Z' }, c9]);
+  assert.match(flow().stdout, /X-5: opened again \(said:c10\)/);
+  last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: answered' });
+  assert.equal(budget(), 'budget=5.8', 'the cap is the 9 he wrote last, not 80');
+  comments([c9]);
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   // A ticket he puts in « Todo » while the tracker does not give its comments waits; it is opened once they are read, with the cap he wrote on it.
   todo(['X-6']);
   by('X-6', 0);
