@@ -4940,6 +4940,40 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   assert.doesNotMatch(flow().stdout, /opened again \(said:/);
 });
 
+test('a ticket given to two teams with no place for the second, or no second harness, is not stuck: the second waits for a place, and one team works when there is no other harness, said once', () => {
+  const asked = JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Deux équipes.', byOwner: true }]);
+  // No other harness is named for the role: one team, and the lead is told once.
+  {
+    const { flow, todo, by, record, session, stuck, box } = flowBox();
+    writeFileSync(join(box.home, 'linear-comments.json'), asked);
+    todo(['X-5']);
+    by('X-5', 0);
+    const alone = flow();
+    assert.match(alone.stdout, /X-5: put in « Todo » by the user: its lane is opened/);
+    assert.match(alone.stdout, /X-5: given to two teams by the user, and no second harness can be opened now \(the first runs on first\): one team works on it/);
+    assert.deepEqual(stuck(), ['lane_stuck X-5']);
+    session('X-5');
+    flow();
+    assert.deepEqual(stuck(), ['lane_stuck X-5'], 'said once a day');
+    assert.throws(() => record('X-5.2'));
+  }
+  // A harness is named, and the only place is taken by the first team at work: the second waits, and opens when there is one.
+  {
+    const { flow, todo, by, record, session, stuck, box } = flowBox({ maxLanes: 1 });
+    const confPath = join(box.home, 'agents.conf');
+    writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[harness]\ndev = b\n`);
+    writeFileSync(join(box.home, 'linear-comments.json'), asked);
+    todo(['X-5']);
+    by('X-5', 0);
+    assert.match(flow().stdout, /X-5: given to two teams by the user: no place now for the second \(the limit of lanes\), it waits/);
+    assert.throws(() => record('X-5.2'));
+    session('X-5');
+    assert.match(flow().stdout, /X-5: given to two teams by the user: its second team is opened \(b, the first runs on first\)/);
+    assert.equal(record('X-5.2').team, '2');
+    assert.deepEqual(stuck(), []);
+  }
+});
+
 test('a lane is not opened again for ever for one reason: three times in a day for the checks, a reviewer or a session that stops, then it is said; a word of the user is never a loop', () => {
   const { flow, todo, by, record, session, stuck, pull, box } = flowBox();
   const confPath = join(box.home, 'agents.conf');

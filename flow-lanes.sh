@@ -293,21 +293,23 @@ wants_two_teams() {
 # its own lane (<role>/<ticket>.2), within the cap of the ticket, which both
 # share. With no place or a subscription at its stop it waits, and is tried
 # again at the next wake; with no second harness at all, that is said to the
-# lead once a day and one team works.
+# lead, one team works, and the second is tried again the day after.
 second_team() {
   local record=$1 ticket=$2 role=$3 first candidate alias= runs_on code=0
   [ ! -f "$(lane_record "$ticket.2")" ] || return 0
+  ! did "$record" "teams:none:$(date -u +%F)" || return 0
+  # What the first team runs on: as its first session was opened, or, when
+  # that is no longer kept, as the ledger wrote its sessions.
   first=$(jq -r '.[0].adapter // empty' "$ORCH_STATE_DIR/runs/$(jq -r '.runs[0].run // empty' "$record")/chain.json" 2> /dev/null) || first=
-  [ -n "$first" ] || return 0
+  [ -n "$first" ] || first=$(ledger sql "select provider from runs where lane = '$role/$ticket' and provider is not null order by started_at limit 1" 2> /dev/null | jq -r '.[0].provider // empty' 2> /dev/null) || first=
   for candidate in "$(conf_get harness "$role")" "$("$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --team 2 --dry-run 2> /dev/null | jq -r '.requested // empty' 2> /dev/null)"; do
     [ -n "$candidate" ] || continue
     runs_on=$("$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --team 2 --model "$candidate" --dry-run 2> /dev/null | jq -r '.would_run.adapter // empty' 2> /dev/null) || runs_on=
-    if [ -n "$runs_on" ] && [ "$runs_on" != "$first" ]; then alias=$candidate; break; fi
+    if [ -n "$first" ] && [ -n "$runs_on" ] && [ "$runs_on" != "$first" ]; then alias=$candidate; break; fi
   done
   if [ -z "$alias" ]; then
-    did "$record" "teams:none:$(date -u +%F)" && return 0
-    say "$ticket: given to two teams by the user, and no second harness can be opened now (the first runs on $first): one team works on it"
-    [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --detail "the user gave $ticket to two teams, and no model of another harness than $first (the one its first team runs on) is available: [harness] $role names none, or its command line does not answer. One team works on the ticket; the second is tried again at each wake"
+    say "$ticket: given to two teams by the user, and no second harness can be opened now (the first runs on ${first:-one that could not be read}): one team works on it"
+    [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --detail "the user gave $ticket to two teams, and no model of another harness than ${first:-the one its first team runs on, which could not be read} is available: [harness] $role names none, or its command line does not answer. One team works on the ticket; the second is tried again tomorrow"
     mark "$record" "teams:none:$(date -u +%F)"
     return 0
   fi
