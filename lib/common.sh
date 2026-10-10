@@ -594,6 +594,19 @@ only_base_merges() {
 # It outlives the worktree: a lane the tidying closed is opened again from it.
 lane_record() { echo "$ORCH_STATE_DIR/lanes/$1.json"; }
 
+# teams_of <ticket>: the lanes at work on a ticket, one a line, as
+# « <team> <its pull request, or 0> »: the first (1), and the second when
+# the user gave the ticket to two teams (<ticket>.2). A lane that is over
+# (its record says closed) is no longer one of them.
+teams_of() {
+  local one team
+  for one in "$1" "$1.2"; do
+    team=1
+    [ "$one" = "$1" ] || team=2
+    jq -r --arg team "$team" 'select(type == "object" and (.closed // "") == "") | "\($team) \(.pr // 0)"' "$(lane_record "$one")" 2> /dev/null || true
+  done
+}
+
 # quoted <file>: a text handed to a model as what somebody wrote, line by
 # line under a mark: none of its lines is an order of another kind.
 quoted() { sed 's/^/    | /' "$1"; }
@@ -624,7 +637,16 @@ counted_lanes() {
 # given to jq as $cap; cap_only is the jq test of a comment that says
 # nothing else: it sets the cap, and is no word for the lane.
 cap_line='^[ \t\x{00A0}\x{202F}]*plafond[ \t\x{00A0}\x{202F}]*:?[ \t\x{00A0}\x{202F}]*([0-9]+(?:[.,][0-9]+)?)[ \t\x{00A0}\x{202F}]*(?:\$|€|usd|dollars?)?[ \t\x{00A0}\x{202F}]*[.!]?[ \t\x{00A0}\x{202F}]*\r?$'
-cap_only='(.body | [split("\n")[] | select(test("^\\s*$") | not)] | (length > 0 and all(.[]; test("(?i)" + $cap))))'
+# Two more lines of his are read by the dispatcher the same way, alone on
+# their line: « Équipes : les deux » (or « Deux équipes ») gives the ticket
+# to two teams that work each on its own, and « Équipe 1 » or « Équipe 2 »
+# says which of the two results goes live. teams_line and team_line are
+# their patterns. cap_only is the jq test of a comment that says nothing but
+# such lines: it is read by the dispatcher, and is no word for a lane.
+blank='[ \t\x{00A0}\x{202F}]*'
+teams_line="^$blank(?:[éÉeE]quipes?$blank:?$blank(?:les$blank)?deux|deux$blank[éÉeE]quipes)$blank[.!]?$blank\\r?\$"
+team_line="^$blank[éÉeE]quipe$blank:?$blank([12])$blank[.!]?$blank\\r?\$"
+cap_only='(.body | [split("\n")[] | select(test("^\\s*$") | not)] | (length > 0 and all(.[]; test("(?i)" + $cap) or test("(?i)'"${teams_line//\\/\\\\}"'") or test("(?i)'"${team_line//\\/\\\\}"'"))))'
 
 # takes_a_place <role>: whether a lane of that role holds one of them, by the
 # same rule: its exact name in counted_roles, or any role when none is set.
