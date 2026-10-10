@@ -26,7 +26,7 @@ of_tickets() {
 }
 if [ "${1:-}" = --list ]; then
   [ ! -f "$known" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$known"
-  of_tickets | sed 's/$/\tlane of the dispatcher: handed at its next session/'
+  of_tickets | sort -u | sed 's/$/\tlane of the dispatcher: handed at its next session/'
   exit 0
 fi
 [ $# -eq 2 ] || die "usage: tell-lane.sh <worktree name | ticket> <file|-> | --list"

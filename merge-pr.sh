@@ -139,6 +139,19 @@ if [ "$needs" != tooling ]; then
         [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the user agreed to ${shown:0:8} and the branch is now at ${head:0:8}: $ticket is back in « $validate », to be asked again with this version"
         no "this version (${head:0:8}) is not the version he was shown (${shown:0:8}): $ticket is back in « $validate ». Ask him again with this version (ask-validation.sh $ticket - --pr $pr)"
       fi
+      # A ticket he gave to two teams: his move agrees to a go-live, and
+      # his line « Équipe 1 » or « Équipe 2 », written after the request,
+      # says of which. No line, or the line of the other team: not this one.
+      if [ "$(jq -r '.teams // {} | length' "$asked" 2> /dev/null)" = 2 ]; then
+        mine=$(jq -r --argjson pr "$pr" '.teams | to_entries[] | select(.value == $pr) | .key' "$asked" | sed -n '1p')
+        [ -n "$mine" ] || no "$ticket was given to two teams, and #$pr is the pull request of neither"
+        "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/choice.json" || die "the comments of $ticket could not be read: which team he chose is not known"
+        cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/choice-agents.txt" || true
+        chosen=$(jq -r --arg team "$team_line" --arg since "$requested" --rawfile ids "$work/choice-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and .createdAt > $since)] | sort_by(.createdAt) | map(.body | [scan("(?im)" + $team)] | map(.[0])) | add // [] | last // empty' "$work/choice.json")
+        [ -n "$chosen" ] || no "$ticket was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 » of his on the ticket, written after the request"
+        [ "$chosen" = "$mine" ] || no "the user chose the team $chosen (#$(jq -r --arg team "$chosen" '.teams[$team]' "$asked")): #$pr, of the team $mine, is not put live"
+        loser=$(jq -r --arg team "$mine" '.teams | to_entries[] | select(.key != $team) | .value' "$asked" | sed -n '1p')
+      fi
       agreed=status
       ;;
     7) later "Linear has not written yet who put $ticket in « $go »" ;;
@@ -184,6 +197,20 @@ fi
 ledger event --kind merged_by_script --ticket "$ticket" --value "$pr" --detail "#$pr at ${head:0:8}, reviewed at ${reviewed:0:8}, $needs, agreement: ${agreed:-none needed}"
 echo "merged: #$pr ($ticket) at ${head:0:8}"
 
+# The result of the other team, which he did not choose: its pull request is
+# closed and its lane is over, so that the ticket closes on what is live.
+if [ -n "${loser:-}" ]; then
+  if (cd "$ORCH_REPO" && gh pr close "$loser") > /dev/null 2>&1; then
+    for one in "$ticket" "$ticket.2"; do
+      kept=$(lane_record "$one")
+      [ "$(jq -r '.pr // empty' "$kept" 2> /dev/null)" = "$loser" ] || continue
+      jq --arg at "$(now_utc)" '. + {closed: $at}' "$kept" > "$kept.part" && mv "$kept.part" "$kept"
+    done
+    echo "closed: #$loser, the result of the team he did not choose"
+  else
+    echo "$(basename "$0"): #$pr is live, but #$loser, of the team he did not choose, could not be closed" >&2
+  fi
+fi
 # What the user agreed to is told to him where he agreed, and closed. A
 # comment the hourly limit holds back leaves with the grouped ones.
 if [ -n "$announcement" ]; then

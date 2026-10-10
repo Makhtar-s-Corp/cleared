@@ -192,7 +192,9 @@ again() {
     return 1
   fi
   if [ -n "$dry" ]; then say "$ticket: opened again ($key)"; return 0; fi
-  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --resume --message-file "$why" --comment-on none ${keep:+--keep-status} ${left:+--budget "$left"} > /dev/null 2> "$work/spawn.err" || code=$?
+  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" ${team:+--team "$team"} --resume --message-file "$why" --comment-on none ${keep:+--keep-status} ${left:+--budget "$left"} > /dev/null 2> "$work/spawn.err" || code=$?
+  # At work again: what it had ready for the request is no longer its last word.
+  [ "$code" != 0 ] || { jq 'del(.ready)' "$record" > "$record.part" && mv "$record.part" "$record"; } || true
   case "$code" in
     0)
       say "$ticket: opened again ($key)"
@@ -224,7 +226,7 @@ base_without_model() {
   push_branch=$(jq -r '.push_branch // empty' "$record")
   tried="nobase:$(git -C "$ORCH_REPO" rev-parse --short "origin/${push_branch:-$lane}" 2> /dev/null):$(git -C "$ORCH_REPO" rev-parse --short "$base" 2> /dev/null)"
   ! did "$record" "$tried" || return 1
-  spot="$(dirname "$(jq -r '.worktree' "$record")")/.base-$ticket"
+  spot="$(dirname "$(jq -r '.worktree' "$record")")/.base-${lane#*/}"
   git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1 || true
   # The branch of the lane may be gone from here (its worktree was closed
   # long ago, or the lane took up a pull request that was there before it):
@@ -269,19 +271,65 @@ base_leftovers() {
     fi
     if ! git -C "$ORCH_REPO" worktree remove --force "$spot" > /dev/null 2>&1; then
       # No longer a worktree git knows: only the directory this script made is taken away.
-      if [[ "$(basename "$spot")" =~ ^\.base-[A-Z]+-[0-9]+$ ]] && [ -f "$spot/.git" ]; then rm -rf -- "$spot" 2> /dev/null || true; fi
+      if [[ "$(basename "$spot")" =~ ^\.base-[A-Z]+-[0-9]+(\.2)?$ ]] && [ -f "$spot/.git" ]; then rm -rf -- "$spot" 2> /dev/null || true; fi
       git -C "$ORCH_REPO" worktree prune > /dev/null 2>&1 || true
     fi
     if [ -e "$spot" ]; then say "what a round left of a base brought in without a model could not be cleared ($spot)"; else say "what a round left of a base brought in without a model is cleared ($(basename "$spot"))"; fi
   done
 }
 
+# wants_two_teams <comments of the ticket>: the user wrote, on a line of its
+# own, that two teams work on this ticket (« Équipes : les deux »). His
+# comments only, like his cap.
+wants_two_teams() {
+  cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/teams-agents.txt" || true
+  jq -e --arg teams "$teams_line" --rawfile ids "$work/teams-agents.txt" '($ids | split("\n")) as $agents | any(.[]; .byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and any(.body | split("\n")[]; test("(?i)" + $teams)))' "$1" > /dev/null 2>&1
+}
+
+# second_team <record of the first team> <ticket> <role>: opens the second
+# team of a ticket the user gave to two, on the other harness than the first
+# one runs on: the one [harness] names for the role, or the one the role is
+# routed to when the first team was itself opened on the other. It works on
+# its own lane (<role>/<ticket>.2), within the cap of the ticket, which both
+# share. With no place or a subscription at its stop it waits, and is tried
+# again at the next wake; with no second harness at all, that is said to the
+# lead once a day and one team works.
+second_team() {
+  local record=$1 ticket=$2 role=$3 first candidate alias= runs_on code=0
+  [ ! -f "$(lane_record "$ticket.2")" ] || return 0
+  first=$(jq -r '.[0].adapter // empty' "$ORCH_STATE_DIR/runs/$(jq -r '.runs[0].run // empty' "$record")/chain.json" 2> /dev/null) || first=
+  [ -n "$first" ] || return 0
+  for candidate in "$(conf_get harness "$role")" "$("$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --team 2 --dry-run 2> /dev/null | jq -r '.requested // empty' 2> /dev/null)"; do
+    [ -n "$candidate" ] || continue
+    runs_on=$("$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --team 2 --model "$candidate" --dry-run 2> /dev/null | jq -r '.would_run.adapter // empty' 2> /dev/null) || runs_on=
+    if [ -n "$runs_on" ] && [ "$runs_on" != "$first" ]; then alias=$candidate; break; fi
+  done
+  if [ -z "$alias" ]; then
+    did "$record" "teams:none:$(date -u +%F)" && return 0
+    say "$ticket: given to two teams by the user, and no second harness can be opened now (the first runs on $first): one team works on it"
+    [ -n "$dry" ] || ledger event --kind lane_stuck --ticket "$ticket" --detail "the user gave $ticket to two teams, and no model of another harness than $first (the one its first team runs on) is available: [harness] $role names none, or its command line does not answer. One team works on the ticket; the second is tried again at each wake"
+    mark "$record" "teams:none:$(date -u +%F)"
+    return 0
+  fi
+  if [ -n "$dry" ]; then say "$ticket: given to two teams by the user: its second team would be opened ($alias)"; return 0; fi
+  cost_left "$record" "$ticket" || return 0
+  [ "$cost_out" != true ] || return 0
+  "$ORCH_HOME/spawn-lane.sh" "$role" "$ticket" --team 2 --model "$alias" --comment-on none --keep-status ${cost_rest:+--budget "$cost_rest"} > /dev/null 2> "$work/spawn.err" || code=$?
+  case "$code" in
+    0) say "$ticket: given to two teams by the user: its second team is opened ($alias, the first runs on $first)" ;;
+    3) say "$ticket: given to two teams by the user: no place now for the second (the limit of lanes), it waits" ;;
+    4) say "$ticket: given to two teams by the user: the subscription of the second is at its stop, it waits" ;;
+    *) say "$ticket: given to two teams by the user: the second could not be opened: $(sed -n '$p' "$work/spawn.err")" ;;
+  esac
+  return 0
+}
+
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped=
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
-  ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record")
+  ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record") team=$(jq -r '.team // empty' "$record")
   last=$(jq -r '.runs[-1].run // empty' "$record")
   [ -n "$last" ] || return 0
   # A session that is not over: at work, unless it died without a word (its
@@ -421,6 +469,12 @@ one_lane() {
     cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
     jq -c --arg cap "$cap_line" --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
     [ "$(jq length "$work/his.json")" = 0 ] || ! did "$record" "said:$(jq -r '.[-1].id' "$work/his.json")" || echo '[]' > "$work/his.json"
+    # He gave the ticket to two teams (when it opened, with no place for the
+    # second, or since): the second opens beside this one, as long as he
+    # was not asked for his agreement yet.
+    if [ -z "$team" ] && [ "$state" != "$(conf_get linear validate_state)" ] && [ "$state" != "$(conf_get linear go_state)" ] && wants_two_teams "$work/comments.json"; then
+      second_team "$record" "$ticket" "$role"
+    fi
   fi
   if [ -s "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" ]; then
     jq -c --slurpfile done <(jq -c '.done // {}' "$record") -R 'fromjson? | select($done[0]["told:" + .at] == null)' "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" | jq -sc 'sort_by(.at)' > "$work/told.json"
@@ -631,7 +685,23 @@ one_lane() {
     return 0
   fi
   # Never asked for this version: the lead asks the user for his agreement.
-  did "$record" "ok:$head" || { say "$ticket: #$pr is reviewed and green at ${head:0:8}: the request for the agreement is the lead's"; mark "$record" "ok:$head"; }
+  # Two teams on the ticket: he is asked once, with both results. The
+  # first that is ready waits for the other; the lead is told when both are.
+  did "$record" "ok:$head" && return 0
+  [ -n "$dry" ] || { jq --argjson pr "$pr" --arg head "$head" '. + {ready: {pr: $pr, head: $head}}' "$record" > "$record.part" && mv "$record.part" "$record"; }
+  other=$(lane_record "$ticket$([ -n "$team" ] || echo .2)")
+  if [ -f "$other" ] && [ "$(jq -r '.closed // empty' "$other" 2> /dev/null)" = "" ]; then
+    theirs=$(jq -r '.ready.pr // empty' "$other" 2> /dev/null) || theirs=
+    if [ -n "$theirs" ]; then
+      say "$ticket: its two teams are reviewed and green (#$pr and #$theirs): one request with both results is the lead's"
+      [ -n "$dry" ] || ledger event --kind teams_ready --ticket "$ticket" --value "$pr" --detail "the two teams of $ticket are done, each reviewed with nothing blocking and green: #$([ -n "$team" ] && echo "$theirs" || echo "$pr") (team 1) and #$([ -n "$team" ] && echo "$pr" || echo "$theirs") (team 2). Ask the user once, with both results side by side (ask-validation.sh $ticket - --pr $([ -n "$team" ] && echo "$theirs" || echo "$pr") --pr $([ -n "$team" ] && echo "$pr" || echo "$theirs"), the captures of each under its name): what each did, how they differ, your recommendation. He chooses by writing a line « Équipe 1 » or « Équipe 2 » on the ticket and by putting the card in his status of agreement; the go-live of the one he chose closes the other"
+    else
+      say "$ticket: #$pr (team ${team:-1}) is reviewed and green at ${head:0:8}: the request waits for the other team of the ticket"
+    fi
+  else
+    say "$ticket: #$pr is reviewed and green at ${head:0:8}: the request for the agreement is the lead's"
+  fi
+  mark "$record" "ok:$head"
 }
 base_leftovers || say "what a round left of a base brought in without a model could not be looked at"
 for record in "$ORCH_STATE_DIR/lanes"/*.json; do
@@ -690,7 +760,11 @@ while IFS=$'\t' read -r ticket updated; do
   if [ "$cost_out" = true ]; then say "$ticket: put in « $todo » by the user: at its cap ($cost_spent \$ of $cost_cap \$) before any lane, it waits"; continue; fi
   "$ORCH_HOME/spawn-lane.sh" dev "$ticket" --comment-on none ${whole:+--budget "$whole"} > /dev/null 2> "$work/spawn.err" || code=$?
   case "$code" in
-    0) say "$ticket: put in « $todo » by the user: its lane is opened" ;;
+    0)
+      say "$ticket: put in « $todo » by the user: its lane is opened"
+      # Given to two teams on the same line of his: the second opens beside it.
+      ! wants_two_teams "$work/cap-comments.json" || second_team "$record" "$ticket" dev
+      ;;
     3) say "$ticket: put in « $todo » by the user: no place now (the limit of lanes), it waits"; break ;;
     4) say "$ticket: put in « $todo » by the user: the subscription is at its stop ($(sed -n 's/.*at its stop (\([^)]*\)).*/\1/p' "$work/spawn.err" | sed -n '$p')), it waits"; break ;;
     *) say "$ticket: put in « $todo » by the user: its lane could not be opened: $(sed -n '$p' "$work/spawn.err")" ;;

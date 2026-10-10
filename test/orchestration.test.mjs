@@ -4847,6 +4847,99 @@ test('a session stopped at the cap of its ticket while a word waits for the lane
   assert.match(heard.prompt, /\| Le chef de projet t’a écrit[\s\S]*Corrige aussi le survol\.[\s\S]*Et le mode sombre\./);
 });
 
+test('a ticket the user gives to two teams (« Équipes : les deux ») gets a second team on the other harness, on a lane of its own; he is asked once, with both results, when both are reviewed and green; his line says which goes live, and its go-live closes the other', () => {
+  const { flow, todo, by, record, session, box, env } = flowBox({ maxLanes: 3 });
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30')}\n[harness]\ndev = b\n`);
+  const comments = (...list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const asked = { id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Équipes : les deux', byOwner: true };
+  const events = (kind) => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select detail from events where kind = ? order by rowid').all(kind).map((row) => row.detail); db.close(); return rows; };
+  const chain = (key) => JSON.parse(readFileSync(join(box.state, 'runs', record(key).runs.at(-1).run, 'chain.json'), 'utf8'));
+  // A line an agent wrote under his account gives nothing to two teams; his own does.
+  comments({ ...asked, body: '> Écrit par un agent (chef de projet), pas par lui.\n\nÉquipes : les deux' });
+  todo(['X-5']);
+  by('X-5', 0);
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: true }]));
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.2.json'), JSON.stringify([{ number: 42, state: 'OPEN', isDraft: true }]));
+  const alone = flow();
+  assert.match(alone.stdout, /X-5: put in « Todo » by the user: its lane is opened/);
+  assert.doesNotMatch(alone.stdout, /two teams/);
+  // He writes it once the first team is at work: the second opens beside it when the first has ended its session.
+  comments(asked);
+  const one = session('X-5');
+  assert.doesNotMatch(one.prompt, /Équipes : les deux/, 'a line for the dispatcher is no word for a lane');
+  const opened = flow();
+  assert.match(opened.stdout, /X-5: given to two teams by the user: its second team is opened \(b, the first runs on first\)/);
+  assert.doesNotMatch(opened.stdout, /X-5: opened again \(said:/, 'and it does not open the first again');
+  assert.equal(record('X-5.2').lane, 'dev/X-5.2');
+  assert.equal(record('X-5.2').ticket, 'X-5');
+  assert.equal(record('X-5.2').team, '2');
+  assert.match(record('X-5.2').worktree, /dev-X-5\.2$/);
+  assert.equal(chain('X-5')[0].adapter, 'first');
+  assert.equal(chain('X-5.2')[0].adapter, 'second');
+  assert.equal(flow().stdout.includes('second team'), false, 'opened once');
+  const two = session('X-5.2', { commit: 'fix: the work of the other team' });
+  assert.match(two.prompt, /Lane : dev\/X-5\.2 [\s\S]*Ce ticket est confié à deux équipes, chacune de son côté : tu es la deuxième\./);
+  assert.equal(record('X-5.2').pr, 42);
+  assert.equal(record('X-5').pr, 41);
+  assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5.2'], { encoding: 'utf8' }).trim(), two.head, 'sent to a branch of its own');
+  // Each is green and read by another model: the first that is ready waits for the other, and the lead is told once both are.
+  const view = (pr, head, over = {}) => writeFileSync(join(box.home, `pr-view-${pr}.json`), JSON.stringify({ number: pr, state: 'OPEN', isDraft: false, headRefName: pr === 41 ? 'dev/X-5' : 'dev/X-5.2', headRefOid: head, baseRefName: 'main', title: 't', body: 'b', createdAt: '2026-01-01T00:00:00Z', additions: 1, deletions: 0, files: [], statusCheckRollup: [{ conclusion: 'SUCCESS' }], ...over }));
+  const read = (pr, head) => {
+    const id = `X-5-review-of-${pr}`;
+    const db = openLedger(join(box.state, 'ledger.db'));
+    db.prepare("insert into runs (run_id, ticket, role, model, provider, started_at, ended_at, outcome, pr_number, lane, source) values (?, 'X-5', 'review', 'c', 'second', '2026-01-03T09:00:00Z', '2026-01-03T09:05:00Z', 'done', ?, 'review/X-5', 'dispatcher')").run(id, pr);
+    db.close();
+    mkdirSync(join(box.state, 'reports'), { recursive: true });
+    writeFileSync(join(box.state, 'reports', `${id}.md`), `commit: ${head}\n\n## Compte rendu\n\nVerdict : rien de bloquant.\n\n## Fichiers modifiés\n`);
+  };
+  view(41, one.head);
+  view(42, two.head, { statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  read(41, one.head);
+  const first = flow();
+  assert.match(first.stdout, /X-5: #41 \(team 1\) is reviewed and green at [0-9a-f]{8}: the request waits for the other team of the ticket/);
+  assert.deepEqual(events('teams_ready'), []);
+  // The lead asks for the first alone all the same: refused, nothing is written to the user.
+  const ask = (...pulls) => spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', ...pulls.flatMap((pr) => ['--pr', String(pr)])], { env, input: 'Deux pistes pour le même écran.', encoding: 'utf8' });
+  const early = ask(41);
+  assert.notEqual(early.status, 0);
+  assert.match(early.stderr, /X-5 was given to two teams \(#41 and #42\): he is asked once, with both results side by side \(--pr 41 --pr 42\)/);
+  view(42, two.head);
+  read(42, two.head);
+  const both = flow();
+  assert.match(both.stdout, /X-5: its two teams are reviewed and green \(#42 and #41\): one request with both results is the lead's/);
+  assert.equal(events('teams_ready').length, 1);
+  assert.match(events('teams_ready')[0], /#41 \(team 1\) and #42 \(team 2\)[\s\S]*ask-validation\.sh X-5 - --pr 41 --pr 42/);
+  assert.equal(flow().stdout.trim(), '', 'said once');
+  // One request, with both: it tells him how to choose, and keeps which team made which.
+  const request = ask(41, 42);
+  assert.equal(request.status, 0, request.stderr);
+  const written = readFileSync(join(box.home, 'linear-posted'), 'utf8');
+  assert.match(written, /Deux équipes ont travaillé ce ticket, chacune de son côté : équipe 1, PR 41 ; équipe 2, PR 42\. Pour choisir, écris sur le ticket une ligne « Équipe 1 » ou « Équipe 2 », puis glisse la carte dans « Go MEP »/);
+  const kept = () => JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8'));
+  assert.deepEqual(kept().teams, { 1: 41, 2: 42 });
+  // He puts the card in his status of agreement and says nothing of which: neither goes live.
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  const live = (pr) => spawnSync(join(box.home, 'merge-pr.sh'), [String(pr), 'X-5', '-'], { env, input: 'Ce qui change, où le voir, comment le vérifier.', encoding: 'utf8' });
+  const silent = live(41);
+  assert.notEqual(silent.status, 0);
+  assert.match(silent.stderr, /X-5 was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 »/);
+  // His line, written after the request, names the second team: the first is refused, the second goes live, and the first is closed.
+  comments(asked, { id: 'c2', createdAt: '2099-01-01T10:00:00Z', body: 'Équipe 2', byOwner: true });
+  const refused = live(41);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /the user chose the team 2 \(#42\): #41, of the team 1, is not put live/);
+  assert.throws(() => readFileSync(join(box.home, 'pr-merged')));
+  const chosen = live(42);
+  assert.equal(chosen.status, 0, chosen.stderr);
+  assert.match(chosen.stdout, /merged: #42 \(X-5\)[\s\S]*closed: #41, the result of the team he did not choose/);
+  assert.equal(readFileSync(join(box.home, 'pr-merged'), 'utf8').split('\n')[2], '42');
+  assert.ok(record('X-5').closed, 'the lane of the team he did not choose is over');
+  assert.equal(record('X-5.2').closed, undefined);
+  // His choice is read by the go-live, and is no word for a lane.
+  assert.doesNotMatch(flow().stdout, /opened again \(said:/);
+});
+
 test('a lane is not opened again for ever for one reason: three times in a day for the checks, a reviewer or a session that stops, then it is said; a word of the user is never a loop', () => {
   const { flow, todo, by, record, session, stuck, pull, box } = flowBox();
   const confPath = join(box.home, 'agents.conf');
