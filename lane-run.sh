@@ -91,6 +91,25 @@ run_chain "$ORCH_ROLE" "$run_dir/prompt.md" "$run_dir/chain.json" "$ORCH_REQUEST
 lane_run_id=$run_id
 lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lane_adapter=$adapter lane_model=$model lane_fallback=$fallback_note
 
+# What a backend that cannot commit brought back ([adapter.<name>] commits =
+# no: its work comes back as changes applied to the worktree) is committed
+# here, by the rules, under the message it wrote (.commit-message, which is
+# not part of its work). Without this the work would wait for another model
+# to commit it. A backend that commits by itself is left alone: what it did
+# not commit is its to sort out.
+if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
+  message=$(mktemp)
+  if [ -s .commit-message ] && [ ! -L .commit-message ]; then head -c 4000 .commit-message > "$message"; fi
+  rm -f .commit-message
+  if [ -n "$(git status --porcelain 2> /dev/null)" ]; then
+    [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
+    git add -A
+    git -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
+      || echo "!! Le travail de $lane_alias n'a pas pu être enregistré (git commit a refusé) : il reste dans la copie de travail."
+  fi
+  rm -f "$message"
+fi
+
 # What the user reads in Linear. The figures and the model come from the
 # scripts; only the wording of the report may come from the writing model.
 body=$(mktemp)

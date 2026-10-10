@@ -20,6 +20,8 @@ asked="$*"
 allowed=
 while IFS= read -r named; do
   [ -n "$named" ] || continue
+  # A command named by its place (the task script of an adapter): ~ is the home.
+  named=$(expand_home "$named")
   case "$asked " in "$named "*) allowed=1 ;; esac
 done < <(conf_get lanes heavy_commands | tr ',' '\n' | sed 's/^ *//; s/ *$//')
 [ -n "$allowed" ] || die "\"$asked\" is not one of the heavy commands of the project ([lanes] heavy_commands): not run"
