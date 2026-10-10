@@ -21,6 +21,7 @@
 #       ORCH_EDIT_ONLY names the one file the session may edit, and
 #       ORCH_READ_DIRS (separated by colons) the folders it may read.
 #
+# ORCH_BUDGET_USD: what the run may still cost; a run stopped there exits 5.
 # ORCH_READ (separated by commas): folders a run may read beyond the one it
 # works in, and those only.
 #

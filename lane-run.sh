@@ -42,7 +42,8 @@ attempt() {
   # The role's own permissions, unless the run was given others (the acting
   # lead), which never apply to another role of the same lane (the write-up).
   if [ "$role" = "$ORCH_ROLE" ]; then permissions_env "${ORCH_PERMISSIONS:-$role}"; else permissions_env "$role"; fi
-  ORCH_RUN_ID=$run_id ORCH_ROLE=$role ORCH_REQUESTED_MODEL=$requested \
+  # The budget of the ticket is for the work of the lane, not for the write-up of its report.
+  ORCH_BUDGET_USD=$([ "$role" = "$ORCH_ROLE" ] && echo "${ORCH_BUDGET_USD:-}") ORCH_RUN_ID=$run_id ORCH_ROLE=$role ORCH_REQUESTED_MODEL=$requested \
     "$(adapter_path "$adapter")" run --model "$model" --prompt-file "$prompt" --report "$report" --usage "$usage_file"
   code=$?
   case "$code" in 0) outcome=done; model_seen "$adapter" "$model" ;; 2 | 3) outcome=refused ;; *) outcome=failed ;; esac
@@ -126,7 +127,8 @@ fi
 # A lane has no network command: when its role is one whose work is pushed,
 # this is where its branch leaves and its pull request opens.
 pushed_note=
-if [ "$lane_code" = 0 ] && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
+# (Also the work of a session its budget stopped: what it committed is not lost.)
+if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   # Its answer is its last line on stdout. What git and gh say on the way is
   # kept in a file and shown once the script has ended.
   push_err=$(mktemp)
@@ -156,6 +158,7 @@ case "$lane_code" in
   0) result="terminé" ;;
   2) result="pas démarré : rien n'a été envoyé au modèle" ;;
   3) result="refusé par le garde-fou du fournisseur : rien n'a été envoyé" ;;
+  5) result="arrêté : le plafond de coût du ticket est atteint" ;;
   *) result="échec (code $lane_code)" ;;
 esac
 tokens=$(jq -r '.tokens_total // empty' "$lane_usage")

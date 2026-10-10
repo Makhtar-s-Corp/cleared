@@ -6,7 +6,7 @@
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
 #                 [--since <commit>] [--from <ref>] [--resume] [--message-file <file>]
-#                 [--keep-status]
+#                 [--keep-status] [--budget <amount>]
 #                 [--path <touched path>]... [--pr-lines <n>] [--wait] [--dry-run]
 #
 # With --pr, the lane starts from the head of that pull request, and its size
@@ -22,7 +22,8 @@
 # branch otherwise), for one more run; --message-file says why, quoted too
 # (what a reviewer found, what the checks said, what the user answered).
 # --keep-status leaves the ticket in the status it is in (a run that brings
-# the base in changes nothing of what the user agreed to).
+# the base in changes nothing of what the user agreed to). --budget is what
+# the session may still cost (the cap of its ticket, less what was spent).
 #
 # This script knows the contract of the adapters and nothing else: no model
 # and no provider is named here.
@@ -37,7 +38,7 @@ usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 [ $# -ge 2 ] || usage
 role=$1 ticket=$2
 shift 2
-forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status=
+forced= prompt_file= comment_on=$ticket author= pr= pr_lines= since= from= wait_for_exit= dry_run= resume= message_file= keep_status= budget=
 paths=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -50,6 +51,7 @@ while [ $# -gt 0 ]; do
     --from) from=$2; shift 2 ;;
     --resume) resume=1; shift ;;
     --keep-status) keep_status=1; shift ;;
+    --budget) budget=$2; shift 2 ;;
     --message-file) message_file=$2; shift 2 ;;
     --path) paths+=(--path "$2"); shift 2 ;;
     --pr-lines) pr_lines=$2; shift 2 ;;
@@ -164,7 +166,9 @@ if grep -qxF -- "$lane" <<<"$lanes"; then
   [ -n "$resume" ] || die "the lane $lane is already open"
   there=1
 fi
-if [ -z "$there" ] && [ "$open" -ge "$max" ]; then
+# Only a role that takes a place is refused for want of one: a review reads,
+# and opens whatever the number of lanes at work.
+if [ -z "$there" ] && [ "$open" -ge "$max" ] && grep -qw -- "$role" <<<"$(conf_get limits counted_roles)"; then
   ledger event --kind lane_limit_reached --ticket "$ticket" --detail "$lane refused: $open lanes open for a limit of $max" --value "$open"
   echo "$(basename "$0"): lane limit reached ($open open, limit $max): $lane not opened" >&2
   exit 3
@@ -273,6 +277,7 @@ fi
   printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$requested" "règle : $rule${route_notes:+ ; $route_notes}" "$spawn_note"
   printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\n' "$comment_on" "$writeup_role"
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PUSH_BRANCH=%q\n' "$pr" "$pr_lines" "$push_branch"
+  printf 'ORCH_BUDGET_USD=%q\n' "$budget"
   printf 'ORCH_PROJECT=%q\nORCH_LABEL=%q\n' "$(jq -r '.project // ""' <<<"$issue")" "$(jq -r '.labels[0] // ""' <<<"$issue")"
 } > "$run_dir/lane.env"
 
