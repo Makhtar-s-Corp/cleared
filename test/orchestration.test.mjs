@@ -2070,8 +2070,8 @@ test('the checkout of the project follows its base by itself: fast-forward only,
   assert.equal(readFileSync(join(project, '.ferme', 'agents.conf'), 'utf8'), '[limits]\nmax_lanes = 2\n');
   assert.equal(readFileSync(join(project, '.env.local'), 'utf8'), 'SECRET=kept\n', 'what is not tracked is left alone');
   assert.deepEqual(events(), ['project_updated']);
-  // Not asked for by the settings: nothing moves.
-  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n');
+  // Switched off by the settings: nothing moves.
+  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n[update]\nproject = no\n');
   const third = live('rules.md', 'two\n', 'docs: a rule');
   assert.equal(update({ ORCH_CONF: join(home, 'off.conf') }).status, 3);
   assert.equal(head(), second);
@@ -2099,13 +2099,33 @@ test('the checkout of the project follows its base by itself: fast-forward only,
   const ahead = update();
   assert.equal(ahead.status, 1);
   assert.match(ahead.stderr, /holds commits/);
+  // A file that is not tracked stands where a tracked one comes in: nothing is overwritten, and what git said is told.
+  git(project, 'reset', '-q', '--hard', third);
+  writeFileSync(join(project, 'notes.md'), 'not tracked\n');
+  live('notes.md', 'tracked\n', 'docs: notes');
+  const blocked = update();
+  assert.equal(blocked.status, 1);
+  assert.match(blocked.stderr, /did not go through: .*notes\.md/);
+  assert.equal(readFileSync(join(project, 'notes.md'), 'utf8'), 'not tracked\n');
+  rmSync(join(project, 'notes.md'));
+  assert.equal(update().status, 0);
+  const fourth = head();
+  // A project that keeps its own settings and says nothing of the updates does not switch them off: the tool's own say.
+  writeFileSync(join(home, 'project.conf'), '[lanes]\nbase = origin/main\n[limits]\nmax_lanes = 2\n');
+  const fifth = live('rules.md', 'three\n', 'docs: one more rule');
+  assert.equal(update({ ORCH_CONF: join(home, 'project.conf') }).status, 0);
+  assert.equal(head(), fifth);
+  assert.notEqual(fifth, fourth);
+  // A base named without its remote, or unknown here, is nothing to follow, and stops nothing.
+  writeFileSync(join(home, 'odd.conf'), '[lanes]\nbase = origin/nowhere\n[update]\nproject = yes\n');
+  assert.equal(update({ ORCH_CONF: join(home, 'odd.conf') }).status, 3);
   // A project the tool lives inside of is left to the update of the tool itself.
   const inside = join(project, 'tool-inside');
   mkdirSync(inside, { recursive: true });
   execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'project-update.sh'), inside]);
-  git(project, 'reset', '-q', '--hard', third);
+  live('other-again.md', 'x\n', 'docs: other again');
   assert.equal(spawnSync(join(inside, 'project-update.sh'), [], { env, encoding: 'utf8' }).status, 3);
-  assert.equal(head(), third);
+  assert.equal(head(), fifth);
   // Each wake asks for it, and goes on whatever it answers: a copy that could not move stops nothing.
   const box = sandbox();
   writeFileSync(join(box.home, 'project-update.sh'), `#!/usr/bin/env bash\necho asked >> "${join(box.home, 'project-calls')}"\nexit 1\n`, { mode: 0o755 });
@@ -2188,8 +2208,8 @@ test('the checkout the dispatcher runs from follows the base by itself: fast-for
   assert.equal(update().status, 3);
   assert.equal(head(), mine);
   git(checkout, 'checkout', '-q', 'main');
-  // Without the setting, nothing.
-  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n');
+  // Switched off by the settings, nothing. (A project's file that says nothing of it leaves the tool's own setting in force.)
+  writeFileSync(join(home, 'off.conf'), '[lanes]\nbase = origin/main\n[update]\nself = no\n');
   assert.equal(spawnSync(join(tools, 'self-update.sh'), [], { env: { ...env, ORCH_CONF: join(home, 'off.conf') }, encoding: 'utf8' }).status, 3);
   assert.notEqual(head(), git(elsewhere, 'rev-parse', 'HEAD').trim());
   // The wake that finds this copy updated goes on as the new wake, once.
@@ -4643,6 +4663,8 @@ test('the base is brought into a lane without a model when nothing has to be dec
   box.git('add', '.');
   box.git('commit', '-q', '-m', 'feat: code on the base');
   box.git('push', '-q', 'origin', 'main');
+  // The branch of the lane is gone from this checkout (seen live: a lane that took up an older pull request): it is made again from the remote.
+  box.git('branch', '-D', 'dev/X-5');
   const merged = flow();
   assert.match(merged.stdout, /X-5: the base is brought in without a model \(#41\)/);
   assert.equal(record('X-5').runs.length, 1, 'no session was opened for it');
