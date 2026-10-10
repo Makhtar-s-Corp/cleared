@@ -118,7 +118,21 @@ case "${1:-}" in
     [ -s "$body" ] || echo "Codex n'a rendu aucun texte (code $code)." > "$body"
     # The CLI only prints a total in this mode: the split stays empty.
     total=$(grep -A1 '^tokens used' "$err" | tail -n 1 | tr -dc '0-9') || total=
-    contract_usage "$(jq -nc --arg total "$total" '{tokens_total: (if $total == "" then null else ($total | tonumber) end)}')"
+    # Where its subscription stands, when the task script passes on what the
+    # CLI recorded (a line « rate limits <json> »: the CLI's own snapshot,
+    # primary and secondary windows with the percent used, the length of the
+    # window in minutes and the time it starts over): kept like any backend's
+    # (lib/limits.mjs), under the names the windows have elsewhere.
+    limits=$(grep '^rate limits ' "$err" | tail -n 1 | sed 's/^rate limits //' | jq -c '
+      def named: if . == 10080 then "seven_day" elif . == 300 then "five_hour" else "\(.)_minutes" end;
+      # Each window by itself: one whose figures cannot be read does not
+      # take the other with it; two of the same length keep the fuller one.
+      [.primary, .secondary]
+      | map(select(type == "object") | try {key: (.window_minutes | floor | named), used: .used_percent, resets_at: (.resets_at | floor | todate)} catch empty)
+      | map(select((.used | type) == "number" and .used >= 0 and .used <= 1000))
+      | group_by(.key) | map(max_by(.used))
+      | if length == 0 then null else {windows: (map({key, value: {used, resets_at}}) | from_entries)} end' 2> /dev/null) || limits=null
+    contract_usage "$(jq -nc --arg total "$total" --argjson limits "${limits:-null}" '{tokens_total: (if $total == "" then null else ($total | tonumber) end)} + (if $limits then {limits: $limits} else {} end)')"
     contract_report codex "$code" "$body"
     exit "$code"
     ;;
