@@ -81,6 +81,9 @@ if [ -n "$resume" ]; then
   [ -f "$record" ] && [ "$(jq -r '.lane // empty' "$record")" = "$lane" ] || die "no lane was ever opened on $key: there is nothing to open again (open it without --resume)"
   [ "$(ledger sql "select count(*) n from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[0].n')" = 0 ] || die "a session of $lane is still running: it is not opened again over it"
   push_branch=$(jq -r '.push_branch // empty' "$record")
+  # A team of a ticket given to two is opened again on the model it was
+  # given: two teams that end up on one harness are no longer two.
+  [ -n "$forced" ] || forced=$(jq -r '.team_model // empty' "$record")
   [ -n "$pr" ] || pr=$(jq -r '.pr // empty' "$record")
 fi
 
@@ -349,8 +352,8 @@ if [ -n "$pushed_role" ]; then
   mkdir -p "$(dirname "$record")"
   kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
   [ -n "$kept" ] || kept='{}'
-  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
-    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
+    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
   # The ticket is at work: said where the user looks.
   progress=$(conf_get linear progress_state)
   [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true

@@ -31,8 +31,13 @@ if [ "${1:-}" = --list ]; then
 fi
 [ $# -eq 2 ] || die "usage: tell-lane.sh <worktree name | ticket> <file|-> | --list"
 lane=$1
-ticket=
+ticket= team=
 ! of_tickets | grep -qxF -- "$lane" || ticket=$lane
+# One of the two teams of a ticket given to two: <ticket>.1 or <ticket>.2.
+# The ticket alone speaks to both.
+if [ -z "$ticket" ] && [[ "$lane" =~ ^(.+)\.([12])$ ]] && of_tickets | grep -qxF -- "${BASH_REMATCH[1]}"; then
+  ticket=${BASH_REMATCH[1]} team=${BASH_REMATCH[2]}
+fi
 handle=
 if [ -z "$ticket" ]; then
   [ -f "$known" ] || die "\"$lane\" is not a lane that can be told something: no lane is known yet"
@@ -61,9 +66,9 @@ recent=$(jq -R -r --arg lane "$lane" --arg since "$(date -u -d '1 hour ago' +%Y-
 # (flow-lanes.sh). One line, appended: nothing else writes this file.
 if [ -n "$ticket" ]; then
   at=$(now_utc)
-  jq -nc --arg at "$at" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" '{at: $at, run: $run, text: $text}' >> "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl"
+  jq -nc --arg at "$at" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" --arg team "$team" '{at: $at, run: $run, text: $text} + (if $team != "" then {team: $team} else {} end)' >> "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl"
   jq -nc --arg lane "$lane" --arg at "$at" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" '{lane: $lane, at: $at, run: $run, text: $text}' >> "$ORCH_STATE_DIR/lane-messages.jsonl"
-  echo "kept for the lane of $ticket: handed to it at its next session, which the rules open once the one at work is over"
+  echo "kept for the lane of $ticket${team:+ (team $team)}: handed to it at its next session, which the rules open once the one at work is over"
   exit 0
 fi
 

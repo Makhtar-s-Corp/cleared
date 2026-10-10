@@ -242,6 +242,7 @@ if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr ready" ]; then echo "$3 \${4:-}" >> "${join(home, 'pr-ready')}"
 elif [ "$1 $2" = "run view" ]; then echo "$3" >> "${join(home, 'run-viewed')}"; cat "${join(home, 'run-log.txt')}" 2>/dev/null || true
+elif [ "$1 $2" = "pr close" ]; then [ -z "\${FAKE_GH_CLOSE_DOWN:-}" ] || exit 1; echo "$3" >> "${join(home, 'pr-closed')}"
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
 elif [ "$1 $2" = "pr view" ]; then [ "\${FAKE_GH_VIEW_DOWN:-}" != "$3" ] || exit 1; cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"
 elif [ "$1 $2" = "run list" ]; then case " $* " in *" --event schedule "*) cat "${join(home, 'night-runs.json')}" 2>/dev/null || echo '[]' ;; *" --event workflow_dispatch "*) cat "${join(home, 'night-runs-by-hand.json')}" 2>/dev/null || echo '[]' ;; *" --branch "*) if [ -f "${join(home, 'runs-of-branch.json')}" ]; then filter=; previous=; for arg in "$@"; do [ "$previous" != --jq ] || filter=$arg; previous=$arg; done; jq -r "$filter" "${join(home, 'runs-of-branch.json')}"; else echo 77; fi ;; *) echo "\${FAKE_GH_RUNS:-[]}" ;; esac
@@ -4940,6 +4941,102 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   assert.doesNotMatch(flow().stdout, /opened again \(said:/);
 });
 
+test('two teams on a ticket, where it could go wrong: the line written once the first is ready, a team opened again stays on its harness, a word for one team only, a wait that lasts is said, his choice is read after the request and never guessed, and the result he did not choose never goes live', () => {
+  const { flow, todo, by, record, session, stuck, moves, box, env } = flowBox({ maxLanes: 3 });
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30')}\n[harness]\ndev = b\n`);
+  const comments = (...list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const asked = { id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Équipes : les deux', byOwner: true };
+  const events = (kind) => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select detail from events where kind = ? order by rowid').all(kind).map((row) => row.detail); db.close(); return rows; };
+  const chain = (key) => JSON.parse(readFileSync(join(box.state, 'runs', record(key).runs.at(-1).run, 'chain.json'), 'utf8'));
+  const view = (pr, head, over = {}) => writeFileSync(join(box.home, `pr-view-${pr}.json`), JSON.stringify({ number: pr, state: 'OPEN', isDraft: false, headRefName: pr === 41 ? 'dev/X-5' : 'dev/X-5.2', headRefOid: head, baseRefName: 'main', title: 't', body: 'b', createdAt: '2026-01-01T00:00:00Z', additions: 1, deletions: 0, files: [], statusCheckRollup: [{ conclusion: 'SUCCESS' }], ...over }));
+  const read = (pr, head) => {
+    const id = `X-5-review-of-${pr}`;
+    const db = openLedger(join(box.state, 'ledger.db'));
+    db.prepare("insert into runs (run_id, ticket, role, model, provider, started_at, ended_at, outcome, pr_number, lane, source) values (?, 'X-5', 'review', 'c', 'second', '2026-01-03T09:00:00Z', '2026-01-03T09:05:00Z', 'done', ?, 'review/X-5', 'dispatcher')").run(id, pr);
+    db.close();
+    mkdirSync(join(box.state, 'reports'), { recursive: true });
+    writeFileSync(join(box.state, 'reports', `${id}.md`), `commit: ${head}\n\n## Compte rendu\n\nVerdict : rien de bloquant.\n\n## Fichiers modifiés\n`);
+  };
+  comments();
+  todo(['X-5']);
+  by('X-5', 0);
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: true }]));
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.2.json'), JSON.stringify([{ number: 42, state: 'OPEN', isDraft: true }]));
+  flow();
+  const one = session('X-5');
+  // One team, reviewed and green: the request is the lead's, as for any ticket.
+  view(41, one.head);
+  read(41, one.head);
+  assert.match(flow().stdout, /X-5: #41 is reviewed and green at [0-9a-f]{8}: the request for the agreement is the lead's/);
+  // He gives the ticket to two teams only then, before anything was asked of him: the second opens, and the first waits for it.
+  comments(asked);
+  assert.match(flow().stdout, /X-5: given to two teams by the user: its second team is opened \(b, the first runs on first\)/);
+  assert.equal(record('X-5').team_model, 'a', 'the first team is kept on what it runs on');
+  assert.equal(record('X-5.2').team_model, 'b');
+  // A wait that lasts is said to the lead, once: nothing is asked for one team behind his back, and nothing waits in silence.
+  { const kept = record('X-5'); kept.ready.at = new Date(Date.now() - 5 * 3600e3).toISOString(); writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept)); }
+  assert.match(flow().stdout, /X-5: #41 \(team 1\) has waited 4 hours for the other team of the ticket: said to the lead/);
+  flow();
+  assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  assert.match(events('lane_stuck')[0], /wait for the other, or go on with this one alone[\s\S]*kill-lane\.sh <role>\/X-5\.2/);
+  const two = session('X-5.2', { commit: 'fix: the work of the other team' });
+  // A word of the lead for the second team only: it is opened again with it, on its own harness, and the first is not.
+  const tell = (to, text) => spawnSync(join(box.home, 'tell-lane.sh'), [to, '-'], { env, input: text, encoding: 'utf8' });
+  view(42, two.head, { isDraft: true, statusCheckRollup: [] });
+  const said = tell('X-5.2', 'Pour la deuxième équipe : vérifie le mode sombre.');
+  assert.equal(said.status, 0, said.stderr);
+  assert.match(said.stdout, /kept for the lane of X-5 \(team 2\)/);
+  const again = flow().stdout;
+  assert.equal(again.match(/opened again \(told:/g).length, 1, again);
+  assert.equal(record('X-5').runs.length, 1, 'the first team was not opened for a word that is not for it');
+  assert.equal(chain('X-5.2')[0].adapter, 'second', 'opened again on the harness it was given');
+  const told = session('X-5.2', { commit: null });
+  assert.match(told.prompt, /\| Le chef de projet t’a écrit[\s\S]*Pour la deuxième équipe : vérifie le mode sombre\./);
+  // The second is ready in its turn: the lead is told, though the first had been ready long before the ticket had two teams.
+  view(42, two.head);
+  read(42, two.head);
+  assert.match(flow().stdout, /X-5: its two teams are reviewed and green \(#42 and #41\): one request with both results is the lead's/);
+  assert.equal(events('teams_ready').length, 1);
+  assert.equal(flow().stdout.trim(), '', 'said once');
+  assert.equal(events('teams_ready').length, 1);
+  // The request, then his choice: a line from before the request, a line an agent wrote, or lines that name both teams choose nothing.
+  const ask = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '41', '--pr', '42'], { env, input: 'Deux pistes pour le même écran.', encoding: 'utf8' });
+  assert.equal(ask.status, 0, ask.stderr);
+  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  const live = (pr, extra = {}) => spawnSync(join(box.home, 'merge-pr.sh'), [String(pr), 'X-5', '-'], { env: { ...env, ...extra }, input: 'Ce qui change, où le voir, comment le vérifier.', encoding: 'utf8' });
+  const before = { id: 'c2', createdAt: '2026-01-02T09:30:00Z', body: 'Équipe 1', byOwner: true };
+  const agent = { id: 'c3', createdAt: '2099-01-01T10:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nÉquipe 2', byOwner: true };
+  comments(asked, before, agent);
+  assert.match(live(41).stderr, /the user has not said which one goes live/);
+  assert.match(live(42).stderr, /the user has not said which one goes live/);
+  comments(asked, { id: 'c4', createdAt: '2099-01-01T11:00:00Z', body: 'Équipe 1', byOwner: true }, { id: 'c5', createdAt: '2099-01-01T12:00:00Z', body: 'Équipe 2', byOwner: true });
+  assert.match(live(41).stderr, /the user named both since the request/);
+  assert.throws(() => readFileSync(join(box.home, 'pr-merged')));
+  // He names the first. It goes live; GitHub does not close the other now: kept, told, and closed by the wake.
+  comments(asked, { id: 'c4', createdAt: '2099-01-01T11:00:00Z', body: 'Équipe 1', byOwner: true });
+  const chosen = live(41, { FAKE_GH_CLOSE_DOWN: '1' });
+  assert.equal(chosen.status, 0, chosen.stderr);
+  assert.match(chosen.stderr, /#41 is live, but #42, of the team he did not choose, could not be closed: the wake tries again/);
+  const kept = () => JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8'));
+  assert.equal(kept().close, 42);
+  assert.ok(record('X-5.2').closed && record('X-5.2').not_chosen, 'its lane is over at once');
+  // The result he did not choose never goes live, whatever is asked later.
+  const second = live(42);
+  assert.notEqual(second.status, 0);
+  assert.match(second.stderr, /#42 is the result of the team the user did not choose for X-5/);
+  assert.equal(readFileSync(join(box.home, 'pr-merged'), 'utf8').split('\n')[2], '41');
+  view(41, one.head, { state: 'MERGED' });
+  const wake = spawnSync('bash', ['-c', '. "$0/lib/common.sh"; close_tickets_left_open', box.home], { env, encoding: 'utf8' });
+  assert.equal(wake.status, 0, wake.stderr);
+  assert.equal(readFileSync(join(box.home, 'pr-closed'), 'utf8').trim(), '42');
+  assert.equal(kept().close, undefined);
+  view(42, two.head, { state: 'CLOSED' });
+  spawnSync('bash', ['-c', '. "$0/lib/common.sh"; close_tickets_left_open', box.home], { env, encoding: 'utf8' });
+  assert.equal(kept().closing, undefined);
+  assert.equal(moves().at(-1), 'X-5 -> Done');
+});
+
 test('a ticket given to two teams with no place for the second, or no second harness, is not stuck: the second waits for a place, and one team works when there is no other harness, said once', () => {
   const asked = JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Deux équipes.', byOwner: true }]);
   // No other harness is named for the role: one team, and the lead is told once.
@@ -4971,6 +5068,20 @@ test('a ticket given to two teams with no place for the second, or no second har
     assert.match(flow().stdout, /X-5: given to two teams by the user: its second team is opened \(b, the first runs on first\)/);
     assert.equal(record('X-5.2').team, '2');
     assert.deepEqual(stuck(), []);
+    // The second has nothing to show yet: the first is not asked for alone, until the lane of the second is closed by hand.
+    const head = execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(box.home, 'pr-view-41.json'), JSON.stringify({ number: 41, state: 'OPEN', headRefOid: head }));
+    const ask = () => spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '41'], { env: box.env, input: 'Une piste.', encoding: 'utf8' });
+    const early = ask();
+    assert.notEqual(early.status, 0);
+    assert.match(early.stderr, /X-5 was given to two teams, and one of them has no pull request yet/);
+    const closed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-5.2'], { env: box.env, encoding: 'utf8' });
+    assert.equal(closed.status, 0, closed.stderr);
+    assert.ok(record('X-5.2').closed && record('X-5.2').given_up);
+    assert.doesNotMatch(flow().stdout, /second team/, 'a team given up is not opened again');
+    const alone = ask();
+    assert.equal(alone.status, 0, alone.stderr);
+    assert.equal(JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8')).teams, undefined);
   }
 });
 

@@ -115,6 +115,13 @@ close_tickets_left_open() {
     for record in "$ORCH_STATE_DIR/validations"/*.json; do
       [ "$(jq -r '.closing // false' "$record" 2> /dev/null)" = true ] || continue
       ticket=$(jq -r '.ticket' "$record")
+      # The result of a team he did not choose, that GitHub did not close
+      # at the go-live of the other: closed here.
+      open=$(jq -r '.close // empty' "$record")
+      if [ -n "$open" ]; then
+        (cd "$ORCH_REPO" && gh pr close "$open") > /dev/null 2>&1 || continue
+        jq 'del(.close)' "$record" > "$record.next" && mv "$record.next" "$record"
+      fi
       read -r open unknown <<<"$(shown_left "$record")"
       [ "$open" = 0 ] && [ "$unknown" = 0 ] || continue
       code=0
