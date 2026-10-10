@@ -355,7 +355,8 @@ github_down() {
 # given to something else), or an opening that never came, holds nothing.
 talk_open() {
   local mark="$ORCH_STATE_DIR/wake/talk" first second
-  read -r first second < "$mark" 2> /dev/null || return 1
+  [ -r "$mark" ] || return 1
+  read -r first second 2> /dev/null < "$mark" || return 1
   if [ "$first" = opening ]; then
     [ $(( $(date +%s) - ${second:-0} )) -lt "${ORCH_TALK_OPENING:-300}" ]
   else
