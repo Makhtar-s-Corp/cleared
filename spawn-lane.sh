@@ -120,6 +120,34 @@ if [ "$(jq length "$available")" = 0 ]; then
   [ -n "$dry_run" ] || ledger event --kind model_fallback_failed --ticket "$ticket" --detail "$lane: no model of the chain is available ($(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed"))"
   die "no model of the chain is available for $lane: $(jq -r '[.chain[].alias] | join(" > ")' <<<"$routed")"
 fi
+# 2b. What is left of each subscription. A role may name another harness
+# ([harness] <role> = <alias>): when the subscription the lane would run on
+# is tight ([limits] subscription_switch) or at its stop, and the one of
+# that other harness is not, the lane opens there, and says so. A stopped
+# subscription is never a fallback; a tight one stays behind as one. A model
+# somebody named for this lane (--model) is not second-guessed.
+other=$(conf_get harness "$role")
+if [ -z "$forced" ] && [ -n "$other" ]; then
+  first=$(jq -r '.[0].adapter' "$available")
+  IFS=$'\t' read -r first_state first_window first_used _ <<<"$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" standing "$first" 2> /dev/null || echo free)"
+  if [ "${first_state:-free}" != free ]; then
+    other_routed=$(node "$ORCH_HOME/lib/route.mjs" "${route_args[@]}" --model "$other" "${paths[@]}" 2> /dev/null) || other_routed=
+    other_available=$(mktemp)
+    if [ -n "$other_routed" ]; then available_chain "$(jq -c '.chain' <<<"$other_routed")" > "$other_available" 2> /dev/null; else echo '[]' > "$other_available"; fi
+    second=$(jq -r '.[0].adapter // empty' "$other_available")
+    second_state=free
+    [ -z "$second" ] || IFS=$'\t' read -r second_state _ <<<"$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" standing "$second" 2> /dev/null || echo free)"
+    if [ -n "$second" ] && [ "$second" != "$first" ] && { [ "$second_state" = free ] || { [ "$first_state" = stopped ] && [ "$second_state" != stopped ]; }; }; then
+      # The other harness first; behind it, every model of both chains whose
+      # subscription is not at its stop, each once.
+      stopped_adapters=$(jq -r '.[].adapter' "$other_available" "$available" | sort -u | while IFS= read -r one; do [ "$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" standing "$one" 2> /dev/null | cut -f1)" != stopped ] || echo "$one"; done | jq -R . | jq -sc .)
+      jq -sc --argjson stopped "$stopped_adapters" '(.[0] + .[1]) | map(select(.adapter as $a | $stopped | index($a) | not)) | reduce .[] as $one ([]; if (map(.alias) | index($one.alias)) then . else . + [$one] end)' "$other_available" "$available" > "$available.next" && mv "$available.next" "$available"
+      switched="$first est à $first_used % de sa période ($first_window) : équipe ouverte sur $(jq -r '.[0].alias' "$available") ($second)."
+      [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$lane: the subscription of $first is $first_state ($first_used % of its $first_window window): opened on $(jq -r '.[0].alias' "$available") ($second) instead of $requested"
+    fi
+    rm -f "$other_available"
+  fi
+fi
 chosen=$(jq -r '.[0].alias' "$available")
 # The subscription this lane would run on is at the stop the project set
 # ([limits] subscription_stop, percent of a window, as the sessions say it):
@@ -136,7 +164,9 @@ if reached=$(node --no-warnings "$ORCH_HOME/lib/limits.mjs" reached "$(jq -r '.[
   echo "$(basename "$0"): the subscription is at its stop ($used % of the $window window): $lane not opened until $resets" >&2
   exit 4
 fi
-if [ "$chosen" != "$requested" ]; then
+if [ -n "${switched:-}" ]; then
+  spawn_note=$switched
+elif [ "$chosen" != "$requested" ]; then
   spawn_note="$requested indisponible au lancement. Repli déclaré pris : $chosen."
   [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$lane: $requested unavailable at spawn, fallback $chosen"
   echo "$(basename "$0"): fallback, $requested -> $chosen" >&2

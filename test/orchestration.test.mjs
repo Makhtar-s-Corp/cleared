@@ -468,6 +468,13 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   const done = call({ script: 'printf "the answer\\nthe answer"; printf "tokens used\\n1,234\\n" >&2' });
   assert.equal(done.status, 0);
   assert.equal(done.usage.tokens_total, 1234);
+  assert.equal(done.usage.limits, undefined, 'a run that says nothing of its subscription leaves nothing');
+  // What the CLI recorded of its subscription, passed on by the task script: read under the names the windows have elsewhere.
+  const resets = Math.floor(Date.now() / 1000) + 3600;
+  const limited = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":41.5,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":7,"window_minutes":300,"resets_at":${resets}},"plan_type":"x"}\\ntokens used\\n10\\n' >&2` });
+  assert.equal(limited.status, 0);
+  assert.deepEqual(limited.usage.limits, { windows: { seven_day: { used: 41.5, resets_at: new Date(resets * 1000).toISOString().replace('.000Z', 'Z') }, five_hour: { used: 7, resets_at: new Date(resets * 1000).toISOString().replace('.000Z', 'Z') } } });
+  assert.equal(call({ script: `printf "ok"; printf 'rate limits not json\\n' >&2` }).usage.limits, undefined);
   assert.match(done.report, /## Compte rendu\n\nthe answer\n\n## Fichiers modifiés/);
 });
 
@@ -5038,6 +5045,64 @@ test('a lane whose first session sent nothing (it ended on a question, with no c
   assert.equal(execFileSync('git', ['-C', record('X-5').worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }), execFileSync('git', ['-C', box.repo, 'rev-parse', 'origin/main'], { encoding: 'utf8' }));
   assert.match(session('X-5', { commit: 'fix: the first one, in blue' }).prompt, /Bleu\./);
   assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'log', '-1', '--format=%s', 'dev/X-5'], { encoding: 'utf8' }).trim(), 'fix: the first one, in blue');
+});
+
+test('the harness of a lane is chosen by what is left of each subscription: a role that names another one opens there when its own is tight or at its stop, never on a stopped one, and a model somebody named is not changed', async () => {
+  const { standing } = await import('../lib/limits.mjs');
+  const soon = new Date(Date.now() + 3600e3).toISOString();
+  assert.equal(standing({}, 90, 80).state, 'free', 'a backend that never said anything is free');
+  assert.equal(standing({ week: { used: 79, resets_at: soon } }, 90, 80).state, 'free');
+  assert.equal(standing({ week: { used: 80, resets_at: soon }, five: { used: 10, resets_at: soon } }, 90, 80).state, 'tight');
+  assert.equal(standing({ week: { used: 12, resets_at: soon }, five: { used: 90, resets_at: soon } }, 90, 80).state, 'stopped');
+  assert.equal(standing({ week: { used: 99, resets_at: soon } }, null, null).state, 'free', 'a project that names neither is never switched nor stopped');
+
+  const box = sandbox({ maxLanes: 9 });
+  const confPath = join(box.home, 'agents.conf');
+  const conf = readFileSync(confPath, 'utf8');
+  writeFileSync(confPath, `${conf.replace('[limits]\n', '[limits]\nsubscription_stop = 90\nsubscription_switch = 80\n')}\n[harness]\ndev = b\n`);
+  const said = (adapter, used) => {
+    const file = join(box.home, `usage-${adapter}.json`);
+    writeFileSync(file, JSON.stringify({ limits: { windows: { seven_day: { used, resets_at: soon } } } }));
+    const noted = spawnSync('node', ['--no-warnings', join(box.home, 'lib', 'limits.mjs'), 'note', adapter, file], { env: box.env, encoding: 'utf8' });
+    assert.equal(noted.status, 0, noted.stderr);
+  };
+  const open = (ticket, ...more) => spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', ticket, '--comment-on', 'none', ...more], { env: box.env, encoding: 'utf8' });
+  const chain = (ticket) => { const lane = JSON.parse(readFileSync(join(box.state, 'lanes', `${ticket}.json`), 'utf8')); return JSON.parse(readFileSync(join(box.state, 'runs', lane.runs.at(-1).run, 'chain.json'), 'utf8')).map((one) => one.alias); };
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select detail from events where kind = 'model_fallback' order by rowid").all().map((row) => row.detail); db.close(); return rows; };
+  // Nothing said yet: where the roles say, with its declared fallback behind.
+  assert.equal(open('X-1').status, 0);
+  assert.deepEqual(chain('X-1'), ['a', 'b']);
+  // Its subscription is tight, the other's is not: the other harness first, its own behind.
+  said('first', 85);
+  const tight = open('X-2');
+  assert.equal(tight.status, 0, tight.stderr);
+  assert.deepEqual(chain('X-2'), ['b', 'a']);
+  assert.match(events().at(-1), /the subscription of first is tight \(85 % of its seven_day window\): opened on b \(second\) instead of a/);
+  // A model somebody named for this lane is not changed.
+  assert.equal(open('X-3', '--model', 'a').status, 0);
+  assert.equal(chain('X-3')[0], 'a');
+  // At its stop: the other harness alone; a stopped subscription is no fallback.
+  said('first', 95);
+  assert.equal(open('X-4').status, 0);
+  assert.deepEqual(chain('X-4'), ['b']);
+  // Both tight: no better place, it stays where the roles say.
+  said('first', 85);
+  said('second', 85);
+  assert.equal(open('X-5').status, 0);
+  assert.equal(chain('X-5')[0], 'a');
+  // Its own at the stop and the other only tight: the other all the same, alone.
+  said('first', 95);
+  assert.equal(open('X-6').status, 0);
+  assert.deepEqual(chain('X-6'), ['b']);
+  // Both at their stop: nothing opens, as before.
+  said('second', 95);
+  const none = open('X-7');
+  assert.equal(none.status, 4);
+  assert.match(none.stderr, /the subscription is at its stop/);
+  // A role that names no other harness is never moved: at its stop it waits.
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[harness]\ndev = b\n', ''));
+  said('second', 10);
+  assert.equal(open('X-8').status, 4);
 });
 
 test('the adapter hands a session its budget, and a session stopped by it ends with a code of its own', () => {
