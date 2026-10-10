@@ -5026,7 +5026,11 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
   assert.notEqual(second.status, 0);
   assert.match(second.stderr, /#42 is the result of the team the user did not choose for X-5/);
   assert.equal(readFileSync(join(box.home, 'pr-merged'), 'utf8').split('\n')[2], '41');
+  // (And the other way round: once one is live, the other is never put live on top of it, even if nothing had marked it.)
   view(41, one.head, { state: 'MERGED' });
+  { const lane = record('X-5.2'); delete lane.not_chosen; delete lane.closed; writeFileSync(join(box.state, 'lanes', 'X-5.2.json'), JSON.stringify(lane)); comments(asked, { id: 'c6', createdAt: '2099-01-01T13:00:00Z', body: 'Équipe 2', byOwner: true }); }
+  assert.match(live(42).stderr, /#41, of the other team of X-5, is already live: #42 is not put live on top of it/);
+  { const lane = record('X-5.2'); lane.not_chosen = true; lane.closed = 'x'; writeFileSync(join(box.state, 'lanes', 'X-5.2.json'), JSON.stringify(lane)); }
   const wake = spawnSync('bash', ['-c', '. "$0/lib/common.sh"; close_tickets_left_open', box.home], { env, encoding: 'utf8' });
   assert.equal(wake.status, 0, wake.stderr);
   assert.equal(readFileSync(join(box.home, 'pr-closed'), 'utf8').trim(), '42');
@@ -5075,8 +5079,14 @@ test('a ticket given to two teams with no place for the second, or no second har
     const early = ask();
     assert.notEqual(early.status, 0);
     assert.match(early.stderr, /X-5 was given to two teams, and one of them has no pull request yet/);
+    // (A lane that only waits, its worktree closed after its session, is closed the same way.)
+    writeFileSync(join(box.home, 'pr-head-dev-X-5.2.json'), JSON.stringify([{ number: 42, state: 'OPEN', isDraft: true }]));
+    writeFileSync(join(box.home, 'pr-view-42.json'), JSON.stringify({ number: 42, state: 'OPEN', isDraft: true, headRefName: 'dev/X-5.2', baseRefName: 'main', statusCheckRollup: [{ status: 'IN_PROGRESS' }] }));
+    session('X-5.2', { commit: 'fix: half of the work of the other team' });
+    assert.match(flow().stdout, /X-5\.2: session over, work sent: its worktree is closed/);
     const closed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-5.2'], { env: box.env, encoding: 'utf8' });
     assert.equal(closed.status, 0, closed.stderr);
+    assert.match(closed.stdout, /closed: dev\/X-5\.2 \(it was waiting/);
     assert.ok(record('X-5.2').closed && record('X-5.2').given_up);
     assert.doesNotMatch(flow().stdout, /second team/, 'a team given up is not opened again');
     const alone = ask();

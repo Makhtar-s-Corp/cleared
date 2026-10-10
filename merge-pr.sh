@@ -192,14 +192,20 @@ if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
   [ -n "$mine" ] || no "$ticket was given to two teams, and #$pr is the pull request of neither"
   "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/choice.json" || die "the comments of $ticket could not be read: which team he chose is not known"
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/choice-agents.txt" || true
+  # Written after the request; with no request (a change that needs no
+  # agreement), after the second team was opened: never a line from before
+  # there were two results to choose from.
   since=$(jq -r '.at // ""' "$asked" 2> /dev/null) || since=
+  [ -n "$since" ] || since=$(jq -r '.opened_at // ""' "$(lane_record "$ticket.2")" 2> /dev/null) || since=
   chosen=$(jq -r --arg team "$team_line" --arg since "$since" --rawfile ids "$work/choice-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and .createdAt > $since)] | map(.body | [scan("(?im)" + $team)] | map(.[0])) | add // [] | unique | join(" ")' "$work/choice.json")
   [ -n "$chosen" ] || no "$ticket was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 » of his on the ticket, written after the request"
   [[ "$chosen" =~ ^[12]$ ]] || no "$ticket was given to two teams and the user named both since the request (« Équipe 1 » and « Équipe 2 »): which one goes live is not known. Ask him"
   [ "$chosen" = "$mine" ] || no "the user chose the team $chosen (#$(jq -r --arg team "$chosen" '.[$team]' <<<"$teams")): #$pr, of the team $mine, is not put live"
   loser=$(jq -r --arg team "$mine" 'to_entries[] | select(.key != $team) | .value' <<<"$teams" | sed -n '1p')
+  other_lane=$ticket
+  [ "$mine" != 1 ] || other_lane=$ticket.2
   # Never the second of the two: the other one is not live already.
-  [ "$(cd "$ORCH_REPO" && gh pr view "$loser" --json state --jq .state 2> /dev/null)" != MERGED ] || no "#$loser, of the other team of $ticket, is already live: #$pr is not put live on top of it"
+  [ "$(cd "$ORCH_REPO" && gh pr view "$loser" --json state 2> /dev/null | jq -r '.state // empty' 2> /dev/null)" != MERGED ] || no "#$loser, of the other team of $ticket, is already live: #$pr is not put live on top of it"
 fi
 
 # 5. The host.
@@ -221,12 +227,12 @@ echo "merged: #$pr ($ticket) at ${head:0:8}"
 # and its pull request is closed, so that the ticket closes on what is
 # live. A pull request GitHub does not close now is kept with what he was
 # shown, and closed by the wake (close_tickets_left_open), told once.
+if [ -n "${other_lane:-}" ]; then
+  # (With or without a pull request yet: a lane that is over opens none.)
+  kept=$(lane_record "$other_lane")
+  [ ! -f "$kept" ] || { jq --arg at "$(now_utc)" '. + {closed: (.closed // $at), not_chosen: true}' "$kept" > "$kept.part" && mv "$kept.part" "$kept"; }
+fi
 if [ -n "$loser" ] && [ "$loser" != 0 ]; then
-  for one in "$ticket" "$ticket.2"; do
-    kept=$(lane_record "$one")
-    [ "$(jq -r '.pr // empty' "$kept" 2> /dev/null)" = "$loser" ] || continue
-    jq --arg at "$(now_utc)" '. + {closed: (.closed // $at), not_chosen: true}' "$kept" > "$kept.part" && mv "$kept.part" "$kept"
-  done
   if (cd "$ORCH_REPO" && gh pr close "$loser") > /dev/null 2>&1; then
     echo "closed: #$loser, the result of the team he did not choose"
   else

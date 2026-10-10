@@ -117,9 +117,16 @@ close_tickets_left_open() {
       ticket=$(jq -r '.ticket' "$record")
       # The result of a team he did not choose, that GitHub did not close
       # at the go-live of the other: closed here.
+      # (One that is closed already, or that somebody merged by hand since,
+      # has nothing left to close: the second is said, once.)
       open=$(jq -r '.close // empty' "$record")
       if [ -n "$open" ]; then
-        (cd "$ORCH_REPO" && gh pr close "$open") > /dev/null 2>&1 || continue
+        case "$(cd "$ORCH_REPO" && gh pr view "$open" --json state 2> /dev/null | jq -r '.state // empty' 2> /dev/null)" in
+          CLOSED) ;;
+          MERGED) ledger event --kind ticket_left_open --ticket "$ticket" --value "$open" --detail "#$open, the result of the team the user did not choose for $ticket, was merged by another hand than the script's after the go-live of the one he chose: both are live. Tell the user, nothing else can be done from here" ;;
+          OPEN) (cd "$ORCH_REPO" && gh pr close "$open") > /dev/null 2>&1 || continue ;;
+          *) continue ;;
+        esac
         jq 'del(.close)' "$record" > "$record.next" && mv "$record.next" "$record"
       fi
       read -r open unknown <<<"$(shown_left "$record")"

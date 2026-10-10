@@ -506,12 +506,13 @@ one_lane() {
     # He gave the ticket to two teams (when it opened, with no place for the
     # second, or since): the second opens beside this one, as long as he
     # was not asked for his agreement yet.
+    # (Written once he was asked, his line gives the ticket to nobody
+    # else: the request made stands, and nothing waits for a second team
+    # that will not open.)
     two=no
-    if wants_two_teams "$work/comments.json"; then
+    if wants_two_teams "$work/comments.json" && in_list "$state" "$(conf_get linear todo_state), $(conf_get linear progress_state), $(conf_get linear review_state)"; then
       two=yes
-      if [ -z "$team" ] && in_list "$state" "$(conf_get linear todo_state), $(conf_get linear progress_state), $(conf_get linear review_state)"; then
-        second_team "$record" "$ticket" "$role"
-      fi
+      [ -n "$team" ] || second_team "$record" "$ticket" "$role"
     fi
   fi
   if [ -s "$ORCH_STATE_DIR/lanes/$ticket.told.jsonl" ]; then
