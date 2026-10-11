@@ -109,7 +109,7 @@ conf_get_from() {
     inside && $0 !~ /^[ \t]*#/ {
       i = index($0, "="); if (!i) next
       key = substr($0, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key)
-      if (key == wanted) { value = substr($0, i + 1); gsub(/^[ \t]+|[ \t]+$/, "", value); found = 1 }
+      if (key == wanted && !found) { value = substr($0, i + 1); gsub(/^[ \t]+|[ \t]+$/, "", value); found = 1 }
     }
     END { if (!found) exit 1; print value }' "$3"
 }
@@ -673,7 +673,7 @@ only_base_merges() {
 # setting he is « l'utilisateur ». owner_name_first is the same at the
 # start of a sentence.
 owner_name() {
-  local name unnamed="the user"
+  local name unnamed="l'utilisateur"
   name=$(conf_get owner name)
   [ -n "$name" ] || name=$(conf_get linear owner_name)
   echo "${name:-$unnamed}"

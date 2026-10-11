@@ -242,7 +242,20 @@ test('CLEARED_STATE_DIR takes precedence over the older environment variable', (
 test('owner name defaults to the user', () => withProject(({ env }) => {
   const result = shell(env, 'owner_name');
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'the user');
+  assert.equal(result.stdout.trim(), "l'utilisateur");
+}));
+
+test('duplicate project keys keep the first value and warn once in the ledger', () => committedGuardProject(({ project, root, env, commit }) => {
+  const config = join(project, '.ferme', 'agents.conf');
+  writeFileSync(config, '[owner]\nname = First Owner\nname = Second Owner\n');
+  commit();
+  assert.equal(loadConf(config).sections.owner.name, 'First Owner');
+  const wake = () => shell(env, 'ledger init >/dev/null; owner_name');
+  assert.equal(wake().stdout.trim(), 'First Owner');
+  assert.equal(wake().stdout.trim(), 'First Owner');
+  const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'duplicate_config_key' AND detail LIKE '%[owner] name%'").get().n, 1);
+  db.close();
 }));
 
 test('project owner name overrides the example', () => withProject(({ project, env }) => {
