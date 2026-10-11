@@ -1,5 +1,5 @@
 [Unit]
-Description=Orchestration: old sessions into the ledger (hourly)
+Description=Cleared: old sessions into the ledger (hourly)
 
 [Timer]
 OnCalendar=hourly

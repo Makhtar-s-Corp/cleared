@@ -5,7 +5,7 @@
 #
 #   serve/check.sh        exit 0 when every line says ok
 set -uo pipefail
-port=${ORCH_DASHBOARD_PORT:-8787}
+port=${CLEARED_DASHBOARD_PORT:-${ORCH_DASHBOARD_PORT:-8787}}
 address=$(tailscale ip -4 | head -n 1)
 container=${ORCH_CHECK_CONTAINER:-coolify-proxy}
 failed=0

@@ -36,7 +36,7 @@ export function allowed(peer, ranges) {
 }
 
 export function dashboardServer({ file, ranges = TAILSCALE }) {
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     if (!allowed(request.socket.remoteAddress, ranges)) {
       response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end('Refusé.\n');
       return;
@@ -59,6 +59,10 @@ export function dashboardServer({ file, ranges = TAILSCALE }) {
       response.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }).end('La page n’a pas encore été écrite.\n');
     }
   });
+  server.on('clientError', (_error, socket) => {
+    socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+  });
+  return server;
 }
 
 // Run as a command (the path may hold a space, an accent or a symbolic link).

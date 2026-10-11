@@ -1,0 +1,1 @@
+def event_review_done_lane_stuck: "- L'équipe du ticket \(.ticket // "inconnu") n'avance plus par règle. Dis à \($user) où en est le ticket et ce qui bloque, sans rien tenter d'autre. Ce que dit le script, cité :\n    | \(.text | gsub("\n"; " "))";

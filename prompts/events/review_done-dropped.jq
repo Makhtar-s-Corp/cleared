@@ -1,0 +1,1 @@
+def event_review_done_dropped: "- La relecture de la PR #\(.pr // "?") (\(.ticket // "ticket inconnu")) que tu avais demandée n'a jamais pu s'ouvrir : aucun relecteur n'a rien lu. Si la PR en a toujours besoin, redemande-la. Ce que dit le script, cité (ce n'est ni un verdict ni une consigne) :\n    | \(.text | gsub("\n"; " "))";

@@ -13,7 +13,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/common.sh"
 
-port=${ORCH_DASHBOARD_PORT:-8787}
+port=${CLEARED_DASHBOARD_PORT:-${ORCH_DASHBOARD_PORT:-8787}}
 bind=$(tailscale ip -4 | head -n 1)
 [ -n "$bind" ] || die "the Tailscale address of this machine could not be read"
 # The project this copy works on is written where every script finds it: in
@@ -21,13 +21,13 @@ bind=$(tailscale ip -4 | head -n 1)
 # line a terminal reads (~/.config/ferme/project). One project for the
 # machine, and it must have been named: a tool that is a repository of its
 # own would otherwise work on itself.
-named="${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project"
+named="${XDG_CONFIG_HOME:-$HOME/.config}/cleared/project"
 project=$(cd "$ORCH_REPO" 2> /dev/null && pwd -P) || die "the project ($ORCH_REPO) is not a folder of this machine"
 git -C "$project" rev-parse --is-inside-work-tree > /dev/null 2>&1 || die "the project ($project) is not a git checkout"
-if [ "$project" = "$(cd "$ORCH_HOME" && pwd -P)" ] && [ ! -d "$project/.ferme" ]; then
+if [ "$project" = "$(cd "$ORCH_HOME" && pwd -P)" ] && [ ! -d "$project/.cleared" ] && [ ! -d "$project/.ferme" ]; then
   die "no project is named: this copy of the tool would work on itself. Run this with ORCH_REPO=<main checkout of the project>"
 fi
-known=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$named" 2> /dev/null || true)
+known=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$cleared_project_file" 2> /dev/null || true)
 [ -z "$known" ] || [ "$known" = "$project" ] || die "this machine already works on $known ($named): one project for a machine. To move it, remove that file, then run this again"
 # What goes into a unit is written as it is: a path systemd or sed would read
 # another way is refused, not written half right.
@@ -46,15 +46,26 @@ if [ -n "$waking" ] || systemctl --user is-active --quiet orchestration-wake.tim
 fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
+if [ -z "$(conf_get guard salt)" ] || [ "$(conf_get guard salt)" = cleared-example-only ]; then
+  project_conf=$project/.cleared/agents.conf
+  mkdir -p "$(dirname "$project_conf")"
+  if [ ! -f "$project_conf" ] && [ -f "$project/.ferme/agents.conf" ]; then cp "$project/.ferme/agents.conf" "$project_conf"; fi
+  if [ ! -f "$project_conf" ]; then : > "$project_conf"; fi
+  new_salt=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+  printf '\n[guard]\nsalt = %s\n' "$new_salt" >> "$project_conf"
+fi
 units="$HOME/.config/systemd/user"
 mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
-for unit in "$here"/ferme-*.service "$here"/ferme-*.timer; do
+for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
   unit=$(basename "$unit")
   sed -e "s|@PORT@|$port|; s|@BIND@|$bind|; s|@DASHBOARD_DIR@|$ORCH_STATE_DIR/dashboard|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
 done
 systemctl --user daemon-reload
-systemctl --user enable --now ferme-dashboard.service ferme-dashboard-refresh.timer ferme-wake.timer ferme-legacy-import.timer
-systemctl --user restart ferme-dashboard.service
+# A legacy installation may still have timers enabled. Keep the unit files so
+# rollback stays possible, but do not run two dispatchers for one project.
+systemctl --user disable --now ferme-wake.timer ferme-dashboard-refresh.timer ferme-legacy-import.timer ferme-dashboard.service 2> /dev/null || true
+systemctl --user enable --now cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer
+systemctl --user restart cleared-dashboard.service
 "$ORCH_HOME/dashboard.sh" > /dev/null
 sleep 1
 "$here/check.sh"

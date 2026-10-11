@@ -1,8 +1,7 @@
-# systemd user unit, installed by serve/install.sh: checked each time the
-# timer of the wakes is started, by hand too. The timer does not start when
-# the model of the project lead is not the one decided last.
+# systemd user unit, installed by serve/install.sh: reads the session logs of
+# the old way of working into the ledger, so that both can be compared.
 [Unit]
-Description=Orchestration: the model of the project lead is the one decided
+Description=Cleared: old sessions into the ledger
 
 [Service]
 # orca and the CLIs are installed in the home of the user: a unit does not get
@@ -14,4 +13,4 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
 Type=oneshot
-ExecStart=@ORCH_HOME@/check-lead-model.sh
+ExecStart=/usr/bin/node --no-warnings @ORCH_HOME@/import-legacy.mjs --days 3
