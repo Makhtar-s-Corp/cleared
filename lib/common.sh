@@ -10,8 +10,6 @@ while IFS= read -r cleared_name; do
 done < <(compgen -e | grep '^CLEARED_' || true)
 
 ORCH_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-ORCH_EXAMPLE_CONF=$ORCH_HOME/agents.example.conf
-[ -f "$ORCH_EXAMPLE_CONF" ] || ORCH_EXAMPLE_CONF=$ORCH_HOME/agents.conf
 ORCH_REPO=${CLEARED_REPO:-${ORCH_REPO:-}}
 ORCH_CONF=${CLEARED_CONF:-${ORCH_CONF:-}}
 ORCH_STATE_DIR=${CLEARED_STATE_DIR:-${ORCH_STATE_DIR:-}}
@@ -32,7 +30,7 @@ ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/n
 if [ -z "${ORCH_CONF:-}" ]; then
   if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && git -C "$ORCH_REPO" ls-files --error-unmatch -- .cleared/agents.conf > /dev/null 2>&1; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
   elif [ -f "$ORCH_REPO/.ferme/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.ferme/agents.conf; CLEARED_LEGACY_PATH=$ORCH_CONF
-  else ORCH_CONF=$ORCH_EXAMPLE_CONF; fi
+  else ORCH_CONF=$ORCH_REPO/.cleared/agents.conf; fi
   if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && [ "$ORCH_CONF" != "$ORCH_REPO/.cleared/agents.conf" ]; then CLEARED_IGNORED_UNTRACKED_CONF=$ORCH_REPO/.cleared/agents.conf; fi
 fi
 # The state is kept on the machine, outside the repositories: one folder per
@@ -59,10 +57,14 @@ prompt_file() { prompt_asset "$1.md"; }
 # Written as it is, whatever characters the path holds (a quoted replacement
 # is taken literally).
 prompt_text() {
-  local text
+  local text verdict
   [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
   text=$(cat "$1"; printf x)
   text=${text%x}
+  if [[ "$text" == *'@REVIEW_VERDICT@'* ]]; then
+    verdict=$(conf_get merge verdict) || return 1
+    text=${text//@REVIEW_VERDICT@/$verdict}
+  fi
   printf '%s' "${text//\{orch\}/"$ORCH_HOME"}"
 }
 
@@ -97,10 +99,7 @@ orca_terminal() {
 # the settings that come with the tool: a project that keeps its own file
 # and says nothing of it does not switch the updates off by leaving it out.
 update_setting() {
-  local value
-  value=$(conf_get update "$1")
-  [ -n "$value" ] || value=$(ORCH_CONF=$ORCH_EXAMPLE_CONF conf_get update "$1")
-  echo "$value"
+  conf_get update "$1"
 }
 
 # conf_get <section> <key>: one value of agents.conf (empty when absent).
@@ -115,10 +114,13 @@ conf_get_from() {
     END { if (!found) exit 1; print value }' "$3"
 }
 conf_get() {
-  local value
-  if value=$(conf_get_from "$1" "$2" "$ORCH_CONF"); then :
-  elif [ "$ORCH_CONF" != "$ORCH_EXAMPLE_CONF" ] && [ -f "$ORCH_EXAMPLE_CONF" ]; then value=$(conf_get_from "$1" "$2" "$ORCH_EXAMPLE_CONF") || value=
-  else value=; fi
+  local value code=0
+  if [ -f "$ORCH_CONF" ] && value=$(conf_get_from "$1" "$2" "$ORCH_CONF"); then :
+  else
+    value=$(node "$ORCH_HOME/lib/conf.mjs" default "$1" "$2") || code=$?
+    [ "$code" != 2 ] || return 2
+    [ "$code" = 0 ] || value=
+  fi
   printf '%s\n' "$value"
 }
 
@@ -183,11 +185,10 @@ close_tickets_left_open() {
 
 # conf_keys <section>: the keys of a section, one per line.
 conf_keys() {
-  local files=("$ORCH_CONF")
-  [ "$ORCH_CONF" = "$ORCH_EXAMPLE_CONF" ] || [ ! -f "$ORCH_EXAMPLE_CONF" ] || files+=("$ORCH_EXAMPLE_CONF")
-  awk -v section="[$1]" '
+  if [ -f "$ORCH_CONF" ]; then awk -v section="[$1]" '
     /^\[/ { inside = ($0 == section); next }
-    inside && $0 !~ /^[ \t]*#/ { i = index($0, "="); if (i) { key = substr($0, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key); if (!seen[key]++) print key } }' "${files[@]}"
+    inside && $0 !~ /^[ \t]*#/ { i = index($0, "="); if (i) { key = substr($0, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key); if (!seen[key]++) print key } }' "$ORCH_CONF"; fi
+  node "$ORCH_HOME/lib/conf.mjs" default-keys "$1"
 }
 
 # Every key of [adapter.<name>] reaches the adapter as ADAPTER_<KEY>.

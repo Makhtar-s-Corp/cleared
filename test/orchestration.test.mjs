@@ -31,6 +31,8 @@ function fixtureProject() {
   const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   mkdirSync(join(dir, 'scripts'), { recursive: true });
+  mkdirSync(join(dir, '.ferme'), { recursive: true });
+  writeFileSync(join(dir, '.ferme', 'agents.conf'), readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'));
   for (const file of ['codex-guard-allow.json', 'private-terms.json']) execFileSync('cp', [join(ORCH_HOME, 'test', 'fixtures', 'guard', file), join(dir, 'scripts', file)]);
   git('add', '.');
   git('commit', '-q', '-m', 'init');
@@ -224,7 +226,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
   writeFileSync(join(home, 'prompts', 'review.md'), 'review prompt\n');
   writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nowner_name = the user\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nowner_name = the user\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n[rules]\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // What the guard must know of the project (its private terms, as fingerprints, and the values it allows) is the
@@ -2199,8 +2201,8 @@ test('the checkout of the project follows its base by itself: fast-forward only,
   rmSync(join(project, 'notes.md'));
   assert.equal(update().status, 0);
   const fourth = head();
-  // A project that keeps its own settings and says nothing of the updates does not switch them off: the tool's own say.
-  writeFileSync(join(home, 'project.conf'), '[lanes]\nbase = origin/main\n[limits]\nmax_lanes = 2\n');
+  // A project that enables updates explicitly still follows its base.
+  writeFileSync(join(home, 'project.conf'), '[lanes]\nbase = origin/main\n[limits]\nmax_lanes = 2\n[update]\nproject = yes\n');
   const fifth = live('rules.md', 'three\n', 'docs: one more rule');
   assert.equal(update({ ORCH_CONF: join(home, 'project.conf') }).status, 0);
   assert.equal(head(), fifth);
@@ -2840,7 +2842,7 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
   assert.equal(run.status, 0, run.stderr);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
   // The tool carries no name of its own: with no [linear] owner_name he is « l'utilisateur »; a project names him as it likes.
-  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par the user\.\\n/);
+  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par l'utilisateur\.\\n/);
   assert.match(asked, /Une question pour toi\./);
   const named = join(dir, 'named.conf');
   writeFileSync(named, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^name =$/m, 'name = Ada'));
@@ -4442,12 +4444,12 @@ test('the project the tool works on is named the same way for every script, its 
   const both = (env, expected, why) => { assert.deepEqual(bash(env), expected, `bash: ${why}`); assert.deepEqual(node(env), expected, `node: ${why}`); };
   // Nobody named a project: the repository the tool sits in (a project that carries its own copy of it).
   const own = execFileSync('git', ['-C', ORCH_HOME, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).split('\n')[0].replace(/^worktree /, '');
-  both({}, [own, join(ORCH_HOME, 'agents.example.conf'), join(dir, 'state', 'cleared', basename(own))], 'no project named');
+  both({}, [own, join(own, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', basename(own))], 'no project named');
   // Named once for the machine, in one line, whatever blanks surround it.
   writeFileSync(join(config, 'ferme', 'project'), `  ${second}  \r\n`);
-  both({}, [second, join(ORCH_HOME, 'agents.example.conf'), join(dir, 'state', 'cleared', 'project b')], 'named for the machine');
+  both({}, [second, join(second, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', 'project b')], 'named for the machine');
   // Whoever runs the script may name another one.
-  both({ ORCH_REPO: first }, [first, join(ORCH_HOME, 'agents.example.conf'), join(dir, 'state', 'cleared', 'project-a')], 'named by the caller');
+  both({ ORCH_REPO: first }, [first, join(first, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', 'project-a')], 'named by the caller');
   // Its own settings come before the example of the tool.
   mkdirSync(join(first, '.ferme', 'prompts'), { recursive: true });
   writeFileSync(join(first, '.ferme', 'agents.conf'), '[lanes]\nbase = main\n');

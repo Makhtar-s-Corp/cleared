@@ -12,7 +12,7 @@ Ne signale ni le style ni les préférences. Ne félicite pas. Si tu n'es pas s�
 
 Termine par un compte rendu de cette forme :
 
-Verdict : « à corriger avant fusion » ou « rien de bloquant ».
+Verdict : « à corriger avant fusion » ou « @REVIEW_VERDICT@ ».
 Défauts : une ligne par défaut, du plus grave au moins grave, sous la forme `fichier:ligne` — ce qui se passe, avec quelle entrée, et ce qui devrait se passer.
 À vérifier : ce que tu n'as pas pu établir.
 Questions pour l'utilisateur : une question fermée par ligne, avec ta recommandation, ou « aucune ».

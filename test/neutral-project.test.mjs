@@ -271,3 +271,38 @@ test('a complete project configuration retains exactly its settings', () => with
   writeFileSync(config, source);
   assert.deepEqual(loadConf(config), parseConf(source));
 }));
+
+test('the example never supplies missing project keys or a merge verdict', () => withProject(({ project, env, root }) => {
+  mkdirSync(join(project, '.cleared'));
+  const config = join(project, '.cleared', 'agents.conf');
+  writeFileSync(config, '[owner]\nname = Example Owner\n');
+  trackProjectConfig(project);
+  const loaded = loadConf(config);
+  assert.equal(loaded.sections.linear?.team, undefined);
+  assert.equal(loaded.sections.merge?.verdict, undefined);
+  assert.equal(loaded.sections.limits.max_lanes, '1');
+  const missingTeam = shell(env, 'conf_get linear team');
+  assert.notEqual(missingTeam.status, 0);
+  assert.match(missingTeam.stderr, /Missing required \[linear\] team/);
+  const report = join(root, 'report.md');
+  writeFileSync(report, '## Compte rendu\nVerdict : rien de bloquant\n');
+  const result = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing required \[merge\] verdict/i);
+}));
+
+test('review prompt and merge check use the same configured verdict', () => withProject(({ project, env, root }) => {
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[merge]\nverdict = approved for sample\n');
+  trackProjectConfig(project);
+  const prompt = shell(env, 'prompt_text "$(prompt_file review)"');
+  assert.equal(prompt.status, 0, prompt.stderr);
+  assert.match(prompt.stdout, /Verdict : « à corriger avant fusion » ou « approved for sample »/);
+  const report = join(root, 'report.md');
+  writeFileSync(report, '## Compte rendu\nVerdict : approved for sample\n');
+  const accepted = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });
+  assert.equal(accepted.status, 0, accepted.stderr);
+  writeFileSync(report, '## Compte rendu\nVerdict : rien de bloquant\n');
+  const refused = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });
+  assert.notEqual(refused.status, 0);
+}));
