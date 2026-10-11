@@ -1,5 +1,7 @@
 # Audit de l'orchestration (phase 0)
 
+> Document daté, gardé pour mémoire : l'état du premier serveur sur lequel l'outil a été construit, le 7 octobre 2026, avant sa première ligne. Ce n'est ni un modèle ni une description de l'outil d'aujourd'hui (voir `README.md`).
+
 7 octobre 2026, 07 h. Lecture du serveur seulement. Un seul test pratique : un worktree créé à la main. Rien d'autre n'a été construit ni modifié.
 
 ## Confirmé
@@ -8,7 +10,7 @@
 - **Session chef de projet trop longue, et pire qu'annoncé.** Ouverte le 4 octobre à 22 h 11 (pas « 11 h 57 »), 56 heures, 3 compactages, 542 000 tokens de contexte au dernier tour, 1,59 milliard de tokens relus en cache. C'est elle qui fusionne (#243 à #252 dans la nuit du 6 au 7).
 - **Monitors de 30 minutes.** 35 réarmements (`timeout_ms: 1800000`), 4 expirations constatées.
 - **Aucun relecteur indépendant.** Les PR #248, #250, #251, #252 ont 0 revue GitHub, toutes écrites et fusionnées par le même compte. Nuance : la lane code, le chef de projet relit et fusionne, et c'est l'outil de déploiement qui déploie seul à chaque push sur `main`.
-- **Goulot côté utilisateur.** 9 tickets en In Review, 7 assignés à l'utilisateur, 2 à personne. L'un d'eux est un compte rendu, pas un travail.
+- **Goulot côté utilisateur.** 9 tickets en In Review, 7 assignés à l'utilisateur, 2 à personne. Un de ces tickets est un compte rendu, pas un travail.
 - **`claude -p` fonctionne avec le connecteur Linear.** 5 sessions sans écran le 6 octobre, 109 appels Linear. Coût mesuré : 40 000 tokens de contexte dès le premier tour, 180 000 tokens pour la plus petite, 1 million en médiane.
 - **Le serveur est joignable depuis Internet** (Traefik sur 443, GitHub déclenche déjà les déploiements).
 
@@ -18,7 +20,7 @@
 2. **« Jusqu'à 30 minutes de latence » : à nuancer.** `watch.py` interroge déjà Linear toutes les 60 s avec `LINEAR_API_KEY`. Les 30 minutes sont le réarmement du monitor, pas le délai de réaction. Le délai réel va d'une à quelques minutes : l'événement n'arrive au chef de projet qu'à son prochain tour d'outil, et rien n'arrive entre une expiration et son réarmement. Contre-proposition : garder ce polling, le sortir de la session (service systemd), ne pas ouvrir de point d'entrée public.
 3. **Un cron `claude -p` toutes les 10 minutes : trop cher et illisible.** 144 réveils par jour à 180 000 tokens au moins, soit 26 millions de tokens par jour même quand rien ne bouge, et une lane qui clignote. Contre-proposition : `orca automations create --trigger <cron> --workspace <lane> --precheck <script>`. Le script regarde Linear et GitHub sans modèle ; s'il n'y a rien, le réveil est sauté à zéro token. Une seule lane stable, historique dans `orca automations runs`. À prouver en phase 2 (aucune automatisation n'existe encore).
 4. **Preview par PR : incompatible avec l'hôte.** Les previews sont désactivées, une seule app sert la prod, et une preview est une pile de 5 conteneurs. Or `docs/decisions.md` (06/10) interdit tout démarrage de conteneur pendant une CI (`ERR_NETWORK_CHANGED`), le swap est plein (7 Go sur 7) et la charge est à 14,9 pour 12 cœurs. Contre-proposition : la CI joue déjà Playwright ; le QA récupère ses captures (`scripts/ui-shots.mjs`, base permanente `cap-tests-pg`) et les poste dans Linear. Aucun conteneur en plus.
-5. **Codex relecteur : interdit par l'utilisateur.** « arrete avec les revues codex whatsoever » (5 octobre, 19 h 34), repris dans `CLAUDE.md`, `regles-lanes.md` et `decisions.md`. Codex reste autorisé pour les tâches mécaniques, en conteneur (`scripts/codex-task.sh`). Contre-proposition : relecteur = session Claude neuve, prompt adversarial, jamais l'auteur.
+5. **Codex relecteur : interdit par l'utilisateur.** Sa consigne écrite du 5 octobre (plus aucune relecture par Codex), reprise dans `CLAUDE.md`, `regles-lanes.md` et `decisions.md`. Codex reste autorisé pour les tâches mécaniques, en conteneur (`scripts/codex-task.sh`). Contre-proposition : relecteur = session Claude neuve, prompt adversarial, jamais l'auteur.
 6. **Cinq rôles : trop.** Contre-proposition : trois. Dev (la lane), relecteur (session courte), release (le chef de projet court). Le QA est un script, pas un agent.
 7. **Les gates par étiquette ne tiennent pas.** Linear n'a que Feature, Improvement, Bug. `chore` n'existe pas et « CI et infra » est un projet. Contre-proposition : décider sur le projet Linear et sur les chemins touchés par la PR (`server/`, `frontend/`, `shared/`), critère déjà écrit dans `regles-lanes.md`.
 8. **« Tout agent écrit dans Linear » contredit la décision du 6 octobre** (« le chef de projet est le seul à écrire dans Linear »). Il faut une décision qui la remplace.
