@@ -26,7 +26,11 @@ test('every alias, fallback, role and rule of agents.conf points to a declared m
     assert.ok(start >= 0, `missing configuration section ${name}`);
     const next = reference.indexOf('\n## ', start + heading.length);
     const body = reference.slice(start, next < 0 ? undefined : next);
-    for (const key of keys) assert.ok(body.includes(`| \`${key}\` |`), `undocumented setting ${name}.${key}`);
+    for (const key of keys) {
+      const row = body.split('\n').find((line) => line.startsWith(`| \`${key}\` |`));
+      assert.ok(row, `undocumented setting ${name}.${key}`);
+      assert.match(row, /\| (?:Required|Default:|Optional; no default)/, `missing requirement or default for ${name}.${key}`);
+    }
   }
   const aliases = Object.keys(conf.models);
   for (const [from, to] of Object.entries(conf.fallbacks)) {
