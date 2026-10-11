@@ -45,7 +45,7 @@ trap 'rm -rf "$work"' EXIT
     "- CI en cours : \(.ci_runs_in_progress | length) ; minutes depuis la dernière fusion : \(.minutes_since_the_last_merge) ; test d'"'"'écran en cours : \(.screen_tests_or_captures_running) ; libre pour une fusion : \(.free_for_a_merge)",
     (.open_pull_requests[] | "- PR #\(.number) (\(.title)), branche \(.branch), \(if .draft then "brouillon" else "prête" end), vérifications : \(.checks)")' \
     || echo "- (host-state.sh n'a pas répondu)"
-  printf "\n### Ce qui attend Makhtar dans Linear (tickets « In Review »)\n\n"
+  printf "\n### Ce qui attend %s dans Linear (tickets « In Review »)\n\n" "$(owner_name)"
   "$ORCH_HOME/linear.sh" waiting 2> /dev/null | jq -r '.[] | "- \(.identifier) (\(.title)), depuis \(.since)"' || echo "- (Linear n'a pas répondu)"
   printf "\n### Les derniers commentaires de %s\n\n" "$report_on"
   "$ORCH_HOME/linear.sh" comments "$report_on" 2> /dev/null | jq -r 'sort_by(.createdAt) | .[-6:][] | "- \(.createdAt) : \(.body | gsub("\\s+"; " ") | .[0:700])"' || echo "- (Linear n'a pas répondu)"

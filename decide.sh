@@ -44,6 +44,6 @@ cp "$text" "$pending/$id/text.md"
 # written to the file afterwards.
 [ -z "$adr" ] || git -C "$worktree" diff -- docs/decisions.md > "$pending/$id/adr.diff"
 jq -n --arg ticket "$ticket" --arg adr "$adr" --arg run "${ORCH_RUN_ID:-}" --arg at "$(now_utc)" '{ticket: $ticket, adr: ($adr == "yes"), run: $run, at: $at}' > "$pending/$id/decision.json"
-echo "Décision gardée, rien n'est encore parti. Makhtar la confirme lui-même, en tapant dans cette conversation :"
+echo "Décision gardée, rien n'est encore parti. $(owner_name_first) la confirme lui-même, en tapant dans cette conversation :"
 echo "  ! $ORCH_HOME/confirm-decision.sh"
 echo "(ou, depuis un autre terminal : $ORCH_HOME/confirm-decision.sh $id ; pour l'abandonner : confirm-decision.sh --drop $id)"

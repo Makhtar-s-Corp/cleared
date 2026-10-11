@@ -603,6 +603,22 @@ only_base_merges() {
   done < <(git -C "$ORCH_REPO" rev-list "$1..$2" --not "$base")
 }
 
+# owner_name: how the agents name the user in what they write (the first
+# line of their comments, what the lead is told): [linear] owner_name, his
+# first name for instance. The tool carries no name of its own: with no
+# setting he is « l'utilisateur ». owner_name_first is the same at the
+# start of a sentence.
+owner_name() {
+  local name unnamed="l'utilisateur"
+  name=$(conf_get linear owner_name)
+  echo "${name:-$unnamed}"
+}
+owner_name_first() {
+  local name
+  name=$(owner_name)
+  echo "${name^}"
+}
+
 # lane_record <ticket>: where what is known of the lane of a ticket is kept
 # (its branch, the branch its work is sent to, its pull request, its runs).
 # It outlives the worktree: a lane the tidying closed is opened again from it.
