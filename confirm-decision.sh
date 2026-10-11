@@ -79,7 +79,7 @@ fi
 if [ ! -f "$pending/$id/comment.url" ]; then
   comment=$(mktemp)
   {
-    printf '**Décision de Makhtar, transcrite pendant une discussion avec le chef de projet et confirmée par lui**\n\n'
+    printf '**Décision de %s, transcrite pendant une discussion avec le chef de projet et confirmée par lui**\n\n' "$(owner_name)"
     cat "$text"
     [ "$adr" != true ] || printf '\n\nÉcrite aussi dans `docs/decisions.md` (pull request en brouillon, à fusionner comme les autres).\n'
   } > "$comment"

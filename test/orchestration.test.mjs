@@ -223,7 +223,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
   writeFileSync(join(home, 'prompts', 'review.md'), 'review prompt\n');
   writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nowner_name = Makhtar\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // What the guard must know of the project (its private terms, as fingerprints, and the values it allows) is the
@@ -2878,8 +2878,14 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
   const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
   assert.equal(run.status, 0, run.stderr);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
-  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par Makhtar/);
+  // The tool carries no name of its own: with no [linear] owner_name he is « l'utilisateur »; a project names him as it likes.
+  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par l'utilisateur\.\\n/);
   assert.match(asked, /Une question pour toi\./);
+  const named = join(dir, 'named.conf');
+  writeFileSync(named, readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8').replace(/^owner_id = .*$/m, (line) => `${line}\nowner_name = Ada`));
+  rmSync(join(dir, 'asked'));
+  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une autre.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet', ORCH_CONF: named } }).status, 0);
+  assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Écrit par un agent \(chef de projet\), pas par Ada\.\\n/);
   assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
 });
 
