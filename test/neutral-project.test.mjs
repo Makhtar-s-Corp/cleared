@@ -245,7 +245,7 @@ test('an old project configuration is never selected', () => withProject(({ proj
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Obsolete Owner\n');
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
   execFileSync('git', ['-C', project, 'add', '.ferme/agents.conf']);
-  assert.equal(shell(env, 'owner_name').stdout.trim(), "l'utilisateur");
+  assert.equal(shell(env, 'owner_name').stdout.trim(), 'the user');
   assert.equal(nodeValue(env, 'conf.loadConf().sections.owner?.name').stdout.trim(), 'undefined');
 }));
 
@@ -290,7 +290,7 @@ test('an untracked Cleared config is ignored and reported', () => withProject(({
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Owner\n');
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
   const wake = shell(env, 'ledger init >/dev/null; owner_name');
-  assert.equal(wake.stdout.trim(), "l'utilisateur");
+  assert.equal(wake.stdout.trim(), 'the user');
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
   assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n, 1);
   db.close();
