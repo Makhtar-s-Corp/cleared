@@ -56,7 +56,7 @@ In the editor, set `[guard] salt` to the random value printed above and set `ter
 ## Read more
 
 - [Concepts and ticket lifecycle](docs/concepts.md)
-- [Configuration reference and migration](docs/configuration.md)
+- [Configuration reference](docs/configuration.md)
 - [Model adapters](docs/adapters.md)
 - [Security boundaries](docs/security.md)
 - [Roadmap](docs/roadmap.md)
