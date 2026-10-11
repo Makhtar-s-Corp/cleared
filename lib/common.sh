@@ -532,7 +532,7 @@ guard_list() {
       echo "$(basename "$0"): not sent, the project names no list $6 ([guard] $4): write the path of the file, or « none »" >&2
       return 1
       ;;
-    none) echo '[]' > "$1/$5" ;;
+    none) echo '{"disabled":true,"hashes":[]}' > "$1/$5" ;;
     *)
       git -C "$ORCH_REPO" show "$2:$value" > "$1/$5" 2> /dev/null || {
         echo "$(basename "$0"): not sent, the list $6 of the project ($value on $2) could not be read" >&2

@@ -4350,7 +4350,7 @@ test('the guard of what leaves the machine is not weaker for living in the tool:
   assert.match(refused.stderr, /terme privé/);
   assert.doesNotMatch(refused.stderr, /Zorglub/);
   // The file of the checkout is emptied (a session ran code there): the list read is the one at the base.
-  writeFileSync(join(box.repo, 'scripts', 'private-terms.json'), '[]\n');
+  writeFileSync(join(box.repo, 'scripts', 'private-terms.json'), '{"salt_id":"e99d7c89dddc","hashes":[]}\n');
   assert.equal(guard(term).status, 1, 'the list is read at the base, not from the files of the checkout');
   box.git('checkout', '-q', '--', 'scripts/private-terms.json');
   // The project carries its own settings: what they say at the base comes before the example of the tool.

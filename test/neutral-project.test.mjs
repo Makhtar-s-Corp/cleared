@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { ORCH_HOME, loadConf, parseConf } from '../lib/conf.mjs';
 
 function withProject(run) {
@@ -21,6 +22,43 @@ function nodeValue(env, expression) {
   const script = `import * as conf from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log(${expression});`;
   return spawnSync('node', ['--input-type=module', '-e', script], { env, encoding: 'utf8' });
 }
+
+function committedGuardProject(run) {
+  return withProject(({ project, env, root }) => {
+    const git = (...args) => execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args]);
+    git('init', '-q', '-b', 'main');
+    mkdirSync(join(project, '.ferme'), { recursive: true });
+    mkdirSync(join(project, 'scripts'), { recursive: true });
+    const commit = () => { git('add', '.'); git('commit', '-q', '-m', 'test configuration'); };
+    const check = (text) => {
+      const input = join(root, 'input.txt');
+      writeFileSync(input, text);
+      return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', ORCH_HOME, input], {
+        env: { ...env, ORCH_GUARD_REF: 'HEAD', ORCH_GUARD_TOOL_REF: '' }, encoding: 'utf8',
+      });
+    };
+    run({ project, env, root, git, commit, check });
+  });
+}
+
+test('fingerprints with another salt refuse the whole guard, including legacy lists', () => committedGuardProject(({ project, commit, check }) => {
+  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  const firstSalt = 'example-salt-a';
+  const secondSalt = 'example-salt-b';
+  const term = 'private meadow';
+  const list = join(project, 'scripts', 'private-terms.json');
+  writeFileSync(join(project, '.ferme', 'agents.conf'), `[guard]\nsalt = ${secondSalt}\nterms = scripts/private-terms.json\nallowed = none\n`);
+  writeFileSync(list, JSON.stringify({ salt_id: hash(firstSalt).slice(0, 12), hashes: [hash(firstSalt + term)] }));
+  commit();
+  const mismatch = check(`A ${term} is here.`);
+  assert.notEqual(mismatch.status, 0);
+  assert.match(mismatch.stderr, /These fingerprints were made with another salt\. Set \[guard\] salt to the salt that made them, or rebuild the list\./);
+  writeFileSync(list, JSON.stringify([hash(firstSalt + term)]));
+  commit();
+  const legacyMismatch = check(`A ${term} is here.`);
+  assert.notEqual(legacyMismatch.status, 0);
+  assert.match(legacyMismatch.stderr, /These fingerprints were made with another salt/);
+}));
 
 test('tracked tool files contain no original project identifiers', () => {
   const forbidden = [
