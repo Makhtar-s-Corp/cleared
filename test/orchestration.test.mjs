@@ -470,6 +470,16 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   assert.equal(done.status, 0);
   assert.equal(done.usage.tokens_total, 1234);
   assert.equal(done.usage.limits, undefined, 'a run that says nothing of its subscription leaves nothing');
+  assert.equal(done.usage.tokens_in, null, 'and one that says nothing of its tokens by kind leaves the split empty');
+  // What the session used, by kind, passed on by the task script: kept as the ledger names it for every backend
+  // (input that was not read from the cache, input read from it, output); the total stays the one the CLI printed.
+  const used = call({ script: 'printf "ok"; printf \'tokens used\\n7,063\\ntoken usage {"input_tokens":29037,"cached_input_tokens":22016,"cache_write_input_tokens":0,"output_tokens":42,"reasoning_output_tokens":0,"total_tokens":29079}\\n\' >&2' });
+  assert.deepEqual([used.usage.tokens_in, used.usage.tokens_cache, used.usage.tokens_out, used.usage.tokens_cache_write, used.usage.tokens_total], [7021, 22016, 42, 0, 7063]);
+  // A line that cannot be read, or without the figures that count, leaves the split empty and takes nothing else with it.
+  for (const line of ['not json', '{"input_tokens":"many","output_tokens":3}', '{"output_tokens":3}', '[1,2]']) {
+    const odd = call({ script: `printf "ok"; printf 'tokens used\\n5\\ntoken usage ${line}\\n' >&2` });
+    assert.deepEqual([odd.status, odd.usage.tokens_in, odd.usage.tokens_out, odd.usage.tokens_total], [0, null, null, 5], line);
+  }
   // What the CLI recorded of its subscription, passed on by the task script: read under the names the windows have elsewhere.
   const resets = Math.floor(Date.now() / 1000) + 3600;
   const limited = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":41.5,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":7,"window_minutes":300,"resets_at":${resets}},"plan_type":"x"}\\ntokens used\\n10\\n' >&2` });

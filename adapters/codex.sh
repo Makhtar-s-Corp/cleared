@@ -116,8 +116,19 @@ case "${1:-}" in
     half=$(( $(wc -c < "$out") / 2 ))
     if [ "$half" -gt 0 ] && cmp -s <(head -c "$half" "$out") <(tail -c "$half" "$out"); then head -c "$half" "$out" > "$body"; else cp "$out" "$body"; fi
     [ -s "$body" ] || echo "Codex n'a rendu aucun texte (code $code)." > "$body"
-    # The CLI only prints a total in this mode: the split stays empty.
+    # The CLI itself only prints a total in this mode. The split by kind
+    # of token comes from the task script, when it passes on what the CLI
+    # counted for the whole session (a line « token usage <json> »): input
+    # that was not read from the cache, input read from it, output, and
+    # what was written to the cache, as the ledger names them for every
+    # backend. A line that cannot be read leaves the split empty.
     total=$(grep -A1 '^tokens used' "$err" | tail -n 1 | tr -dc '0-9') || total=
+    split=$(grep '^token usage ' "$err" | tail -n 1 | sed 's/^token usage //' | jq -c '
+      def count: if type == "number" and . >= 0 then floor else null end;
+      select(type == "object" and (.input_tokens | count) != null and (.output_tokens | count) != null)
+      | (.cached_input_tokens | count) as $cached
+      | {tokens_in: ((.input_tokens | count) - ($cached // 0) | if . < 0 then 0 else . end), tokens_out: (.output_tokens | count), tokens_cache: $cached, tokens_cache_write: (.cache_write_input_tokens | count)}' 2> /dev/null) || split=
+    [ -n "$split" ] || split='{}'
     # Where its subscription stands, when the task script passes on what the
     # CLI recorded (a line « rate limits <json> »: the CLI's own snapshot,
     # primary and secondary windows with the percent used, the length of the
@@ -132,7 +143,7 @@ case "${1:-}" in
       | map(select((.used | type) == "number" and .used >= 0 and .used <= 1000))
       | group_by(.key) | map(max_by(.used))
       | if length == 0 then null else {windows: (map({key, value: {used, resets_at}}) | from_entries)} end' 2> /dev/null) || limits=null
-    contract_usage "$(jq -nc --arg total "$total" --argjson limits "${limits:-null}" '{tokens_total: (if $total == "" then null else ($total | tonumber) end)} + (if $limits then {limits: $limits} else {} end)')"
+    contract_usage "$(jq -nc --arg total "$total" --argjson split "$split" --argjson limits "${limits:-null}" '$split + {tokens_total: (if $total == "" then null else ($total | tonumber) end)} + (if $limits then {limits: $limits} else {} end)')"
     contract_report codex "$code" "$body"
     exit "$code"
     ;;
