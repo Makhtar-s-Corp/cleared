@@ -12,7 +12,7 @@ A team's role is a permission and routing profile, not a different program. Exam
 
 The names are configured in `[linear]`. A typical path is `Todo` → `In Progress` → `In Review` → `Needs Approval` → `Ready to Ship` → `Done`. A ticket moved to Todo can open a team. Once checks pass and a different model has reviewed its pull request, `ask-validation.sh` posts a product-language request showing the exact commit and moves the ticket to the validation state. The owner personally moves it to the configured go state to approve shipping. `merge-pr.sh` checks who moved the ticket and whether the reviewed commit is still the version shown. If a team changed its code after the request, Cleared asks again. A merge of the base that changes no team code can retain approval. For two teams, only the selected pull request can ship.
 
-Paths under `[merge] tooling_paths` may use the project's policy for routine tooling. Paths under `guarded_paths`, including the scripts that enforce shipping, always require the owner's own approval. These rules classify paths; they never let a model grant itself approval.
+Paths under `[merge] tooling_paths` may merge without a ticket approval once review and checks pass. This is a real exception to the normal human approval step; configure the list narrowly. Paths under `guarded_paths`, including the scripts that enforce shipping, always require the owner's own approval. These rules classify paths; they never let a model grant itself approval.
 
 ## Ledger
 

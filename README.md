@@ -16,17 +16,19 @@ flowchart LR
   D -->|Fix needed| B
 ```
 
+This diagram shows the normal path for an application change. The configured tooling exception is described below.
+
 ## Principles
 
 - Scripts coordinate the workflow; a model does not decide when to merge.
-- Nothing ships without a human approving the version shown to them.
+- Application changes require a human to approve the version shown to them. Paths explicitly configured as `tooling_paths` can merge after review and green checks without a ticket approval; audit that list before using unattended shipping.
 - The reviewer cannot be the model that wrote the change.
 - Cleared runs on your CLI subscriptions and your Linux host. It does not resell model calls.
 - The ledger records runs, costs, events, and decisions so the process can be inspected.
 
 ## Status
 
-**Alpha, Linux only.** Cleared has run on one production project since October 2026. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Setup still assumes a GitHub repository, Linear, a Node-oriented project, and project-specific rules. Automatic terminals currently require Orca; other ticket trackers, OpenCode, and a terminal without Orca are future work. CLI permissions and the private-term guard are safeguards, not an operating-system sandbox.
+**Alpha, Linux only.** Cleared has run on one production project since October 2026. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Setup still assumes a GitHub repository, Linear, a Node-oriented project, and project-specific rules. Automatic terminals currently require Orca; other ticket trackers, OpenCode, and a terminal without Orca are future work. Tooling-only changes are exempt from the ticket approval check when configured that way. CLI permissions and the private-term guard are safeguards, not an operating-system sandbox.
 
 ## Requirements
 
