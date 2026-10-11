@@ -30,9 +30,10 @@ ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/n
 # Its settings: its own (.ferme/agents.conf in that checkout, which no lane
 # writes to), else the example that comes with the tool.
 if [ -z "${ORCH_CONF:-}" ]; then
-  if [ -f "$ORCH_REPO/.cleared/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
+  if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && git -C "$ORCH_REPO" ls-files --error-unmatch -- .cleared/agents.conf > /dev/null 2>&1; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
   elif [ -f "$ORCH_REPO/.ferme/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.ferme/agents.conf; CLEARED_LEGACY_PATH=$ORCH_CONF
   else ORCH_CONF=$ORCH_EXAMPLE_CONF; fi
+  if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && [ "$ORCH_CONF" != "$ORCH_REPO/.cleared/agents.conf" ]; then CLEARED_IGNORED_UNTRACKED_CONF=$ORCH_REPO/.cleared/agents.conf; fi
 fi
 # The state is kept on the machine, outside the repositories: one folder per
 # project, named after its checkout.
@@ -41,7 +42,7 @@ if [ -z "${ORCH_STATE_DIR:-}" ]; then
   ORCH_STATE_DIR=$cleared_state_root/cleared/$(basename "$ORCH_REPO")
   if [ ! -d "$ORCH_STATE_DIR" ] && [ -d "$cleared_state_root/ferme/$(basename "$ORCH_REPO")" ]; then ORCH_STATE_DIR=$cleared_state_root/ferme/$(basename "$ORCH_REPO"); CLEARED_LEGACY_PATH=$ORCH_STATE_DIR; fi
 fi
-export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR CLEARED_LEGACY_PATH
+export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR CLEARED_LEGACY_PATH CLEARED_IGNORED_UNTRACKED_CONF
 export CLEARED_REPO="$ORCH_REPO" CLEARED_CONF="$ORCH_CONF" CLEARED_STATE_DIR="$ORCH_STATE_DIR"
 
 # prompt_file <name>: the prompt of that name. The project's own

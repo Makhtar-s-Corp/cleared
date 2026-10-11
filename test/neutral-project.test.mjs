@@ -22,6 +22,10 @@ function nodeValue(env, expression) {
   const script = `import * as conf from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log(${expression});`;
   return spawnSync('node', ['--input-type=module', '-e', script], { env, encoding: 'utf8' });
 }
+function trackProjectConfig(project) {
+  execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
+  execFileSync('git', ['-C', project, 'add', '.cleared/agents.conf']);
+}
 
 function committedGuardProject(run) {
   return withProject(({ project, env, root }) => {
@@ -140,6 +144,10 @@ test('a project with only legacy paths still resolves its settings and ledger', 
     mkdirSync(join(config, 'ferme'), { recursive: true });
     mkdirSync(join(state, 'ferme', 'sample-project'), { recursive: true });
     writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Example Owner\n');
+    execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
+    execFileSync('git', ['-C', project, 'add', '.ferme/agents.conf']);
+    execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'legacy config']);
+    execFileSync('git', ['-C', project, 'checkout', '-q', '-b', 'chore/cleared-config']);
     writeFileSync(join(config, 'ferme', 'project'), `${project}\n`);
     const env = { ...process.env, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state, HOME: root };
     const result = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; printf "%s\\n%s\\n" "$ORCH_CONF" "$ORCH_STATE_DIR"; ledger init >/dev/null; ledger init >/dev/null', '_', ORCH_HOME], { env, encoding: 'utf8' });
@@ -166,7 +174,40 @@ test('new project settings take precedence over legacy settings', () => withProj
   for (const name of ['.ferme', '.cleared']) mkdirSync(join(project, name));
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Old\n');
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = New\n');
+  trackProjectConfig(project);
   assert.equal(shell(env, 'printf "%s" "$ORCH_CONF"').stdout, join(project, '.cleared', 'agents.conf'));
+  assert.equal(nodeValue(env, 'conf.confPath()').stdout.trim(), join(project, '.cleared', 'agents.conf'));
+}));
+
+test('an untracked Cleared config cannot mask later committed legacy changes', () => committedGuardProject(({ project, env, root, git, commit }) => {
+  const legacy = join(project, '.ferme', 'agents.conf');
+  writeFileSync(legacy, '[owner]\nname = First Owner\n');
+  commit();
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Local Copy\n');
+  const wake = () => shell(env, 'ledger init >/dev/null; owner_name');
+  assert.equal(wake().stdout.trim(), 'First Owner');
+  writeFileSync(legacy, '[owner]\nname = Updated Owner\n');
+  git('add', '.ferme/agents.conf');
+  git('commit', '-q', '-m', 'update legacy configuration');
+  assert.equal(wake().stdout.trim(), 'Updated Owner');
+  const nodePath = nodeValue(env, 'conf.confPath()');
+  assert.equal(nodePath.stdout.trim(), legacy);
+  const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n, 1);
+  db.close();
+}));
+
+test('migration prepares a project config for a PR without activating its untracked copy', () => committedGuardProject(({ project, env, git, commit }) => {
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Legacy Owner\n');
+  commit();
+  git('checkout', '-q', '-b', 'chore/cleared-config');
+  const migration = spawnSync(join(ORCH_HOME, 'migrate-from-ferme.sh'), ['--apply'], { env, encoding: 'utf8' });
+  assert.equal(migration.status, 0, migration.stderr);
+  assert.ok(existsSync(join(project, '.cleared', 'agents.conf')));
+  assert.equal(shell(env, 'owner_name').stdout.trim(), 'Legacy Owner');
+  assert.match(migration.stdout, /pull request/i);
+  git('add', '.cleared/agents.conf');
   assert.equal(nodeValue(env, 'conf.confPath()').stdout.trim(), join(project, '.cleared', 'agents.conf'));
 }));
 
@@ -207,6 +248,7 @@ test('owner name defaults to the user', () => withProject(({ env }) => {
 test('project owner name overrides the example', () => withProject(({ project, env }) => {
   mkdirSync(join(project, '.cleared'));
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Example Owner\n');
+  trackProjectConfig(project);
   assert.equal(shell(env, 'owner_name').stdout.trim(), 'Example Owner');
 }));
 

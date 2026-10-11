@@ -4,6 +4,13 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 mode=${1:---dry-run}
 case "$mode" in --dry-run|--apply) ;; *) echo 'usage: migrate-from-ferme.sh [--dry-run|--apply]' >&2; exit 2 ;; esac
+if [ "$mode" = --apply ]; then
+  branch=$(git -C "$ORCH_REPO" symbolic-ref --quiet --short HEAD 2> /dev/null || true)
+  [ -n "$branch" ] && [ "$branch" != main ] && [ "$branch" != master ] || {
+    echo 'migrate-from-ferme.sh: apply only in a separate project checkout on a feature branch; open a pull request for .cleared/agents.conf' >&2
+    exit 1
+  }
+fi
 copy_if_missing() {
   local source=$1 target=$2
   [ -e "$source" ] || return 0
@@ -22,4 +29,4 @@ for source in "$HOME"/.config/systemd/user/ferme-*; do
     if [ "$mode" = --apply ]; then sed -i 's/ferme-/cleared-/g' "$target"; fi
   fi
 done
-printf 'Run serve/install.sh after applying to enable the new services. Legacy files stay in place.\n'
+printf 'Commit the new .cleared/ files in a project pull request, then merge it before using them. Run serve/install.sh after that merge. Legacy files stay in place.\n'
