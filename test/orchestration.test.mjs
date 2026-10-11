@@ -2789,7 +2789,7 @@ test('host-state sees a screen test from the command that runs it, before any br
   const running = [
     ['npm run test:ui'],
     ['node', 'scripts/with-test-postgres.mjs', '--', 'npm', 'run', 'test:ui:run'],
-    ['node', '/somewhere/budgeting/scripts/run-ui-tests.mjs'],
+    ['node', '/somewhere/sample-app/scripts/run-ui-tests.mjs'],
     ['node', 'scripts/capture-all.mjs'],
     ['node', 'scripts/ui-shots.mjs', 'http://127.0.0.1:4173'],
     ['node', '/somewhere/node_modules/.bin/playwright', 'test'],

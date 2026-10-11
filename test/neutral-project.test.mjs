@@ -209,9 +209,23 @@ test('without fingerprint lists or salt the generic guard runs and records one e
   db.close();
 }));
 
+test('project token prefixes are guarded only when committed in project settings', () => committedGuardProject(({ project, git, commit, check }) => {
+  const config = join(project, '.ferme', 'agents.conf');
+  const token = 'gs' + '_live_' + '123456789abc';
+  writeFileSync(config, '[guard]\nterms = none\nallowed = none\n');
+  commit();
+  assert.equal(check(token).status, 0);
+  writeFileSync(config, '[guard]\nterms = none\nallowed = none\ntoken_patterns = gs_live_\n');
+  git('add', '.ferme/agents.conf');
+  git('commit', '-q', '-m', 'configure project token prefix');
+  const blocked = check(token);
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /application token/);
+}));
+
 test('tracked tool files contain no original project identifiers', () => {
   const forbidden = [
-    'TWFraHRhcg==', 'Z2V0c2VldHU=', 'U2VldHU=', 'QUJDLQ==', 'U0VFLQ==',
+    'TWFraHRhcg==', 'Z2V0c2VldHU=', 'U2VldHU=', 'QUJDLQ==', 'U0VFLQ==', 'YnVkZ2V0aW5n',
     'L2hvbWUvbWFraHRhcg==', 'SnVzdGVzc2UgZHUgbW90ZXVy',
     'UmVmb250ZSBkZXMg6WNyYW5z',
   ].map((part) => Buffer.from(part, 'base64').toString('utf8'));
