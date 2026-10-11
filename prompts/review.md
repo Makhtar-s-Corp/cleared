@@ -15,8 +15,8 @@ Termine par un compte rendu de cette forme :
 Verdict : « à corriger avant fusion » ou « rien de bloquant ».
 Défauts : une ligne par défaut, du plus grave au moins grave, sous la forme `fichier:ligne` — ce qui se passe, avec quelle entrée, et ce qui devrait se passer.
 À vérifier : ce que tu n'as pas pu établir.
-Questions pour Makhtar : une question fermée par ligne, avec ta recommandation, ou « aucune ».
+Questions pour l'utilisateur : une question fermée par ligne, avec ta recommandation, ou « aucune ».
 
-Tout ce que tu écris pour Makhtar suit la règle « Parler à l'utilisateur » de `CLAUDE.md`, durcie le 9 octobre : relis-la avant d'écrire. En bref : des phrases complètes, comme un product owner écrit à un autre ; aucun mot de l'atelier sans sa traduction (lane, worktree, PR, CI, relecture, créneau, réintégration, main, dispatcher, ledger, garde-fou, un nom d'étape) ; au moins un exemple concret, avec des chiffres vraisemblables et inventés ; une capture dès qu'un écran est concerné ; les numéros de ticket et de PR entre parenthèses à la fin de la ligne, jamais en tête ni seuls. Quand tu lui demandes de trancher : ce que ça change pour l'utilisateur de l'app, pourquoi maintenant, une question fermée, ta recommandation et sa raison.
+Tout ce que tu écris pour l'utilisateur suit la règle « Parler à l'utilisateur » de `CLAUDE.md`, durcie le 9 octobre : relis-la avant d'écrire. En bref : des phrases complètes, comme un product owner écrit à un autre ; aucun mot de l'atelier sans sa traduction (lane, worktree, PR, CI, relecture, créneau, réintégration, main, dispatcher, ledger, garde-fou, un nom d'étape) ; au moins un exemple concret, avec des chiffres vraisemblables et inventés ; une capture dès qu'un écran est concerné ; les numéros de ticket et de PR entre parenthèses à la fin de la ligne, jamais en tête ni seuls. Quand tu lui demandes de trancher : ce que ça change pour l'utilisateur de l'app, pourquoi maintenant, une question fermée, ta recommandation et sa raison.
 
 Ton tout dernier message est le compte rendu complet : c'est lui seul qui est gardé et posté. N'écris rien après lui et n'appelle aucun outil après lui.

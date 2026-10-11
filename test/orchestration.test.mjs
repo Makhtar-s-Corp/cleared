@@ -4351,7 +4351,7 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
   // The rest of a lane's worktree (its test results, the images of the repository) does not leave: only that one folder, at that one place.
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'test-results.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png')).stderr, /not under a folder of captures/);
-  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/orca-workspaces\/budgeting\/\.local\/captures-linear, ~\/orca-workspaces\/budgeting\/\.local\/captures-linear\/\*, ~\/orca-workspaces\/budgeting-lanes\/budgeting\/\*\/\.local\/captures-linear$/m);
+  assert.match(readFileSync(join(ORCH_HOME, 'agents.conf'), 'utf8'), /^capture_roots = ~\/work\/my-project\/\.local\/captures-linear, ~\/work\/my-project\/\.local\/captures-linear\/\*, ~\/work\/my-project-lanes\/my-project\/\*\/\.local\/captures-linear$/m);
   assert.match(upload(join(captures, 'secret.png')).stderr, /not a PNG or JPEG image/);
   assert.match(upload(join(captures, 'missing.png')).stderr, /no such file/);
   assert.equal(sent(), '', 'nothing left the machine');
