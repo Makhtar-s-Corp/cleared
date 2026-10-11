@@ -162,6 +162,43 @@ exit 0
   assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
 }));
 
+test('installed legacy project advances without stale config, guard bypass, or overlapping services', () => committedGuardProject(({ project, env, root, git, commit, check }) => {
+  const config = join(project, '.ferme', 'agents.conf');
+  const salt = 'integration-salt';
+  const term = 'private orchard';
+  writeFileSync(config, '[owner]\nname = First Owner\n[guard]\nterms = none\nallowed = none\n');
+  commit();
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Owner\n');
+  const bin = join(root, 'bin');
+  const units = join(root, '.config', 'systemd', 'user');
+  mkdirSync(bin);
+  mkdirSync(units, { recursive: true });
+  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  const systemLog = join(root, 'systemctl.log');
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${systemLog}'\ncase "$*" in *'disable ferme-wake.service'*) exit 1;; *'is-active --quiet ferme-wake.service'*) count=$(cat '${join(root, 'wake-active-count')}' 2>/dev/null || echo 0); echo $((count+1)) > '${join(root, 'wake-active-count')}'; [ "$count" -lt 2 ]; exit $?;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(units, 'ferme-wake.service'), '[Service]\n');
+  const installEnv = { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` };
+  const install = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: installEnv, encoding: 'utf8' });
+  assert.notEqual(install.status, 0);
+  assert.doesNotMatch(readFileSync(systemLog, 'utf8'), /enable --now cleared-/);
+  writeFileSync(config, `[owner]\nname = Updated Owner\n[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
+  writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: createHash('sha256').update(salt).digest('hex').slice(0, 12), hashes: [createHash('sha256').update(salt + term).digest('hex')] }));
+  git('add', '.ferme/agents.conf', 'scripts/private-terms.json');
+  git('commit', '-q', '-m', 'advance legacy project configuration');
+  assert.equal(shell(env, 'owner_name').stdout.trim(), 'Updated Owner');
+  assert.equal(check('Public text.').status, 0);
+  assert.notEqual(check(term).status, 0);
+  writeFileSync(config, '[guard]\nsalt = local-wrong-salt\n');
+  assert.notEqual(check(term).status, 0, 'the committed salt remains authoritative');
+}));
+
+test('CI checks all test files on draft pull requests', () => {
+  const workflow = readFileSync(join(ORCH_HOME, '.github', 'workflows', 'checks.yml'), 'utf8');
+  assert.match(workflow, /test\/\*\.test\.mjs/);
+  assert.doesNotMatch(workflow, /draft == false/);
+});
+
 test('without fingerprint lists or salt the generic guard runs and records one event', () => committedGuardProject(({ project, root, commit, check }) => {
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Example Owner\n');
   commit();
