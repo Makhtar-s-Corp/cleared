@@ -204,3 +204,5 @@ La page n'est lisible que depuis le réseau Tailscale (décision du 7 octobre) :
 `serve/check.sh` vérifie qui peut lire la page : cette machine par Tailscale, oui ; un conteneur, non, par aucune adresse ; rien n'écoute ailleurs. `install.sh` le lance à la fin.
 
 Tous appellent les scripts du checkout d'où `install.sh` a été lancé : le relancer depuis le checkout principal une fois la PR fusionnée.
+
+Pour revenir aux anciens services, désactivez d'abord les minuteurs et services `cleared-*` avec `systemctl --user disable --now cleared-wake.timer cleared-dashboard-refresh.timer cleared-legacy-import.timer cleared-dashboard.service`, puis réactivez les anciens minuteurs nécessaires avec `systemctl --user enable --now ferme-wake.timer ferme-dashboard-refresh.timer ferme-legacy-import.timer`. Les fichiers `ferme-*` sont conservés dans `~/.config/systemd/user/` pour ce retour arrière ; vérifiez l'état avec `systemctl --user list-units 'ferme-*' 'cleared-*'` avant de laisser un réveil actif.

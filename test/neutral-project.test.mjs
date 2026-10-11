@@ -110,6 +110,58 @@ test('installer asks for a committed salt and leaves the project untouched', () 
   assert.ok(!existsSync(join(project, '.cleared')));
 }));
 
+test('installer never enables Cleared when disabling a legacy unit fails', () => committedGuardProject(({ project, env, root, commit }) => {
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
+  commit();
+  const bin = join(root, 'bin');
+  const units = join(root, '.config', 'systemd', 'user');
+  mkdirSync(bin);
+  mkdirSync(units, { recursive: true });
+  writeFileSync(join(units, 'ferme-lead-model.service'), '[Service]\n');
+  const log = join(root, 'systemctl.log');
+  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in *'disable ferme-lead-model.service'*) exit 1;; *'is-active --quiet ferme-wake.service'*) count=$(cat '${join(root, 'wake-active-count')}' 2>/dev/null || echo 0); echo $((count+1)) > '${join(root, 'wake-active-count')}'; [ "$count" -lt 2 ]; exit $?;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
+  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], {
+    env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /could not (stop|disable).*ferme-|legacy.*unit/i);
+  assert.match(readFileSync(log, 'utf8'), /ferme-lead-model.service/);
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
+  assert.ok(existsSync(join(units, 'ferme-lead-model.service')));
+}));
+
+test('installer waits for an active legacy wake to finish before stopping its service', () => committedGuardProject(({ project, env, root, commit }) => {
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
+  commit();
+  const bin = join(root, 'bin');
+  const units = join(root, '.config', 'systemd', 'user');
+  mkdirSync(bin);
+  mkdirSync(units, { recursive: true });
+  writeFileSync(join(units, 'ferme-wake.service'), '[Service]\n');
+  writeFileSync(join(units, 'ferme-wake.timer'), '[Timer]\n');
+  writeFileSync(join(units, 'ferme-lead-model.service'), '[Service]\n');
+  const log = join(root, 'systemctl.log');
+  const active = join(root, 'active-count');
+  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in
+  *'is-active --quiet ferme-wake.service'*) count=$(cat '${active}' 2>/dev/null || echo 0); echo $((count+1)) > '${active}'; [ "$count" -lt 2 ]; exit $?;;
+  *'disable ferme-lead-model.service'*) exit 1;;
+  *'is-active '*|*'is-enabled '*) exit 1;;
+esac
+exit 0
+`, { mode: 0o755 });
+  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], {
+    env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  const calls = readFileSync(log, 'utf8').split('\n');
+  assert.ok(calls.indexOf('--user stop ferme-wake.timer') < calls.indexOf('--user stop ferme-wake.service'));
+  assert.ok(calls.lastIndexOf('--user is-active --quiet ferme-wake.service') < calls.indexOf('--user stop ferme-wake.service'));
+  assert.ok(calls.filter((call) => call === '--user is-active --quiet ferme-wake.service').length >= 2);
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
+}));
+
 test('without fingerprint lists or salt the generic guard runs and records one event', () => committedGuardProject(({ project, root, commit, check }) => {
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Example Owner\n');
   commit();
