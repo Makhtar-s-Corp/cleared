@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
+import { defaultValue, loadConf, parseConf, requiredValue, ORCH_HOME } from '../lib/conf.mjs';
 import { route } from '../lib/route.mjs';
 import { openLedger, runStart, runEnd, addEvent, costEur } from '../lib/ledger.mjs';
 import { conf, scratch, fixtureProject, sandbox, runLane, laneWithRemote, flowBox, reviewedPull, task, first } from './support.mjs';
@@ -30,6 +30,9 @@ test('every alias, fallback, role and rule of agents.conf points to a declared m
       const row = body.split('\n').find((line) => line.startsWith(`| \`${key}\` |`));
       assert.ok(row, `undocumented setting ${name}.${key}`);
       assert.match(row, /\| (?:Required|Default:|Optional; no default)/, `missing requirement or default for ${name}.${key}`);
+      const fallback = defaultValue(name, key);
+      if (fallback !== undefined) assert.ok(row.includes(`Default: ${fallback} |`), `incorrect default for ${name}.${key}`);
+      else if (requiredValue(name, key)) assert.match(row, /\| Required(?: |\|)/, `required setting ${name}.${key} marked optional`);
     }
   }
   const aliases = Object.keys(conf.models);
