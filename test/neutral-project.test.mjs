@@ -60,6 +60,62 @@ test('fingerprints with another salt refuse the whole guard, including legacy li
   assert.match(legacyMismatch.stderr, /These fingerprints were made with another salt/);
 }));
 
+test('guard salt comes from the committed config beside the fingerprint list', () => committedGuardProject(({ project, env, root, commit, check }) => {
+  const salt = 'committed-example-salt';
+  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  const term = 'quiet valley';
+  const config = join(project, '.ferme', 'agents.conf');
+  writeFileSync(config, `[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
+  writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: hash(salt).slice(0, 12), hashes: [hash(salt + term)] }));
+  commit();
+  writeFileSync(config, '[guard]\nsalt = uncommitted-wrong-salt\nterms = scripts/private-terms.json\nallowed = none\n');
+  assert.notEqual(check(term).status, 0, 'the committed term remains protected');
+  const input = join(root, 'scan.txt');
+  writeFileSync(input, term);
+  const direct = spawnSync('node', [join(ORCH_HOME, 'lib', 'guard', 'private-terms.mjs'), 'scan', input], {
+    env: { ...env, ORCH_GUARD_REF: 'HEAD' }, encoding: 'utf8',
+  });
+  assert.equal(direct.status, 1, direct.stderr);
+  assert.match(direct.stdout, /quiet valley/);
+}));
+
+test('fingerprint lists without a committed salt refuse with the line to commit', () => committedGuardProject(({ project, commit, check }) => {
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = scripts/private-terms.json\nallowed = none\n');
+  writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: '123456789abc', hashes: [] }));
+  commit();
+  const result = check('A harmless sentence.');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /\[guard\] salt = <random value>/);
+  assert.match(result.stderr, /commit/);
+}));
+
+test('installer asks for a committed salt and leaves the project untouched', () => committedGuardProject(({ project, env, root, commit }) => {
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = scripts/private-terms.json\nallowed = none\n');
+  writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: '123456789abc', hashes: [] }));
+  commit();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  const before = execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' });
+  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], {
+    env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /\[guard\] salt = <random value>.*commit/);
+  assert.equal(execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' }), before);
+  assert.ok(!existsSync(join(project, '.cleared')));
+}));
+
+test('without fingerprint lists or salt the generic guard runs and records one event', () => committedGuardProject(({ project, root, commit, check }) => {
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Example Owner\n');
+  commit();
+  assert.equal(check('A harmless sentence.').status, 0);
+  assert.equal(check('Another harmless sentence.').status, 0);
+  const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'private_terms_disabled'").get().n, 1);
+  db.close();
+}));
+
 test('tracked tool files contain no original project identifiers', () => {
   const forbidden = [
     'TWFraHRhcg==', 'Z2V0c2VldHU=', 'U2VldHU=', 'QUJDLQ==', 'U0VFLQ==',

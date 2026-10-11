@@ -450,7 +450,7 @@ close_old_terminals() {
 # phone numbers). For anything a script sends to an outside service: Linear,
 # GitHub.
 guard_text() {
-  local dir ref tool_ref settings
+  local dir ref tool_ref settings terms_setting allowed_setting guard_key
   dir=$(mktemp -d)
   # 1. Its code is the tool's own (lib/guard/). When the tool is a checkout
   # that follows a branch ([update] base), it is the code of that branch,
@@ -465,15 +465,9 @@ guard_text() {
     && git -C "$ORCH_HOME" cat-file -e "$tool_ref:lib/guard/codex-guard.mjs" 2> /dev/null; then
     git -C "$ORCH_HOME" show "$tool_ref:lib/guard/codex-guard.mjs" > "$dir/codex-guard.mjs" 2> /dev/null || true
     git -C "$ORCH_HOME" show "$tool_ref:lib/guard/private-terms.mjs" > "$dir/private-terms.mjs" 2> /dev/null || true
-    git -C "$ORCH_HOME" show "$tool_ref:agents.example.conf" > "$dir/tool.conf" 2> /dev/null || true
-    if [ ! -s "$dir/tool.conf" ]; then
-      if [ -f "$ORCH_HOME/agents.example.conf" ]; then cp "$ORCH_HOME/agents.example.conf" "$dir/tool.conf"
-      elif [ -f "$ORCH_HOME/agents.conf" ]; then cp "$ORCH_HOME/agents.conf" "$dir/tool.conf"; fi
-    fi
   else
     [ -z "$tool_ref" ] || echo "$(basename "$0"): the guard runs from the files of this checkout ($ORCH_HOME does not follow $tool_ref, or that branch does not carry lib/guard/)" >&2
     cp "$ORCH_HOME/lib/guard/codex-guard.mjs" "$ORCH_HOME/lib/guard/private-terms.mjs" "$dir/" 2> /dev/null || true
-    if [ -f "$ORCH_HOME/agents.example.conf" ]; then cp "$ORCH_HOME/agents.example.conf" "$dir/tool.conf"; elif [ -f "$ORCH_HOME/agents.conf" ]; then cp "$ORCH_HOME/agents.conf" "$dir/tool.conf"; fi
   fi
   [ -s "$dir/codex-guard.mjs" ] && [ -s "$dir/private-terms.mjs" ] || {
     rm -rf "$dir"
@@ -499,22 +493,38 @@ guard_text() {
     git -C "$ORCH_REPO" show "$ref:.ferme/agents.conf" > "$dir/settings.conf" 2> /dev/null || true
     settings=$dir/settings.conf
   else
-    settings=$dir/tool.conf
+    settings=$dir/settings.conf
   fi
   [ -f "$settings" ] || : > "$settings"
-  CLEARED_GUARD_SALT=$(conf_get_from guard salt "$settings" 2> /dev/null || true)
-  if [ -z "$CLEARED_GUARD_SALT" ]; then
-    printf '%s\n' 'Missing [guard] salt in project configuration; run the installer to generate one.' >&2
-    rm -rf "$dir"
-    return 1
+  while IFS= read -r guard_key; do
+    case "$guard_key" in salt|terms|allowed|token_patterns) ;; *) echo "$(basename "$0"): unknown [guard] key $guard_key in committed project configuration" >&2; rm -rf "$dir"; return 1 ;; esac
+  done < <(awk '/^\[/{inside=($0=="[guard]");next} inside && $0 !~ /^[[:space:]]*#/ && index($0,"=") {key=substr($0,1,index($0,"=")-1);gsub(/^[[:space:]]+|[[:space:]]+$/,"",key);print key}' "$settings")
+  terms_setting=$(conf_get_from guard terms "$settings" 2> /dev/null || true)
+  allowed_setting=$(conf_get_from guard allowed "$settings" 2> /dev/null || true)
+  if { [ -z "$terms_setting" ] || [ "$terms_setting" = none ]; } && { [ -z "$allowed_setting" ] || [ "$allowed_setting" = none ]; }; then
+    echo '{"disabled":true,"hashes":[]}' > "$dir/private-terms.json"
+    echo '{"disabled":true,"hashes":[]}' > "$dir/codex-guard-allow.json"
+    mkdir -p "$ORCH_STATE_DIR"
+    (
+      flock -w 30 9 || exit 1
+      ledger init > /dev/null || exit 1
+      if [ "$(ledger sql "select count(*) as n from events where kind = 'private_terms_disabled'" | jq -r '.[0].n')" = 0 ]; then
+        ledger event --kind private_terms_disabled --detail 'No committed private-term fingerprint lists are configured for this project' || exit 1
+      fi
+    ) 9> "$ORCH_STATE_DIR/guard-disabled.lock" || { rm -rf "$dir"; return 1; }
+  else
+    if [ -z "$(conf_get_from guard salt "$settings" 2> /dev/null || true)" ]; then
+      printf '%s\n' 'Missing committed [guard] salt: add [guard] salt = <random value> to the project agents.conf and commit it before using these fingerprint lists.' >&2
+      rm -rf "$dir"
+      return 1
+    fi
+    guard_list "$dir" "$ref" "$settings" terms private-terms.json "of private terms" \
+      && guard_list "$dir" "$ref" "$settings" allowed codex-guard-allow.json "of allowed values" || {
+      rm -rf "$dir"
+      return 1
+    }
   fi
-  export CLEARED_GUARD_SALT
-  guard_list "$dir" "$ref" "$settings" terms private-terms.json "of private terms" \
-    && guard_list "$dir" "$ref" "$settings" allowed codex-guard-allow.json "of allowed values" || {
-    rm -rf "$dir"
-    return 1
-  }
-  if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
+  if ! ORCH_GUARD_REF="$ref" node "$dir/codex-guard.mjs" --strict "$1" >&2; then
     rm -rf "$dir"
     echo "$(basename "$0"): not sent, the guard refuses this text" >&2
     return 1

@@ -29,6 +29,23 @@ if [ "$project" = "$(cd "$ORCH_HOME" && pwd -P)" ] && [ ! -d "$project/.cleared"
 fi
 known=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$cleared_project_file" 2> /dev/null || true)
 [ -z "$known" ] || [ "$known" = "$project" ] || die "this machine already works on $known ($named): one project for a machine. To move it, remove that file, then run this again"
+guard_ref=${ORCH_GUARD_REF:-$(git -C "$project" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2> /dev/null || true)}
+guard_ref=${guard_ref:-origin/main}
+guard_settings=$(mktemp)
+trap 'rm -f "$guard_settings"' EXIT
+if git -C "$project" cat-file -e "$guard_ref:.cleared/agents.conf" 2> /dev/null; then
+  git -C "$project" show "$guard_ref:.cleared/agents.conf" > "$guard_settings"
+elif git -C "$project" cat-file -e "$guard_ref:.ferme/agents.conf" 2> /dev/null; then
+  git -C "$project" show "$guard_ref:.ferme/agents.conf" > "$guard_settings"
+fi
+if [ -z "$(conf_get_from guard salt "$guard_settings" 2> /dev/null || true)" ]; then
+  echo 'Add [guard] salt = <random value> to the project agents.conf and commit it; the installer will not write it.' >&2
+  terms=$(conf_get_from guard terms "$guard_settings" 2> /dev/null || true)
+  allowed=$(conf_get_from guard allowed "$guard_settings" 2> /dev/null || true)
+  if { [ -n "$terms" ] && [ "$terms" != none ]; } || { [ -n "$allowed" ] && [ "$allowed" != none ]; }; then
+    die 'fingerprint lists are configured but their salt is not committed; no services were installed'
+  fi
+fi
 # What goes into a unit is written as it is: a path systemd or sed would read
 # another way is refused, not written half right.
 for path in "$ORCH_HOME" "$project" "$ORCH_STATE_DIR"; do
@@ -46,14 +63,6 @@ if [ -n "$waking" ] || systemctl --user is-active --quiet orchestration-wake.tim
 fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
-if [ -z "$(conf_get guard salt)" ] || [ "$(conf_get guard salt)" = cleared-example-only ]; then
-  project_conf=$project/.cleared/agents.conf
-  mkdir -p "$(dirname "$project_conf")"
-  if [ ! -f "$project_conf" ] && [ -f "$project/.ferme/agents.conf" ]; then cp "$project/.ferme/agents.conf" "$project_conf"; fi
-  if [ ! -f "$project_conf" ]; then : > "$project_conf"; fi
-  new_salt=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
-  printf '\n[guard]\nsalt = %s\n' "$new_salt" >> "$project_conf"
-fi
 units="$HOME/.config/systemd/user"
 mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
