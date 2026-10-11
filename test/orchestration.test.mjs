@@ -241,7 +241,8 @@ if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
   if [ -n "$head" ]; then cat "${home}/pr-head-\${head//\\//-}.json" 2>/dev/null || echo '[]'; else cat "${join(home, 'pulls-now.json')}"; fi
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr ready" ]; then echo "$3 \${4:-}" >> "${join(home, 'pr-ready')}"
-elif [ "$1 $2" = "run view" ]; then echo "$3" >> "${join(home, 'run-viewed')}"; cat "${join(home, 'run-log.txt')}" 2>/dev/null || true
+elif [ "$1 $2" = "run view" ]; then case " $* " in *" --json jobs "*) cat "${join(home, 'run-jobs.json')}" 2>/dev/null || echo '{"jobs":[]}' ;; *) echo "$3" >> "${join(home, 'run-viewed')}"; cat "${join(home, 'run-log.txt')}" 2>/dev/null || true ;; esac
+elif [ "$1 $2" = "run rerun" ]; then [ -z "\${FAKE_GH_RERUN_DOWN:-}" ] || exit 1; echo "$3 $4" >> "${join(home, 'run-rerun')}"
 elif [ "$1 $2" = "pr close" ]; then [ -z "\${FAKE_GH_CLOSE_DOWN:-}" ] || exit 1; echo "$3" >> "${join(home, 'pr-closed')}"
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
 elif [ "$1 $2" = "pr view" ]; then [ "\${FAKE_GH_VIEW_DOWN:-}" != "$3" ] || exit 1; cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"
@@ -5107,6 +5108,47 @@ test('a ticket given to two teams with no place for the second, or no second har
     assert.equal(alone.status, 0, alone.stderr);
     assert.equal(JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8')).teams, undefined);
   }
+});
+
+test('a check the runner broke is started again once by rule, with no session of a model: only when every step that failed is one the project names, never twice for a version, and never when no step is named', () => {
+  const { flow, todo, by, record, session, pull, box } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  const conf = readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30');
+  writeFileSync(confPath, conf);
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const done = session('X-5');
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  const jobs = (...steps) => writeFileSync(join(box.home, 'run-jobs.json'), JSON.stringify({ jobs: [{ name: 'verify (2/2)', conclusion: 'failure', steps: [{ name: 'Checkout', conclusion: 'success' }, ...steps.map((name) => ({ name, conclusion: 'failure' }))] }, { name: 'verify (1/2)', conclusion: 'success', steps: [{ name: 'Unit tests', conclusion: 'success' }] }] }));
+  const again = () => { try { return readFileSync(join(box.home, 'run-rerun'), 'utf8').trim().split('\n'); } catch { return []; } };
+  writeFileSync(join(box.home, 'run-log.txt'), 'verify (2/2)\tUNKNOWN STEP\t2026-01-02T10:00:00.0000000Z npm error ETXTBSY\nverify (2/2)\tUNKNOWN STEP\t2026-01-02T10:00:01.0000000Z ##[error]Process completed with exit code 1.\n');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }, { conclusion: 'SUCCESS' }] });
+  jobs('Run npm ci');
+  // The project names the install as the runner's: the checks are started again, and no session opens.
+  writeFileSync(confPath, conf.replace('[lanes]\n', '[lanes]\nrerun_steps = Run npm ci, Set up job\n'));
+  const first = flow();
+  assert.match(first.stdout, /X-5: #41 is red at [0-9a-f]{8} on a step of the runner \(Run npm ci\): its checks are started again, once/);
+  assert.doesNotMatch(first.stdout, /opened again/);
+  assert.deepEqual(again(), ['77 --failed']);
+  assert.equal(record('X-5').runs.length, 1);
+  // Red again at the same version: not a second time, the lane reads it.
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  assert.deepEqual(again(), ['77 --failed']);
+  const fixed = session('X-5', { commit: 'fix: something else' });
+  assert.match(fixed.prompt, /\| npm error ETXTBSY/);
+  // A test that failed beside the install is the lane's: nothing is started again.
+  jobs('Run npm ci', 'Unit tests and coverage');
+  pull({ headRefOid: fixed.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  assert.deepEqual(again(), ['77 --failed']);
+  // No step named: never, as before.
+  const last = session('X-5', { commit: 'fix: a third thing' });
+  writeFileSync(confPath, conf);
+  jobs('Run npm ci');
+  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  assert.deepEqual(again(), ['77 --failed']);
 });
 
 test('a lane is not opened again for ever for one reason: three times in a day for the checks, a reviewer or a session that stops, then it is said; a word of the user is never a loop', () => {

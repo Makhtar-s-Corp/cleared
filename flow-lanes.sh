@@ -363,7 +363,7 @@ second_team() {
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record") team=$(jq -r '.team // empty' "$record")
   # What is said of the second team of a ticket names it (<ticket>.2): two
@@ -660,6 +660,29 @@ one_lane() {
       say "$ticket: red at ${head:0:8} and the run that failed is not listed yet: asked again at the next wake"
       mark "$record" "nolog:$head"
       return 0
+    fi
+    # A check the runner broke, not the lane: when every step that failed
+    # is one the project names ([lanes] rerun_steps: an install, a checkout,
+    # by the name the workflow gives the step), the run is started again
+    # once for that version, when the host is free, instead of a session of
+    # a model that has nothing to correct. Red again, it is the lane's to
+    # read, like any other. With no step named, nothing is ever started
+    # again.
+    rerun=$(conf_get lanes rerun_steps)
+    if [ -n "$run" ] && [ -n "$rerun" ] && ! did "$record" "rerun:$head"; then
+      broken=$(cd "$ORCH_REPO" && gh run view "$run" --json jobs 2> /dev/null | jq -r '[.jobs[]? | select(.conclusion == "failure" or .conclusion == "timed_out") | .steps[]? | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] | unique | .[]' 2> /dev/null) || broken=
+      if [ -n "$broken" ] && ! grep -vxF -f <(tr ',' '\n' <<<"$rerun" | sed 's/^ *//; s/ *$//' | grep .) <<<"$broken" | grep -q .; then
+        free_for_a_run || return 0
+        : > "$work/readied"
+        if [ -n "$dry" ]; then say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks would be started again"; return 0; fi
+        mark "$record" "rerun:$head"
+        if (cd "$ORCH_REPO" && gh run rerun "$run" --failed) > /dev/null 2>&1; then
+          : > "$ORCH_STATE_DIR/checks-starting"
+          say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks are started again, once"
+          return 0
+        fi
+        say "$ticket: #$pr is red at ${head:0:8} on a step of the runner, and its checks could not be started again: read by the lane"
+      fi
     fi
     : > "$work/failed.log"
     [ -z "$run" ] || (cd "$ORCH_REPO" && gh run view "$run" --log-failed 2> /dev/null) | cut -f3- | sed -E 's/^[^ ]*[0-9]T[0-9:.]+Z //' > "$work/failed.log" || true
