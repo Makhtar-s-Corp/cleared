@@ -4808,6 +4808,10 @@ test('a word written to a lane that stays at its cap is not lost in silence: the
   tell('Et le mode sombre.');
   flow();
   assert.equal(told().length, 2, 'once a day for the words of the lead');
+  // The day after, the same words still wait: that is not news, and the lead is not woken for it again.
+  { const aged = record('X-5'); for (const key of Object.keys(aged.done)) if (/^cost:1:told:\d{4}-/.test(key)) { aged.done['cost:1:told:2020-01-01'] = aged.done[key]; delete aged.done[key]; } writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(aged)); }
+  assert.doesNotMatch(flow().stdout, /at its cap/);
+  assert.equal(told().length, 2);
   // The user writes on the ticket, without lifting the cap: his word is not handed over either, and that is said too.
   writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }]));
   assert.match(flow().stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(said\)/);

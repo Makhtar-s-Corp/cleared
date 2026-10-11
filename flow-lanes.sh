@@ -112,12 +112,15 @@ cost_left() {
 # to a lane that is at its cap (the user's on the ticket, the lead's by
 # tell-lane.sh) is not handed over, and somebody waits for its effect: the
 # telling says so, and a word that comes once the cap was said is told
-# again, once a day for his words and once for the lead's. Red checks or a
-# review on a lane already said to be stopped tell the lead nothing new.
+# again: once for that word (the same one, still waiting the day after,
+# is not news), and no more than once a day for his words and once for
+# the lead's. Red checks or a review on a lane already said to be stopped
+# tell the lead nothing new.
 at_cost_cap() {
-  local record=$1 ticket=$2 kind=${3:-} key word= unheard= sibling
+  local record=$1 ticket=$2 kind=${3:-} reason=${4:-} key word= unheard= sibling
   key="cost:$cost_cap"
   case "$kind" in said | told) word="$key:$kind:$(date -u +%F)" ;; esac
+  if [ -n "$word" ] && [ -n "$reason" ] && did "$record" "unheard:$reason"; then word=; fi
   # Two teams share the cap of their ticket: reached, it is told once, not
   # once for each.
   sibling=$(lane_record "$ticket$([ -n "${team:-}" ] || echo .2)")
@@ -126,7 +129,12 @@ at_cost_cap() {
     return 0
   fi
   if did "$record" "$key"; then
-    [ -n "$word" ] && ! did "$record" "$word" || return 0
+    [ -n "$word" ] || return 0
+    if did "$record" "$word"; then
+      # Told today for a word of that kind: this one is counted with it.
+      [ -z "$reason" ] || did "$record" "unheard:$reason" || mark "$record" "unheard:$reason"
+      return 0
+    fi
     unheard=" It was already said to be at this cap."
   fi
   [ -z "$word" ] || unheard="$unheard Since its last session $([ "$kind" = said ] && echo 'the user wrote on the ticket' || echo 'you wrote to the lane'), and that word was not handed to it: no session opens at the cap. Say so to the user in the same question."
@@ -134,6 +142,7 @@ at_cost_cap() {
   [ -n "$dry" ] || ledger event --kind ticket_cost --ticket "$ticket" --value "$cost_spent" --detail "the lane of $ticket has cost $(printf '%.2f' "$cost_spent") \$ at list price, for a cap of $cost_cap \$ on this ticket: it is stopped and not opened again, what it had committed is on its branch.$unheard Tell the user what was done and what is left (its last report says), and ask him one closed question: raise the cap of this ticket, yes or no, with your recommendation and an amount; he answers by writing a line « Plafond <amount> » on the ticket"
   mark "$record" "$key"
   [ -z "$word" ] || mark "$record" "$word"
+  [ -z "$word" ] || [ -z "$reason" ] || mark "$record" "unheard:$reason"
 }
 
 # again <record> <ticket> <role> <key> <file that says why> [keep]: one more
@@ -195,7 +204,7 @@ again() {
   fi
   left=$cost_rest
   if [ "$cost_out" = true ]; then
-    at_cost_cap "$record" "$ticket" "$kind"
+    at_cost_cap "$record" "$ticket" "$kind" "$key"
     return 1
   fi
   if [ -n "$dry" ]; then say "$ticket: opened again ($key)"; return 0; fi
