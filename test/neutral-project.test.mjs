@@ -24,7 +24,7 @@ function nodeValue(env, expression) {
 
 test('tracked tool files contain no original project identifiers', () => {
   const forbidden = [
-    'TWFraHRhcg==', 'Z2V0c2VldHU=', 'U2VldHU=', 'QUJDLQ==',
+    'TWFraHRhcg==', 'Z2V0c2VldHU=', 'U2VldHU=', 'QUJDLQ==', 'U0VFLQ==',
     'L2hvbWUvbWFraHRhcg==', 'SnVzdGVzc2UgZHUgbW90ZXVy',
     'UmVmb250ZSBkZXMg6WNyYW5z',
   ].map((part) => Buffer.from(part, 'base64').toString('utf8'));

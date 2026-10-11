@@ -140,7 +140,7 @@ test('the dispatcher scripts name no model and no provider', () => {
 
 test('the ledger records a run, its cost and an event', () => {
   const db = openLedger(':memory:');
-  runStart(db, { runId: 'r1', ticket: 'SEE-1', role: 'dev', model: 'm', provider: 'x', lane: 'dev/SEE-1', requestedModel: 'alias' });
+  runStart(db, { runId: 'r1', ticket: 'EX-1', role: 'dev', model: 'm', provider: 'x', lane: 'dev/EX-1', requestedModel: 'alias' });
   const pricing = parseConf('[currency]\nusd_eur = 0.5\n[prices]\npriced = 1 2 0.5 4 8\n');
   runEnd(db, pricing, { runId: 'r1', outcome: 'done', exitCode: 0, usage: { model: 'actual', tokens_in: 10, tokens_out: 20, tokens_cache: 30, tokens_cache_write: 40, cost_usd: 2 } });
   const row = db.prepare('select * from runs').get();
@@ -150,7 +150,7 @@ test('the ledger records a run, its cost and an event', () => {
   assert.equal(row.tokens_total, 100);
   assert.throws(() => runEnd(db, pricing, { runId: 'nope', outcome: 'done' }), /unknown run/);
   assert.throws(() => addEvent(db, { kind: 'made_up' }), /unknown event kind/);
-  addEvent(db, { kind: 'lane_limit_reached', ticket: 'SEE-1', value: 3 });
+  addEvent(db, { kind: 'lane_limit_reached', ticket: 'EX-1', value: 3 });
   assert.equal(db.prepare('select count(*) n from events').get().n, 1);
 });
 
@@ -3202,7 +3202,7 @@ test('the tokens of a conversation are counted from its own session log, each me
 test('the sessions of a worktree the dispatcher opened are not the old way of working: the import of the past leaves them out', async () => {
   const { dispatcherWorktree } = await import('../lib/lanes.mjs');
   const roles = Object.keys(conf.roles);
-  for (const name of ['release-lead', 'dev-SEE-105', 'review-SEE-112', 'talk-SEE-112']) assert.equal(dispatcherWorktree(name, roles), true, name);
+  for (const name of ['release-lead', 'dev-EX-105', 'review-EX-112', 'talk-EX-112']) assert.equal(dispatcherWorktree(name, roles), true, name);
   for (const name of ['orrchestrator', 'app-rapide', 'release-notes', 'dev-something', 'fiche-enveloppe-projet']) assert.equal(dispatcherWorktree(name, roles), false, name);
 });
 
