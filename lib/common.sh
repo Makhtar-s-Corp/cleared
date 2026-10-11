@@ -1,8 +1,7 @@
 # Shared by the dispatcher scripts. Sourced, never executed.
 # Nothing here names a model or a provider: both come from agents.conf.
 
-# Accept the public Cleared environment names while old launchers continue to
-# pass ORCH_* during the transition. The newer name wins when both are set.
+# Map public Cleared environment names to the internal script variables.
 while IFS= read -r cleared_name; do
   old_name=ORCH_${cleared_name#CLEARED_}
   printf -v "$old_name" '%s' "${!cleared_name}"
@@ -15,21 +14,19 @@ ORCH_CONF=${CLEARED_CONF:-${ORCH_CONF:-}}
 ORCH_STATE_DIR=${CLEARED_STATE_DIR:-${ORCH_STATE_DIR:-}}
 # The project these scripts work on, by its main checkout: said by whoever
 # runs them (ORCH_REPO), else once for the machine (first line of
-# ~/.config/ferme/project), else the repository these scripts sit in (a
+# ~/.config/cleared/project), else the repository these scripts sit in (a
 # project that carries its own copy of the tool).
 cleared_config_root=${XDG_CONFIG_HOME:-$HOME/.config}
 cleared_project_file=$cleared_config_root/cleared/project
-if [ ! -f "$cleared_project_file" ] && [ -f "$cleared_config_root/ferme/project" ]; then cleared_project_file=$cleared_config_root/ferme/project; CLEARED_LEGACY_PATH=$cleared_project_file; fi
 ORCH_REPO=${ORCH_REPO:-$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$cleared_project_file" 2> /dev/null || true)}
 ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/null | sed -n '1s/^worktree //p' || true)}
 # No project at all (nobody named one, and the tool sits in no repository):
 # nothing is done « wherever this was started from ».
 [ -n "$ORCH_REPO" ] || { echo "$(basename "$0"): no project is named (ORCH_REPO, or the first line of $cleared_project_file)" >&2; exit 1; }
-# Its settings: its own (.ferme/agents.conf in that checkout, which no lane
-# writes to), else the example that comes with the tool.
+# Its settings are the tracked .cleared/agents.conf in the project checkout.
 if [ -z "${ORCH_CONF:-}" ]; then
   if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && git -C "$ORCH_REPO" ls-files --error-unmatch -- .cleared/agents.conf > /dev/null 2>&1; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
-  elif [ -f "$ORCH_REPO/.ferme/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.ferme/agents.conf; CLEARED_LEGACY_PATH=$ORCH_CONF
+  elif [ -f "$ORCH_REPO/.cleared/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.cleared/tracked-agents.conf-missing
   else ORCH_CONF=$ORCH_REPO/.cleared/agents.conf; fi
   if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && [ "$ORCH_CONF" != "$ORCH_REPO/.cleared/agents.conf" ]; then CLEARED_IGNORED_UNTRACKED_CONF=$ORCH_REPO/.cleared/agents.conf; fi
 fi
@@ -38,17 +35,15 @@ fi
 if [ -z "${ORCH_STATE_DIR:-}" ]; then
   cleared_state_root=${XDG_STATE_HOME:-$HOME/.local/state}
   ORCH_STATE_DIR=$cleared_state_root/cleared/$(basename "$ORCH_REPO")
-  if [ ! -d "$ORCH_STATE_DIR" ] && [ -d "$cleared_state_root/ferme/$(basename "$ORCH_REPO")" ]; then ORCH_STATE_DIR=$cleared_state_root/ferme/$(basename "$ORCH_REPO"); CLEARED_LEGACY_PATH=$ORCH_STATE_DIR; fi
 fi
-export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR CLEARED_LEGACY_PATH CLEARED_IGNORED_UNTRACKED_CONF
+export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR CLEARED_IGNORED_UNTRACKED_CONF
 export CLEARED_REPO="$ORCH_REPO" CLEARED_CONF="$ORCH_CONF" CLEARED_STATE_DIR="$ORCH_STATE_DIR"
 
 # prompt_file <name>: the prompt of that name. The project's own
-# (.ferme/prompts/<name>.md in its main checkout) comes before the one of the
+# (.cleared/prompts/<name>.md in its main checkout) comes before the one of the
 # tool: what an agent is told about a product is the product's.
 prompt_asset() {
   if [ -f "$ORCH_REPO/.cleared/prompts/$1" ]; then printf '%s\n' "$ORCH_REPO/.cleared/prompts/$1"
-  elif [ -f "$ORCH_REPO/.ferme/prompts/$1" ]; then printf '%s\n' "$ORCH_REPO/.ferme/prompts/$1"
   else printf '%s\n' "$ORCH_HOME/prompts/$1"; fi
 }
 prompt_file() { prompt_asset "$1.md"; }
@@ -481,8 +476,8 @@ guard_text() {
   # is read from what is committed on the default branch of its remote,
   # never from the files of a checkout (a session runs code there) and
   # never at a place a settings file names. Which files: [guard] terms and
-  # allowed, as the project's own settings say there (.ferme/agents.conf),
-  # else as the example of the tool says. Each names a file, or says
+  # allowed, as the project's committed settings say there (.cleared/agents.conf).
+  # Each names a file, or says
   # « none »; a key left out or misspelt is a refusal, never « no list ».
   # ORCH_GUARD_REF names another ref: the tests, and a project without a
   # remote.
@@ -490,9 +485,6 @@ guard_text() {
   ref=${ref:-origin/main}
   if git -C "$ORCH_REPO" cat-file -e "$ref:.cleared/agents.conf" 2> /dev/null; then
     git -C "$ORCH_REPO" show "$ref:.cleared/agents.conf" > "$dir/settings.conf" 2> /dev/null || true
-    settings=$dir/settings.conf
-  elif git -C "$ORCH_REPO" cat-file -e "$ref:.ferme/agents.conf" 2> /dev/null; then
-    git -C "$ORCH_REPO" show "$ref:.ferme/agents.conf" > "$dir/settings.conf" 2> /dev/null || true
     settings=$dir/settings.conf
   else
     settings=$dir/settings.conf

@@ -31,7 +31,7 @@ function committedGuardProject(run) {
   return withProject(({ project, env, root }) => {
     const git = (...args) => execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args]);
     git('init', '-q', '-b', 'main');
-    mkdirSync(join(project, '.ferme'), { recursive: true });
+    mkdirSync(join(project, '.cleared'), { recursive: true });
     mkdirSync(join(project, 'scripts'), { recursive: true });
     const commit = () => { git('add', '.'); git('commit', '-q', '-m', 'test configuration'); };
     const check = (text) => {
@@ -45,13 +45,13 @@ function committedGuardProject(run) {
   });
 }
 
-test('fingerprints with another salt refuse the whole guard, including legacy lists', () => committedGuardProject(({ project, commit, check }) => {
+test('fingerprints with another salt refuse the whole guard, including headerless lists', () => committedGuardProject(({ project, commit, check }) => {
   const hash = (value) => createHash('sha256').update(value).digest('hex');
   const firstSalt = 'example-salt-a';
   const secondSalt = 'example-salt-b';
   const term = 'private meadow';
   const list = join(project, 'scripts', 'private-terms.json');
-  writeFileSync(join(project, '.ferme', 'agents.conf'), `[guard]\nsalt = ${secondSalt}\nterms = scripts/private-terms.json\nallowed = none\n`);
+  writeFileSync(join(project, '.cleared', 'agents.conf'), `[guard]\nsalt = ${secondSalt}\nterms = scripts/private-terms.json\nallowed = none\n`);
   writeFileSync(list, JSON.stringify({ salt_id: hash(firstSalt).slice(0, 12), hashes: [hash(firstSalt + term)] }));
   commit();
   const mismatch = check(`A ${term} is here.`);
@@ -59,16 +59,16 @@ test('fingerprints with another salt refuse the whole guard, including legacy li
   assert.match(mismatch.stderr, /These fingerprints were made with another salt\. Set \[guard\] salt to the salt that made them, or rebuild the list\./);
   writeFileSync(list, JSON.stringify([hash(firstSalt + term)]));
   commit();
-  const legacyMismatch = check(`A ${term} is here.`);
-  assert.notEqual(legacyMismatch.status, 0);
-  assert.match(legacyMismatch.stderr, /These fingerprints were made with another salt/);
+  const headerlessMismatch = check(`A ${term} is here.`);
+  assert.notEqual(headerlessMismatch.status, 0);
+  assert.match(headerlessMismatch.stderr, /These fingerprints were made with another salt/);
 }));
 
 test('guard salt comes from the committed config beside the fingerprint list', () => committedGuardProject(({ project, env, root, commit, check }) => {
   const salt = 'committed-example-salt';
   const hash = (value) => createHash('sha256').update(value).digest('hex');
   const term = 'quiet valley';
-  const config = join(project, '.ferme', 'agents.conf');
+  const config = join(project, '.cleared', 'agents.conf');
   writeFileSync(config, `[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
   writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: hash(salt).slice(0, 12), hashes: [hash(salt + term)] }));
   commit();
@@ -83,18 +83,23 @@ test('guard salt comes from the committed config beside the fingerprint list', (
   assert.match(direct.stdout, /quiet valley/);
 }));
 
-test('fingerprint lists without a committed salt refuse with the line to commit', () => committedGuardProject(({ project, commit, check }) => {
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = scripts/private-terms.json\nallowed = none\n');
+test('fingerprint lists without a committed salt refuse with the line to commit', () => committedGuardProject(({ project, env, root, commit, check }) => {
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nterms = scripts/private-terms.json\nallowed = none\n');
   writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: '123456789abc', hashes: [] }));
   commit();
   const result = check('A harmless sentence.');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /\[guard\] salt = <random value>/);
   assert.match(result.stderr, /commit/);
+  const input = join(root, 'scan.txt');
+  writeFileSync(input, 'A harmless sentence.');
+  const direct = spawnSync('node', [join(ORCH_HOME, 'lib', 'guard', 'private-terms.mjs'), 'scan', input], { env: { ...env, ORCH_GUARD_REF: 'HEAD' }, encoding: 'utf8' });
+  assert.notEqual(direct.status, 0);
+  assert.match(direct.stderr, /Missing committed \[guard\] salt/);
 }));
 
 test('installer asks for a committed salt and leaves the project untouched', () => committedGuardProject(({ project, env, root, commit }) => {
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = scripts/private-terms.json\nallowed = none\n');
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nterms = scripts/private-terms.json\nallowed = none\n');
   writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: '123456789abc', hashes: [] }));
   commit();
   const bin = join(root, 'bin');
@@ -107,90 +112,41 @@ test('installer asks for a committed salt and leaves the project untouched', () 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /\[guard\] salt = <random value>.*commit/);
   assert.equal(execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' }), before);
-  assert.ok(!existsSync(join(project, '.cleared')));
+  assert.ok(existsSync(join(project, '.cleared', 'agents.conf')));
 }));
 
-test('installer never enables Cleared when disabling a legacy unit fails', () => committedGuardProject(({ project, env, root, commit }) => {
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
+test('installer refuses an active Cleared wake before changing units or the project', () => committedGuardProject(({ project, env, root, commit }) => {
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
   commit();
   const bin = join(root, 'bin');
-  const units = join(root, '.config', 'systemd', 'user');
   mkdirSync(bin);
-  mkdirSync(units, { recursive: true });
-  writeFileSync(join(units, 'ferme-lead-model.service'), '[Service]\n');
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in *'disable ferme-lead-model.service'*) exit 1;; *'is-active --quiet ferme-wake.service'*) count=$(cat '${join(root, 'wake-active-count')}' 2>/dev/null || echo 0); echo $((count+1)) > '${join(root, 'wake-active-count')}'; [ "$count" -lt 2 ]; exit $?;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
-  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], {
-    env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
-  });
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in *'is-active --quiet cleared-wake.service'*) exit 0;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
+  const before = execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' });
+  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /could not (stop|disable).*ferme-|legacy.*unit/i);
-  assert.match(readFileSync(log, 'utf8'), /ferme-lead-model.service/);
+  assert.match(result.stderr, /Cleared wake.*active/i);
   assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
-  assert.ok(existsSync(join(units, 'ferme-lead-model.service')));
+  assert.equal(execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' }), before);
 }));
 
-test('installer waits for an active legacy wake to finish before stopping its service', () => committedGuardProject(({ project, env, root, commit }) => {
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
-  commit();
-  const bin = join(root, 'bin');
-  const units = join(root, '.config', 'systemd', 'user');
-  mkdirSync(bin);
-  mkdirSync(units, { recursive: true });
-  writeFileSync(join(units, 'ferme-wake.service'), '[Service]\n');
-  writeFileSync(join(units, 'ferme-wake.timer'), '[Timer]\n');
-  writeFileSync(join(units, 'ferme-lead-model.service'), '[Service]\n');
-  const log = join(root, 'systemctl.log');
-  const active = join(root, 'active-count');
-  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in
-  *'is-active --quiet ferme-wake.service'*) count=$(cat '${active}' 2>/dev/null || echo 0); echo $((count+1)) > '${active}'; [ "$count" -lt 2 ]; exit $?;;
-  *'disable ferme-lead-model.service'*) exit 1;;
-  *'is-active '*|*'is-enabled '*) exit 1;;
-esac
-exit 0
-`, { mode: 0o755 });
-  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], {
-    env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
-  });
-  assert.notEqual(result.status, 0);
-  const calls = readFileSync(log, 'utf8').split('\n');
-  assert.ok(calls.indexOf('--user stop ferme-wake.timer') < calls.indexOf('--user stop ferme-wake.service'));
-  assert.ok(calls.lastIndexOf('--user is-active --quiet ferme-wake.service') < calls.indexOf('--user stop ferme-wake.service'));
-  assert.ok(calls.filter((call) => call === '--user is-active --quiet ferme-wake.service').length >= 2);
-  assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
-}));
-
-test('installed legacy project advances without stale config, guard bypass, or overlapping services', () => committedGuardProject(({ project, env, root, git, commit, check }) => {
-  const config = join(project, '.ferme', 'agents.conf');
+test('committed Cleared settings advance without stale config or guard bypass', () => committedGuardProject(({ project, env, git, commit, check }) => {
+  const config = join(project, '.cleared', 'agents.conf');
   const salt = 'integration-salt';
   const term = 'private orchard';
   writeFileSync(config, '[owner]\nname = First Owner\n[guard]\nterms = none\nallowed = none\n');
   commit();
-  mkdirSync(join(project, '.cleared'));
-  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Owner\n');
-  const bin = join(root, 'bin');
-  const units = join(root, '.config', 'systemd', 'user');
-  mkdirSync(bin);
-  mkdirSync(units, { recursive: true });
-  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  const systemLog = join(root, 'systemctl.log');
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${systemLog}'\ncase "$*" in *'disable ferme-wake.service'*) exit 1;; *'is-active --quiet ferme-wake.service'*) count=$(cat '${join(root, 'wake-active-count')}' 2>/dev/null || echo 0); echo $((count+1)) > '${join(root, 'wake-active-count')}'; [ "$count" -lt 2 ]; exit $?;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
-  writeFileSync(join(units, 'ferme-wake.service'), '[Service]\n');
-  const installEnv = { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` };
-  const install = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: installEnv, encoding: 'utf8' });
-  assert.notEqual(install.status, 0);
-  assert.doesNotMatch(readFileSync(systemLog, 'utf8'), /enable --now cleared-/);
+  assert.equal(shell(env, 'owner_name').stdout.trim(), 'First Owner');
   writeFileSync(config, `[owner]\nname = Updated Owner\n[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
   writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: createHash('sha256').update(salt).digest('hex').slice(0, 12), hashes: [createHash('sha256').update(salt + term).digest('hex')] }));
-  git('add', '.ferme/agents.conf', 'scripts/private-terms.json');
-  git('commit', '-q', '-m', 'advance legacy project configuration');
+  git('add', '.cleared/agents.conf', 'scripts/private-terms.json');
+  git('commit', '-q', '-m', 'advance project configuration');
   assert.equal(shell(env, 'owner_name').stdout.trim(), 'Updated Owner');
   assert.equal(check('Public text.').status, 0);
   assert.notEqual(check(term).status, 0);
   writeFileSync(config, '[guard]\nsalt = local-wrong-salt\n');
-  assert.notEqual(check(term).status, 0, 'the committed salt remains authoritative');
+  assert.notEqual(check(term).status, 0);
 }));
 
 test('CI checks all test files on draft pull requests', () => {
@@ -200,7 +156,7 @@ test('CI checks all test files on draft pull requests', () => {
 });
 
 test('without fingerprint lists or salt the generic guard runs and records one event', () => committedGuardProject(({ project, root, commit, check }) => {
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Example Owner\n');
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Example Owner\n');
   commit();
   assert.equal(check('A harmless sentence.').status, 0);
   assert.equal(check('Another harmless sentence.').status, 0);
@@ -210,13 +166,13 @@ test('without fingerprint lists or salt the generic guard runs and records one e
 }));
 
 test('project token prefixes are guarded only when committed in project settings', () => committedGuardProject(({ project, git, commit, check }) => {
-  const config = join(project, '.ferme', 'agents.conf');
+  const config = join(project, '.cleared', 'agents.conf');
   const token = 'gs' + '_live_' + '123456789abc';
   writeFileSync(config, '[guard]\nterms = none\nallowed = none\n');
   commit();
   assert.equal(check(token).status, 0);
   writeFileSync(config, '[guard]\nterms = none\nallowed = none\ntoken_patterns = gs_live_\n');
-  git('add', '.ferme/agents.conf');
+  git('add', '.cleared/agents.conf');
   git('commit', '-q', '-m', 'configure project token prefix');
   const blocked = check(token);
   assert.notEqual(blocked.status, 0);
@@ -237,88 +193,67 @@ test('tracked tool files contain no original project identifiers', () => {
   }
 });
 
-test('a project with only legacy paths still resolves its settings and ledger', () => {
-  const root = mkdtempSync(join(tmpdir(), 'cleared-legacy-'));
-  try {
-    const project = join(root, 'sample-project');
-    const config = join(root, 'config');
-    const state = join(root, 'state');
-    mkdirSync(join(project, '.ferme', 'prompts'), { recursive: true });
-    mkdirSync(join(config, 'ferme'), { recursive: true });
-    mkdirSync(join(state, 'ferme', 'sample-project'), { recursive: true });
-    writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Example Owner\n');
-    execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
-    execFileSync('git', ['-C', project, 'add', '.ferme/agents.conf']);
-    execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'legacy config']);
-    execFileSync('git', ['-C', project, 'checkout', '-q', '-b', 'chore/cleared-config']);
-    writeFileSync(join(config, 'ferme', 'project'), `${project}\n`);
-    const env = { ...process.env, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state, HOME: root };
-    const result = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; printf "%s\\n%s\\n" "$ORCH_CONF" "$ORCH_STATE_DIR"; ledger init >/dev/null; ledger init >/dev/null', '_', ORCH_HOME], { env, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.stdout.trim().split('\n'), [join(project, '.ferme', 'agents.conf'), join(state, 'ferme', 'sample-project')]);
-    assert.ok(existsSync(join(state, 'ferme', 'sample-project', 'ledger.db')));
-    const db = new DatabaseSync(join(state, 'ferme', 'sample-project', 'ledger.db'), { readOnly: true });
-    assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'legacy_path_used'").get().n, 1);
-    db.close();
-    assert.ok(!existsSync(join(state, 'cleared', 'sample-project')));
-    const migrationEnv = { ...env, CLEARED_REPO: project };
-    const migration = (mode) => spawnSync(join(ORCH_HOME, 'migrate-from-ferme.sh'), [mode], { env: migrationEnv, encoding: 'utf8' });
-    assert.equal(migration('--dry-run').status, 0);
-    assert.ok(!existsSync(join(project, '.cleared')));
-    assert.equal(migration('--apply').status, 0);
-    assert.ok(existsSync(join(project, '.cleared', 'agents.conf')));
-    assert.ok(existsSync(join(project, '.ferme', 'agents.conf')));
-    assert.ok(existsSync(join(state, 'cleared', 'sample-project', 'ledger.db')));
-    assert.ok(existsSync(join(state, 'ferme', 'sample-project', 'ledger.db')));
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('new project settings take precedence over legacy settings', () => withProject(({ project, env }) => {
-  for (const name of ['.ferme', '.cleared']) mkdirSync(join(project, name));
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Old\n');
-  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = New\n');
+test('only Cleared settings and state paths are selected', () => withProject(({ root, project, env }) => {
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Cleared Owner\n');
   trackProjectConfig(project);
-  assert.equal(shell(env, 'printf "%s" "$ORCH_CONF"').stdout, join(project, '.cleared', 'agents.conf'));
+  assert.equal(shell(env, 'printf "%s\n%s\n" "$ORCH_CONF" "$ORCH_STATE_DIR"').stdout.trim(), `${join(project, '.cleared', 'agents.conf')}\n${join(root, 'state', 'cleared', 'project')}`);
   assert.equal(nodeValue(env, 'conf.confPath()').stdout.trim(), join(project, '.cleared', 'agents.conf'));
+  assert.equal(nodeValue(env, 'conf.stateDir()').stdout.trim(), join(root, 'state', 'cleared', 'project'));
 }));
 
-test('an untracked Cleared config cannot mask later committed legacy changes', () => committedGuardProject(({ project, env, root, git, commit }) => {
-  const legacy = join(project, '.ferme', 'agents.conf');
-  writeFileSync(legacy, '[owner]\nname = First Owner\n');
+test('an old project configuration is never selected', () => withProject(({ project, env }) => {
+  mkdirSync(join(project, '.ferme'));
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Obsolete Owner\n');
+  execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
+  execFileSync('git', ['-C', project, 'add', '.ferme/agents.conf']);
+  assert.equal(shell(env, 'owner_name').stdout.trim(), "l'utilisateur");
+  assert.equal(nodeValue(env, 'conf.loadConf().sections.owner?.name').stdout.trim(), 'undefined');
+}));
+
+test('an old state directory is never selected', () => withProject(({ root, env }) => {
+  mkdirSync(join(root, 'state', 'ferme', 'project'), { recursive: true });
+  assert.equal(shell(env, 'printf "%s" "$ORCH_STATE_DIR"').stdout, join(root, 'state', 'cleared', 'project'));
+  assert.equal(nodeValue(env, 'conf.stateDir()').stdout.trim(), join(root, 'state', 'cleared', 'project'));
+}));
+
+test('an old project prompt is never selected', () => withProject(({ project, env }) => {
+  mkdirSync(join(project, '.ferme', 'prompts'), { recursive: true });
+  writeFileSync(join(project, '.ferme', 'prompts', 'dev.md'), 'obsolete prompt');
+  assert.equal(shell(env, 'prompt_file dev').stdout.trim(), join(ORCH_HOME, 'prompts', 'dev.md'));
+}));
+
+test('the migration script is absent', () => {
+  assert.ok(!existsSync(join(ORCH_HOME, 'migrate-from-ferme.sh')));
+});
+
+test('a committed old guard configuration is never trusted', () => committedGuardProject(({ project, git, check }) => {
+  mkdirSync(join(project, '.ferme'));
+  writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nsalt = obsolete\nterms = scripts/private-terms.json\n');
+  writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: createHash('sha256').update('obsolete').digest('hex').slice(0, 12), hashes: [] }));
+  git('add', '.'); git('commit', '-q', '-m', 'old configuration');
+  assert.equal(check('Public text.').status, 0);
+}));
+
+test('a headerless fingerprint list is refused even with a configured salt', () => committedGuardProject(({ project, commit, check }) => {
+  const salt = 'new-project-salt';
+  writeFileSync(join(project, '.cleared', 'agents.conf'), `[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
+  writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify([createHash('sha256').update(salt + 'private meadow').digest('hex')]));
   commit();
+  const result = check('private meadow');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /These fingerprints were made with another salt/);
+}));
+
+test('an untracked Cleared config is ignored and reported', () => withProject(({ project, root, env }) => {
   mkdirSync(join(project, '.cleared'));
-  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Local Copy\n');
-  const wake = () => shell(env, 'ledger init >/dev/null; owner_name');
-  assert.equal(wake().stdout.trim(), 'First Owner');
-  writeFileSync(legacy, '[owner]\nname = Updated Owner\n');
-  git('add', '.ferme/agents.conf');
-  git('commit', '-q', '-m', 'update legacy configuration');
-  assert.equal(wake().stdout.trim(), 'Updated Owner');
-  const nodePath = nodeValue(env, 'conf.confPath()');
-  assert.equal(nodePath.stdout.trim(), legacy);
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Owner\n');
+  execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
+  const wake = shell(env, 'ledger init >/dev/null; owner_name');
+  assert.equal(wake.stdout.trim(), "l'utilisateur");
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
   assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n, 1);
   db.close();
-}));
-
-test('migration prepares a project config for a PR without activating its untracked copy', () => committedGuardProject(({ project, env, git, commit }) => {
-  writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Legacy Owner\n');
-  commit();
-  git('checkout', '-q', '-b', 'chore/cleared-config');
-  const migration = spawnSync(join(ORCH_HOME, 'migrate-from-ferme.sh'), ['--apply'], { env, encoding: 'utf8' });
-  assert.equal(migration.status, 0, migration.stderr);
-  assert.ok(existsSync(join(project, '.cleared', 'agents.conf')));
-  assert.equal(shell(env, 'owner_name').stdout.trim(), 'Legacy Owner');
-  assert.match(migration.stdout, /pull request/i);
-  git('add', '.cleared/agents.conf');
-  assert.equal(nodeValue(env, 'conf.confPath()').stdout.trim(), join(project, '.cleared', 'agents.conf'));
-}));
-
-test('new state takes precedence when both state directories exist', () => withProject(({ root, env }) => {
-  mkdirSync(join(root, 'state', 'ferme', 'project'), { recursive: true });
-  mkdirSync(join(root, 'state', 'cleared', 'project'), { recursive: true });
-  assert.equal(shell(env, 'printf "%s" "$ORCH_STATE_DIR"').stdout, join(root, 'state', 'cleared', 'project'));
-  assert.equal(nodeValue(env, 'conf.stateDir()').stdout.trim(), join(root, 'state', 'cleared', 'project'));
 }));
 
 test('CLEARED_REPO takes precedence over the older environment variable', () => withProject(({ project, env }) => {
@@ -349,7 +284,7 @@ test('owner name defaults to the user', () => withProject(({ env }) => {
 }));
 
 test('duplicate project keys keep the first value and warn once in the ledger', () => committedGuardProject(({ project, root, env, commit }) => {
-  const config = join(project, '.ferme', 'agents.conf');
+  const config = join(project, '.cleared', 'agents.conf');
   writeFileSync(config, '[owner]\nname = First Owner\nname = Second Owner\n');
   commit();
   assert.equal(loadConf(config).sections.owner.name, 'First Owner');
@@ -372,12 +307,6 @@ test('new prompt overrides the tool prompt', () => withProject(({ project, env }
   mkdirSync(join(project, '.cleared', 'prompts'), { recursive: true });
   writeFileSync(join(project, '.cleared', 'prompts', 'dev.md'), 'new prompt');
   assert.equal(shell(env, 'prompt_text "$(prompt_file dev)"').stdout, 'new prompt');
-}));
-
-test('legacy prompt remains available when no new prompt exists', () => withProject(({ project, env }) => {
-  mkdirSync(join(project, '.ferme', 'prompts'), { recursive: true });
-  writeFileSync(join(project, '.ferme', 'prompts', 'dev.md'), 'legacy prompt');
-  assert.equal(shell(env, 'prompt_text "$(prompt_file dev)"').stdout, 'legacy prompt');
 }));
 
 test('a complete project configuration retains exactly its settings', () => withProject(({ project }) => {
