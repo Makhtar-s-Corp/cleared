@@ -647,6 +647,12 @@ one_lane() {
     return 0
   fi
   if [ "$(jq 'map(select(. == "FAILURE" or . == "TIMED_OUT")) | length' <<<"$checks")" != 0 ]; then
+    # Started again by rule a moment ago (below): the forge may still show
+    # the red of the attempt before for a while. Nothing is read of it for
+    # five minutes: opening the lane on it would undo the second attempt.
+    if did "$record" "rerun:$head" && [ $(( $(date +%s) - $(date -d "$(jq -r --arg key "rerun:$head" '.done[$key] // empty' "$record")" +%s 2> /dev/null || echo 0) )) -lt 300 ]; then
+      return 0
+    fi
     # What they said: the log of the run that failed on this very version
     # (a branch has runs that were skipped, or of an older version). From
     # where the test runner lists its failures when it does; else what came
@@ -670,7 +676,11 @@ one_lane() {
     # again.
     rerun=$(conf_get lanes rerun_steps)
     if [ -n "$run" ] && [ -n "$rerun" ] && ! did "$record" "rerun:$head"; then
-      broken=$(cd "$ORCH_REPO" && gh run view "$run" --json jobs 2> /dev/null | jq -r '[.jobs[]? | select(.conclusion == "failure" or .conclusion == "timed_out") | .steps[]? | select(.conclusion == "failure" or .conclusion == "timed_out") | .name] | unique | .[]' 2> /dev/null) || broken=
+      # (A job that failed with no step that says why, a runner lost or a
+      # job cut short, is not known to be one of those: nothing is started
+      # again on a guess.)
+      (cd "$ORCH_REPO" && gh run view "$run" --json jobs 2> /dev/null) > "$work/jobs.json" || : > "$work/jobs.json"
+      broken=$(jq -r 'def red: .conclusion == "failure" or .conclusion == "timed_out"; [.jobs[]? | select(red)] | if any(.[]; [.steps[]? | select(red)] | length == 0) then empty else [.[] | .steps[]? | select(red) | .name] | unique | .[] end' "$work/jobs.json" 2> /dev/null) || broken=
       if [ -n "$broken" ] && ! grep -vxF -f <(tr ',' '\n' <<<"$rerun" | sed 's/^ *//; s/ *$//' | grep .) <<<"$broken" | grep -q .; then
         free_for_a_run || return 0
         : > "$work/readied"

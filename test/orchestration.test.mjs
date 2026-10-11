@@ -5132,7 +5132,11 @@ test('a check the runner broke is started again once by rule, with no session of
   assert.doesNotMatch(first.stdout, /opened again/);
   assert.deepEqual(again(), ['77 --failed']);
   assert.equal(record('X-5').runs.length, 1);
-  // Red again at the same version: not a second time, the lane reads it.
+  // The forge still shows the red of the first attempt for a while: nothing is read of it, the lane is not opened on it.
+  assert.equal(flow().stdout.trim(), '');
+  assert.equal(record('X-5').runs.length, 1);
+  // Red again at the same version once that while has passed: not a second time, the lane reads it.
+  { const aged = record('X-5'); for (const key of Object.keys(aged.done)) if (key.startsWith('rerun:')) aged.done[key] = new Date(Date.now() - 6 * 60e3).toISOString(); writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(aged)); }
   assert.match(flow().stdout, /X-5: opened again \(checks:/);
   assert.deepEqual(again(), ['77 --failed']);
   const fixed = session('X-5', { commit: 'fix: something else' });
@@ -5142,13 +5146,38 @@ test('a check the runner broke is started again once by rule, with no session of
   pull({ headRefOid: fixed.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
   assert.match(flow().stdout, /X-5: opened again \(checks:/);
   assert.deepEqual(again(), ['77 --failed']);
-  // No step named: never, as before.
-  const last = session('X-5', { commit: 'fix: a third thing' });
-  writeFileSync(confPath, conf);
-  jobs('Run npm ci');
-  pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  // A job that failed with no step that says why (a runner lost) is not known to be the runner's install: nothing is started again.
+  const third = session('X-5', { commit: 'fix: a third thing' });
+  writeFileSync(join(box.home, 'run-jobs.json'), JSON.stringify({ jobs: [{ name: 'verify (2/2)', conclusion: 'failure', steps: [{ name: 'Run npm ci', conclusion: 'failure' }] }, { name: 'verify (1/2)', conclusion: 'failure', steps: [{ name: 'Unit tests', conclusion: 'cancelled' }] }] }));
+  pull({ headRefOid: third.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
   assert.match(flow().stdout, /X-5: opened again \(checks:/);
   assert.deepEqual(again(), ['77 --failed']);
+});
+
+test('a check the runner broke that the forge refuses to start again is read by the lane at once, and with no step named nothing is ever started again', () => {
+  const { flow, todo, by, record, session, pull, box } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  const conf = readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30');
+  writeFileSync(confPath, conf);
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const done = session('X-5');
+  writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
+  writeFileSync(join(box.home, 'run-jobs.json'), JSON.stringify({ jobs: [{ name: 'verify', conclusion: 'failure', steps: [{ name: 'Run npm ci', conclusion: 'failure' }] }] }));
+  writeFileSync(join(box.home, 'run-log.txt'), 'verify\tUNKNOWN STEP\t2026-01-02T10:00:00.0000000Z npm error ETXTBSY\n');
+  pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  // No step named: never, as before.
+  assert.match(flow().stdout, /X-5: opened again \(checks:/);
+  assert.throws(() => readFileSync(join(box.home, 'run-rerun')));
+  const next = session('X-5', { commit: 'fix: something' });
+  // A step named, and the forge refuses: said, and the lane is opened in the same pass.
+  writeFileSync(confPath, conf.replace('[lanes]\n', '[lanes]\nrerun_steps = Run npm ci\n'));
+  pull({ headRefOid: next.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  const refused = flow({ FAKE_GH_RERUN_DOWN: '1' });
+  assert.match(refused.stdout, /X-5: #41 is red at [0-9a-f]{8} on a step of the runner, and its checks could not be started again: read by the lane/);
+  assert.match(refused.stdout, /X-5: opened again \(checks:/);
+  assert.equal(record('X-5').runs.length, 3);
 });
 
 test('a lane is not opened again for ever for one reason: three times in a day for the checks, a reviewer or a session that stops, then it is said; a word of the user is never a loop', () => {
