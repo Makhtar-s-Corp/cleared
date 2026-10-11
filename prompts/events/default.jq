@@ -1,1 +1,1 @@
-def event_default: "- PR #\(.pr) (\(.title), branche \(.branch)) — \(.kind | sub("pr_"; ""))";
+def event_default: "- PR #\(.pr) (\(.title), branch \(.branch)) — \(.kind | sub("pr_"; ""))";

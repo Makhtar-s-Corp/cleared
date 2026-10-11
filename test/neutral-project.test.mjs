@@ -346,7 +346,9 @@ test('project owner name overrides the example', () => withProject(({ project, e
 test('new prompt overrides the tool prompt', () => withProject(({ project, env }) => {
   mkdirSync(join(project, '.cleared', 'prompts'), { recursive: true });
   writeFileSync(join(project, '.cleared', 'prompts', 'dev.md'), 'new prompt');
-  assert.equal(shell(env, 'prompt_text "$(prompt_file dev)"').stdout, 'new prompt');
+  const prompt = shell(env, 'prompt_text "$(prompt_file dev)"').stdout;
+  assert.match(prompt, /^Write to the user in en\./);
+  assert.ok(prompt.endsWith('new prompt'));
 }));
 
 test('a complete project configuration retains exactly its settings', () => withProject(({ project }) => {

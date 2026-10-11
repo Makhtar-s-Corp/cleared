@@ -171,7 +171,7 @@ fi
 
 # 4b. A ticket he gave to two teams: one result goes live, the one he named.
 # Whatever the kind of change (one that needs no agreement is still one of
-# two), his line « Équipe 1 » or « Équipe 2 », written after the request
+# two), the user's line “Team 1” or “Team 2” (or its French equivalent), written after the request
 # when there was one, says which: no line, the line of the other team, or
 # lines that name both, and this pull request is not put live.
 loser=
@@ -198,8 +198,8 @@ if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
   since=$(jq -r '.at // ""' "$asked" 2> /dev/null) || since=
   [ -n "$since" ] || since=$(jq -r '.opened_at // ""' "$(lane_record "$ticket.2")" 2> /dev/null) || since=
   chosen=$(jq -r --arg team "$team_line" --arg since "$since" --rawfile ids "$work/choice-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not) and .createdAt > $since)] | map(.body | [scan("(?im)" + $team)] | map(.[0])) | add // [] | unique | join(" ")' "$work/choice.json")
-  [ -n "$chosen" ] || no "$ticket was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 » of his on the ticket, written after the request"
-  [[ "$chosen" =~ ^[12]$ ]] || no "$ticket was given to two teams and the user named both since the request (« Équipe 1 » and « Équipe 2 »): which one goes live is not known. Ask him"
+  [ -n "$chosen" ] || no "$ticket was given to two teams and the user has not said which one goes live: a Team 1 or Team 2 line on the ticket, written after the request"
+  [[ "$chosen" =~ ^[12]$ ]] || no "$ticket was given to two teams and the user named both since the request (Team 1 and Team 2): which one goes live is not known. Ask them"
   [ "$chosen" = "$mine" ] || no "the user chose the team $chosen (#$(jq -r --arg team "$chosen" '.[$team]' <<<"$teams")): #$pr, of the team $mine, is not put live"
   loser=$(jq -r --arg team "$mine" 'to_entries[] | select(.key != $team) | .value' <<<"$teams" | sed -n '1p')
   other_lane=$ticket

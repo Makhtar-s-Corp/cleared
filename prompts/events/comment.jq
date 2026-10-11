@@ -1,1 +1,1 @@
-def event_comment: "- \(.ticket) (\(.title)) — commentaire de \($user), \(.at) : « \(.text) »";
+def event_comment: "- \(.ticket) (\(.title)) — comment by \($user), \(.at): “\(.text)”";

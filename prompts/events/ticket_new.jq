@@ -1,1 +1,1 @@
-def event_ticket_new: "- \(.ticket) (\(.title)) — nouveau ticket, \(.at), projet \(.project // "aucun") : « \(.text) »";
+def event_ticket_new: "- \(.ticket) (\(.title)) — new ticket, \(.at), project \(.project // "none"): “\(.text)”";

@@ -1,1 +1,1 @@
-def event_lane_report: "- Lane \(.lane) (branche \(.branch)) — son dernier message, \(.at) : « \(.text) »";
+def event_lane_report: "- Team \(.lane) (branch \(.branch)) — its latest message, \(.at): “\(.text)”";

@@ -305,14 +305,14 @@ flush_outbox() {
   count=$(ls -1 "$sending" | grep -c .)
   grouped=$(mktemp)
   {
-    printf '**%s comptes rendus groupés** (pas plus de quelques commentaires par heure : ceux-ci attendaient)\n' "$count"
+    user_message grouped_reports "count=$count"
     for file in "$sending"/*.md; do
       printf '\n### %s\n\n' "$(basename "$file" | sed 's/--.*//')"
       cat "$file"
     done
   } > "$grouped"
   code=0
-  "$ORCH_HOME/linear.sh" comment "$(conf_get lead report_on)" "$grouped" "dispatcher, comptes rendus groupés" > /dev/null || code=$?
+  "$ORCH_HOME/linear.sh" comment "$(conf_get lead report_on)" "$grouped" "$(user_message grouped_sender)" > /dev/null || code=$?
   rm -f "$grouped"
   # Not sent: back where they were, for the next wake.
   [ "$code" = 0 ] || mv "$sending"/*.md "$box"/
@@ -550,7 +550,7 @@ guard_list() {
   value=$(conf_get_from guard "$4" "$3" 2> /dev/null || true)
   case "$(tr '[:upper:]' '[:lower:]' <<<"$value")" in
     "")
-      echo "$(basename "$0"): not sent, the project names no list $6 ([guard] $4): write the path of the file, or « none »" >&2
+      echo "$(basename "$0"): not sent, the project names no list $6 ([guard] $4): write the file path or 'none'" >&2
       return 1
       ;;
     none) echo '{"disabled":true,"hashes":[]}' > "$1/$5" ;;
@@ -653,7 +653,7 @@ lane_deps() {
   mkdir -p "$(dirname "$exclude")"
   grep -qxF '/node_modules' "$exclude" 2> /dev/null || echo '/node_modules' >> "$exclude"
   if ! git -C "$worktree" show "$base:package.json" | cmp -s - "$worktree/package.json" || ! git -C "$worktree" show "$base:package-lock.json" | cmp -s - "$worktree/package-lock.json"; then
-    deps_note="Les dépendances installées sont celles de la branche principale : ton \`package.json\` ou ton \`package-lock.json\` en diffère. Ce que tu y ajoutes n'est pas installé ici (rien n'est installé à partir de ce qu'une équipe écrit) : dis-le dans ton compte rendu, les vérifications automatiques de ta PR l'installeront."
+    deps_note=$(node "$ORCH_HOME/lib/i18n.mjs" en dependency_note)
   fi
 }
 
@@ -677,9 +677,9 @@ only_base_merges() {
 }
 
 # owner_name: how the agents name the user in what they write (the first
-# line of their comments, what the lead is told): [linear] owner_name, his
-# first name for instance. The tool carries no name of its own: with no
-# setting he is « l'utilisateur ». owner_name_first is the same at the
+# line of their comments, what the lead is told): [owner] name, for instance.
+# The tool carries no name of its own: with no setting, it uses "the user".
+# owner_name_first is the same at the
 # start of a sentence.
 owner_name() {
   local name unnamed="l'utilisateur"
@@ -734,16 +734,15 @@ counted_lanes() {
 }
 
 # The line by which the user says what a ticket may cost, as he writes it:
-# « Plafond 80 », « Plafond : 80 $ », « plafond: 80,5 », alone on its line
-# (the spaces a French keyboard puts before « : » and « $ » included).
-# A line that goes on is a sentence, and sets nothing (« plafond 80 % de
-# l'abonnement », « plafond 3 niveaux de prix »). cap_line is the pattern,
+# "Cap 80" or its French equivalent, alone on its line
+# (including the spaces a French keyboard puts before ':' and '$').
+# A line that continues as a sentence sets nothing. cap_line is the pattern,
 # given to jq as $cap; cap_only is the jq test of a comment that says
 # nothing else: it sets the cap, and is no word for the lane.
 cap_line='^[ \t\x{00A0}\x{202F}]*(?:plafond|cap)[ \t\x{00A0}\x{202F}]*:?[ \t\x{00A0}\x{202F}]*([0-9]+(?:[.,][0-9]+)?)[ \t\x{00A0}\x{202F}]*(?:\$|€|usd|dollars?)?[ \t\x{00A0}\x{202F}]*[.!]?[ \t\x{00A0}\x{202F}]*\r?$'
 # Two more lines of his are read by the dispatcher the same way, alone on
-# their line: « Équipes : les deux » (or « Deux équipes ») gives the ticket
-# to two teams that work each on its own, and « Équipe 1 » or « Équipe 2 »
+# their line: “Teams: both” (or its French equivalent) gives the ticket
+# to two teams that work each on its own, and “Team 1” or “Team 2”
 # says which of the two results goes live. teams_line and team_line are
 # their patterns. cap_only is the jq test of a comment that says nothing but
 # such lines: it is read by the dispatcher, and is no word for a lane.

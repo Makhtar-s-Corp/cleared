@@ -110,7 +110,7 @@ case "${1:-}" in
       def file: (. // "") | if startswith($here) then .[($here | length):] else . end;
       fromjson? | select(.type == "assistant" and (.parent_tool_use_id // null) == null) | .message.content[]?
       | if .type == "text" then .text
-        elif .type == "thinking" then ((.thinking // "") | short | select(. != "") | "  (réflexion) " + .)
+        elif .type == "thinking" then ((.thinking // "") | short | select(. != "") | "  (thinking) " + .)
         elif .type == "tool_use" then
           (.input // {}) as $in
           | (if ($in.description // "") != "" then ($in.description | short)
@@ -172,7 +172,7 @@ case "${1:-}" in
     # run again as a session that stopped short.
     if [ -n "$result" ] && [ "$(jq -r '.subtype // ""' <<<"$result")" = error_max_budget_usd ]; then
       code=5
-      echo "La session a été arrêtée : le plafond de coût de son ticket est atteint. Ce qu'elle avait enregistré est gardé." > "$body"
+      echo "The session stopped: its ticket cost cap was reached. Its committed work remains." > "$body"
     fi
     contract_report claude "$code" "$body"
     exit "$code"
