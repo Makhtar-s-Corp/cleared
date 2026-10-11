@@ -52,7 +52,7 @@ for pr in "${pulls[@]}"; do
   head=$(jq -r '.headRefOid' <<<"$pull")
   [[ "$head" =~ ^[0-9a-f]{40}$ ]] || die "the version of #$pr could not be read"
   shown=$(jq -c --argjson pr "$pr" --arg head "$head" '. + [{pr: $pr, head: $head}]' <<<"$shown")
-  versions="${versions:+$versions, }PR $pr à ${head:0:8}"
+  versions="${versions:+$versions, }$(user_message approval_pr_version "pr=$pr" "head=${head:0:8}")"
   asked_pulls="${asked_pulls:+$asked_pulls }$pr:$head"
 done
 # A ticket he gave to two teams is asked for once, with both results: a
@@ -70,7 +70,7 @@ if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
     || die "$ticket was given to two teams, and one of them has no pull request yet: he is asked once, with both results. Wait for it (the rules say when both are ready), or close its lane to ask for the other alone"
   [ "$(jq -c --argjson shown "$shown" '[.[]] - ($shown | map(.pr)) | length' <<<"$teams")" = 0 ] \
     || die "$ticket was given to two teams (#$(jq -r '."1"' <<<"$teams") and #$(jq -r '."2"' <<<"$teams")): he is asked once, with both results side by side (--pr $(jq -r '."1"' <<<"$teams") --pr $(jq -r '."2"' <<<"$teams")). To ask for one alone, the lane of the other must be closed first"
-  choice=$(printf 'Deux équipes ont travaillé ce ticket, chacune de son côté : équipe 1, PR %s ; équipe 2, PR %s. Pour choisir, écris sur le ticket une ligne « Équipe 1 » ou « Équipe 2 », puis glisse la carte dans « %s » : seule celle que tu choisis part en ligne, l'"'"'autre est fermée.' "$(jq -r '."1"' <<<"$teams")" "$(jq -r '."2"' <<<"$teams")" "$(conf_get linear go_state)")
+  choice=$(user_message team_choice "first=$(jq -r '."1"' <<<"$teams")" "second=$(jq -r '."2"' <<<"$teams")" "go_state=$(conf_get linear go_state)")
 else
   teams='{}'
 fi
@@ -116,7 +116,9 @@ if [ "$written" != "$request" ]; then
     [ -z "$was" ] || [ "$was" = "${one#*:}" ] || earlier="${earlier:+$earlier, }${was:0:8}"
   done
   [ -z "$choice" ] || printf '\n\n%s\n' "$choice" >> "$text"
-  printf '\n\n(Version montrée : %s%s.)\n' "$versions" "${earlier:+ ; la demande précédente portait sur $earlier}" >> "$text"
+  previous=
+  [ -z "$earlier" ] || previous=" ; $(user_message approval_previous_version "heads=$earlier")"
+  printf '\n\n%s\n' "$(user_message approval_version "versions=$versions" "previous=$previous")" >> "$text"
   "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
   note true || die "the request is written on $ticket, but that could not be noted: the card is not moved and what he was shown is not kept. Asked again, it will be written to him a second time: repair $ORCH_STATE_DIR/validations first"
 fi

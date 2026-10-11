@@ -91,7 +91,7 @@ cost_left() {
   "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/cap-comments.json" 2> /dev/null || return 1
   jq -e 'type == "array"' "$work/cap-comments.json" > /dev/null 2>&1 || return 1
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/cap-agents.txt" || true
-  own=$(jq -r --arg cap "$cap_line" --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)" + $cap)] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
+  own=$(jq -r --arg cap "$cap_line" --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)" + $cap)] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
   [ -z "$own" ] || cost_cap=$own
   [[ "$cost_cap" =~ ^[0-9]+([.][0-9]+)?$ ]] || { cost_cap=; return 0; }
   rate=$(conf_get currency usd_eur)
@@ -299,7 +299,7 @@ base_leftovers() {
 # comments only, like his cap.
 wants_two_teams() {
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/teams-agents.txt" || true
-  jq -e --arg teams "$teams_line" --rawfile ids "$work/teams-agents.txt" '($ids | split("\n")) as $agents | any(.[]; .byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and any(.body | split("\n")[]; test("(?i)" + $teams)))' "$1" > /dev/null 2>&1
+  jq -e --arg teams "$teams_line" --rawfile ids "$work/teams-agents.txt" '($ids | split("\n")) as $agents | any(.[]; .byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not) and any(.body | split("\n")[]; test("(?i)" + $teams)))' "$1" > /dev/null 2>&1
 }
 
 # second_team <record of the first team> <ticket> <role>: opens the second
@@ -485,7 +485,7 @@ one_lane() {
   if ! did "$record" "asked:$last"; then
     report="$ORCH_STATE_DIR/reports/$last-$role-a1.md"
     for candidate in "$ORCH_STATE_DIR/reports/$last-$role"-a*.md; do [ ! -f "$candidate" ] || report=$candidate; done
-    asked=$(sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions pour/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions pour[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question)\b' | sed '/^## /d' | head -n 20 || true)
+    asked=$(sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions (pour|for)/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions (pour|for)[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question|none|nothing|no questions?)\b' | sed '/^## /d' | head -n 20 || true)
     if [ -n "$asked" ]; then
       say "$ticket: its session ends on a question for the user"
       [ -n "$dry" ] || ledger event --kind lane_asks --ticket "$ticket" --detail "$(printf '%s' "$asked" | cut -c1-1500)"
@@ -510,7 +510,7 @@ one_lane() {
   echo '[]' > "$work/told.json"
   if "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/comments.json" 2> /dev/null; then
     cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-    jq -c --arg cap "$cap_line" --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
+    jq -c --arg cap "$cap_line" --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
     [ "$(jq length "$work/his.json")" = 0 ] || ! did "$record" "said:$(jq -r '.[-1].id' "$work/his.json")" || echo '[]' > "$work/his.json"
     # He gave the ticket to two teams (when it opened, with no place for the
     # second, or since): the second opens beside this one, as long as he
@@ -731,7 +731,7 @@ one_lane() {
   if [ "$verdict" = corrections ]; then
     {
       echo "Un relecteur (un autre modèle que toi) a lu la version ${head:0:8} de ta branche et demande des corrections. Ce qu'il a écrit :"
-      sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
+      sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
     } > "$work/why.md"
     again "$record" "$ticket" "$role" "verdict:$reviewed_by" "$work/why.md"
     return 0

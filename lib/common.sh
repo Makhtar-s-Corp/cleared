@@ -52,13 +52,20 @@ prompt_file() { prompt_asset "$1.md"; }
 # Written as it is, whatever characters the path holds (a quoted replacement
 # is taken literally).
 prompt_text() {
-  local text verdict
+  local text language verdict
   [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
   text=$(cat "$1"; printf x)
   text=${text%x}
   if [[ "$text" == *'@REVIEW_VERDICT@'* ]]; then
     verdict=$(conf_get merge verdict) || return 1
     text=${text//@REVIEW_VERDICT@/$verdict}
+  fi
+  language=$(conf_get owner language)
+  language=${language:-en}
+  if [[ "$text" == *'{owner_language}'* ]]; then
+    text=${text//\{owner_language\}/$language}
+  else
+    text="Write to the user in $language. Work and communicate with other agents in English."$'\n\n'"$text"
   fi
   printf '%s' "${text//\{orch\}/"$ORCH_HOME"}"
 }
@@ -121,6 +128,13 @@ conf_get() {
     [ "$code" = 0 ] || value=
   fi
   printf '%s\n' "$value"
+}
+
+user_message() {
+  local language
+  language=$(conf_get owner language)
+  node "$ORCH_HOME/lib/i18n.mjs" "${language:-en}" "$@"
+  printf '\n'
 }
 
 # shown_left <record of a request>: of the pull requests the user was shown
@@ -726,7 +740,7 @@ counted_lanes() {
 # l'abonnement », « plafond 3 niveaux de prix »). cap_line is the pattern,
 # given to jq as $cap; cap_only is the jq test of a comment that says
 # nothing else: it sets the cap, and is no word for the lane.
-cap_line='^[ \t\x{00A0}\x{202F}]*plafond[ \t\x{00A0}\x{202F}]*:?[ \t\x{00A0}\x{202F}]*([0-9]+(?:[.,][0-9]+)?)[ \t\x{00A0}\x{202F}]*(?:\$|€|usd|dollars?)?[ \t\x{00A0}\x{202F}]*[.!]?[ \t\x{00A0}\x{202F}]*\r?$'
+cap_line='^[ \t\x{00A0}\x{202F}]*(?:plafond|cap)[ \t\x{00A0}\x{202F}]*:?[ \t\x{00A0}\x{202F}]*([0-9]+(?:[.,][0-9]+)?)[ \t\x{00A0}\x{202F}]*(?:\$|€|usd|dollars?)?[ \t\x{00A0}\x{202F}]*[.!]?[ \t\x{00A0}\x{202F}]*\r?$'
 # Two more lines of his are read by the dispatcher the same way, alone on
 # their line: « Équipes : les deux » (or « Deux équipes ») gives the ticket
 # to two teams that work each on its own, and « Équipe 1 » or « Équipe 2 »
@@ -734,8 +748,8 @@ cap_line='^[ \t\x{00A0}\x{202F}]*plafond[ \t\x{00A0}\x{202F}]*:?[ \t\x{00A0}\x{2
 # their patterns. cap_only is the jq test of a comment that says nothing but
 # such lines: it is read by the dispatcher, and is no word for a lane.
 blank='[ \t\x{00A0}\x{202F}]*'
-teams_line="^$blank(?:[éÉeE]quipes?$blank:?$blank(?:les$blank)?deux|deux$blank[éÉeE]quipes)$blank[.!]?$blank\\r?\$"
-team_line="^$blank[éÉeE]quipe$blank:?$blank([12])$blank[.!]?$blank\\r?\$"
+teams_line="^$blank(?:[éÉeE]quipes?$blank:?$blank(?:les$blank)?deux|deux$blank[éÉeE]quipes|teams?$blank:?$blank(?:both|two)|(?:both|two)$blank teams?)$blank[.!]?$blank\\r?\$"
+team_line="^$blank(?:[éÉeE]quipe|team)$blank:?$blank([12])$blank[.!]?$blank\\r?\$"
 cap_only='(.body | [split("\n")[] | select(test("^\\s*$") | not)] | (length > 0 and all(.[]; test("(?i)" + $cap) or test("(?i)'"${teams_line//\\/\\\\}"'") or test("(?i)'"${team_line//\\/\\\\}"'"))))'
 
 # takes_a_place <role>: whether a lane of that role holds one of them, by the

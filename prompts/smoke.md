@@ -1,8 +1,7 @@
-Ceci est un essai à blanc du dispatcher, pas une demande de travail.
+This is a dry run of Cleared, not a work request.
 
-Ne modifie aucun fichier, ne lance aucune commande, ne crée aucun commit.
-Réponds seulement par un compte rendu de trois lignes :
+Do not edit files, run commands, or create a commit. Work and internal agent communication are in English. Write to the user in {owner_language}. Reply with exactly three report lines:
 
-Fait : une phrase qui dit que la lane a démarré et dans quel dossier tu te trouves.
-Reste à faire : rien, c'est un essai.
-Questions pour l'utilisateur : aucune.
+Done: one sentence saying the team started and naming its directory.
+Remaining work: none; this was a dry run.
+Questions for the user: none.

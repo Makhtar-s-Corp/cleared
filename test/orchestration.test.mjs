@@ -2741,6 +2741,7 @@ test('what a lane may be told: an order to merge or to force is refused in its u
     'La CI est verte et tu peux fusionner.', 'FUSIONNEZ.',
     // A negation far before the word does not bear on it.
     'Comme tu n’as plus rien à faire fusionne la PR.',
+    'Merge #259 now.', 'You can merge the pull request.', 'Force push this branch.', 'Do not hesitate to merge.',
   ]) assert.ok(refusedOrder(order), order);
   for (const said of [
     'Ne fusionne pas avant l’accord de the user.', 'Tu ne dois ni fusionner ni forcer.', 'Ne jamais fusionner sans son accord écrit.', 'Pas de merge de ton côté.',
@@ -2748,6 +2749,7 @@ test('what a lane may be told: an order to merge or to force is refused in its u
     'Je fusionnerai #259 quand elle sera verte ; réintègre main.', 'Je la fusionne à un moment sans test d’écran.', 'Le script fusionnera quand tout sera vert.',
     '#266 est fusionnée, réintègre main.', 'Une fois #259 fusionnée, c’est ton tour.', 'Après la fusion de #266, réintègre main.',
     'Réintègre main et pousse une seule fois.', 'Le conflit émerge dans server/core.mjs.',
+    'Do not merge before approval.', 'Never force push.', 'I will merge after the checks pass.', '#266 was merged already.',
   ]) assert.equal(refusedOrder(said), null, said);
 });
 
@@ -4919,7 +4921,7 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   assert.notEqual(silent.status, 0);
   assert.match(silent.stderr, /X-5 was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 »/);
   // His line, written after the request, names the second team: the first is refused, the second goes live, and the first is closed.
-  comments(asked, { id: 'c2', createdAt: '2099-01-01T10:00:00Z', body: 'Équipe 2', byOwner: true });
+  comments(asked, { id: 'c2', createdAt: '2099-01-01T10:00:00Z', body: 'Team 2', byOwner: true });
   const refused = live(41);
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /the user chose the team 2 \(#42\): #41, of the team 1, is not put live/);
@@ -5035,7 +5037,7 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
 });
 
 test('a ticket given to two teams with no place for the second, or no second harness, is not stuck: the second waits for a place, and one team works when there is no other harness, said once', () => {
-  const asked = JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Deux équipes.', byOwner: true }]);
+  const asked = JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Teams: both.', byOwner: true }]);
   // No other harness is named for the role: one team, and the lead is told once.
   {
     const { flow, todo, by, record, session, stuck, box } = flowBox();
@@ -5419,13 +5421,13 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   const comments = (list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
   const c9 = { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true };
   const c10 = { id: 'c10', createdAt: '2099-01-01T11:00:00Z', body: 'plafond 80 % de mon abonnement, on est bien d’accord', byOwner: true };
-  const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Plafond 4', byOwner: true };
+  const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Cap 4', byOwner: true };
   comments([c11, c9]);
   const lifted = flow();
   assert.match(lifted.stdout, /X-5: opened again \(budget:/);
   assert.doesNotMatch(lifted.stdout, /said:c11/);
   assert.equal(told().length, 2, 'a cap he lifted is not told as reached');
-  assert.doesNotMatch(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'comments.md'), 'utf8'), /Plafond 4/);
+  assert.doesNotMatch(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'comments.md'), 'utf8'), /Cap 4/);
   last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: finished' });
   assert.equal(budget(), 'budget=0.9');
   // A lane that was not stopped is not opened by a line that only sets the cap; it is by a sentence of his.

@@ -52,14 +52,14 @@ no() { echo "$(basename "$0"): #$pr is not put live: $1" >&2; exit 6; }
 # still running or for Linear's history is kept in a queue the wake tries
 # again by itself, with no model, with these same checks each time.
 later() {
-  if [ -n "$dry_run" ]; then echo "Elle attendrait dans la file : $1"; exit 3; fi
+  if [ -n "$dry_run" ]; then user_message merge_dry_queue "reason=$1"; exit 3; fi
   if [ -n "${ORCH_FROM_QUEUE:-}" ]; then echo "$(basename "$0"): #$pr is not put live now: $1" >&2; exit 5; fi
   mkdir -p "$ORCH_STATE_DIR/merge-queue"
   [ -z "$announcement" ] || cp "$announcement" "$ORCH_STATE_DIR/merge-queue/$pr.announcement.md"
   jq -n --arg pr "$pr" --arg ticket "$ticket" --arg at "$(now_utc)" --arg why "$1" --arg said "$([ -z "$announcement" ] || echo "$ORCH_STATE_DIR/merge-queue/$pr.announcement.md")" \
     '{pr: ($pr | tonumber), ticket: $ticket, at: $at, why: $why, announcement: $said}' > "$ORCH_STATE_DIR/merge-queue/.$pr.part"
   mv "$ORCH_STATE_DIR/merge-queue/.$pr.part" "$ORCH_STATE_DIR/merge-queue/$pr.json"
-  echo "Mise en ligne de la PR #$pr mise en file ($1). Elle partira d'elle-même dès que possible, avec les mêmes contrôles ; rien à relancer."
+  user_message merge_queue "pr=$pr" "reason=$1"
   exit 3
 }
 node_lib() { node --no-warnings "$ORCH_HOME/lib/$1" "${@:2}"; }
@@ -197,7 +197,7 @@ if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
   # there were two results to choose from.
   since=$(jq -r '.at // ""' "$asked" 2> /dev/null) || since=
   [ -n "$since" ] || since=$(jq -r '.opened_at // ""' "$(lane_record "$ticket.2")" 2> /dev/null) || since=
-  chosen=$(jq -r --arg team "$team_line" --arg since "$since" --rawfile ids "$work/choice-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and .createdAt > $since)] | map(.body | [scan("(?im)" + $team)] | map(.[0])) | add // [] | unique | join(" ")' "$work/choice.json")
+  chosen=$(jq -r --arg team "$team_line" --arg since "$since" --rawfile ids "$work/choice-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not) and .createdAt > $since)] | map(.body | [scan("(?im)" + $team)] | map(.[0])) | add // [] | unique | join(" ")' "$work/choice.json")
   [ -n "$chosen" ] || no "$ticket was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 » of his on the ticket, written after the request"
   [[ "$chosen" =~ ^[12]$ ]] || no "$ticket was given to two teams and the user named both since the request (« Équipe 1 » and « Équipe 2 »): which one goes live is not known. Ask him"
   [ "$chosen" = "$mine" ] || no "the user chose the team $chosen (#$(jq -r --arg team "$chosen" '.[$team]' <<<"$teams")): #$pr, of the team $mine, is not put live"

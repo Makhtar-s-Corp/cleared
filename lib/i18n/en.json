@@ -1,0 +1,20 @@
+{
+  "agent_comment": "> Written by an agent ({from}), not by {owner}.\n\n{body}\n",
+  "agent_ticket": "> Ticket opened by an agent ({from}), not by {owner}.\n\n{body}\n",
+  "team_choice": "Two teams worked on this ticket independently: team 1, PR {first}; team 2, PR {second}. To choose, write a line ‘Team 1’ or ‘Team 2’ on the ticket, then move it to ‘{go_state}’. Only your choice ships; the other PR closes.",
+  "missing_salt": "Missing [guard] salt in project configuration; run the installer to generate one.",
+  "decision_listing": "{ticket}{adr}, proposed at {at}",
+  "decision_adr_suffix": " (with docs/decisions.md)",
+  "decision_dropped": "Decision {id} dropped. Nothing was sent.",
+  "decision_confirmed": "Decision confirmed by you for {ticket}:",
+  "decision_diff": "Changes to docs/decisions.md (removed lines start with -, added lines with +):",
+  "decision_preview": "Nothing was sent. If this is your decision, run the same command again; otherwise: confirm-decision.sh --drop {id}",
+  "decision_comment": "**Decision by {owner}, recorded during a discussion with the project lead and confirmed by the user**\n\n",
+  "decision_adr_note": "\n\nAlso recorded in `docs/decisions.md` (draft pull request, reviewed and merged like others).\n",
+  "decision_transcribed": "Recorded: {url}",
+  "merge_queue": "Shipping PR #{pr} is queued ({reason}). It will retry automatically with the same checks; no action is needed.",
+  "merge_dry_queue": "It would wait in the queue: {reason}",
+  "approval_pr_version": "PR {pr} at {head}",
+  "approval_previous_version": "the previous request covered {heads}",
+  "approval_version": "(Version shown: {versions}{previous}.)"
+}

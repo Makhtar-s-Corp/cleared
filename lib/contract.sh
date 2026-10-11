@@ -102,12 +102,12 @@ contract_report() {
     echo "files_changed: $changed"
     echo '---'
     echo
-    echo '## Compte rendu'
+    echo '## Report'
     echo
     cat "$body"
     [ -z "$(tail -c 1 "$body")" ] || echo
     echo
-    echo '## Fichiers modifiés'
+    echo '## Changed files'
     echo
     if [ "$changed" = 0 ]; then
       echo 'Aucun.'

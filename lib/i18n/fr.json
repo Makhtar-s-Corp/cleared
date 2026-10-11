@@ -1,0 +1,20 @@
+{
+  "agent_comment": "> Écrit par un agent ({from}), pas par {owner}.\n\n{body}\n",
+  "agent_ticket": "> Ticket ouvert par un agent ({from}), pas par {owner}.\n\n{body}\n",
+  "team_choice": "Deux équipes ont travaillé ce ticket, chacune de son côté : équipe 1, PR {first} ; équipe 2, PR {second}. Pour choisir, écris sur le ticket une ligne « Équipe 1 » ou « Équipe 2 », puis glisse la carte dans « {go_state} » : seule celle que tu choisis part en ligne, l'autre est fermée.",
+  "missing_salt": "Il manque [guard] salt dans la configuration du projet ; lance l'installation pour en générer un.",
+  "decision_listing": "{ticket}{adr}, proposée à {at}",
+  "decision_adr_suffix": " (avec docs/decisions.md)",
+  "decision_dropped": "Décision abandonnée : {id}. Rien n'est parti.",
+  "decision_confirmed": "Décision confirmée par toi, pour {ticket} :",
+  "decision_diff": "Ce qui changera dans docs/decisions.md (lignes « - » retirées, lignes « + » ajoutées) :",
+  "decision_preview": "Rien n'est parti. Si c'est bien ce que tu décides, relance la même commande ; sinon : confirm-decision.sh --drop {id}",
+  "decision_comment": "**Décision de {owner}, transcrite pendant une discussion avec le chef de projet et confirmée par lui**\n\n",
+  "decision_adr_note": "\n\nÉcrite aussi dans `docs/decisions.md` (pull request en brouillon, à fusionner comme les autres).\n",
+  "decision_transcribed": "Transcrite : {url}",
+  "merge_queue": "Mise en ligne de la PR #{pr} mise en file ({reason}). Elle partira d'elle-même dès que possible, avec les mêmes contrôles ; rien à relancer.",
+  "merge_dry_queue": "Elle attendrait dans la file : {reason}",
+  "approval_pr_version": "PR {pr} à {head}",
+  "approval_previous_version": "la demande précédente portait sur {heads}",
+  "approval_version": "(Version montrée : {versions}{previous}.)"
+}

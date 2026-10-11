@@ -56,7 +56,7 @@ trap 'rm -rf "$work"' EXIT
   while IFS= read -r report; do
     found=1
     printf -- "- %s :\n" "$(basename "$report" .md)"
-    sed -n '/^## Compte rendu/,/^## Fichiers modifiés/p' "$report" | sed '1d;$d' | tail -n 14 | sed 's/^/    /'
+    sed -n '/^## \(Report\|Compte rendu\)/,/^## \(Changed files\|Fichiers modifiés\)/p' "$report" | sed '1d;$d' | tail -n 14 | sed 's/^/    /'
   done < <(ls -1 "$ORCH_STATE_DIR/reports/" 2> /dev/null | grep "^lead-" | tail -n 3 | sed "s|^|$ORCH_STATE_DIR/reports/|")
   [ -n "$found" ] || echo "- (aucune)"
   printf "\n### Les décisions déjà transcrites en discussion (ledger)\n\n"
