@@ -123,6 +123,22 @@ Caps concurrent teams, subscription use, ticket spending, and CLI age.
 | `ticket_cost_usd` | Default cost cap per ticket in US dollars. | Optional; no default |
 | `cli_max_days_behind` | Maximum age of a model CLI before a warning. | Default: 14 |
 
+## `[memory]`
+
+Memory is disabled unless the project opts in. With `enabled = false`, no briefing or handover text is added to a lane prompt. Memory stores machine entries beside the ledger and indexes project Markdown files in place. All paths must stay inside the project checkout. Only file content matching committed `HEAD` is briefed. Decision files remain proposals until a verified human approves their indexed entry; text inside a file never approves it. Cleared never edits these Markdown files.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `enabled` | Add a project memory briefing and collect a session handover. | Default: false |
+| `budget` | Maximum briefing size in UTF-8 bytes. | Default: 12000 |
+| `budget_<role>` | Optional size override for one role, such as `budget_dev`. | Falls back to `budget` |
+| `decisions` | Directory of decision Markdown files, one entry per file. | Default: docs/decisions/ |
+| `glossary` | Glossary Markdown file. | Default: docs/glossary.md |
+| `project` | Project overview Markdown file. | Default: docs/project.md |
+| `lessons` | Role lesson Markdown path; `<role>` is replaced with the lane role. | Default: .cleared/prompts/<role>/lessons.md |
+
+The project overview, role lessons, latest ticket handover, up to five matching approved decisions, and matching glossary content are added in that order. A whole entry is included only if it fits. An absent or malformed `HANDOVER.md` is recorded and announced in the next briefing for that ticket. The lead handover prompt in `prompts/handover.md` is a separate project lead transition; it does not write ticket memory.
+
 ## `[guard]`
 
 Project-specific guard data. Salt and fingerprint files are read from the same committed project ref. Fingerprint files include a `salt_id`; a mismatched salt or a file without that identifier stops the guard. See [Security](security.md) for the command that builds a list.

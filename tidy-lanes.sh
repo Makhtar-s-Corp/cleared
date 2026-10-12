@@ -112,6 +112,17 @@ while IFS=$'\t' read -r path branch; do
     continue
   fi
 
+  if [ "$(conf_get memory enabled)" = true ] && [ -e "$path/HANDOVER.md" ]; then
+    if [[ ! "$tickets" =~ ^[A-Z]+-[0-9]+$ ]]; then
+      kept "$lane" "HANDOVER.md is present but its ticket cannot be identified: left for recovery"
+      continue
+    fi
+    if ! node "$ORCH_HOME/lib/memory/cli.mjs" recover "$path" "${branch%%/*}" "$tickets" "$branch"; then
+      kept "$lane" "HANDOVER.md could not be recovered: worktree kept"
+      continue
+    fi
+  fi
+
   # Nothing lost. 1: what exists only here, build outputs and dependencies aside.
   archive="$ORCH_REPO/$(conf_get lanes archives)/$lane/menage-$(date +%F)"
   git -C "$path" -c core.quotePath=false ls-files -z --others --ignored --exclude-standard \
@@ -143,6 +154,11 @@ while IFS=$'\t' read -r path branch; do
   # no longer has is not put back there: what it still holds is kept as a
   # bundle beside the archives.
   if [ "$(git -C "$path" rev-list --count HEAD --not --remotes)" != 0 ]; then
+    if { [ "$(conf_get memory enabled)" = true ] || [ "$(git -C "$path" config --get cleared.memory.everEnabled || true)" = true ]; } \
+      && git -C "$path" log --full-history --format= --name-only HEAD --not --remotes -- HANDOVER.md | grep -qxF HANDOVER.md; then
+      kept "$lane" "HANDOVER.md is present in an unpushed commit: remove it from branch history before tidying"
+      continue
+    fi
     if [ "$why" = "$(conf_get lanes tidy_reason_live)" ] && ! git -C "$ORCH_REPO" ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
       mkdir -p "$archive"
       git -C "$path" bundle create "$archive/unpushed.bundle" "$branch" --not --remotes > /dev/null 2>&1 || { kept "$lane" "what its branch still holds could not be kept"; continue; }

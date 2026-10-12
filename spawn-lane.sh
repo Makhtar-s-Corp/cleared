@@ -290,6 +290,28 @@ run_base="$ticket-$(date -u +%Y%m%dT%H%M%SZ)"
 while [ -e "$ORCH_STATE_DIR/runs/$run_base" ]; do sleep 1; run_base="$ticket-$(date -u +%Y%m%dT%H%M%SZ)"; done
 run_dir="$ORCH_STATE_DIR/runs/$run_base"
 mkdir -p "$run_dir"
+if [ "$(conf_get memory enabled)" = true ]; then
+  if git -C "$worktree" ls-files --error-unmatch -- HANDOVER.md > /dev/null 2>&1; then
+    die "memory is enabled but HANDOVER.md is tracked by the project; choose a project without this tracked file"
+  fi
+  # The handover is a per-session artifact, excluded from ordinary git add -A.
+  git_common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)
+  mkdir -p "$git_common/info"
+  grep -qxF '/HANDOVER.md' "$git_common/info/exclude" 2> /dev/null || printf '/HANDOVER.md\n' >> "$git_common/info/exclude"
+  if [ -n "$resume" ]; then
+    node "$ORCH_HOME/lib/memory/cli.mjs" recover "$worktree" "$role" "$ticket" "$lane" \
+      || die "the previous session's handover could not be recovered; its file remains in $worktree"
+  fi
+  if ! node "$ORCH_HOME/lib/memory/cli.mjs" briefing "$role" "$ticket" "$(jq -r '.title // ""' <<<"$issue")" "$(jq -r '.description // ""' <<<"$issue")" > "$run_dir/memory-briefing.md"; then
+    rm -rf "$run_dir"
+    if [ -z "$there" ]; then
+      git -C "$ORCH_REPO" worktree remove --force "$worktree" 2> /dev/null || true
+      [ -n "$resume" ] || git -C "$ORCH_REPO" branch -D "$lane" > /dev/null 2>&1 || true
+    fi
+    die "memory briefing failed; the lane was not started"
+  fi
+  git -C "$worktree" config --local cleared.memory.everEnabled true
+fi
 if [ -n "$pushed_role" ]; then
   jq -r '.description // ""' <<<"$issue" > "$run_dir/description.md"
   # His comments only: written from his account, and not one an agent wrote
@@ -306,6 +328,12 @@ if [ -n "$pushed_role" ]; then
 fi
 mv "$available" "$run_dir/chain.json"
 {
+  if [ "$(conf_get memory enabled)" = true ]; then
+    cat "$run_dir/memory-briefing.md"
+    printf '\n\n'
+    prompt_text "$(prompt_file lane-handover)"
+    printf '\n\n'
+  fi
   prompt_text "$prompt_file"
   printf '\n---\nTicket %s : %s\n%s\nTeam: %s (branch of the same name).\n' "$ticket" "$(jq -r '.title' <<<"$issue")" "$(jq -r '.url' <<<"$issue")" "$lane"
   [ -z "$team" ] || printf "This ticket has two independent teams; you are the second. Do not read or use the other team’s work. The user will choose between the two results.\n"
