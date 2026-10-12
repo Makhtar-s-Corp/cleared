@@ -40,6 +40,7 @@ test('declared migration paths disable automatic rollback', () => {
   assert.equal(touchesMigrations(['db/migrations/001.sql'], ['db/migrations/']), true);
   assert.equal(touchesMigrations(['db/migrations/001.sql'], ['db/migrations']), true);
   assert.equal(touchesMigrations(['db/migrations/001.sql'], ['./db/migrations/']), true);
+  assert.equal(touchesMigrations(['DB/Migrations/É.sql'], ['db/migrations']), true);
   assert.equal(touchesMigrations(['db/migrations-old/a.sql'], ['db/migrations/']), false);
 });
 
