@@ -15,7 +15,7 @@
 #   - a review that cannot open now is not refused and forgotten: it waits
 #     in state/reviews-queue/ and the wake opens it as soon as it may.
 # What the reviewer says comes back to the lead at its next wake (the event
-# review_done); nothing is posted to Linear.
+# review_done); nothing is posted to tracker.
 #
 #   review-pr.sh <pull request number> <ticket> [--author-model <alias>] [--dry-run]
 #

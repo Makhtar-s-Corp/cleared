@@ -92,14 +92,14 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
 });
 
 
-test('a comment that the guard refuses never reaches Linear', () => {
-  const dir = scratch('orch-linear-');
+test('a comment that the guard refuses never reaches tracker', () => {
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
   const post = (text) => {
     writeFileSync(join(dir, 'comment.md'), text);
-    return spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', join(dir, 'comment.md'), 'test'], { env, encoding: 'utf8' });
+    return spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', join(dir, 'comment.md'), 'test'], { env, encoding: 'utf8' });
   };
   // Built at run time so that this file holds nothing the guard would flag.
   const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}" est dans le rapport.`;
@@ -110,7 +110,7 @@ test('a comment that the guard refuses never reaches Linear', () => {
   // A ticket goes through the same guard, title and description.
   const open = (title, text) => {
     writeFileSync(join(dir, 'ticket.md'), text);
-    return spawnSync(join(ORCH_HOME, 'linear.sh'), ['create', 'Projet', 'Bug', title, join(dir, 'ticket.md')], { env, encoding: 'utf8' });
+    return spawnSync(join(ORCH_HOME, 'tracker.sh'), ['create', 'Projet', 'Bug', title, join(dir, 'ticket.md')], { env, encoding: 'utf8' });
   };
   assert.notEqual(open('Un titre', flagged).status, 0);
   assert.notEqual(open(flagged, 'Une description.').status, 0);
@@ -190,8 +190,8 @@ test('push-lane does not refuse a branch for a value that only shows in the cont
 });
 
 
-test('only an image, and only from the folder a lane sets apart for what may leave, may be sent to Linear', () => {
-  const dir = scratch('orch-linear-');
+test('only an image, and only from the folder a lane sets apart for what may leave, may be sent to tracker', () => {
+  const dir = scratch('orch-tracker-');
   const captures = join(dir, 'lanes', 'a-lane', 'to-send');
   mkdirSync(captures, { recursive: true });
   mkdirSync(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send'), { recursive: true });
@@ -210,14 +210,14 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
   const confPath = join(dir, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^capture_roots = .*$/m, `capture_roots = ${join(dir, 'lanes')}/*/to-send`)}`);
   const repoRoot = fixtureProject();
-  const upload = (file) => spawnSync(join(ORCH_HOME, 'linear.sh'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
+  const upload = (file) => spawnSync(join(ORCH_HOME, 'tracker.sh'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
   const sent = () => { try { return readFileSync(join(dir, 'curl-args'), 'utf8'); } catch { return ''; } };
   assert.match(upload(join(dir, 'elsewhere.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(captures, '..', 'to-send', '..', 'test-results.png')).stderr, /not under a folder of captures/);
   // The rest of a lane's worktree (its test results, the images of the repository) does not leave: only that one folder, at that one place.
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'test-results.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png')).stderr, /not under a folder of captures/);
-  assert.match(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'), /^capture_roots = ~\/work\/example\/\.local\/captures-linear, ~\/work\/example\/\.local\/captures-linear\/\*, ~\/work\/example-lanes\/example\/\*\/\.local\/captures-linear$/m);
+  assert.match(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'), /^capture_roots = ~\/work\/example\/\.local\/captures-tracker, ~\/work\/example\/\.local\/captures-tracker\/\*, ~\/work\/example-lanes\/example\/\*\/\.local\/captures-tracker$/m);
   assert.match(upload(join(captures, 'secret.png')).stderr, /not a PNG or JPEG image/);
   assert.match(upload(join(captures, 'missing.png')).stderr, /no such file/);
   assert.equal(sent(), '', 'nothing left the machine');

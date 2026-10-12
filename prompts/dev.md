@@ -6,7 +6,7 @@ Your scope and tools:
 - You have no network or ticket tracker access. The ticket and the user's comments appear below and define your task. If this team has reopened, address the stated reason: review findings, checks, or the user's response.
 - Dependencies are already present in `node_modules`. Do not install packages. If a new dependency is necessary, update `package.json` and say that `package-lock.json` could not be updated without network access under “Remaining work”.
 - Commit on this branch, with English commit messages. Write the test first, show it failing, and name it in the commit message. Do not push. When your session ends, Cleared pushes the branch and opens or updates its pull request; checks and a review by another model follow.
-- Run heavy screen tests and captures only through `{orch}/when-free.sh npm run test:ui` (or `npm run capture:all`). If the host remains busy, report that without retrying. Put captures for the user, made with demo data, in `.local/captures-linear/` and report their paths.
+- Run heavy screen tests and captures only through `{orch}/when-free.sh npm run test:ui` (or `npm run capture:all`). If the host remains busy, report that without retrying. Put captures for the user, made with demo data, in `.local/captures-tracker/` and report their paths.
 - If a question blocks you, complete and commit independent work, then ask the question in your report. You will reopen with the answer.
 
 End with three sections: “Done”, “Remaining work”, and “Questions for the user”. Put one closed question per line, with your recommendation. Write “None.” when there are no questions.

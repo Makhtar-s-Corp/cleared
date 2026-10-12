@@ -67,22 +67,25 @@ esac
 `, { mode: 0o755 });
   fake('first', '${FIRST_EXIT:-0}');
   fake('second', '${SECOND_EXIT:-0}');
-  // Linear and GitHub as files the test writes: what they "say now".
-  writeFileSync(join(home, 'linear.sh'), `#!/usr/bin/env bash
-if [ "$1" = changes ]; then cat "${join(home, 'linear-now.json')}"; exit; fi
-if [ "$1" = comment ]; then [ -z "\${FAKE_LINEAR_DOWN:-}" ] || exit 1; [ -z "\${FAKE_LINEAR_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'linear-posted')}"; echo "$2" >> "${join(home, 'linear-posted-log')}"; echo "https://example.test/comment"; exit; fi
+  // tracker and GitHub as files the test writes: what they "say now".
+  writeFileSync(join(home, 'tracker.sh'), `#!/usr/bin/env bash
+if [ "$1" = decorate-worktree ]; then orca worktree set --worktree "path:$2" --display-name "$3" --comment "$5"; exit; fi
+if [ "$1" = ticket-prefix ]; then echo X; exit; fi
+if [ "$1" = legacy-line-allowed ]; then exit 0; fi
+if [ "$1" = changes ]; then cat "${join(home, 'tracker-now.json')}"; exit; fi
+if [ "$1" = comment ]; then [ -z "\${FAKE_TRACKER_DOWN:-}" ] || exit 1; [ -z "\${FAKE_TRACKER_FULL:-}" ] || exit 4; { echo "$2 from=$4"; cat "$3"; } > "${join(home, 'tracker-posted')}"; echo "$2" >> "${join(home, 'tracker-posted-log')}"; echo "https://example.test/comment"; exit; fi
 if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à valider","url":"u","since":"2026-01-02T10:00:00Z"}]'; exit; fi
-if [ "$1" = comments ]; then [ -z "\${FAKE_LINEAR_COMMENTS_DOWN:-}" ] || exit 1; cat "${join(home, 'linear-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
-if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'linear-moved-asked')}"; exit "$(cat "${home}/linear-moved-$2" 2>/dev/null || cat "${join(home, 'linear-moved')}" 2>/dev/null || echo 5)"; fi
-if [ "$1" = list ]; then cat "${home}/linear-list-$2.json" 2>/dev/null || echo '[]'; exit; fi
-if [ "$1" = identity ]; then cat "${join(home, 'linear-identity')}" 2>/dev/null || echo app; exit; fi
-if [ "$1" = move ]; then [ -z "\${FAKE_LINEAR_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'linear-moves')}"; echo "$3" > "${join(home, 'linear-state')}"; exit; fi
+if [ "$1" = comments ]; then [ -z "\${FAKE_TRACKER_COMMENTS_DOWN:-}" ] || exit 1; cat "${join(home, 'tracker-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
+if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'tracker-moved-asked')}"; exit "$(cat "${home}/tracker-moved-$2" 2>/dev/null || cat "${join(home, 'tracker-moved')}" 2>/dev/null || echo 5)"; fi
+if [ "$1" = list ]; then cat "${home}/tracker-list-$2.json" 2>/dev/null || echo '[]'; exit; fi
+if [ "$1" = identity ]; then cat "${join(home, 'tracker-identity')}" 2>/dev/null || echo app; exit; fi
+if [ "$1" = move ]; then [ -z "\${FAKE_TRACKER_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'tracker-moves')}"; echo "$3" > "${join(home, 'tracker-state')}"; exit; fi
 if [ "$1" = upload ]; then case "$2" in *.png) echo "https://uploads.example.test/$(basename "$2")" ;; *) echo "not an image" >&2; exit 1 ;; esac; exit; fi
-if [ "$1" = state ]; then cat "${home}/linear-state-$2" 2>/dev/null || cat "${join(home, 'linear-state')}" 2>/dev/null || echo "In Review"; exit; fi
-if [ "$1" = issue ]; then title=$(cat "${home}/linear-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --rawfile description <(cat "${home}/linear-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: [], description: $description}'; exit; fi
+if [ "$1" = state ]; then cat "${home}/tracker-state-$2" 2>/dev/null || cat "${join(home, 'tracker-state')}" 2>/dev/null || echo "In Review"; exit; fi
+if [ "$1" = issue ]; then title=$(cat "${home}/tracker-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --rawfile description <(cat "${home}/tracker-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: [], description: $description}'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
-  writeFileSync(join(home, 'linear-now.json'), '[]');
+  writeFileSync(join(home, 'tracker-now.json'), '[]');
   // What GitHub says of itself: all is well, unless a test writes otherwise. No test asks the real page.
   writeFileSync(join(home, 'github-status.json'), JSON.stringify({ components: ['Git Operations', 'Pull Requests', 'Actions', 'API Requests', 'Webhooks'].map((name) => ({ name, status: 'operational' })) }));
   writeFileSync(join(home, 'pulls-now.json'), '[]');
@@ -92,7 +95,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
   writeFileSync(join(home, 'prompts', 'review.md'), 'review prompt\n');
   writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nowner_name = the user\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n[rules]\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[tracker]\nadapter = local\nteam = X\nowner_name = the user\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n[rules]\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // What the guard must know of the project (its private terms, as fingerprints, and the values it allows) is the
@@ -180,11 +183,11 @@ export function flowBox({ maxLanes = 1 } = {}) {
   mkdirSync(join(box.home, 'proc-none'), { recursive: true });
   const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none') };
   const flow = (extra = {}) => spawnSync(join(box.home, 'flow-lanes.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
-  const todo = (tickets) => writeFileSync(join(box.home, 'linear-list-Todo.json'), JSON.stringify(tickets.map((identifier, index) => ({ identifier, title: `Titre de ${identifier}`, updatedAt: `2026-01-02T10:0${index}:00Z`, state: 'Todo' }))));
-  const by = (ticket, code) => writeFileSync(join(box.home, `linear-moved-${ticket}`), String(code));
+  const todo = (tickets) => writeFileSync(join(box.home, 'tracker-list-Todo.json'), JSON.stringify(tickets.map((identifier, index) => ({ identifier, title: `Titre de ${identifier}`, updatedAt: `2026-01-02T10:0${index}:00Z`, state: 'Todo' }))));
+  const by = (ticket, code) => writeFileSync(join(box.home, `tracker-moved-${ticket}`), String(code));
   const record = (ticket) => JSON.parse(readFileSync(join(box.state, 'lanes', `${ticket}.json`), 'utf8'));
   const there = (ticket) => { try { readdirSync(join(box.home, 'lanes', `dev-${ticket}`)); return true; } catch { return false; } };
-  const moves = () => { try { return readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const moves = () => { try { return readFileSync(join(box.home, 'tracker-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
   const stuck = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind, ticket from events where kind in ('lane_stuck', 'lane_asks') order by rowid").all().map((row) => `${row.kind} ${row.ticket}`); db.close(); return rows; };
   // The session of the lane of a ticket: it commits what it was asked, says what it has to say, and ends.
   const session = (ticket, { commit = 'fix: the work', answer = 'Fait.\n\nQuestions pour the user : aucune.', exit = 0, bringBase = false } = {}) => {
@@ -199,7 +202,7 @@ export function flowBox({ maxLanes = 1 } = {}) {
   return { box, lane, env, flow, todo, by, record, there, moves, stuck, session, pull };
 }
 
-export function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare = null, table = { tooling_paths: 'ops/cleared/, docs/decisions.md', guarded_paths: '.github/, compose, Dockerfile, ops/cleared/merge-pr.sh' } } = {}) {
+export function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', prepare = null, ticket = 'X-5', table = { tooling_paths: 'ops/cleared/, docs/decisions.md', guarded_paths: '.github/, compose, Dockerfile, ops/cleared/merge-pr.sh' } } = {}) {
   const lane = laneWithRemote('feat/w', 'feat: the work of the lane');
   const { box } = lane;
   // What a pull request changes is read from git, not from what GitHub lists: the files are really in the branch.
@@ -225,15 +228,15 @@ export function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', pr
   // The base of the sandbox is its local main: the scripts read it as origin/main once it is pushed.
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ${table.tooling_paths}\nguarded_paths = ${table.guarded_paths}\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
-  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[tracker]\nadapter = local\nteam = X\n', '[tracker]\nadapter = local\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   publish();
-  const opened = JSON.parse(spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' }).stdout);
+  const opened = JSON.parse(spawnSync(join(box.home, 'review-pr.sh'), ['7', ticket, '--author-model', 'b'], { env, encoding: 'utf8' }).stdout);
   assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [opened.run_dir], { cwd: opened.worktree, env: { ...env, ANSWER: answer }, encoding: 'utf8' }).status, 0);
-  const merge = (args = [], extra = {}, input = undefined) => spawnSync(join(box.home, 'merge-pr.sh'), ['7', 'X-5', ...args], { env: { ...env, ...extra }, encoding: 'utf8', input });
+  const merge = (args = [], extra = {}, input = undefined) => spawnSync(join(box.home, 'merge-pr.sh'), ['7', ticket, ...args], { env: { ...env, ...extra }, encoding: 'utf8', input });
   const merged = () => { try { return readFileSync(join(box.home, 'pr-merged'), 'utf8').trim().split('\n'); } catch { return null; } };
-  const moves = () => { try { return readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const moves = () => { try { return readFileSync(join(box.home, 'tracker-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
   const ledgerKinds = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind from events where kind in ('merged_by_script', 'merge_refused') order by rowid").all().map((row) => row.kind); db.close(); return rows; };
-  const hisLine = (body, over = {}) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'u1', body, byOwner: true, createdAt: '2026-01-02T10:00:00Z', editedAt: null, ...over }]));
-  const ask = (input = '**Ce qui change.** Je la mets en ligne ?') => spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env, encoding: 'utf8', input });
+  const hisLine = (body, over = {}) => writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'u1', body, byOwner: true, createdAt: '2026-01-02T10:00:00Z', editedAt: null, ...over }]));
+  const ask = (input = '**Ce qui change.** Je la mets en ligne ?', extra = {}) => spawnSync(join(box.home, 'ask-validation.sh'), [ticket, '-', '--pr', '7'], { env: { ...env, ...extra }, encoding: 'utf8', input });
   return { lane, box, env, headOf, publish, merge, merged, moves, ledgerKinds, hisLine, ask, git: laneGit };
 }

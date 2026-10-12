@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { loadConf } from './lib/conf.mjs';
+import { createTracker } from './lib/tracker/contract.mjs';
+
+const [area, action, ...args] = process.argv.slice(2);
+if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action)) {
+  console.error('usage: cleared ticket new <title> [body file] | show <id> | comment <id> <body file> | move <id> <status>');
+  process.exit(64);
+}
+const conf = loadConf();
+if (conf.sections.tracker?.adapter !== 'local') {
+  console.error('cleared ticket commands require [tracker] adapter = local');
+  process.exit(2);
+}
+const tracker = createTracker(conf);
+try {
+  let result;
+  if (action === 'new') result = tracker.createTicket({ title: args[0], body: args[1] ? readFileSync(args[1], 'utf8') : '' });
+  else if (action === 'show') result = { ...tracker.getTicket(args[0]), comments: tracker.comments(args[0]), history: tracker.history(args[0]) };
+  else if (action === 'comment') result = tracker.comment(args[0], readFileSync(args[1], 'utf8'));
+  else result = tracker.moveTicket(args[0], args[1]);
+  console.log(JSON.stringify(result, null, 2));
+} catch (error) { console.error(`cleared: ${error.message}`); process.exitCode = 1; }
+finally { tracker.close?.(); }

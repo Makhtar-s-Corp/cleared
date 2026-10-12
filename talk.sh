@@ -8,7 +8,7 @@
 #
 # The session has no right to act: no lane, no merge, no push, no message to
 # a lane. It reads. Its one way to write is decide.sh, which transcribes a
-# decision the user worded: to the ledger, to Linear, and, for a lasting
+# decision the user worded: to the ledger, to tracker, and, for a lasting
 # rule, to docs/decisions.md in a worktree of its own (talk/<report ticket>),
 # the only file the session may edit.
 set -euo pipefail
@@ -45,10 +45,10 @@ trap 'rm -rf "$work"' EXIT
     "- CI runs in progress: \(.ci_runs_in_progress | length) ; minutes since the last merge: \(.minutes_since_the_last_merge) ; screen tests running: \(.screen_tests_or_captures_running) ; free for a merge: \(.free_for_a_merge)",
     (.open_pull_requests[] | "- PR #\(.number) (\(.title)), branch \(.branch), \(if .draft then "draft" else "ready" end), checks: \(.checks)")' \
     || echo "- (host-state.sh did not respond)"
-  printf "\n### Waiting for %s in Linear (In Review tickets)\n\n" "$(owner_name)"
-  "$ORCH_HOME/linear.sh" waiting 2> /dev/null | jq -r '.[] | "- \(.identifier) (\(.title)), since \(.since)"' || echo "- (Linear did not respond)"
+  printf "\n### Waiting for %s in tracker (In Review tickets)\n\n" "$(owner_name)"
+  "$ORCH_HOME/tracker.sh" waiting 2> /dev/null | jq -r '.[] | "- \(.identifier) (\(.title)), since \(.since)"' || echo "- (tracker did not respond)"
   printf "\n### Recent comments on %s\n\n" "$report_on"
-  "$ORCH_HOME/linear.sh" comments "$report_on" 2> /dev/null | jq -r 'sort_by(.createdAt) | .[-6:][] | "- \(.createdAt) : \(.body | gsub("\\s+"; " ") | .[0:700])"' || echo "- (Linear did not respond)"
+  "$ORCH_HOME/tracker.sh" comments "$report_on" 2> /dev/null | jq -r 'sort_by(.createdAt) | .[-6:][] | "- \(.createdAt) : \(.body | gsub("\\s+"; " ") | .[0:700])"' || echo "- (tracker did not respond)"
   printf "\n### Active teams the project lead can contact\n\n"
   { [ -f "$ORCH_STATE_DIR/lanes.json" ] && jq -r 'keys[] | "- \(.)"' "$ORCH_STATE_DIR/lanes.json"; } || echo "- (none known)"
   printf "\n### Latest short sessions of the project lead (end of each report)\n\n"

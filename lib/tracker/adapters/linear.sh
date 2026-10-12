@@ -19,9 +19,9 @@
 #
 # Every comment starts with a line saying an agent wrote it: the key belongs
 # to the user, so Linear shows his name, and a watcher must be able to tell
-# these comments from his. Their ids are also kept in state/linear-comments.jsonl.
+# these comments from his. Their ids are also kept in state/tracker-comments.jsonl.
 set -euo pipefail
-. "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
+. "$(cd "$(dirname "$0")/../../.." && pwd)/lib/common.sh"
 
 # Under whose name the scripts act. The application of the agents when the
 # project has one (its identifier and its secret): everything an agent does
@@ -101,14 +101,17 @@ gql() {
 # is him.
 owner_id() {
   local owner
-  owner=$(conf_get linear owner_id)
-  [ -n "$owner" ] || [ "$identity" != app ] || { echo "$(basename "$0"): [linear] owner_id is not set: with the application of the agents, who the user is must be written in the settings" >&2; return 1; }
+  owner=$(conf_get tracker owner_id)
+  [ -n "$owner" ] || [ "$identity" != app ] || { echo "$(basename "$0"): [tracker] owner_id is not set: with the application of the agents, who the user is must be written in the settings" >&2; return 1; }
   printf '%s\n' "$owner"
 }
 
 ticket_ok() { [[ "$1" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$1\" is not a ticket identifier"; }
 
 case "${1:-}" in
+  decorate-worktree)
+    orca worktree set --worktree "path:$2" --display-name "$3" --linear-issue "$4" --comment "$5"
+    ;;
   identity)
     # app: the scripts act under the name of the agents. shared: under the
     # one of a person, whom the tracker cannot tell from an agent.
@@ -141,16 +144,16 @@ case "${1:-}" in
     # the user confirms himself (confirm-decision.sh) is his own word, not
     # one more message of an agent: it is never held back. Exit 4 tells the
     # caller apart from a failure: it keeps its text for a grouped comment.
-    limit=$(conf_get linear comments_per_hour)
+    limit=$(conf_get tracker comments_per_hour)
     mkdir -p "$ORCH_STATE_DIR"
-    exec 9> "$ORCH_STATE_DIR/linear-comments.lock"
+    exec 9> "$ORCH_STATE_DIR/tracker-comments.lock"
     flock -w 60 9 || die "another comment is being posted for too long"
     # The script of the user is told by what runs it, not by a word in a
     # command: the parent process is bash running that very file.
     [[ "$limit" =~ ^[0-9]+$ ]] || limit=6
     mapfile -d '' -t parent < "/proc/$PPID/cmdline" 2> /dev/null || parent=()
     if [ "$(basename "${parent[0]:-}")" != bash ] || [ "$(realpath -q "${parent[1]:-/nonexistent}" 2> /dev/null)" != "$(realpath "$ORCH_HOME/confirm-decision.sh")" ]; then
-      recent=$(jq -R -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.at > $since) | .at' "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | grep -c . || true)
+      recent=$(jq -R -r --arg since "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)" 'fromjson? | select(.at > $since) | .at' "$ORCH_STATE_DIR/tracker-comments.jsonl" 2> /dev/null | grep -c . || true)
       if [ "$recent" -ge "$limit" ]; then
         echo "$(basename "$0"): the user was already written $recent times in the last hour (limit: $limit): nothing posted. Group what there is to say in one comment, later" >&2
         exit 4
@@ -164,17 +167,17 @@ case "${1:-}" in
       "$(jq -nc --arg issue "$id" --arg body "$body" '{input: {issueId: $issue, body: $body}}')")
     [ "$(jq -r '.data.commentCreate.success == true and (.data.commentCreate.comment.id | type) == "string"' <<<"$created")" = true ] || die "Linear did not record the comment"
     mkdir -p "$ORCH_STATE_DIR"
-    jq -c --arg ticket "$2" --arg from "$from" --arg at "$(now_utc)" '.data.commentCreate.comment + {ticket: $ticket, from: $from, at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/linear-comments.jsonl"
+    jq -c --arg ticket "$2" --arg from "$from" --arg at "$(now_utc)" '.data.commentCreate.comment + {ticket: $ticket, from: $from, at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/tracker-comments.jsonl"
     jq -r '.data.commentCreate.comment.url' <<<"$created"
     ;;
   create)
     [ $# -eq 5 ] && [ -f "$5" ] || die "usage: linear.sh create <project> <label> <title> <description file>"
     title_file=$(mktemp)
-    printf '%s\n' "$4" > "$title_file"
+    printf '%s\n' "$2" "$3" "$4" > "$title_file"
     guard_text "$title_file" && guard_text "$5" || { rm -f "$title_file"; exit 1; }
     rm -f "$title_file"
     found=$(gql 'query($team: String!, $project: String!, $label: String!) { teams(filter: {key: {eq: $team}}) { nodes { id } } projects(filter: {name: {eq: $project}}) { nodes { id } } issueLabels(filter: {name: {eq: $label}}) { nodes { id } } }' \
-      "$(jq -nc --arg team "$(conf_get linear team)" --arg project "$2" --arg label "$3" '{team: $team, project: $project, label: $label}')")
+      "$(jq -nc --arg team "$(conf_get tracker team)" --arg project "$2" --arg label "$3" '{team: $team, project: $project, label: $label}')")
     team_id=$(jq -r '.data.teams.nodes[0].id // empty' <<<"$found") project_id=$(jq -r '.data.projects.nodes[0].id // empty' <<<"$found") label_id=$(jq -r '.data.issueLabels.nodes[0].id // empty' <<<"$found")
     [ -n "$team_id" ] && [ -n "$project_id" ] && [ -n "$label_id" ] || die "team, project \"$2\" or label \"$3\" not found in Linear"
     description=$(user_message agent_ticket "from=${ORCH_FROM:-script}" "owner=$(owner_name)" "body=$(cat "$5")")
@@ -182,29 +185,29 @@ case "${1:-}" in
       "$(jq -nc --arg team "$team_id" --arg project "$project_id" --arg label "$label_id" --arg title "$4" --arg description "$description" '{input: {teamId: $team, projectId: $project, labelIds: [$label], title: $title, description: $description}}')")
     [ "$(jq -r '.data.issueCreate.success == true and (.data.issueCreate.issue.identifier | type) == "string"' <<<"$created")" = true ] || die "Linear did not open the ticket"
     mkdir -p "$ORCH_STATE_DIR"
-    jq -c --arg at "$(now_utc)" '.data.issueCreate.issue + {at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/linear-issues.jsonl"
+    jq -c --arg at "$(now_utc)" '.data.issueCreate.issue + {at: $at}' <<<"$created" >> "$ORCH_STATE_DIR/tracker-issues.jsonl"
     jq -r '.data.issueCreate.issue | "\(.identifier) \(.url)"' <<<"$created"
     ;;
   comments)
     ticket_ok "$2"
-    # byOwner: written by the user himself ([linear] owner_id; without it,
+    # byOwner: written by the user himself ([tracker] owner_id; without it,
     # and with the key of a person, the owner of that key), by no
     # application and no integration.
     owner=$(owner_id) || exit 1
     gql 'query($id: String!) { viewer { id } issue(id: $id) { comments(first: 100) { nodes { id createdAt editedAt body url user { id app } botActor { id } externalUser { id } } } } }' \
       "$(jq -nc --arg id "$2" '{id: $id}')" \
-      | jq -c --arg owner "$owner" '(if $owner != "" then $owner else .data.viewer.id end) as $owner | [.data.issue.comments.nodes[] | {id, createdAt, editedAt, body, url, byOwner: ($owner != null and .user.id == $owner and .user.app != true and .botActor == null and .externalUser == null)}]'
+      | jq -c --arg owner "$owner" '(if $owner != "" then $owner else .data.viewer.id end) as $owner | [.data.issue.comments.nodes[] | {id, createdAt, editedAt, body, url, byOwner: ($owner != null and .user.id == $owner and .user.app != true and .botActor == null and .externalUser == null), by: {kind: (if .user.app == true or .botActor != null then "agents" elif $owner != null and .user.id == $owner and .externalUser == null then "human" else "other" end), id: (.user.id // .botActor.id // .externalUser.id // "unknown")}}]'
     ;;
   changes)
     [[ "${2:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || die "usage: linear.sh changes <ISO time>"
-    gql 'query($team: String!, $since: DateTimeOrDuration!) { issues(first: 50, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, updatedAt: {gt: $since}}) { nodes { id identifier title url createdAt updatedAt description state { name } project { name } creator { app } botActor { id } comments(first: 20) { nodes { id createdAt body url user { app } botActor { id } } } } } }' \
-      "$(jq -nc --arg team "$(conf_get linear team)" --arg since "$2" '{team: $team, since: $since}')" \
-      | jq -c '[.data.issues.nodes[] | {id, identifier, title, url, createdAt, updatedAt, description: ((.description // "") | .[0:1200]), state: .state.name, project: (.project.name // null), agent: (.creator.app == true or .botActor != null), comments: [.comments.nodes[] | {id, createdAt, url, body, agent: (.user.app == true or .botActor != null)}]}]'
+    gql 'query($team: String!, $since: DateTimeOrDuration!) { issues(first: 50, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, updatedAt: {gt: $since}}) { nodes { id identifier title url createdAt updatedAt description state { name } project { name } creator { id app } botActor { id } comments(first: 20) { nodes { id createdAt body url user { id app } botActor { id } } } } } }' \
+      "$(jq -nc --arg team "$(conf_get tracker team)" --arg since "$2" '{team: $team, since: $since}')" \
+      | jq -c --arg owner "$(owner_id)" '[.data.issues.nodes[] | {id, identifier, title, url, createdAt, updatedAt, description: ((.description // "") | .[0:1200]), state: .state.name, project: (.project.name // null), agent: (.creator.app == true or .botActor != null), by: {kind: (if .creator.app == true or .botActor != null then "agents" elif $owner != "" and .creator.id == $owner then "human" else "other" end), id: (.creator.id // .botActor.id // "unknown")}, comments: [.comments.nodes[] | {id, createdAt, url, body, agent: (.user.app == true or .botActor != null), by: {kind: (if .user.app == true or .botActor != null then "agents" elif $owner != "" and .user.id == $owner then "human" else "other" end), id: (.user.id // .botActor.id // "unknown")}}]}]'
     ;;
   list)
     [ -n "${2:-}" ] || die "usage: linear.sh list <state>"
     listed=$(gql 'query($team: String!, $state: String!) { issues(first: 100, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt state { name } project { name } assignee { name } } } }' \
-      "$(jq -nc --arg team "$(conf_get linear team)" --arg state "$2" '{team: $team, state: $state}')" \
+      "$(jq -nc --arg team "$(conf_get tracker team)" --arg state "$2" '{team: $team, state: $state}')" \
       | jq -c '[.data.issues.nodes[] | {identifier, title, url, updatedAt, state: .state.name, project: (.project.name // null), assignee: (.assignee.name // null)}]')
     # One page only: a full page may not be everything.
     [ "$(jq length <<<"$listed")" -lt 100 ] || echo "$(basename "$0"): 100 tickets in the state \"$2\": the list may be cut short" >&2
@@ -213,7 +216,7 @@ case "${1:-}" in
   upload)
     # Sends one screenshot to Linear and prints the address to put in a
     # comment. Only an image (its first bytes say so, not its name), and
-    # only from the folder a lane sets apart for what may leave ([linear]
+    # only from the folder a lane sets apart for what may leave ([tracker]
     # capture_roots, where * is one folder name): nothing else on this
     # machine leaves by here. The guard reads the text of a comment, not an
     # image: what is put in that folder was taken on the demonstration data.
@@ -223,8 +226,8 @@ case "${1:-}" in
       [ -n "$root" ] || continue
       pattern=$(realpath -m "$(expand_home "$root")" | sed 's/[][\.^$()+?{}|]/\\&/g; s/\*/[^\/]+/g')
       if [[ "$file" =~ ^$pattern/[^/]+$ ]]; then allowed=1; fi
-    done < <(conf_get linear capture_roots | tr ',' '\n' | sed 's/^ *//; s/ *$//')
-    [ -n "$allowed" ] || die "$file is not under a folder of captures ([linear] capture_roots): nothing sent"
+    done < <(conf_get tracker capture_roots | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+    [ -n "$allowed" ] || die "$file is not under a folder of captures ([tracker] capture_roots): nothing sent"
     case "$(head -c 8 "$file" | od -An -tx1 | tr -d ' \n')" in
       89504e470d0a1a0a) type=image/png ;;
       ffd8ff*) type=image/jpeg ;;
@@ -245,6 +248,23 @@ case "${1:-}" in
     ticket_ok "$2"
     gql 'query($id: String!) { issue(id: $id) { state { name } } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.state.name // empty'
     ;;
+  history)
+    ticket_ok "$2"
+    owner=$(owner_id) || exit 1
+    gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } createdAt creator { id app } history(first: 100) { nodes { createdAt actorId actor { id app } botActor { id } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')" \
+      | jq -c --arg owner "$owner" '(if $owner != "" then $owner else .data.viewer.id end) as $owner | [.data.issue.history.nodes[] | select(.toState.name != null) | {status: .toState.name, by: {kind: (if .botActor != null or .actor.app == true then "agents" elif .actorId == $owner and .actorId != null then "human" else "other" end), id: (.actorId // .botActor.id // "unknown")}, at: .createdAt}] as $history | (if ($history | length) == 0 and .data.issue.creator != null then [{status: .data.issue.state.name, by: {kind: (if .data.issue.creator.app == true then "agents" elif .data.issue.creator.id == $owner then "human" else "other" end), id: .data.issue.creator.id}, at: .data.issue.createdAt}] else $history end) | sort_by(.at)'
+    ;;
+  edit-comment)
+    ticket_ok "$2"
+    [ -f "${4:-}" ] || die "usage: tracker.sh edit-comment <ticket> <comment id> <body file>"
+    guard_text "$4" || exit 1
+    existing=$(gql 'query($id: String!) { comment(id: $id) { id user { id app } botActor { id } } viewer { id } }' "$(jq -nc --arg id "$3" '{id: $id}')")
+    [ "$(jq -r --arg identity "$identity" '.data.comment != null and (if $identity == "app" then .data.comment.user.app == true and .data.comment.user.id != null and .data.comment.user.id == .data.viewer.id else false end)' <<<"$existing")" = true ] || die "the comment was not written by the agent application"
+    body=$(cat "$4")
+    updated=$(gql 'mutation($id: String!, $body: String!) { commentUpdate(id: $id, input: {body: $body}) { success comment { id url } } }' "$(jq -nc --arg id "$3" --arg body "$body" '{id: $id, body: $body}')")
+    [ "$(jq -r '.data.commentUpdate.success' <<<"$updated")" = true ] || die "the comment could not be edited"
+    jq -r '.data.commentUpdate.comment.url' <<<"$updated"
+    ;;
   moved-by-owner)
     # Is the ticket in that status, and was it put there by the user
     # himself, after the time given when one is? 0: yes. 5: it is not in
@@ -252,7 +272,7 @@ case "${1:-}" in
     # agents among them), an integration or another account. 7: the tracker
     # has not written the move to its history yet. 8: by him, but before
     # the time given: an agreement to something else. The user is the one
-    # the settings of the project name ([linear] owner_id); with the key of
+    # the settings of the project name ([tracker] owner_id); with the key of
     # a person and no such setting, the owner of that key, whom the tracker
     # cannot tell from a program acting under his account. The tracker
     # merges the successive changes of one author in one line of history,
@@ -276,8 +296,9 @@ case "${1:-}" in
     [ -n "$last" ] || exit 7
     [ -n "$owner" ] || owner=$(jq -r '.data.viewer.id' <<<"$answer")
     [ "$(jq -r --arg owner "$owner" '.botActor == null and .actor.app != true and .actorId != null and .actorId == $owner' <<<"$last")" = true ] || exit 6
-    # Compared as times, to the second: the tracker writes fractions of a second, the request does not.
-    [ -z "$not_before" ] || [ "$(jq -r --arg from "$not_before" 'def seconds: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601; (.at | seconds) >= ($from | seconds)' <<<"$last")" = true ] || exit 8
+    # The request and the move carry subsecond times. A move earlier in the
+    # same second must not authorize the later request.
+    [ -z "$not_before" ] || [ "$(date -u -d "$(jq -r '.at' <<<"$last")" +%s%N)" -gt "$(date -u -d "$not_before" +%s%N)" ] || exit 8
     ;;
   move)
     # A script only ever puts a ticket in the statuses that say where the
@@ -288,11 +309,11 @@ case "${1:-}" in
     target=${3:-}
     allowed=
     for name in progress_state review_state validate_state done_state; do
-      [ -z "$(conf_get linear "$name")" ] || [ "$target" != "$(conf_get linear "$name")" ] || allowed=1
+      [ -z "$(conf_get tracker "$name")" ] || [ "$target" != "$(conf_get tracker "$name")" ] || allowed=1
     done
-    [ -n "$target" ] && [ -n "$allowed" ] && [ "$target" != "$(conf_get linear go_state)" ] \
-      || die "a script may only move a ticket to a status of the work, to \"$(conf_get linear validate_state)\" or to \"$(conf_get linear done_state)\", never to \"${target:-nothing}\""
-    found=$(gql 'query($id: String!, $team: String!) { issue(id: $id) { id } teams(filter: {key: {eq: $team}}) { nodes { states { nodes { id name } } } } }' "$(jq -nc --arg id "$2" --arg team "$(conf_get linear team)" '{id: $id, team: $team}')")
+    [ -n "$target" ] && [ -n "$allowed" ] && [ "$target" != "$(conf_get tracker go_state)" ] \
+      || die "a script may only move a ticket to a status of the work, to \"$(conf_get tracker validate_state)\" or to \"$(conf_get tracker done_state)\", never to \"${target:-nothing}\""
+    found=$(gql 'query($id: String!, $team: String!) { issue(id: $id) { id } teams(filter: {key: {eq: $team}}) { nodes { states { nodes { id name } } } } }' "$(jq -nc --arg id "$2" --arg team "$(conf_get tracker team)" '{id: $id, team: $team}')")
     issue_id=$(jq -r '.data.issue.id // empty' <<<"$found") state_id=$(jq -r --arg name "$target" '.data.teams.nodes[0].states.nodes[] | select(.name == $name) | .id' <<<"$found")
     [ -n "$issue_id" ] && [ -n "$state_id" ] || die "ticket \"$2\" or status \"$target\" not found in Linear"
     moved=$(gql 'mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }' "$(jq -nc --arg id "$issue_id" --arg state "$state_id" '{id: $id, input: {stateId: $state}}')")
@@ -304,7 +325,7 @@ case "${1:-}" in
     # « the tickets assigned to the one who asks »: the scripts act as the
     # application of the agents, to which nothing is assigned.
     gql 'query($team: String!, $state: String!) { issues(first: 50, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt comments(first: 1) { nodes { url createdAt } } } } }' \
-      "$(jq -nc --arg team "$(conf_get linear team)" --arg state "$(conf_get linear validate_state)" '{team: $team, state: $state}')" \
+      "$(jq -nc --arg team "$(conf_get tracker team)" --arg state "$(conf_get tracker validate_state)" '{team: $team, state: $state}')" \
       | jq -c '[.data.issues.nodes[] | {identifier, title, url: (.comments.nodes[0].url // .url), since: (.comments.nodes[0].createdAt // .updatedAt)}] | sort_by(.since)'
     ;;
   *)

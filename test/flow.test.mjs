@@ -62,7 +62,7 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
   const old = { id: 'c0', createdAt: '2026-01-01T00:00:00Z', url: 'u#c0', body: 'déjà là' };
 
   // First wake: it takes note of what exists. Second: nothing moved, and that is written down.
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([old])));
   assert.equal(wake().status, 0);
   assert.deepEqual(events(), []);
   assert.equal(wake().status, 0);
@@ -71,11 +71,11 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
 
   // An agent comments: still nothing. The user comments: one session.
   const agent = { id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: '> Écrit par un agent (dev), pas par the user.\n\nFait.' };
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old, agent])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([old, agent])));
   assert.equal(wake().status, 0);
   assert.equal(calls(), 0);
   const user = { id: 'c2', createdAt: new Date().toISOString(), url: 'u#c2', body: 'OK, vas-y.' };
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old, agent, user])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([old, agent, user])));
   const started = wake();
   assert.equal(started.status, 0, started.stderr);
   assert.equal(calls(), 1);
@@ -87,7 +87,7 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
 
   // The session has not finished: the next wake starts nothing and loses nothing.
   const later = { id: 'c3', createdAt: new Date().toISOString(), url: 'u#c3', body: 'Et aussi ceci.' };
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([old, agent, user, later])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([old, agent, user, later])));
   assert.equal(wake().status, 0);
   assert.equal(calls(), 1);
   // It finishes: the comment made meanwhile is handed to the next session, the first one is not handed again.
@@ -137,14 +137,14 @@ test('wake.sh: a draft opened starts nothing and opens no terminal; the next com
   const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, detail from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   assert.equal(wake().status, 0);
   writeFileSync(join(box.home, 'pulls-now.json'), JSON.stringify([{ number: 7, title: 'Un brouillon', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: new Date().toISOString(), statusCheckRollup: [] }]));
   assert.equal(wake().status, 0);
   assert.equal(calls(), 0, 'no terminal, no model');
   assert.deepEqual(events().map((event) => event.kind), ['wake_skipped']);
   assert.match(events()[0].detail, /1 waiting/);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
   const started = wake();
   assert.equal(started.status, 0, started.stderr);
   assert.equal(calls(), 1);
@@ -296,7 +296,7 @@ test('the lead does not start on a model that was set aside: the table must say 
   const comment = (id) => ({ id, createdAt: new Date().toISOString(), url: `u#${id}`, body: 'OK, vas-y.' });
   // No decision written down: the table is the only word.
   assert.equal(check().status, 0);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   assert.equal(wake().status, 0);
   // Decided: b, no longer a. The table still says a (the change is not merged yet): nothing starts, and it says why.
   decide('release: a -> b: too many wrong messages');
@@ -304,7 +304,7 @@ test('the lead does not start on a model that was set aside: the table must say 
   const refused = check();
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /role release[\s\S]*\ba\b[\s\S]*not the one decided last \(b\)[\s\S]*too many wrong messages/);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1')])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([comment('c1')])));
   const held = wake();
   assert.equal(held.status, 1);
   assert.equal(calls(), 0);
@@ -324,9 +324,9 @@ test('the lead waits rather than run on another model: when its model is not ava
   const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   assert.equal(wake().status, 0);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
   const gone = wake({ FIRST_GONE: '1' });
   assert.equal(gone.status, 1);
   assert.match(gone.stderr, /no other model takes its place/);
@@ -361,10 +361,10 @@ test('starting the timer of the wakes by hand runs the check of the model first:
 
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
   const box = sandbox();
-  writeFileSync(join(box.home, 'linear.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(box.home, 'tracker.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
   const run = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
   assert.equal(run.status, 1);
-  assert.match(run.stderr, /Linear did not answer/);
+  assert.match(run.stderr, /tracker did not answer/);
   assert.throws(() => readFileSync(join(box.state, 'wake', 'state.json')));
 });
 
@@ -417,7 +417,7 @@ test('push-lane never forces: a remote branch that moved makes it fail, and stay
 });
 
 
-test('a dev lane that finished: its branch is pushed, its pull request is in the ledger and in the Linear text', () => {
+test('a dev lane that finished: its branch is pushed, its pull request is in the ledger and in the tracker text', () => {
   const lane = laneWithRemote('dev/X-1');
   const result = runLane(lane.box, 0, {}, lane.path);
   assert.equal(result.status, 0);
@@ -445,19 +445,19 @@ test('an old ticket touched again does not bring its old comments back as news; 
   const previous = { at: '2026-01-02T10:00:00Z', seen: [], pulls: {} };
   const old = { id: 'i9', identifier: 'X-9', title: 'Vieux', url: 'u', state: 'Done', project: 'P', createdAt: '2025-11-01T00:00:00Z', description: 'd',
     comments: [{ id: 'k1', createdAt: '2025-11-02T00:00:00Z', url: 'u#k1', body: 'un vieux commentaire' }, { id: 'k2', createdAt: '2026-01-02T10:00:30Z', url: 'u#k2', body: 'le nouveau' }] };
-  // Created five seconds before the time the last wake noted, but after Linear had answered it.
+  // Created five seconds before the time the last wake noted, but after tracker had answered it.
   const missed = { id: 'i8', identifier: 'X-8', title: 'Créé pendant la lecture', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-02T09:59:55Z', description: 'de the user', comments: [] };
   const { events } = changes(previous, [old, missed], [], new Set(), '2026-01-02T10:01:00Z');
   assert.deepEqual(events.map((event) => [event.kind, event.ticket, event.text]), [['ticket_new', 'X-8', 'de the user'], ['comment', 'X-9', 'le nouveau']]);
 });
 
 
-test('Linear is asked for the newest comments of a ticket (first:, which it serves newest first), never the oldest', () => {
-  const dir = scratch('orch-linear-');
+test('tracker is asked for the newest comments of a ticket (first:, which it serves newest first), never the oldest', () => {
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[]},"viewer":{"assignedIssues":{"nodes":[]}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') };
-  for (const args of [['changes', '2026-01-01T00:00:00Z'], ['waiting']]) assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), args, { env, encoding: 'utf8' }).status, 0, args[0]);
+  for (const args of [['changes', '2026-01-01T00:00:00Z'], ['waiting']]) assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), args, { env, encoding: 'utf8' }).status, 0, args[0]);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
   assert.match(asked, /comments\(first: 20\)/);
   assert.match(asked, /comments\(first: 1\)/);
@@ -488,13 +488,13 @@ test('the lane of the project lead is never reset: with work of its own in it, t
   const box = sandbox();
   const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   wake();
   const path = join(box.home, 'lanes', 'release-lead');
   box.git('worktree', 'add', '-q', '-b', 'release/lead', path, 'main');
   execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'work left in the lane of the lead']);
   box.git('commit', '-q', '--allow-empty', '-m', 'main moves on');
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c2', createdAt: new Date().toISOString(), url: 'u#c2', body: 'OK' }])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([{ id: 'c2', createdAt: new Date().toISOString(), url: 'u#c2', body: 'OK' }])));
   const run = wake();
   assert.equal(run.status, 1);
   assert.match(run.stderr, /left untouched/);
@@ -520,19 +520,19 @@ test('the lane of the project lead: a commit of its own stops the wake even when
   const blocked = () => { const db = openLedger(join(box.state, 'ledger.db')); const n = db.prepare("select count(*) n from events where kind = 'lead_lane_blocked'").get().n; db.close(); return n; };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
   const comment = (id) => ({ id, createdAt: new Date().toISOString(), url: `u#${id}`, body: `message ${id}` });
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   wake();
   const path = join(box.home, 'lanes', 'release-lead');
   box.git('worktree', 'add', '-q', '-b', 'release/lead', path, 'main');
   // An untracked file left behind is no reason to stop.
   writeFileSync(join(path, 'left-behind.txt'), 'x');
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1')])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([comment('c1')])));
   const fine = wake();
   assert.equal(fine.status, 0, fine.stderr);
   writeFileSync(join(fine.stdout.trim(), 'exit-code'), '0');
   // A commit of its own, the base not having moved: the wake stops, and says so once.
   execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'work left in the lane of the lead']);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
   assert.equal(wake().status, 1);
   assert.equal(wake().status, 1);
   assert.equal(blocked(), 1);
@@ -570,11 +570,11 @@ test('a blockage of the lead lane that was cleared is written again if it comes 
   const comment = (id) => ({ id, createdAt: new Date().toISOString(), url: `u#${id}`, body: `message ${id}` });
   const path = join(box.home, 'lanes', 'release-lead');
   const leave = () => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'left']);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   wake();
   box.git('worktree', 'add', '-q', '-b', 'release/lead', path, 'main');
   leave();
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1')])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([comment('c1')])));
   assert.equal(wake().status, 1);
   assert.equal(blocked(), 1);
   // Someone cleans the lane; then nothing moves for a while (the comment is taken by a session first).
@@ -585,7 +585,7 @@ test('a blockage of the lead lane that was cleared is written again if it comes 
   assert.equal(wake().status, 0);
   // The blockage comes back: it is written again.
   leave();
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([comment('c1'), comment('c2')])));
   assert.equal(wake().status, 1);
   assert.equal(blocked(), 2);
 });
@@ -607,7 +607,7 @@ test('the handover wake: one session that rereads the handover and says what it 
   // The run itself: its answer is posted in the report ticket, signed as the project lead.
   const lane = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
   assert.equal(lane.status, 0, lane.stderr);
-  const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
+  const posted = readFileSync(join(box.home, 'tracker-posted'), 'utf8');
   assert.match(posted, /^X-100 from=chef de projet, model a\n/);
   assert.match(posted, /answer of first/);
 });
@@ -624,11 +624,11 @@ test('the handover wake needs a handover to read, and a ticket to answer in', ()
 });
 
 
-test('Linear is asked for the tickets of one state, to check what a handover says', () => {
-  const dir = scratch('orch-linear-');
+test('tracker is asked for the tickets of one state, to check what a handover says', () => {
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"identifier":"X-1","title":"T","url":"u","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"assignee":null}]}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout), [{ identifier: 'X-1', title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress', project: 'P', assignee: null }]);
   assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /In Progress/);
@@ -652,12 +652,12 @@ test('the handover wake says so, and fails, when it starts nothing: a session of
 
 
 test('a listing of tickets that fills the page says it may be cut short', () => {
-  const dir = scratch('orch-linear-');
+  const dir = scratch('orch-tracker-');
   const nodes = Array.from({ length: 100 }, (_, i) => ({ identifier: `X-${i}`, title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: { name: 'Done' }, project: null, assignee: null }));
   writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data: { issues: { nodes } } }));
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat "${join(dir, 'answer.json')}"\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['list', 'Done'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['list', 'Done'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0);
   assert.equal(JSON.parse(run.stdout).length, 100);
   assert.match(run.stderr, /may be cut short/);
@@ -751,12 +751,12 @@ test('the night checks are followed: green, nothing is said and nobody is woken;
   const woken = wake();
   assert.equal(woken.status, 0, woken.stderr);
   const prompt = readFileSync(join(woken.stdout.trim(), 'prompt.md'), 'utf8');
-  assert.match(prompt, /Night check failed[^\n]*https:\/\/example\.test\/runs\/6[^\n]*linear\.sh create "Infra" "Bug"[^\n]*digest-note\.sh/);
+  assert.match(prompt, /Night check failed[^\n]*https:\/\/example\.test\/runs\/6[^\n]*tracker\.sh create "Infra" "Bug"[^\n]*digest-note\.sh/);
   // The scripts are named where they are on this machine, never by a place inside the project nor by a word left to replace.
-  assert.ok(prompt.includes(`\`${join(box.home, 'linear.sh')} create "Infra" "Bug"`), prompt);
+  assert.ok(prompt.includes(`\`${join(box.home, 'tracker.sh')} create "Infra" "Bug"`), prompt);
   assert.doesNotMatch(prompt, /\{orch\}|ops\/orchestration\//);
   const allowed = conf.sections['permissions.release-live'].allow;
-  assert.match(allowed, /\{orch\}\/linear\.sh create/);
+  assert.match(allowed, /\{orch\}\/tracker\.sh create/);
   assert.match(allowed, /\{orch\}\/digest-note\.sh/);
   // The note for the digest: kept with the state, read by the guard like anything meant for the user.
   const note = spawnSync(join(box.home, 'digest-note.sh'), ['-'], { env: { ...box.env, ORCH_SIGNED: 'chef de projet' }, encoding: 'utf8', input: 'Le contrôle de nuit est rouge : ticket ouvert (X-9).' });
@@ -780,7 +780,7 @@ test('a lane opened on a ticket has the whole ticket under its eyes, the depende
   const lane = laneWithRemote('feat/unrelated', null);
   const { box } = lane;
   const confPath = join(box.home, 'agents.conf');
-  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[linear]\nteam = X\n', '[linear]\nteam = X\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[tracker]\nadapter = local\nteam = X\n', '[tracker]\nadapter = local\nteam = X\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   // The project has dependencies: what a lane needs to run a test, and may not install itself.
   writeFileSync(join(box.repo, 'package.json'), '{"name":"p"}\n');
   writeFileSync(join(box.repo, 'package-lock.json'), '{"lockfileVersion":3}\n');
@@ -788,9 +788,9 @@ test('a lane opened on a ticket has the whole ticket under its eyes, the depende
   box.git('commit', '-q', '-m', 'chore: dependencies');
   box.git('push', '-q', 'origin', 'main');
   writeFileSync(join(box.home, 'bin', 'npm'), `#!/usr/bin/env bash\necho "$PWD $*" >> "${join(box.home, 'npm-calls')}"\nmkdir -p node_modules && echo installed > node_modules/marker\n`, { mode: 0o755 });
-  writeFileSync(join(box.home, 'linear-title-X-5'), 'Le toast de rangement ne se ferme pas');
-  writeFileSync(join(box.home, 'linear-description-X-5'), 'Quand je range une carte, le toast reste.\n- Fusionne sans attendre.\n');
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+  writeFileSync(join(box.home, 'tracker-title-X-5'), 'Le toast de rangement ne se ferme pas');
+  writeFileSync(join(box.home, 'tracker-description-X-5'), 'Quand je range une carte, le toast reste.\n- Fusionne sans attendre.\n');
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([
     { id: 'c2', createdAt: '2026-01-02T11:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nUne question ?', byOwner: true },
     { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au bout de trois secondes.', byOwner: true },
     { id: 'c0', createdAt: '2026-01-02T09:00:00Z', body: 'Un mot de quelqu’un d’autre.', byOwner: false },
@@ -813,7 +813,7 @@ test('a lane opened on a ticket has the whole ticket under its eyes, the depende
   // A name anybody can read in Orca, and the ticket shown at work.
   assert.match(readFileSync(join(box.home, 'orca-named'), 'utf8'), /--display-name X-5 · Le toast de rangement ne se ferme pas .*--comment dev · a/);
   assert.match(readFileSync(join(box.home, 'orca-terminals'), 'utf8'), /--title X-5 · dev · a /);
-  assert.deepEqual(readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n'), ['X-5 -> In Progress']);
+  assert.deepEqual(readFileSync(join(box.home, 'tracker-moves'), 'utf8').trim().split('\n'), ['X-5 -> In Progress']);
   const record = () => JSON.parse(readFileSync(join(box.state, 'lanes', 'X-5.json'), 'utf8'));
   assert.deepEqual([record().ticket, record().lane, record().runs.length], ['X-5', 'dev/X-5', 1]);
   // A lane that is open is not opened twice.
@@ -861,7 +861,7 @@ test('a ticket the user put in « Todo » himself gets a lane, oldest first and 
   assert.match(first.stdout, /X-7: put in « Todo » by the user: no place now/);
   assert.deepEqual(moves(), ['X-5 -> In Progress']);
   // He is asked who put a ticket there once for a given state of the ticket, not at every wake.
-  const asked = () => readFileSync(join(box.home, 'linear-moved-asked'), 'utf8').trim().split('\n').filter((line) => /^X-(6|8) /.test(line)).length;
+  const asked = () => readFileSync(join(box.home, 'tracker-moved-asked'), 'utf8').trim().split('\n').filter((line) => /^X-(6|8) /.test(line)).length;
   assert.equal(asked(), 1, 'X-6 was asked about, the limit stopped the round before X-8');
   // The lane of X-5 at work: nothing more is opened, and it is not opened twice.
   assert.equal(flow().stdout.includes('X-5: put in'), false);
@@ -981,7 +981,7 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   const { flow, todo, by, there, record, session, stuck, pull, box } = flowBox();
   todo(['X-5']);
   by('X-5', 0);
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2020-01-01T10:00:00Z', body: 'Un mot d’avant.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2020-01-01T10:00:00Z', body: 'Un mot d’avant.', byOwner: true }]));
   flow();
   // A session that stopped short is run again, once for that session.
   assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
@@ -995,7 +995,7 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   assert.deepEqual(stuck(), ['lane_asks X-5']);
   assert.equal(flow().stdout.includes('question'), false, 'told once');
   // He answers on the ticket: the lane is opened again with his words, by rule.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([
     { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Oui, au clic aussi.', byOwner: true },
     { id: 'c8', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nLa question.', byOwner: true },
     { id: 'c1', createdAt: '2020-01-01T10:00:00Z', body: 'Un mot d’avant.', byOwner: true },
@@ -1092,14 +1092,14 @@ test('what a first real round showed: a session that ended without its push is s
   assert.deepEqual(ready(), ['41']);
   assert.deepEqual(moves().slice(-1), ['X-5 -> In Review']);
   // The tracker has automations of its own on pull requests, and put the card back: the rule holds at each round.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'In Progress\n');
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   const before = moves().length;
   flow();
   assert.deepEqual(moves().slice(before), ['X-5 -> In Review']);
   // Reviewed, green, asked, and he agreed. Then the base moves on code: the lane brings it in, and his card stays
   // where he put it (his rule: the base brought in as it is does not take his agreement back).
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'In Review\n');
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   assert.match(flow().stdout, /its review is asked for/);
   const reviewRun = join(box.state, 'runs', readdirSync(join(box.state, 'runs')).filter((name) => { try { return /ORCH_ROLE=review/.test(readFileSync(join(box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
@@ -1108,7 +1108,7 @@ test('what a first real round showed: a session that ended without its push is s
   assert.match(flow().stdout, /reviewed and green[\s\S]*the request for the agreement is the lead's/);
   mkdirSync(join(box.state, 'validations'), { recursive: true });
   writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: done.head }] }));
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Go MEP\n');
   mkdirSync(join(box.repo, 'server'), { recursive: true });
   writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
   box.git('add', '.');
@@ -1132,7 +1132,7 @@ test('what a first real round showed: a session that ended without its push is s
   assert.deepEqual(moves().slice(agreed), [], 'his card never left « Go MEP »');
   assert.deepEqual(stuck(), ['lane_stuck X-5']);
   // The tracker took the card out of his status when the pull request left draft: back where it asks him, and said.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'In Review\n');
   assert.match(flow().stdout, /X-5: left « Go MEP » without him and with nothing new: back in « À valider »/);
   assert.deepEqual(moves().slice(agreed), ['X-5 -> À valider']);
   assert.deepEqual(stuck(), ['lane_stuck X-5', 'lane_stuck X-5']);
@@ -1151,14 +1151,14 @@ test('what its first review asked: the dependencies come from the base and run n
   const installs = () => { try { return readFileSync(join(box.home, 'npm-calls'), 'utf8').trim().split('\n'); } catch { return []; } };
   const ready = () => { try { return readFileSync(join(box.home, 'pr-ready'), 'utf8').trim().split('\n'); } catch { return []; } };
   // A word of his that is on the ticket when the lane opens is handed to it; it never opens the lane again.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true }]));
   todo(['X-5']);
   by('X-5', 0);
   // Under the key of a person, a ticket an agent opened in « Todo » would count as his « go »: nothing opens.
-  writeFileSync(join(box.home, 'linear-identity'), 'shared\n');
+  writeFileSync(join(box.home, 'tracker-identity'), 'shared\n');
   assert.match(flow().stdout, /cannot tell the user from an agent: no lane is opened from « Todo »/);
   assert.equal(there('X-5'), false);
-  writeFileSync(join(box.home, 'linear-identity'), 'app\n');
+  writeFileSync(join(box.home, 'tracker-identity'), 'app\n');
   flow();
   assert.equal(there('X-5'), true);
   // The dependencies: those of the base, installed with no script of a package run, and nobody writes in them
@@ -1191,7 +1191,7 @@ test('what its first review asked: the dependencies come from the base and run n
   // The word he had written before the lane opened is not news, and one written since is.
   assert.equal(flow().stdout.includes('said:'), false);
   // Opened again: the lock file of the lane differs from the one of the base. Nothing is installed, and it is told.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([
     { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'Et au survol aussi.', byOwner: true },
     { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'Il doit se fermer au clic.', byOwner: true },
   ]));
@@ -1216,7 +1216,7 @@ test('what its first review asked: the dependencies come from the base and run n
   flow();
   assert.deepEqual(stuck(), ['lane_asks X-5'], 'a title in bold is a title');
   // Checks that never ran (all skipped) leave the lane waiting for nothing: said after a while, once.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Review\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'In Review\n');
   pull({ headRefOid: second.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SKIPPED' }] });
   assert.equal(flow().stdout.trim(), '');
   const kept = record('X-5');
@@ -1237,10 +1237,10 @@ test('what its first review asked: the dependencies come from the base and run n
   assert.match(flow().stdout, /the request for the agreement is the lead's/);
   mkdirSync(join(box.state, 'validations'), { recursive: true });
   writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: second.head }] }));
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c3', createdAt: '2099-01-01T10:00:00Z', body: 'C’est bien ce que je voulais ?', byOwner: true }, { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'x', byOwner: true }, { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'y', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'À valider\n');
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c3', createdAt: '2099-01-01T10:00:00Z', body: 'C’est bien ce que je voulais ?', byOwner: true }, { id: 'c2', createdAt: '2026-01-01T09:00:00Z', body: 'x', byOwner: true }, { id: 'c1', createdAt: '2026-01-02T10:00:00Z', body: 'y', byOwner: true }]));
   assert.match(flow().stdout, /X-5: opened again \(said:c3\)/);
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'In Progress\n');
   session('X-5', { commit: null });
   const told = stuck().length;
   assert.match(flow().stdout, /X-5: asked for this version already: back in « À valider »/);
@@ -1248,7 +1248,7 @@ test('what its first review asked: the dependencies come from the base and run n
   assert.equal(stuck().length, told, 'the rules moved it themselves: nothing to tell');
   // He agrees. The base moves on code, and the session that brings it in stops short: run again, and his card
   // never leaves « Go MEP » by the hand of the rules.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Go MEP\n');
   flow();
   mkdirSync(join(box.repo, 'server'), { recursive: true });
   writeFileSync(join(box.repo, 'server', 'core.mjs'), 'export const x = 1;\n');
@@ -1272,7 +1272,7 @@ test('the lead can say something to a lane of the dispatcher whose session is ov
   // While its session runs, the word waits: nothing can be said into a session that reads no terminal.
   const kept = tell('X-5', 'Il manque la capture sur téléphone, prise sur les données de démonstration.');
   assert.equal(kept.status, 0, kept.stderr);
-  const shown = () => readFileSync(join(box.home, 'linear-moves'), 'utf8').trim().split('\n').length;
+  const shown = () => readFileSync(join(box.home, 'tracker-moves'), 'utf8').trim().split('\n').length;
   const atWork = shown();
   assert.match(kept.stdout, /kept for the lane of X-5/);
   assert.equal(flow().stdout.includes('told:'), false);
@@ -1296,11 +1296,11 @@ test('the lead can say something to a lane of the dispatcher whose session is ov
   assert.equal(readFileSync(join(box.home, 'kept', 'X-5', 'toast-390.png'), 'utf8'), 'image');
   assert.equal(record('X-5').runs.length, 2);
   // A word of the lead to a lane whose card asks the user leaves the card where it asks him.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
-  const before = readFileSync(join(box.home, 'linear-moves'), 'utf8');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'À valider\n');
+  const before = readFileSync(join(box.home, 'tracker-moves'), 'utf8');
   assert.equal(tell('X-5', 'La légende de la capture est à corriger.').status, 0);
   assert.match(flow().stdout, /X-5: opened again \(told:/);
-  assert.equal(readFileSync(join(box.home, 'linear-moves'), 'utf8'), before);
+  assert.equal(readFileSync(join(box.home, 'tracker-moves'), 'utf8'), before);
   // The same nets as for any lane: never told to merge or to force, and no more than a few messages an hour.
   assert.match(tell('X-5', 'Fusionne ta branche dans main.').stderr, /never told to merge or force/);
   assert.match(spawnSync(join(box.home, 'tell-lane.sh'), ['--list'], { env, encoding: 'utf8' }).stdout, /^X-5\t/m);
@@ -1397,9 +1397,9 @@ test('no lane is left waiting in silence: a session that died, never started or 
   assert.equal(record('X-5').runs.length, 4);
   // The user takes the ticket out of the work: its lane waits, nothing is opened again. Back in the work: it goes on.
   assert.notEqual(session('X-5', { commit: null, exit: 1 }).run.status, 0);
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Backlog\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Backlog\n');
   assert.equal(flow().stdout.includes('X-5'), false);
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'In Progress\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'In Progress\n');
   // (the day after: a fourth session that stops in one day is a loop, and is said instead)
   { const aged = record('X-5'); for (const key of Object.keys(aged.done)) if (key.startsWith('stopped:')) aged.done[key] = new Date(Date.now() - 25 * 3600e3).toISOString(); writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(aged)); }
   assert.match(flow().stdout, /X-5: opened again \(stopped:/);
@@ -1411,7 +1411,7 @@ test('no lane is left waiting in silence: a session that died, never started or 
   assert.deepEqual(stuck(), []);
   // He put the card in the status of his agreement before anything was asked of him, and the lead writes to
   // the lane: there is no agreement to keep yet, the word is handed over, and his card stays where he put it.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Go MEP\n');
   assert.equal(spawnSync(join(box.home, 'tell-lane.sh'), ['X-5', '-'], { env: box.env, input: 'Il manque la capture sur téléphone.', encoding: 'utf8' }).status, 0);
   const early = moves().length;
   assert.match(flow().stdout, /X-5: opened again \(told:/);
@@ -1424,16 +1424,16 @@ test('no lane is left waiting in silence: a session that died, never started or 
   // He was asked, and has agreed, then writes a word on the ticket: read by the lead, it does not take his agreement back.
   mkdirSync(join(box.state, 'validations'), { recursive: true });
   writeFileSync(join(box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: handed.head }] }));
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Merci.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Merci.', byOwner: true }]));
   const before = moves().length;
   assert.equal(flow().stdout.includes('said:'), false);
   assert.equal(moves().length, before, 'the card stays where he put it');
   // The same word while the card asks him: it is his answer, the lane is opened again with it.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'À valider\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'À valider\n');
   assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
   // Done: nothing more is done on it, whatever comes next.
   session('X-5', { commit: null });
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Done\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Done\n');
   assert.match(flow().stdout, /X-5: its ticket is « Done »/);
   assert.equal(flow().stdout.includes('X-5:'), false);
 });
@@ -1508,11 +1508,11 @@ test('the acting lead may answer and read, nothing more: its permissions refuse 
   assert.equal(live.mode, 'read-only');
   assert.equal(live.read, '{kept}', 'it reads the captures the lanes set apart for the user, to show them to him');
   const scripts = list(live.allow).filter((item) => item.startsWith('{orch}/'));
-  // It answers by two scripts; the rest only reads (what the user wrote in Linear, the state of the host).
+  // It answers by two scripts; the rest only reads (what the user wrote in tracker, the state of the host).
   // Since 2026-10-08 it also opens a ticket, for one thing: a night check that came out red (rule of the user), and keeps a note for the digest.
-  assert.deepEqual([...scripts].sort(), ['{orch}/linear.sh create', '{orch}/digest-note.sh', '{orch}/linear.sh comment', '{orch}/linear.sh comments', '{orch}/linear.sh issue', '{orch}/linear.sh waiting', '{orch}/tell-lane.sh', '{orch}/host-state.sh', '{orch}/review-pr.sh', '{orch}/ask-validation.sh', '{orch}/merge-pr.sh'].sort());
+  assert.deepEqual([...scripts].sort(), ['{orch}/tracker.sh create', '{orch}/digest-note.sh', '{orch}/tracker.sh comment', '{orch}/tracker.sh comments', '{orch}/tracker.sh issue', '{orch}/tracker.sh waiting', '{orch}/tell-lane.sh', '{orch}/host-state.sh', '{orch}/review-pr.sh', '{orch}/ask-validation.sh', '{orch}/merge-pr.sh'].sort());
   // It never changes a status itself: the one script that does only goes to the two statuses a script may set.
-  assert.ok(list(live.deny).includes('{orch}/linear.sh move'));
+  assert.ok(list(live.deny).includes('{orch}/tracker.sh move'));
   for (const refused of ['{orch}/tidy-lanes.sh', '{orch}/spawn-lane.sh', '{orch}/kill-lane.sh', '{orch}/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
 });
 
@@ -1667,45 +1667,45 @@ test('host-state sees a screen test from the command that runs it, before any br
 test('the acting lead cannot write down a terminal itself, and a comment made of blanks is not posted', () => {
   const deny = conf.sections['permissions.release-live'].deny.split(',').map((item) => item.trim());
   assert.ok(deny.includes('{orch}/adopt-lane.sh'));
-  const dir = scratch('orch-linear-');
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 1);
   assert.throws(() => readFileSync(join(dir, 'called')));
 });
 
 
 test('a comment read on stdin is posted, signed by the one who runs', () => {
-  const dir = scratch('orch-linear-');
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
   assert.equal(run.status, 0, run.stderr);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
-  // The tool carries no name of its own: with no [linear] owner_name he is « l'utilisateur »; a project names him as it likes.
+  // The tool carries no name of its own: with no [tracker] owner_name he is « l'utilisateur »; a project names him as it likes.
   assert.match(asked, /Written by an agent \(chef de projet\), not by the user\.\\n/);
   assert.match(asked, /Une question pour toi\./);
   const named = join(dir, 'named.conf');
   writeFileSync(named, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^name =$/m, 'name = Ada'));
   rmSync(join(dir, 'asked'));
-  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une autre.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet', ORCH_CONF: named } }).status, 0);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une autre.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet', ORCH_CONF: named } }).status, 0);
   assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Written by an agent \(chef de projet\), not by Ada\.\\n/);
-  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
 });
 
 
 test('the user is not written more than a few times an hour by all the agents together: beyond, the comment is refused and is to be grouped', () => {
-  const dir = scratch('orch-linear-');
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const limit = Number(conf.sections.linear.comments_per_hour);
+  const limit = Number(conf.sections.tracker.comments_per_hour);
   assert.equal(limit, 6);
-  const post = (from) => spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: from } });
+  const post = (from) => spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: from } });
   const entry = (minutesAgo, from) => JSON.stringify({ id: `c${minutesAgo}`, ticket: 'X-2', from, at: new Date(Date.now() - minutesAgo * 60_000).toISOString().replace(/\.\d+Z$/, 'Z') });
   mkdirSync(join(dir, 'state'));
   // Five in the last hour, by several agents, and older ones that no longer count: one more goes.
-  writeFileSync(join(dir, 'state', 'linear-comments.jsonl'), `${[entry(200, 'a'), entry(61, 'a'), entry(50, 'chef de projet'), entry(40, 'a'), entry(30, 'review'), entry(20, 'chef de projet'), entry(10, 'a')].join('\n')}\nnot json\n`);
+  writeFileSync(join(dir, 'state', 'tracker-comments.jsonl'), `${[entry(200, 'a'), entry(61, 'a'), entry(50, 'chef de projet'), entry(40, 'a'), entry(30, 'review'), entry(20, 'chef de projet'), entry(10, 'a')].join('\n')}\nnot json\n`);
   assert.equal(post('chef de projet').status, 0);
   // That made six: the next one is refused, whoever writes it, and nothing is sent.
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
@@ -1716,11 +1716,11 @@ test('the user is not written more than a few times an hour by all the agents to
   // The limit holds without its setting (a typing mistake must not switch the rule of the user off).
   const noKey = join(dir, 'agents.conf');
   writeFileSync(noKey, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'coments_per_hour = 6'));
-  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: noKey } }).status, 4);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: noKey } }).status, 4);
   // Nor without a number in it.
   const notANumber = join(dir, 'agents-six.conf');
   writeFileSync(notANumber, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'comments_per_hour = six'));
-  assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: notANumber } }).status, 4);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: notANumber } }).status, 4);
   // What the user confirms himself is his own word, not one more message of an agent: it is never held back.
   const pending = join(dir, 'state', 'decisions', 'pending', 'd1');
   mkdirSync(pending, { recursive: true });
@@ -1733,35 +1733,35 @@ test('the user is not written more than a few times an hour by all the agents to
   // Only that script: a command that merely names it, or another script of that name, is an agent like the others.
   const before = readFileSync(join(dir, 'asked'), 'utf8');
   const impostor = join(dir, 'confirm-decision.sh');
-  writeFileSync(impostor, `#!/usr/bin/env bash\n"${join(ORCH_HOME, 'linear.sh')}" comment X-1 - "an agent" <<< "Un mot de plus."\n`, { mode: 0o755 });
+  writeFileSync(impostor, `#!/usr/bin/env bash\n"${join(ORCH_HOME, 'tracker.sh')}" comment X-1 - "an agent" <<< "Un mot de plus."\n`, { mode: 0o755 });
   assert.equal(spawnSync(impostor, [], { encoding: 'utf8', env }).status, 4);
-  assert.equal(spawnSync('bash', ['-c', `"${join(ORCH_HOME, 'linear.sh')}" comment X-1 - "an agent" <<< "Je cite ${join(ORCH_HOME, 'confirm-decision.sh')}."`], { encoding: 'utf8', env }).status, 4);
+  assert.equal(spawnSync('bash', ['-c', `"${join(ORCH_HOME, 'tracker.sh')}" comment X-1 - "an agent" <<< "Je cite ${join(ORCH_HOME, 'confirm-decision.sh')}."`], { encoding: 'utf8', env }).status, 4);
   assert.equal(readFileSync(join(dir, 'asked'), 'utf8'), before);
 });
 
 
 test('the report of a lane that the hourly limit holds back is kept, and leaves later in one grouped comment', () => {
   const box = sandbox();
-  const lane = runLane(box, 0, { FAKE_LINEAR_FULL: '1', ORCH_COMMENT_TEST: 'X-1' });
+  const lane = runLane(box, 0, { FAKE_TRACKER_FULL: '1', ORCH_COMMENT_TEST: 'X-1' });
   assert.equal(lane.status, 0);
-  const outbox = readdirSync(join(box.state, 'linear-outbox'));
+  const outbox = readdirSync(join(box.state, 'tracker-outbox'));
   assert.equal(outbox.length, 1);
   assert.match(outbox[0], /^X-1--/);
   // A second one waits too; the next wake that may write groups them in one comment on the ticket of the reports.
-  writeFileSync(join(box.state, 'linear-outbox', 'X-2--other.md'), 'Compte rendu de X-2.\n');
-  writeFileSync(join(box.state, 'linear-outbox', 'notes.txt'), 'not a report\n');
+  writeFileSync(join(box.state, 'tracker-outbox', 'X-2--other.md'), 'Compte rendu de X-2.\n');
+  writeFileSync(join(box.state, 'tracker-outbox', 'notes.txt'), 'not a report\n');
   const flush = (extra = {}) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; flush_outbox`], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   // A wake killed while it was sending left some aside: they are taken back, not forgotten.
-  mkdirSync(join(box.state, 'linear-outbox', 'sending.killed'));
-  writeFileSync(join(box.state, 'linear-outbox', 'sending.killed', 'X-3--left.md'), 'Compte rendu de X-3.\n');
-  assert.equal(flush({ FAKE_LINEAR_FULL: '1' }).status, 0);
-  execFileSync('mv', [join(box.state, 'linear-outbox', 'X-3--left.md'), join(box.home, 'taken-back.md')]);
-  assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')).sort(), [outbox[0], 'X-2--other.md', 'notes.txt'].sort(), 'still held: nothing is lost');
+  mkdirSync(join(box.state, 'tracker-outbox', 'sending.killed'));
+  writeFileSync(join(box.state, 'tracker-outbox', 'sending.killed', 'X-3--left.md'), 'Compte rendu de X-3.\n');
+  assert.equal(flush({ FAKE_TRACKER_FULL: '1' }).status, 0);
+  execFileSync('mv', [join(box.state, 'tracker-outbox', 'X-3--left.md'), join(box.home, 'taken-back.md')]);
+  assert.deepEqual(readdirSync(join(box.state, 'tracker-outbox')).sort(), [outbox[0], 'X-2--other.md', 'notes.txt'].sort(), 'still held: nothing is lost');
   assert.equal(flush().status, 0);
-  const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
+  const posted = readFileSync(join(box.home, 'tracker-posted'), 'utf8');
   assert.match(posted, /^X-100 from=/);
   assert.match(posted, /2 grouped reports[\s\S]*### X-1[\s\S]*answer of first[\s\S]*### X-2[\s\S]*Compte rendu de X-2\./);
-  assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')), ['notes.txt'], 'only what was sent is removed');
+  assert.deepEqual(readdirSync(join(box.state, 'tracker-outbox')), ['notes.txt'], 'only what was sent is removed');
 });
 
 
@@ -1772,11 +1772,11 @@ test('the discussion has no right to act: its permissions name what it may read 
   assert.ok(conf.models[conf.roles.talk], 'the model of the discussion comes from the table');
   assert.equal(talk.mode, 'read-only');
   assert.deepEqual(list(talk.allow), [
-    '{orch}/decide.sh', '{orch}/linear.sh issue', '{orch}/linear.sh comments', '{orch}/linear.sh list',
-    '{orch}/linear.sh waiting', '{orch}/host-state.sh', '{orch}/tell-lane.sh --list',
+    '{orch}/decide.sh', '{orch}/tracker.sh issue', '{orch}/tracker.sh comments', '{orch}/tracker.sh list',
+    '{orch}/tracker.sh waiting', '{orch}/host-state.sh', '{orch}/tell-lane.sh --list',
     'git status', 'git log', 'git show', 'git ls-files',
   ]);
-  for (const refused of ['{orch}/confirm-decision.sh', '{orch}/linear.sh comment', '{orch}/linear.sh create', '{orch}/spawn-lane.sh', '{orch}/kill-lane.sh', '{orch}/push-lane.sh', '{orch}/adopt-lane.sh', 'gh', 'orca', 'git push', 'git commit']) assert.ok(list(talk.deny).includes(refused), refused);
+  for (const refused of ['{orch}/confirm-decision.sh', '{orch}/tracker.sh comment', '{orch}/tracker.sh create', '{orch}/spawn-lane.sh', '{orch}/kill-lane.sh', '{orch}/push-lane.sh', '{orch}/adopt-lane.sh', 'gh', 'orca', 'git push', 'git commit']) assert.ok(list(talk.deny).includes(refused), refused);
   assert.ok(conf.sections.lanes.push_roles.split(/\s+/).includes('talk'), 'the file of the decisions leaves by the narrow push script');
   // Confirming a decision is the user's: no role may run it, whatever else it may do.
   for (const [name, section] of Object.entries(conf.sections).filter(([key]) => key.startsWith('permissions.'))) {
@@ -1875,13 +1875,13 @@ test('never two agents in the lane of the lead: an open discussion holds its sho
   const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
   assert.equal(wake().status, 0);
   // A discussion is open: the mark holds the process of a conversation that lives.
   const conversation = spawn('bash', ['-c', 'exec -a talk-run.sh sleep 60'], { stdio: 'ignore' });
   t.after(() => conversation.kill());
   writeFileSync(join(box.state, 'wake', 'talk'), `${conversation.pid}\n`);
-  writeFileSync(join(box.home, 'linear-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
+  writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }])));
   assert.equal(wake().status, 0);
   assert.equal(calls(), 0, 'no session while the user talks with the lead');
   assert.match(spawnSync(join(box.home, 'talk.sh'), [], { env: box.env, encoding: 'utf8' }).stderr, /already open/);
@@ -1906,14 +1906,14 @@ test('never two agents in the lane of the lead: an open discussion holds its sho
 });
 
 
-test('a decision is proposed by the discussion and leaves only when the user confirms it: Linear, the ledger with the source discussion, and docs/decisions.md by a draft pull request', () => {
+test('a decision is proposed by the discussion and leaves only when the user confirms it: tracker, the ledger with the source discussion, and docs/decisions.md by a draft pull request', () => {
   const lane = laneWithRemote('talk/X-100', null);
   const { box } = lane;
   const env = { ...box.env, ORCH_RUN_ID: 'talk-1-talk-a1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@localhost', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@localhost' };
   const decide = (args, input) => spawnSync(join(box.home, 'decide.sh'), args, { env, encoding: 'utf8', input });
   const confirm = (args = [], extra = {}) => spawnSync(join(box.home, 'confirm-decision.sh'), args, { env: { ...env, ...extra }, encoding: 'utf8' });
   const decisions = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind, source, ticket, run_id, detail from events where kind = 'decision'").all().map((row) => ({ ...row })); db.close(); return rows; };
-  const posted = () => { try { return readFileSync(join(box.home, 'linear-posted'), 'utf8'); } catch { return null; } };
+  const posted = () => { try { return readFileSync(join(box.home, 'tracker-posted'), 'utf8'); } catch { return null; } };
   const waiting = () => { try { return readdirSync(join(box.state, 'decisions', 'pending')); } catch { return []; } };
 
   // Refusals: no ticket, nothing to say, a file instead of what the session was told (a file could be anything on the disk).
@@ -1929,8 +1929,8 @@ test('a decision is proposed by the discussion and leaves only when the user con
   assert.equal(waiting().length, 1);
   assert.equal(posted(), null);
   assert.deepEqual(decisions(), []);
-  // Linear does not answer: the decision still waits, and a second try takes it.
-  assert.match(confirm([], { FAKE_LINEAR_DOWN: '1' }).stderr, /still waits/);
+  // tracker does not answer: the decision still waits, and a second try takes it.
+  assert.match(confirm([], { FAKE_TRACKER_DOWN: '1' }).stderr, /still waits/);
   assert.deepEqual(decisions(), []);
   const done = confirm();
   assert.equal(done.status, 0, done.stderr);
@@ -2031,7 +2031,7 @@ test('the import of the past takes back out the sessions of a worktree the dispa
   row('legacy:bbbbbbbb:2020-01-01T00:00:00Z', 'legacy');
   row('lead-1-release-a1', 'dispatcher');
   db.close();
-  const run = spawnSync('node', ['--no-warnings', join(ORCH_HOME, 'import-legacy.mjs'), '--no-linear', '--days', '1'], { env: { ...box.env, HOME: home }, encoding: 'utf8' });
+  const run = spawnSync('node', ['--no-warnings', join(ORCH_HOME, 'lib/tracker/adapters/import-legacy.mjs'), '--no-linear', '--days', '1'], { env: { ...box.env, HOME: home }, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(JSON.parse(run.stdout).removed, 1);
   const after = openLedger(join(box.state, 'ledger.db'));
@@ -2159,7 +2159,7 @@ test('a lane is not opened again for ever for one reason: three times in a day f
   red();
   assert.deepEqual(stuck(), ['lane_stuck X-5'], 'said once');
   // He writes on the ticket: that is no loop, the lane is opened with his words.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Laisse ce test de côté.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Laisse ce test de côté.', byOwner: true }]));
   assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
   assert.equal(record('X-5').runs.length, 5);
 });

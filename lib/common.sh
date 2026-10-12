@@ -158,14 +158,14 @@ shown_left() {
 # not say what became of another pull request shown on it (merge-pr.sh marks
 # the record): asked again at each wake, with no model, under the lock of
 # the go-lives since both write these records. Nothing is given up in
-# silence: while that pull request is open or unknown, or while Linear does
+# silence: while that pull request is open or unknown, or while tracker does
 # not answer or has not written yet who moved the ticket, the mark stays and
 # the next wake tries again. The ticket is closed only if it still is where
 # the user put it himself; if it is not, it is left as it is, and said.
 close_tickets_left_open() {
   local record ticket open unknown code go
   ls "$ORCH_STATE_DIR/validations"/*.json > /dev/null 2>&1 || return 0
-  go=$(conf_get linear go_state)
+  go=$(conf_get tracker go_state)
   (
     flock -n 9 || exit 0
     for record in "$ORCH_STATE_DIR/validations"/*.json; do
@@ -188,9 +188,9 @@ close_tickets_left_open() {
       read -r open unknown <<<"$(shown_left "$record")"
       [ "$open" = 0 ] && [ "$unknown" = 0 ] || continue
       code=0
-      "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" || code=$?
+      "$ORCH_HOME/tracker.sh" moved-by-owner "$ticket" "$go" || code=$?
       case "$code" in
-        0) "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null || continue ;;
+        0) "$ORCH_HOME/tracker.sh" move "$ticket" "$(conf_get tracker done_state)" > /dev/null || continue ;;
         5 | 6) ledger event --kind ticket_left_open --ticket "$ticket" --detail "everything shown on $ticket is live or closed, but the ticket is no longer in « $go » by the user's own hand (he moved it, or someone else did): the wake leaves it as it is and closes nothing. Tell the user where the ticket stands" ;;
         *) continue ;;
       esac
@@ -297,9 +297,9 @@ decisions_worktree() {
 
 # flush_outbox: the comments the hourly limit held back (lane-run.sh) leave in
 # one grouped comment on the ticket of the reports, as soon as the user may be
-# written again. Nothing is removed before Linear has it.
+# written again. Nothing is removed before tracker has it.
 flush_outbox() {
-  local box="$ORCH_STATE_DIR/linear-outbox" sending grouped file count code left
+  local box="$ORCH_STATE_DIR/tracker-outbox" sending grouped file count code left
   # What a wake killed while sending had taken aside comes back first.
   for left in "$box"/sending.*; do
     [ -d "$left" ] || continue
@@ -321,7 +321,7 @@ flush_outbox() {
     done
   } > "$grouped"
   code=0
-  "$ORCH_HOME/linear.sh" comment "$(conf_get lead report_on)" "$grouped" "$(user_message grouped_sender)" > /dev/null || code=$?
+  "$ORCH_HOME/tracker.sh" comment "$(conf_get lead report_on)" "$grouped" "$(user_message grouped_sender)" > /dev/null || code=$?
   rm -f "$grouped"
   # Not sent: back where they were, for the next wake.
   [ "$code" = 0 ] || mv "$sending"/*.md "$box"/
@@ -471,7 +471,7 @@ close_old_terminals() {
 
 # guard_text <file>: refuses, without showing any value, a text the guard of
 # the repository would not let out (private terms, secrets, IBANs, addresses,
-# phone numbers). For anything a script sends to an outside service: Linear,
+# phone numbers). For anything a script sends to an outside service: tracker,
 # GitHub.
 guard_text() {
   local dir ref tool_ref settings terms_setting allowed_setting guard_key
@@ -693,7 +693,7 @@ only_base_merges() {
 owner_name() {
   local name unnamed="the user"
   name=$(conf_get owner name)
-  [ -n "$name" ] || name=$(conf_get linear owner_name)
+  [ -n "$name" ] || name=$(conf_get tracker owner_name)
   echo "${name:-$unnamed}"
 }
 owner_name_first() {

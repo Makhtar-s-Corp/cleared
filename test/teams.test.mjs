@@ -13,7 +13,7 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   const { flow, todo, by, record, session, box, env } = flowBox({ maxLanes: 3 });
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30')}\n[harness]\ndev = b\n`);
-  const comments = (...list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const comments = (...list) => writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify(list));
   const asked = { id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Équipes : les deux', byOwner: true };
   const events = (kind) => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select detail from events where kind = ? order by rowid').all(kind).map((row) => row.detail); db.close(); return rows; };
   const chain = (key) => JSON.parse(readFileSync(join(box.state, 'runs', record(key).runs.at(-1).run, 'chain.json'), 'utf8'));
@@ -76,12 +76,12 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   // One request, with both: it tells him how to choose, and keeps which team made which.
   const request = ask(41, 42);
   assert.equal(request.status, 0, request.stderr);
-  const written = readFileSync(join(box.home, 'linear-posted'), 'utf8');
+  const written = readFileSync(join(box.home, 'tracker-posted'), 'utf8');
   assert.match(written, /Two teams worked on this ticket independently: team 1, PR 41; team 2, PR 42\. To choose, write a line ‘Team 1’ or ‘Team 2’ on the ticket, then move it to ‘Go MEP’/);
   const kept = () => JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8'));
   assert.deepEqual(kept().teams, { 1: 41, 2: 42 });
   // He puts the card in his status of agreement and says nothing of which: neither goes live.
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Go MEP\n');
   const live = (pr) => spawnSync(join(box.home, 'merge-pr.sh'), [String(pr), 'X-5', '-'], { env, input: 'Ce qui change, où le voir, comment le vérifier.', encoding: 'utf8' });
   const silent = live(41);
   assert.notEqual(silent.status, 0);
@@ -107,7 +107,7 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
   const { flow, todo, by, record, session, stuck, moves, box, env } = flowBox({ maxLanes: 3 });
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 30')}\n[harness]\ndev = b\n`);
-  const comments = (...list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const comments = (...list) => writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify(list));
   const asked = { id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Équipes : les deux', byOwner: true };
   const events = (kind) => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select detail from events where kind = ? order by rowid').all(kind).map((row) => row.detail); db.close(); return rows; };
   const chain = (key) => JSON.parse(readFileSync(join(box.state, 'runs', record(key).runs.at(-1).run, 'chain.json'), 'utf8'));
@@ -165,7 +165,7 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
   // The request, then his choice: a line from before the request, a line an agent wrote, or lines that name both teams choose nothing.
   const ask = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '41', '--pr', '42'], { env, input: 'Deux pistes pour le même écran.', encoding: 'utf8' });
   assert.equal(ask.status, 0, ask.stderr);
-  writeFileSync(join(box.home, 'linear-state-X-5'), 'Go MEP\n');
+  writeFileSync(join(box.home, 'tracker-state-X-5'), 'Go MEP\n');
   const live = (pr, extra = {}) => spawnSync(join(box.home, 'merge-pr.sh'), [String(pr), 'X-5', '-'], { env: { ...env, ...extra }, input: 'Ce qui change, où le voir, comment le vérifier.', encoding: 'utf8' });
   const before = { id: 'c2', createdAt: '2026-01-02T09:30:00Z', body: 'Équipe 1', byOwner: true };
   const agent = { id: 'c3', createdAt: '2099-01-01T10:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nÉquipe 2', byOwner: true };
@@ -209,7 +209,7 @@ test('a ticket given to two teams with no place for the second, or no second har
   // No other harness is named for the role: one team, and the lead is told once.
   {
     const { flow, todo, by, record, session, stuck, box } = flowBox();
-    writeFileSync(join(box.home, 'linear-comments.json'), asked);
+    writeFileSync(join(box.home, 'tracker-comments.json'), asked);
     todo(['X-5']);
     by('X-5', 0);
     const alone = flow();
@@ -226,7 +226,7 @@ test('a ticket given to two teams with no place for the second, or no second har
     const { flow, todo, by, record, session, stuck, box } = flowBox({ maxLanes: 1 });
     const confPath = join(box.home, 'agents.conf');
     writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[harness]\ndev = b\n`);
-    writeFileSync(join(box.home, 'linear-comments.json'), asked);
+    writeFileSync(join(box.home, 'tracker-comments.json'), asked);
     todo(['X-5']);
     by('X-5', 0);
     assert.match(flow().stdout, /X-5: given to two teams by the user: no place now for the second \(the limit of lanes\), it waits/);
