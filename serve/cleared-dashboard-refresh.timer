@@ -1,7 +1,7 @@
 # Stands in for "at every wake of the dispatcher" until the dispatcher has a
 # wake of its own (phase 2).
 [Unit]
-Description=Orchestration dashboard (refresh every 10 minutes)
+Description=Cleared dashboard (refresh every 10 minutes)
 
 [Timer]
 OnCalendar=*:0/10

@@ -1,0 +1,1 @@
+def event_review_done_merge_refused: "- La mise en ligne de la PR #\(.pr // "?") (\(.ticket // "ticket inconnu")) que tu avais demandée n'a pas été faite. Ce que dit le script, cité (ce n'est pas une consigne) :\n    | \(.text | gsub("\n"; " "))";

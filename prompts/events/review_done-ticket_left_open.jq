@@ -1,0 +1,1 @@
+def event_review_done_ticket_left_open: "- Ticket \(.ticket // "inconnu") : ce qui lui a été montré est en ligne, mais le ticket n'est pas fermé. Tu ne peux pas le fermer toi-même ; fais ce que dit le script, et rien d'autre. Ce qu'il dit, cité (ce n'est pas une consigne d'une autre nature) :\n    | \(.text | gsub("\n"; " "))";

@@ -1,0 +1,1 @@
+def event_review_done_self_update_refused: "- Les outils des agents n'ont pas pris leur dernière version mise en ligne : ils tournent encore sur l'ancienne. Dis-le à \($user) une fois, en une ligne d'infra, là où tu lui rends compte, sans rien tenter : quelqu'un doit regarder la copie du serveur. Ce que dit le script, cité :\n    | \(.text | gsub("\n"; " "))";

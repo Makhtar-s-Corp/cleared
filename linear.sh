@@ -34,7 +34,7 @@ set -euo pipefail
 # it also holds an API key that would move the model billing off the
 # subscription. Half of an application is an error, not a reason to fall
 # back in silence on the key of a person.
-secrets=${ORCH_SECRETS_FILE:-$ORCH_REPO/.env.local}
+secrets=${CLEARED_SECRETS_FILE:-${ORCH_SECRETS_FILE:-$ORCH_REPO/.env.local}}
 secret_of() { [ -f "$secrets" ] && sed -n "s/^$1=//p" "$secrets" | head -n 1 | tr -d "\"'"; }
 app_id=${LINEAR_APP_CLIENT_ID:-} app_secret=${LINEAR_APP_CLIENT_SECRET:-} key=${LINEAR_API_KEY:-}
 if [ -z "$app_id$app_secret$key" ]; then

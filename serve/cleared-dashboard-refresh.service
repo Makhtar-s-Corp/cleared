@@ -1,7 +1,7 @@
-# systemd user unit, installed by serve/install.sh: reads the session logs of
-# the old way of working into the ledger, so that both can be compared.
+# systemd user unit, installed by serve/install.sh: writes the dashboard
+# again from the ledger. Scripts only, no model is started.
 [Unit]
-Description=Orchestration: old sessions into the ledger
+Description=Cleared dashboard (refresh)
 
 [Service]
 # orca and the CLIs are installed in the home of the user: a unit does not get
@@ -13,4 +13,4 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
 Type=oneshot
-ExecStart=/usr/bin/node --no-warnings @ORCH_HOME@/import-legacy.mjs --days 3
+ExecStart=@ORCH_HOME@/dashboard.sh

@@ -1,7 +1,8 @@
-# systemd user unit, installed by serve/install.sh: one wake of the project
-# lead. Scripts only; a model starts only when something moved.
+# systemd user unit, installed by serve/install.sh: checked each time the
+# timer of the wakes is started, by hand too. The timer does not start when
+# the model of the project lead is not the one decided last.
 [Unit]
-Description=Orchestration: wake of the project lead
+Description=Cleared: the model of the project lead is the one decided
 
 [Service]
 # orca and the CLIs are installed in the home of the user: a unit does not get
@@ -13,4 +14,4 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
 Type=oneshot
-ExecStart=@ORCH_HOME@/wake.sh
+ExecStart=@ORCH_HOME@/check-lead-model.sh

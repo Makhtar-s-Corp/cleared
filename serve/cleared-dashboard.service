@@ -3,7 +3,7 @@
 # that is not a machine of the Tailscale network (serve-dashboard.mjs). No
 # container, no proxy in front.
 [Unit]
-Description=Orchestration dashboard (static page, Tailscale only)
+Description=Cleared dashboard (static page, Tailscale only)
 
 [Service]
 # orca and the CLIs are installed in the home of the user: a unit does not get

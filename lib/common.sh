@@ -1,39 +1,65 @@
 # Shared by the dispatcher scripts. Sourced, never executed.
 # Nothing here names a model or a provider: both come from agents.conf.
 
+# Map public Cleared environment names to the internal script variables.
+while IFS= read -r cleared_name; do
+  old_name=ORCH_${cleared_name#CLEARED_}
+  printf -v "$old_name" '%s' "${!cleared_name}"
+  export "$old_name"
+done < <(compgen -e | grep '^CLEARED_' || true)
+
 ORCH_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ORCH_REPO=${CLEARED_REPO:-${ORCH_REPO:-}}
+ORCH_CONF=${CLEARED_CONF:-${ORCH_CONF:-}}
+ORCH_STATE_DIR=${CLEARED_STATE_DIR:-${ORCH_STATE_DIR:-}}
 # The project these scripts work on, by its main checkout: said by whoever
 # runs them (ORCH_REPO), else once for the machine (first line of
-# ~/.config/ferme/project), else the repository these scripts sit in (a
+# ~/.config/cleared/project), else the repository these scripts sit in (a
 # project that carries its own copy of the tool).
-ORCH_REPO=${ORCH_REPO:-$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project" 2> /dev/null || true)}
+cleared_config_root=${XDG_CONFIG_HOME:-$HOME/.config}
+cleared_project_file=$cleared_config_root/cleared/project
+ORCH_REPO=${ORCH_REPO:-$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$cleared_project_file" 2> /dev/null || true)}
 ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/null | sed -n '1s/^worktree //p' || true)}
 # No project at all (nobody named one, and the tool sits in no repository):
 # nothing is done « wherever this was started from ».
-[ -n "$ORCH_REPO" ] || { echo "$(basename "$0"): no project is named (ORCH_REPO, or the first line of ${XDG_CONFIG_HOME:-$HOME/.config}/ferme/project)" >&2; exit 1; }
-# Its settings: its own (.ferme/agents.conf in that checkout, which no lane
-# writes to), else the example that comes with the tool.
+[ -n "$ORCH_REPO" ] || { echo "$(basename "$0"): no project is named (ORCH_REPO, or the first line of $cleared_project_file)" >&2; exit 1; }
+# Its settings are the tracked .cleared/agents.conf in the project checkout.
 if [ -z "${ORCH_CONF:-}" ]; then
-  if [ -f "$ORCH_REPO/.ferme/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.ferme/agents.conf; else ORCH_CONF=$ORCH_HOME/agents.conf; fi
+  if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && git -C "$ORCH_REPO" ls-files --error-unmatch -- .cleared/agents.conf > /dev/null 2>&1; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
+  elif [ -f "$ORCH_REPO/.cleared/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.cleared/tracked-agents.conf-missing
+  else ORCH_CONF=$ORCH_REPO/.cleared/agents.conf; fi
+  if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && [ "$ORCH_CONF" != "$ORCH_REPO/.cleared/agents.conf" ]; then CLEARED_IGNORED_UNTRACKED_CONF=$ORCH_REPO/.cleared/agents.conf; fi
 fi
 # The state is kept on the machine, outside the repositories: one folder per
 # project, named after its checkout.
-ORCH_STATE_DIR=${ORCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ferme/$(basename "$ORCH_REPO")}
-export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR
+if [ -z "${ORCH_STATE_DIR:-}" ]; then
+  cleared_state_root=${XDG_STATE_HOME:-$HOME/.local/state}
+  ORCH_STATE_DIR=$cleared_state_root/cleared/$(basename "$ORCH_REPO")
+fi
+export ORCH_HOME ORCH_CONF ORCH_REPO ORCH_STATE_DIR CLEARED_IGNORED_UNTRACKED_CONF
+export CLEARED_REPO="$ORCH_REPO" CLEARED_CONF="$ORCH_CONF" CLEARED_STATE_DIR="$ORCH_STATE_DIR"
 
 # prompt_file <name>: the prompt of that name. The project's own
-# (.ferme/prompts/<name>.md in its main checkout) comes before the one of the
+# (.cleared/prompts/<name>.md in its main checkout) comes before the one of the
 # tool: what an agent is told about a product is the product's.
-prompt_file() { if [ -f "$ORCH_REPO/.ferme/prompts/$1.md" ]; then printf '%s\n' "$ORCH_REPO/.ferme/prompts/$1.md"; else printf '%s\n' "$ORCH_HOME/prompts/$1.md"; fi; }
+prompt_asset() {
+  if [ -f "$ORCH_REPO/.cleared/prompts/$1" ]; then printf '%s\n' "$ORCH_REPO/.cleared/prompts/$1"
+  else printf '%s\n' "$ORCH_HOME/prompts/$1"; fi
+}
+prompt_file() { prompt_asset "$1.md"; }
 # prompt_text <file>: its text, with {orch} standing for where these scripts
 # are on this machine (the same word as in [permissions.*]).
 # Written as it is, whatever characters the path holds (a quoted replacement
 # is taken literally).
 prompt_text() {
-  local text
+  local text verdict
   [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
   text=$(cat "$1"; printf x)
   text=${text%x}
+  if [[ "$text" == *'@REVIEW_VERDICT@'* ]]; then
+    verdict=$(conf_get merge verdict) || return 1
+    text=${text//@REVIEW_VERDICT@/$verdict}
+  fi
   printf '%s' "${text//\{orch\}/"$ORCH_HOME"}"
 }
 
@@ -68,21 +94,33 @@ orca_terminal() {
 # the settings that come with the tool: a project that keeps its own file
 # and says nothing of it does not switch the updates off by leaving it out.
 update_setting() {
-  local value
-  value=$(conf_get update "$1")
-  [ -n "$value" ] || [ ! -f "$ORCH_HOME/agents.conf" ] || value=$(ORCH_CONF=$ORCH_HOME/agents.conf conf_get update "$1")
-  echo "$value"
+  conf_get update "$1"
 }
 
 # conf_get <section> <key>: one value of agents.conf (empty when absent).
-conf_get() {
+conf_get_from() {
   awk -v section="[$1]" -v wanted="$2" '
     /^\[/ { inside = ($0 == section); next }
     inside && $0 !~ /^[ \t]*#/ {
       i = index($0, "="); if (!i) next
       key = substr($0, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key)
-      if (key == wanted) { value = substr($0, i + 1); gsub(/^[ \t]+|[ \t]+$/, "", value); print value; exit }
-    }' "$ORCH_CONF"
+      if (key == wanted && !found) { value = substr($0, i + 1); gsub(/^[ \t]+|[ \t]+$/, "", value); found = 1 }
+    }
+    END { if (!found) exit 1; print value }' "$3"
+}
+conf_get() {
+  local value code=0
+  if [ -f "$ORCH_CONF" ] && value=$(conf_get_from "$1" "$2" "$ORCH_CONF"); then
+    if [ -z "$value" ] && node "$ORCH_HOME/lib/conf.mjs" required "$1" "$2"; then
+      echo "Missing required [$1] $2 in project agents.conf" >&2
+      return 2
+    fi
+  else
+    value=$(node "$ORCH_HOME/lib/conf.mjs" default "$1" "$2") || code=$?
+    [ "$code" != 2 ] || return 2
+    [ "$code" = 0 ] || value=
+  fi
+  printf '%s\n' "$value"
 }
 
 # shown_left <record of a request>: of the pull requests the user was shown
@@ -146,9 +184,10 @@ close_tickets_left_open() {
 
 # conf_keys <section>: the keys of a section, one per line.
 conf_keys() {
-  awk -v section="[$1]" '
+  if [ -f "$ORCH_CONF" ]; then awk -v section="[$1]" '
     /^\[/ { inside = ($0 == section); next }
-    inside && $0 !~ /^[ \t]*#/ { i = index($0, "="); if (i) { key = substr($0, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key); print key } }' "$ORCH_CONF"
+    inside && $0 !~ /^[ \t]*#/ { i = index($0, "="); if (i) { key = substr($0, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key); if (!seen[key]++) print key } }' "$ORCH_CONF"; fi
+  node "$ORCH_HOME/lib/conf.mjs" default-keys "$1"
 }
 
 # Every key of [adapter.<name>] reaches the adapter as ADAPTER_<KEY>.
@@ -412,7 +451,7 @@ close_old_terminals() {
 # phone numbers). For anything a script sends to an outside service: Linear,
 # GitHub.
 guard_text() {
-  local dir ref tool_ref settings
+  local dir ref tool_ref settings terms_setting allowed_setting guard_key
   dir=$(mktemp -d)
   # 1. Its code is the tool's own (lib/guard/). When the tool is a checkout
   # that follows a branch ([update] base), it is the code of that branch,
@@ -427,11 +466,9 @@ guard_text() {
     && git -C "$ORCH_HOME" cat-file -e "$tool_ref:lib/guard/codex-guard.mjs" 2> /dev/null; then
     git -C "$ORCH_HOME" show "$tool_ref:lib/guard/codex-guard.mjs" > "$dir/codex-guard.mjs" 2> /dev/null || true
     git -C "$ORCH_HOME" show "$tool_ref:lib/guard/private-terms.mjs" > "$dir/private-terms.mjs" 2> /dev/null || true
-    git -C "$ORCH_HOME" show "$tool_ref:agents.conf" > "$dir/tool.conf" 2> /dev/null || true
   else
     [ -z "$tool_ref" ] || echo "$(basename "$0"): the guard runs from the files of this checkout ($ORCH_HOME does not follow $tool_ref, or that branch does not carry lib/guard/)" >&2
     cp "$ORCH_HOME/lib/guard/codex-guard.mjs" "$ORCH_HOME/lib/guard/private-terms.mjs" "$dir/" 2> /dev/null || true
-    cp "$ORCH_HOME/agents.conf" "$dir/tool.conf" 2> /dev/null || true
   fi
   [ -s "$dir/codex-guard.mjs" ] && [ -s "$dir/private-terms.mjs" ] || {
     rm -rf "$dir"
@@ -443,26 +480,48 @@ guard_text() {
   # is read from what is committed on the default branch of its remote,
   # never from the files of a checkout (a session runs code there) and
   # never at a place a settings file names. Which files: [guard] terms and
-  # allowed, as the project's own settings say there (.ferme/agents.conf),
-  # else as the example of the tool says. Each names a file, or says
+  # allowed, as the project's committed settings say there (.cleared/agents.conf).
+  # Each names a file, or says
   # « none »; a key left out or misspelt is a refusal, never « no list ».
   # ORCH_GUARD_REF names another ref: the tests, and a project without a
   # remote.
   ref=${ORCH_GUARD_REF:-$(git -C "$ORCH_REPO" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2> /dev/null || true)}
   ref=${ref:-origin/main}
-  if git -C "$ORCH_REPO" cat-file -e "$ref:.ferme/agents.conf" 2> /dev/null; then
-    git -C "$ORCH_REPO" show "$ref:.ferme/agents.conf" > "$dir/settings.conf" 2> /dev/null || true
-    settings=$dir/settings.conf
-  else
-    settings=$dir/tool.conf
-  fi
-  [ -f "$settings" ] || : > "$settings"
-  guard_list "$dir" "$ref" "$settings" terms private-terms.json "of private terms" \
-    && guard_list "$dir" "$ref" "$settings" allowed codex-guard-allow.json "of allowed values" || {
+  if ! git -C "$ORCH_REPO" show "$ref:.cleared/agents.conf" > "$dir/settings.conf" 2> /dev/null; then
+    echo "$(basename "$0"): not sent, the committed project configuration (.cleared/agents.conf at $ref) could not be read" >&2
     rm -rf "$dir"
     return 1
-  }
-  if ! node "$dir/codex-guard.mjs" --strict "$1" >&2; then
+  fi
+  settings=$dir/settings.conf
+  while IFS= read -r guard_key; do
+    case "$guard_key" in salt|terms|allowed|token_patterns) ;; *) echo "$(basename "$0"): unknown [guard] key $guard_key in committed project configuration" >&2; rm -rf "$dir"; return 1 ;; esac
+  done < <(awk '/^\[/{inside=($0=="[guard]");next} inside && $0 !~ /^[[:space:]]*#/ && index($0,"=") {key=substr($0,1,index($0,"=")-1);gsub(/^[[:space:]]+|[[:space:]]+$/,"",key);print key}' "$settings")
+  terms_setting=$(conf_get_from guard terms "$settings" 2> /dev/null || true)
+  allowed_setting=$(conf_get_from guard allowed "$settings" 2> /dev/null || true)
+  if { [ -z "$terms_setting" ] || [ "$terms_setting" = none ]; } && { [ -z "$allowed_setting" ] || [ "$allowed_setting" = none ]; }; then
+    echo '{"disabled":true,"hashes":[]}' > "$dir/private-terms.json"
+    echo '{"disabled":true,"hashes":[]}' > "$dir/codex-guard-allow.json"
+    mkdir -p "$ORCH_STATE_DIR"
+    (
+      flock -w 30 9 || exit 1
+      ledger init > /dev/null || exit 1
+      if [ "$(ledger sql "select count(*) as n from events where kind = 'private_terms_disabled'" | jq -r '.[0].n')" = 0 ]; then
+        ledger event --kind private_terms_disabled --detail 'No committed private-term fingerprint lists are configured for this project' || exit 1
+      fi
+    ) 9> "$ORCH_STATE_DIR/guard-disabled.lock" || { rm -rf "$dir"; return 1; }
+  else
+    if [ -z "$(conf_get_from guard salt "$settings" 2> /dev/null || true)" ]; then
+      printf '%s\n' 'Missing committed [guard] salt: add [guard] salt = <random value> to the project agents.conf and commit it before using these fingerprint lists.' >&2
+      rm -rf "$dir"
+      return 1
+    fi
+    guard_list "$dir" "$ref" "$settings" terms private-terms.json "of private terms" \
+      && guard_list "$dir" "$ref" "$settings" allowed codex-guard-allow.json "of allowed values" || {
+      rm -rf "$dir"
+      return 1
+    }
+  fi
+  if ! ORCH_GUARD_REF="$ref" node "$dir/codex-guard.mjs" --strict "$1" >&2; then
     rm -rf "$dir"
     echo "$(basename "$0"): not sent, the guard refuses this text" >&2
     return 1
@@ -474,13 +533,13 @@ guard_text() {
 # project put where the guard reads it, as its settings name it.
 guard_list() {
   local value
-  value=$(ORCH_CONF=$3 conf_get guard "$4" 2> /dev/null || true)
+  value=$(conf_get_from guard "$4" "$3" 2> /dev/null || true)
   case "$(tr '[:upper:]' '[:lower:]' <<<"$value")" in
     "")
       echo "$(basename "$0"): not sent, the project names no list $6 ([guard] $4): write the path of the file, or « none »" >&2
       return 1
       ;;
-    none) echo '[]' > "$1/$5" ;;
+    none) echo '{"disabled":true,"hashes":[]}' > "$1/$5" ;;
     *)
       git -C "$ORCH_REPO" show "$2:$value" > "$1/$5" 2> /dev/null || {
         echo "$(basename "$0"): not sent, the list $6 of the project ($value on $2) could not be read" >&2
@@ -610,7 +669,8 @@ only_base_merges() {
 # start of a sentence.
 owner_name() {
   local name unnamed="l'utilisateur"
-  name=$(conf_get linear owner_name)
+  name=$(conf_get owner name)
+  [ -n "$name" ] || name=$(conf_get linear owner_name)
   echo "${name:-$unnamed}"
 }
 owner_name_first() {

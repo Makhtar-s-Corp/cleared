@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Brings the checkout of the project up to its base, when it lags. The tool
 # reads the project where that checkout stands: its settings and its prompts
-# (.ferme/), its rules, what a session opened there is shown. A change of
+# (.cleared/), its rules, what a session opened there is shown. A change of
 # the project that went live is seen there only once this copy has it:
 # without this, somebody pulls by hand after each go-live, or it grows old.
 #

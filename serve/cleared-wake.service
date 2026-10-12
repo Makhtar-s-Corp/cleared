@@ -1,7 +1,7 @@
-# systemd user unit, installed by serve/install.sh: writes the dashboard
-# again from the ledger. Scripts only, no model is started.
+# systemd user unit, installed by serve/install.sh: one wake of the project
+# lead. Scripts only; a model starts only when something moved.
 [Unit]
-Description=Orchestration dashboard (refresh)
+Description=Cleared: wake of the project lead
 
 [Service]
 # orca and the CLIs are installed in the home of the user: a unit does not get
@@ -13,4 +13,4 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
 Type=oneshot
-ExecStart=@ORCH_HOME@/dashboard.sh
+ExecStart=@ORCH_HOME@/wake.sh

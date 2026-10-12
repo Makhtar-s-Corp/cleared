@@ -19,8 +19,6 @@ permissions:
 
 jobs:
   verify:
-    # A draft is not checked: its checks start when it is marked ready.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -35,4 +33,4 @@ jobs:
           for script in *.sh lib/*.sh adapters/*.sh serve/*.sh; do bash -n "$script"; done
           for module in lib/*.mjs lib/guard/*.mjs serve/*.mjs *.mjs; do node --check "$module"; done
       - name: Tests
-        run: node --no-warnings --test --test-timeout=120000 test/orchestration.test.mjs
+        run: node --no-warnings --test --test-timeout=120000 test/*.test.mjs
