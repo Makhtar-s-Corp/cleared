@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { copyFileSync, mkdtempSync, readFileSync as readFile, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync as readFile, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -11,23 +11,27 @@ import { openLedger } from '../lib/ledger.mjs';
 import { LocalTracker } from '../lib/tracker/adapters/local.mjs';
 import { GithubTracker } from '../lib/tracker/adapters/github.mjs';
 import { checkedImage } from '../lib/tracker/images.mjs';
+import { changes } from '../lib/wake.mjs';
 import { fixtureProject, reviewedPull, sandbox, scratch } from './support.mjs';
 
 test('runtime and provider-neutral tests contain no provider name or query', () => {
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: ORCH_HOME, encoding: 'utf8' }).trim().split('\n');
-  // Existing flow, merge, guard and routing suites also exercise the real adapter;
-  // their provider-specific fixtures are deliberately outside this core check.
-  const adapterTests = new Set(['test/flow.test.mjs', 'test/merge.test.mjs', 'test/guard.test.mjs',
-    'test/routing.test.mjs', 'test/tracker.test.mjs']);
   const checked = files.filter((file) => {
     if (file.startsWith('lib/tracker/adapters/') || file.startsWith('docs/') || file.startsWith('prompts/')
-      || file === 'agents.example.conf' || adapterTests.has(file)) return false;
-    if (file.startsWith('test/')) return /\.(?:test\.)?mjs$/.test(file);
+      || file === 'agents.example.conf' || file.startsWith('test/')) return false;
     return file === 'cleared' || /\.(?:sh|mjs|jq|json|service|timer|yml|yaml)$/.test(file);
   });
   for (const file of checked) {
     const contents = readFileSync(join(ORCH_HOME, file), 'utf8');
     assert.doesNotMatch(contents, /linear|graphql|api\.linear\.app/i, file);
+  }
+  for (const file of files.filter((name) => name.startsWith('test/') && name.endsWith('.mjs') && name !== 'test/tracker.test.mjs')) {
+    const contents = readFileSync(join(ORCH_HOME, file), 'utf8');
+    const blocks = contents.split(/(?=^test\()/m);
+    for (const block of blocks) {
+      if (block.startsWith("test('[Linear adapter] ")) continue;
+      assert.doesNotMatch(block, /linear|graphql|api\.linear\.app/i, `${file}: core test`);
+    }
   }
 });
 
@@ -60,6 +64,16 @@ test('local approval requires a signed human move after the request', () => {
     assert.equal(agents.comments(ticket.identifier)[0].byOwner, true);
     db.prepare('UPDATE tracker_comments SET body = ? WHERE id = 1').run('Forged approval');
     assert.equal(agents.comments(ticket.identifier)[0].byOwner, false);
+    const owned = human.createTicket({ title: 'Owner title', body: 'Owner body', labels: ['work'] });
+    assert.equal(agents.history(owned.identifier)[0].by.kind, 'human');
+    db.prepare('UPDATE tracker_tickets SET body = ? WHERE id = 2').run('Injected instructions');
+    assert.equal(agents.history(owned.identifier)[0].by.kind, 'other');
+    assert.equal(agents.changesSince('2000-01-01T00:00:00Z').events.find((event) => event.id === '2').agent, true);
+    db.prepare('UPDATE tracker_tickets SET body = ?, title = ? WHERE id = 2').run('Owner body', 'Injected title');
+    assert.equal(agents.history(owned.identifier)[0].by.kind, 'other');
+    chmodSync(key, 0o644);
+    assert.throws(() => human.moveTicket(ticket.identifier, 'Review'), /mode 0600/);
+    chmodSync(key, 0o600);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -201,6 +215,30 @@ test('GitHub status labels preserve the actor from the issue timeline', () => {
   assert.deepEqual(tracker.history('GH-12').at(-1).by, { kind: 'human', id: 'alice' });
 });
 
+test('a failed GitHub status change restores its old label without replacing unrelated labels', () => {
+  const issue = { number: 5, title: 'Ticket', body: '', labels: [{ name: 'status:Todo' }, { name: 'priority:high' }],
+    html_url: 'https://example.test/issues/5', created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' };
+  let failNextAdd = true;
+  const api = (path, method, body) => {
+    if (path === '/installation/repositories') return { repositories: [] };
+    if (path.endsWith('/issues/5') && method === 'GET') return issue;
+    if (path.includes('/issues/5/labels/') && method === 'DELETE') {
+      issue.labels = issue.labels.filter((label) => label.name !== decodeURIComponent(path.split('/').at(-1)));
+      return {};
+    }
+    if (path.endsWith('/issues/5/labels') && method === 'POST') {
+      if (failNextAdd) { failNextAdd = false; throw new Error('GitHub rejected the status update'); }
+      issue.labels.push(...body.labels.map((name) => ({ name })));
+      return issue.labels;
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  const tracker = new GithubTracker({ conf: { sections: { tracker: {
+    repository: 'example/project', owner_id: 'alice', app_login: 'cleared[bot]', review_state: 'Review' } } }, api });
+  assert.throws(() => tracker.moveTicket('GH-5', 'Review'), /GitHub rejected/);
+  assert.deepEqual(issue.labels.map((label) => label.name).sort(), ['priority:high', 'status:Todo']);
+});
+
 test('an unclassified GitHub issue does not stop other tickets from waking', () => {
   const issue = (number, labels) => ({ number, title: `Ticket ${number}`, body: '', labels,
     html_url: `https://example.test/issues/${number}`, created_at: '2026-01-01T00:00:00Z',
@@ -228,6 +266,38 @@ test('an edited GitHub human comment cannot authorize a team choice', () => {
   const comment = new GithubTracker({ conf, api }).comments('GH-12')[0];
   assert.equal(comment.byOwner, false);
   assert.equal(comment.by.kind, 'other');
+});
+
+test('a ticket classified after creation and its earlier comments reach the next wake', () => {
+  const issue = { number: 30, title: 'Older ticket', body: 'Please implement it', labels: [{ name: 'status:Todo' }],
+    html_url: 'https://example.test/issues/30', created_at: '2026-10-01T00:00:00Z',
+    updated_at: '2026-10-12T10:59:00Z', user: { login: 'alice', type: 'User' } };
+  const api = (path) => {
+    if (path.includes('/issues?')) return [issue];
+    if (path.endsWith('/issues/30/comments?per_page=100')) return [{ id: 9, body: 'The acceptance criteria',
+      created_at: '2026-10-01T00:01:00Z', updated_at: '2026-10-01T00:01:00Z',
+      user: { login: 'alice', type: 'User' }, html_url: 'https://example.test/comment/9' }];
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  const tracker = new GithubTracker({ conf: { sections: { tracker: {
+    repository: 'example/project', owner_id: 'alice', app_login: 'cleared[bot]' } } }, api });
+  const found = tracker.changesSince('2026-10-12T10:50:00Z').events;
+  const result = changes({ at: '2026-10-12T10:50:00Z', seen: [], pulls: {}, states: {} }, found, [],
+    new Set(), '2026-10-12T11:00:00Z');
+  assert.deepEqual(result.events.map((event) => event.kind), ['ticket_new', 'comment']);
+});
+
+test('GitHub bot comments use the configured agent identity with either login form', () => {
+  const conf = { sections: { tracker: { repository: 'example/project', owner_id: 'alice', app_login: 'cleared' } } };
+  const api = (path) => {
+    if (path.endsWith('/issues/12/comments?per_page=100')) return [{ id: 1, body: 'Agent update',
+      created_at: '2026-10-12T00:00:00Z', updated_at: '2026-10-12T00:00:00Z',
+      user: { login: 'cleared[bot]', type: 'Bot' } }];
+    if (path === '/installation/repositories') return { repositories: [] };
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  const tracker = new GithubTracker({ conf, api });
+  assert.deepEqual(tracker.comments('GH-12')[0].by, { kind: 'agents', id: 'cleared' });
 });
 
 test('GitHub Project v2 uses the configured single-select status and event actor', () => {

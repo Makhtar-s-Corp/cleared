@@ -92,7 +92,7 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
 });
 
 
-test('a comment that the guard refuses never reaches tracker', () => {
+test('[Linear adapter] a comment that the guard refuses never reaches tracker', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
@@ -190,7 +190,7 @@ test('push-lane does not refuse a branch for a value that only shows in the cont
 });
 
 
-test('only an image, and only from the folder a lane sets apart for what may leave, may be sent to tracker', () => {
+test('[Linear adapter] only an image, and only from the folder a lane sets apart for what may leave, may be sent to tracker', () => {
   const dir = scratch('orch-tracker-');
   const captures = join(dir, 'lanes', 'a-lane', 'to-send');
   mkdirSync(captures, { recursive: true });

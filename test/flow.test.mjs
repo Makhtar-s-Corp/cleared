@@ -20,7 +20,7 @@ test('the pre-check of the project lead: what the user and the outside world did
   assert.deepEqual(first.events, []);
   assert.deepEqual(first.next.pulls, { 7: { state: 'draft', checks: 'none' } });
 
-  const linear = [
+  const tickets = [
     issue({ comments: [
       comment('c0', 'déjà là'),
       comment('c1', 'OK A'),
@@ -32,20 +32,20 @@ test('the pre-check of the project lead: what the user and the outside world did
     issue({ id: 'i3', identifier: 'X-3', createdAt: '2026-01-02T10:03:00Z', description: '> Ticket ouvert par un agent (script), pas par the user.' }),
     issue({ id: 'i4', identifier: 'X-4', createdAt: '2025-12-01T00:00:00Z', description: 'ancien, vu pour la première fois' }),
   ];
-  const second = changes(first.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] }), pull({ number: 8, state: 'MERGED' })], new Set(['c3']), '2026-01-02T10:05:00Z');
+  const second = changes(first.next, tickets, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] }), pull({ number: 8, state: 'MERGED' })], new Set(['c3']), '2026-01-02T10:05:00Z');
   assert.deepEqual(second.events.map((event) => [event.kind, event.ticket ?? event.pr]), [['pr_ready', 7], ['comment', 'X-1'], ['ticket_new', 'X-2']]);
   assert.equal(second.events[1].text, 'OK A');
 
   // Nothing new: nothing. Then the checks turn red: one event, once.
   const pulls = [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })];
-  const third = changes(second.next, linear, pulls, new Set(['c3']));
+  const third = changes(second.next, tickets, pulls, new Set(['c3']));
   assert.deepEqual(third.events, []);
   const red = [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }, { conclusion: 'FAILURE' }] })];
-  const fourth = changes(third.next, linear, red, new Set(['c3']));
+  const fourth = changes(third.next, tickets, red, new Set(['c3']));
   assert.deepEqual(fourth.events.map((event) => [event.kind, event.checks]), [['pr_checks', 'failure']]);
-  assert.deepEqual(changes(fourth.next, linear, red, new Set(['c3'])).events, []);
+  assert.deepEqual(changes(fourth.next, tickets, red, new Set(['c3'])).events, []);
   // Merged: said once, then forgotten.
-  const merged = changes(fourth.next, linear, [pull({ state: 'MERGED' })], new Set(['c3']));
+  const merged = changes(fourth.next, tickets, [pull({ state: 'MERGED' })], new Set(['c3']));
   assert.deepEqual(merged.events.map((event) => event.kind), ['pr_merged']);
   assert.deepEqual(merged.next.pulls, {});
   assert.equal(checksOf([{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }]), 'pending');
@@ -107,25 +107,25 @@ test('the pre-check starts a session only for what is worth one: the rest waits 
   const pull = (over) => ({ number: 7, title: 't', headRefName: 'b', isDraft: true, state: 'OPEN', updatedAt: '2026-01-02T10:01:00Z', statusCheckRollup: [], ...over });
   const first = changes(null, [issue({})], [], new Set(), '2026-01-02T10:00:00Z', [], worth);
   // A draft opened and a ticket created: nobody has anything to decide yet.
-  const linear = [issue({}), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:02:00Z', description: 'Un ticket de the user' })];
-  const quiet = changes(first.next, linear, [pull({})], new Set(), '2026-01-02T10:05:00Z', [], worth);
+  const tickets = [issue({}), issue({ id: 'i2', identifier: 'X-2', createdAt: '2026-01-02T10:02:00Z', description: 'Un ticket de the user' })];
+  const quiet = changes(first.next, tickets, [pull({})], new Set(), '2026-01-02T10:05:00Z', [], worth);
   assert.deepEqual(quiet.events, []);
   assert.deepEqual(quiet.next.waiting.map((event) => event.kind), ['pr_opened', 'ticket_new']);
   // Nothing new: what waits keeps waiting, once.
-  const still = changes(quiet.next, linear, [pull({})], new Set(), '2026-01-02T10:06:00Z', [], worth);
+  const still = changes(quiet.next, tickets, [pull({})], new Set(), '2026-01-02T10:06:00Z', [], worth);
   assert.deepEqual(still.events, []);
   assert.equal(still.next.waiting.length, 2);
   // The checks turn green: one session, which is handed what waited too.
-  const green = changes(still.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
+  const green = changes(still.next, tickets, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
   assert.deepEqual(green.events.map((event) => event.kind), ['pr_opened', 'ticket_new', 'pr_ready']);
   assert.deepEqual(green.next.waiting, [], 'made ready is not worth a session, but it came with green checks');
-  const pending = changes(still.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
+  const pending = changes(still.next, tickets, [pull({ isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] })], new Set(), '2026-01-02T10:07:00Z', [], worth);
   assert.deepEqual(pending.events, []);
-  const done = changes(pending.next, linear, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:09:00Z', [], worth);
+  const done = changes(pending.next, tickets, [pull({ isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] })], new Set(), '2026-01-02T10:09:00Z', [], worth);
   assert.deepEqual(done.events.map((event) => event.kind), ['pr_opened', 'ticket_new', 'pr_ready', 'pr_checks']);
   assert.deepEqual(done.next.waiting, []);
   // No list of what is worth a session: everything is, as before.
-  assert.deepEqual(changes(first.next, linear, [pull({})], new Set(), '2026-01-02T10:05:00Z').events.map((event) => event.kind), ['pr_opened', 'ticket_new']);
+  assert.deepEqual(changes(first.next, tickets, [pull({})], new Set(), '2026-01-02T10:05:00Z').events.map((event) => event.kind), ['pr_opened', 'ticket_new']);
 });
 
 
@@ -452,7 +452,7 @@ test('an old ticket touched again does not bring its old comments back as news; 
 });
 
 
-test('tracker is asked for the newest comments of a ticket (first:, which it serves newest first), never the oldest', () => {
+test('[Linear adapter] tracker is asked for the newest comments of a ticket (first:, which it serves newest first), never the oldest', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[]},"viewer":{"assignedIssues":{"nodes":[]}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
@@ -624,7 +624,7 @@ test('the handover wake needs a handover to read, and a ticket to answer in', ()
 });
 
 
-test('tracker is asked for the tickets of one state, to check what a handover says', () => {
+test('[Linear adapter] tracker is asked for the tickets of one state, to check what a handover says', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"id":"i1","identifier":"X-1","title":"T","description":"Body","url":"u","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"labels":{"nodes":[]},"assignee":null}]}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
@@ -653,7 +653,7 @@ test('the handover wake says so, and fails, when it starts nothing: a session of
 });
 
 
-test('a listing of tickets that fills the page says it may be cut short', () => {
+test('[Linear adapter] a listing of tickets that fills the page says it may be cut short', () => {
   const dir = scratch('orch-tracker-');
   const nodes = Array.from({ length: 100 }, (_, i) => ({ identifier: `X-${i}`, title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: { name: 'Done' }, project: null, assignee: null }));
   writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data: { issues: { nodes } } }));
@@ -1666,7 +1666,7 @@ test('host-state sees a screen test from the command that runs it, before any br
 });
 
 
-test('the acting lead cannot write down a terminal itself, and a comment made of blanks is not posted', () => {
+test('[Linear adapter] the acting lead cannot write down a terminal itself, and a comment made of blanks is not posted', () => {
   const deny = conf.sections['permissions.release-live'].deny.split(',').map((item) => item.trim());
   assert.ok(deny.includes('{orch}/adopt-lane.sh'));
   const dir = scratch('orch-tracker-');
@@ -1678,7 +1678,7 @@ test('the acting lead cannot write down a terminal itself, and a comment made of
 });
 
 
-test('a comment read on stdin is posted, signed by the one who runs', () => {
+test('[Linear adapter] a comment read on stdin is posted, signed by the one who runs', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
@@ -1697,7 +1697,7 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
 });
 
 
-test('the user is not written more than a few times an hour by all the agents together: beyond, the comment is refused and is to be grouped', () => {
+test('[Linear adapter] the user is not written more than a few times an hour by all the agents together: beyond, the comment is refused and is to be grouped', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
@@ -2016,7 +2016,7 @@ test('the decisions of a second discussion are written on top of the base as it 
 });
 
 
-test('the import of the past takes back out the sessions of a worktree the dispatcher opened, and only those', () => {
+test('[Linear adapter] the import of the past takes back out the sessions of a worktree the dispatcher opened, and only those', () => {
   const box = sandbox();
   const home = scratch('orch-user-');
   const prefix = join(box.home, 'lanes').replace(/[^A-Za-z0-9]/g, '-');

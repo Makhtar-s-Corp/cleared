@@ -358,7 +358,7 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   // The lines stopped the moment his two statuses were created in tracker (read from tracker, not chosen).
   const rules = { until: merge.lines_until, openedAt: '2026-10-07T10:00:00Z' };
   assert.equal(merge.lines_until, '2026-10-08T06:23:38Z');
-  const his = [comment('u1', 'Oui.\n\nFusion : [X-12](https://linear.app/x/issue/X-12/titre)\nFusion : X-40\n\nPas de ligne pour X-95.'), comment('u2', 'Fusion : X-7 #34. Vaut pour celle-là.')];
+  const his = [comment('u1', 'Oui.\n\nFusion : [X-12](https://example.test/x/issue/X-12/titre)\nFusion : X-40\n\nPas de ligne pour X-95.'), comment('u2', 'Fusion : X-7 #34. Vaut pour celle-là.')];
   assert.equal(fusionLine(his, new Set(), 'X-12', null, rules), true);
   assert.equal(fusionLine([comment('en1', 'Merge: X-12')], new Set(), 'X-12', null, rules), true);
   assert.equal(fusionLine(his, new Set(), 'X-40', null, rules), true);
@@ -665,7 +665,7 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   const wake = (extra = {}) => spawnSync(join(unknown.box.home, 'wake.sh'), [], { env: { ...unknown.env, ...extra }, encoding: 'utf8' });
   const record = () => JSON.parse(readFileSync(join(unknown.box.state, 'validations', 'X-5.json'), 'utf8'));
   const other8 = (state) => writeFileSync(join(unknown.box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state, headRefOid: 'abc' }));
-  const linearSays = (code) => writeFileSync(join(unknown.box.home, 'tracker-moved'), code);
+  const trackerSays = (code) => writeFileSync(join(unknown.box.home, 'tracker-moved'), code);
   const still = (why) => { assert.deepEqual(unknown.moves(), [], why); assert.equal(record().closing, true, why); };
   assert.equal(wake({ FAKE_GH_VIEW_DOWN: '8' }).status, 0);
   still('GitHub still does not answer');
@@ -673,14 +673,14 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   assert.equal(wake().status, 0);
   still('the other one is open after all: nothing to close yet, and it is still watched, it may be given up without ever going live');
   other8('CLOSED');
-  linearSays('7');
+  trackerSays('7');
   assert.equal(wake().status, 0);
   still('tracker has not written yet who moved the ticket');
-  linearSays('1');
+  trackerSays('1');
   assert.equal(wake().status, 0);
   still('tracker does not answer');
   // While a go-live holds the lock, the wake does not write the same record.
-  linearSays('0');
+  trackerSays('0');
   const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(unknown.box.state, 'merge.lock'), join(unknown.box.home, 'wake.sh')], { env: unknown.env, encoding: 'utf8' });
   assert.equal(held.status, 0, held.stderr);
   still('a go-live is being done');
@@ -691,7 +691,7 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   assert.deepEqual(unknown.moves(), ['X-5 -> Done'], 'closed once');
   // The ticket is no longer where he put it (he moved it, or someone else did): the wake leaves it, and says so.
   writeFileSync(join(unknown.box.state, 'validations', 'X-5.json'), JSON.stringify({ ...record(), closing: true }));
-  linearSays('5');
+  trackerSays('5');
   assert.equal(wake().status, 0);
   assert.deepEqual(unknown.moves(), ['X-5 -> Done']);
   assert.equal(record().closing, undefined);
@@ -798,7 +798,7 @@ test('a go-live that only waits is kept and done by the wake, with every check a
 });
 
 
-test('the scripts act in the tracker under the name of the agents, never under the one of the user: a token of the application, asked once and kept out of sight', () => {
+test('[Linear adapter] the scripts act in the tracker under the name of the agents, never under the one of the user: a token of the application, asked once and kept out of sight', () => {
   const dir = scratch('orch-tracker-');
   // A tracker that gives a token to the application, and answers anything asked with it.
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash
@@ -880,7 +880,7 @@ esac
 });
 
 
-test('a script never puts a ticket in the status that is the user\'s agreement, and tells his move from the one of an integration', () => {
+test('[Linear adapter] a script never puts a ticket in the status that is the user\'s agreement, and tells his move from the one of an integration', () => {
   const dir = scratch('orch-tracker-');
   const answer = (data) => writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data }));
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\ncat "${join(dir, 'answer.json')}"\n`, { mode: 0o755 });

@@ -458,7 +458,7 @@ test('a backend that dies without a report: the lane says so instead of posting 
 });
 
 
-test('tracker saying no is an error: nothing is reported as sent or opened', () => {
+test('[Linear adapter] tracker saying no is an error: nothing is reported as sent or opened', () => {
   const dir = scratch('orch-tracker-');
   const no = { data: { issue: { id: 'i' }, teams: { nodes: [{ id: 't' }] }, projects: { nodes: [{ id: 'p' }] }, issueLabels: { nodes: [{ id: 'l' }] }, commentCreate: { success: false, comment: null }, issueCreate: { success: false, issue: null } } };
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '${JSON.stringify(no)}'\n`, { mode: 0o755 });
@@ -494,7 +494,7 @@ test('the scripts run as commands from a folder whose name has a space or an acc
 });
 
 
-test('a comment on a ticket tracker does not know is an error', () => {
+test('[Linear adapter] a comment on a ticket tracker does not know is an error', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"data":{"issue":null}}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
