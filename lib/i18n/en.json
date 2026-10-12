@@ -2,7 +2,7 @@
   "agent_comment": "> Written by an agent ({from}), not by {owner}.\n\n{body}\n",
   "agent_ticket": "> Ticket opened by an agent ({from}), not by {owner}.\n\n{body}\n",
   "team_choice": "Two teams worked on this ticket independently: team 1, PR {first}; team 2, PR {second}. To choose, write a line ‘Team 1’ or ‘Team 2’ on the ticket, then move it to ‘{go_state}’. Only your choice ships; the other PR closes.",
-  "missing_salt": "Missing [guard] salt in project configuration; run the installer to generate one.",
+  "missing_salt": "Missing committed [guard] salt in the project configuration; add [guard] salt = <random value> to .cleared/agents.conf and commit it.",
   "decision_listing": "{ticket}{adr}, proposed at {at}",
   "decision_adr_suffix": " (with docs/decisions.md)",
   "decision_dropped": "Decision {id} dropped. Nothing was sent.",

@@ -2,7 +2,7 @@
   "agent_comment": "> Écrit par un agent ({from}), pas par {owner}.\n\n{body}\n",
   "agent_ticket": "> Ticket ouvert par un agent ({from}), pas par {owner}.\n\n{body}\n",
   "team_choice": "Deux équipes ont travaillé ce ticket, chacune de son côté : équipe 1, PR {first} ; équipe 2, PR {second}. Pour choisir, écris sur le ticket une ligne « Équipe 1 » ou « Équipe 2 », puis glisse la carte dans « {go_state} » : seule celle que tu choisis part en ligne, l'autre est fermée.",
-  "missing_salt": "Il manque [guard] salt dans la configuration du projet ; lance l'installation pour en générer un.",
+  "missing_salt": "Il manque [guard] salt dans la configuration suivie du projet ; ajoute [guard] salt = <valeur aléatoire> à .cleared/agents.conf et crée un commit.",
   "decision_listing": "{ticket}{adr}, proposée à {at}",
   "decision_adr_suffix": " (avec docs/decisions.md)",
   "decision_dropped": "Décision abandonnée : {id}. Rien n'est parti.",
