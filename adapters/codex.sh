@@ -18,6 +18,10 @@ host_permissions() {
   local paths=() readonlys=() denies=() entries=('":tmpdir"="deny"' '":slash_tmp"="deny"') sibling
   case "$mode" in read-only) parent=:read-only ;; accept-edits) parent=:workspace ;; *) echo "codex: unknown permission mode: $mode" >&2; return 64 ;; esac
   case "$network" in yes) network=true ;; no) network=false ;; *) echo "codex: unknown network permission: $network" >&2; return 64 ;; esac
+  if [ "$mode" = read-only ] && [ -n "${ORCH_WRITE:-}" ]; then
+    echo 'Codex did not start: this read-only role needs trusted scripts to write state. The host CLI cannot restrict commands to those scripts; use another harness or the container runner.' >&2
+    return 2
+  fi
   if [ "$mode" = accept-edits ] && [[ ",${ORCH_ALLOW:-}," == *"git commit"* ]]; then
     gitdir=$(git rev-parse --absolute-git-dir)
     common=$(git rev-parse --path-format=absolute --git-common-dir)
@@ -78,7 +82,11 @@ host_run() {
   . "$here/../lib/common.sh"
   events=$(mktemp) body=$(mktemp)
   trap 'rm -f "$events" "$body"' EXIT
-  host_permissions || return $?
+  set +e
+  host_permissions 2> "$body"
+  code=$?
+  set -e
+  if [ "$code" != 0 ]; then contract_usage '{}'; contract_report codex "$code" "$body"; return "$code"; fi
   if ! command -v codex >/dev/null 2>&1; then
     echo 'Codex did not start: codex is not installed on the host.' > "$body"
     contract_usage '{}'; contract_report codex 2 "$body"; return 2

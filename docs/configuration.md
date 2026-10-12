@@ -252,7 +252,7 @@ Provider CLI permission profile for this role. See the [role mapping](adapters.m
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
 | `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
-| `write` | Extra Codex host write paths, comma separated; `{state}` and `{repo}` expand to the configured paths. | Optional; no default |
+| `write` | Paths that trusted scripts need to write, comma separated; `{state}` and `{repo}` expand to the configured paths. Host Codex refuses read-only roles with this setting. | Optional; no default |
 | `read` | Extra paths the role may read. | Optional; no default |
 | `advisor` | Whether the CLI may use a separately billed helper model. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
@@ -274,7 +274,7 @@ Provider CLI permission profile for this role. See the [role mapping](adapters.m
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
 | `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
-| `write` | Extra Codex host write paths, comma separated; `{state}` and `{repo}` expand to the configured paths. | Optional; no default |
+| `write` | Paths that trusted scripts need to write, comma separated; `{state}` and `{repo}` expand to the configured paths. Host Codex refuses read-only roles with this setting. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 | `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 

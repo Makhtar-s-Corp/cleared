@@ -71,7 +71,7 @@ function runRole(role, adapter, repo = fixtureProject(), extra = {}) {
   };
 }
 
-test('every role gives Claude and host Codex the same configured edit and network intent', () => {
+test('each safe role maps to both CLIs, while host Codex refuses trusted-script write roles', () => {
   const { path: repo } = laneWithRemote('dev/X-99', null);
   execFileSync('git', ['-C', repo, 'branch', 'dev/X-98']);
   for (const [name, settings] of Object.entries(example.sections).filter(([key]) => key.startsWith('permissions.'))) {
@@ -82,6 +82,12 @@ test('every role gives Claude and host Codex the same configured edit and networ
       GH_TOKEN: 'test-forge-token', GITHUB_TOKEN: 'test-github-token', SSH_AUTH_SOCK: '/tmp/test-agent.sock',
     });
     assert.equal(claude.run.status, 0, `${role}: ${claude.run.stderr}`);
+    if (settings.mode === 'read-only' && settings.write) {
+      assert.equal(codex.run.status, 2, role);
+      assert.match(codex.report, /needs trusted scripts to write state/, role);
+      assert.deepEqual(codex.args, [], role);
+      continue;
+    }
     assert.equal(codex.run.status, 0, `${role}: ${codex.run.stderr}`);
     assert.equal(codex.prompt, claude.prompt, role);
     assert.match(codex.report, /adapter: codex/);
@@ -133,7 +139,7 @@ test('a commit-capable host run refuses the main checkout', () => {
   execFileSync('git', ['-C', repo, 'checkout', '-q', '-b', 'dev/X-100']);
   const result = runRole('dev', 'codex', repo);
   assert.equal(result.run.status, 64);
-  assert.match(result.run.stderr, /linked lane worktree/);
+  assert.match(result.report, /linked lane worktree/);
   assert.deepEqual(result.args, []);
 });
 
