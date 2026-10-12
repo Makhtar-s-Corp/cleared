@@ -471,6 +471,9 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   assert.equal(refusal.status, 3);
   assert.match(refusal.report, /^outcome: refused$/m);
   assert.match(refusal.report, /- test\/a\.test\.mjs:3: secret littéral/);
+  const englishRefusal = call({ script: 'echo "/tmp/x/repo/test/a.test.mjs:4: email address" >&2; echo "Refused: sensitive content in data that would be sent to Codex." >&2; exit 1' });
+  assert.equal(englishRefusal.status, 3);
+  assert.match(englishRefusal.report, /- test\/a\.test\.mjs:4: email address/);
   assert.equal(call({ ci: 1, script: 'exit 0' }).status, 2);
   const done = call({ script: 'printf "the answer\\nthe answer"; printf "tokens used\\n1,234\\n" >&2' });
   assert.equal(done.status, 0);
