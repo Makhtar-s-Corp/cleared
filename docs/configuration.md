@@ -299,6 +299,7 @@ Read-only example profile for the triage role.
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
 | `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 
 ## `[permissions.cleanup]`
@@ -309,6 +310,7 @@ Read-only example profile for the cleanup role.
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
 | `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 
 ## `[permissions.writing]`
@@ -319,6 +321,7 @@ Read-only example profile for the writing role.
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
 | `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[permissions.digest]`
 
@@ -328,6 +331,7 @@ Read-only example profile for the digest role.
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
 | `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[adapter.claude]`
 

@@ -98,7 +98,7 @@ lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lan
 # to commit it. A backend that commits by itself is left alone: what it did
 # not commit is its to sort out.
 if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
-  && [ "$(conf_get "adapter.$lane_adapter" runner)" = container ] \
+  && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ] \
   && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   message=$(mktemp)
   # A real file that says something: a blank one, or anything else by that
