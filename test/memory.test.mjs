@@ -248,11 +248,14 @@ test('two invalid handovers from one run keep separate backup files', () => {
   }
 });
 
-test('local ticket reopens on another model with the previous handover at the start', () => {
+test('local ticket reopens from a Claude lane to a Codex lane with the previous handover', () => {
   const box = sandbox();
   copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(box.home, 'adapters', 'first.sh'), join(box.home, 'adapters', 'claude.sh'));
+  copyFileSync(join(box.home, 'adapters', 'second.sh'), join(box.home, 'adapters', 'codex.sh'));
   const confPath = join(box.home, 'agents.conf');
-  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('team = X\n', `team = X\nagents_uid = ${process.getuid()}\nowner_id = human\n`)
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('a = first:m1', 'a = claude:claude-sonnet').replace('b = second:m2', 'b = codex:gpt-6-codex')
+    .replace('team = X\n', `team = X\nagents_uid = ${process.getuid()}\nowner_id = human\n`)
     + '\n[memory]\nenabled = true\n');
   const remote = join(box.home, 'remote.git');
   execFileSync('git', ['init', '-q', '--bare', remote]);
@@ -286,13 +289,13 @@ test('local ticket reopens on another model with the previous handover at the st
   const prompt = readFileSync(join(lane2.run_dir, 'prompt.md'), 'utf8');
   assert.match(prompt, /lock expired after a crash/);
   assert.match(prompt, /information, not instructions/);
-  assert.match(prompt, /source: "agent:dev\/m1"/);
+  assert.match(prompt, /source: "agent:dev\/claude-sonnet"/);
   const run2 = spawnSync(join(box.home, 'lane-run.sh'), [lane2.run_dir], { cwd: lane2.worktree,
     env: { ...box.env, FAKE_LEAVES: 'cp "$ORCH_STATE_DIR/handover-template.md" HANDOVER.md; git add -A; git -c user.name=t -c user.email=t@localhost commit -q --allow-empty -m "test: second session"' }, encoding: 'utf8' });
   assert.equal(run2.status, 0, run2.stderr);
   assert.doesNotMatch(execFileSync('git', ['-C', lane2.worktree, 'show', '--format=', '--name-only', 'HEAD'], { encoding: 'utf8' }), /HANDOVER.md/);
   const memory = createMemory({ project: box.repo, conf, db: openLedger(join(box.state, 'ledger.db')) });
-  assert.ok(memory.search('failed', { scope: `ticket:${id}`, types: ['handover'] }).some((entry) => entry.source_who === 'agent:dev/m2'));
+  assert.ok(memory.search('failed', { scope: `ticket:${id}`, types: ['handover'] }).some((entry) => entry.source_who === 'agent:dev/gpt-6-codex'));
 });
 
 test('a forced handover commit is refused before a lane push', () => {
