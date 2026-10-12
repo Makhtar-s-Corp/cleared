@@ -156,6 +156,23 @@ test('local ticket reopens on another model with the previous handover at the st
   assert.ok(memory.search('failed', { scope: `ticket:${id}`, types: ['handover'] }).some((entry) => entry.source_who === 'agent:dev/m2'));
 });
 
+test('a forced handover commit is refused before a lane push', () => {
+  const box = sandbox();
+  const remote = join(box.home, 'remote.git');
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  box.git('remote', 'add', 'origin', remote);
+  box.git('push', '-q', 'origin', 'main');
+  const path = join(box.home, 'lanes', 'dev-X-1');
+  box.git('worktree', 'add', '-q', '-b', 'dev/X-1', path, 'main');
+  writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8') + '\n[memory]\nenabled = true\n');
+  writeFileSync(join(path, 'HANDOVER.md'), '## Done\nPrivate handover\n');
+  execFileSync('git', ['-C', path, 'add', '-f', 'HANDOVER.md']);
+  execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'test: forced handover']);
+  const pushed = spawnSync(join(box.home, 'push-lane.sh'), [path], { env: box.env, encoding: 'utf8' });
+  assert.equal(pushed.status, 1);
+  assert.match(pushed.stderr, /HANDOVER.md/);
+});
+
 test('disabled memory leaves the original lane prompt bytes unchanged', () => {
   const box = sandbox();
   const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-1', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
