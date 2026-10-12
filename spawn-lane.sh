@@ -302,6 +302,15 @@ if [ "$(conf_get memory enabled)" = true ]; then
     node "$ORCH_HOME/lib/memory/cli.mjs" recover "$worktree" "$role" "$ticket" "$lane" \
       || die "the previous session's handover could not be recovered; its file remains in $worktree"
   fi
+  if ! node "$ORCH_HOME/lib/memory/cli.mjs" briefing "$role" "$ticket" "$(jq -r '.title // ""' <<<"$issue")" "$(jq -r '.description // ""' <<<"$issue")" > "$run_dir/memory-briefing.md"; then
+    rm -rf "$run_dir"
+    if [ -z "$there" ]; then
+      git -C "$ORCH_REPO" worktree remove --force "$worktree" 2> /dev/null || true
+      [ -n "$resume" ] || git -C "$ORCH_REPO" branch -D "$lane" > /dev/null 2>&1 || true
+    fi
+    die "memory briefing failed; the lane was not started"
+  fi
+  git -C "$worktree" config --local cleared.memory.everEnabled true
 fi
 if [ -n "$pushed_role" ]; then
   jq -r '.description // ""' <<<"$issue" > "$run_dir/description.md"
@@ -320,7 +329,7 @@ fi
 mv "$available" "$run_dir/chain.json"
 {
   if [ "$(conf_get memory enabled)" = true ]; then
-    node "$ORCH_HOME/lib/memory/cli.mjs" briefing "$role" "$ticket" "$(jq -r '.title // ""' <<<"$issue")" "$(jq -r '.description // ""' <<<"$issue")"
+    cat "$run_dir/memory-briefing.md"
     printf '\n\n'
     prompt_text "$(prompt_file lane-handover)"
     printf '\n\n'
