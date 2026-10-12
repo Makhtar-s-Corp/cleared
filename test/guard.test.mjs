@@ -50,7 +50,7 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
     writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\necho ${ci}\n`, { mode: 0o755 });
     writeFileSync(join(box.home, 'task.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
     const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], {
-      cwd: box.repo, encoding: 'utf8', env: { ...box.env, ADAPTER_TASK_SCRIPT: join(box.home, 'task.sh') },
+      cwd: box.repo, encoding: 'utf8', env: { ...box.env, ADAPTER_RUNNER: 'container', ADAPTER_TASK_SCRIPT: join(box.home, 'task.sh') },
     });
     return { status: run.status, report: readFileSync(join(box.home, 'r.md'), 'utf8'), usage: JSON.parse(readFileSync(join(box.home, 'u.json'), 'utf8')) };
   };

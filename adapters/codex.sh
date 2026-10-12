@@ -1,15 +1,67 @@
 #!/usr/bin/env bash
 # Adapter for the Codex CLI. Contract: lib/contract.sh.
 #
-# Codex never runs on the host. This adapter only calls the trusted task
-# script of the main checkout (ADAPTER_TASK_SCRIPT), which runs Codex in a
-# container on a guarded snapshot of the commit and brings back a patch. When
-# it cannot start now (a CI run in progress, uncommitted changes, the host
-# not free for a session with tools) the adapter exits with 2; when the guard
-# of that script refuses the content, with 3.
+# Host execution is the default. A project can still select its own container
+# task script with [adapter.codex] runner = container.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/contract.sh"
+
+runner=${ADAPTER_RUNNER:-host}
+case "$runner" in host | container) ;; *) echo "codex: unknown runner: $runner (use host or container)" >&2; exit 64 ;; esac
+
+# Codex profiles enforce filesystem and command-network boundaries. A linked
+# worktree keeps Git metadata in its main checkout; a role allowed to commit
+# needs that metadata writable in addition to the lane's files.
+host_permissions() {
+  local mode=${ORCH_PERMISSION_MODE:-read-only} network=${ORCH_NETWORK:-no} parent path key joined=
+  local paths=() entries=('":tmpdir"="deny"' '":slash_tmp"="deny"')
+  case "$mode" in read-only) parent=:read-only ;; accept-edits) parent=:workspace ;; *) echo "codex: unknown permission mode: $mode" >&2; return 64 ;; esac
+  case "$network" in yes) network=true ;; no) network=false ;; *) echo "codex: unknown network permission: $network" >&2; return 64 ;; esac
+  if [ "$mode" = accept-edits ] && [[ ",${ORCH_ALLOW:-}," == *"git commit"* ]]; then
+    paths+=("$(git rev-parse --absolute-git-dir)" "$(git rev-parse --path-format=absolute --git-common-dir)")
+  fi
+  while IFS= read -r path; do
+    path=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' <<<"$path")
+    [ -z "$path" ] || paths+=("$path")
+  done < <(tr ',' '\n' <<<"${ORCH_WRITE:-}")
+  [ -z "${ORCH_EDIT_ONLY:-}" ] || paths+=("$(dirname "$ORCH_EDIT_ONLY")")
+  for path in "${paths[@]}"; do
+    [ -n "$path" ] || continue
+    key=$(jq -Rn --arg path "$path" '$path')
+    entries+=("$key=\"write\"")
+  done
+  for path in "${entries[@]}"; do joined+="${joined:+,}$path"; done
+  codex_policy=(-c 'approval_policy="never"' -c 'default_permissions="cleared"'
+    -c "permissions.cleared={extends=\"$parent\",filesystem={$joined},network={enabled=$network}}")
+}
+
+host_run() {
+  local code usage_json
+  events=$(mktemp) body=$(mktemp)
+  trap 'rm -f "$events" "$body"' EXIT
+  host_permissions || return $?
+  if ! command -v codex >/dev/null 2>&1; then
+    echo 'Codex did not start: codex is not installed on the host.' > "$body"
+    contract_usage '{}'; contract_report codex 2 "$body"; return 2
+  fi
+  local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
+  [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral)
+  set +e
+  env -u OPENAI_API_KEY codex "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
+    fromjson? | if .type == "item.completed" and .item.type == "agent_message" then .item.text
+      elif .type == "item.started" and .item.type == "command_execution" then "  > " + (.item.command // "command")
+      else empty end' 2>/dev/null
+  code=${PIPESTATUS[0]}
+  set -e
+  [ -s "$body" ] || echo "Codex returned no text (exit $code)." > "$body"
+  usage_json=$(jq -sc '[.[] | select(.type == "turn.completed") | .usage] | last // {} | {
+    tokens_in: (.input_tokens // null), tokens_out: (.output_tokens // null),
+    tokens_cache: (.cached_input_tokens // null), tokens_total: ((.input_tokens // 0) + (.output_tokens // 0))}' "$events" 2>/dev/null) || usage_json='{}'
+  contract_usage "$usage_json"
+  contract_report codex "$code" "$body"
+  return "$code"
+}
 
 case "${1:-}" in
   list-models)
@@ -25,22 +77,37 @@ case "${1:-}" in
     fi
     ;;
   talk)
-    # The CLI only runs inside its container, without a screen.
-    echo "codex: no conversation from this adapter" >&2
-    exit 2
+    [ "$runner" = host ] || { echo "codex: no conversation from the container runner" >&2; exit 2; }
+    shift
+    talk_model= talk_prompt=
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --model) talk_model=$2 ;;
+        --prompt-file) talk_prompt=$2 ;;
+        --session-id) ;; # Codex assigns its own session ID.
+        *) echo "talk: unknown option $1" >&2; exit 64 ;;
+      esac
+      shift 2
+    done
+    [ -n "$talk_model" ] && [ -f "$talk_prompt" ] || { echo 'talk: model and prompt file are required' >&2; exit 64; }
+    host_permissions || exit $?
+    env -u OPENAI_API_KEY codex -m "$talk_model" -C "$PWD" -a never "${codex_policy[@]}" "$(cat "$talk_prompt")"
     ;;
   version)
-    # The copy that counts is the one the isolated task script mounts in its
-    # container, not the one on the PATH.
-    task_script=${ADAPTER_TASK_SCRIPT:-}
-    case "$task_script" in "~/"*) task_script="$HOME/${task_script#\~/}" ;; esac
-    mounted=$(grep -o -m 1 -E '/[^ :"]+/node_modules/@openai/codex' "$task_script" 2>/dev/null || true)
-    installed=$(jq -r '.version' "$mounted/package.json" 2>/dev/null || codex --version 2>/dev/null | awk '{print $NF}')
+    if [ "$runner" = container ]; then
+      task_script=${ADAPTER_TASK_SCRIPT:-}
+      case "$task_script" in "~/"*) task_script="$HOME/${task_script#\~/}" ;; esac
+      mounted=$(grep -o -m 1 -E '/[^ :"]+/node_modules/@openai/codex' "$task_script" 2>/dev/null || true)
+      installed=$(jq -r '.version' "$mounted/package.json" 2>/dev/null || codex --version 2>/dev/null | awk '{print $NF}')
+    else
+      installed=$(codex --version 2>/dev/null | awk '{print $NF}')
+    fi
     contract_npm_version codex "${ADAPTER_PACKAGE:-}" "$installed"
     ;;
   run)
     shift
     contract_parse_run "$@"
+    if [ "$runner" = host ]; then host_run; exit $?; fi
     out=$(mktemp) err=$(mktemp) body=$(mktemp)
     trap 'rm -f "$out" "$err" "$body"' EXIT
     refuse() {
