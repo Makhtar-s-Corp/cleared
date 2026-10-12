@@ -126,6 +126,22 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
 
 Automatic rollback requires a git credential that can push a normal commit to the base branch. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET`; a remote tracker owner may provide `--approval-comment COMMENT_ID` after posting exactly `Rollback TICKET MERGE_SHA` on the ticket. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never identity verification.
+
+## `[heartbeat]`
+
+Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_url` after each successful wake. A failed wake or a detected stall sends a POST to `fail_url` with only stable problem codes. If `fail_url` is absent, a failed or blocked wake sends no ping; the monitoring service detects the missed heartbeat. A failed delivery never blocks the wake and is written to the ledger at most once per hour. See [Heartbeat and status](heartbeat.md).
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `ping_url` | Push URL for a successful wake. | Optional; no default |
+| `fail_url` | Push URL for a failed or blocked wake. | Optional; no default |
+| `timeout_secs` | Maximum delivery and probe time. | Default: 10 |
+| `quota_url` | Optional quota API reachability probe. No auth headers are sent. | Optional; no default |
+| `wake_interval_minutes` | Configured wake timer interval; late after three intervals. | Default: 1 |
+| `pending_minutes` | Time for observed changes without an action. | Default: 30 |
+| `service_minutes` | Time tracker, forge, or configured quota endpoint may stay unreachable. | Default: 10 |
+| `lane_idle_minutes` | Time without a lane branch or ledger movement. | Default: 120 |
+| `orphan_hours` | Age before an unattached Cleared process is considered orphaned. | Default: 6 |
 The approval comment must be unedited, posted after the merge, and no more than ten minutes old when used. If the monitor cannot start after a merge, Cleared comments on the ticket and records the failure; rerun `node lib/release.mjs start TICKET PR` after fixing the cause. A stopped monitor is restarted on the next wake. An interrupted revert is reconciled from its marked commit on the base; otherwise it is marked failed and the owner is alerted.
 
 ## `[limits]`

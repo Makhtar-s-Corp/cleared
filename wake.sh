@@ -50,6 +50,14 @@ flock -n 8 || busy "another wake is at work"
 if [ -z "$handover$dry_run" ] && [ -z "${ORCH_SELF_UPDATED:-}" ] && [ -x "$ORCH_HOME/self-update.sh" ] && "$ORCH_HOME/self-update.sh" > /dev/null 2>&1; then
   ORCH_SELF_UPDATED=1 exec "$0" "$@"
 fi
+if [ -z "$handover$dry_run" ]; then
+  wake_finished() {
+    local result=$1
+    trap - EXIT
+    node --no-warnings "$ORCH_HOME/lib/heartbeat.mjs" wake-end "$result" > /dev/null 2>&1 || true
+  }
+  trap 'wake_finished "$?"' EXIT
+fi
 # So does the checkout of the project: what went live there (its settings,
 # its prompts, its rules) is what this wake reads.
 if [ -z "$handover$dry_run" ] && [ -x "$ORCH_HOME/project-update.sh" ]; then "$ORCH_HOME/project-update.sh" > /dev/null 2>&1 || true; fi
