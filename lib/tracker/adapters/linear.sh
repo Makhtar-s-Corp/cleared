@@ -22,6 +22,7 @@
 # these comments from his. Their ids are also kept in state/tracker-comments.jsonl.
 set -euo pipefail
 . "$(cd "$(dirname "$0")/../../.." && pwd)/lib/common.sh"
+[ -n "$(conf_get tracker team)" ] || die "Missing required [tracker] team for Linear"
 
 # Under whose name the scripts act. The application of the agents when the
 # project has one (its identifier and its secret): everything an agent does
@@ -119,9 +120,9 @@ case "${1:-}" in
     ;;
   issue)
     ticket_ok "$2"
-    gql 'query($id: String!) { issue(id: $id) { id identifier title url description createdAt state { name } project { name } labels { nodes { name } } } }' \
+    gql 'query($id: String!) { issue(id: $id) { id identifier title url description createdAt updatedAt state { name } project { name } labels { nodes { name } } } }' \
       "$(jq -nc --arg id "$2" '{id: $id}')" \
-      | jq -c '.data.issue | {id, identifier, title, url, state: .state.name, project: (.project.name // null), labels: [.labels.nodes[].name], createdAt, description: (.description // "")}'
+      | jq -c '.data.issue | {id, identifier, title, url, state: .state.name, project: (.project.name // null), labels: [.labels.nodes[].name], createdAt, updatedAt, description: (.description // "")}'
     ;;
   comment)
     ticket_ok "$2"
@@ -206,9 +207,9 @@ case "${1:-}" in
     ;;
   list)
     [ -n "${2:-}" ] || die "usage: linear.sh list <state>"
-    listed=$(gql 'query($team: String!, $state: String!) { issues(first: 100, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { identifier title url updatedAt state { name } project { name } assignee { name } } } }' \
+    listed=$(gql 'query($team: String!, $state: String!) { issues(first: 100, orderBy: updatedAt, filter: {team: {key: {eq: $team}}, state: {name: {eq: $state}}}) { nodes { id identifier title url description createdAt updatedAt state { name } project { name } labels { nodes { name } } assignee { name } } } }' \
       "$(jq -nc --arg team "$(conf_get tracker team)" --arg state "$2" '{team: $team, state: $state}')" \
-      | jq -c '[.data.issues.nodes[] | {identifier, title, url, updatedAt, state: .state.name, project: (.project.name // null), assignee: (.assignee.name // null)}]')
+      | jq -c '[.data.issues.nodes[] | {id, identifier, title, url, description: (.description // ""), body: (.description // ""), createdAt, updatedAt, state: .state.name, status: .state.name, project: (.project.name // null), labels: [.labels.nodes[]?.name], assignee: (.assignee.name // null)}]')
     # One page only: a full page may not be everything.
     [ "$(jq length <<<"$listed")" -lt 100 ] || echo "$(basename "$0"): 100 tickets in the state \"$2\": the list may be cut short" >&2
     printf '%s\n' "$listed"

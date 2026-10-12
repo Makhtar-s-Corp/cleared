@@ -626,11 +626,13 @@ test('the handover wake needs a handover to read, and a ticket to answer in', ()
 
 test('tracker is asked for the tickets of one state, to check what a handover says', () => {
   const dir = scratch('orch-tracker-');
-  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"identifier":"X-1","title":"T","url":"u","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"assignee":null}]}}}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"id":"i1","identifier":"X-1","title":"T","description":"Body","url":"u","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"labels":{"nodes":[]},"assignee":null}]}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0, run.stderr);
-  assert.deepEqual(JSON.parse(run.stdout), [{ identifier: 'X-1', title: 'T', url: 'u', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress', project: 'P', assignee: null }]);
+  assert.deepEqual(JSON.parse(run.stdout), [{ id: 'i1', identifier: 'X-1', title: 'T', description: 'Body', body: 'Body',
+    url: 'u', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress',
+    status: 'In Progress', project: 'P', labels: [], assignee: null }]);
   assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /In Progress/);
 });
 

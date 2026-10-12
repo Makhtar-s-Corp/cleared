@@ -13,11 +13,19 @@ if (conf.sections.tracker?.adapter !== 'local') {
   console.error('cleared ticket commands require [tracker] adapter = local');
   process.exit(2);
 }
+if (!process.env.CLEARED_STATE_DIR && !process.env.ORCH_STATE_DIR) {
+  console.error('cleared ticket commands require CLEARED_STATE_DIR set to the shared state directory used by the Cleared service');
+  process.exit(2);
+}
 const tracker = createTracker(conf);
 try {
   let result;
   if (action === 'new') result = tracker.createTicket({ title: args[0], body: args[1] ? readFileSync(args[1], 'utf8') : '' });
-  else if (action === 'show') result = { ...tracker.getTicket(args[0]), comments: tracker.comments(args[0]), history: tracker.history(args[0]) };
+  else if (action === 'show') {
+    const ticket = tracker.getTicket(args[0]);
+    if (!ticket) throw new Error(`No such ticket: ${args[0]}`);
+    result = { ...ticket, comments: tracker.comments(args[0]), history: tracker.history(args[0]) };
+  }
   else if (action === 'comment') result = tracker.comment(args[0], readFileSync(args[1], 'utf8'));
   else result = tracker.moveTicket(args[0], args[1]);
   console.log(JSON.stringify(result, null, 2));

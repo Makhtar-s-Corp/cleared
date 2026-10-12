@@ -23,7 +23,7 @@ test('runtime and provider-neutral tests contain no provider name or query', () 
     if (file.startsWith('lib/tracker/adapters/') || file.startsWith('docs/') || file.startsWith('prompts/')
       || file === 'agents.example.conf' || adapterTests.has(file)) return false;
     if (file.startsWith('test/')) return /\.(?:test\.)?mjs$/.test(file);
-    return /\.(?:sh|mjs|jq|json|service|timer)$/.test(file);
+    return file === 'cleared' || /\.(?:sh|mjs|jq|json|service|timer|yml|yaml)$/.test(file);
   });
   for (const file of checked) {
     const contents = readFileSync(join(ORCH_HOME, file), 'utf8');
@@ -63,6 +63,25 @@ test('local approval requires a signed human move after the request', () => {
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('local comment creation and editing remain visible to later wakes', () => {
+  const db = openLedger(':memory:');
+  const tracker = new LocalTracker({ conf: { sections: { tracker: { todo_state: 'Todo' } } }, db,
+    actor: { kind: 'agents', id: 'cleared' } });
+  try {
+    const ticket = tracker.createTicket({ title: 'Comment updates' });
+    db.prepare('UPDATE tracker_tickets SET updated_at = ? WHERE id = 1').run('2026-01-01T00:00:00Z');
+    const comment = tracker.comment(ticket.identifier, 'First version');
+    assert.equal(tracker.changesSince('2026-01-02T00:00:00Z').events.length, 1);
+    db.prepare('UPDATE tracker_comments SET created_at = ? WHERE id = 1').run('2026-01-01T00:00:00Z');
+    db.prepare('UPDATE tracker_tickets SET updated_at = ? WHERE id = 1').run('2026-01-01T00:00:00Z');
+    tracker.editComment(ticket.identifier, comment.id, 'Edited version');
+    const changed = tracker.changesSince('2026-01-02T00:00:00Z').events;
+    assert.equal(changed.length, 1);
+    assert.equal(changed[0].comments[0].body, 'Edited version');
+    assert.equal(tracker.comments(ticket.identifier, { since: '2026-01-02T00:00:00Z' })[0].id, comment.id);
+  } finally { db.close(); }
+});
+
 test('the local ticket CLI creates, reads, comments, and moves without a network service', () => {
   const box = sandbox();
   copyFileSync(join(ORCH_HOME, 'cleared'), join(box.home, 'cleared'));
@@ -74,8 +93,17 @@ test('the local ticket CLI creates, reads, comments, and moves without a network
     return JSON.parse(result);
   };
   const ticket = run('new', 'Try local tracking');
+  const wrongState = { ...box.env };
+  delete wrongState.ORCH_STATE_DIR;
+  delete wrongState.CLEARED_STATE_DIR;
+  const missingState = spawnSync(join(box.home, 'cleared'), ['ticket', 'show', 'LOCAL-1'], { env: wrongState, encoding: 'utf8' });
+  assert.notEqual(missingState.status, 0);
+  assert.match(missingState.stderr, /CLEARED_STATE_DIR/);
   assert.equal(ticket.identifier, 'LOCAL-1');
   assert.equal(run('show', 'LOCAL-1').title, 'Try local tracking');
+  const missing = spawnSync(join(box.home, 'cleared'), ['ticket', 'show', 'LOCAL-999'], { env: box.env, encoding: 'utf8' });
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /No such ticket/);
   const body = join(box.home, 'comment.md');
   writeFileSync(body, 'Agent note.');
   assert.equal(run('comment', 'LOCAL-1', body).body, 'Agent note.');
@@ -83,6 +111,26 @@ test('the local ticket CLI creates, reads, comments, and moves without a network
   const refused = spawnSync(join(box.home, 'cleared'), ['ticket', 'move', 'LOCAL-1', 'Go MEP'], { env: box.env, encoding: 'utf8' });
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /Only the configured human/);
+});
+
+test('generic tracker comments keep the agent marker and hourly limit', () => {
+  const box = sandbox();
+  copyFileSync(join(ORCH_HOME, 'cleared'), join(box.home, 'cleared'));
+  copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
+    `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid()}\ncomments_per_hour = 1`));
+  execFileSync(join(box.home, 'cleared'), ['ticket', 'new', 'Comment limit'], { env: box.env });
+  const file = join(box.home, 'note.md');
+  writeFileSync(file, 'A useful update.');
+  const post = () => spawnSync(join(box.home, 'tracker.sh'), ['comment', 'LOCAL-1', file, 'tester'], { env: box.env, encoding: 'utf8' });
+  const first = post();
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /local:\/\/ticket\/LOCAL-1/);
+  const comments = JSON.parse(execFileSync(join(box.home, 'tracker.sh'), ['comments', 'LOCAL-1'], { env: box.env, encoding: 'utf8' }));
+  assert.match(comments[0].body, /^> Written by an agent \(tester\)/);
+  assert.equal(post().status, 4);
+  assert.match(readFile(join(box.state, 'tracker-comments.jsonl'), 'utf8'), /"id":"1"/);
 });
 
 test('the shell facade reports each adapter ticket prefix for lane cleanup', () => {
@@ -132,7 +180,8 @@ test('GitHub status labels preserve the actor from the issue timeline', () => {
     if (path.endsWith('/issues/12/labels') && method === 'POST') {
       issue.labels.push(...body.labels.map((name) => ({ name })));
       timeline.push({ event: 'labeled', label: { name: body.labels[0] },
-        actor: { login: identity === 'app' ? 'cleared[bot]' : 'alice' }, created_at: new Date().toISOString() });
+        actor: { login: identity === 'app' ? 'cleared[bot]' : 'alice', type: identity === 'app' ? 'Bot' : 'User' },
+        created_at: new Date().toISOString() });
       return issue;
     }
     if (path.includes('/issues/12/labels/') && method === 'DELETE') {
@@ -152,6 +201,35 @@ test('GitHub status labels preserve the actor from the issue timeline', () => {
   assert.deepEqual(tracker.history('GH-12').at(-1).by, { kind: 'human', id: 'alice' });
 });
 
+test('an unclassified GitHub issue does not stop other tickets from waking', () => {
+  const issue = (number, labels) => ({ number, title: `Ticket ${number}`, body: '', labels,
+    html_url: `https://example.test/issues/${number}`, created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-10-12T00:00:00Z', user: { login: 'alice', type: 'User' } });
+  const api = (path) => {
+    if (path.includes('/issues?')) return [issue(1, []), issue(2, [{ name: 'status:Todo' }])];
+    if (path.endsWith('/issues/2/comments?per_page=100')) return [];
+    if (path.endsWith('/issues/1')) return issue(1, []);
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  const conf = { sections: { tracker: { repository: 'example/project', owner_id: 'alice', app_login: 'cleared[bot]' } } };
+  const tracker = new GithubTracker({ conf, api });
+  assert.deepEqual(tracker.listTickets({ status: 'Todo' }).map((ticket) => ticket.identifier), ['GH-2']);
+  assert.deepEqual(tracker.changesSince('2026-10-01T00:00:00Z').events.map((ticket) => ticket.identifier), ['GH-2']);
+  assert.throws(() => tracker.getTicket('GH-1'), /exactly one status label/);
+});
+
+test('an edited GitHub human comment cannot authorize a team choice', () => {
+  const conf = { sections: { tracker: { repository: 'example/project', owner_id: 'alice', app_login: 'cleared[bot]' } } };
+  const api = (path) => {
+    if (path.endsWith('/issues/12/comments?per_page=100')) return [{ id: 1, body: 'Teams: both',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:01:00Z', user: { login: 'alice', type: 'User' } }];
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  const comment = new GithubTracker({ conf, api }).comments('GH-12')[0];
+  assert.equal(comment.byOwner, false);
+  assert.equal(comment.by.kind, 'other');
+});
+
 test('GitHub Project v2 uses the configured single-select status and event actor', () => {
   let status = 'Todo';
   let identity = 'app';
@@ -161,11 +239,15 @@ test('GitHub Project v2 uses the configured single-select status and event actor
   const api = (path, method, input) => {
     if (path === '/installation/repositories') { if (identity === 'app') return { repositories: [] }; throw new Error('not app'); }
     if (path === '/user') return { login: 'alice' };
+    if (path.includes('/issues?state=all&since=')) return [];
     if (path.endsWith('/issues?state=all&per_page=100')) return [issue];
     if (path.endsWith('/issues/12/comments?per_page=100')) return [];
     if (path.endsWith('/issues/12')) return issue;
     if (path !== 'graphql') throw new Error(`Unexpected request: ${path}`);
     const q = input.query;
+    if (q.includes('items(first:100')) return { data: { node: { items: { nodes: [{ updatedAt: new Date().toISOString(),
+      content: { number: 12, repository: { nameWithOwner: 'example/project' } }, fieldValueByName: { name: status } }],
+      pageInfo: { hasNextPage: false, endCursor: null } } } } };
     if (q.includes('projectItems(')) return { data: { repository: { issue: { projectItems: { nodes: [
       { id: 'item1', project: { id: 'project1' }, fieldValueByName: { name: status } },
     ] } } } } };
@@ -174,7 +256,8 @@ test('GitHub Project v2 uses the configured single-select status and event actor
     ] } } } };
     if (q.includes('updateProjectV2ItemFieldValue')) {
       status = input.variables.option === 'o2' ? 'Review' : 'Approved';
-      events.push({ status, createdAt: new Date().toISOString(), actor: { login: identity === 'app' ? 'cleared[bot]' : 'alice' },
+      events.push({ status, createdAt: new Date().toISOString(), actor: { login: identity === 'app' ? 'cleared' : 'alice',
+        __typename: identity === 'app' ? 'Bot' : 'User' },
         project: { id: 'project1' }, wasAutomated: false });
       return { data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: 'item1' } } } };
     }
@@ -190,9 +273,11 @@ test('GitHub Project v2 uses the configured single-select status and event actor
   identity = 'human';
   tracker.moveTicket('GH-12', 'Approved');
   assert.equal(tracker.history('GH-12').at(-1).by.kind, 'human');
+  assert.equal(tracker.listTickets({ status: 'Approved' })[0].identifier, 'GH-12');
   const changed = tracker.changesSince('2026-10-01T00:00:00Z');
   assert.equal(changed.events[0].status, 'Approved');
-  assert.equal(changed.events[0].updatedAt, changed.cursor, 'a field-only move must be visible to the next wake');
+  assert.ok(Date.parse(changed.events[0].updatedAt) > Date.parse('2026-10-01T00:00:00Z'),
+    'a field-only move must be visible to the next wake');
 });
 
 test('a GitHub capture passes OCR and the text guard before any image bytes reach the API', () => {
@@ -251,10 +336,14 @@ test('local ticket moves through request, verified approval, guarded merge, and 
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('adapter = local', `adapter = local\n${lines}`));
   const db = openLedger(join(box.state, 'ledger.db'));
   const conf = { sections: { tracker: settings } };
-  const agents = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'cleared' } });
-  const human = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' } });
+  const approvalDir = join(box.state, 'validations');
+  const agents = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'cleared' }, approvalDir });
+  const human = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' }, approvalDir });
   try {
     assert.equal(human.createTicket({ title: 'Test ticket', body: 'Body' }).identifier, 'LOCAL-1');
+    const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'LOCAL-1'], { env: box.env, encoding: 'utf8' });
+    assert.equal(opened.status, 0, opened.stderr);
+    assert.ok(agents.getTicket('LOCAL-1'));
     human.moveTicket('LOCAL-1', 'Go MEP');
     const earlier = db.prepare('SELECT status, actor_kind, actor_id, at, proof FROM tracker_history ORDER BY id DESC LIMIT 1').get();
     const asked = pull.ask();
@@ -273,6 +362,15 @@ test('local ticket moves through request, verified approval, guarded merge, and 
     assert.equal(pull.merge(['-'], {}, 'Announcement.').status, 6, 'an agent status change is not a human approval');
     assert.equal(agents.getTicket('LOCAL-1').status, 'À valider');
     human.moveTicket('LOCAL-1', 'Go MEP');
+    const validationFile = join(approvalDir, 'LOCAL-1.json');
+    const authenticRequest = readFile(validationFile, 'utf8');
+    const forgedRequest = JSON.parse(authenticRequest);
+    forgedRequest.at = '2020-01-01T00:00:00Z';
+    forgedRequest.pulls[0].head = 'f'.repeat(40);
+    writeFileSync(validationFile, JSON.stringify(forgedRequest));
+    assert.equal(pull.merge(['-', '--dry-run'], {}, 'Announcement.').status, 6,
+      'altering the request timestamp and presented head cannot reuse a human signature');
+    writeFileSync(validationFile, authenticRequest);
     const approved = pull.merge(['-', '--dry-run'], {}, 'Announcement.');
     assert.equal(approved.status, 0, approved.stderr);
     const shipped = pull.merge(['-'], {}, 'Announcement.');
@@ -328,6 +426,8 @@ console.log(JSON.stringify(result));
   writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash
 if [ "$1" = api ] && [[ " $* " == *"/repos/example/project/issues/12"* || " $* " == *"/installation/repositories"* ]]; then node ${fake} "\${@:2}"; else exec ${original} "$@"; fi
 `, { mode: 0o755 });
+  const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'GH-12'], { env: box.env, encoding: 'utf8' });
+  assert.equal(opened.status, 0, opened.stderr);
   const externalMove = (who, at) => {
     const data = JSON.parse(readFile(stateFile, 'utf8'));
     data.issue.labels = [{ name: 'status:Go MEP' }];
@@ -387,7 +487,9 @@ if (query.includes('commentCreate')) {
 } else if (query.includes('teams(filter:')) {
   data = {issue: {id: 'issue1'}, teams: {nodes: [{states: {nodes: ['Todo', 'À valider', 'Go MEP', 'Done', 'In Progress', 'In Review'].map((name) => ({id: 'status-' + name, name}))}}]}};
 } else if (query.includes('issue(id:')) {
-  data = {issue: {id: 'issue1', state: {name: state.status}}};
+  data = {issue: {id: 'issue1', identifier: 'X-5', title: 'Test ticket', url: 'https://example.test/X-5',
+    description: 'Body', createdAt: '2026-01-01T00:00:00Z', updatedAt: new Date().toISOString(),
+    state: {name: state.status}, project: {name: 'Example'}, labels: {nodes: []}}};
 } else throw new Error('Unexpected query: ' + query);
 writeFileSync(file, JSON.stringify(state));
 console.log(JSON.stringify({data}));
@@ -396,6 +498,8 @@ console.log(JSON.stringify({data}));
 node ${fake} "$@"
 `, { mode: 0o755 });
   const env = { LINEAR_APP_CLIENT_ID: 'app', LINEAR_APP_CLIENT_SECRET: 'secret' };
+  const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5'], { env: { ...box.env, ...env }, encoding: 'utf8' });
+  assert.equal(opened.status, 0, opened.stderr);
   const asked = pull.ask('Please approve this version.', env);
   assert.equal(asked.status, 0, asked.stderr);
   assert.equal(JSON.parse(readFile(stateFile, 'utf8')).status, 'À valider');
