@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
@@ -161,6 +161,29 @@ test('bad health with automatic rollback off is reported without a revert', asyn
   assert.equal(reverts, 0);
   assert.equal(notices.length, 1);
   assert.match(notices[0], /disabled/);
+});
+
+test('an unavailable tracker leaves the health alert in the retry outbox', async (t) => {
+  const x = releasedProject(t);
+  x.conf.sections.release.auto_rollback = 'false';
+  const oldState = process.env.CLEARED_STATE_DIR;
+  process.env.CLEARED_STATE_DIR = join(x.repo, '..');
+  try {
+    let time = x.clock;
+    await watchRelease(x.conf, x.db, x.repo, x.row.id, {
+      currentTime: () => time, wait: async (ms) => { time += ms; },
+      check: async () => ({ ok: false, detail: 'HTTP 503' }),
+      announce: () => { throw new Error('tracker unavailable'); },
+    });
+    const outbox = join(x.repo, '..', 'tracker-outbox');
+    const files = readdirSync(outbox).filter((name) => name.endsWith('.md'));
+    assert.equal(files.length, 1);
+    assert.match(readFileSync(join(outbox, files[0]), 'utf8'), /HTTP 503/);
+    assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_notification_failed'").get().n, 1);
+  } finally {
+    if (oldState === undefined) delete process.env.CLEARED_STATE_DIR;
+    else process.env.CLEARED_STATE_DIR = oldState;
+  }
 });
 
 test('a later conflicting change is never pushed over', (t) => {
