@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible Cleared bug (use private reporting for security issues)
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "For a vulnerability, use the private form linked in SECURITY.md. Remove tokens, real ticket content, and private paths from this report."
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include the command and observed result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use a disposable repository or invented data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cleared revision and environment
+      placeholder: "commit hash, Linux distribution, Node version"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs or ledger events
+      render: text
