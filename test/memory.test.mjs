@@ -30,13 +30,15 @@ test('agent entries cannot be approved through write, supersede, or approve', ()
 });
 
 test('an agent cannot archive or supersede an approved entry', () => {
-  const { memory, project } = fixture();
+  const { memory, project, db, conf } = fixture();
   execFileSync('git', ['-C', project, 'init', '-q']);
   mkdirSync(join(project, 'docs', 'decisions'), { recursive: true });
   writeFileSync(join(project, 'docs', 'decisions', 'queue.md'), 'status: approved\nUse a queue.');
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: approve queue']);
   const id = memory.search('queue')[0].id;
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+  createMemory({ project, db, conf, tracker: { whoAmI: () => ({ kind: 'human', id: 'owner' }) } }).approve(id);
   assert.throws(() => memory.archive(id), /human/i);
   assert.throws(() => memory.supersede(id, { type: 'decision', scope: 'ticket:LOCAL-1', content: 'Other', source_who: 'agent:dev/codex', source_where: 'ticket:LOCAL-1' }), /human/i);
   const proposed = memory.write({ type: 'decision', scope: 'ticket:LOCAL-1', content: 'Draft', source_who: 'agent:dev/codex', source_where: 'ticket:LOCAL-1' });
@@ -54,6 +56,10 @@ test('a quoted approval marker and an uncommitted edit do not approve a file', (
   const id = memory.search('queue')[0].id;
   assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
   writeFileSync(path, 'status: approved\nUse a queue.');
+  memory.search('queue');
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+  execFileSync('git', ['-C', project, 'add', '.']);
+  execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: mark approved']);
   memory.search('queue');
   assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
 });
@@ -81,6 +87,14 @@ test('agent entries receive server-side IDs and timestamps', () => {
     source_who: 'agent:dev/model', source_where: 'session:one', source_when: '1999-01-01T00:00:00.000Z' });
   assert.notEqual(id, 'file:replay');
   assert.notEqual(db.prepare('SELECT source_when FROM memory_entries WHERE id = ?').get(id).source_when, '1999-01-01T00:00:00.000Z');
+});
+
+test('schema migration withdraws automatic file approvals from version 1', () => {
+  const { project, db, conf } = fixture();
+  db.exec("DROP TABLE memory_entries; DROP TABLE memory_files; DROP TABLE memory_meta; CREATE TABLE memory_entries(id TEXT PRIMARY KEY,type TEXT,scope TEXT,content TEXT,source_who TEXT,source_where TEXT,source_when TEXT,status TEXT,links TEXT,supersedes TEXT,last_used_at TEXT); CREATE TABLE memory_files(path TEXT PRIMARY KEY,hash TEXT,indexed_at TEXT,entry_id TEXT); CREATE TABLE memory_meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO memory_meta VALUES ('schema_version','1'); INSERT INTO memory_entries VALUES ('file:old','decision','project:x','Use a queue','script:file-index','docs/decisions/queue.md','2026-10-11T00:00:00Z','approved','[]',NULL,NULL); INSERT INTO memory_files VALUES ('/tmp/queue.md','old','2026-10-11T00:00:00Z','[\"file:old\"]');");
+  createMemory({ project, db, conf });
+  assert.equal(db.prepare("SELECT status FROM memory_entries WHERE id = 'file:old'").get().status, 'proposed');
+  assert.equal(db.prepare('PRAGMA table_info(memory_files)').all().some((column) => column.name === 'committed'), true);
 });
 
 test('search finds a decision and its source; changed files are reindexed once', () => {
