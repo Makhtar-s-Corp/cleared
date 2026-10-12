@@ -53,6 +53,7 @@ fi
 # So does the checkout of the project: what went live there (its settings,
 # its prompts, its rules) is what this wake reads.
 if [ -z "$handover$dry_run" ] && [ -x "$ORCH_HOME/project-update.sh" ]; then "$ORCH_HOME/project-update.sh" > /dev/null 2>&1 || true; fi
+if [ -z "$handover$dry_run" ]; then node --no-warnings "$ORCH_HOME/lib/release.mjs" reconcile > /dev/null 2>&1 || true; fi
 
 # What the hourly limit held back leaves now, grouped, if the user may be written.
 [ -n "$handover" ] || flush_outbox
