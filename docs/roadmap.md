@@ -2,7 +2,7 @@
 
 Cleared is an alpha for developers, maintained around one real project. It aims to work with as many coding harnesses as practical. The items below are directions for contributors, not commitments or claims that these features already work.
 
-- **Memory.** Keep a concise, inspectable record of project decisions and prior findings for new agent sessions. The ledger records actions and outcomes today; it is not a general agent memory.
+- **Memory improvements.** The opt-in local adapter indexes project files and session handovers today. Future work may add model-assisted extraction, embeddings, and other storage adapters after their trust boundaries are designed and tested.
 - **Cleared app.** Build an app for developers to review active teams, approvals, queues, cost, and host health. Today's static dashboard is read-only and generated from the ledger.
 - **More coding harnesses.** Add OpenCode, Gemini CLI, and Copilot CLI adapters alongside today's Claude Code and Codex CLI adapters, following the documented adapter contract.
 - **Review with one subscription.** When another model is available, use it for review. Otherwise, allow a fresh session on the same subscription without the author's context. Today the reviewer must use a different model.

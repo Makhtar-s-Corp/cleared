@@ -14,7 +14,22 @@ run_dir=${1:?usage: lane-run.sh <run directory>}
 # closed, the host restarted) is told from one at work.
 echo $$ > "$run_dir/pid"
 # Whatever stops this script, the run says it is over: a wake waits for it.
-trap 'echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"' EXIT
+lane_worktree=$PWD
+handover_captured=
+capture_handover() {
+  [ -n "$handover_captured" ] && return 0
+  handover_captured=1
+  [ "$(conf_get memory enabled)" = true ] || return 0
+  local actual_model=${lane_model:-${model:-}}
+  [ -n "$actual_model" ] || return 0
+  node "$ORCH_HOME/lib/memory/cli.mjs" capture "$lane_worktree" "$ORCH_ROLE" "$actual_model" "$ORCH_TICKET" "${lane_run_id:-${run_id:-$ORCH_RUN_BASE}}" \
+    || { ledger event --kind handover_missing --ticket "$ORCH_TICKET" --run-id "${lane_run_id:-${run_id:-$ORCH_RUN_BASE}}" --detail 'handover capture failed'; echo '!! Handover could not be stored.' >&2; }
+}
+on_exit() {
+  capture_handover
+  echo "${lane_code:-${code:-1}}" > "$run_dir/exit-code"
+}
+trap on_exit EXIT
 export ORCH_LANE ORCH_TICKET ORCH_ROLE
 [ -z "${ORCH_PUSH_BRANCH:-}" ] || export ORCH_PUSH_BRANCH
 # How what this run posts is signed (the acting lead posts by itself).
@@ -90,6 +105,7 @@ run_chain() {
 run_chain "$ORCH_ROLE" "$run_dir/prompt.md" "$run_dir/chain.json" "$ORCH_REQUESTED_ALIAS"
 lane_run_id=$run_id
 lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lane_adapter=$adapter lane_model=$model lane_fallback=$fallback_note
+capture_handover
 
 # What a backend that cannot commit brought back ([adapter.<name>] commits =
 # no: its work comes back as changes applied to the worktree) is committed

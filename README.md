@@ -26,6 +26,7 @@ This diagram shows the normal path for an application change. The configured too
 - Cleared runs on your CLI subscriptions and your Linux host. It does not resell model calls.
 - Claude Code and Codex coding lanes run on the host under the same configured role policy. Codex can instead use a project-owned container runner. Either host harness can read every file readable by the Cleared account; use a dedicated system account without other projects' secrets if you need stronger isolation.
 - The ledger records runs, costs, events, and decisions so the process can be inspected.
+- Optional project memory gives a new team a bounded briefing from project files and the previous session's handover. It is off by default; enable it with `[memory] enabled = true` in the project's tracked `.cleared/agents.conf`.
 
 ## Status
 
@@ -57,6 +58,7 @@ In the editor, set `[guard] salt` to the random value printed above and set `ter
 ## Read more
 
 - [Concepts and ticket lifecycle](docs/concepts.md)
+- [Memory contract and briefing](docs/memory.md)
 - [Configuration reference](docs/configuration.md)
 - [Model adapters](docs/adapters.md)
 - [Ticket trackers](docs/trackers.md)
