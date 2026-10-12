@@ -2,7 +2,7 @@
 
 **Your agents do the work. Nothing ships until it's cleared.**
 
-Cleared uses scripts to take a Linear ticket through a coding team, checks, an independent model review, human approval, and a guarded merge. It keeps each team's work in a Git worktree and records actions, costs, and decisions in a SQLite ledger.
+Cleared is for developers who want coding agents to work on tickets while keeping review and shipping decisions visible. Scripts take a Linear ticket through a coding team, checks, an independent review, human approval, and a guarded merge; Git worktrees isolate the work, and a SQLite ledger records actions, costs, and decisions.
 
 ```mermaid
 flowchart LR
@@ -22,13 +22,13 @@ This diagram shows the normal path for an application change. The configured too
 
 - Scripts coordinate the workflow; a model does not decide when to merge.
 - Application changes require a human to approve the version shown to them. Paths explicitly configured as `tooling_paths` can merge after review and green checks without a ticket approval; audit that list before using unattended shipping.
-- The reviewer cannot be the model that wrote the change.
+- Today, review requires a different model from the one that wrote the change. A fresh session on the same subscription, without the author's context, is planned for developers who have only one model.
 - Cleared runs on your CLI subscriptions and your Linux host. It does not resell model calls.
 - The ledger records runs, costs, events, and decisions so the process can be inspected.
 
 ## Status
 
-**Alpha, Linux only.** Cleared was used on one production project in October 2026; that installation is currently disconnected pending a clean reinstall. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Setup still assumes a GitHub repository, Linear, a Node-oriented project, and project-specific rules. Automatic terminals currently require Orca; other ticket trackers, OpenCode, and a terminal without Orca are future work. Tooling-only changes are exempt from the ticket approval check when configured that way. CLI permissions and the private-term guard are safeguards, not an operating-system sandbox.
+**Alpha, Linux only.** Cleared was used on one production project in October 2026; that installation is currently disconnected pending a clean reinstall. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Claude Code and Codex CLI are supported today. Cleared aims to support many coding harnesses; OpenCode, Gemini CLI, and Copilot CLI are planned. Setup still assumes a GitHub repository, Linear, a Node-oriented project, and project-specific rules. Automatic terminals currently require Orca. A terminal adapter for Orca, tmux, or no terminal is planned so Cleared can also run without a graphical terminal. A Cleared app is planned. Tooling-only changes are exempt from the ticket approval check when configured that way. CLI permissions and the private-term guard are safeguards, not an operating-system sandbox.
 
 ## Requirements
 
