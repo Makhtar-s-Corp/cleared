@@ -351,6 +351,16 @@ test('new prompt overrides the tool prompt', () => withProject(({ project, env }
   assert.ok(prompt.endsWith('new prompt'));
 }));
 
+test('the live lead prompt names the configured reporting ticket', () => withProject(({ project, env }) => {
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[lead]\nreport_on = DEMO-7\n');
+  trackProjectConfig(project);
+  const result = shell(env, 'prompt_text "$(prompt_file release-live)"');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /reporting ticket DEMO-7/);
+  assert.doesNotMatch(result.stdout, /@REPORT_ON@/);
+}));
+
 test('a complete project configuration retains exactly its settings', () => withProject(({ project }) => {
   mkdirSync(join(project, '.cleared'));
   const source = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8');
@@ -393,7 +403,7 @@ test('review prompt and merge check use the same configured verdict', () => with
   trackProjectConfig(project);
   const prompt = shell(env, 'prompt_text "$(prompt_file review)"');
   assert.equal(prompt.status, 0, prompt.stderr);
-  assert.match(prompt.stdout, /Verdict : « à corriger avant fusion » ou « approved for sample »/);
+  assert.match(prompt.stdout, /Verdict: “fix before merge” or “approved for sample”/);
   const report = join(root, 'report.md');
   writeFileSync(report, '## Compte rendu\nVerdict : approved for sample\n');
   const accepted = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });

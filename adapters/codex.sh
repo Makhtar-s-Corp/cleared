@@ -106,7 +106,7 @@ case "${1:-}" in
         echo
         echo "What the guard found (locations only, never values):"
         echo
-        grep -E ': (secret|adresse|terme|IBAN)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | sed -n '1,30p'
+        grep -E '(:[0-9]+)?: (private term( in name)?|application token( in name)?|API key( in name)?|private key( in name)?|IBAN( in name)?|credentials in a URL( in name)?|email address( in name)?|phone number( in name)?|literal secret|assigned secret|symbolic link|non-text file)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | sed -n '1,30p'
       } > "$body"
       contract_usage '{}'
       contract_report codex 3 "$body"

@@ -52,13 +52,17 @@ prompt_file() { prompt_asset "$1.md"; }
 # Written as it is, whatever characters the path holds (a quoted replacement
 # is taken literally).
 prompt_text() {
-  local text language verdict
+  local text language verdict report_on
   [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
   text=$(cat "$1"; printf x)
   text=${text%x}
   if [[ "$text" == *'@REVIEW_VERDICT@'* ]]; then
     verdict=$(conf_get merge verdict) || return 1
     text=${text//@REVIEW_VERDICT@/$verdict}
+  fi
+  if [[ "$text" == *'@REPORT_ON@'* ]]; then
+    report_on=$(conf_get lead report_on) || return 1
+    text=${text//@REPORT_ON@/$report_on}
   fi
   language=$(conf_get owner language)
   language=${language:-en}
