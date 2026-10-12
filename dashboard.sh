@@ -17,7 +17,7 @@ cli=$(cat "$ORCH_STATE_DIR/cli-versions.json" 2>/dev/null || echo null)
 
 # What the ledger does not hold: read here, by scripts, never by a model.
 # A source that does not answer is written as null and shown as such.
-waiting=$("$ORCH_HOME/linear.sh" waiting 2>/dev/null || echo null)
+waiting=$("$ORCH_HOME/tracker.sh" waiting 2>/dev/null || echo null)
 merged=$(cd "$ORCH_REPO" && gh pr list --state merged --search "merged:>=$(date -u -d '7 days ago' +%F)" --limit 500 --json number --jq length 2>/dev/null || echo null)
 inputs=$(mktemp)
 trap 'rm -f "$inputs"' EXIT

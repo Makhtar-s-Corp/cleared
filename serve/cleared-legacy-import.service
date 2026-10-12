@@ -13,4 +13,4 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
 Type=oneshot
-ExecStart=/usr/bin/node --no-warnings @ORCH_HOME@/import-legacy.mjs --days 3
+ExecStart=/usr/bin/node --no-warnings @ORCH_HOME@/lib/tracker/adapters/import-legacy.mjs --days 3

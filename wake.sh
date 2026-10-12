@@ -2,7 +2,7 @@
 # The wake of the project lead. Run every minute by a timer; no model unless
 # something moved.
 #
-#   1. Reads Linear and GitHub (scripts only) and compares with what the last
+#   1. Reads tracker and GitHub (scripts only) and compares with what the last
 #      wake saw: lib/wake.mjs.
 #   2. Nothing moved: writes "wake skipped" to the ledger and stops there.
 #      Zero token.
@@ -64,7 +64,7 @@ if [ -z "$handover$dry_run" ] && [ -x "$ORCH_HOME/project-update.sh" ]; then "$O
 # The lanes move forward by rule, with no model: opened on the tickets the
 # user said « go » on, their checks started, their review asked for, opened
 # again when something asks for it. Only once the lead acts.
-if [ -z "$handover" ] && [ "$(conf_get lead live)" = yes ] && [ -n "$(conf_get linear todo_state)" ]; then
+if [ -z "$handover" ] && [ "$(conf_get lead live)" = yes ] && [ -n "$(conf_get tracker todo_state)" ]; then
   "$ORCH_HOME/flow-lanes.sh" 2>&1 | sed "s/^/$(now_utc) /" >> "$ORCH_STATE_DIR/flow.log" || true
   # What it did is kept for a while, not for ever.
   [ "$(wc -l < "$ORCH_STATE_DIR/flow.log" 2> /dev/null || echo 0)" -le 4000 ] || { tail -n 2000 "$ORCH_STATE_DIR/flow.log" > "$ORCH_STATE_DIR/flow.log.part" && mv "$ORCH_STATE_DIR/flow.log.part" "$ORCH_STATE_DIR/flow.log"; }
@@ -123,7 +123,7 @@ count=0
 if [ -z "$handover" ]; then
   # Taken before anything is read: it becomes the time of this wake.
   read_at=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-  # Linear is asked for what was touched since the last wake, with some overlap;
+  # tracker is asked for what was touched since the last wake, with some overlap;
   # what was already seen is told apart by its identifier.
   # A state file that cannot be read is no state: this wake starts over as a
   # first one (lib/wake.mjs does the same with it).
@@ -137,7 +137,7 @@ if [ -z "$handover" ]; then
   fi
 
   # A source that does not answer: this wake sees nothing and moves nothing.
-  "$ORCH_HOME/linear.sh" changes "$since" > "$work/linear.json" || die "Linear did not answer: nothing read, nothing moved"
+  "$ORCH_HOME/tracker.sh" changes "$since" > "$work/tracker.json" || die "tracker did not answer: nothing read, nothing moved"
   if [ -n "$github_out" ]; then
     echo '[]' > "$work/pulls.json"
   else
@@ -145,7 +145,7 @@ if [ -z "$handover" ]; then
       || die "GitHub did not answer: nothing read, nothing moved"
   fi
   # What the scripts of the dispatcher posted themselves.
-  cat "$ORCH_STATE_DIR/linear-comments.jsonl" "$ORCH_STATE_DIR/linear-issues.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
+  cat "$ORCH_STATE_DIR/tracker-comments.jsonl" "$ORCH_STATE_DIR/tracker-issues.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
   # What the lanes already at work say to the lead: only once it acts. A
   # lane is a worktree under the lanes root that the dispatcher did not open.
   echo '[]' > "$work/reports.json"
@@ -178,7 +178,7 @@ if [ -z "$handover" ]; then
     # The reviews the dispatcher ran that came to their end: the lead opens them, it is told what they say.
     node --no-warnings "$ORCH_HOME/lib/reviews.mjs" done "$(conf_get lead report_hours)" > "$work/reviews.json" || echo '[]' > "$work/reviews.json"
   fi
-  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/linear.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" "${github_out:+down}" "$work/reviews.json" "$(conf_get linear go_state)" "$work/nights.json" > "$work/changes.json"
+  node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/tracker.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" "${github_out:+down}" "$work/reviews.json" "$(conf_get tracker go_state)" "$work/nights.json" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
 
   if [ -n "$dry_run" ]; then
@@ -235,7 +235,7 @@ printf '%s\n' "$chain" > "$run_dir/chain.json"
 live=$(conf_get lead live)
 # live = no: the lead observes, it writes what it would do and does nothing.
 # live = yes: it acts, by the few scripts its permissions name (it answers in
-# Linear and to the lanes at work; it opens no lane and merges nothing yet).
+# tracker and to the lanes at work; it opens no lane and merges nothing yet).
 acting=
 [ "$live" != yes ] || acting=1
 if [ -n "$handover" ]; then

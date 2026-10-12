@@ -1,5 +1,7 @@
 # Model adapters
 
+Ticket trackers use a separate contract documented in [Ticket trackers](trackers.md). A model adapter never calls a provider API directly; it uses `tracker.sh` for ticket actions.
+
 An adapter is an executable `adapters/<name>.sh`. Routing uses `[models] alias = adapter:model-id`; dispatch scripts name neither provider nor model. `lib/contract.sh` contains the shared report helpers. An adapter can be added without changing the dispatcher when it implements the commands below and declares its model IDs in the project configuration.
 
 | Command | Required behavior |

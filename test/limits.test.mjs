@@ -196,7 +196,7 @@ test('a lane that cannot be opened again is not left with its finished work unsh
   assert.equal(record('X-5').runs.length, 1);
   // The place frees, and meanwhile the user wrote on the ticket too: one session, with his word and the lead's.
   assert.equal(session('X-7', { commit: 'fix: the other work' }).run.status, 0);
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Et vérifie aussi le mode sombre.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Et vérifie aussi le mode sombre.', byOwner: true }]));
   pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   writeFileSync(join(box.home, 'pr-view-42.json'), JSON.stringify({ number: 42, state: 'OPEN', isDraft: true, headRefName: 'dev/X-7', baseRefName: 'main', title: 't', body: 'b', additions: 1, deletions: 0, files: [], statusCheckRollup: [] }));
   writeFileSync(join(box.home, 'agents.conf'), readFileSync(join(box.home, 'agents.conf'), 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 3'));
@@ -280,7 +280,7 @@ test('a word written to a lane that stays at its cap is not lost in silence: the
   assert.doesNotMatch(flow().stdout, /at its cap/);
   assert.equal(told().length, 2);
   // The user writes on the ticket, without lifting the cap: his word is not handed over either, and that is said too.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }]));
   assert.match(flow().stdout, /X-5: at its cap \(1\.10 \$ of 1 \$\): not opened again \(said\)/);
   assert.equal(told().length, 3);
   assert.match(told()[2], /Since its last session the user wrote on the ticket, and that word was not handed to it/);
@@ -288,7 +288,7 @@ test('a word written to a lane that stays at its cap is not lost in silence: the
   assert.equal(told().length, 3, 'once a day for his words');
   assert.equal(record('X-5').runs.length, 1, 'nothing was opened at the cap');
   // He lifts the cap: the lane opens with every word that waited, and nothing more is said of the cap.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }, { id: 'c8', createdAt: '2099-01-01T11:00:00Z', body: 'Plafond 5', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c7', createdAt: '2099-01-01T10:00:00Z', body: 'Tu en es où ?', byOwner: true }, { id: 'c8', createdAt: '2099-01-01T11:00:00Z', body: 'Plafond 5', byOwner: true }]));
   assert.match(flow().stdout, /X-5: opened again \(said:c7\)/);
   assert.equal(told().length, 3);
   const heard = session('X-5', { commit: null });
@@ -359,11 +359,11 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   flow();
   assert.equal(told().length, 1, 'said once for a cap');
   // A line an agent wrote does not raise it; a line of the user does, for this ticket.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([
     { id: 'a1', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nPlafond : 50 $', byOwner: true },
   ]));
   assert.doesNotMatch(flow().stdout, /X-5: opened again \(/);
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([
     { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true },
     { id: 'a1', createdAt: '2099-01-01T09:00:00Z', body: '> Écrit par un agent (chef de projet), pas par lui.\n\nPlafond : 50 $', byOwner: true },
   ]));
@@ -376,7 +376,7 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.equal(record('X-5').runs.length, 3);
   // The tracker does not answer: the cap he may have written cannot be read, and nothing is opened on a guess.
   pull({ headRefOid: last.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
-  assert.match(flow({ FAKE_LINEAR_COMMENTS_DOWN: '1' }).stdout, /X-5: its cap or what it has cost cannot be read: not opened again \(checks:/);
+  assert.match(flow({ FAKE_TRACKER_COMMENTS_DOWN: '1' }).stdout, /X-5: its cap or what it has cost cannot be read: not opened again \(checks:/);
   assert.equal(record('X-5').runs.length, 3);
   // Nor what it cost (here: a record whose date is no date).
   const path = join(box.state, 'lanes', 'X-5.json');
@@ -409,7 +409,7 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.equal(record('X-5').runs.length, atCap);
   // He lifts it the way he writes: « Plafond 4 », alone, without a colon. That comment is no word for the lane and is not shown to it;
   // a sentence about a share (« plafond 80 % ») sets no cap, and is a word like any other.
-  const comments = (list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
+  const comments = (list) => writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify(list));
   const c9 = { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true };
   const c10 = { id: 'c10', createdAt: '2099-01-01T11:00:00Z', body: 'plafond 80 % de mon abonnement, on est bien d’accord', byOwner: true };
   const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Cap 4', byOwner: true };
@@ -446,7 +446,7 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   todo(['X-6']);
   by('X-6', 0);
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(/max_lanes = \d+/, 'max_lanes = 5'));
-  const waits = flow({ FAKE_LINEAR_COMMENTS_DOWN: '1' });
+  const waits = flow({ FAKE_TRACKER_COMMENTS_DOWN: '1' });
   assert.match(waits.stdout, /X-6: put in « Todo » by the user: its cap or what it has cost cannot be read, it waits/);
   assert.throws(() => record('X-6'));
   assert.match(flow().stdout, /X-6: put in « Todo » by the user: its lane is opened/);
@@ -466,7 +466,7 @@ test('a lane whose first session sent nothing (it ended on a question, with no c
   assert.equal(there('X-5'), false, 'its worktree is closed');
   assert.equal(spawnSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', '--verify', '--quiet', 'dev/X-5']).status, 1, 'nothing of it is on the remote');
   // He answers: the lane is opened again, though there is no branch on the remote to come back to.
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
   const first = flow();
   assert.match(first.stdout, /X-5: opened again \(said:c1\)/);
   assert.equal(there('X-5'), true);
@@ -475,7 +475,7 @@ test('a lane whose first session sent nothing (it ended on a question, with no c
   flow();
   assert.equal(there('X-5'), false);
   box.git('branch', '-D', 'dev/X-5');
-  writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify([{ id: 'c2', createdAt: '2099-01-02T10:00:00Z', body: 'Bleu.', byOwner: true }, { id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
+  writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c2', createdAt: '2099-01-02T10:00:00Z', body: 'Bleu.', byOwner: true }, { id: 'c1', createdAt: '2099-01-01T10:00:00Z', body: 'Prends la première.', byOwner: true }]));
   assert.match(flow().stdout, /X-5: opened again \(said:c2\)/);
   assert.equal(execFileSync('git', ['-C', record('X-5').worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }), execFileSync('git', ['-C', box.repo, 'rev-parse', 'origin/main'], { encoding: 'utf8' }));
   assert.match(session('X-5', { commit: 'fix: the first one, in blue' }).prompt, /Bleu\./);

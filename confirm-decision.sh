@@ -4,7 +4,7 @@
 #   - with --adr, the change to docs/decisions.md is committed in the
 #     worktree of the decisions and leaves as a draft pull request
 #     (push-lane.sh: that branch only, never forced, never the base);
-#   - a comment on the ticket in Linear, marked as written by an agent;
+#   - a comment on the ticket in tracker, marked as written by an agent;
 #   - one line in the ledger (kind decision, source discussion).
 # In that order: what cannot leave stops everything before anything is said
 # to be decided, and running it again takes up where it stopped.
@@ -87,7 +87,7 @@ if [ ! -f "$pending/$id/comment.url" ]; then
     cat "$text"
     [ "$adr" != true ] || user_message decision_adr_note
   } > "$comment"
-  url=$("$ORCH_HOME/linear.sh" comment "$ticket" "$comment" "$(conf_get lead name), en discussion") || { rm -f "$comment"; die "Linear did not take the comment (see above): the decision still waits, run this again"; }
+  url=$("$ORCH_HOME/tracker.sh" comment "$ticket" "$comment" "$(conf_get lead name), en discussion") || { rm -f "$comment"; die "tracker did not take the comment (see above): the decision still waits, run this again"; }
   rm -f "$comment"
   echo "$url" > "$pending/$id/comment.url"
 fi

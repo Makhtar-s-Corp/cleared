@@ -375,12 +375,12 @@ test('the example never supplies missing project keys or a merge verdict', () =>
   writeFileSync(config, '[owner]\nname = Example Owner\n');
   trackProjectConfig(project);
   const loaded = loadConf(config);
-  assert.equal(loaded.sections.linear?.team, undefined);
+  assert.equal(loaded.sections.tracker?.team, undefined);
   assert.equal(loaded.sections.merge?.verdict, undefined);
   assert.equal(loaded.sections.limits.max_lanes, '1');
-  const missingTeam = shell(env, 'conf_get linear team');
+  const missingTeam = shell(env, 'conf_get tracker team');
   assert.notEqual(missingTeam.status, 0);
-  assert.match(missingTeam.stderr, /Missing required \[linear\] team/);
+  assert.match(missingTeam.stderr, /Missing required \[tracker\] team/);
   const report = join(root, 'report.md');
   writeFileSync(report, '## Compte rendu\nVerdict : rien de bloquant\n');
   const result = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });

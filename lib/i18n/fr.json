@@ -59,7 +59,7 @@
   "dashboard_lead": "Chef de projet",
   "dashboard_teams": "Lanes",
   "dashboard_no_legacy": "Aucune session relue.",
-  "dashboard_tracker_down": "Linear n’a pas répondu : liste indisponible.",
+  "dashboard_tracker_down": "tracker n’a pas répondu : liste indisponible.",
   "dashboard_waiting_none": "Rien ne t’attend.",
   "dashboard_week_window": "limite de la semaine",
   "dashboard_five_hour_window": "limite des cinq heures",

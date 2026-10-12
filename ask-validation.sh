@@ -11,7 +11,7 @@
 # each is at now: the request ends with a line that says which, and
 # state/validations/<ticket>.json keeps it. His agreement is to that
 # version; merge-pr.sh puts nothing else live on it. Each capture is a
-# screenshot a lane set apart to be sent (linear.sh upload says from which
+# screenshot a lane set apart to be sent (tracker.sh upload says from which
 # folder); it is shown under the request, with its caption. A change of
 # screen is asked for with its capture, or not asked for.
 set -euo pipefail
@@ -43,7 +43,7 @@ text=$(mktemp)
 trap 'rm -f "$text"' EXIT
 if [ "$source" = - ]; then cat > "$text"; else [ -f "$source" ] || die "no such file: $source"; cat "$source" > "$text"; fi
 grep -q '[^[:space:]]' "$text" || die "nothing to ask"
-validate=$(conf_get linear validate_state)
+validate=$(conf_get tracker validate_state)
 # The version of each pull request, now.
 shown='[]' versions= asked_pulls=
 for pr in "${pulls[@]}"; do
@@ -70,7 +70,7 @@ if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
     || die "$ticket was given to two teams, and one of them has no pull request yet: he is asked once, with both results. Wait for it (the rules say when both are ready), or close its lane to ask for the other alone"
   [ "$(jq -c --argjson shown "$shown" '[.[]] - ($shown | map(.pr)) | length' <<<"$teams")" = 0 ] \
     || die "$ticket was given to two teams (#$(jq -r '."1"' <<<"$teams") and #$(jq -r '."2"' <<<"$teams")): he is asked once, with both results side by side (--pr $(jq -r '."1"' <<<"$teams") --pr $(jq -r '."2"' <<<"$teams")). To ask for one alone, the lane of the other must be closed first"
-  choice=$(user_message team_choice "first=$(jq -r '."1"' <<<"$teams")" "second=$(jq -r '."2"' <<<"$teams")" "go_state=$(conf_get linear go_state)")
+  choice=$(user_message team_choice "first=$(jq -r '."1"' <<<"$teams")" "second=$(jq -r '."2"' <<<"$teams")" "go_state=$(conf_get tracker go_state)")
 else
   teams='{}'
 fi
@@ -85,7 +85,7 @@ mkdir -p "$ORCH_STATE_DIR/validations"
 exec 9> "$ORCH_STATE_DIR/merge.lock"
 flock -w "${ORCH_LOCK_WAIT:-60}" 9 || die "a go-live is being done: nothing asked, ask again in a minute"
 before=$(jq -c '[.pulls[]]' "$kept" 2> /dev/null) || before='[]'
-if [ "$("$ORCH_HOME/linear.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c --argjson shown "$shown" '[.[] | {pr, head}] as $kept | $shown - $kept | length' <<<"$before")" = 0 ]; then
+if [ "$("$ORCH_HOME/tracker.sh" state "$ticket")" = "$validate" ] && [ "$(jq -c --argjson shown "$shown" '[.[] | {pr, head}] as $kept | $shown - $kept | length' <<<"$before")" = 0 ]; then
   die "$ticket already waits for the user in « $validate » for these versions: nothing asked again"
 fi
 all=$(jq -c --argjson shown "$shown" '[.[] | select(.pr as $pr | $shown | map(.pr) | index($pr) | not)] + $shown | sort_by(.pr)' <<<"$before")
@@ -105,7 +105,7 @@ if [ "$written" != "$request" ]; then
   note false || die "nothing can be kept in $ORCH_STATE_DIR/validations: nothing asked, nothing written to the user. Repair the folder and ask again"
   # The captures first: a request whose capture cannot be sent is not posted without it.
   for index in "${!captures[@]}"; do
-    address=$("$ORCH_HOME/linear.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
+    address=$("$ORCH_HOME/tracker.sh" upload "${captures[$index]}") || die "the capture ${captures[$index]} could not be sent: nothing asked"
     printf '\n\n**%s**\n\n![%s](%s)\n' "${captions[$index]}" "${captions[$index]}" "$address" >> "$text"
   done
   # A request made again for a pull request says which version the one before
@@ -119,14 +119,14 @@ if [ "$written" != "$request" ]; then
   previous=
   [ -z "$earlier" ] || previous=" ; $(user_message approval_previous_version "heads=$earlier")"
   printf '\n\n%s\n' "$(user_message approval_version "versions=$versions" "previous=$previous")" >> "$text"
-  "$ORCH_HOME/linear.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
+  "$ORCH_HOME/tracker.sh" comment "$ticket" "$text" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null
   note true || die "the request is written on $ticket, but that could not be noted: the card is not moved and what he was shown is not kept. Asked again, it will be written to him a second time: repair $ORCH_STATE_DIR/validations first"
 fi
-"$ORCH_HOME/linear.sh" move "$ticket" "$validate" \
+"$ORCH_HOME/tracker.sh" move "$ticket" "$validate" \
   || die "the request is written on $ticket, but the card could not be moved to « $validate »: nothing is kept yet. Ask again with the same request: it will be finished without being written to him a second time"
 # What else the record holds (a ticket the wake still has to close) is kept.
 record=$(jq -c 'if type == "object" then . else {} end' "$kept" 2> /dev/null) || record=
 [ -n "$record" ] || record='{}'
-{ jq --arg ticket "$ticket" --arg at "$(now_utc)" --argjson pulls "$all" --argjson teams "$teams" '. + {ticket: $ticket, at: $at, pulls: $pulls} + (if ($teams | length) == 2 then {teams: $teams} else {} end) | if ($teams | length) == 2 then . else del(.teams) end' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"; } 2> /dev/null \
+{ jq --arg ticket "$ticket" --arg at "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" --argjson pulls "$all" --argjson teams "$teams" '. + {ticket: $ticket, at: $at, pulls: $pulls} + (if ($teams | length) == 2 then {teams: $teams} else {} end) | if ($teams | length) == 2 then . else del(.teams) end' <<<"$record" > "$kept.part" && mv "$kept.part" "$kept"; } 2> /dev/null \
   || die "the card of $ticket is in « $validate », but what he was shown could not be kept in $kept: his agreement would be bound to no version, and no go-live will read it. Repair the folder and ask again with the same request: it will be finished without being written to him a second time"
 rm -f "$pending"

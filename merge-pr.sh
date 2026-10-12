@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Puts a pull request live: the one way a merge is done without a person at
 # the keyboard. It checks, and judges nothing. Every condition is read from
-# GitHub, git, the ledger, Linear and the host, and all of them must hold:
+# GitHub, git, the ledger, tracker and the host, and all of them must hold:
 #   1. the pull request is open, not a draft, and its checks are all green;
 #   2. its branch holds the base, or lacks only what is not code;
 #   3. the version that goes live was reviewed by a model other than its
@@ -9,7 +9,7 @@
 #      verdict says: the reviewed commit is the head, or the head only adds
 #      merges of the base that changed nothing by themselves;
 #   4. the user agreed: he put the ticket in his status of agreement himself
-#      (linear.sh moved-by-owner), for the version he was shown
+#      (tracker.sh moved-by-owner), for the version he was shown
 #      (ask-validation.sh keeps which), or wrote « Fusion : <ticket> » before
 #      the statuses existed. Invisible tooling ([merge] tooling_paths) needs
 #      neither; what touches the checks of the CI, the deployment, his
@@ -49,7 +49,7 @@ if [ "$announcement" = - ]; then cat > "$work/announcement.md"; announcement="$w
 ledger init > /dev/null
 no() { echo "$(basename "$0"): #$pr is not put live: $1" >&2; exit 6; }
 # "Not now" is not "no": a go-live that only waits for the host, for a check
-# still running or for Linear's history is kept in a queue the wake tries
+# still running or for tracker's history is kept in a queue the wake tries
 # again by itself, with no model, with these same checks each time.
 later() {
   if [ -n "$dry_run" ]; then user_message merge_dry_queue "reason=$1"; exit 3; fi
@@ -111,19 +111,19 @@ done < <(ledger sql "select run_id from runs where role = 'review' and source = 
 
 # 4. The agreement of the user.
 needs=$(node_lib merge.mjs needs "$work/files.json")
-go=$(conf_get linear go_state) validate=$(conf_get linear validate_state) agreed=
+go=$(conf_get tracker go_state) validate=$(conf_get tracker validate_state) agreed=
 asked="$ORCH_STATE_DIR/validations/$ticket.json"
 if [ "$needs" != tooling ]; then
   # His move is read from the tracker, and not from one that cannot tell him
   # from an agent, unless the project says it accepts that ([merge]
   # separate_identity = no).
-  if [ "$(conf_get merge separate_identity)" != no ] && [ "$("$ORCH_HOME/linear.sh" identity)" != app ]; then
+  if [ "$(conf_get merge separate_identity)" != no ] && [ "$("$ORCH_HOME/tracker.sh" identity)" != app ]; then
     no "the tracker cannot tell the user from an agent (the scripts act under the key of a person): no agreement is read from it ([merge] separate_identity). Give the agents their own application"
   fi
   # His move answers a request: the time of the last one made on this ticket.
   requested=$(jq -r '.at // empty' "$asked" 2> /dev/null) || requested=
   code=0
-  "$ORCH_HOME/linear.sh" moved-by-owner "$ticket" "$go" ${requested:+"$requested"} || code=$?
+  "$ORCH_HOME/tracker.sh" moved-by-owner "$ticket" "$go" ${requested:+"$requested"} || code=$?
   case "$code" in
     0)
       # His move is his agreement to what he was shown, and to nothing else:
@@ -135,35 +135,37 @@ if [ "$needs" != tooling ]; then
       shown=$(jq -r --argjson pr "$pr" '.pulls[]? | select(.pr == $pr) | .head' "$asked" 2> /dev/null | sed -n '1p') || shown=
       [ -n "$shown" ] || no "$ticket is in « $go », but the user was never shown #$pr: ask him for it (ask-validation.sh $ticket - --pr $pr)"
       if ! only_base_merges "$shown" "$head"; then
-        [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
+        [ -n "$dry_run" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$validate" > /dev/null || true
         [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the user agreed to ${shown:0:8} and the branch is now at ${head:0:8}: $ticket is back in « $validate », to be asked again with this version"
         no "this version (${head:0:8}) is not the version he was shown (${shown:0:8}): $ticket is back in « $validate ». Ask him again with this version (ask-validation.sh $ticket - --pr $pr)"
       fi
       agreed=status
       ;;
-    7) later "Linear has not written yet who put $ticket in « $go »" ;;
+    7) later "tracker has not written yet who put $ticket in « $go »" ;;
     8)
       # By him, but before the request: an agreement to something else, and
       # a card that somebody else put back where he had left it.
-      [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
+      [ -n "$dry_run" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$validate" > /dev/null || true
       [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: the move of the user to « $go » is older than the request made at $requested: it answers another request. $ticket is back in « $validate »"
       no "the move of the user to « $go » is older than the request made at $requested: $ticket is back in « $validate », where the request waits for him"
       ;;
     6)
       # In his status, but not put there by him: never live, and back to the status that asks him.
-      [ -n "$dry_run" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$validate" > /dev/null || true
+      [ -n "$dry_run" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$validate" > /dev/null || true
       [ -n "$dry_run" ] || ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "#$pr: $ticket was put in « $go » by an integration or another account, not by the user: back to « $validate »"
       no "$ticket is in « $go » but the user did not put it there himself: put back in « $validate »"
       ;;
     5)
       # Not in his status: a line he wrote before the statuses existed still counts.
-      { "$ORCH_HOME/linear.sh" comments "$ticket"; "$ORCH_HOME/linear.sh" comments "$(conf_get lead report_on)"; } | jq -sc 'add' > "$work/comments.json"
-      cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-      opened=$(jq -r '.createdAt // ""' <<<"$pull")
-      if [ "$needs" = guarded ]; then node_lib merge.mjs line "$work/comments.json" "$work/agent-ids.txt" "$ticket" "$opened" "$pr" && agreed=line
-      else node_lib merge.mjs line "$work/comments.json" "$work/agent-ids.txt" "$ticket" "$opened" && agreed=line; fi
+      if "$ORCH_HOME/tracker.sh" legacy-line-allowed; then
+        { "$ORCH_HOME/tracker.sh" comments "$ticket"; "$ORCH_HOME/tracker.sh" comments "$(conf_get lead report_on)"; } | jq -sc 'add' > "$work/comments.json"
+        cat "$ORCH_STATE_DIR/tracker-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
+        opened=$(jq -r '.createdAt // ""' <<<"$pull")
+        if [ "$needs" = guarded ]; then node_lib merge.mjs line "$work/comments.json" "$work/agent-ids.txt" "$ticket" "$opened" "$pr" && agreed=line
+        else node_lib merge.mjs line "$work/comments.json" "$work/agent-ids.txt" "$ticket" "$opened" && agreed=line; fi
+      fi
       ;;
-    *) die "Linear could not say who moved $ticket" ;;
+    *) die "tracker could not say who moved $ticket" ;;
   esac
   [ -n "$agreed" ] || no "the user has not agreed: $ticket is not in « $go »$([ "$needs" != guarded ] || echo ' (it touches the checks of the CI, the deployment, his written rules or the tooling of the go-lives: his own agreement is needed, tooling or not)'). Ask him (ask-validation.sh $ticket - --pr $pr)"
   [ -n "$announcement" ] || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
@@ -190,8 +192,8 @@ fi
 if [ "$(jq 'length' <<<"$teams")" = 2 ]; then
   mine=$(jq -r --argjson pr "$pr" 'to_entries[] | select(.value == $pr) | .key' <<<"$teams" | sed -n '1p')
   [ -n "$mine" ] || no "$ticket was given to two teams, and #$pr is the pull request of neither"
-  "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/choice.json" || die "the comments of $ticket could not be read: which team he chose is not known"
-  cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/choice-agents.txt" || true
+  "$ORCH_HOME/tracker.sh" comments "$ticket" > "$work/choice.json" || die "the comments of $ticket could not be read: which team he chose is not known"
+  cat "$ORCH_STATE_DIR/tracker-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/choice-agents.txt" || true
   # Written after the request; with no request (a change that needs no
   # agreement), after the second team was opened: never a line from before
   # there were two results to choose from.
@@ -245,10 +247,10 @@ fi
 # comment the hourly limit holds back leaves with the grouped ones.
 if [ -n "$announcement" ]; then
   code=0
-  "$ORCH_HOME/linear.sh" comment "$ticket" "$announcement" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null || code=$?
+  "$ORCH_HOME/tracker.sh" comment "$ticket" "$announcement" "${ORCH_SIGNED:-$(conf_get lead name)}" > /dev/null || code=$?
   if [ "$code" != 0 ]; then
-    mkdir -p "$ORCH_STATE_DIR/linear-outbox"
-    cp "$announcement" "$ORCH_STATE_DIR/linear-outbox/.$pr.part" && mv "$ORCH_STATE_DIR/linear-outbox/.$pr.part" "$ORCH_STATE_DIR/linear-outbox/$ticket--mise-en-ligne-$pr.md"
+    mkdir -p "$ORCH_STATE_DIR/tracker-outbox"
+    cp "$announcement" "$ORCH_STATE_DIR/tracker-outbox/.$pr.part" && mv "$ORCH_STATE_DIR/tracker-outbox/.$pr.part" "$ORCH_STATE_DIR/tracker-outbox/$ticket--mise-en-ligne-$pr.md"
   fi
 fi
 # The ticket is closed once everything he was shown on it is live. A pull
@@ -262,10 +264,10 @@ if [ "$agreed" = status ]; then
     jq '. + {closing: true}' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
     ledger event --kind ticket_left_open --ticket "$ticket" --value "$pr" --detail "#$pr is live, and $ticket stays in « $go »: GitHub did not say what became of $(jq -r '[.pulls[] | select(.merged_at == null) | "#\(.pr)"] | join(", ")' "$asked"), shown on the same ticket. Nothing to do: the wake asks GitHub again by itself, and closes the ticket once every other pull request shown is live or closed, if the ticket still is where the user put it"
   elif [ "$still_open" = 0 ]; then
-    if "$ORCH_HOME/linear.sh" move "$ticket" "$(conf_get linear done_state)" > /dev/null; then
+    if "$ORCH_HOME/tracker.sh" move "$ticket" "$(conf_get tracker done_state)" > /dev/null; then
       jq 'del(.closing)' "$asked" > "$asked.next" && mv "$asked.next" "$asked"
     else
-      echo "$(basename "$0"): #$pr is live, but $ticket could not be put in « $(conf_get linear done_state) »" >&2
+      echo "$(basename "$0"): #$pr is live, but $ticket could not be put in « $(conf_get tracker done_state) »" >&2
     fi
   fi
 fi

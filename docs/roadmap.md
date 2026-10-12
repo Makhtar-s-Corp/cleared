@@ -6,7 +6,7 @@ Cleared is an alpha for developers, maintained around one real project. It aims 
 - **Cleared app.** Build an app for developers to review active teams, approvals, queues, cost, and host health. Today's static dashboard is read-only and generated from the ledger.
 - **More coding harnesses.** Add OpenCode, Gemini CLI, and Copilot CLI adapters alongside today's Claude Code and Codex CLI adapters, following the documented adapter contract.
 - **Review with one subscription.** When another model is available, use it for review. Otherwise, allow a fresh session on the same subscription without the author's context. Today the reviewer must use a different model.
-- **Ticket tracker contract.** Separate the ticket API from Linear-specific scripts so another tracker can supply tickets, comments, owner identity, and status transitions without weakening approval checks.
+- **Ticket tracker adapters.** Improve the first Linear, GitHub Issues, and local SQLite adapters, especially pagination, capture review, and offline use. GitHub remains the only forge; GitLab and Gitea are outside this contract.
 - **Terminal adapter.** Support Orca, tmux, and no terminal so Cleared can run without a graphical terminal. Today Orca provides automatic terminals and readable worktree names; without it, a team can be prepared but the terminal must be run by hand.
 - **Broader project support.** Remove assumptions about Node projects, `CLAUDE.md`, and example capture paths where the project supplies its own workflow. Keep documented French ticket commands usable where the parser supports them.
 

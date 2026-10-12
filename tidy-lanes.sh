@@ -32,12 +32,12 @@ dry=
 [ $# -le 1 ] && { [ $# = 0 ] || [ -n "$dry" ]; } || die "usage: tidy-lanes.sh [--dry-run]"
 root=$(realpath -m "$(expand_home "$(conf_get lanes root)")")
 base=$(conf_get lanes base)
-team=$(conf_get linear team)
+team=$("$ORCH_HOME/tracker.sh" ticket-prefix)
 idle_hours=$(conf_get lanes idle_hours)
 [[ "$idle_hours" =~ ^[0-9]+$ ]] || idle_hours=24
 in_list() { tr ',' '\n' <<<"$2" | sed 's/^ *//; s/ *$//' | grep -qxF -- "$1"; }
 busy=$(conf_get lanes busy_states)
-waiting_states="$(conf_get linear validate_state), $(conf_get linear go_state)"
+waiting_states="$(conf_get tracker validate_state), $(conf_get tracker go_state)"
 closed_states=$(conf_get lanes closed_states)
 lead_lane="$(conf_get lead role)/lead"
 out=$(mktemp -d)
@@ -68,7 +68,7 @@ while IFS=$'\t' read -r path branch; do
   tickets=$({ echo "$branch"; jq -r '.[] | .title' <<<"$pulls"; jq -r '.[] | .body' <<<"$pulls" | while IFS= read -r line; do grep -oE "\\b$team-[0-9]+" <<<"$line" | sed -n '1p'; done | sed -n '1p'; } | grep -oE "\\b$team-[0-9]+" | sort -u || true)
   blocked= open_ticket= name= waiting=
   for ticket in $tickets; do
-    state=$("$ORCH_HOME/linear.sh" state "$ticket" 2> /dev/null) || state=
+    state=$("$ORCH_HOME/tracker.sh" state "$ticket" 2> /dev/null) || state=
     # A ticket whose state cannot be read counts as open and at work: no guess.
     [ -n "$state" ] || { blocked="$ticket (state unknown)"; break; }
     if in_list "$state" "$busy"; then blocked="$ticket ($state)"; break; fi
@@ -104,7 +104,7 @@ while IFS=$'\t' read -r path branch; do
   # Its name for the user: the title of its ticket, the one that waits for
   # him first, then one still open, then any.
   named=${waiting:-${open_ticket:-$(sed -n '1p' <<<"$tickets")}}
-  [ -z "$named" ] || name=$("$ORCH_HOME/linear.sh" issue "$named" 2> /dev/null | jq -r '.title // empty') || name=
+  [ -z "$named" ] || name=$("$ORCH_HOME/tracker.sh" issue "$named" 2> /dev/null | jq -r '.title // empty') || name=
   [ -n "$name" ] || name=$lane
 
   if [ -n "$dry" ]; then

@@ -59,7 +59,7 @@
   "dashboard_lead": "Project lead",
   "dashboard_teams": "Teams",
   "dashboard_no_legacy": "No earlier sessions imported.",
-  "dashboard_tracker_down": "Linear did not respond; list unavailable.",
+  "dashboard_tracker_down": "tracker did not respond; list unavailable.",
   "dashboard_waiting_none": "Nothing needs your response.",
   "dashboard_week_window": "weekly window",
   "dashboard_five_hour_window": "five-hour window",

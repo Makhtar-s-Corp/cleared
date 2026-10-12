@@ -107,7 +107,7 @@ Classifies paths and sets the guarded shipping policy.
 | `code_paths` | Paths considered application code when comparing the base. | Required |
 | `verdict` | Reviewer verdict required to ship, in English or legacy French. | Required |
 | `lines_until` | Cutoff for old written `Fusion:` or `Merge:` approval lines. | Optional; no default |
-| `separate_identity` | Whether the agent must have a separate Linear application identity. | Default: required |
+| `separate_identity` | Require independently attributable agent and human actions. | Default: required |
 | `queue_hours` | How long a blocked merge remains queued. | Default: 24 |
 
 ## `[limits]`
@@ -191,24 +191,38 @@ How Cleared addresses the human and which language its direct user messages use.
 | `name` | Human name in agent messages; blank means “the user”. | Default: the user |
 | `language` | Language for user messages (`en` by default; `fr` included). | Default: en |
 
-## `[linear]`
+## `[tracker]`
 
-Linear team, ticket states, message limits, and captures.
+Selects the ticket adapter, names the workflow states, and configures identity and captures. See [Ticket trackers](trackers.md).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
-| `team` | Linear team key used in ticket IDs. | Required |
+| `adapter` | `linear`, `github`, or `local`. | Required |
+| `team` | Team key used by the Linear adapter. | Required for Linear |
+| `create_project` | Project for tickets created by an agent through the contract. | Required for Linear creation unless supplied in the call |
+| `create_label` | Label for those tickets when the call supplies none. | Required for Linear creation unless supplied in the call |
+| `repository` | `owner/repo` for GitHub Issues. | Required for GitHub |
+| `project_v2_id` | Optional GitHub Project v2 node ID; otherwise status labels are used. | Optional |
+| `app_login` | Login of the GitHub App bot that writes agent actions. | Required for GitHub approval attribution |
+| `app_id` | Numeric GitHub App ID used to sign short-lived JWTs. | Required for GitHub |
+| `installation_id` | Numeric installation ID for the configured repository. | Required for GitHub |
+| `app_private_key_file` | Absolute path to the App RSA private key, outside the repository, owned by Cleared with mode `0600`. | Required for GitHub |
+| `agents_uid` | System UID of the dedicated Cleared account. | Required for local |
+| `human_private_key` | Absolute path to the human account’s Ed25519 private key. | Required for local human actions |
+| `human_public_key` | Base64 encoded PEM public key used to verify local actions. | Required for local approval |
+| `capture_branch` | Git branch used to store guarded GitHub captures. | Default: `cleared-captures` |
+| `capture_base` | Branch used when the capture branch is first created. | Default: `main` |
 | `writeup_role` | Role that formats an agent report for the user. | Optional; no default |
 | `writeup_for` | Roles whose reports get formatted. | Optional; no default |
 | `comments_per_hour` | Maximum Cleared comments on one ticket in an hour. | Default: 6 |
-| `owner_id` | Linear user ID used to verify the human approver. | Required when separate identity is required |
+| `owner_id` | Human user ID or login used to verify the approver. | Required when separate identity is required |
 | `validate_state` | State used while waiting for human approval. | Required |
 | `go_state` | State the owner moves a ticket to when approving shipment. | Required |
 | `done_state` | State after shipment. | Required |
 | `progress_state` | State while a team works. | Required |
 | `review_state` | State during independent review. | Required |
 | `todo_state` | State that starts work. | Required |
-| `capture_roots` | Allowed roots for images uploaded to Linear. | Optional; no default |
+| `capture_roots` | Allowed roots for capture images; GitHub upload requires OCR and guard approval. | Optional; no default |
 
 ## `[permissions.dev]`
 

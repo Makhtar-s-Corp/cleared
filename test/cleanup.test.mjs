@@ -52,7 +52,7 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFileSync(confPath, 'utf8')
     .replace('[lanes]\n', '[lanes]\ntidy_hour = 0\nidle_hours = 24\ntrial_prefixes = test/, essai/\nbusy_states = In Progress\nclosed_states = Done, Canceled\narchives = .local/lane-archives\ntidy_reason_live = changement en ligne\ntidy_reason_idle = sans activité depuis un jour, aucun ticket ouvert\ntidy_reason_trial = équipe d’essai\ntidy_reason_waiting = n’attend plus que l’accord\n')
-    .replace('[linear]\nteam = X\n', '[linear]\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n')
+    .replace('[tracker]\nadapter = local\nteam = X\n', '[tracker]\nadapter = local\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n')
     .replace('live = no', 'live = yes'));
   const git = (path, ...args) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
   const add = (branch, { old = false } = {}) => {
@@ -64,11 +64,11 @@ test('the lanes are tidied once a day by rule, with no model and no loss: a lane
     return path;
   };
   const pulls = (branch, list) => writeFileSync(join(box.home, `pr-head-${branch.replace('/', '-')}.json`), JSON.stringify(list));
-  const state = (ticket, name) => writeFileSync(join(box.home, `linear-state-${ticket}`), `${name}\n`);
+  const state = (ticket, name) => writeFileSync(join(box.home, `tracker-state-${ticket}`), `${name}\n`);
   // a: its change is live, its ticket is done. It holds a commit the remote lacks and a file that exists nowhere else.
   pulls('feat/a', [{ number: 11, state: 'MERGED', title: 'feat: a (X-1)', body: '' }]);
   state('X-1', 'Done');
-  writeFileSync(join(box.home, 'linear-title-X-1'), 'Les budgets du mois');
+  writeFileSync(join(box.home, 'tracker-title-X-1'), 'Les budgets du mois');
   git(lane.path, 'push', '-q', 'origin', 'feat/a');
   mkdirSync(join(lane.path, '.local', 'notes'), { recursive: true });
   writeFileSync(join(lane.path, '.gitignore'), '.local/\n');

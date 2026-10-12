@@ -3,10 +3,13 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/contract.sh"
+. "$here/../lib/tracker/adapters/env.sh"
+tracker_unset=()
+for tracker_secret in "${TRACKER_SECRET_ENV[@]}"; do tracker_unset+=(-u "$tracker_secret"); done
 
 # The subscription pays, never an API key: a key left in the environment
 # (for instance after loading .env.local) would move the billing to it.
-cli() { env -u ANTHROPIC_API_KEY claude "$@"; }
+cli() { env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" claude "$@"; }
 
 case "${1:-}" in
   list-models)
@@ -16,7 +19,7 @@ case "${1:-}" in
     empty=$(mktemp -d)
     trap 'rm -rf "$empty"' EXIT
     for candidate in "$@"; do
-      if out=$(cd "$empty" && timeout 120 env -u ANTHROPIC_API_KEY claude -p --model "$candidate" --no-session-persistence \
+      if out=$(cd "$empty" && timeout 120 cli -p --model "$candidate" --no-session-persistence \
           --strict-mcp-config --tools "" --output-format json 'Reply with the single word OK.' 2>/dev/null) \
         && [ "$(jq -r '.is_error' <<<"$out" 2>/dev/null)" = false ]; then
         echo "$candidate"
@@ -24,7 +27,7 @@ case "${1:-}" in
     done
     ;;
   version)
-    contract_npm_version claude "${ADAPTER_PACKAGE:-}" "$(claude --version 2>/dev/null | awk '{print $1}')"
+    contract_npm_version claude "${ADAPTER_PACKAGE:-}" "$(cli --version 2>/dev/null | awk '{print $1}')"
     ;;
   talk)
     shift

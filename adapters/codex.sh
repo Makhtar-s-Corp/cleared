@@ -113,7 +113,10 @@ host_run() {
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
   [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral --skip-git-repo-check)
   set +e
-  env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN -u LINEAR_API_KEY -u LINEAR_APP_CLIENT_ID -u LINEAR_APP_CLIENT_SECRET -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
+  . "$ORCH_HOME/lib/tracker/adapters/env.sh"
+  tracker_unset=()
+  for tracker_secret in "${TRACKER_SECRET_ENV[@]}"; do tracker_unset+=(-u "$tracker_secret"); done
+  env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
     TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
     GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
     codex "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '

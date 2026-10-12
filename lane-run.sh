@@ -2,7 +2,7 @@
 # Runs inside the terminal of a lane, in its worktree: calls the adapter of
 # the model the dispatcher picked, takes the declared fallback if that
 # backend refuses to start, writes each attempt to the ledger, then posts the
-# report in Linear with the model actually used.
+# report in tracker with the model actually used.
 #
 #   lane-run.sh <run directory prepared by spawn-lane.sh>
 set -uo pipefail
@@ -114,7 +114,7 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$
   rm -f "$message"
 fi
 
-# What the user reads in Linear. The figures and the model come from the
+# What the user reads in tracker. The figures and the model come from the
 # scripts; only the wording of the report may come from the writing model.
 body=$(mktemp)
 if [ -f "$lane_report" ]; then
@@ -203,20 +203,20 @@ comment="$run_dir/comment.md"
 rm -f "$body"
 
 if [ "${ORCH_COMMENT_ON:-}" = none ]; then
-  echo "Linear comment not sent (requested): $comment"
-elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_SIGNED:-$ORCH_ROLE, lane $ORCH_LANE}"); then
-  echo "Linear comment: $url"
+  echo "tracker comment not sent (requested): $comment"
+elif url=$("$ORCH_HOME/tracker.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_SIGNED:-$ORCH_ROLE, lane $ORCH_LANE}"); then
+  echo "tracker comment: $url"
   echo "$url" > "$run_dir/comment.url"
 elif [ $? = 4 ]; then
   # The user already got his comments of the hour: this one is kept, and
   # leaves with the others in one grouped comment (flush_outbox, at a wake).
-  mkdir -p "$ORCH_STATE_DIR/linear-outbox"
+  mkdir -p "$ORCH_STATE_DIR/tracker-outbox"
   # Written under another name, then renamed: a wake never takes half a file.
-  cp "$comment" "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part"
-  mv "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part" "$ORCH_STATE_DIR/linear-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
-  echo "Linear comment kept for a grouped send (hourly limit reached): $comment"
+  cp "$comment" "$ORCH_STATE_DIR/tracker-outbox/.$ORCH_RUN_BASE.part"
+  mv "$ORCH_STATE_DIR/tracker-outbox/.$ORCH_RUN_BASE.part" "$ORCH_STATE_DIR/tracker-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
+  echo "tracker comment kept for a grouped send (hourly limit reached): $comment"
 else
-  echo "!! The Linear comment could not be sent. It remains here: $comment"
+  echo "!! The tracker comment could not be sent. It remains here: $comment"
 fi
 echo "Report: $lane_report"
 # A lane woken again and again keeps the terminals of its last sessions only.

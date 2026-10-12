@@ -271,7 +271,7 @@ test('the Claude adapter turns the permissions of a role into the allow and deny
 });
 
 
-test('the Linear text is the write-up when the writing model answers, the raw report when it does not', () => {
+test('the tracker text is the write-up when the writing model answers, the raw report when it does not', () => {
   const lane = (writerExit) => {
     const box = sandbox();
     writeFileSync(join(box.home, 'prompts', 'writeup.md'), 'reword\n');
@@ -458,20 +458,20 @@ test('a backend that dies without a report: the lane says so instead of posting 
 });
 
 
-test('Linear saying no is an error: nothing is reported as sent or opened', () => {
-  const dir = scratch('orch-linear-');
+test('[Linear adapter] tracker saying no is an error: nothing is reported as sent or opened', () => {
+  const dir = scratch('orch-tracker-');
   const no = { data: { issue: { id: 'i' }, teams: { nodes: [{ id: 't' }] }, projects: { nodes: [{ id: 'p' }] }, issueLabels: { nodes: [{ id: 'l' }] }, commentCreate: { success: false, comment: null }, issueCreate: { success: false, issue: null } } };
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '${JSON.stringify(no)}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
   for (const args of [['comment', 'X-1', join(dir, 'text.md'), 'test'], ['create', 'Projet', 'Bug', 'Un titre', join(dir, 'text.md')]]) {
-    const run = spawnSync(join(ORCH_HOME, 'linear.sh'), args, { env, encoding: 'utf8' });
+    const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), args, { env, encoding: 'utf8' });
     assert.notEqual(run.status, 0, args[0]);
     assert.equal(run.stdout.trim(), '', args[0]);
   }
-  assert.throws(() => readFileSync(join(dir, 'state', 'linear-comments.jsonl')));
-  assert.throws(() => readFileSync(join(dir, 'state', 'linear-issues.jsonl')));
+  assert.throws(() => readFileSync(join(dir, 'state', 'tracker-comments.jsonl')));
+  assert.throws(() => readFileSync(join(dir, 'state', 'tracker-issues.jsonl')));
 });
 
 
@@ -494,12 +494,12 @@ test('the scripts run as commands from a folder whose name has a space or an acc
 });
 
 
-test('a comment on a ticket Linear does not know is an error', () => {
-  const dir = scratch('orch-linear-');
+test('[Linear adapter] a comment on a ticket tracker does not know is an error', () => {
+  const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"data":{"issue":null}}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /no such ticket: X-404/);
 });

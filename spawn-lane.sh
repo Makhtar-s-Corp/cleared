@@ -87,8 +87,8 @@ if [ -n "$resume" ]; then
   [ -n "$pr" ] || pr=$(jq -r '.pr // empty' "$record")
 fi
 
-# 1. The ticket decides the model: project and label from Linear.
-issue=$("$ORCH_HOME/linear.sh" issue "$ticket")
+# 1. The ticket decides the model: project and label from tracker.
+issue=$("$ORCH_HOME/tracker.sh" issue "$ticket")
 route_args=(--role "$role" --project "$(jq -r '.project // ""' <<<"$issue")")
 while IFS= read -r label; do [ -n "$label" ] && route_args+=(--label "$label"); done < <(jq -r '.labels[]' <<<"$issue")
 # A pull request brings its head, its size and its paths. Read by gh, here.
@@ -294,8 +294,8 @@ if [ -n "$pushed_role" ]; then
   jq -r '.description // ""' <<<"$issue" > "$run_dir/description.md"
   # His comments only: written from his account, and not one an agent wrote
   # under it before the agents had a name of their own.
-  written=$("$ORCH_HOME/linear.sh" comments "$ticket") || die "the comments of $ticket could not be read: the lane is not started blind"
-  cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$run_dir/agent-ids.txt" || true
+  written=$("$ORCH_HOME/tracker.sh" comments "$ticket") || die "the comments of $ticket could not be read: the lane is not started blind"
+  cat "$ORCH_STATE_DIR/tracker-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$run_dir/agent-ids.txt" || true
   # Which of his words this session is handed, kept with the run: what he
   # writes from here on is what it was not handed, whatever the clocks say.
   # A comment that only sets the cap of the ticket is not shown to the
@@ -330,8 +330,8 @@ mv "$available" "$run_dir/chain.json"
     quoted "$message_file"
   fi
 } > "$run_dir/prompt.md"
-writeup_role=$(conf_get linear writeup_role)
-if [ -n "$writeup_role" ] && [ "$comment_on" != none ] && grep -qw -- "$role" <<<"$(conf_get linear writeup_for)"; then
+writeup_role=$(conf_get tracker writeup_role)
+if [ -n "$writeup_role" ] && [ "$comment_on" != none ] && grep -qw -- "$role" <<<"$(conf_get tracker writeup_for)"; then
   written=$(node "$ORCH_HOME/lib/route.mjs" --role "$writeup_role")
   available_chain "$(jq -c '.chain' <<<"$written")" > "$run_dir/writeup-chain.json"
   [ "$(jq length "$run_dir/writeup-chain.json")" = 0 ] && rm -f "$run_dir/writeup-chain.json"
@@ -355,8 +355,8 @@ if [ -n "$pushed_role" ]; then
   jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
     '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
   # The ticket is at work: said where the user looks.
-  progress=$(conf_get linear progress_state)
-  [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/linear.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
+  progress=$(conf_get tracker progress_state)
+  [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
 fi
 
 # 6. The terminal, visible in Orca under the lane.
@@ -364,7 +364,7 @@ handle=$(open_terminal "$worktree" "$ticket · $role · $chosen" "$ORCH_HOME/lan
   || { echo 97 > "$run_dir/exit-code"; die "the worktree $worktree exists but Orca did not open a terminal in it: the session never started (flow-lanes.sh runs it again; to run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir))"; }
 # Orca knows the worktree by now: link it to its ticket.
 # A name anybody can read: the ticket and its title, then who works in it.
-orca worktree set --worktree "path:$worktree" --display-name "$ticket${team:+ (team $team)} · $(jq -r '.title' <<<"$issue" | cut -c1-70)" --linear-issue "$ticket" --comment "$role · $chosen · opened by Cleared" > /dev/null 2>&1 || true
+"$ORCH_HOME/tracker.sh" decorate-worktree "$worktree" "$ticket${team:+ (team $team)} · $(jq -r '.title' <<<"$issue" | cut -c1-70)" "$ticket" "$role · $chosen · opened by Cleared" > /dev/null 2>&1 || true
 echo "$handle" > "$run_dir/terminal.handle"
 
 jq -n --arg lane "$lane" --arg worktree "$worktree" --arg requested "$requested" --arg chosen "$chosen" --arg rule "$rule" --arg run "$run_dir" --arg terminal "$handle" \
