@@ -126,6 +126,7 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
 
 Automatic rollback requires a git credential that can push a normal commit to the base branch. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET`; a remote tracker owner may provide `--approval-comment COMMENT_ID` after posting exactly `Rollback TICKET MERGE_SHA` on the ticket. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never identity verification.
+The approval comment must be unedited, posted after the merge, and no more than ten minutes old when used. If the monitor cannot start after a merge, Cleared comments on the ticket and records the failure; rerun `node lib/release.mjs start TICKET PR` after fixing the cause. A stopped monitor is restarted on the next wake. An interrupted revert is reconciled from its marked commit on the base; otherwise it is marked failed and the owner is alerted.
 
 ## `[limits]`
 

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
 import { releaseSettings, canHumanRollback, canAutoRollback, shouldRollback, touchesMigrations,
   activeRelease, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
-  reconcileNotifications } from '../lib/release.mjs';
+  reconcileNotifications, resumeWatches } from '../lib/release.mjs';
 import { authorizeManualRollback } from '../lib/release.mjs';
 
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
@@ -33,6 +33,8 @@ test('only the configured human owner can request rollback', () => {
 test('declared migration paths disable automatic rollback', () => {
   assert.equal(touchesMigrations(['src/a.js'], ['db/migrations/']), false);
   assert.equal(touchesMigrations(['db/migrations/001.sql'], ['db/migrations/']), true);
+  assert.equal(touchesMigrations(['db/migrations/001.sql'], ['db/migrations']), true);
+  assert.equal(touchesMigrations(['db/migrations/001.sql'], ['./db/migrations/']), true);
   assert.equal(touchesMigrations(['db/migrations-old/a.sql'], ['db/migrations/']), false);
 });
 
@@ -87,11 +89,15 @@ test('three failures push one exact revert, reopen the ticket and report recover
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => (++checks <= 3 ? { ok: false, detail: 'HTTP 503' } : { ok: true, detail: 'HTTP 200' }),
     announce: (_conf, _ticket, body) => notices.push(body),
-    performRollback: () => rollbackRelease(x.conf, x.db, x.repo,
-      x.db.prepare('SELECT * FROM releases WHERE id = ?').get(x.row.id), {
-      automatic: true, trackerFactory: () => ({ moveTicket: (...args) => moved.push(args) }),
-      announce: (_conf, _ticket, body) => notices.push(body),
-    }),
+    performRollback: () => {
+      const sha = rollbackRelease(x.conf, x.db, x.repo,
+        x.db.prepare('SELECT * FROM releases WHERE id = ?').get(x.row.id), {
+          automatic: true, trackerFactory: () => ({ moveTicket: (...args) => moved.push(args) }),
+          announce: (_conf, _ticket, body) => notices.push(body),
+        });
+      assert.equal(activeRelease(x.db).status, 'verifying_rollback', 'no second release starts before post-rollback health');
+      return sha;
+    },
   });
   assert.equal(checks, 4);
   assert.deepEqual(moved, [['LOCAL-1', 'Todo']]);
@@ -111,7 +117,11 @@ test('health still failing after revert alerts once and never reverts again', as
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: false, detail: 'HTTP 503' }),
-    performRollback: () => { reverts++; x.db.prepare("UPDATE releases SET status = 'rolled_back' WHERE id = ?").run(x.row.id); },
+    performRollback: () => {
+      reverts++;
+      x.db.prepare("UPDATE releases SET status = 'verifying_rollback', rollback_pushed_at = ? WHERE id = ?")
+        .run(new Date(time).toISOString(), x.row.id);
+    },
     announce: (_conf, _ticket, body) => notices.push(body),
   });
   assert.equal(reverts, 1);
@@ -165,6 +175,23 @@ test('failing health on a migration release alerts instead of auto reverting', a
   assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_migrations_blocked'").get().n, 1);
 });
 
+test('a later base commit blocks automatic rollback even without a conflict', async (t) => {
+  const x = releasedProject(t);
+  writeFileSync(join(x.repo, 'unrelated.txt'), 'later\n');
+  x.git('add', '.'); x.git('commit', '-qm', 'later unrelated change'); x.git('push', '-q', 'origin', 'main');
+  const head = x.git('rev-parse', 'HEAD');
+  let time = x.clock, reverts = 0;
+  const notices = [];
+  await watchRelease(x.conf, x.db, x.repo, x.row.id, {
+    currentTime: () => time, wait: async (ms) => { time += ms; },
+    check: async () => ({ ok: false, detail: 'HTTP 503' }),
+    performRollback: () => { reverts++; }, announce: (_conf, _ticket, body) => notices.push(body),
+  });
+  assert.equal(reverts, 0);
+  assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], head);
+  assert.match(notices[0], /base branch moved/);
+});
+
 test('agent rollback is rejected and audited; human owner may proceed', (t) => {
   const x = releasedProject(t);
   assert.throws(() => authorizeManualRollback(x.conf, x.db, {
@@ -174,6 +201,20 @@ test('agent rollback is rejected and audited; human owner may proceed', (t) => {
   assert.equal(authorizeManualRollback(x.conf, x.db, {
     whoAmI: () => ({ kind: 'human', id: 'human' }), comments: () => [],
   }, x.row), 'human');
+});
+
+test('a remote owner comment must be fresh, unedited and name the exact merge', (t) => {
+  const x = releasedProject(t);
+  const row = { ...x.row, merged_at: new Date(Date.now() - 3600000).toISOString() };
+  const comment = (age, editedAt = null, body = `Rollback ${row.ticket} ${row.merge_sha}`) => ({
+    id: 'c1', by: { kind: 'human', id: 'human' }, body,
+    createdAt: new Date(Date.now() - age).toISOString(), editedAt,
+  });
+  const tracker = (entry) => ({ whoAmI: () => ({ kind: 'agents', id: 'bot' }), comments: () => [entry] });
+  assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(11 * 60000)), row, 'c1'), /verified human/);
+  assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(60000, new Date().toISOString())), row, 'c1'), /verified human/);
+  assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(60000, null, 'Rollback another merge')), row, 'c1'), /verified human/);
+  assert.equal(authorizeManualRollback(x.conf, x.db, tracker(comment(60000)), row, 'c1'), 'human');
 });
 
 test('direct automatic rollback is refused without a live failed watch', (t) => {
@@ -196,9 +237,15 @@ test('manual rollback previews the exact merge and needs explicit confirmation',
 test('a second release is held while the first is watched', (t) => {
   const x = releasedProject(t);
   assert.equal(activeRelease(x.db).id, x.row.id);
+  x.git('checkout', '-qb', 'other');
+  writeFileSync(join(x.repo, 'other.txt'), 'second\n');
+  x.git('add', '.'); x.git('commit', '-qm', 'other change');
+  x.git('checkout', '-q', 'main'); x.git('merge', '--no-ff', '-qm', 'Merge other', 'other');
+  x.git('push', '-q', 'origin', 'main');
+  const secondSha = x.git('rev-parse', 'HEAD');
   addEvent(x.db, { kind: 'merged_by_script', ticket: 'LOCAL-2', value: 2 });
   assert.throws(() => startRelease(x.conf, x.db, x.repo, 'LOCAL-2', 2, {
-    readPull: () => ({ mergeCommit: { oid: x.row.merge_sha }, mergedAt: new Date().toISOString(), title: 'Second' }),
+    readPull: () => ({ mergeCommit: { oid: secondSha }, mergedAt: new Date().toISOString(), title: 'Second' }),
     schedule: () => assert.fail('no second watcher'),
   }), /already being monitored/);
 });
@@ -238,4 +285,66 @@ test('failed ticket notification stays pending and is retried on the next wake',
   assert.equal(notices.length, 1);
   assert.ok(x.db.prepare('SELECT notified_at FROM releases WHERE id = ?').get(x.row.id).notified_at);
   reconcileNotifications(x.conf, x.db, { announce: () => assert.fail('already delivered') });
+});
+
+test('a stopped watch is restarted after a reboot without clearing the release gate', (t) => {
+  const x = releasedProject(t);
+  const resumed = [];
+  resumeWatches(x.conf, x.db, x.repo, {
+    running: () => false, lockAvailable: () => true, schedule: (_repo, id) => resumed.push(id), announce: () => {},
+  });
+  assert.deepEqual(resumed, [x.row.id]);
+  assert.equal(activeRelease(x.db).id, x.row.id);
+});
+
+test('an elapsed watch after downtime fails visibly instead of pretending health was good', (t) => {
+  const x = releasedProject(t);
+  x.db.prepare('UPDATE releases SET merged_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - 3 * 60000).toISOString(), x.row.id);
+  const notices = [];
+  resumeWatches(x.conf, x.db, x.repo, {
+    running: () => false, schedule: () => assert.fail('expired watch must not restart'),
+    announce: (_conf, _ticket, body) => notices.push(body),
+  });
+  assert.equal(activeRelease(x.db), undefined);
+  assert.match(notices[0], /could not finish monitoring/);
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_watch_failed'").get().n, 1);
+});
+
+test('a revert pushed before process death is found and verified once', async (t) => {
+  const x = releasedProject(t);
+  rollbackRelease(x.conf, x.db, x.repo, x.row, {
+    trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {},
+  });
+  x.db.prepare("UPDATE releases SET status = 'rolling_back', rollback_sha = NULL, rollback_pushed_at = NULL WHERE id = ?").run(x.row.id);
+  const resumed = [];
+  resumeWatches(x.conf, x.db, x.repo, {
+    running: () => false, lockAvailable: () => true, schedule: (_repo, id) => resumed.push(id), announce: () => {},
+  });
+  assert.deepEqual(resumed, [x.row.id]);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'verifying_rollback');
+  let time = Date.now();
+  await watchRelease(x.conf, x.db, x.repo, x.row.id, {
+    currentTime: () => time, wait: async (ms) => { time += ms; },
+    check: async () => ({ ok: true, detail: 'HTTP 200' }), announce: () => {},
+  });
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'rolled_back');
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_health_ok'").get().n, 1);
+});
+
+test('a stopped rollback with no pushed revert fails visibly instead of blocking releases forever', (t) => {
+  const x = releasedProject(t);
+  x.db.prepare("UPDATE releases SET status = 'rolling_back' WHERE id = ?").run(x.row.id);
+  const notices = [];
+  resumeWatches(x.conf, x.db, x.repo, {
+    running: () => false, lockAvailable: () => false, schedule: () => assert.fail('active revert owns the lock'),
+    announce: () => assert.fail('active revert must not be declared failed'),
+  });
+  assert.equal(activeRelease(x.db).status, 'rolling_back');
+  resumeWatches(x.conf, x.db, x.repo, {
+    running: () => false, lockAvailable: () => true, schedule: () => assert.fail('no watcher should restart'),
+    announce: (_conf, _ticket, body) => notices.push(body),
+  });
+  assert.equal(activeRelease(x.db), undefined);
+  assert.match(notices[0], /could not roll back/);
 });
