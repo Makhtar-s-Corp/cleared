@@ -44,15 +44,15 @@ case "${1:-}" in
     out=$(mktemp) err=$(mktemp) body=$(mktemp)
     trap 'rm -f "$out" "$err" "$body"' EXIT
     refuse() {
-      echo "Codex n'a pas été lancé : $1" | tee "$body" >&2
+      echo "Codex did not start: $1" | tee "$body" >&2
       contract_usage '{}'
       contract_report codex 2 "$body"
       exit 2
     }
     task_script=${ADAPTER_TASK_SCRIPT:-}
     case "$task_script" in "~/"*) task_script="$HOME/${task_script#\~/}" ;; esac
-    [ -x "$task_script" ] || refuse "le script de tâche isolée est introuvable (${task_script:-non configuré})."
-    git diff --quiet HEAD || refuse "la copie de travail a des modifications non commitées."
+    [ -x "$task_script" ] || refuse "the isolated task script is missing (${task_script:-not configured})."
+    git diff --quiet HEAD || refuse "the worktree has uncommitted changes."
     # With [adapter.codex] task_tools = yes, the work of a lane is given the
     # means of any other lane inside its container (the task script's
     # --tools: the dependencies, a browser, a database, its screenshots). A
@@ -71,14 +71,14 @@ case "${1:-}" in
       trap 'rm -f "$out" "$err" "$body" "$with_tools"' EXIT
       {
         cat "$prompt_file"
-        printf '\n\nTu ne peux pas enregistrer ton travail toi-même (pas de git ici) : il le sera pour toi à la fin de ta session. Écris à la racine du dépôt un fichier `.commit-message` : une première ligne au format des commits de ce dépôt (lis-en quelques-uns dans les fichiers, ou suis `type(périmètre): ce qui change`), en anglais, puis une ligne vide et un court paragraphe. Les commandes lourdes (tests d’écran, captures) se lancent directement ici, sans passer par un script d’attente : ta session entière a déjà son tour sur la machine.\n'
+        printf '\n\nYou cannot commit your work here (there is no git); Cleared commits it after your session. Write `.commit-message` at the repository root with an English conventional commit subject, then a blank line and a short paragraph. Run heavy commands such as screen tests and captures directly here; your whole session already holds its host slot.\n'
       } > "$with_tools"
       launch=("$here/../when-free.sh" "$task_script" "$PWD" "$with_tools" "$model" --tools)
     else
       # Rule of the host (2026-10-06): no container starts while a CI run is
       # in progress, and the task script starts three.
       running=$(gh run list --limit 30 --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo unknown)
-      [ "$running" = 0 ] || refuse "une CI est en cours ou son état est illisible ($running) : aucun conteneur ne démarre pendant une CI."
+      [ "$running" = 0 ] || refuse "CI is running or its state cannot be read ($running) : no container starts during CI."
     fi
 
     # Output goes to files, read once the script has ended; the lane follows
@@ -98,15 +98,15 @@ case "${1:-}" in
     # end with any code and print anything.
     last=$(sed -n '$p' "$err")
     if [ -n "$tools" ] && { [ "$code" = 5 ] || [ "$code" = 1 ]; } && [[ "$last" == "when-free.sh: "* ]]; then
-      refuse "la machine n'était pas libre pour une session avec outils, ou le script de tâche n'est pas nommé parmi les commandes lourdes du projet : $last"
+      refuse "the host was busy for a tool-enabled session, or the task script is absent from the project heavy commands : $last"
     fi
     if [ "$code" != 0 ] && grep -q -E '^(Refus|Refused)' "$err"; then
       {
         grep -E '^(Refus|Refused)' "$err" | tail -n 1
         echo
-        echo "Ce que le garde-fou a relevé (emplacements seulement, jamais la valeur) :"
+        echo "What the guard found (locations only, never values):"
         echo
-        grep -E ': (secret|adresse|terme|IBAN)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | sed -n '1,30p'
+        grep -E '(:[0-9]+)?: (secret|adresse|terme|IBAN|private term( in name)?|application token( in name)?|API key( in name)?|private key( in name)?|credentials in a URL( in name)?|email address( in name)?|phone number( in name)?|literal secret|assigned secret|symbolic link|non-text file)' "$err" | sed -E 's#^/tmp/[^/]+/repo/##; s/^/- /' | sed -n '1,30p' || true
       } > "$body"
       contract_usage '{}'
       contract_report codex 3 "$body"
@@ -115,7 +115,7 @@ case "${1:-}" in
     # The task script prints the last message twice (the CLI, then its file).
     half=$(( $(wc -c < "$out") / 2 ))
     if [ "$half" -gt 0 ] && cmp -s <(head -c "$half" "$out") <(tail -c "$half" "$out"); then head -c "$half" "$out" > "$body"; else cp "$out" "$body"; fi
-    [ -s "$body" ] || echo "Codex n'a rendu aucun texte (code $code)." > "$body"
+    [ -s "$body" ] || echo "Codex returned no text (exit $code)." > "$body"
     # The CLI itself only prints a total in this mode. The split by kind
     # of token comes from the task script, when it passes on what the CLI
     # counted for the whole session (a line « token usage <json> »): input

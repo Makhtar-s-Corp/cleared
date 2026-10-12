@@ -39,28 +39,28 @@ trap 'rm -rf "$work"' EXIT
 # The state of things, read by scripts. A source that does not answer is said
 # in the briefing, and does not stop the conversation.
 {
-  printf "## L'état, lu par les scripts le %s\n\n" "$(date '+%d/%m/%Y à %H:%M')"
-  printf "### La machine et les PR ouvertes (host-state.sh)\n\n"
+  printf "## State read by scripts on %s\n\n" "$(date '+%Y-%m-%d %H:%M')"
+  printf "### Host and open pull requests (host-state.sh)\n\n"
   "$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '
-    "- CI en cours : \(.ci_runs_in_progress | length) ; minutes depuis la dernière fusion : \(.minutes_since_the_last_merge) ; test d'"'"'écran en cours : \(.screen_tests_or_captures_running) ; libre pour une fusion : \(.free_for_a_merge)",
-    (.open_pull_requests[] | "- PR #\(.number) (\(.title)), branche \(.branch), \(if .draft then "brouillon" else "prête" end), vérifications : \(.checks)")' \
-    || echo "- (host-state.sh n'a pas répondu)"
-  printf "\n### Ce qui attend %s dans Linear (tickets « In Review »)\n\n" "$(owner_name)"
-  "$ORCH_HOME/linear.sh" waiting 2> /dev/null | jq -r '.[] | "- \(.identifier) (\(.title)), depuis \(.since)"' || echo "- (Linear n'a pas répondu)"
-  printf "\n### Les derniers commentaires de %s\n\n" "$report_on"
-  "$ORCH_HOME/linear.sh" comments "$report_on" 2> /dev/null | jq -r 'sort_by(.createdAt) | .[-6:][] | "- \(.createdAt) : \(.body | gsub("\\s+"; " ") | .[0:700])"' || echo "- (Linear n'a pas répondu)"
-  printf "\n### Les lanes au travail que le chef de projet peut joindre\n\n"
-  { [ -f "$ORCH_STATE_DIR/lanes.json" ] && jq -r 'keys[] | "- \(.)"' "$ORCH_STATE_DIR/lanes.json"; } || echo "- (aucune connue)"
-  printf "\n### Les dernières sessions courtes du chef de projet (fin de leur compte rendu)\n\n"
+    "- CI runs in progress: \(.ci_runs_in_progress | length) ; minutes since the last merge: \(.minutes_since_the_last_merge) ; screen tests running: \(.screen_tests_or_captures_running) ; free for a merge: \(.free_for_a_merge)",
+    (.open_pull_requests[] | "- PR #\(.number) (\(.title)), branch \(.branch), \(if .draft then "draft" else "ready" end), checks: \(.checks)")' \
+    || echo "- (host-state.sh did not respond)"
+  printf "\n### Waiting for %s in Linear (In Review tickets)\n\n" "$(owner_name)"
+  "$ORCH_HOME/linear.sh" waiting 2> /dev/null | jq -r '.[] | "- \(.identifier) (\(.title)), since \(.since)"' || echo "- (Linear did not respond)"
+  printf "\n### Recent comments on %s\n\n" "$report_on"
+  "$ORCH_HOME/linear.sh" comments "$report_on" 2> /dev/null | jq -r 'sort_by(.createdAt) | .[-6:][] | "- \(.createdAt) : \(.body | gsub("\\s+"; " ") | .[0:700])"' || echo "- (Linear did not respond)"
+  printf "\n### Active teams the project lead can contact\n\n"
+  { [ -f "$ORCH_STATE_DIR/lanes.json" ] && jq -r 'keys[] | "- \(.)"' "$ORCH_STATE_DIR/lanes.json"; } || echo "- (none known)"
+  printf "\n### Latest short sessions of the project lead (end of each report)\n\n"
   found=
   while IFS= read -r report; do
     found=1
     printf -- "- %s :\n" "$(basename "$report" .md)"
-    sed -n '/^## Compte rendu/,/^## Fichiers modifiés/p' "$report" | sed '1d;$d' | tail -n 14 | sed 's/^/    /'
+    sed -n '/^## \(Report\|Compte rendu\)/,/^## \(Changed files\|Fichiers modifiés\)/p' "$report" | sed '1d;$d' | tail -n 14 | sed 's/^/    /'
   done < <(ls -1 "$ORCH_STATE_DIR/reports/" 2> /dev/null | grep "^lead-" | tail -n 3 | sed "s|^|$ORCH_STATE_DIR/reports/|")
-  [ -n "$found" ] || echo "- (aucune)"
-  printf "\n### Les décisions déjà transcrites en discussion (ledger)\n\n"
-  ledger sql "select at, ticket, detail from events where kind = 'decision' order by at desc limit 10" 2> /dev/null | jq -r 'if length == 0 then "- (aucune)" else .[] | "- \(.at), \(.ticket // "sans ticket") : \(.detail)" end' || echo "- (aucune)"
+  [ -n "$found" ] || echo "- (none)"
+  printf "\n### Decisions already recorded during discussions (ledger)\n\n"
+  ledger sql "select at, ticket, detail from events where kind = 'decision' order by at desc limit 10" 2> /dev/null | jq -r 'if length == 0 then "- (none)" else .[] | "- \(.at), \(.ticket // "no ticket") : \(.detail)" end' || echo "- (none)"
 } > "$work/state.md"
 
 {
@@ -128,5 +128,5 @@ echo "opening $(date +%s)" > "$ORCH_STATE_DIR/wake/talk"
 exec 8>&-
 open_terminal "$worktree" "$lane · discussion · $(jq -r '.[0].alias' <<<"$chain")" "$ORCH_HOME/talk-run.sh $run_dir" > "$run_dir/terminal.handle" \
   || { rm -f "$ORCH_STATE_DIR/wake/talk"; die "Orca did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"; }
-echo "Discussion ouverte dans la lane $lane d'Orca (onglet « discussion »), modèle $(jq -r '.[0].alias' <<<"$chain")."
+user_message talk_opened "lane=$lane" "model=$(jq -r '.[0].alias' <<<"$chain")"
 echo "$run_dir"

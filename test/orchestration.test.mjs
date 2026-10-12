@@ -176,7 +176,7 @@ test('the report is written, and the adapter goes on, when the lane changed a fe
   assert.match(run.stdout, /after/);
   const report = readFileSync(join(dir, 'report.md'), 'utf8');
   assert.match(report, /^format: lane-report\/1$/m);
-  assert.match(report, /## Compte rendu\n\nFait : rien\.\n\n## Fichiers modifiés\n\n- \?\? /);
+  assert.match(report, /## Report\n\nFait : rien\.\n\n## Changed files\n\n- \?\? /);
 });
 
 // A throwaway copy of the dispatcher with fake backends: `first` exits with
@@ -292,7 +292,7 @@ test('a backend that cannot start now hands over to the declared fallback, and s
   assert.equal(lane.status, 0);
   assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'refused', exit_code: 2 }, { model: 'm2', outcome: 'done', exit_code: 0 }]);
   assert.deepEqual(lane.events, ['model_fallback']);
-  assert.match(lane.comment, /Repli : a/);
+  assert.match(lane.comment, /Fallback: a/);
 });
 
 test('a refusal by the safeguard of a backend stops the lane when the policy says stop', () => {
@@ -300,7 +300,7 @@ test('a refusal by the safeguard of a backend stops the lane when the policy say
   assert.equal(lane.status, 3);
   assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'refused', exit_code: 3 }]);
   assert.deepEqual(lane.events, ['model_fallback_failed']);
-  assert.match(lane.comment, /garde-fou/);
+  assert.match(lane.comment, /provider guard/);
 });
 
 test('a refusal by the safeguard of a backend takes the fallback when the policy says fallback', () => {
@@ -432,13 +432,13 @@ test('the Linear text is the write-up when the writing model answers, the raw re
     return readFileSync(join(runDir, 'comment.md'), 'utf8');
   };
   const worded = lane(0);
-  assert.match(worded, /Texte mis en forme par m1/);
+  assert.match(worded, /Report formatted by m1/);
   assert.match(worded, /answer of first/);
   assert.doesNotMatch(worded, /answer of second/);
   const raw = lane(1);
-  assert.match(raw, /La mise en forme a échoué/);
+  assert.match(raw, /Formatting failed/);
   assert.match(raw, /answer of second/);
-  assert.match(raw, /Modèle utilisé : `m2`/);
+  assert.match(raw, /Used model: `m2`/);
 });
 
 test('the Claude adapter says "cannot start now" when the model produced nothing, and "failed" once it has worked', () => {
@@ -471,6 +471,9 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   assert.equal(refusal.status, 3);
   assert.match(refusal.report, /^outcome: refused$/m);
   assert.match(refusal.report, /- test\/a\.test\.mjs:3: secret littéral/);
+  const englishRefusal = call({ script: 'echo "/tmp/x/repo/test/a.test.mjs:4: email address" >&2; echo "Refused: sensitive content in data that would be sent to Codex." >&2; exit 1' });
+  assert.equal(englishRefusal.status, 3);
+  assert.match(englishRefusal.report, /- test\/a\.test\.mjs:4: email address/);
   assert.equal(call({ ci: 1, script: 'exit 0' }).status, 2);
   const done = call({ script: 'printf "the answer\\nthe answer"; printf "tokens used\\n1,234\\n" >&2' });
   assert.equal(done.status, 0);
@@ -498,7 +501,7 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   assert.equal(odd.usage.limits.windows.seven_day.used, 93);
   const twin = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":93,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":12,"window_minutes":10080,"resets_at":${resets}}}\\n' >&2` });
   assert.equal(twin.usage.limits.windows.seven_day.used, 93);
-  assert.match(done.report, /## Compte rendu\n\nthe answer\n\n## Fichiers modifiés/);
+  assert.match(done.report, /## Report\n\nthe answer\n\n## Changed files/);
 });
 
 test('the Codex adapter gives the work of a lane its tools through the door of the heavy commands, for the whole session; a text-only run gets none; a host that is not free is « cannot start now »', () => {
@@ -648,7 +651,7 @@ test('a long session does not make the Claude adapter die before its report', ()
     cwd: dir, encoding: 'utf8', maxBuffer: 64e6, env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
   });
   assert.equal(run.status, 0, run.stderr.slice(-300));
-  assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /## Compte rendu\n\nthe end\n/);
+  assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /## Report\n\nthe end\n/);
 });
 
 test('a CLI that ends with no result at all is a failure, not a reason to try another model', () => {
@@ -666,8 +669,8 @@ test('a backend that dies without a report: the lane says so instead of posting 
   const lane = runLane(sandbox(), 0, { FIRST_DIES: '1' });
   assert.equal(lane.status, 141);
   assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'failed', exit_code: 141 }]);
-  assert.match(lane.comment, /sans compte rendu/);
-  assert.match(lane.comment, /Modèle utilisé : `m1`/);
+  assert.match(lane.comment, /without a report/);
+  assert.match(lane.comment, /Used model: `m1`/);
 });
 
 test('Linear saying no is an error: nothing is reported as sent or opened', () => {
@@ -882,7 +885,7 @@ test('the wake of the project lead: nothing moved, nothing starts; a comment of 
   assert.equal(started.status, 0, started.stderr);
   assert.equal(calls(), 1);
   const runDir = started.stdout.trim();
-  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /lead prompt[\s\S]*X-1 \(Titre\) — commentaire de the user[\s\S]*« OK, vas-y\. »/);
+  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /lead prompt[\s\S]*X-1 \(Titre\) — comment by the user[\s\S]*OK, vas-y/);
   assert.match(readFileSync(join(runDir, 'lane.env'), 'utf8'), /ORCH_LANE=release\/lead[\s\S]*ORCH_COMMENT_ON=none/);
   assert.match(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }), /\[release\/lead\]/);
   assert.deepEqual(events().slice(-1), [{ kind: 'comment_handled', ticket: 'X-1' }]);
@@ -949,7 +952,7 @@ test('wake.sh: a draft opened starts nothing and opens no terminal; the next com
   assert.equal(started.status, 0, started.stderr);
   assert.equal(calls(), 1);
   const runDir = started.stdout.trim();
-  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /2 événement\(s\)[\s\S]*PR #7 \(Un brouillon[\s\S]*ouverte en brouillon[\s\S]*« OK, vas-y\. »/);
+  assert.match(readFileSync(join(runDir, 'prompt.md'), 'utf8'), /2 events[\s\S]*PR #7 \(Un brouillon[\s\S]*opened as a draft[\s\S]*OK, vas-y/);
   assert.match(readFileSync(join(runDir, 'lane.env'), 'utf8'), /^ORCH_KEEP_TERMINALS=3$/m);
   const why = events().find((event) => event.kind === 'wake_started');
   assert.equal(why.detail, 'pr_opened #7, comment X-1');
@@ -1045,7 +1048,7 @@ test('wake.sh during an outage of GitHub: no session for its events, the outage 
   assert.match(outage[0].detail, new RegExp(`^from ${started} to \\S+: Actions$`));
   assert.throws(() => readFileSync(join(box.state, 'wake', 'github-down')));
   assert.equal(calls(), 1);
-  assert.match(readFileSync(join(after.stdout.trim(), 'prompt.md'), 'utf8'), /PR #7 \(Une PR[\s\S]*vérifications : failure/);
+  assert.match(readFileSync(join(after.stdout.trim(), 'prompt.md'), 'utf8'), /PR #7 \(Une PR[\s\S]*checks: failure/);
 });
 
 test('host-state says the host is free for nothing while GitHub is down, and the dashboard explains the hole', async () => {
@@ -1059,20 +1062,25 @@ test('host-state says the host is free for nothing while GitHub is down, and the
   assert.equal(state.free_for_a_merge, false);
 
   const { collect, render } = await import('../lib/dashboard.mjs');
+  const { message } = await import('../lib/i18n.mjs');
+  assert.equal(message('catalog_fallback_probe', 'fr'), 'English fallback');
+  assert.equal(message('dashboard_health', 'fr'), 'Santé du serveur');
   const db = openLedger(join(box.state, 'ledger.db'));
   const now = Date.parse('2026-10-07T16:00:00Z');
   addEvent(db, { kind: 'github_down', at: '2026-10-07T15:06:00Z', value: 26, detail: 'from 2026-10-07T15:06:00Z to 2026-10-07T15:32:00Z: Git Operations, Pull Requests, Actions' });
   const inputs = { lanes: [], worktrees: [], max_lanes: 3, waiting: [], cli: null, load: 1, cores: 4, swap_total_kb: 1, swap_free_kb: 1, mem_available_kb: 1, mem_total_kb: 2, github_down_since: null };
   const data = collect(db, conf, inputs, now);
   assert.deepEqual(data.outages, [{ at: '2026-10-07T15:06:00Z', minutes: 26, detail: 'Git Operations, Pull Requests, Actions' }]);
-  assert.match(render(data, conf, now), /GitHub en panne[^<]*<\/span>[\s\S]*?26 min[\s\S]*?Git Operations, Pull Requests, Actions/);
-  assert.match(render(collect(db, conf, { ...inputs, github_down_since: '2026-10-07T15:50:00Z' }, now), conf, now), /GitHub est en panne depuis/);
+  assert.match(render(data, conf, now), /GitHub outage on[^<]*<\/span>[\s\S]*?26 min[\s\S]*?Git Operations, Pull Requests, Actions/);
+  assert.match(render(collect(db, conf, { ...inputs, github_down_since: '2026-10-07T15:50:00Z' }, now), conf, now), /GitHub has been down since/);
+  const french = { ...conf, sections: { ...conf.sections, owner: { ...conf.sections.owner, language: 'fr' } } };
+  assert.match(render(data, french, now), /GitHub en panne/);
   // Where the subscription is, as the sessions said it: the share of the limit used, what the day took, the pace, and when it starts over.
   const used = { adapter: 'claude', stop: 80, windows: { seven_day: { used: 68, resets_at: '2026-10-13T09:00:00.000Z', today: 12, pace: 2, hours_to_stop: 6, hours_to_full: 16, stopped: false } } };
   const shown = render(collect(db, conf, { ...inputs, limits: [used] }, now), conf, now);
-  assert.match(shown, /claude[\s\S]*?68 %[\s\S]*?limite de la semaine[\s\S]*?12 points aujourd[\s\S]*?2 points par heure[\s\S]*?80 % dans 6 h[\s\S]*?13 octobre/);
-  assert.match(render(collect(db, conf, { ...inputs, limits: [{ ...used, windows: { seven_day: { ...used.windows.seven_day, used: 81, stopped: true } } }] }, now), conf, now), /plus aucune équipe ne s’ouvre/);
-  assert.doesNotMatch(render(data, conf, now), /limite de la semaine/, 'nothing is shown when no session said anything');
+  assert.match(shown, /claude[\s\S]*?68 %[\s\S]*?weekly window[\s\S]*?12 points today[\s\S]*?2 points per hour[\s\S]*?80% in 6 h[\s\S]*?October 13/);
+  assert.match(render(collect(db, conf, { ...inputs, limits: [{ ...used, windows: { seven_day: { ...used.windows.seven_day, used: 81, stopped: true } } }] }, now), conf, now), /no more teams open/);
+  assert.doesNotMatch(render(data, conf, now), /weekly window/, 'nothing is shown when no session said anything');
   db.close();
 });
 
@@ -1229,7 +1237,7 @@ test('a dev lane that finished: its branch is pushed, its pull request is in the
   const lane = laneWithRemote('dev/X-1');
   const result = runLane(lane.box, 0, {}, lane.path);
   assert.equal(result.status, 0);
-  assert.match(result.comment, /PR ouverte ou mise à jour : #41/);
+  assert.match(result.comment, /Pull request opened or updated: #41/);
   const db = openLedger(join(lane.box.state, 'ledger.db'));
   assert.deepEqual({ ...db.prepare('select pr_number, lines_changed from runs').get() }, { pr_number: 41, lines_changed: 0 });
   db.close();
@@ -1275,16 +1283,16 @@ test('what the push script says is read from its last line, whatever git or gh w
     writeFileSync(join(box.home, 'push-lane.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
     return runLane(box, 0).comment;
   };
-  assert.match(lane('echo "remote: Create a pull request" >&2; echo "warning from gh"; echo "#41"'), /PR ouverte ou mise à jour : #41/);
-  assert.match(lane('echo "nothing to push: dev/X-1 has no commit of its own"'), /Rien à pousser/);
+  assert.match(lane('echo "remote: Create a pull request" >&2; echo "warning from gh"; echo "#41"'), /Pull request opened or updated: #41/);
+  assert.match(lane('echo "nothing to push: dev/X-1 has no commit of its own"'), /Nothing to push/);
   // An answer nobody expected is said as such, not passed off as "nothing to push".
   const odd = lane('echo "something else"');
-  assert.match(odd, /Réponse inattendue du script de push : something else/);
+  assert.match(odd, /Unexpected response from the push script: something else/);
   // The reason of a failure is the script's own last word, not a hint of git after it.
-  assert.match(lane('echo "push-lane.sh: dev/X-1 not pushed: its changes are refused by the guard" >&2; echo "hint: see the manual" >&2; exit 1'), /n'a pas été poussée : push-lane\.sh: dev\/X-1 not pushed: its changes are refused/);
+  assert.match(lane('echo "push-lane.sh: dev/X-1 not pushed: its changes are refused by the guard" >&2; echo "hint: see the manual" >&2; exit 1'), /The branch was not pushed: push-lane\.sh: dev\/X-1 not pushed: its changes are refused/);
   const failed = lane('echo "push-lane.sh: dev/X-1 not pushed: a commit message is refused by the guard" >&2; exit 1');
-  assert.match(failed, /La branche n'a pas été poussée : push-lane\.sh: dev\/X-1 not pushed/);
-  assert.doesNotMatch(failed, /Rien à pousser|PR ouverte/);
+  assert.match(failed, /The branch was not pushed: push-lane\.sh: dev\/X-1 not pushed/);
+  assert.doesNotMatch(failed, /Nothing to push|Pull request opened/);
 });
 
 test('push-lane sends nothing when the changes of the branch hold what the guard refuses', () => {
@@ -1450,7 +1458,7 @@ test('the handover wake: one session that rereads the handover and says what it 
   assert.equal(run.status, 0, run.stderr);
   const runDir = run.stdout.trim();
   const prompt = readFileSync(join(runDir, 'prompt.md'), 'utf8');
-  assert.match(prompt, /^handover prompt/);
+  assert.match(prompt, /handover prompt/);
   assert.match(prompt, /Chef de projet : passation\. Trois tickets en cours\./);
   assert.doesNotMatch(prompt, /lead prompt/);
   const env = readFileSync(join(runDir, 'lane.env'), 'utf8');
@@ -1460,7 +1468,7 @@ test('the handover wake: one session that rereads the handover and says what it 
   const lane = spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env: box.env, encoding: 'utf8' });
   assert.equal(lane.status, 0, lane.stderr);
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
-  assert.match(posted, /^X-100 from=chef de projet, modèle a\n/);
+  assert.match(posted, /^X-100 from=chef de projet, model a\n/);
   assert.match(posted, /answer of first/);
 });
 
@@ -1596,7 +1604,7 @@ test('the night checks are followed: green, nothing is said and nobody is woken;
   const woken = wake();
   assert.equal(woken.status, 0, woken.stderr);
   const prompt = readFileSync(join(woken.stdout.trim(), 'prompt.md'), 'utf8');
-  assert.match(prompt, /Contrôle de nuit rouge[^\n]*https:\/\/example\.test\/runs\/6[^\n]*linear\.sh create "Infra" "Bug"[^\n]*digest-note\.sh/);
+  assert.match(prompt, /Night check failed[^\n]*https:\/\/example\.test\/runs\/6[^\n]*linear\.sh create "Infra" "Bug"[^\n]*digest-note\.sh/);
   // The scripts are named where they are on this machine, never by a place inside the project nor by a word left to replace.
   assert.ok(prompt.includes(`\`${join(box.home, 'linear.sh')} create "Infra" "Bug"`), prompt);
   assert.doesNotMatch(prompt, /\{orch\}|ops\/orchestration\//);
@@ -1790,7 +1798,7 @@ test('a lane opened on a ticket has the whole ticket under its eyes, the depende
   const second = JSON.parse(again.stdout);
   assert.equal(second.worktree, first.worktree);
   assert.notEqual(second.run_dir, first.run_dir);
-  assert.match(readFileSync(join(second.run_dir, 'prompt.md'), 'utf8'), /Pourquoi tu es rouverte[^\n]*\n {4}\| Verdict : à corriger\.\n {4}\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
+  assert.match(readFileSync(join(second.run_dir, 'prompt.md'), 'utf8'), /Why this team reopened[^\n]*\n {4}\| Verdict : à corriger\.\n {4}\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
   assert.equal(record().runs.length, 2);
   assert.deepEqual(readFileSync(join(box.home, 'npm-calls'), 'utf8').trim().split('\n').length, 1, 'the same lock file: nothing installed again');
   // Closed by the tidying, then needed again: its worktree is made again from its branch, with its work.
@@ -1912,7 +1920,7 @@ test('a lane moves by rule to the point where the user is asked: its checks star
   assert.equal(record('X-5').runs.length, 2, 'not while its session runs');
   writeFileSync(join(box.home, 'pr-head-dev-X-5.json'), JSON.stringify([{ number: 41, state: 'OPEN', isDraft: false }]));
   const fixed = session('X-5', { commit: 'fix: the toast closes' });
-  assert.match(fixed.prompt, /Pourquoi tu es rouverte[\s\S]*\| Les vérifications automatiques sont rouges[\s\S]*\|.*✖ the toast closes after three seconds/);
+  assert.match(fixed.prompt, /Why this team reopened[\s\S]*\| Automated checks failed[\s\S]*\|.*✖ the toast closes after three seconds/);
   assert.doesNotMatch(fixed.prompt, /unrelated line/);
   // Its pull request went back to draft before the push: a push to one that is ready starts the checks whatever the host does.
   assert.deepEqual(ready().slice(-1), ['41 --undo']);
@@ -1931,7 +1939,7 @@ test('a lane moves by rule to the point where the user is asked: its checks star
   review('Verdict : à corriger avant fusion.\n\n- `fix.txt:1` : le toast reste ouvert au survol.');
   assert.match(flow().stdout, /X-5: opened again \(verdict:/);
   const corrected = session('X-5', { commit: 'fix: the toast closes on hover too' });
-  assert.match(corrected.prompt, /\| Un relecteur[\s\S]*\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
+  assert.match(corrected.prompt, /\| An independent reviewer[\s\S]*\| - `fix\.txt:1` : le toast reste ouvert au survol\./);
   // Green again, read again, nothing blocking: the rules stop there, the request for his agreement is the lead's.
   pull({ headRefOid: corrected.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   assert.match(flow().stdout, /its review is asked for/);
@@ -1976,7 +1984,7 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   assert.equal(record('X-5').runs.length, 2);
   // It ends on a question for the user: the lead is told, and nothing is guessed.
   const asking = session('X-5', { answer: 'Fait : la moitié.\n\nQuestions pour the user :\n- Le toast se cleared-t-il aussi au clic ? Recommandation : oui.' });
-  assert.match(asking.prompt, /\| Ta session précédente s’est arrêtée sans finir/);
+  assert.match(asking.prompt, /\| Your previous session stopped before finishing/);
   pull({ headRefOid: asking.head, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   assert.match(flow().stdout, /X-5: its session ends on a question for the user/);
   assert.deepEqual(stuck(), ['lane_asks X-5']);
@@ -1991,8 +1999,8 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   assert.match(said.stdout, /X-5: opened again \(said:c9\)/);
   assert.doesNotMatch(said.stdout, /could not be opened/, said.stdout);
   const answered = session('X-5', { commit: 'fix: closes on click too' });
-  assert.match(answered.prompt, /Pourquoi tu es rouverte[\s\S]*\| L'utilisateur a écrit sur le ticket[\s\S]*Oui, au clic aussi\./);
-  assert.doesNotMatch(answered.prompt.split('Pourquoi tu es rouverte')[1], /La question\.|Un mot d’avant/);
+  assert.match(answered.prompt, /Why this team reopened[\s\S]*\| The user wrote on the ticket[\s\S]*Oui, au clic aussi\./);
+  assert.doesNotMatch(answered.prompt.split('Why this team reopened')[1], /La question\.|Un mot d’avant/);
   assert.equal(flow().stdout.includes('said:'), false, 'his answer is handed once');
   // The base moved on code the branch lacks: it brings it in before anything else.
   mkdirSync(join(box.repo, 'server'), { recursive: true });
@@ -2003,7 +2011,7 @@ test('what the rules cannot settle is said, not left: a session that stopped sho
   pull({ headRefOid: answered.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
   assert.match(flow().stdout, /X-5: opened again \(base:/);
   // Its session ends without having brought it in: opened again for that already, and the reason still holds. Said, once.
-  assert.match(session('X-5', { commit: null }).prompt, /\| La branche principale a avancé sur du code/);
+  assert.match(session('X-5', { commit: null }).prompt, /\| The base branch advanced on code/);
   assert.equal(record('X-5').runs.length, 4);
   assert.match(flow().stdout, /X-5: opened again for this already and nothing changed \(base:/);
   assert.deepEqual(stuck(), ['lane_asks X-5', 'lane_stuck X-5']);
@@ -2065,7 +2073,7 @@ test('what a first real round showed: a session that ended without its push is s
   assert.match(reopened.stdout, /X-5: opened again \(unsent:/);
   assert.doesNotMatch(reopened.stdout, /could not be opened/, reopened.stdout);
   const tidied = session('X-5', { commit: null });
-  assert.match(tidied.prompt, /\| Ta session précédente a laissé des fichiers non commités/);
+  assert.match(tidied.prompt, /\| Your previous session left uncommitted files/);
   assert.match(flow().stdout, /X-5: opened again for this already and nothing changed \(unsent:/);
   assert.deepEqual(stuck(), ['lane_stuck X-5']);
   git('add', 'left.txt');
@@ -2383,8 +2391,8 @@ test('what its first review asked: the dependencies come from the base and run n
   assert.deepEqual(readdirSync(join(fresh, 'node_modules')), ['new']);
   assert.equal(readFileSync(join(record('X-5').worktree, 'node_modules', 'pkg', 'index.js'), 'utf8'), 'installed\n');
   const second = session('X-5', { commit: null, answer: 'Fait.\n\n**Questions pour the user**\n\n1. Le toast se cleared-t-il aussi au survol ? Recommandation : oui.' });
-  assert.match(second.prompt, /Les dépendances installées sont celles de la branche principale/);
-  assert.doesNotMatch(second.prompt.split('Pourquoi tu es rouverte')[1], /au clic/);
+  assert.match(second.prompt, /Installed dependencies come from the base branch/);
+  assert.doesNotMatch(second.prompt.split('Why this team reopened')[1], /au clic/);
   flow();
   assert.deepEqual(stuck(), ['lane_asks X-5'], 'a title in bold is a title');
   // Checks that never ran (all skipped) leave the lane waiting for nothing: said after a while, once.
@@ -2459,7 +2467,7 @@ test('the lead can say something to a lane of the dispatcher whose session is ov
   mkdirSync(join(record('X-5').worktree, '.local', 'captures'), { recursive: true });
   writeFileSync(join(record('X-5').worktree, '.local', 'captures', 'toast-390.png'), 'image');
   const second = session('X-5', { commit: 'docs: the capture' });
-  assert.match(second.prompt, /Pourquoi tu es rouverte[\s\S]*\| Le chef de projet t’a écrit[\s\S]*\|.*Il manque la capture sur téléphone/);
+  assert.match(second.prompt, /Why this team reopened[\s\S]*\| The project lead wrote[\s\S]*\|.*Il manque la capture sur téléphone/);
   const closed = flow();
   assert.equal(closed.stdout.includes('told:'), false);
   assert.match(closed.stdout, /X-5: what its lane set apart for the user is kept/);
@@ -2473,7 +2481,7 @@ test('the lead can say something to a lane of the dispatcher whose session is ov
   assert.match(flow().stdout, /X-5: opened again \(told:/);
   assert.equal(readFileSync(join(box.home, 'linear-moves'), 'utf8'), before);
   // The same nets as for any lane: never told to merge or to force, and no more than a few messages an hour.
-  assert.match(tell('X-5', 'Fusionne ta branche dans main.').stderr, /never told to merge or to force/);
+  assert.match(tell('X-5', 'Fusionne ta branche dans main.').stderr, /never told to merge or force/);
   assert.match(spawnSync(join(box.home, 'tell-lane.sh'), ['--list'], { env, encoding: 'utf8' }).stdout, /^X-5\t/m);
   // A ticket that never had a lane, or whose lane is over, cannot be told anything.
   assert.notEqual(tell('X-6', 'Un mot.').status, 0);
@@ -2586,7 +2594,7 @@ test('no lane is left waiting in silence: a session that died, never started or 
   assert.match(flow().stdout, /X-5: opened again \(told:/);
   assert.equal(moves().length, early, 'the card stays where he put it');
   const handed = session('X-5', { answer: 'Fait.\n\nQuestions pour the user : aucune.' });
-  assert.match(handed.prompt, /\| Le chef de projet t’a écrit[\s\S]*Il manque la capture sur téléphone\./);
+  assert.match(handed.prompt, /\| The project lead wrote[\s\S]*Il manque la capture sur téléphone\./);
   pull({ headRefOid: handed.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   flow();
   assert.deepEqual(stuck(), []);
@@ -2617,7 +2625,7 @@ test('a lane takes over a pull request somebody else began: it works on that bra
   const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-7', '--pr', '7', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
   assert.equal(opened.status, 0, opened.stderr);
   const lane = JSON.parse(opened.stdout);
-  assert.match(readFileSync(join(lane.run_dir, 'prompt.md'), 'utf8'), /PR #7, branche feat\/by-hand/);
+  assert.match(readFileSync(join(lane.run_dir, 'prompt.md'), 'utf8'), /PR #7, branch feat\/by-hand/);
   execFileSync('git', ['-C', lane.worktree, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: what the reviewer asked']);
   const head = execFileSync('git', ['-C', lane.worktree, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [lane.run_dir], { cwd: lane.worktree, env: box.env, encoding: 'utf8' }).status, 0);
@@ -2653,8 +2661,8 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   assert.equal(acting.status, 0, acting.stderr);
   const runDir = acting.stdout.trim();
   const prompt = readFileSync(join(runDir, 'prompt.md'), 'utf8');
-  assert.match(prompt, /^acting lead prompt/);
-  assert.match(prompt, /Lane old-lane \(branche feat\/old\) — son dernier message[\s\S]*je demande le créneau de CI/);
+  assert.match(prompt, /acting lead prompt/);
+  assert.match(prompt, /Team old-lane \(branch feat\/old\) — its latest message[\s\S]*je demande le créneau de CI/);
   const laneEnv = readFileSync(join(runDir, 'lane.env'), 'utf8');
   assert.match(laneEnv, /ORCH_PERMISSIONS=release-live/);
   assert.match(laneEnv, /ORCH_COMMENT_ON=none/);
@@ -2662,7 +2670,7 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env, encoding: 'utf8' });
   assert.equal(readFileSync(join(box.state, 'allowed-first'), 'utf8').trim(), 'read-only|only-for-the-acting-lead|never');
   // What it writes to the user says which model wrote it.
-  assert.equal(readFileSync(join(box.state, 'signed-first'), 'utf8').trim(), 'chef de projet, modèle a');
+  assert.equal(readFileSync(join(box.state, 'signed-first'), 'utf8').trim(), 'chef de projet, model a');
   // Said once: the next wake does not hand the same report again.
   writeFileSync(join(runDir, 'exit-code'), '0');
   assert.equal(wake().stdout.trim(), '');
@@ -2710,7 +2718,7 @@ test('tell-lane says it in the terminal written for that lane, and nowhere else'
   const args = sent().split('\n');
   assert.equal(args[args.indexOf('--terminal') + 1], 'term_1');
   const text = args[args.indexOf('--text') + 1];
-  assert.match(text, /^Pour la lane old-lane, de la part du chef de projet/);
+  assert.match(text, /^To team old-lane, from chef de projet/);
   assert.match(text, /Accord de the user sur X-1\. Tu peux réintégrer main\./);
   assert.ok(args.includes('--enter'));
   assert.equal(JSON.parse(readFileSync(join(box.state, 'lane-messages.jsonl'), 'utf8').trim()).lane, 'old-lane');
@@ -2741,6 +2749,7 @@ test('what a lane may be told: an order to merge or to force is refused in its u
     'La CI est verte et tu peux fusionner.', 'FUSIONNEZ.',
     // A negation far before the word does not bear on it.
     'Comme tu n’as plus rien à faire fusionne la PR.',
+    'Merge #259 now.', 'You can merge the pull request.', 'Force push this branch.', 'Do not hesitate to merge.',
   ]) assert.ok(refusedOrder(order), order);
   for (const said of [
     'Ne fusionne pas avant l’accord de the user.', 'Tu ne dois ni fusionner ni forcer.', 'Ne jamais fusionner sans son accord écrit.', 'Pas de merge de ton côté.',
@@ -2748,6 +2757,7 @@ test('what a lane may be told: an order to merge or to force is refused in its u
     'Je fusionnerai #259 quand elle sera verte ; réintègre main.', 'Je la fusionne à un moment sans test d’écran.', 'Le script fusionnera quand tout sera vert.',
     '#266 est fusionnée, réintègre main.', 'Une fois #259 fusionnée, c’est ton tour.', 'Après la fusion de #266, réintègre main.',
     'Réintègre main et pousse une seule fois.', 'Le conflit émerge dans server/core.mjs.',
+    'Do not merge before approval.', 'Never force push.', 'I will merge after the checks pass.', '#266 was merged already.',
   ]) assert.equal(refusedOrder(said), null, said);
 });
 
@@ -2842,13 +2852,13 @@ test('a comment read on stdin is posted, signed by the one who runs', () => {
   assert.equal(run.status, 0, run.stderr);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
   // The tool carries no name of its own: with no [linear] owner_name he is « l'utilisateur »; a project names him as it likes.
-  assert.match(asked, /Écrit par un agent \(chef de projet\), pas par l'utilisateur\.\\n/);
+  assert.match(asked, /Written by an agent \(chef de projet\), not by the user\.\\n/);
   assert.match(asked, /Une question pour toi\./);
   const named = join(dir, 'named.conf');
   writeFileSync(named, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^name =$/m, 'name = Ada'));
   rmSync(join(dir, 'asked'));
   assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une autre.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet', ORCH_CONF: named } }).status, 0);
-  assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Écrit par un agent \(chef de projet\), pas par Ada\.\\n/);
+  assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Written by an agent \(chef de projet\), not by Ada\.\\n/);
   assert.equal(spawnSync(join(ORCH_HOME, 'linear.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
 });
 
@@ -2916,7 +2926,7 @@ test('the report of a lane that the hourly limit holds back is kept, and leaves 
   assert.equal(flush().status, 0);
   const posted = readFileSync(join(box.home, 'linear-posted'), 'utf8');
   assert.match(posted, /^X-100 from=/);
-  assert.match(posted, /2 comptes rendus groupés[\s\S]*### X-1[\s\S]*answer of first[\s\S]*### X-2[\s\S]*Compte rendu de X-2\./);
+  assert.match(posted, /2 grouped reports[\s\S]*### X-1[\s\S]*answer of first[\s\S]*### X-2[\s\S]*Compte rendu de X-2\./);
   assert.deepEqual(readdirSync(join(box.state, 'linear-outbox')), ['notes.txt'], 'only what was sent is removed');
 });
 
@@ -3013,7 +3023,7 @@ test('talk.sh opens one conversation in the lane of the lead, briefed by scripts
   assert.ok(said.includes(`read=${lead}:${decisions}`));
   assert.ok(said.includes('mode=read-only') && said.includes('allow=only-for-the-talk'));
   // The session has no log here: its tokens are unknown in the ledger, not zero.
-  assert.match(held.stdout, /tokens restent inconnus/);
+  assert.match(held.stdout, /token count remains unknown/);
   const db = openLedger(join(box.state, 'ledger.db'));
   assert.deepEqual({ ...db.prepare("select role, lane, source, model, outcome, tokens_total from runs where outcome = 'done'").get() }, { role: 'talk', lane: 'release/lead', source: 'discussion', model: 'm2', outcome: 'done', tokens_total: null });
   assert.deepEqual(db.prepare('select model, outcome from runs order by rowid').all().map((r) => ({ ...r })), [{ model: 'm1', outcome: 'refused' }, { model: 'm2', outcome: 'done' }]);
@@ -3076,7 +3086,7 @@ test('a decision is proposed by the discussion and leaves only when the user con
   // Proposed: kept, and nothing has left.
   const proposed = decide(['X-5', '-'], 'On garde le bouton\nsous la liste.');
   assert.equal(proposed.status, 0, proposed.stderr);
-  assert.match(proposed.stdout, /rien n'est encore parti[\s\S]*! \S+\/confirm-decision\.sh/);
+  assert.match(proposed.stdout, /nothing has been sent yet[\s\S]*! \S+\/confirm-decision\.sh/);
   assert.equal(waiting().length, 1);
   assert.equal(posted(), null);
   assert.deepEqual(decisions(), []);
@@ -3085,8 +3095,8 @@ test('a decision is proposed by the discussion and leaves only when the user con
   assert.deepEqual(decisions(), []);
   const done = confirm();
   assert.equal(done.status, 0, done.stderr);
-  assert.match(done.stdout, /Transcrite : https:\/\/example\.test\/comment/);
-  assert.match(posted(), /^X-5 from=chef de projet, en discussion\n\*\*Décision de the user, transcrite pendant une discussion avec le chef de projet et confirmée par lui\*\*[\s\S]*On garde le bouton\nsous la liste\./);
+  assert.match(done.stdout, /Recorded: https:\/\/example\.test\/comment/);
+  assert.match(posted(), /^X-5 from=chef de projet, en discussion\n\*\*Decision by the user, recorded during a discussion with the project lead and confirmed by the user\*\*[\s\S]*On garde le bouton\nsous la liste\./);
   assert.deepEqual(decisions(), [{ kind: 'decision', source: 'discussion', ticket: 'X-5', run_id: 'talk-1-talk-a1', detail: 'On garde le bouton sous la liste.' }]);
   assert.deepEqual(waiting(), []);
   // A decision the user drops never leaves.
@@ -3124,7 +3134,7 @@ test('a decision is proposed by the discussion and leaves only when the user con
   // The first run shows the whole change, removed lines included, and sends nothing; the second one sends.
   const shown = confirm([], { FAKE_GH_DOWN: '1' });
   assert.equal(shown.status, 0, shown.stderr);
-  assert.match(shown.stdout, /Ce qui changera dans docs\/decisions\.md[\s\S]*\+Une règle qui dure\.[\s\S]*Rien n'est parti/);
+  assert.match(shown.stdout, /Changes to docs\/decisions\.md[\s\S]*\+Une règle qui dure\.[\s\S]*Nothing was sent/);
   assert.equal(execFileSync('git', ['-C', lane.path, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), 'M docs/decisions.md');
   const failed = confirm([], { FAKE_GH_DOWN: '1' });
   assert.equal(failed.status, 1);
@@ -3134,7 +3144,7 @@ test('a decision is proposed by the discussion and leaves only when the user con
   const adr = confirm();
   assert.equal(adr.status, 0, adr.stderr);
   assert.equal(decisions().length, 2);
-  assert.match(posted(), /Une règle qui dure\.[\s\S]*Écrite aussi dans `docs\/decisions\.md`/);
+  assert.match(posted(), /Une règle qui dure\.[\s\S]*Also recorded in `docs\/decisions\.md`/);
   assert.ok(lane.onRemote().some((ref) => ref.startsWith('talk/X-100 ')), 'the branch of the decisions left, to its namesake');
   assert.ok(lane.created().includes('--draft'));
   assert.equal(execFileSync('git', ['-C', lane.path, 'status', '--porcelain'], { encoding: 'utf8' }), '');
@@ -3236,7 +3246,7 @@ test('the lead opens the review of a pull request by a script that never reads t
   const unqueue = () => execFileSync('rm', ['-rf', join(box.state, 'reviews-queue')]);
   const down = review();
   assert.equal(down.status, 0, down.stderr);
-  assert.match(down.stdout, /mise en file \(GitHub est en panne/);
+  assert.match(down.stdout, /queued \(GitHub is unavailable/);
   unqueue();
   writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'operational' }] }));
   const first = review({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' });
@@ -3244,14 +3254,14 @@ test('the lead opens the review of a pull request by a script that never reads t
   const opened = JSON.parse(first.stdout);
   assert.equal(opened.lane, 'review/X-5');
   assert.equal(opened.model, 'b', 'not the model that wrote it');
-  assert.match(readFileSync(join(opened.run_dir, 'prompt.md'), 'utf8'), /^review prompt[\s\S]*PR #7, branche feat\/x/);
+  assert.match(readFileSync(join(opened.run_dir, 'prompt.md'), 'utf8'), /review prompt[\s\S]*PR #7, branch feat\/x/);
   assert.match(readFileSync(join(opened.run_dir, 'lane.env'), 'utf8'), /ORCH_COMMENT_ON=none/);
   // It runs: no second one meanwhile.
   writeFileSync(join(box.state, 'x'), '');
   const db = openLedger(join(box.state, 'ledger.db'));
   runStart(db, { runId: 'held', role: 'review', lane: 'review/X-5' });
   db.close();
-  assert.match(review().stdout, /mise en file \(une relecture de X-5 tourne encore/);
+  assert.match(review().stdout, /queued \(a review of X-5 is already running/);
   unqueue();
   const done = openLedger(join(box.state, 'ledger.db'));
   runEnd(done, conf, { runId: 'held', outcome: 'killed' });
@@ -3287,13 +3297,13 @@ test('the lead opens the review of a pull request by a script that never reads t
   assert.notEqual(again.run_dir, opened.run_dir);
   assert.throws(() => readFileSync(join(opened.worktree, 'notes-of-the-reviewer.txt')), 'the lane of the review before is closed');
   assert.equal(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('[review/X-5]')).length, 1);
-  assert.match(readFileSync(join(again.run_dir, 'prompt.md'), 'utf8'), new RegExp(`seulement ce qui a changé depuis le commit ${firstHead}`));
+  assert.match(readFileSync(join(again.run_dir, 'prompt.md'), 'utf8'), new RegExp(`only changes since commit ${firstHead}`));
   // No more than a few an hour (three in this sandbox, the held one counted).
   assert.equal(spawnSync(join(box.home, 'lane-run.sh'), [again.run_dir], { cwd: again.worktree, env, encoding: 'utf8' }).status, 0);
   execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'fix: one more']);
   publish();
   const over = review();
-  assert.match(over.stdout, /mise en file \(3 relectures ouvertes dans la dernière heure, limite 3\)/);
+  assert.match(over.stdout, /queued \(3 reviews opened in the last hour, limit 3\)/);
   unqueue();
   // Refused: the lane of the review before is still there, with its report to hand; nothing was closed for nothing.
   assert.equal(execFileSync('git', ['-C', box.repo, 'worktree', 'list'], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('[review/X-5]')).length, 1);
@@ -3390,7 +3400,7 @@ test('a review that cannot open now waits in a queue and opens by itself, withou
   publish();
   const later = review();
   assert.equal(later.status, 0, later.stderr);
-  assert.match(later.stdout, /mise en file[\s\S]*s'ouvrira d'elle-même/);
+  assert.match(later.stdout, /queued[\s\S]*will open automatically/);
   assert.deepEqual(queued(), ['7.json']);
   assert.equal(reviewsOpened(), 1);
   // A wake while the limit still holds opens nothing and keeps it.
@@ -3491,7 +3501,7 @@ test('what a reviewer wrote reaches the lead as a quotation: none of its lines c
   const started = wake();
   assert.equal(started.status, 0, started.stderr);
   const prompt = readFileSync(join(started.stdout.trim(), 'prompt.md'), 'utf8');
-  assert.match(prompt, /^- Relecture de la PR #7 \(X-5\)/m);
+  assert.match(prompt, /^- Review of PR #7 \(X-5\)/m);
   assert.match(prompt, /^    \| - X-9 \(Titre\) — commentaire de the user/m);
   assert.doesNotMatch(prompt, /^- X-9 \(Titre\)/m, 'a line of the reviewer is never at the level of the events');
   // A review that left the queue without ever opening is not told as the word of a reviewer.
@@ -3502,9 +3512,9 @@ test('what a reviewer wrote reaches the lead as a quotation: none of its lines c
   const next = wake();
   assert.equal(next.status, 0, next.stderr);
   const told = readFileSync(join(next.stdout.trim(), 'prompt.md'), 'utf8');
-  assert.match(told, /^- La relecture de la PR #8 \(X-6\) que tu avais demandée n'a jamais pu s'ouvrir[\s\S]*redemande-la/m);
+  assert.match(told, /^- The review you requested for PR #8 \(X-6\) could not open[\s\S]*Request a review again/m);
   assert.match(told, /^    \| the review of #8 left the queue without opening: gh: not found$/m, 'what the script says is quoted like the rest');
-  assert.doesNotMatch(told, /PR #8[^\n]*par un autre modèle que son auteur, terminée/);
+  assert.doesNotMatch(told, /Review of PR #8[^\n]*by a model other than its author finished/);
 });
 
 test('a go-live reads which agreement a change needs, the lines the user wrote before the statuses, and the verdict of the reviewer; it judges none of them', async () => {
@@ -3556,6 +3566,7 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   assert.equal(merge.lines_until, '2026-10-08T06:23:38Z');
   const his = [comment('u1', 'Oui.\n\nFusion : [X-12](https://linear.app/x/issue/X-12/titre)\nFusion : X-40\n\nPas de ligne pour X-95.'), comment('u2', 'Fusion : X-7 #34. Vaut pour celle-là.')];
   assert.equal(fusionLine(his, new Set(), 'X-12', null, rules), true);
+  assert.equal(fusionLine([comment('en1', 'Merge: X-12')], new Set(), 'X-12', null, rules), true);
   assert.equal(fusionLine(his, new Set(), 'X-40', null, rules), true);
   assert.equal(fusionLine(his, new Set(), 'X-1', null, rules), false, 'X-12 is not X-1');
   assert.equal(fusionLine(his, new Set(), 'X-95', null, rules), false, 'named, but not on a line of agreement');
@@ -3573,6 +3584,7 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   const report = (verdict) => `---\ncommit: abc\n---\n\n## Compte rendu\n\n${verdict}\n\nDéfauts : …\n\n## Fichiers modifiés\n\nAucun.\n`;
   assert.equal(verdictIs(report('Verdict : rien de bloquant.'), 'rien de bloquant'), true);
   assert.equal(verdictIs(report('**Verdict : rien de bloquant**'), 'rien de bloquant'), true);
+  assert.equal(verdictIs(report('Verdict: no blocking issues.'), 'rien de bloquant'), true, 'an existing project can retain its French merge verdict');
   assert.equal(verdictIs(report('Verdict : à corriger avant fusion (rien de bloquant pour les chiffres)'), 'rien de bloquant'), false);
   assert.equal(verdictIs(report('Je ne vois rien de bloquant.'), 'rien de bloquant'), false, 'no verdict line, no verdict');
 });
@@ -3721,7 +3733,7 @@ test('what the user of the app sees goes live only on his own move of the ticket
   writeFileSync(join(pull.box.home, 'linear-moved'), '5');
   const asked = pull.ask();
   assert.equal(asked.status, 0, asked.stderr);
-  assert.match(readFileSync(join(pull.box.home, 'linear-posted'), 'utf8'), new RegExp(`Je la mets en ligne \\?[\\s\\S]*\\(Version montrée : PR 7 à ${pull.headOf().slice(0, 8)} ; la demande précédente portait sur ${before.slice(0, 8)}\\.\\)`));
+  assert.match(readFileSync(join(pull.box.home, 'linear-posted'), 'utf8'), new RegExp(`Je la mets en ligne \\?[\\s\\S]*\\(Version shown: PR 7 at ${pull.headOf().slice(0, 8)} ; the previous request covered ${before.slice(0, 8)}\\.\\)`));
   assert.deepEqual(JSON.parse(readFileSync(join(pull.box.state, 'validations', 'X-5.json'), 'utf8')).pulls, [{ pr: 7, head: pull.headOf() }]);
   assert.deepEqual(pull.moves(), ['X-5 -> À valider', 'X-5 -> À valider']);
   // In his status, but put there by an integration or another account: never live, back to the status that asks him.
@@ -3794,7 +3806,7 @@ test('his agreement is to the request it answers and to the version shown: an ol
   writeFileSync(join(pull.box.home, 'linear-moved'), '5');
   const before = record().pulls[0].head;
   assert.equal(pull.ask('**Ce qui a changé depuis.** Je la mets en ligne ?').status, 0);
-  assert.match(readFileSync(join(pull.box.home, 'linear-posted'), 'utf8'), new RegExp(`\\(Version montrée : PR 7 à ${pull.headOf().slice(0, 8)} ; la demande précédente portait sur ${before.slice(0, 8)}\\.\\)`));
+  assert.match(readFileSync(join(pull.box.home, 'linear-posted'), 'utf8'), new RegExp(`\\(Version shown: PR 7 at ${pull.headOf().slice(0, 8)} ; the previous request covered ${before.slice(0, 8)}\\.\\)`));
   writeFileSync(join(pull.box.home, 'linear-moved'), '0');
   assert.equal(live().status, 0);
   assert.ok(pull.merged());
@@ -3935,8 +3947,8 @@ test('the lead is told, in the words of the script, of a ticket a go-live could 
   const woken = wake();
   assert.equal(woken.status, 0, woken.stderr);
   const prompt = readFileSync(join(woken.stdout.trim(), 'prompt.md'), 'utf8');
-  assert.match(prompt, /X-5[^\n]*n'est pas fermé[^\n]*\n {4}\| #7 is live, and X-5 stays in « Go MEP »: GitHub did not say what became of #8/);
-  assert.doesNotMatch(prompt, /n'a pas été faite/, 'it is not told as a go-live that was refused');
+  assert.match(prompt, /X-5[^\n]*still open[^\n]*\n {4}\| #7 is live, and X-5 stays in « Go MEP »: GitHub did not say what became of #8/);
+  assert.doesNotMatch(prompt, /was refused/, 'it is not told as a go-live that was refused');
 });
 
 test('only the version a reviewer read goes live: a commit of the lane on top of it does not, a merge of the base that changed nothing does; a review that asks for corrections is no review', () => {
@@ -3972,7 +3984,7 @@ test('a go-live that only waits is kept and done by the wake, with every check a
   pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }] });
   const waiting = pull.merge();
   assert.equal(waiting.status, 3, 'kept in the queue is its own answer, not the one of a go-live done');
-  assert.match(waiting.stdout, /mise en file \(its checks still run\)/);
+  assert.match(waiting.stdout, /is queued \(its checks still run\)/);
   assert.equal(pull.merge(['--dry-run']).status, 3, 'and a dry run says the same');
   assert.deepEqual(queued(), ['7.json']);
   assert.equal(wake().status, 0);
@@ -4086,7 +4098,7 @@ esac
   assert.equal(waiting.status, 0, waiting.stderr);
   assert.deepEqual(JSON.parse(waiting.stdout), [{ identifier: 'X-7', title: 'Un écran', url: 'u#c', since: '2026-01-02T09:00:00Z' }]);
   const askedWhat = readFileSync(join(dir, 'asked-what'), 'utf8');
-  assert.match(askedWhat, /À valider/);
+  assert.match(askedWhat, /Needs Approval/);
   assert.doesNotMatch(askedWhat, /assignedIssues/);
   // Without the application, the key of a person: the tracker then cannot tell him from an agent, and says so.
   writeFileSync(secrets, 'LINEAR_API_KEY=personal-key\n');
@@ -4219,7 +4231,7 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   pull('1111111111111111111111111111111111111111');
   const asked = ask(['--pr', '7', '--capture', '/somewhere/avant.png', 'Avant', '--capture', '/somewhere/apres.png'], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
   assert.equal(asked.status, 0, asked.stderr);
-  assert.match(posted(), /^X-5 from=[\s\S]*Je la mets en ligne \?[\s\S]*\*\*Avant\*\*\n\n!\[Avant\]\(https:\/\/uploads\.example\.test\/avant\.png\)[\s\S]*!\[Capture\]\(https:\/\/uploads\.example\.test\/apres\.png\)[\s\S]*\(Version montrée : PR 7 à 11111111\.\)\s*$/);
+  assert.match(posted(), /^X-5 from=[\s\S]*Je la mets en ligne \?[\s\S]*\*\*Avant\*\*\n\n!\[Avant\]\(https:\/\/uploads\.example\.test\/avant\.png\)[\s\S]*!\[Capture\]\(https:\/\/uploads\.example\.test\/apres\.png\)[\s\S]*\(Version shown: PR 7 at 11111111\.\)\s*$/);
   assert.deepEqual(moves(), ['X-5 -> À valider']);
   assert.deepEqual(kept(), [{ pr: 7, head: '1111111111111111111111111111111111111111' }]);
   // A card that could not be moved is a request that is not made yet: what he was shown before stays what is kept,
@@ -4282,7 +4294,7 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   pull('2222222222222222222222222222222222222222');
   const again = ask(['--pr', '7'], 'La fiche a changé depuis ma demande. Je la mets en ligne ?');
   assert.equal(again.status, 0, again.stderr);
-  assert.match(posted(), /\(Version montrée : PR 7 à 22222222 ; la demande précédente portait sur 11111111\.\)/);
+  assert.match(posted(), /\(Version shown: PR 7 at 22222222 ; the previous request covered 11111111\.\)/);
   assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }]);
   // A second pull request of the same ticket is added to what he was shown: his agreement to the first still stands.
   writeFileSync(join(box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state: 'OPEN', headRefOid: '8888888888888888888888888888888888888888' }));
@@ -4296,7 +4308,7 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   const waited = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'merge.lock'), join(box.home, 'ask-validation.sh'), 'X-5', '-', '--pr', '9'], { env: { ...box.env, ORCH_LOCK_WAIT: '1' }, encoding: 'utf8', input: 'Une troisième ?' });
   assert.equal(waited.status, 1);
   assert.match(waited.stderr, /a go-live is being done/);
-  assert.match(posted(), /\(Version montrée : PR 8 à 88888888\.\)/);
+  assert.match(posted(), /\(Version shown: PR 8 at 88888888\.\)/);
   assert.deepEqual(kept(), [{ pr: 7, head: '2222222222222222222222222222222222222222' }, { pr: 8, head: '8888888888888888888888888888888888888888' }]);
   assert.match(ask(['--pr', '8'], 'Encore ?').stderr, /already waits for the user/);
 });
@@ -4351,7 +4363,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   // An invented private term of the project, which the tool knows only by its fingerprint: refused, and not shown.
   const refused = guard(term);
   assert.equal(refused.status, 1, refused.stderr);
-  assert.match(refused.stderr, /terme privé/);
+  assert.match(refused.stderr, /private term/);
   assert.doesNotMatch(refused.stderr, /Zorglub/);
   // The file of the checkout is emptied (a session ran code there): the list read is the one at the base.
   writeFileSync(join(box.repo, 'scripts', 'private-terms.json'), '{"salt_id":"e99d7c89dddc","hashes":[]}\n');
@@ -4405,11 +4417,11 @@ test('the guard reads project lists at the committed base and keeps generic chec
     writeFileSync(file, text);
     return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, file], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/main' }, encoding: 'utf8' });
   };
-  assert.match(fromCopy(term).stderr, /terme privé/);
+  assert.match(fromCopy(term).stderr, /private term/);
   writeFileSync(join(copy, 'lib', 'guard', 'codex-guard.mjs'), 'process.exit(0);\n');
   const edited = fromCopy(term);
   assert.equal(edited.status, 1, 'the guard that runs is the one of the branch the tool follows');
-  assert.match(edited.stderr, /terme privé/);
+  assert.match(edited.stderr, /private term/);
   // When that branch does not carry the guard, the files of the checkout are what runs: said each time, not silent.
   const elsewhere = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, join(tool, 'out.txt')], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/absent' }, encoding: 'utf8' });
   assert.match(elsewhere.stderr, /the guard runs from the files of this checkout/);
@@ -4425,7 +4437,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   writeFileSync(join(box.home, 'out.txt'), term);
   const viaSettings = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', box.home, join(box.home, 'out.txt')], { env: { ...noRef, ORCH_CONF: join(box.home, 'lane.conf') }, encoding: 'utf8' });
   assert.equal(viaSettings.status, 1, viaSettings.stderr);
-  assert.match(viaSettings.stderr, /terme privé/);
+  assert.match(viaSettings.stderr, /private term/);
   // « None », however it is written, is none.
   settings('[guard]\nterms = None\nallowed = NONE\n');
   commit('chore: none, in capitals');
@@ -4463,7 +4475,7 @@ test('the project the tool works on is named the same way for every script, its 
   writeFileSync(join(odd, 'agents.conf'), '[permissions.dev]\nmode = accept-edits\nallow = npm test, {orch}/when-free.sh\ndeny = {orch}/merge-pr.sh\n');
   writeFileSync(join(odd, 'prompts', 'dev.md'), 'Lance `{orch}/when-free.sh npm run test:ui`.\n');
   const told = (env) => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env dev; printf "%s\\n%s\\n" "$ORCH_ALLOW" "$ORCH_DENY"; prompt_text "$(prompt_file dev)"', '_', odd], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout;
-  assert.equal(told({ ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }), `npm test, ${odd}/when-free.sh\n${odd}/merge-pr.sh\nLance \`${odd}/when-free.sh npm run test:ui\`.\n`);
+  assert.equal(told({ ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }), `npm test, ${odd}/when-free.sh\n${odd}/merge-pr.sh\nWrite to the user in en. Work and communicate with other agents in English.\n\nLance \`${odd}/when-free.sh npm run test:ui\`.\n`);
   // {kept} in what a role may read: the folder where what the lanes set apart for the user is kept.
   writeFileSync(join(odd, 'agents.conf'), `${readFileSync(join(odd, 'agents.conf'), 'utf8')}read = {kept}\n\n[lanes]\nkept_in = ~/kept for him\n`);
   const may = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env dev; printf "%s\\n" "$ORCH_READ"', '_', odd], { env: { ...clean, ORCH_REPO: second, ORCH_CONF: join(odd, 'agents.conf') }, encoding: 'utf8' });
@@ -4682,7 +4694,7 @@ test('the terminal of a lane shows what the agent says, what it thinks and what 
   // What it says, whole.
   assert.match(shown, /^Je lance les tests de la charge fixe\.$/m);
   // What it thinks, marked as such, on one line.
-  assert.match(shown, /^ {2}\(réflexion\) Le test échoue sur l’arrondi : je regarde d’abord le calcul\. Puis je corrige\.$/m);
+  assert.match(shown, /^ {2}\(thinking\) Le test échoue sur l’arrondi : je regarde d’abord le calcul\. Puis je corrige\.$/m);
   // Each action with what it is about: the reason the agent gave, else the command; the file, from the folder it works in.
   assert.match(shown, /^ {2}> Bash : Run the tests of the fixed charge$/m);
   assert.match(shown, /^ {2}> Bash : git status --short$/m);
@@ -4728,8 +4740,8 @@ test('a lane that cannot be opened again is not left with its finished work unsh
   assert.match(together.stdout, /X-5: opened again \(said:c9\)/);
   assert.equal(record('X-5').runs.length, 2);
   const told = session('X-5', { commit: null });
-  assert.match(told.prompt, /\| L'utilisateur a écrit sur le ticket[\s\S]*Et vérifie aussi le mode sombre\./);
-  assert.match(told.prompt, /\| Le chef de projet t’a écrit[\s\S]*Il manque la capture sur téléphone\./);
+  assert.match(told.prompt, /\| The user wrote on the ticket[\s\S]*Et vérifie aussi le mode sombre\./);
+  assert.match(told.prompt, /\| The project lead wrote[\s\S]*Il manque la capture sur téléphone\./);
   flow();
   assert.equal(record('X-5').runs.length, 2, 'both were handed in that one session');
   assert.deepEqual(stuck(), []);
@@ -4763,7 +4775,7 @@ test('a lane opened again on red checks is told what failed: the list of the tes
   assert.doesNotMatch(install, /Post job cleanup|background worker/);
   // The forge gives no log: the lane is told so rather than handed an empty extract.
   writeFileSync(join(box.home, 'run-log.txt'), '');
-  assert.match(red(3), /\| \(le journal des vérifications n'a pas pu être lu : relance chez toi les tests des fichiers que tu as touchés/);
+  assert.match(red(3), /\| \(the check log could not be read; rerun tests for touched files/);
 });
 
 test('a word written to a lane that stays at its cap is not lost in silence: the lead is told it was not handed over, once a day for his own words and once for those of the user, and red checks on a lane already said to be stopped tell him nothing new', () => {
@@ -4837,8 +4849,8 @@ test('a session stopped at the cap of its ticket while a word waits for the lane
   flow();
   assert.equal(told().length, 1);
 });
-  assert.match(heard.prompt, /\| L'utilisateur a écrit sur le ticket[\s\S]*Tu en es où \?/);
-  assert.match(heard.prompt, /\| Le chef de projet t’a écrit[\s\S]*Corrige aussi le survol\.[\s\S]*Et le mode sombre\./);
+  assert.match(heard.prompt, /\| The user wrote on the ticket[\s\S]*Tu en es où \?/);
+  assert.match(heard.prompt, /\| The project lead wrote[\s\S]*Corrige aussi le survol\.[\s\S]*Et le mode sombre\./);
 });
 
 test('a ticket the user gives to two teams (« Équipes : les deux ») gets a second team on the other harness, on a lane of its own; he is asked once, with both results, when both are reviewed and green; his line says which goes live, and its go-live closes the other', () => {
@@ -4873,7 +4885,7 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   assert.equal(chain('X-5.2')[0].adapter, 'second');
   assert.equal(flow().stdout.includes('second team'), false, 'opened once');
   const two = session('X-5.2', { commit: 'fix: the work of the other team' });
-  assert.match(two.prompt, /Lane : dev\/X-5\.2 [\s\S]*Ce ticket est confié à deux équipes, chacune de son côté : tu es la deuxième\./);
+  assert.match(two.prompt, /Team: dev\/X-5\.2 [\s\S]*This ticket has two independent teams; you are the second\./);
   assert.equal(record('X-5.2').pr, 42);
   assert.equal(record('X-5').pr, 41);
   assert.equal(execFileSync('git', ['--git-dir', join(box.home, 'remote.git'), 'rev-parse', 'dev/X-5.2'], { encoding: 'utf8' }).trim(), two.head, 'sent to a branch of its own');
@@ -4909,7 +4921,7 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   const request = ask(41, 42);
   assert.equal(request.status, 0, request.stderr);
   const written = readFileSync(join(box.home, 'linear-posted'), 'utf8');
-  assert.match(written, /Deux équipes ont travaillé ce ticket, chacune de son côté : équipe 1, PR 41 ; équipe 2, PR 42\. Pour choisir, écris sur le ticket une ligne « Équipe 1 » ou « Équipe 2 », puis glisse la carte dans « Go MEP »/);
+  assert.match(written, /Two teams worked on this ticket independently: team 1, PR 41; team 2, PR 42\. To choose, write a line ‘Team 1’ or ‘Team 2’ on the ticket, then move it to ‘Go MEP’/);
   const kept = () => JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8'));
   assert.deepEqual(kept().teams, { 1: 41, 2: 42 });
   // He puts the card in his status of agreement and says nothing of which: neither goes live.
@@ -4917,9 +4929,9 @@ test('a ticket the user gives to two teams (« Équipes : les deux ») gets a se
   const live = (pr) => spawnSync(join(box.home, 'merge-pr.sh'), [String(pr), 'X-5', '-'], { env, input: 'Ce qui change, où le voir, comment le vérifier.', encoding: 'utf8' });
   const silent = live(41);
   assert.notEqual(silent.status, 0);
-  assert.match(silent.stderr, /X-5 was given to two teams and the user has not said which one goes live: a line « Équipe 1 » or « Équipe 2 »/);
+  assert.match(silent.stderr, /X-5 was given to two teams and the user has not said which one goes live: a Team 1 or Team 2 line/);
   // His line, written after the request, names the second team: the first is refused, the second goes live, and the first is closed.
-  comments(asked, { id: 'c2', createdAt: '2099-01-01T10:00:00Z', body: 'Équipe 2', byOwner: true });
+  comments(asked, { id: 'c2', createdAt: '2099-01-01T10:00:00Z', body: 'Team 2', byOwner: true });
   const refused = live(41);
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /the user chose the team 2 \(#42\): #41, of the team 1, is not put live/);
@@ -4985,7 +4997,7 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
   assert.equal(record('X-5').runs.length, 1, 'the first team was not opened for a word that is not for it');
   assert.equal(chain('X-5.2')[0].adapter, 'second', 'opened again on the harness it was given');
   const told = session('X-5.2', { commit: null });
-  assert.match(told.prompt, /\| Le chef de projet t’a écrit[\s\S]*Pour la deuxième équipe : vérifie le mode sombre\./);
+  assert.match(told.prompt, /\| The project lead wrote[\s\S]*Pour la deuxième équipe : vérifie le mode sombre\./);
   // The second is ready in its turn: the lead is told, though the first had been ready long before the ticket had two teams.
   view(42, two.head);
   read(42, two.head);
@@ -5035,7 +5047,7 @@ test('two teams on a ticket, where it could go wrong: the line written once the 
 });
 
 test('a ticket given to two teams with no place for the second, or no second harness, is not stuck: the second waits for a place, and one team works when there is no other harness, said once', () => {
-  const asked = JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Deux équipes.', byOwner: true }]);
+  const asked = JSON.stringify([{ id: 'c1', createdAt: '2026-01-02T09:00:00Z', body: 'Teams: both.', byOwner: true }]);
   // No other harness is named for the role: one team, and the lead is told once.
   {
     const { flow, todo, by, record, session, stuck, box } = flowBox();
@@ -5227,7 +5239,7 @@ test('the base is brought into a lane without a model when nothing has to be dec
   const conflict = flow();
   assert.match(conflict.stdout, /X-5: opened again \(base:/);
   assert.equal(record('X-5').runs.length, 2);
-  assert.match(session('X-5', { commit: null }).prompt, /\| La branche principale a avancé sur du code/);
+  assert.match(session('X-5', { commit: null }).prompt, /\| The base branch advanced on code/);
   assert.deepEqual(stuck(), []);
   assert.equal(execFileSync('git', ['-C', box.repo, 'rev-parse', 'dev/X-5'], { encoding: 'utf8' }).trim(), remoteHead, 'the merge git could not make is not left on the branch');
 });
@@ -5403,7 +5415,7 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   assert.match(more.stdout, /X-5: opened again \(budget:/);
   assert.doesNotMatch(more.stdout, /at its cap/);
   assert.equal(told().length, 1);
-  assert.match(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'prompt.md'), 'utf8'), /arrêtée à la limite de son budget/);
+  assert.match(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'prompt.md'), 'utf8'), /stopped at its budget limit/);
   // This one spends the cap he set: said once for that cap, and nothing opens the lane.
   last = run('X-5', { FAKE_COST: '1.7', FIRST_EXIT: '5', SECOND_EXIT: '5' }, { commit: 'fix: still more' });
   assert.equal(budget(), 'budget=1.6');
@@ -5419,13 +5431,13 @@ test('a ticket has a cap on what it may cost: a session is given what is left, a
   const comments = (list) => writeFileSync(join(box.home, 'linear-comments.json'), JSON.stringify(list));
   const c9 = { id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Continue.\nPlafond : 3 $', byOwner: true };
   const c10 = { id: 'c10', createdAt: '2099-01-01T11:00:00Z', body: 'plafond 80 % de mon abonnement, on est bien d’accord', byOwner: true };
-  const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Plafond 4', byOwner: true };
+  const c11 = { id: 'c11', createdAt: '2099-01-01T12:00:00Z', body: 'Cap 4', byOwner: true };
   comments([c11, c9]);
   const lifted = flow();
   assert.match(lifted.stdout, /X-5: opened again \(budget:/);
   assert.doesNotMatch(lifted.stdout, /said:c11/);
   assert.equal(told().length, 2, 'a cap he lifted is not told as reached');
-  assert.doesNotMatch(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'comments.md'), 'utf8'), /Plafond 4/);
+  assert.doesNotMatch(readFileSync(join(box.state, 'runs', record('X-5').runs.at(-1).run, 'comments.md'), 'utf8'), /Cap 4/);
   last = run('X-5', { FAKE_COST: '0.1' }, { commit: 'fix: finished' });
   assert.equal(budget(), 'budget=0.9');
   // A lane that was not stopped is not opened by a line that only sets the cap; it is by a sentence of his.

@@ -18,7 +18,11 @@ set -euo pipefail
 pending="$ORCH_STATE_DIR/decisions/pending"
 mkdir -p "$pending" "$ORCH_STATE_DIR/decisions/done"
 waiting() { ls -1 "$pending" 2> /dev/null || true; }
-show() { jq -r '"\(.ticket)\(if .adr then " (avec docs/decisions.md)" else "" end), proposée à \(.at)"' "$pending/$1/decision.json"; }
+show() {
+  local record="$pending/$1/decision.json" adr_suffix=
+  [ "$(jq -r '.adr' "$record")" != true ] || adr_suffix=$(user_message decision_adr_suffix)
+  user_message decision_listing "ticket=$(jq -r '.ticket' "$record")" "adr=$adr_suffix" "at=$(jq -r '.at' "$record")"
+}
 case "${1:-}" in
   --list)
     for id in $(waiting); do
@@ -31,7 +35,7 @@ case "${1:-}" in
   --drop)
     [ -n "${2:-}" ] && [ -d "$pending/$2" ] || die "usage: confirm-decision.sh --drop <id> (waiting: $(waiting | paste -sd' '))"
     mv "$pending/$2" "$ORCH_STATE_DIR/decisions/done/$2-dropped"
-    echo "Décision abandonnée : $2. Rien n'est parti."
+    user_message decision_dropped "id=$2"
     exit 0
     ;;
 esac
@@ -45,7 +49,7 @@ ticket=$(jq -r '.ticket' "$pending/$id/decision.json")
 adr=$(jq -r '.adr' "$pending/$id/decision.json")
 run=$(jq -r '.run' "$pending/$id/decision.json")
 text="$pending/$id/text.md"
-echo "Décision confirmée par toi, pour $ticket :"
+user_message decision_confirmed "ticket=$ticket"
 sed 's/^/    /' "$text"
 
 if [ "$adr" = true ] && [ ! -f "$pending/$id/adr.sent" ]; then
@@ -59,10 +63,10 @@ if [ "$adr" = true ] && [ ! -f "$pending/$id/adr.sent" ]; then
     # The user sees the whole change, what it removes included, before
     # anything is committed: the first run shows it, the second one sends.
     if [ ! -f "$pending/$id/adr.shown" ]; then
-      echo "Ce qui changera dans docs/decisions.md (lignes « - » retirées, lignes « + » ajoutées) :"
+      user_message decision_diff
       sed -n '/^@@/,$p' "$pending/$id/adr.diff" | sed 's/^/    /'
       now_utc > "$pending/$id/adr.shown"
-      echo "Rien n'est parti. Si c'est bien ce que tu décides, relance la même commande ; sinon : confirm-decision.sh --drop $id"
+      user_message decision_preview "id=$id"
       exit 0
     fi
     git -C "$worktree" add docs/decisions.md
@@ -79,9 +83,9 @@ fi
 if [ ! -f "$pending/$id/comment.url" ]; then
   comment=$(mktemp)
   {
-    printf '**Décision de %s, transcrite pendant une discussion avec le chef de projet et confirmée par lui**\n\n' "$(owner_name)"
+    user_message decision_comment "owner=$(owner_name)"
     cat "$text"
-    [ "$adr" != true ] || printf '\n\nÉcrite aussi dans `docs/decisions.md` (pull request en brouillon, à fusionner comme les autres).\n'
+    [ "$adr" != true ] || user_message decision_adr_note
   } > "$comment"
   url=$("$ORCH_HOME/linear.sh" comment "$ticket" "$comment" "$(conf_get lead name), en discussion") || { rm -f "$comment"; die "Linear did not take the comment (see above): the decision still waits, run this again"; }
   rm -f "$comment"
@@ -90,4 +94,4 @@ fi
 ledger event --kind decision --source discussion --ticket "$ticket" ${run:+--run-id "$run"} \
   --detail "$(tr '\n' ' ' < "$text" | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-600)"
 mv "$pending/$id" "$ORCH_STATE_DIR/decisions/done/$id"
-echo "Transcrite : $(cat "$ORCH_STATE_DIR/decisions/done/$id/comment.url")"
+user_message decision_transcribed "url=$(cat "$ORCH_STATE_DIR/decisions/done/$id/comment.url")"

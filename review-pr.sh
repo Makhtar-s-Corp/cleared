@@ -50,7 +50,7 @@ never() {
 }
 later() {
   if [ -n "$dry_run" ]; then
-    echo "Elle attendrait dans la file : $1"
+    echo "It would wait in the queue: $1"
     exit 0
   fi
   if [ -n "${ORCH_FROM_QUEUE:-}" ]; then
@@ -62,7 +62,7 @@ later() {
   jq -n --arg pr "$pr" --arg ticket "$ticket" --arg author "${author:-$said_author}" --arg at "$(now_utc)" --arg why "$1" \
     '{pr: ($pr | tonumber), ticket: $ticket, author: $author, at: $at, why: $why}' > "$ORCH_STATE_DIR/reviews-queue/.$pr.part"
   mv "$ORCH_STATE_DIR/reviews-queue/.$pr.part" "$ORCH_STATE_DIR/reviews-queue/$pr.json"
-  echo "Relecture de la PR #$pr mise en file ($1). Elle s'ouvrira d'elle-même dès que possible, sans rien relancer ; son verdict te sera remis à un réveil."
+  user_message review_queued "pr=$pr" "reason=$1"
   exit 0
 }
 
@@ -70,7 +70,7 @@ later() {
 # operations of the host and may open while a CI runs (docs/regles-lanes.md,
 # rule of the user of 2026-10-07). Not while GitHub is down.
 down=$(github_down) || down=
-[ -z "$down" ] || later "GitHub est en panne : $down"
+[ -z "$down" ] || later "GitHub is unavailable: $down"
 
 pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json number,state,title,body,headRefName,headRefOid) || die "pull request #$pr could not be read"
 [ "$(jq -r '.state' <<<"$pull")" = OPEN ] || never "pull request #$pr is not open"
@@ -104,14 +104,14 @@ lane="review/$ticket"
 previous=
 if dispatcher_lanes | grep -qxF -- "$lane"; then
   if [ "$(ledger sql "select count(*) n from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[0].n')" != 0 ]; then
-    later "une relecture de $ticket tourne encore, une à la fois"
+    later "$(user_message review_ticket_busy "ticket=$ticket")"
   fi
   previous=1
 fi
 limit=$(conf_get review per_hour)
 [[ "$limit" =~ ^[0-9]+$ ]] || limit=4
 recent=$(ledger sql "select count(*) n from runs where role = 'review' and source = 'dispatcher' and started_at >= '$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)'" | jq -r '.[0].n')
-[ "$recent" -lt "$limit" ] || later "$recent relectures ouvertes dans la dernière heure, limite $limit"
+[ "$recent" -lt "$limit" ] || later "$(user_message review_hour_limit "count=$recent" "limit=$limit")"
 # A finished review holds nothing to keep (the reviewer writes no file of
 # the repository, and its report is in the state): closed whatever it left.
 if [ -n "$previous" ] && [ -z "$dry_run" ]; then

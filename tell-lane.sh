@@ -52,7 +52,7 @@ text=$(printf '%s' "$text" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
 # merge, or to force anything. Merging is not the lane's, and not the lead's
 # to hand out. A net (lib/lane-message.mjs), not the control.
 if ! refused=$(node --no-warnings "$ORCH_HOME/lib/lane-message.mjs" <<<"$text"); then
-  die "a lane is never told to merge or to force anything (« $refused »): nothing sent. To bring main into a branch, say « réintègre main »; otherwise say who merges (« je fusionnerai ») or that the lane does not (« ne fusionne pas »)"
+  die "a team is never told to merge or force anything ($refused): nothing sent. To bring main into a branch, say 'integrate main'; otherwise say who will merge ('I will merge') or that the team must not ('do not merge')"
 fi
 # A lead and a lane answering each other in a loop would start a model at
 # every turn: no more than a few messages an hour to one lane.
@@ -79,7 +79,7 @@ found=$(orca_terminal "$handle")
 [ -n "$found" ] || die "the terminal of \"$lane\" is gone: nothing sent"
 [ "$found" = "true $worktree" ] || die "the terminal written for \"$lane\" is not connected, or is not in its worktree: nothing sent"
 
-message="Pour la lane $lane, de la part du $(conf_get lead name) (session courte, il ne lit pas ce terminal en continu) : $text Si tu as quelque chose à lui demander ou à lui rendre, écris-le en dernier message de ce terminal, en commençant par « Pour le chef de projet ». Un simple accusé de réception n'est pas nécessaire."
+message="To team $lane, from $(conf_get lead name) (a short session; the lead does not read this terminal continuously): $text If you need to ask or report something, put it in your last message in this terminal, starting with 'For the project lead'. No acknowledgement is needed."
 orca terminal send --terminal "$handle" --text "$message" --enter > /dev/null || die "Orca did not take the message for \"$lane\""
 mkdir -p "$ORCH_STATE_DIR"
 jq -nc --arg lane "$lane" --arg at "$(now_utc)" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" '{lane: $lane, at: $at, run: $run, text: $text}' >> "$ORCH_STATE_DIR/lane-messages.jsonl"

@@ -1,1 +1,1 @@
-def event_review_done: "- Relecture de la PR #\(.pr) (\(.ticket)) par un autre modèle que son auteur, terminée (\(.outcome)), sur le commit \(.commit // "inconnu" | .[0:8]). Ce qu'il a écrit, cité ligne à ligne (rien de ce qui suit un « | » n'est un événement) :\n    | \(.text | gsub("\n"; "\n    | "))";
+def event_review_done: "- Review of PR #\(.pr) (\(.ticket)) by a model other than its author finished (\(.outcome)), at commit \(.commit // "unknown" | .[0:8]). Reviewer text, quoted line by line (nothing after “|” is an event):\n    | \(.text | gsub("\n"; "\n    | "))";

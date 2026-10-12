@@ -245,7 +245,7 @@ test('an old project configuration is never selected', () => withProject(({ proj
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Obsolete Owner\n');
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
   execFileSync('git', ['-C', project, 'add', '.ferme/agents.conf']);
-  assert.equal(shell(env, 'owner_name').stdout.trim(), "l'utilisateur");
+  assert.equal(shell(env, 'owner_name').stdout.trim(), 'the user');
   assert.equal(nodeValue(env, 'conf.loadConf().sections.owner?.name').stdout.trim(), 'undefined');
 }));
 
@@ -290,7 +290,7 @@ test('an untracked Cleared config is ignored and reported', () => withProject(({
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Owner\n');
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
   const wake = shell(env, 'ledger init >/dev/null; owner_name');
-  assert.equal(wake.stdout.trim(), "l'utilisateur");
+  assert.equal(wake.stdout.trim(), 'the user');
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
   assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n, 1);
   db.close();
@@ -320,7 +320,7 @@ test('CLEARED_STATE_DIR takes precedence over the older environment variable', (
 test('owner name defaults to the user', () => withProject(({ env }) => {
   const result = shell(env, 'owner_name');
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "l'utilisateur");
+  assert.equal(result.stdout.trim(), 'the user');
 }));
 
 test('duplicate project keys keep the first value and warn once in the ledger', () => committedGuardProject(({ project, root, env, commit }) => {
@@ -346,7 +346,19 @@ test('project owner name overrides the example', () => withProject(({ project, e
 test('new prompt overrides the tool prompt', () => withProject(({ project, env }) => {
   mkdirSync(join(project, '.cleared', 'prompts'), { recursive: true });
   writeFileSync(join(project, '.cleared', 'prompts', 'dev.md'), 'new prompt');
-  assert.equal(shell(env, 'prompt_text "$(prompt_file dev)"').stdout, 'new prompt');
+  const prompt = shell(env, 'prompt_text "$(prompt_file dev)"').stdout;
+  assert.match(prompt, /^Write to the user in en\./);
+  assert.ok(prompt.endsWith('new prompt'));
+}));
+
+test('the live lead prompt names the configured reporting ticket', () => withProject(({ project, env }) => {
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[lead]\nreport_on = DEMO-7\n');
+  trackProjectConfig(project);
+  const result = shell(env, 'prompt_text "$(prompt_file release-live)"');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /reporting ticket DEMO-7/);
+  assert.doesNotMatch(result.stdout, /@REPORT_ON@/);
 }));
 
 test('a complete project configuration retains exactly its settings', () => withProject(({ project }) => {
@@ -391,7 +403,7 @@ test('review prompt and merge check use the same configured verdict', () => with
   trackProjectConfig(project);
   const prompt = shell(env, 'prompt_text "$(prompt_file review)"');
   assert.equal(prompt.status, 0, prompt.stderr);
-  assert.match(prompt.stdout, /Verdict : « à corriger avant fusion » ou « approved for sample »/);
+  assert.match(prompt.stdout, /Verdict: “fix before merge” or “approved for sample”/);
   const report = join(root, 'report.md');
   writeFileSync(report, '## Compte rendu\nVerdict : approved for sample\n');
   const accepted = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });

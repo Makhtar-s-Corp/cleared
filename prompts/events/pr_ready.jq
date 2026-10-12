@@ -1,1 +1,1 @@
-def event_pr_ready: "- PR #\(.pr) (\(.title), branche \(.branch)) — prête pour revue, vérifications : \(.checks)";
+def event_pr_ready: "- PR #\(.pr) (\(.title), branch \(.branch)) — ready for review; checks: \(.checks)";

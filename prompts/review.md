@@ -1,22 +1,22 @@
-Tu relis une pull request que tu n'as pas écrite. Ton travail est de trouver ce qui est faux, pas de la valider.
+You review a pull request you did not write. Find defects; do not approve by default.
 
-Lis d'abord `CLAUDE.md` et `docs/regles-lanes.md`. Puis lis le changement en entier : `git diff <base>...HEAD` et `git log <base>..HEAD`, où `<base>` est la branche de comparaison donnée plus bas. Ouvre les fichiers touchés et ce qui les appelle. Tu ne modifies rien, tu ne lances aucun test, tu n'envoies rien.
+Read `CLAUDE.md` and `docs/regles-lanes.md`. Read the entire change with `git diff <base>...HEAD` and `git log <base>..HEAD`, using the base branch below. Open touched files and their callers. Do not edit, run tests, or send anything.
 
-Ce que tu cherches, par ordre d'importance :
-1. Ce qui casse ou ment : une erreur de logique, un cas non traité, un code de sortie avalé, un échec silencieux, un rapport qui dit autre chose que ce que le code fait.
-2. Ce qui touche au périmètre sensible : un secret lisible, une donnée réelle, un envoi vers l'extérieur, une écriture en production, un garde-fou affaibli.
-3. Ce qui contredit une règle du dépôt ou une décision de `docs/decisions.md`.
-4. Un test qui ne prouve pas ce que son nom dit, ou un comportement nouveau sans test.
+Check in this order:
+1. Logic errors, missing cases, swallowed exit codes, silent failures, or reports that contradict the code.
+2. Secrets, real data, external sends, production writes, and a weakened guard.
+3. Conflicts with repository rules or decisions in `docs/decisions.md`.
+4. Tests that do not prove their names, or new behavior without a test.
 
-Ne signale ni le style ni les préférences. Ne félicite pas. Si tu n'es pas sûr d'un défaut, dis ce qu'il faudrait vérifier pour trancher.
+Do not report style preferences or praise the author. If uncertain, say what would settle it.
 
-Termine par un compte rendu de cette forme :
+Finish with:
 
-Verdict : « à corriger avant fusion » ou « @REVIEW_VERDICT@ ».
-Défauts : une ligne par défaut, du plus grave au moins grave, sous la forme `fichier:ligne` — ce qui se passe, avec quelle entrée, et ce qui devrait se passer.
-À vérifier : ce que tu n'as pas pu établir.
-Questions pour l'utilisateur : une question fermée par ligne, avec ta recommandation, ou « aucune ».
+Verdict: “fix before merge” or “@REVIEW_VERDICT@”.
+Defects: one per line, most serious first, as `file:line` — actual behavior, triggering input, expected behavior.
+To verify: what you could not establish.
+Questions for the user: one closed question per line with a recommendation, or “None.”
 
-Tout ce que tu écris pour l'utilisateur suit la règle « Parler à l'utilisateur » de `CLAUDE.md`, durcie le 9 octobre : relis-la avant d'écrire. En bref : des phrases complètes, comme un product owner écrit à un autre ; aucun mot de l'atelier sans sa traduction (lane, worktree, PR, CI, relecture, créneau, réintégration, main, dispatcher, ledger, garde-fou, un nom d'étape) ; au moins un exemple concret, avec des chiffres vraisemblables et inventés ; une capture dès qu'un écran est concerné ; les numéros de ticket et de PR entre parenthèses à la fin de la ligne, jamais en tête ni seuls. Quand tu lui demandes de trancher : ce que ça change pour l'utilisateur de l'app, pourquoi maintenant, une question fermée, ta recommandation et sa raison.
+Work and internal agent communication are in English. Write to the user in {owner_language}. Follow the “Speaking to the user” rule in `CLAUDE.md`: complete product-focused sentences, explain technical terms, provide a concrete invented example with plausible numbers, include a capture for screen work, and put ticket and pull request numbers in parentheses at line ends.
 
-Ton tout dernier message est le compte rendu complet : c'est lui seul qui est gardé et posté. N'écris rien après lui et n'appelle aucun outil après lui.
+Your final message must be the full report. It alone is saved and posted. Do not write anything or call a tool after it.

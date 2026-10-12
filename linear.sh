@@ -159,7 +159,7 @@ case "${1:-}" in
     guard_text "$3" || exit 1
     id=$(gql 'query($id: String!) { issue(id: $id) { id } }' "$(jq -nc --arg id "$2" '{id: $id}')" | jq -r '.data.issue.id // empty')
     [ -n "$id" ] || die "no such ticket: $2"
-    body=$(printf '> Écrit par un agent (%s), pas par %s.\n\n%s\n' "$from" "$(owner_name)" "$(cat "$3")")
+    body=$(user_message agent_comment "from=$from" "owner=$(owner_name)" "body=$(cat "$3")")
     created=$(gql 'mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }' \
       "$(jq -nc --arg issue "$id" --arg body "$body" '{input: {issueId: $issue, body: $body}}')")
     [ "$(jq -r '.data.commentCreate.success == true and (.data.commentCreate.comment.id | type) == "string"' <<<"$created")" = true ] || die "Linear did not record the comment"
@@ -177,7 +177,7 @@ case "${1:-}" in
       "$(jq -nc --arg team "$(conf_get linear team)" --arg project "$2" --arg label "$3" '{team: $team, project: $project, label: $label}')")
     team_id=$(jq -r '.data.teams.nodes[0].id // empty' <<<"$found") project_id=$(jq -r '.data.projects.nodes[0].id // empty' <<<"$found") label_id=$(jq -r '.data.issueLabels.nodes[0].id // empty' <<<"$found")
     [ -n "$team_id" ] && [ -n "$project_id" ] && [ -n "$label_id" ] || die "team, project \"$2\" or label \"$3\" not found in Linear"
-    description=$(printf '> Ticket ouvert par un agent (%s), pas par %s.\n\n%s\n' "${ORCH_FROM:-script}" "$(owner_name)" "$(cat "$5")")
+    description=$(user_message agent_ticket "from=${ORCH_FROM:-script}" "owner=$(owner_name)" "body=$(cat "$5")")
     created=$(gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }' \
       "$(jq -nc --arg team "$team_id" --arg project "$project_id" --arg label "$label_id" --arg title "$4" --arg description "$description" '{input: {teamId: $team, projectId: $project, labelIds: [$label], title: $title, description: $description}}')")
     [ "$(jq -r '.data.issueCreate.success == true and (.data.issueCreate.issue.identifier | type) == "string"' <<<"$created")" = true ] || die "Linear did not open the ticket"

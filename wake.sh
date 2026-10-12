@@ -241,7 +241,7 @@ acting=
 if [ -n "$handover" ]; then
   {
     prompt_text "$(prompt_file handover)"
-    printf '\n---\nLa passation, telle qu'"'"'elle a été écrite et vérifiée :\n\n'
+    printf '\n---\nThe handover, as written and checked:\n\n'
     cat "$handover"
   } > "$run_dir/prompt.md"
   comment_on=$(conf_get lead report_on)
@@ -253,16 +253,16 @@ else
   cat "$(prompt_asset wake-events.jq)" >> "$work/wake-events.jq"
   {
     prompt_text "$(prompt_file "$role${acting:+-live}")"
-    printf '\n---\nCe qui a bougé depuis le dernier réveil (%s événement(s)) :\n\n' "$count"
+    printf '\n---\nWhat changed since the last wake (%s events):\n\n' "$count"
     jq -r --arg orch "$ORCH_HOME" --arg user "$(owner_name)" --arg User "$(owner_name_first)" --arg night_ticket "$(conf_get lead night_ticket | awk -F'|' '{ gsub(/^ +| +$/, "", $1); gsub(/^ +| +$/, "", $2); printf "\"%s\" \"%s\"", $1, $2 }')" -f "$work/wake-events.jq" "$work/changes.json"
-    [ -z "$github_out" ] || printf '\nGitHub est en panne en ce moment (%s, d'"'"'après sa page d'"'"'état) : aucun envoi, aucune vérification, aucune fusion ne peut partir. Ne donne aucun créneau ; dis-le en une phrase à qui demande, et rien de plus.\n' "$github_out"
+    [ -z "$github_out" ] || printf '\nGitHub is down now (%s on its status page): nothing can be pushed, checked, or merged. Do not offer a host slot; tell anyone asking in one sentence and nothing more.\n' "$github_out"
   } > "$run_dir/prompt.md"
   # While it observes, its decisions stay in its report: nothing is posted.
   comment_on=none
 fi
 {
   printf 'ORCH_LANE=%q\nORCH_TICKET=%q\nORCH_ROLE=%q\nORCH_RUN_BASE=%q\n' "$lane" "" "$role" "$run_base"
-  printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$(jq -r '.chain[0].alias' <<<"$routed")" "règle : $(jq -r '.rule' <<<"$routed")" ""
+  printf 'ORCH_REQUESTED_ALIAS=%q\nORCH_RULE_NOTE=%q\nORCH_SPAWN_NOTE=%q\n' "$(jq -r '.chain[0].alias' <<<"$routed")" "rule: $(jq -r '.rule' <<<"$routed")" ""
   printf 'ORCH_COMMENT_ON=%q\nORCH_WRITEUP_ROLE=%q\nORCH_SIGNED=%q\n' "$comment_on" "" "$(conf_get lead name)"
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PROJECT=%q\nORCH_LABEL=%q\n' "" "" "" ""
   # What the session may run: the permissions of the role, or those of the

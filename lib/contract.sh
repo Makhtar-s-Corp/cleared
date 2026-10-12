@@ -102,18 +102,18 @@ contract_report() {
     echo "files_changed: $changed"
     echo '---'
     echo
-    echo '## Compte rendu'
+    echo '## Report'
     echo
     cat "$body"
     [ -z "$(tail -c 1 "$body")" ] || echo
     echo
-    echo '## Fichiers modifiés'
+    echo '## Changed files'
     echo
     if [ "$changed" = 0 ]; then
-      echo 'Aucun.'
+      echo 'None.'
     else
       git status --porcelain | sed -n '1,30s/^/- /p'
-      if [ "$changed" -gt 30 ]; then echo "- … et $((changed - 30)) autres"; fi
+      if [ "$changed" -gt 30 ]; then echo "- … and $((changed - 30)) more"; fi
     fi
   } > "$report"
 }

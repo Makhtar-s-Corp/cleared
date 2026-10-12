@@ -12,6 +12,8 @@ import { readFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
+import { loadConf, section } from '../lib/conf.mjs';
+import { message } from '../lib/i18n.mjs';
 
 // The ranges Tailscale hands out to the machines of a network.
 export const TAILSCALE = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'];
@@ -35,28 +37,28 @@ export function allowed(peer, ranges) {
   });
 }
 
-export function dashboardServer({ file, ranges = TAILSCALE }) {
+export function dashboardServer({ file, ranges = TAILSCALE, language = 'en' }) {
   const server = createServer(async (request, response) => {
     if (!allowed(request.socket.remoteAddress, ranges)) {
-      response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end('Refusé.\n');
+      response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end(message('http_forbidden', language));
       return;
     }
     let path;
     try {
       path = new URL(request.url, 'http://x').pathname;
     } catch {
-      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end('Demande illisible.\n');
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end(message('http_bad_request', language));
       return;
     }
     if (!['GET', 'HEAD'].includes(request.method) || (path !== '/' && path !== '/index.html')) {
-      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('Introuvable.\n');
+      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end(message('http_not_found', language));
       return;
     }
     try {
       const page = await readFile(file);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(request.method === 'HEAD' ? undefined : page);
     } catch {
-      response.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }).end('La page n’a pas encore été écrite.\n');
+      response.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }).end(message('http_unavailable', language));
     }
   });
   server.on('clientError', (_error, socket) => {
@@ -79,7 +81,7 @@ if (command) {
     process.stderr.write('usage: serve-dashboard.mjs <address> <port> <index.html> [<allowed CIDR>...]\n');
     process.exit(64);
   }
-  dashboardServer({ file, ranges: ranges.length ? ranges : TAILSCALE }).listen(Number(port), address, () => {
+  dashboardServer({ file, ranges: ranges.length ? ranges : TAILSCALE, language: section(loadConf(), 'owner').language || 'en' }).listen(Number(port), address, () => {
     process.stdout.write(`dashboard on http://${address}:${port}/, for ${(ranges.length ? ranges : TAILSCALE).join(', ')} only\n`);
   });
 }

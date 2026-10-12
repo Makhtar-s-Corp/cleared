@@ -1,1 +1,1 @@
-def event_pr_opened: "- PR #\(.pr) (\(.title), branche \(.branch)) — ouverte en brouillon";
+def event_pr_opened: "- PR #\(.pr) (\(.title), branch \(.branch)) — opened as a draft";

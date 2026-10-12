@@ -1,1 +1,1 @@
-def event_ticket_moved: "- \(.ticket) (\(.title)) est maintenant dans le statut « \(.state) », celui de l'accord de \($user) pour une mise en ligne. Le script de mise en ligne vérifie lui-même qui l'y a mis.";
+def event_ticket_moved: "- \(.ticket) (\(.title)) is now in “\(.state)”, the status for \($user)’s shipping approval. The shipping script verifies who moved it.";

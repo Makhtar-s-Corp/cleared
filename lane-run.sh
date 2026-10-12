@@ -37,7 +37,7 @@ attempt() {
     --project "${ORCH_PROJECT:-}" --label "${ORCH_LABEL:-}"
   echo "── $ORCH_LANE · $role · $alias ($adapter: $model) ──"
   # What this run posts by itself says which model wrote it.
-  [ -z "${signed_as:-}" ] || export ORCH_SIGNED="$signed_as, modèle $alias"
+  [ -z "${signed_as:-}" ] || export ORCH_SIGNED="$signed_as, model $alias"
   adapter_env "$adapter"
   # The role's own permissions, unless the run was given others (the acting
   # lead), which never apply to another role of the same lane (the write-up).
@@ -65,24 +65,24 @@ run_chain() {
   for ((index = 0; index < count; index++)); do
     attempt "$index" "$role" "$prompt" "$chain" "$requested"
     case "$code" in
-      2) why="n'a pas pu démarrer" ;;
+      2) why="could not start" ;;
       3)
-        why="a été refusé par son garde-fou"
+        why="was refused by its guard"
         if [ "$(conf_get policy guard_refusal)" != fallback ]; then
           ledger event --kind model_fallback_failed --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "$alias: its safeguard refused the task; no fallback by policy"
-          echo "!! $alias $why : la lane s'arrête là (pas de repli après un refus de garde-fou)."
+          echo "!! $alias $why : the team stops here (no fallback after a guard refusal)."
           return 0
         fi
         ;;
       *) return 0 ;;
     esac
     if [ $((index + 1)) -lt "$count" ]; then
-      fallback_note="$alias $why ; repli déclaré : $(jq -r ".[$((index + 1))].alias" "$chain")."
+      fallback_note="$alias $why ; configured fallback: $(jq -r ".[$((index + 1))].alias" "$chain")."
       ledger event --kind model_fallback --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "$alias could not run (exit $code), next: $(jq -r ".[$((index + 1))].alias" "$chain")"
       echo "!! $fallback_note"
     else
       ledger event --kind model_fallback_failed --ticket "$ORCH_TICKET" --run-id "$run_id" --detail "no model of the chain could start (last: $alias, exit $code)"
-      echo "!! Aucun modèle de la chaîne n'a pu démarrer (dernier essai : $alias)."
+      echo "!! No model in the chain could start (last attempt: $alias)."
     fi
   done
 }
@@ -107,7 +107,7 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$
     [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
     git add -A
     git -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
-      || echo "!! Le travail de $lane_alias n'a pas pu être enregistré (git commit a refusé) : il reste dans la copie de travail."
+      || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
   fi
   rm -f "$message"
 fi
@@ -116,11 +116,11 @@ fi
 # scripts; only the wording of the report may come from the writing model.
 body=$(mktemp)
 if [ -f "$lane_report" ]; then
-  sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$lane_report" | sed '1d;$d' > "$body"
+  sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$lane_report" | sed '1d;$d' > "$body"
   used=$(sed -n 's/^model: //p' "$lane_report")
 else
   # The backend stopped before writing anything: said as it is.
-  echo "L'adaptateur \`$lane_adapter\` s'est arrêté sans compte rendu (code $lane_code). Ce qu'il a affiché est resté dans le terminal de la lane." > "$body"
+  echo "The \`$lane_adapter\` adapter stopped without a report (exit $lane_code). Its output remains in the team terminal." > "$body"
   used=$lane_model
 fi
 writeup_note=
@@ -137,10 +137,10 @@ if [ "$lane_code" = 0 ] && [ -f "$run_dir/writeup-chain.json" ] && [ -r "$(promp
   cd "$lane_dir"
   # $code and $report are those of the last attempt of the write-up.
   if [ "$code" = 0 ]; then
-    sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$report" | sed '1d;$d' > "$body"
-    writeup_note="Texte mis en forme par $(sed -n 's/^model: //p' "$report")."
+    sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$report" | sed '1d;$d' > "$body"
+    writeup_note="Report formatted by $(sed -n 's/^model: //p' "$report")."
   else
-    writeup_note="La mise en forme a échoué : le compte rendu est celui de la lane, tel quel."
+    writeup_note="Formatting failed; this is the original team report."
   fi
   rm -rf "$scratch"
 fi
@@ -156,19 +156,19 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && grep -qw -- "$ORCH_ROLE"
   if pushed=$(ORCH_RUN_ID=$lane_run_id "$ORCH_HOME/push-lane.sh" "$PWD" 2> "$push_err"); then
     pushed=$(sed -n '$p' <<<"$pushed")
     if [[ "$pushed" =~ ^#[0-9]+$ ]]; then
-      pushed_note="PR ouverte ou mise à jour : $pushed (brouillon)."
+      pushed_note="Pull request opened or updated: $pushed (draft)."
       # Kept with what is known of the lane of this ticket.
       kept_lane=$(lane_record "${ORCH_LANE#*/}")
       [ ! -f "$kept_lane" ] || { jq --argjson pr "${pushed#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}' "$kept_lane" > "$kept_lane.part" && mv "$kept_lane.part" "$kept_lane"; } || true
     elif [[ "$pushed" == "nothing to push"* ]]; then
-      pushed_note="Rien à pousser : la lane n'a aucun commit."
+      pushed_note="Nothing to push: the team has no commit."
     else
-      pushed_note="Réponse inattendue du script de push : ${pushed:-rien}. À vérifier à la main."
+      pushed_note="Unexpected response from the push script: ${pushed:-nothing}. Check manually."
     fi
   else
     # Its own last word, not a hint git may have added after it.
     reason=$(grep '^push-lane\.sh: ' "$push_err" | sed -n '$p')
-    pushed_note="La branche n'a pas été poussée : ${reason:-$(sed -n '$p' "$push_err")}"
+    pushed_note="The branch was not pushed: ${reason:-$(sed -n '$p' "$push_err")}"
   fi
   cat "$push_err" >&2
   rm -f "$push_err"
@@ -176,23 +176,23 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && grep -qw -- "$ORCH_ROLE"
 fi
 
 case "$lane_code" in
-  0) result="terminé" ;;
-  2) result="pas démarré : rien n'a été envoyé au modèle" ;;
-  3) result="refusé par le garde-fou du fournisseur : rien n'a été envoyé" ;;
-  5) result="arrêté : le plafond de coût du ticket est atteint" ;;
-  *) result="échec (code $lane_code)" ;;
+  0) result="done" ;;
+  2) result="not started: nothing was sent to the model" ;;
+  3) result="refused by the provider guard: nothing was sent" ;;
+  5) result="stopped: the ticket cost cap was reached" ;;
+  *) result="failed (exit $lane_code)" ;;
 esac
 tokens=$(jq -r '.tokens_total // empty' "$lane_usage")
-cost=$(jq -r 'if .cost_usd then (.cost_usd * 100 | round / 100 | tostring | sub("\\."; ",")) else empty end' "$lane_usage")
+cost=$(jq -r 'if .cost_usd then (.cost_usd * 100 | round / 100 | tostring) else empty end' "$lane_usage")
 comment="$run_dir/comment.md"
 {
-  echo "**Lane \`$ORCH_LANE\`** · rôle $ORCH_ROLE · $ORCH_TICKET${ORCH_PR:+ · PR #$ORCH_PR}"
+  echo "**Lane \`$ORCH_LANE\`** · role $ORCH_ROLE · $ORCH_TICKET${ORCH_PR:+ · PR #$ORCH_PR}"
   echo
-  echo "- Modèle demandé : \`$ORCH_REQUESTED_ALIAS\` ($ORCH_RULE_NOTE)"
-  echo "- Modèle utilisé : \`$used\` (adaptateur \`$lane_adapter\`)"
-  [ -n "$lane_fallback" ] && echo "- Repli : $lane_fallback"
+  echo "- Requested model: \`$ORCH_REQUESTED_ALIAS\` ($ORCH_RULE_NOTE)"
+  echo "- Used model: \`$used\` (adapter \`$lane_adapter\`)"
+  [ -n "$lane_fallback" ] && echo "- Fallback: $lane_fallback"
   [ -n "${ORCH_SPAWN_NOTE:-}" ] && echo "- $ORCH_SPAWN_NOTE"
-  echo "- Résultat : $result${tokens:+ · $(french_number "$tokens") tokens}${cost:+ · $cost \$ au tarif API}"
+  echo "- Result: $result${tokens:+ · $(french_number "$tokens") tokens}${cost:+ · $cost \$ at API list price}"
   [ -n "$pushed_note" ] && echo "- $pushed_note"
   [ -n "$writeup_note" ] && echo "- $writeup_note"
   echo
@@ -201,9 +201,9 @@ comment="$run_dir/comment.md"
 rm -f "$body"
 
 if [ "${ORCH_COMMENT_ON:-}" = none ]; then
-  echo "Commentaire Linear non envoyé (demandé) : $comment"
+  echo "Linear comment not sent (requested): $comment"
 elif url=$("$ORCH_HOME/linear.sh" comment "$ORCH_COMMENT_ON" "$comment" "${ORCH_SIGNED:-$ORCH_ROLE, lane $ORCH_LANE}"); then
-  echo "Commentaire Linear : $url"
+  echo "Linear comment: $url"
   echo "$url" > "$run_dir/comment.url"
 elif [ $? = 4 ]; then
   # The user already got his comments of the hour: this one is kept, and
@@ -212,11 +212,11 @@ elif [ $? = 4 ]; then
   # Written under another name, then renamed: a wake never takes half a file.
   cp "$comment" "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part"
   mv "$ORCH_STATE_DIR/linear-outbox/.$ORCH_RUN_BASE.part" "$ORCH_STATE_DIR/linear-outbox/$ORCH_COMMENT_ON--$ORCH_RUN_BASE.md"
-  echo "Commentaire Linear gardé pour un envoi groupé (limite de l'heure atteinte) : $comment"
+  echo "Linear comment kept for a grouped send (hourly limit reached): $comment"
 else
-  echo "!! Le commentaire Linear n'a pas pu être envoyé. Il reste ici : $comment"
+  echo "!! The Linear comment could not be sent. It remains here: $comment"
 fi
-echo "Compte rendu : $lane_report"
+echo "Report: $lane_report"
 # A lane woken again and again keeps the terminals of its last sessions only.
 [ -z "${ORCH_KEEP_TERMINALS:-}" ] || close_old_terminals "$ORCH_LANE" "$ORCH_KEEP_TERMINALS"
 echo "$lane_code" > "$run_dir/exit-code"

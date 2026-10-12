@@ -91,7 +91,7 @@ cost_left() {
   "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/cap-comments.json" 2> /dev/null || return 1
   jq -e 'type == "array"' "$work/cap-comments.json" > /dev/null 2>&1 || return 1
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/cap-agents.txt" || true
-  own=$(jq -r --arg cap "$cap_line" --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)" + $cap)] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
+  own=$(jq -r --arg cap "$cap_line" --rawfile ids "$work/cap-agents.txt" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not))] | sort_by(.createdAt) | map(.body | [scan("(?im)" + $cap)] | .[]?[0]) | .[-1] // empty' "$work/cap-comments.json" 2> /dev/null | tr ',' '.') || return 1
   [ -z "$own" ] || cost_cap=$own
   [[ "$cost_cap" =~ ^[0-9]+([.][0-9]+)?$ ]] || { cost_cap=; return 0; }
   rate=$(conf_get currency usd_eur)
@@ -295,11 +295,11 @@ base_leftovers() {
 }
 
 # wants_two_teams <comments of the ticket>: the user wrote, on a line of its
-# own, that two teams work on this ticket (« Équipes : les deux »). His
+# own, that two teams work on this ticket ("Teams: both", also in French). Their
 # comments only, like his cap.
 wants_two_teams() {
   cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/teams-agents.txt" || true
-  jq -e --arg teams "$teams_line" --rawfile ids "$work/teams-agents.txt" '($ids | split("\n")) as $agents | any(.[]; .byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and any(.body | split("\n")[]; test("(?i)" + $teams)))' "$1" > /dev/null 2>&1
+  jq -e --arg teams "$teams_line" --rawfile ids "$work/teams-agents.txt" '($ids | split("\n")) as $agents | any(.[]; .byOwner == true and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not) and any(.body | split("\n")[]; test("(?i)" + $teams)))' "$1" > /dev/null 2>&1
 }
 
 # second_team <record of the first team> <ticket> <role>: opens the second
@@ -432,7 +432,7 @@ one_lane() {
       if [ "$cost_out" = true ]; then capped=1; else more=1; fi
     fi
   elif [ "$code" != 0 ]; then
-    printf 'Ta session précédente s’est arrêtée sans finir (code %s). Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' "$code" > "$work/why.md"
+    printf 'Your previous session stopped before finishing (exit %s). Resume it: read `git status` and `git log`, finish, and report.\n' "$code" > "$work/why.md"
     again "$record" "$ticket" "$role" "stopped:$last" "$work/why.md"
     return 0
   fi
@@ -443,7 +443,7 @@ one_lane() {
     own=$(git -C "$worktree" rev-parse HEAD 2> /dev/null) || own=
     if [ -n "$(git -C "$worktree" status --porcelain 2> /dev/null)" ]; then
       # Files left uncommitted: only the lane knows what they are.
-      printf 'Ta session précédente a laissé des fichiers non commités dans ton worktree (`git status` les montre). Commite ce qui fait partie de ton travail, retire le reste, et rends ton compte rendu.\n' > "$work/why.md"
+      printf 'Your previous session left uncommitted files in this worktree (`git status` shows them). Commit your work, remove unrelated changes, and report.\n' > "$work/why.md"
       again "$record" "$ticket" "$role" "unsent:$own" "$work/why.md"
       return 0
     elif [ "$(git -C "$worktree" rev-list --count HEAD --not --remotes 2> /dev/null || echo 1)" != 0 ]; then
@@ -456,7 +456,7 @@ one_lane() {
         say "$ticket: its session ended without sending its work: sent now ($sent)"
         jq --argjson pr "${sent#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}' "$record" > "$record.part" && mv "$record.part" "$record"
       else
-        { echo "Ton travail n'a pas pu être envoyé : le script de push l'a refusé. Ce qu'il a dit :"; sed -n '$p' "$work/push.err"; echo "Corrige ce qui est refusé (sans rien contourner), commite, et rends ton compte rendu."; } > "$work/why.md"
+        { echo "Your work could not be sent: the push script refused it. Its reason:"; sed -n '$p' "$work/push.err"; echo "Fix what was refused without bypassing it, commit, and report."; } > "$work/why.md"
         again "$record" "$ticket" "$role" "push:$own" "$work/why.md"
       fi
       return 0
@@ -485,7 +485,7 @@ one_lane() {
   if ! did "$record" "asked:$last"; then
     report="$ORCH_STATE_DIR/reports/$last-$role-a1.md"
     for candidate in "$ORCH_STATE_DIR/reports/$last-$role"-a*.md; do [ ! -f "$candidate" ] || report=$candidate; done
-    asked=$(sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions pour/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions pour[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question)\b' | sed '/^## /d' | head -n 20 || true)
+    asked=$(sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions (pour|for)/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions (pour|for)[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question|none|nothing|no questions?)\b' | sed '/^## /d' | head -n 20 || true)
     if [ -n "$asked" ]; then
       say "$ticket: its session ends on a question for the user"
       [ -n "$dry" ] || ledger event --kind lane_asks --ticket "$ticket" --detail "$(printf '%s' "$asked" | cut -c1-1500)"
@@ -510,7 +510,7 @@ one_lane() {
   echo '[]' > "$work/told.json"
   if "$ORCH_HOME/linear.sh" comments "$ticket" > "$work/comments.json" 2> /dev/null; then
     cat "$ORCH_STATE_DIR/linear-comments.jsonl" 2> /dev/null | jq -r '.id // empty' > "$work/agent-ids.txt" || true
-    jq -c --arg cap "$cap_line" --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|Chef de projet *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
+    jq -c --arg cap "$cap_line" --arg since "$ended" --rawfile ids "$work/agent-ids.txt" --argjson seen "$(jq -c '.runs[-1].seen // null' "$record")" '($ids | split("\n")) as $agents | [.[] | select(.byOwner == true and (if $seen then (.id as $id | $seen | index($id) | not) else .createdAt > $since end) and (.id as $id | $agents | index($id) | not) and (.body | test("^\\s*(> *(Écrit|Ticket ouvert) par un agent|> *(Written by an agent|Ticket opened by an agent)|Chef de projet *:|Project lead *:)") | not) and ('"$cap_only"' | not))] | sort_by(.createdAt)' "$work/comments.json" > "$work/his.json"
     [ "$(jq length "$work/his.json")" = 0 ] || ! did "$record" "said:$(jq -r '.[-1].id' "$work/his.json")" || echo '[]' > "$work/his.json"
     # He gave the ticket to two teams (when it opened, with no place for the
     # second, or since): the second opens beside this one, as long as he
@@ -534,12 +534,12 @@ one_lane() {
   if { [ "$state" != "$(conf_get linear go_state)" ] || [ ! -s "$ORCH_STATE_DIR/validations/$ticket.json" ]; } && [ "$(jq -s 'map(length) | add' "$work/his.json" "$work/told.json")" != 0 ]; then
     {
       if [ "$(jq length "$work/his.json")" != 0 ]; then
-        echo "L'utilisateur a écrit sur le ticket depuis ta dernière session :"
-        jq -r '.[] | "le \(.createdAt[0:16] | sub("T"; " à ")) : " + .body' "$work/his.json"
+        echo "The user wrote on the ticket since your last session:"
+        jq -r '.[] | "\(.createdAt[0:16] | sub("T"; " at ")): " + .body' "$work/his.json"
       fi
       if [ "$(jq length "$work/told.json")" != 0 ]; then
-        echo "Le chef de projet t’a écrit depuis ta dernière session (il relaie ; ce sont des constats à traiter dans ta copie de travail) :"
-        jq -r '.[] | "le \(.at[0:16] | sub("T"; " à ")) : " + .text' "$work/told.json"
+        echo "The project lead wrote since your last session (these are facts to address in your worktree):"
+        jq -r '.[] | "\(.at[0:16] | sub("T"; " at ")): " + .text' "$work/told.json"
       fi
     } > "$work/why.md"
     # His word shows the ticket at work. The lead's alone leaves a card
@@ -565,7 +565,7 @@ one_lane() {
   # Its budget had stopped it, and the ticket has something left: it goes on
   # from where it was (three times a day at most, like any other reason).
   if [ -n "$more" ]; then
-    printf 'Ta session précédente s’est arrêtée à la limite de son budget, et ce ticket a encore de quoi continuer. Reprends où elle en était : relis `git status` et `git log`, termine, et rends ton compte rendu.\n' > "$work/why.md"
+    printf 'Your previous session stopped at its budget limit, and this ticket has funds left. Resume it: read `git status` and `git log`, finish, and report.\n' > "$work/why.md"
     again "$record" "$ticket" "$role" "budget:$last" "$work/why.md" || true
     return 0
   fi
@@ -593,7 +593,7 @@ one_lane() {
         say "$ticket: the base is brought in without a model (#$pr)"
         return 0
       fi
-      printf 'La branche principale a avancé sur du code depuis ta dernière session. Réintègre-la dans ta branche (`git merge %s`), résous les conflits s’il y en a en gardant ce que fait chaque côté, relance les tests de ce que tu touches, et commite.\n' "$base" > "$work/why.md"
+      printf 'The base branch advanced on code since your last session. Integrate it into your branch (`git merge %s`), resolve any conflicts while preserving both intended behaviors, rerun relevant tests, and commit.\n' "$base" > "$work/why.md"
       # His card stays where it is: the base brought in as it is changes
       # nothing of what he agreed to, or is asked.
       again "$record" "$ticket" "$role" "base:$(git -C "$ORCH_REPO" rev-parse --short "$base")" "$work/why.md" keep
@@ -704,8 +704,8 @@ one_lane() {
       grep -E '✖|not ok|Error|error:|failing|expected|actual|\.mjs:[0-9]+' "$work/failed.log" | cut -c1-400 | tail -n 80 > "$work/failed.txt" || true
     fi
     {
-      echo "Les vérifications automatiques sont rouges sur la version ${head:0:8} de ta branche. Ce qu'elles ont dit (extrait) :"
-      if [ -s "$work/failed.txt" ]; then cat "$work/failed.txt"; else echo "(le journal des vérifications n'a pas pu être lu : relance chez toi les tests des fichiers que tu as touchés, et dis-le dans ton compte rendu.)"; fi
+      echo "Automated checks failed on your branch version ${head:0:8}. Their output (excerpt):"
+      if [ -s "$work/failed.txt" ]; then cat "$work/failed.txt"; else echo "(the check log could not be read; rerun tests for touched files and say so in your report.)"; fi
     } > "$work/why.md"
     again "$record" "$ticket" "$role" "checks:$head" "$work/why.md"
     return 0
@@ -730,8 +730,8 @@ one_lane() {
   fi
   if [ "$verdict" = corrections ]; then
     {
-      echo "Un relecteur (un autre modèle que toi) a lu la version ${head:0:8} de ta branche et demande des corrections. Ce qu'il a écrit :"
-      sed -n '/^## Compte rendu$/,/^## Fichiers modifiés$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
+      echo "An independent reviewer read branch version ${head:0:8} and requested fixes. Their findings:"
+      sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
     } > "$work/why.md"
     again "$record" "$ticket" "$role" "verdict:$reviewed_by" "$work/why.md"
     return 0
@@ -795,7 +795,7 @@ one_lane() {
     both="both:$([ -n "$team" ] && echo "$(jq -r '.ready.head' "$other"):$head" || echo "$head:$(jq -r '.ready.head' "$other")")"
     if ! did "$record" "$both" && ! did "$other" "$both"; then
       say "$ticket: its two teams are reviewed and green (#$pr and #$theirs): one request with both results is the lead's"
-      [ -n "$dry" ] || ledger event --kind teams_ready --ticket "$ticket" --value "$pr" --detail "the two teams of $ticket are done, each reviewed with nothing blocking and green: #$([ -n "$team" ] && echo "$theirs" || echo "$pr") (team 1) and #$([ -n "$team" ] && echo "$pr" || echo "$theirs") (team 2). Ask the user once, with both results side by side (ask-validation.sh $ticket - --pr $([ -n "$team" ] && echo "$theirs" || echo "$pr") --pr $([ -n "$team" ] && echo "$pr" || echo "$theirs"), the captures of each under its name): what each did, how they differ, your recommendation. He chooses by writing a line « Équipe 1 » or « Équipe 2 » on the ticket and by putting the card in his status of agreement; the go-live of the one he chose closes the other"
+      [ -n "$dry" ] || ledger event --kind teams_ready --ticket "$ticket" --value "$pr" --detail "the two teams of $ticket are done, each reviewed with nothing blocking and green: #$([ -n "$team" ] && echo "$theirs" || echo "$pr") (team 1) and #$([ -n "$team" ] && echo "$pr" || echo "$theirs") (team 2). Ask the user once, with both results side by side (ask-validation.sh $ticket - --pr $([ -n "$team" ] && echo "$theirs" || echo "$pr") --pr $([ -n "$team" ] && echo "$pr" || echo "$theirs"), the captures of each under its name): what each did, how they differ, your recommendation. The user chooses by writing a Team 1 or Team 2 line on the ticket and moving the card to the approval status; shipping the chosen team closes the other"
     fi
     mark "$record" "$both"
     mark "$record" "ok:$head"
