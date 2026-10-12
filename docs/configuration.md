@@ -204,6 +204,9 @@ Selects the ticket adapter, names the workflow states, and configures identity a
 | `repository` | `owner/repo` for GitHub Issues. | Required for GitHub |
 | `project_v2_id` | Optional GitHub Project v2 node ID; otherwise status labels are used. | Optional |
 | `app_login` | Login of the GitHub App bot that writes agent actions. | Required for GitHub approval attribution |
+| `app_id` | Numeric GitHub App ID used to sign short-lived JWTs. | Required for GitHub |
+| `installation_id` | Numeric installation ID for the configured repository. | Required for GitHub |
+| `app_private_key_file` | Absolute path to the App RSA private key, outside the repository, owned by Cleared with mode `0600`. | Required for GitHub |
 | `agents_uid` | System UID of the dedicated Cleared account. | Required for local |
 | `human_private_key` | Absolute path to the human account’s Ed25519 private key. | Required for local human actions |
 | `human_public_key` | Base64 encoded PEM public key used to verify local actions. | Required for local approval |

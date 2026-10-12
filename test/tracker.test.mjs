@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { createVerify, generateKeyPairSync } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdtempSync, readFileSync as readFile, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
 import { LocalTracker } from '../lib/tracker/adapters/local.mjs';
 import { GithubTracker } from '../lib/tracker/adapters/github.mjs';
+import { GithubAppTokens, mintInstallationToken } from '../lib/tracker/adapters/github-auth.mjs';
 import { checkedImage } from '../lib/tracker/images.mjs';
 import { changes } from '../lib/wake.mjs';
 import { fixtureProject, reviewedPull, sandbox, scratch } from './support.mjs';
@@ -300,6 +301,49 @@ test('GitHub bot comments use the configured agent identity with either login fo
   assert.deepEqual(tracker.comments('GH-12')[0].by, { kind: 'agents', id: 'cleared' });
 });
 
+test('GitHub App token is renewed when fewer than five minutes remain', () => {
+  let clock = Date.parse('2026-10-12T12:00:00Z');
+  let requested = 0;
+  const tokens = new GithubAppTokens({}, { now: () => clock, mint: () => ({
+    token: `installation-${++requested}`, expiresAt: new Date(clock + 60 * 60_000).toISOString() }) });
+  assert.equal(tokens.get(), 'installation-1');
+  clock += 54 * 60_000;
+  assert.equal(tokens.get(), 'installation-1');
+  clock += 2 * 60_000;
+  assert.equal(tokens.get(), 'installation-2');
+  assert.equal(requested, 2);
+  tokens.current.expiresAt = new Date(clock - 1000).toISOString();
+  assert.equal(tokens.get(), 'installation-3', 'an expired token is never sent to GitHub');
+});
+
+test('GitHub tracker does not reuse a static ambient installation token', () => {
+  const tracker = new GithubTracker({ conf: { sections: { tracker: {
+    repository: 'example/project', owner_id: 'alice', app_login: 'cleared[bot]' } } } });
+  assert.throws(() => tracker.whoAmI(), /app_id and installation_id/);
+});
+
+test('GitHub App installation request signs a short-lived JWT and rejects an expired response', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cleared-github-app-'));
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const key = join(dir, 'app.pem');
+  writeFileSync(key, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  const clock = Date.parse('2026-10-12T12:00:00Z');
+  const settings = { app_id: '123', installation_id: '456', app_private_key_file: key };
+  try {
+    const request = (endpoint, jwt) => {
+      assert.equal(endpoint, 'https://api.github.com/app/installations/456/access_tokens');
+      const [header, payload, signature] = jwt.split('.');
+      assert.equal(JSON.parse(Buffer.from(header, 'base64url')).alg, 'RS256');
+      assert.equal(JSON.parse(Buffer.from(payload, 'base64url')).iss, '123');
+      assert.equal(createVerify('RSA-SHA256').update(`${header}.${payload}`).verify(publicKey, Buffer.from(signature, 'base64url')), true);
+      return { token: 'fresh', expires_at: new Date(clock + 60 * 60_000).toISOString() };
+    };
+    assert.equal(mintInstallationToken(settings, { now: () => clock, request }).token, 'fresh');
+    assert.throws(() => mintInstallationToken(settings, { now: () => clock,
+      request: () => ({ token: 'expired', expires_at: new Date(clock - 1000).toISOString() }) }), /nearly expired/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('GitHub Project v2 uses the configured single-select status and event actor', () => {
   let status = 'Todo';
   let identity = 'app';
@@ -453,9 +497,17 @@ test('GitHub Issues ticket moves through request, actor checks, guarded merge, a
   const pull = reviewedPull(['server/core.mjs'], { ticket: 'GH-12' });
   const { box } = pull;
   copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  const appKey = join(box.home, 'github-app.pem');
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  writeFileSync(appKey, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!/usr/bin/env bash
+cat > /dev/null
+printf '{"token":"fake-installation-token","expires_at":"%s"}\n' "$(date -u -d '1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+`, { mode: 0o755 });
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
-    'adapter = github\nrepository = example/project\nowner_id = alice\napp_login = cleared[bot]'));
+    `adapter = github\nrepository = example/project\nowner_id = alice\napp_login = cleared[bot]\napp_id = 123\ninstallation_id = 456\napp_private_key_file = ${appKey}`));
+  box.env.GH_TOKEN = 'stale-token';
   const stateFile = join(box.home, 'fake-issue.json');
   const state = { issue: { number: 12, title: 'Test ticket', body: 'Body', node_id: 'node12',
     labels: [{ name: 'status:Todo' }], html_url: 'https://example.test/issues/12',
@@ -494,7 +546,10 @@ writeFileSync(file, JSON.stringify(state));
 console.log(JSON.stringify(result));
 `);
   writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash
-if [ "$1" = api ] && [[ " $* " == *"/repos/example/project/issues/12"* || " $* " == *"/installation/repositories"* ]]; then node ${fake} "\${@:2}"; else exec ${original} "$@"; fi
+if [ "$1" = api ] && [[ " $* " == *"/repos/example/project/issues/12"* || " $* " == *"/installation/repositories"* ]]; then
+  [ "$GH_TOKEN" = fake-installation-token ] || exit 97
+  node ${fake} "\${@:2}"
+else exec ${original} "$@"; fi
 `, { mode: 0o755 });
   const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'GH-12'], { env: box.env, encoding: 'utf8' });
   assert.equal(opened.status, 0, opened.stderr);

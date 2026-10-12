@@ -33,7 +33,7 @@ This diagram shows the normal path for an application change. The configured too
 
 ## Requirements
 
-Linux with systemd, Node.js 24, git, jq, GitHub CLI (`gh`), Claude Code and/or Codex CLI. Linear credentials are needed only for the Linear tracker; GitHub Issues needs a GitHub App installation token and Tesseract OCR for capture uploads; local tracking needs separate operating-system accounts and an approval signing key. Authenticate the CLIs before starting. Orca is optional for reading configuration and running scripts, but **required today for automatic team terminals**. Tailscale is required only if you install the dashboard and wake timers. Separate agent and human identities are needed before allowing unattended shipping; see [Ticket trackers](docs/trackers.md) and [Security](docs/security.md).
+Linux with systemd, Node.js 24, git, jq, curl, GitHub CLI (`gh`), Claude Code and/or Codex CLI. Linear credentials are needed only for the Linear tracker; GitHub Issues needs a GitHub App ID, installation ID, and private key so Cleared can renew its installation token, plus Tesseract OCR for capture uploads; local tracking needs separate operating-system accounts and an approval signing key. Authenticate the CLIs before starting. Orca is optional for reading configuration and running scripts, but **required today for automatic team terminals**. Tailscale is required only if you install the dashboard and wake timers. Separate agent and human identities are needed before allowing unattended shipping; see [Ticket trackers](docs/trackers.md) and [Security](docs/security.md).
 
 ## Open a test team
 
