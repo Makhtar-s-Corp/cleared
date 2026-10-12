@@ -9,7 +9,7 @@ const [area, action, ...args] = process.argv.slice(2);
 if (area === 'rollback') {
   if (!action || action.startsWith('--')) { console.error('usage: cleared rollback <ticket> [--yes] [--force-with-migrations] [--approval-comment ID]'); process.exit(64); }
   mkdirSync(stateDir(), { recursive: true });
-  const result = spawnSync('flock', ['-x', join(stateDir(), 'merge.lock'), process.execPath,
+  const result = spawnSync('flock', ['-x', '-w', '120', join(stateDir(), 'merge.lock'), process.execPath,
     new URL('./lib/release.mjs', import.meta.url).pathname, 'rollback', action, ...args], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }

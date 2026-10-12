@@ -122,7 +122,7 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `deploy_grace_minutes` | Delay before first probe. Must be less than the watch window. | Default: 5 |
 | `failures_to_rollback` | Consecutive failed probes before action. | Default: 3 |
 | `auto_rollback` | Revert the exact merge after repeated failures. | Default: false |
-| `reopen_state` | Ticket status to use after a rollback. | Required before any rollback; no default |
+| `reopen_state` | Configured non-approval tracker status to use after a rollback. | Required before any rollback; no default |
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
 
 Automatic rollback requires a git credential that can push a normal commit to the base branch. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET`; a remote tracker owner may provide `--approval-comment COMMENT_ID` after posting exactly `Rollback TICKET MERGE_SHA` on the ticket. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never identity verification.

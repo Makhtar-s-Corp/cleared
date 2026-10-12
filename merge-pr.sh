@@ -229,7 +229,7 @@ fi
 # The very commit that was checked, and nothing that arrived since.
 (cd "$ORCH_REPO" && gh pr merge "$pr" --merge --match-head-commit "$head") > /dev/null || die "GitHub did not merge #$pr"
 ledger event --kind merged_by_script --ticket "$ticket" --value "$pr" --detail "#$pr at ${head:0:8}, reviewed at ${reviewed:0:8}, $needs, agreement: ${agreed:-none needed}"
-if ! node --no-warnings "$ORCH_HOME/lib/release.mjs" start "$ticket" "$pr" 2> "$work/release-error"; then
+if ! node --no-warnings "$ORCH_HOME/lib/release.mjs" start "$ticket" "$pr" 9>&- 2> "$work/release-error"; then
   watch_reason=$(tail -n 1 "$work/release-error")
   ledger event --kind release_watch_failed --ticket "$ticket" --value "$pr" --detail "the merge succeeded but its release watch could not start: $watch_reason"
   user_message release_watch_failed "title=#$pr ($ticket)" "reason=$watch_reason" > "$work/release-watch-failed.md"

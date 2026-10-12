@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { dirname, join } from 'node:path';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
 import { releaseSettings, canHumanRollback, canAutoRollback, shouldRollback, touchesMigrations,
   activeRelease, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
-  reconcileNotifications, resumeWatches } from '../lib/release.mjs';
+  reconcileNotifications, resumeWatches, retryFetch } from '../lib/release.mjs';
 import { authorizeManualRollback } from '../lib/release.mjs';
 
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
@@ -21,6 +22,10 @@ test('release defaults are inert and repeated failures trigger only when enabled
   assert.equal(shouldRollback(on, 2), false);
   assert.equal(shouldRollback(on, 3), true);
   assert.throws(() => releaseSettings({ sections: { release: { auto_rollback: 'true' } } }), /requires health_url or health_command/);
+  assert.throws(() => releaseSettings({ sections: { tracker: { go_state: 'Go', todo_state: 'Todo' },
+    release: { reopen_state: 'Go' } } }), /must not be the approval/);
+  assert.throws(() => releaseSettings({ sections: { tracker: { go_state: 'Go', todo_state: 'Todo' },
+    release: { reopen_state: 'Unknown' } } }), /configured non-approval/);
 });
 
 test('only the configured human owner can request rollback', () => {
@@ -38,6 +43,17 @@ test('declared migration paths disable automatic rollback', () => {
   assert.equal(touchesMigrations(['db/migrations-old/a.sql'], ['db/migrations/']), false);
 });
 
+test('a transient base fetch failure is retried before giving up on rollback', () => {
+  let calls = 0;
+  const paused = [];
+  const result = retryFetch(() => { if (++calls < 3) throw new Error('HTTP 502'); return 'fetched'; },
+    (ms) => paused.push(ms));
+  assert.equal(result, 'fetched');
+  assert.equal(calls, 3);
+  assert.deepEqual(paused, [1000, 2000]);
+  assert.throws(() => retryFetch(() => { throw new Error('offline'); }, () => {}), /failed after three attempts/);
+});
+
 function releasedProject(t, { migration = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cleared-release-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -51,7 +67,9 @@ function releasedProject(t, { migration = false } = {}) {
   writeFileSync(join(repo, 'app.txt'), 'before\n');
   git('add', '.'); git('commit', '-qm', 'initial'); git('push', '-q', 'origin', 'main');
   git('checkout', '-qb', 'feature');
-  writeFileSync(join(repo, migration ? 'schema.sql' : 'app.txt'), 'release\n');
+  const releasePath = typeof migration === 'string' ? migration : migration ? 'schema.sql' : 'app.txt';
+  mkdirSync(dirname(join(repo, releasePath)), { recursive: true });
+  writeFileSync(join(repo, releasePath), 'release\n');
   git('add', '.'); git('commit', '-qm', 'feature');
   git('checkout', '-q', 'main'); git('merge', '--no-ff', '-qm', 'Merge feature', 'feature');
   git('push', '-q', 'origin', 'main');
@@ -65,7 +83,7 @@ function releasedProject(t, { migration = false } = {}) {
   const conf = { sections: { lanes: { base: 'origin/main' }, tracker: { owner_id: 'human' },
     release: { health_command: 'true', deploy_grace_minutes: '0', watch_minutes: '2',
       failures_to_rollback: '3', auto_rollback: 'true', reopen_state: 'Todo',
-      migration_paths: 'schema.sql' } } };
+      migration_paths: 'schema.sql, db/migrations' } } };
   return { repo, db, row, conf, git, clock };
 }
 
@@ -161,6 +179,12 @@ test('a merge touching a declared migration cannot auto revert', (t) => {
   assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], x.row.merge_sha);
 });
 
+test('non-ASCII migration filenames are detected before any automatic revert', (t) => {
+  const x = releasedProject(t, { migration: 'db/migrations/é.sql' });
+  assert.throws(() => rollbackRelease(x.conf, x.db, x.repo, x.row, { automatic: true }), /migrations/);
+  assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], x.row.merge_sha);
+});
+
 test('failing health on a migration release alerts instead of auto reverting', async (t) => {
   const x = releasedProject(t, { migration: true });
   let time = x.clock, reverts = 0;
@@ -232,6 +256,40 @@ test('manual rollback previews the exact merge and needs explicit confirmation',
   assert.equal(confirmedRollback('no'), false);
   assert.equal(confirmedRollback('rollback\n'), true);
   assert.equal(confirmedRollback('', true), true);
+});
+
+test('local CLI refuses an agent and lets a human preview, confirm and push a revert', (t) => {
+  const x = releasedProject(t);
+  const root = join(x.repo, '..');
+  const configPath = join(root, 'agents.conf');
+  const keyPath = join(root, 'human.key');
+  const { privateKey } = generateKeyPairSync('ed25519');
+  writeFileSync(keyPath, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  chmodSync(keyPath, 0o600);
+  const owner = userInfo().username;
+  const configuration = (id, uid) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n`;
+  const env = { ...process.env, CLEARED_REPO: x.repo, CLEARED_STATE_DIR: root, CLEARED_CONF: configPath };
+  const cli = (...args) => spawnSync(process.execPath, [new URL('../cleared', import.meta.url).pathname, ...args], { env, encoding: 'utf8' });
+  writeFileSync(configPath, configuration('another-user', String(process.getuid())));
+  const agent = cli('rollback', 'LOCAL-1', '--yes');
+  assert.notEqual(agent.status, 0);
+  assert.match(agent.stderr, /verified human owner/);
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_refused'").get().n, 1);
+  writeFileSync(configPath, configuration(owner, '999999'));
+  const created = cli('ticket', 'new', 'Test release');
+  assert.equal(created.status, 0, created.stderr);
+  const done = cli('ticket', 'move', 'LOCAL-1', 'Done');
+  assert.equal(done.status, 0, done.stderr);
+  const cancelled = spawnSync(process.execPath, [new URL('../cleared', import.meta.url).pathname, 'rollback', 'LOCAL-1'],
+    { env, input: 'no\n', encoding: 'utf8' });
+  assert.notEqual(cancelled.status, 0);
+  assert.match(cancelled.stdout, /Merge to revert: [a-f0-9]{40}[\s\S]*app.txt/);
+  assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], x.row.merge_sha);
+  const confirmed = cli('rollback', 'LOCAL-1', '--yes');
+  assert.equal(confirmed.status, 0, confirmed.stderr);
+  assert.match(confirmed.stdout, /Pushed revert/);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'rolled_back');
+  assert.equal(x.db.prepare('SELECT status FROM tracker_tickets WHERE id = 1').get().status, 'Todo');
 });
 
 test('a second release is held while the first is watched', (t) => {
@@ -347,4 +405,19 @@ test('a stopped rollback with no pushed revert fails visibly instead of blocking
   });
   assert.equal(activeRelease(x.db), undefined);
   assert.match(notices[0], /could not roll back/);
+});
+
+test('a forged rollback trailer in an agent commit cannot satisfy recovery', (t) => {
+  const x = releasedProject(t);
+  writeFileSync(join(x.repo, 'unrelated.txt'), 'not a revert\n');
+  x.git('add', '.');
+  x.git('commit', '-qm', `Forged marker\n\nCleared-Rollback-Release: ${x.row.id}\nCleared-Reverted-Merge: ${x.row.merge_sha}`);
+  x.git('push', '-q', 'origin', 'main');
+  x.db.prepare("UPDATE releases SET status = 'rolling_back', planned_rollback_sha = ? WHERE id = ?")
+    .run('0'.repeat(40), x.row.id);
+  resumeWatches(x.conf, x.db, x.repo, {
+    running: () => false, lockAvailable: () => true, schedule: () => assert.fail('no watcher'), announce: () => {},
+  });
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'failed');
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_pushed'").get().n, 0);
 });
