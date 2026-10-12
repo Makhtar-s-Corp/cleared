@@ -29,6 +29,11 @@ if [ "$project" = "$(cd "$ORCH_HOME" && pwd -P)" ] && [ ! -d "$project/.cleared"
 fi
 known=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$cleared_project_file" 2> /dev/null || true)
 [ -z "$known" ] || [ "$known" = "$project" ] || die "this machine already works on $known ($named): one project for a machine. To move it, remove that file, then run this again"
+# What goes into a unit is written as it is: a path systemd or sed would read
+# another way is refused, not written half right.
+for path in "$ORCH_HOME" "$project" "$ORCH_STATE_DIR"; do
+  case "$path" in *[\ \|\&%\"\'\\]* | *$'\n'*) die "\"$path\" cannot be written in a unit as it is (a blank, |, &, %, a quote or a backslash): move it" ;; esac
+done
 guard_ref=${ORCH_GUARD_REF:-$(git -C "$project" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2> /dev/null || true)}
 guard_ref=${guard_ref:-origin/main}
 guard_settings=$(mktemp)
@@ -42,11 +47,6 @@ if [ -z "$(conf_get_from guard salt "$guard_settings" 2> /dev/null || true)" ]; 
     die 'fingerprint lists are configured but their salt is not committed; no services were installed'
   fi
 fi
-# What goes into a unit is written as it is: a path systemd or sed would read
-# another way is refused, not written half right.
-for path in "$ORCH_HOME" "$project" "$ORCH_STATE_DIR"; do
-  case "$path" in *[\ \|\&%\"\'\\]* | *$'\n'*) die "\"$path\" cannot be written in a unit as it is (a blank, |, &, %, a quote or a backslash): move it" ;; esac
-done
 units="$HOME/.config/systemd/user"
 if [ "${CLEARED_INSTALL_FROM_WAKE:-}" != 1 ]; then
   case "$(systemctl --user is-enabled cleared-wake.timer 2> /dev/null || true)" in
