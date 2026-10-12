@@ -225,7 +225,7 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
 });
 
 
-test('the guard of what leaves the machine is not weaker for living in the tool: the lists of the project are read at its base, never from files a session could have changed, and a project that names no list is refused, not let through', () => {
+test('the guard reads project lists at the committed base and keeps generic checks when private lists are absent', () => {
   const box = sandbox();
   const guard = (text, extra = {}) => {
     const file = join(box.home, 'out.txt');
@@ -241,12 +241,12 @@ test('the guard of what leaves the machine is not weaker for living in the tool:
   assert.match(refused.stderr, /private term/);
   assert.doesNotMatch(refused.stderr, /Zorglub/);
   // The file of the checkout is emptied (a session ran code there): the list read is the one at the base.
-  writeFileSync(join(box.repo, 'scripts', 'private-terms.json'), '[]\n');
+  writeFileSync(join(box.repo, 'scripts', 'private-terms.json'), '{"salt_id":"e99d7c89dddc","hashes":[]}\n');
   assert.equal(guard(term).status, 1, 'the list is read at the base, not from the files of the checkout');
   box.git('checkout', '-q', '--', 'scripts/private-terms.json');
   // The project carries its own settings: what they say at the base comes before the example of the tool.
-  mkdirSync(join(box.repo, '.ferme'), { recursive: true });
-  const settings = (text) => writeFileSync(join(box.repo, '.ferme', 'agents.conf'), `${text}\n[guard]\nsalt = cleared-example-only\n`);
+  mkdirSync(join(box.repo, '.cleared'), { recursive: true });
+  const settings = (text) => writeFileSync(join(box.repo, '.cleared', 'agents.conf'), `${text}\n[guard]\nsalt = cleared-example-only\n`);
   settings('[guard]\nterms = none\nallowed = none\n');
   commit('chore: no private term');
   assert.equal(guard(term).status, 0, 'this project says it has no private term');
@@ -257,16 +257,16 @@ test('the guard of what leaves the machine is not weaker for living in the tool:
   // The same file rewritten in the checkout, not at the base: nothing changes.
   settings('[guard]\nterms = none\nallowed = none\n');
   assert.equal(guard(term).status, 1, 'settings changed in the checkout do not weaken the guard');
-  box.git('checkout', '-q', '--', '.ferme');
-  // A key misspelt, or a section left out: refused and said, never read as « no list ».
+  box.git('checkout', '-q', '--', '.cleared');
+  // A misspelt key is refused rather than silently treated as no list.
   settings('[guard]\nterm = scripts/private-terms.json\nallowed = none\n');
   commit('chore: a typo');
   const typo = guard('Rien de privé ici.\n');
   assert.equal(typo.status, 1);
-  assert.match(typo.stderr, /names no list of private terms/);
+  assert.match(typo.stderr, /unknown \[guard\] key/);
   settings('[lanes]\nbase = main\n');
   commit('chore: no section');
-  assert.match(guard('Rien de privé ici.\n').stderr, /names no list of private terms/);
+  assert.equal(guard('Rien de privé ici.\n').status, 0, 'a project with no fingerprint lists keeps generic checks');
   // A list that is named and is not there at the base: refused too.
   settings('[guard]\nterms = scripts/gone.json\nallowed = none\n');
   commit('chore: a list that is not there');

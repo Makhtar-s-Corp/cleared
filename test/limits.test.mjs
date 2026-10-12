@@ -113,7 +113,7 @@ test('the subscription is watched from what each session says of it: its share u
   writeFileSync(join(box.state, 'limits', 'first.jsonl'), `${JSON.stringify({ at: new Date(Date.now() - 7200e3).toISOString(), windows: { seven_day: { used: 81, resets_at: new Date(Date.now() - 60e3).toISOString() } } })}\n`);
   assert.match(flow().stdout, /X-8: put in « Todo » by the user: its lane is opened/);
   // A project that names no stop is never stopped by this.
-  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('subscription_stop = 80\n', ''));
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('subscription_stop = 80\n', 'subscription_stop = 0\n'));
   writeFileSync(join(box.state, 'limits', 'first.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), windows: { seven_day: { used: 99, resets_at: soon } } })}\n`);
   assert.equal(spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-9', '--comment-on', 'none', '--dry-run'], { env, encoding: 'utf8' }).status, 0);
 });

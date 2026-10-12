@@ -31,6 +31,8 @@ export function fixtureProject() {
   const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   mkdirSync(join(dir, 'scripts'), { recursive: true });
+  mkdirSync(join(dir, '.cleared'), { recursive: true });
+  writeFileSync(join(dir, '.cleared', 'agents.conf'), readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'));
   for (const file of ['codex-guard-allow.json', 'private-terms.json']) execFileSync('cp', [join(ORCH_HOME, 'test', 'fixtures', 'guard', file), join(dir, 'scripts', file)]);
   git('add', '.');
   git('commit', '-q', '-m', 'init');
@@ -90,13 +92,15 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
   writeFileSync(join(home, 'prompts', 'review.md'), 'review prompt\n');
   writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nowner_name = the user\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[linear]\nteam = X\nowner_name = the user\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n[rules]\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // What the guard must know of the project (its private terms, as fingerprints, and the values it allows) is the
   // project's, read from its trusted ref: here, invented ones.
   execFileSync('mkdir', ['-p', join(repo, 'scripts')]);
   for (const file of ['codex-guard-allow.json', 'private-terms.json']) execFileSync('cp', [join(ORCH_HOME, 'test', 'fixtures', 'guard', file), join(repo, 'scripts', file)]);
+  mkdirSync(join(repo, '.cleared'), { recursive: true });
+  writeFileSync(join(repo, '.cleared', 'agents.conf'), '[guard]\nsalt = cleared-example-only\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n');
   writeFileSync(join(home, 'agents.conf'), `${readFileSync(join(home, 'agents.conf'), 'utf8')}\n[guard]\nsalt = cleared-example-only\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n`);
   git('add', '.');
   git('commit', '-q', '-m', 'init');
@@ -170,7 +174,6 @@ export function flowBox({ maxLanes = 1 } = {}) {
   execFileSync('git', ['-C', box.repo, 'worktree', 'remove', '--force', lane.path]);
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8')
-    .replace('[linear]\nteam = X\n', '[linear]\nteam = X\ntodo_state = Todo\nprogress_state = In Progress\nreview_state = In Review\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n')
     .replace('[lanes]\n', '[lanes]\ntodo_since = 2026-01-01T00:00:00Z\nruns_per_day = 4\nbase_without_model = no\nclosed_states = Done, Canceled\n')
     .replace('base = main', 'base = origin/main')
     .replace(/max_lanes = \d+/, `max_lanes = ${maxLanes}`)}[merge]\ncode_paths = server/\nverdict = rien de bloquant\n`);

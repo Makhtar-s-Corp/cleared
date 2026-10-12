@@ -173,7 +173,7 @@ test('the checkout of the project follows its base by itself: fast-forward only,
   mkdirSync(tools, { recursive: true });
   execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'project-update.sh'), tools]);
   writeFileSync(join(tools, 'agents.conf'), '[lanes]\nbase = origin/main\n\n[update]\nproject = yes\n');
-  mkdirSync(join(project, '.ferme'), { recursive: true });
+  mkdirSync(join(project, '.cleared'), { recursive: true });
   writeFileSync(join(project, 'rules.md'), 'one\n');
   git(project, 'checkout', '-q', '-b', 'main');
   git(project, 'add', '.');
@@ -191,11 +191,11 @@ test('the checkout of the project follows its base by itself: fast-forward only,
   assert.equal(update().status, 3);
   assert.deepEqual(events(), []);
   // Something of the project went live, its settings for the tool among it: this copy takes it, and says it did.
-  const second = live('.ferme/agents.conf', '[limits]\nmax_lanes = 2\n', 'chore: the settings of the project');
+  const second = live('.cleared/agents.conf', '[limits]\nmax_lanes = 2\n', 'chore: the settings of the project');
   const taken = update();
   assert.equal(taken.status, 0, taken.stderr);
   assert.equal(head(), second);
-  assert.equal(readFileSync(join(project, '.ferme', 'agents.conf'), 'utf8'), '[limits]\nmax_lanes = 2\n');
+  assert.equal(readFileSync(join(project, '.cleared', 'agents.conf'), 'utf8'), '[limits]\nmax_lanes = 2\n');
   assert.equal(readFileSync(join(project, '.env.local'), 'utf8'), 'SECRET=kept\n', 'what is not tracked is left alone');
   assert.deepEqual(events(), ['project_updated']);
   // Switched off by the settings: nothing moves.
@@ -238,8 +238,8 @@ test('the checkout of the project follows its base by itself: fast-forward only,
   rmSync(join(project, 'notes.md'));
   assert.equal(update().status, 0);
   const fourth = head();
-  // A project that keeps its own settings and says nothing of the updates does not switch them off: the tool's own say.
-  writeFileSync(join(home, 'project.conf'), '[lanes]\nbase = origin/main\n[limits]\nmax_lanes = 2\n');
+  // A project that enables updates explicitly still follows its base.
+  writeFileSync(join(home, 'project.conf'), '[lanes]\nbase = origin/main\n[limits]\nmax_lanes = 2\n[update]\nproject = yes\n');
   const fifth = live('rules.md', 'three\n', 'docs: one more rule');
   assert.equal(update({ ORCH_CONF: join(home, 'project.conf') }).status, 0);
   assert.equal(head(), fifth);
@@ -355,23 +355,25 @@ test('the project the tool works on is named the same way for every script, its 
   const config = join(dir, 'config');
   const first = join(dir, 'project-a');
   const second = join(dir, 'project b');
-  for (const made of [join(config, 'ferme'), first, second]) mkdirSync(made, { recursive: true });
+  for (const made of [join(config, 'cleared'), first, second]) mkdirSync(made, { recursive: true });
   const clean = { PATH: process.env.PATH, HOME: dir, XDG_CONFIG_HOME: config, XDG_STATE_HOME: join(dir, 'state') };
   const bash = (env) => spawnSync('bash', ['-c', 'set -euo pipefail; . "$1/lib/common.sh"; printf "%s\\n%s\\n%s\\n" "$ORCH_REPO" "$ORCH_CONF" "$ORCH_STATE_DIR"', '_', ORCH_HOME], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
   const node = (env) => spawnSync('node', ['--no-warnings', '--input-type=module', '-e', `import { projectDir, confPath, stateDir } from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log([projectDir(), confPath(), stateDir()].join('\\n'));`], { env: { ...clean, ...env }, encoding: 'utf8' }).stdout.trim().split('\n');
   const both = (env, expected, why) => { assert.deepEqual(bash(env), expected, `bash: ${why}`); assert.deepEqual(node(env), expected, `node: ${why}`); };
   // Nobody named a project: the repository the tool sits in (a project that carries its own copy of it).
   const own = execFileSync('git', ['-C', ORCH_HOME, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).split('\n')[0].replace(/^worktree /, '');
-  both({}, [own, join(ORCH_HOME, 'agents.example.conf'), join(dir, 'state', 'cleared', basename(own))], 'no project named');
+  both({}, [own, join(own, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', basename(own))], 'no project named');
   // Named once for the machine, in one line, whatever blanks surround it.
-  writeFileSync(join(config, 'ferme', 'project'), `  ${second}  \r\n`);
-  both({}, [second, join(ORCH_HOME, 'agents.example.conf'), join(dir, 'state', 'cleared', 'project b')], 'named for the machine');
+  writeFileSync(join(config, 'cleared', 'project'), `  ${second}  \r\n`);
+  both({}, [second, join(second, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', 'project b')], 'named for the machine');
   // Whoever runs the script may name another one.
-  both({ ORCH_REPO: first }, [first, join(ORCH_HOME, 'agents.example.conf'), join(dir, 'state', 'cleared', 'project-a')], 'named by the caller');
+  both({ ORCH_REPO: first }, [first, join(first, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', 'project-a')], 'named by the caller');
   // Its own settings come before the example of the tool.
-  mkdirSync(join(first, '.ferme', 'prompts'), { recursive: true });
-  writeFileSync(join(first, '.ferme', 'agents.conf'), '[lanes]\nbase = main\n');
-  both({ ORCH_REPO: first }, [first, join(first, '.ferme', 'agents.conf'), join(dir, 'state', 'cleared', 'project-a')], 'its own settings');
+  mkdirSync(join(first, '.cleared', 'prompts'), { recursive: true });
+  writeFileSync(join(first, '.cleared', 'agents.conf'), '[lanes]\nbase = main\n');
+  execFileSync('git', ['-C', first, 'init', '-q', '-b', 'main']);
+  execFileSync('git', ['-C', first, 'add', '.cleared/agents.conf']);
+  both({ ORCH_REPO: first }, [first, join(first, '.cleared', 'agents.conf'), join(dir, 'state', 'cleared', 'project-a')], 'its own settings');
   // A tool installed under a path with « & » and « | »: written as it is in the permissions and in a prompt.
   const odd = join(dir, 'we&ird|tool');
   mkdirSync(join(odd, 'prompts'), { recursive: true });
@@ -395,7 +397,7 @@ test('the project the tool works on is named the same way for every script, its 
   assert.match(nowhere.stderr, /no project is named/);
   assert.doesNotMatch(nowhere.stdout, /reached/);
   // The prompt of the project, when it has one, is the one handed.
-  writeFileSync(join(first, '.ferme', 'prompts', 'dev.md'), 'Projet : `{orch}/when-free.sh`.\n');
+  writeFileSync(join(first, '.cleared', 'prompts', 'dev.md'), 'Projet : `{orch}/when-free.sh`.\n');
   assert.match(told({ ORCH_REPO: first, ORCH_CONF: join(odd, 'agents.conf') }), new RegExp(`\\nProjet : \`${odd.replace(/[|&]/g, '\\$&')}/when-free\\.sh\`\\.\\n$`));
 });
 
@@ -437,7 +439,7 @@ test('a tool that is the whole of its repository updates itself too, and its ser
 });
 
 
-test('the installer of the services names one project for the machine and never two wakes: it refuses a tool that would work on itself, a second project, and a machine where an older copy still wakes', () => {
+test('the installer of the services names one project for the machine and never two wakes: it refuses a tool that would work on itself, a second project, and a machine where another Cleared wake is active', () => {
   const home = scratch('orch-install-');
   const tool = join(home, 'tool');
   const bin = join(home, 'bin');
@@ -448,7 +450,7 @@ test('the installer of the services names one project for the machine and never 
   writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(bin, 'tailscale'), '#!/usr/bin/env bash\necho 100.64.0.1\n', { mode: 0o755 });
   writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> "${join(home, 'systemctl-calls')}"\nstate=$(cat "${join(home, 'old-wake')}" 2>/dev/null || echo absent)\ncase "$*" in\n  *is-enabled*orchestration-wake.timer*) echo "$state"; case "$state" in enabled|static) exit 0 ;; *) exit 1 ;; esac ;;\n  *is-enabled*) echo static; exit 0 ;;\n  *is-active*) [ "$state" = enabled ] && exit 0 || exit 3 ;;\nesac\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> "${join(home, 'systemctl-calls')}"\nstate=$(cat "${join(home, 'cleared-wake-state')}" 2>/dev/null || echo absent)\ncase "$*" in\n  *is-enabled*cleared-wake.timer*) echo "$state"; case "$state" in enabled|static) exit 0 ;; *) exit 1 ;; esac ;;\n  *is-enabled*) echo static; exit 0 ;;\n  *is-active*) [ "$state" = enabled ] && exit 0 || exit 3 ;;\nesac\nexit 0\n`, { mode: 0o755 });
   const project = fixtureProject();
   const other = scratch('orch-other-project-');
   execFileSync('git', ['-C', other, 'init', '-q', '-b', 'main']);
@@ -466,14 +468,14 @@ test('the installer of the services names one project for the machine and never 
   // A folder that is not a checkout is not a project.
   assert.match(install({ ORCH_REPO: join(home, 'nowhere') }).stderr, /is not a folder of this machine/);
   assert.match(install({ ORCH_REPO: bin }).stderr, /is not a git checkout/);
-  // An older copy still wakes on this machine: two wakes would run. Refused, and it says what to do.
-  writeFileSync(join(home, 'old-wake'), 'enabled');
+  // A Cleared timer already wakes on this machine: two wakes would run. Refused, and it says what to do.
+  writeFileSync(join(home, 'cleared-wake-state'), 'enabled');
   const twice = install({ ORCH_REPO: project });
   assert.notEqual(twice.status, 0);
-  assert.match(twice.stderr, /orchestration-wake\.timer/);
+  assert.match(twice.stderr, /Cleared wake timer is already active/);
   assert.doesNotMatch(calls(), /enable --now/);
   // Stopped: its timer is « disabled », and the service it started is « static » as any unit a timer starts. That is not waking.
-  writeFileSync(join(home, 'old-wake'), 'disabled');
+  writeFileSync(join(home, 'cleared-wake-state'), 'disabled');
   // Named: written in the one line a terminal reads and in every unit, and the units are started.
   const done = install({ ORCH_REPO: project });
   assert.equal(done.status, 0, done.stderr);
