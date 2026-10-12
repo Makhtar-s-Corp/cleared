@@ -20,10 +20,14 @@ capture_handover() {
   [ -n "$handover_captured" ] && return 0
   handover_captured=1
   [ "$(conf_get memory enabled)" = true ] || return 0
+  [[ "$ORCH_TICKET" =~ ^[A-Z]+-[0-9]+$ ]] || return 0
   local actual_model=${lane_model:-${model:-}}
-  [ -n "$actual_model" ] || return 0
+  if [ -z "$actual_model" ]; then
+    ledger event --kind handover_missing --ticket "$ORCH_TICKET" --run-id "${lane_run_id:-${run_id:-$ORCH_RUN_BASE}}" --detail 'No model started; any handover is left for recovery'
+    return 0
+  fi
   node "$ORCH_HOME/lib/memory/cli.mjs" capture "$lane_worktree" "$ORCH_ROLE" "$actual_model" "$ORCH_TICKET" "${lane_run_id:-${run_id:-$ORCH_RUN_BASE}}" \
-    || { ledger event --kind handover_missing --ticket "$ORCH_TICKET" --run-id "${lane_run_id:-${run_id:-$ORCH_RUN_BASE}}" --detail 'handover capture failed'; echo '!! Handover could not be stored.' >&2; }
+    || echo '!! Handover could not be stored; inspect the worktree and the run backup.' >&2
 }
 on_exit() {
   capture_handover

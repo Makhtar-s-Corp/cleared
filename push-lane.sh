@@ -40,7 +40,7 @@ if [ "$ahead" = 0 ]; then
   echo "nothing to push: $branch has no commit of its own"
   exit 0
 fi
-if [ "$(conf_get memory enabled)" = true ] && git -C "$worktree" log --format= --name-only "$base..HEAD" -- HANDOVER.md | grep -qxF HANDOVER.md; then
+if [ "$(conf_get memory enabled)" = true ] && git -C "$worktree" log --full-history --format= --name-only "$base..HEAD" -- HANDOVER.md | grep -qxF HANDOVER.md; then
   die "$branch not pushed: HANDOVER.md is present in a commit; remove it from branch history before retrying"
 fi
 

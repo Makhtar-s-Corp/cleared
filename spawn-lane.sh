@@ -298,6 +298,10 @@ if [ "$(conf_get memory enabled)" = true ]; then
   git_common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)
   mkdir -p "$git_common/info"
   grep -qxF '/HANDOVER.md' "$git_common/info/exclude" 2> /dev/null || printf '/HANDOVER.md\n' >> "$git_common/info/exclude"
+  if [ -n "$resume" ]; then
+    node "$ORCH_HOME/lib/memory/cli.mjs" recover "$worktree" "$role" "$ticket" "$lane" \
+      || die "the previous session's handover could not be recovered; its file remains in $worktree"
+  fi
 fi
 if [ -n "$pushed_role" ]; then
   jq -r '.description // ""' <<<"$issue" > "$run_dir/description.md"

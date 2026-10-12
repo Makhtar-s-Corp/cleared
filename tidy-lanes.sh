@@ -143,6 +143,10 @@ while IFS=$'\t' read -r path branch; do
   # no longer has is not put back there: what it still holds is kept as a
   # bundle beside the archives.
   if [ "$(git -C "$path" rev-list --count HEAD --not --remotes)" != 0 ]; then
+    if [ "$(conf_get memory enabled)" = true ] && git -C "$path" log --full-history --format= --name-only HEAD --not --remotes -- HANDOVER.md | grep -qxF HANDOVER.md; then
+      kept "$lane" "HANDOVER.md is present in an unpushed commit: remove it from branch history before tidying"
+      continue
+    fi
     if [ "$why" = "$(conf_get lanes tidy_reason_live)" ] && ! git -C "$ORCH_REPO" ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
       mkdir -p "$archive"
       git -C "$path" bundle create "$archive/unpushed.bundle" "$branch" --not --remotes > /dev/null 2>&1 || { kept "$lane" "what its branch still holds could not be kept"; continue; }

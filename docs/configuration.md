@@ -125,7 +125,7 @@ Caps concurrent teams, subscription use, ticket spending, and CLI age.
 
 ## `[memory]`
 
-Memory is disabled unless the project opts in. With `enabled = false`, no briefing or handover text is added to a lane prompt. Memory stores machine entries beside the ledger and indexes project Markdown files in place. All paths must stay inside the project checkout. Decision files need a `status: approved` line to appear among approved decisions in a briefing; without it they remain searchable proposals. Cleared never edits these Markdown files.
+Memory is disabled unless the project opts in. With `enabled = false`, no briefing or handover text is added to a lane prompt. Memory stores machine entries beside the ledger and indexes project Markdown files in place. All paths must stay inside the project checkout. A decision file needs `status: approved` at its start and content matching the committed `HEAD` version to appear among approved decisions; otherwise it remains a searchable proposal. Cleared never edits these Markdown files.
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
