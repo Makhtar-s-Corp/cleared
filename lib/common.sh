@@ -110,7 +110,11 @@ conf_get_from() {
 }
 conf_get() {
   local value code=0
-  if [ -f "$ORCH_CONF" ] && value=$(conf_get_from "$1" "$2" "$ORCH_CONF"); then :
+  if [ -f "$ORCH_CONF" ] && value=$(conf_get_from "$1" "$2" "$ORCH_CONF"); then
+    if [ -z "$value" ] && node "$ORCH_HOME/lib/conf.mjs" required "$1" "$2"; then
+      echo "Missing required [$1] $2 in project agents.conf" >&2
+      return 2
+    fi
   else
     value=$(node "$ORCH_HOME/lib/conf.mjs" default "$1" "$2") || code=$?
     [ "$code" != 2 ] || return 2
@@ -483,13 +487,12 @@ guard_text() {
   # remote.
   ref=${ORCH_GUARD_REF:-$(git -C "$ORCH_REPO" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2> /dev/null || true)}
   ref=${ref:-origin/main}
-  if git -C "$ORCH_REPO" cat-file -e "$ref:.cleared/agents.conf" 2> /dev/null; then
-    git -C "$ORCH_REPO" show "$ref:.cleared/agents.conf" > "$dir/settings.conf" 2> /dev/null || true
-    settings=$dir/settings.conf
-  else
-    settings=$dir/settings.conf
+  if ! git -C "$ORCH_REPO" show "$ref:.cleared/agents.conf" > "$dir/settings.conf" 2> /dev/null; then
+    echo "$(basename "$0"): not sent, the committed project configuration (.cleared/agents.conf at $ref) could not be read" >&2
+    rm -rf "$dir"
+    return 1
   fi
-  [ -f "$settings" ] || : > "$settings"
+  settings=$dir/settings.conf
   while IFS= read -r guard_key; do
     case "$guard_key" in salt|terms|allowed|token_patterns) ;; *) echo "$(basename "$0"): unknown [guard] key $guard_key in committed project configuration" >&2; rm -rf "$dir"; return 1 ;; esac
   done < <(awk '/^\[/{inside=($0=="[guard]");next} inside && $0 !~ /^[[:space:]]*#/ && index($0,"=") {key=substr($0,1,index($0,"=")-1);gsub(/^[[:space:]]+|[[:space:]]+$/,"",key);print key}' "$settings")

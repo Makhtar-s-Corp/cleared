@@ -131,6 +131,44 @@ test('installer refuses an active Cleared wake before changing units or the proj
   assert.equal(execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' }), before);
 }));
 
+test('installer refuses an activating wake even when its timer is disabled', () => committedGuardProject(({ project, env, root, commit }) => {
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
+  commit();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  const log = join(root, 'systemctl.log');
+  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *'is-enabled cleared-wake.timer'*) exit 1;; *'show '*cleared-wake.service*) echo activating; exit 0;; *'is-active '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
+  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /wake.*active/i);
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
+}));
+
+test('installer allows its own wake to refresh units during self update', () => committedGuardProject(({ project, env, root, commit }) => {
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nterms = none\nallowed = none\n');
+  commit();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  const log = join(root, 'systemctl.log');
+  writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *"is-enabled cleared-wake.timer"*) echo enabled; exit 0;; *"show "*cleared-wake.service*) echo activating; exit 0;; *"is-active "*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
+  const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', CLEARED_INSTALL_FROM_WAKE: '1', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  assert.doesNotMatch(result.stderr, /wake.*active/i);
+  assert.match(readFileSync(log, 'utf8'), /enable --now cleared-dashboard\.service .*cleared-wake\.timer/);
+}));
+
+test('missing trusted project configuration refuses the guard instead of disabling it', () => committedGuardProject(({ project, commit, check }) => {
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nsalt = example\nterms = scripts/private-terms.json\nallowed = none\n');
+  commit();
+  execFileSync('git', ['-C', project, 'branch', '-m', 'master']);
+  const result = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', ORCH_HOME, join(project, '.cleared', 'agents.conf')], {
+    env: { ...process.env, HOME: project, CLEARED_REPO: project, ORCH_GUARD_REF: 'origin/main', ORCH_GUARD_TOOL_REF: '' }, encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /committed project configuration.*could not be read/i);
+}));
+
 test('committed Cleared settings advance without stale config or guard bypass', () => committedGuardProject(({ project, env, git, commit, check }) => {
   const config = join(project, '.cleared', 'agents.conf');
   const salt = 'integration-salt';
@@ -232,7 +270,9 @@ test('a committed old guard configuration is never trusted', () => committedGuar
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[guard]\nsalt = obsolete\nterms = scripts/private-terms.json\n');
   writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: createHash('sha256').update('obsolete').digest('hex').slice(0, 12), hashes: [] }));
   git('add', '.'); git('commit', '-q', '-m', 'old configuration');
-  assert.equal(check('Public text.').status, 0);
+  const result = check('Public text.');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /committed project configuration.*could not be read/i);
 }));
 
 test('a headerless fingerprint list is refused even with a configured salt', () => committedGuardProject(({ project, commit, check }) => {
@@ -334,6 +374,15 @@ test('the example never supplies missing project keys or a merge verdict', () =>
   const result = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /missing required \[merge\] verdict/i);
+}));
+
+test('an empty required project setting is reported as missing', () => withProject(({ project, env }) => {
+  mkdirSync(join(project, '.cleared'));
+  writeFileSync(join(project, '.cleared', 'agents.conf'), '[merge]\nverdict =\n');
+  trackProjectConfig(project);
+  const result = shell(env, 'conf_get merge verdict');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing required \[merge\] verdict/);
 }));
 
 test('review prompt and merge check use the same configured verdict', () => withProject(({ project, env, root }) => {

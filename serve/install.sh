@@ -33,9 +33,7 @@ guard_ref=${ORCH_GUARD_REF:-$(git -C "$project" symbolic-ref --quiet --short ref
 guard_ref=${guard_ref:-origin/main}
 guard_settings=$(mktemp)
 trap 'rm -f "$guard_settings"' EXIT
-if git -C "$project" cat-file -e "$guard_ref:.cleared/agents.conf" 2> /dev/null; then
-  git -C "$project" show "$guard_ref:.cleared/agents.conf" > "$guard_settings"
-fi
+git -C "$project" show "$guard_ref:.cleared/agents.conf" > "$guard_settings" 2> /dev/null || die "the committed project configuration (.cleared/agents.conf at $guard_ref) could not be read; no services were installed"
 if [ -z "$(conf_get_from guard salt "$guard_settings" 2> /dev/null || true)" ]; then
   echo 'Add [guard] salt = <random value> to the project agents.conf and commit it; the installer will not write it.' >&2
   terms=$(conf_get_from guard terms "$guard_settings" 2> /dev/null || true)
@@ -50,11 +48,18 @@ for path in "$ORCH_HOME" "$project" "$ORCH_STATE_DIR"; do
   case "$path" in *[\ \|\&%\"\'\\]* | *$'\n'*) die "\"$path\" cannot be written in a unit as it is (a blank, |, &, %, a quote or a backslash): move it" ;; esac
 done
 units="$HOME/.config/systemd/user"
-case "$(systemctl --user is-enabled cleared-wake.timer 2> /dev/null || true)" in
-  enabled*) die "a Cleared wake timer is already active; disable it and wait for cleared-wake.service to finish before installing" ;;
-esac
-if systemctl --user is-active --quiet cleared-wake.timer 2> /dev/null || systemctl --user is-active --quiet cleared-wake.service 2> /dev/null; then
-  die "a Cleared wake is already active; stop the timer and wait for cleared-wake.service to finish before installing"
+if [ "${CLEARED_INSTALL_FROM_WAKE:-}" != 1 ]; then
+  case "$(systemctl --user is-enabled cleared-wake.timer 2> /dev/null || true)" in
+    enabled*) die "a Cleared wake timer is already active; disable it and wait for cleared-wake.service to finish before installing" ;;
+  esac
+  if systemctl --user is-active --quiet cleared-wake.timer 2> /dev/null; then
+    die "a Cleared wake timer is already active; stop it before installing"
+  fi
+  wake_state=$(systemctl --user show -p ActiveState --value cleared-wake.service 2> /dev/null) || die "the Cleared wake state could not be read; no services were installed"
+  case "$wake_state" in
+    inactive|failed) ;;
+    *) die "a Cleared wake is already active ($wake_state); wait for cleared-wake.service to finish before installing" ;;
+  esac
 fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"

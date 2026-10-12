@@ -72,7 +72,7 @@ rm -f "$mark"
 ledger init > /dev/null
 services=
 if [ -n "$(git -C "$top" diff --name-only "$old" "$new" -- "$tools/serve")" ] && [ -x "$ORCH_HOME/serve/install.sh" ]; then
-  if "$ORCH_HOME/serve/install.sh" > /dev/null 2>&1; then services=", its services installed again"; else services=", but its services could not be installed again (serve/install.sh): to be run by hand"; fi
+  if CLEARED_INSTALL_FROM_WAKE=1 "$ORCH_HOME/serve/install.sh" > /dev/null 2>&1; then services=", its services installed again"; else services=", but its services could not be installed again (serve/install.sh): to be run by hand"; fi
 fi
 ledger event --kind self_updated --detail "the checkout the dispatcher runs from went from ${old:0:8} to ${new:0:8} of $branch$services"
 echo "updated: ${old:0:8} -> ${new:0:8}"
