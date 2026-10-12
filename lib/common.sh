@@ -686,7 +686,7 @@ only_base_merges() {
 # owner_name_first is the same at the
 # start of a sentence.
 owner_name() {
-  local name unnamed="l'utilisateur"
+  local name unnamed="the user"
   name=$(conf_get owner name)
   [ -n "$name" ] || name=$(conf_get linear owner_name)
   echo "${name:-$unnamed}"
