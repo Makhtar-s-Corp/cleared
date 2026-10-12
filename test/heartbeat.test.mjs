@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLedger } from '../lib/ledger.mjs';
-import { diagnose, recordIncidents, sendHeartbeat, heartbeatSettings, statusJson,
+import { collectStatus, diagnose, recordIncidents, sendHeartbeat, heartbeatSettings, matchesClearedCommand, statusJson,
   canReap, localReapActor, reapOrphans } from '../lib/heartbeat.mjs';
 import { sandbox, scratch } from './support.mjs';
 
@@ -56,6 +56,10 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   const failed = await wake({ FAKE_GH_LIST_DOWN: '1' });
   assert.notEqual(failed.code, 0);
   assert.deepEqual(calls, ['/ping', '/fail', '/fail']);
+  appendFileSync(join(box.home, 'agents.conf'), '\n[heartbeat]\ntimeout_secs = 0\n');
+  const misconfigured = await wake();
+  assert.equal(misconfigured.code, 0);
+  assert.deepEqual(calls, ['/ping', '/fail', '/fail', '/fail'], 'a bad timeout still calls the valid failure URL');
 });
 
 test('status JSON uses exit 2 and a stable error object when configuration is unreadable', () => {
@@ -88,6 +92,27 @@ test('the status reaper refuses a process without a verified sudo human', () => 
     { env: { ...box.env, SUDO_UID: '1001', SUDO_USER: 'alice' }, encoding: 'utf8' });
   assert.equal(result.status, 2);
   assert.equal(JSON.parse(result.stdout).problems[0].code, 'status_error');
+});
+
+test('the reaper refuses a state directory from another project', () => {
+  const box = sandbox();
+  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+  const result = spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--reap'],
+    { env: { ...box.env, CLEARED_REPO: scratch('cleared-heartbeat-other-project-') }, encoding: 'utf8' });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /shared state does not belong/);
+});
+
+test('the reaper refuses a service UID altered in writable state', () => {
+  const box = sandbox();
+  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  db.prepare("UPDATE heartbeat_state SET value = '999999' WHERE key = 'wake_uid'").run();
+  db.close();
+  const result = spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--reap'],
+    { env: box.env, encoding: 'utf8' });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /service account ownership could not be verified/);
 });
 
 test('failed heartbeat does not throw and is logged at most once per hour', async () => {
@@ -145,12 +170,21 @@ test('heartbeat body contains neither configured URL secrets nor ticket content'
 });
 
 test('monitoring URLs can be stored outside the tracked project configuration', () => {
-  const file = join(scratch('cleared-heartbeat-secret-'), 'ping-url');
+  const dir = scratch('cleared-heartbeat-secret-');
+  const file = join(dir, 'ping-url');
   writeFileSync(file, 'https://example.invalid/ping/secret-token\n', { mode: 0o600 });
   const settings = heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } });
   assert.equal(settings.pingUrl, 'https://example.invalid/ping/secret-token');
+  assert.equal(heartbeatSettings({ sections: { heartbeat: { quota_url_file: file } } }).quotaUrl,
+    'https://example.invalid/ping/secret-token');
   assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: file,
     ping_url: 'https://example.invalid/other' } } }), /either ping_url or ping_url_file/);
+  chmodSync(file, 0o644);
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } }), /private regular file/);
+  chmodSync(file, 0o600);
+  symlinkSync(file, join(dir, 'linked'));
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: join(dir, 'linked') } } }), /private regular file/);
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url: 'http://example.invalid/ping' } } }), /HTTPS, or HTTP on loopback/);
 });
 
 test('a newly opened lane is not called idle because its base commit is old', () => {
@@ -179,6 +213,7 @@ test('reap is restricted to a verified local human and acts only on stale unatta
   const remote = { sections: { tracker: { adapter: 'github' }, heartbeat: { reap_owner_uid: '1001' } } };
   const sudo = { effectiveUid: 0, sudoUid: '1001', sudoUser: 'alice', serviceUid: '1002' };
   assert.equal(localReapActor(local, sudo).kind, 'human');
+  assert.equal(localReapActor(local, { ...sudo, sudoUid: undefined }).kind, 'other');
   assert.equal(localReapActor(local, { ...sudo, effectiveUid: 1001 }).kind, 'other');
   assert.equal(localReapActor(local, { ...sudo, sudoUid: '1002' }).kind, 'other');
   assert.equal(localReapActor(local, { ...sudo, serviceUid: '1001' }).kind, 'other');
@@ -191,4 +226,18 @@ test('reap is restricted to a verified local human and acts only on stale unatta
   reapOrphans([{ pid: 10, orphan: true }, { pid: 11, orphan: false }],
     { actor: { kind: 'human', id: 'human' }, owner: 'human', kill: (pid) => killed.push(pid) });
   assert.deepEqual(killed, [10]);
+});
+
+test('status fails closed if lane inventory cannot be inspected', async () => {
+  const db = openLedger(':memory:');
+  const directory = scratch('cleared-heartbeat-no-git-');
+  await assert.rejects(collectStatus(db, { roles: { dev: 'a' }, sections: { lanes: { root: directory } } },
+    { repo: directory, state: directory, probe: false }), /Cannot inspect project worktrees/);
+  db.close();
+});
+
+test('an editor viewing a Cleared script is not identified as an orphan process', () => {
+  const script = new URL('../when-free.sh', import.meta.url).pathname;
+  assert.equal(matchesClearedCommand(['/usr/bin/vim', script], 'wait'), false);
+  assert.equal(matchesClearedCommand(['/usr/bin/bash', script], 'wait'), true);
 });

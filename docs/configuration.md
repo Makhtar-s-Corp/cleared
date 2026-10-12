@@ -129,7 +129,7 @@ Automatic rollback requires a git credential that can push a normal commit to th
 
 ## `[heartbeat]`
 
-Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_url` after each successful wake. A failed wake or a detected stall sends a POST to `fail_url` with only stable problem codes. If `fail_url` is absent, a failed or blocked wake sends no ping; the monitoring service detects the missed heartbeat. A failed delivery never blocks the wake and is written to the ledger at most once per hour. See [Heartbeat and status](heartbeat.md).
+Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_url` after each successful wake. A failed wake or a detected stall sends a POST to `fail_url` with only stable problem codes. If `fail_url` is absent, a failed or blocked wake sends no ping; the monitoring service detects the missed heartbeat. A failed delivery never blocks the wake and is written to the ledger at most once per hour. URL files must be regular, owned by the service account, mode `0600` or stricter, and outside the project checkout. URLs require HTTPS, except for HTTP on loopback. See [Heartbeat and status](heartbeat.md).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
@@ -139,6 +139,7 @@ Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_u
 | `fail_url_file` | Path to a private file containing the failure URL; alternative to `fail_url`. | Optional; no default |
 | `timeout_secs` | Maximum delivery and probe time. | Default: 10 |
 | `quota_url` | Optional quota API reachability probe. No auth headers are sent. | Optional; no default |
+| `quota_url_file` | Private file containing the quota probe URL; alternative to `quota_url`. | Optional; no default |
 | `wake_interval_minutes` | Configured wake timer interval; late after three intervals. | Default: 1 |
 | `pending_minutes` | Time for observed changes without an action. | Default: 30 |
 | `service_minutes` | Time tracker, forge, or configured quota endpoint may stay unreachable. | Default: 10 |
