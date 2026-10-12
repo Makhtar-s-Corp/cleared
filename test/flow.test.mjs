@@ -1820,7 +1820,7 @@ test('the Claude adapter holds a conversation where nothing is asked for: readin
   assert.ok(!none.some((arg) => arg.startsWith('Edit(')));
   assert.ok(none.includes(`Read(/${dir}/**)`));
   // The other backend has no conversation to offer: the next model of the chain takes it.
-  assert.equal(spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['talk', '--model', 'm', '--prompt-file', join(dir, 'prompt.md')], { encoding: 'utf8' }).status, 2);
+  assert.equal(spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['talk', '--model', 'm', '--prompt-file', join(dir, 'prompt.md')], { encoding: 'utf8', env: { ...process.env, ADAPTER_RUNNER: 'container' } }).status, 2);
 });
 
 

@@ -212,42 +212,47 @@ Linear team, ticket states, message limits, and captures.
 
 ## `[permissions.dev]`
 
-Provider CLI permission profile for this role. These settings are not a sandbox.
+Provider CLI permission profile for this role. See the [role mapping](adapters.md#existing-adapters) and [host access](security.md#permissions-and-host-access).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 | `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[permissions.mechanical]`
 
-Provider CLI permission profile for this role. These settings are not a sandbox.
+Provider CLI permission profile for this role. See the [role mapping](adapters.md#existing-adapters) and [host access](security.md#permissions-and-host-access).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 | `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[permissions.release]`
 
-Provider CLI permission profile for this role. These settings are not a sandbox.
+Provider CLI permission profile for this role. See the [role mapping](adapters.md#existing-adapters) and [host access](security.md#permissions-and-host-access).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
 | `advisor` | Whether the CLI may use a separately billed helper model. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 | `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[permissions.release-live]`
 
-Provider CLI permission profile for this role. These settings are not a sandbox.
+Provider CLI permission profile for this role. See the [role mapping](adapters.md#existing-adapters) and [host access](security.md#permissions-and-host-access).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `write` | Paths that trusted scripts need to write, comma separated; `{state}` and `{repo}` expand to the configured paths. Host Codex refuses read-only roles with this setting. | Optional; no default |
 | `read` | Extra paths the role may read. | Optional; no default |
 | `advisor` | Whether the CLI may use a separately billed helper model. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
@@ -263,22 +268,69 @@ Interactive discussion role.
 
 ## `[permissions.talk]`
 
-Provider CLI permission profile for this role. These settings are not a sandbox.
+Provider CLI permission profile for this role. See the [role mapping](adapters.md#existing-adapters) and [host access](security.md#permissions-and-host-access).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `write` | Paths that trusted scripts need to write, comma separated; `{state}` and `{repo}` expand to the configured paths. Host Codex refuses read-only roles with this setting. | Optional; no default |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
 | `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[permissions.review]`
 
-Provider CLI permission profile for this role. These settings are not a sandbox.
+Provider CLI permission profile for this role. See the [role mapping](adapters.md#existing-adapters) and [host access](security.md#permissions-and-host-access).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
 | `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
+
+Define a permission section for every role routed to a harness; otherwise the two CLIs can inherit different defaults.
+
+## `[permissions.triage]`
+
+Read-only example profile for the triage role.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
+| `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
+
+## `[permissions.cleanup]`
+
+Read-only example profile for the cleanup role.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
+| `allow` | Comma-separated command prefixes allowed by the role. | Optional; no default |
+
+## `[permissions.writing]`
+
+Read-only example profile for the writing role.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
+| `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
+
+## `[permissions.digest]`
+
+Read-only example profile for the digest role.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `mode` | `read-only` or `accept-edits` for the provider CLI. | Required when role runs |
+| `network` | Whether the Codex host sandbox allows network access (`yes` or `no`). | Default: no |
 | `deny` | Comma-separated command prefixes denied by the role. | Optional; no default |
 
 ## `[adapter.claude]`
@@ -294,15 +346,16 @@ Claude Code CLI package and process options.
 
 ## `[adapter.codex]`
 
-Codex CLI and the project-owned task script.
+Codex CLI on the host by default, or a project-owned container task script.
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `package` | npm package whose latest version is checked. | Optional; no default |
 | `process` | Executable used to start Codex. | Optional; no default |
-| `task_script` | Executable in the project called with `<worktree> <prompt-file> <model> [--tools]`. | Optional; no default |
-| `task_tools` | Whether work sessions receive tools through the task script. | Optional; no default |
-| `commits` | Whether the adapter commits its own work. | Optional; no default |
+| `runner` | `host` or `container`. | Default: host |
+| `task_script` | Executable in the project called with `<worktree> <prompt-file> <model> [--tools]` in container mode. | Required for container mode |
+| `task_tools` | Whether container sessions receive tools through the task script. | Optional; no default; ignored on host |
+| `commits` | Whether the container adapter commits its own work. | Optional; no default; ignored on host |
 
 ## `[dashboard]`
 

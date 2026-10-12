@@ -25,6 +25,11 @@ while IFS= read -r named; do
   case "$asked " in "$named "*) allowed=1 ;; esac
 done < <(conf_get lanes heavy_commands | tr ',' '\n' | sed 's/^ *//; s/ *$//')
 [ -n "$allowed" ] || die "\"$asked\" is not one of the heavy commands of the project ([lanes] heavy_commands): not run"
+# A host Codex session already holds this lock for its whole run. Its heavy
+# commands may use this script without waiting on the lock they already hold.
+if [ "${CLEARED_HEAVY_SLOT:-}" = "$ORCH_STATE_DIR/heavy.lock" ]; then
+  exec "$@"
+fi
 wait_minutes=$(conf_get lanes heavy_wait_minutes)
 [[ "$wait_minutes" =~ ^[0-9]+$ ]] || wait_minutes=30
 deadline=$(( $(date +%s) + wait_minutes * 60 ))

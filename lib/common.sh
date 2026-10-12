@@ -219,18 +219,23 @@ adapter_env() {
 
 # What a role may do without a screen, from [permissions.<role>], handed to
 # the adapter as ORCH_PERMISSION_MODE, ORCH_ALLOW and ORCH_DENY (comma
-# separated command prefixes). No section: nothing is set, and the CLI keeps
-# the settings of the user.
+# separated command prefixes), plus ORCH_NETWORK and ORCH_WRITE for host
+# sandbox translation. No section: nothing is set for the provider CLI.
 permissions_env() {
-  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR ORCH_READ
+  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR ORCH_READ ORCH_NETWORK ORCH_WRITE
   local mode
   # advisor = no: the role runs without the helper model the CLI may consult.
   [ "$(conf_get "permissions.$1" advisor)" != no ] || export ORCH_ADVISOR=no
   mode=$(conf_get "permissions.$1" mode)
   [ -n "$mode" ] || return 0
-  export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY
+  export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY ORCH_NETWORK ORCH_WRITE
   ORCH_ALLOW=$(conf_get "permissions.$1" allow)
   ORCH_DENY=$(conf_get "permissions.$1" deny)
+  ORCH_NETWORK=$(conf_get "permissions.$1" network)
+  ORCH_NETWORK=${ORCH_NETWORK:-no}
+  ORCH_WRITE=$(conf_get "permissions.$1" write)
+  ORCH_WRITE=${ORCH_WRITE//\{state\}/"$ORCH_STATE_DIR"}
+  ORCH_WRITE=${ORCH_WRITE//\{repo\}/"$ORCH_REPO"}
   # {orch} is where these scripts are: a lane is handed the dispatcher's own
   # copy of a script, never the one of the branch it works on.
   ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/"$ORCH_HOME"}

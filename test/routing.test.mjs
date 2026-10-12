@@ -320,7 +320,7 @@ test('the Codex adapter gives the work of a lane its tools through the door of t
   mkdirSync(box.state, { recursive: true });
   writeFileSync(join(box.home, 'prompt.md'), 'the prompt of the lane\n');
   writeFileSync(task, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(box.home, 'task-args')}"\ncp "$2" "${join(box.home, 'task-prompt')}"\n(flock -n 9 && echo free || echo held) 9> "${join(box.state, 'heavy.lock')}" > "${join(box.home, 'door')}"\nprintf 'done'\n`, { mode: 0o755 });
-  const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none'), ADAPTER_TASK_SCRIPT: task };
+  const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none'), ADAPTER_RUNNER: 'container', ADAPTER_TASK_SCRIPT: task };
   const call = (extra = {}, ci = 0) => {
     writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\necho ${ci}\n`, { mode: 0o755 });
     const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], { cwd: box.repo, encoding: 'utf8', env: { ...env, ...extra } });
