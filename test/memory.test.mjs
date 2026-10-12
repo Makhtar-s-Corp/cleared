@@ -64,6 +64,22 @@ test('a quoted approval marker and an uncommitted edit do not approve a file', (
   assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
 });
 
+test('a file decision leaves the briefing when its approved content changes', () => {
+  const { memory, project, db, conf } = fixture();
+  execFileSync('git', ['-C', project, 'init', '-q']);
+  mkdirSync(join(project, 'docs', 'decisions'), { recursive: true });
+  const path = join(project, 'docs', 'decisions', 'queue.md');
+  writeFileSync(path, 'Use a durable queue.');
+  execFileSync('git', ['-C', project, 'add', '.']);
+  execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: queue']);
+  const id = memory.search('queue')[0].id;
+  createMemory({ project, db, conf, tracker: { whoAmI: () => ({ kind: 'human', id: 'owner' }) } }).approve(id);
+  assert.match(memory.briefing({ role: 'dev', ticket: { id: 'LOCAL-1', title: 'queue' }, budget: 1000 }).text, /durable queue/);
+  writeFileSync(path, 'Use a fast queue.');
+  assert.doesNotMatch(memory.briefing({ role: 'dev', ticket: { id: 'LOCAL-1', title: 'queue' }, budget: 1000 }).text, /fast queue/);
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+});
+
 test('invalid briefing budget is refused rather than growing without limit', () => {
   const { memory } = fixture();
   assert.throws(() => memory.briefing({ role: 'dev', ticket: 'LOCAL-1', budget: Number.NaN }), /budget/i);
