@@ -320,7 +320,7 @@ test('CLEARED_STATE_DIR takes precedence over the older environment variable', (
 test('owner name defaults to the user', () => withProject(({ env }) => {
   const result = shell(env, 'owner_name');
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "l'utilisateur");
+  assert.equal(result.stdout.trim(), 'the user');
 }));
 
 test('duplicate project keys keep the first value and warn once in the ledger', () => committedGuardProject(({ project, root, env, commit }) => {
