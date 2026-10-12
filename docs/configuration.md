@@ -125,7 +125,7 @@ Caps concurrent teams, subscription use, ticket spending, and CLI age.
 
 ## `[guard]`
 
-Project-specific guard data. Salt and fingerprint files are read from the same committed project ref. New fingerprint files include a `salt_id`; a mismatched salt stops the guard. Headerless files require the original salt, stored in the project config.
+Project-specific guard data. Salt and fingerprint files are read from the same committed project ref. Fingerprint files include a `salt_id`; a mismatched salt or a file without that identifier stops the guard. See [Security](security.md) for the command that builds a list.
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |

@@ -28,7 +28,7 @@ This diagram shows the normal path for an application change. The configured too
 
 ## Status
 
-**Alpha, Linux only.** Cleared has run on one production project since October 2026. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Setup still assumes a GitHub repository, Linear, a Node-oriented project, and project-specific rules. Automatic terminals currently require Orca; other ticket trackers, OpenCode, and a terminal without Orca are future work. Tooling-only changes are exempt from the ticket approval check when configured that way. CLI permissions and the private-term guard are safeguards, not an operating-system sandbox.
+**Alpha, Linux only.** Cleared was used on one production project in October 2026; that installation is currently disconnected pending a clean reinstall. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Setup still assumes a GitHub repository, Linear, a Node-oriented project, and project-specific rules. Automatic terminals currently require Orca; other ticket trackers, OpenCode, and a terminal without Orca are future work. Tooling-only changes are exempt from the ticket approval check when configured that way. CLI permissions and the private-term guard are safeguards, not an operating-system sandbox.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ Linux with systemd, Node.js 24, git, jq, GitHub CLI (`gh`), a Linear account and
 
 ## Open a test team
 
-Use a disposable GitHub project with a `main` branch and a test ticket such as `EX-1` already in your Linear team's **Todo** state. Copy both clone URLs from the repositories' **Code → HTTPS** menus. The commands below assume the required CLIs are installed and authenticated. Run them in a new parent directory, not in a checkout serving an existing project.
+Use a disposable GitHub project with a `main` branch and a test ticket such as `EX-1` already in your Linear team's **Todo** state. Copy both clone URLs from the repositories' **Code → HTTPS** menus. Install and authenticate the required CLIs, then export `LINEAR_API_KEY` or the separate `LINEAR_APP_CLIENT_ID` and `LINEAR_APP_CLIENT_SECRET` before running the commands: the dry run queries Linear. Run the commands in a new parent directory, not in a checkout serving an existing project.
 
 ```sh
 git clone '<cleared-repository-url>' cleared
@@ -51,7 +51,7 @@ CLEARED_REPO=$PWD ../cleared/spawn-lane.sh dev EX-1 --dry-run
 CLEARED_REPO=$PWD ../cleared/spawn-lane.sh dev EX-1
 ```
 
-In the editor, set `[guard] salt` to the random value printed above and set `terms = none` and `allowed = none` **only for a test repository without private terms**. Replace the example Linear team and states, worktree root, model IDs, and adapter settings with values available on your machine. Set `LINEAR_API_KEY` or the separate `LINEAR_APP_CLIENT_ID` and `LINEAR_APP_CLIENT_SECRET` in the environment or an untracked `.env.local`. The final command opens a worktree and Orca terminal; the ticket's team then starts. If Orca cannot open the terminal, Cleared prints the exact command to run in the created worktree. Do not use the example's model IDs or salt as production settings.
+In the editor, set `[guard] salt` to the random value printed above and set `terms = none` and `allowed = none` **only for a test repository without private terms**. Replace the example Linear team and states, worktree root, model IDs, and adapter settings with values available on your machine. The final command opens a worktree and Orca terminal; the ticket's team then starts. If Orca cannot open the terminal, Cleared prints the exact command to run in the created worktree. Do not use the example's model IDs or salt as production settings.
 
 ## Read more
 
