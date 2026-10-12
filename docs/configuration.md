@@ -135,6 +135,8 @@ Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_u
 | --- | --- | --- |
 | `ping_url` | Push URL for a successful wake. | Optional; no default |
 | `fail_url` | Push URL for a failed or blocked wake. | Optional; no default |
+| `ping_url_file` | Path to a private file containing the success URL; alternative to `ping_url`. | Optional; no default |
+| `fail_url_file` | Path to a private file containing the failure URL; alternative to `fail_url`. | Optional; no default |
 | `timeout_secs` | Maximum delivery and probe time. | Default: 10 |
 | `quota_url` | Optional quota API reachability probe. No auth headers are sent. | Optional; no default |
 | `wake_interval_minutes` | Configured wake timer interval; late after three intervals. | Default: 1 |
@@ -142,6 +144,7 @@ Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_u
 | `service_minutes` | Time tracker, forge, or configured quota endpoint may stay unreachable. | Default: 10 |
 | `lane_idle_minutes` | Time without a lane branch or ledger movement. | Default: 120 |
 | `orphan_hours` | Age before an unattached Cleared process is considered orphaned. | Default: 6 |
+| `reap_owner_uid` | Unix UID allowed to run `status --reap`; required for non-local trackers. Must differ from `[tracker] agents_uid`. | Optional; no default |
 The approval comment must be unedited, posted after the merge, and no more than ten minutes old when used. If the monitor cannot start after a merge, Cleared comments on the ticket and records the failure; rerun `node lib/release.mjs start TICKET PR` after fixing the cause. A stopped monitor is restarted on the next wake. An interrupted revert is reconciled from its marked commit on the base; otherwise it is marked failed and the owner is alerted.
 
 ## `[limits]`

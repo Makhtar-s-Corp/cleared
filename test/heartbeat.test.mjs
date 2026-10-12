@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { appendFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { openLedger } from '../lib/ledger.mjs';
 import { diagnose, recordIncidents, sendHeartbeat, heartbeatSettings, statusJson,
   canReap, localReapActor, reapOrphans } from '../lib/heartbeat.mjs';
+import { sandbox, scratch } from './support.mjs';
 
 const conf = { sections: { heartbeat: {} } };
 const now = Date.parse('2026-10-12T12:00:00Z');
@@ -18,6 +23,71 @@ test('one successful wake pings once; a failed wake calls the failure URL', asyn
   await sendHeartbeat(db, settings, [], false, { fetcher, now });
   assert.deepEqual(urls.map(([url]) => url), [settings.pingUrl, settings.failUrl]);
   db.close();
+});
+
+test('real wake exits call the success and failure URLs once each', async (t) => {
+  const box = sandbox();
+  const calls = [];
+  const server = createServer((request, response) => {
+    calls.push(request.url);
+    request.resume(); response.writeHead(200); response.end('ok');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const port = server.address().port;
+  appendFileSync(join(box.home, 'agents.conf'), `\n[heartbeat]\nping_url = http://127.0.0.1:${port}/ping\nfail_url = http://127.0.0.1:${port}/fail\n`);
+  const wake = (env = {}) => new Promise((resolve) => {
+    const child = spawn(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...env } });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.resume();
+    child.on('close', (code) => resolve({ code, stderr }));
+  });
+  const healthy = await wake();
+  assert.equal(healthy.code, 0, healthy.stderr);
+  assert.deepEqual(calls, ['/ping']);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  db.prepare("UPDATE heartbeat_state SET value = ? WHERE key = 'last_wake_at'")
+    .run(new Date(Date.now() - 5 * 60_000).toISOString());
+  db.close();
+  const late = await wake();
+  assert.equal(late.code, 0, late.stderr);
+  assert.deepEqual(calls, ['/ping', '/fail'], 'a live but delayed wake reports the stall');
+  const failed = await wake({ FAKE_GH_LIST_DOWN: '1' });
+  assert.notEqual(failed.code, 0);
+  assert.deepEqual(calls, ['/ping', '/fail', '/fail']);
+});
+
+test('status JSON uses exit 2 and a stable error object when configuration is unreadable', () => {
+  const box = sandbox();
+  writeFileSync(join(box.home, 'agents.conf'), 'broken configuration\n');
+  const result = spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--json'],
+    { env: box.env, encoding: 'utf8' });
+  assert.equal(result.status, 2, result.stderr);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.schema, 1);
+  assert.equal(body.ok, false);
+  assert.equal(body.problems[0].code, 'status_error');
+});
+
+test('an invalid heartbeat setting is visible in the ledger and service log', () => {
+  const box = sandbox();
+  appendFileSync(join(box.home, 'agents.conf'), '\n[heartbeat]\ntimeout_secs = 0\n');
+  const result = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /timeout_secs/);
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_diagnostic_failed'").get().n, 1);
+  db.close();
+});
+
+test('the status reaper refuses a process without a verified sudo human', () => {
+  const box = sandbox();
+  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+  const result = spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--reap', '--json'],
+    { env: { ...box.env, SUDO_UID: '1001', SUDO_USER: 'alice' }, encoding: 'utf8' });
+  assert.equal(result.status, 2);
+  assert.equal(JSON.parse(result.stdout).problems[0].code, 'status_error');
 });
 
 test('failed heartbeat does not throw and is logged at most once per hour', async () => {
@@ -74,6 +144,15 @@ test('heartbeat body contains neither configured URL secrets nor ticket content'
   db.close();
 });
 
+test('monitoring URLs can be stored outside the tracked project configuration', () => {
+  const file = join(scratch('cleared-heartbeat-secret-'), 'ping-url');
+  writeFileSync(file, 'https://example.invalid/ping/secret-token\n', { mode: 0o600 });
+  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } });
+  assert.equal(settings.pingUrl, 'https://example.invalid/ping/secret-token');
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: file,
+    ping_url: 'https://example.invalid/other' } } }), /either ping_url or ping_url_file/);
+});
+
 test('a newly opened lane is not called idle because its base commit is old', () => {
   const snapshot = base();
   snapshot.lanes = [{ name: 'dev/one', openedAt: new Date(now - 60_000).toISOString(),
@@ -81,10 +160,30 @@ test('a newly opened lane is not called idle because its base commit is old', ()
   assert.equal(diagnose(snapshot, heartbeatSettings(conf), now).some((p) => p.code === 'lane_idle'), false);
 });
 
+test('a lane waiting for approval is not called idle after its session ended', () => {
+  const snapshot = base();
+  snapshot.lanes = [{ name: 'dev/one', active: false,
+    branchMovedAt: new Date(now - 4 * 3600_000).toISOString(), ledgerMovedAt: new Date(now - 4 * 3600_000).toISOString() }];
+  assert.equal(diagnose(snapshot, heartbeatSettings(conf), now).some((p) => p.code === 'lane_idle'), false);
+});
+
+test('a lead session past its time limit is reported despite successful wakes', () => {
+  const snapshot = base();
+  snapshot.leadBusySince = new Date(now - 21 * 60_000).toISOString();
+  snapshot.leadMaxMinutes = 20;
+  assert.equal(diagnose(snapshot, heartbeatSettings(conf), now).some((p) => p.code === 'lead_stuck'), true);
+});
+
 test('reap is restricted to a verified local human and acts only on stale unattached Cleared processes', () => {
-  assert.equal(localReapActor({ sections: { tracker: { adapter: 'local', owner_id: 'alice', agents_uid: '1002' } } }, 1001, 'alice').kind, 'human');
-  assert.equal(localReapActor({ sections: { tracker: { adapter: 'local', owner_id: 'alice', agents_uid: '1002' } } }, 1002, 'alice').kind, 'other');
-  assert.equal(localReapActor({ sections: { tracker: { adapter: 'github', owner_id: 'alice', agents_uid: '1002' } } }, 1001, 'alice').kind, 'other');
+  const local = { sections: { tracker: { adapter: 'local', owner_id: 'alice', agents_uid: '1002' } } };
+  const remote = { sections: { tracker: { adapter: 'github' }, heartbeat: { reap_owner_uid: '1001' } } };
+  const sudo = { effectiveUid: 0, sudoUid: '1001', sudoUser: 'alice', serviceUid: '1002' };
+  assert.equal(localReapActor(local, sudo).kind, 'human');
+  assert.equal(localReapActor(local, { ...sudo, effectiveUid: 1001 }).kind, 'other');
+  assert.equal(localReapActor(local, { ...sudo, sudoUid: '1002' }).kind, 'other');
+  assert.equal(localReapActor(local, { ...sudo, serviceUid: '1001' }).kind, 'other');
+  assert.equal(localReapActor(remote, sudo).kind, 'human');
+  assert.equal(localReapActor(remote, { ...sudo, sudoUid: '1002' }).kind, 'other');
   assert.equal(canReap({ kind: 'agents', id: 'bot' }, 'human'), false);
   assert.equal(canReap({ kind: 'human', id: 'human' }, 'human'), true);
   const killed = [];
