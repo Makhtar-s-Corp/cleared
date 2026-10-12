@@ -14,30 +14,50 @@ case "$runner" in host | container) ;; *) echo "codex: unknown runner: $runner (
 # worktree keeps Git metadata in its main checkout; a role allowed to commit
 # needs that metadata writable in addition to the lane's files.
 host_permissions() {
-  local mode=${ORCH_PERMISSION_MODE:-read-only} network=${ORCH_NETWORK:-no} parent path key joined=
-  local paths=() entries=('":tmpdir"="deny"' '":slash_tmp"="deny"')
+  local mode=${ORCH_PERMISSION_MODE:-read-only} network=${ORCH_NETWORK:-no} parent path key joined= gitdir common branch
+  local paths=() denies=() entries=('":tmpdir"="deny"' '":slash_tmp"="deny"')
   case "$mode" in read-only) parent=:read-only ;; accept-edits) parent=:workspace ;; *) echo "codex: unknown permission mode: $mode" >&2; return 64 ;; esac
   case "$network" in yes) network=true ;; no) network=false ;; *) echo "codex: unknown network permission: $network" >&2; return 64 ;; esac
   if [ "$mode" = accept-edits ] && [[ ",${ORCH_ALLOW:-}," == *"git commit"* ]]; then
-    paths+=("$(git rev-parse --absolute-git-dir)" "$(git rev-parse --path-format=absolute --git-common-dir)")
+    gitdir=$(git rev-parse --absolute-git-dir)
+    common=$(git rev-parse --path-format=absolute --git-common-dir)
+    branch=$(git symbolic-ref -q --short HEAD) || { echo 'codex: a commit-capable lane needs a branch' >&2; return 64; }
+    [[ "$branch" == */* ]] || { echo 'codex: a commit-capable lane needs a namespaced branch' >&2; return 64; }
+    paths+=("$gitdir" "$common/objects" "$common/refs/heads/${branch%/*}" "$common/logs/refs/heads/${branch%/*}")
   fi
+  gitdir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+  codex_tmp=${gitdir:+$gitdir/cleared-tmp}
+  codex_tmp=${codex_tmp:-$ORCH_STATE_DIR/tmp/codex-${ORCH_RUN_ID:-text}}
+  mkdir -p "$codex_tmp"
+  paths+=("$codex_tmp")
   while IFS= read -r path; do
     path=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' <<<"$path")
     [ -z "$path" ] || paths+=("$path")
   done < <(tr ',' '\n' <<<"${ORCH_WRITE:-}")
   [ -z "${ORCH_EDIT_ONLY:-}" ] || paths+=("$(dirname "$ORCH_EDIT_ONLY")")
+  for path in "${CODEX_HOME:-$HOME/.codex}" "$HOME/.ssh" "$HOME/.config/gh" "$HOME/.config/git" "$HOME/.git-credentials" "$HOME/.gitconfig"; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] || denies+=("$path")
+  done
+  [[ ",${ORCH_WRITE:-}," == *"${ORCH_STATE_DIR}"* ]] || denies+=("$ORCH_STATE_DIR")
   for path in "${paths[@]}"; do
     [ -n "$path" ] || continue
     key=$(jq -Rn --arg path "$path" '$path')
     entries+=("$key=\"write\"")
   done
+  for path in "${denies[@]}"; do
+    key=$(jq -Rn --arg path "$path" '$path')
+    entries+=("$key=\"deny\"")
+  done
   for path in "${entries[@]}"; do joined+="${joined:+,}$path"; done
+  key=$(jq -Rn --arg path "$PWD" '$path')
   codex_policy=(-c 'approval_policy="never"' -c 'default_permissions="cleared"'
+    -c "projects.$key.trust_level=\"untrusted\""
     -c "permissions.cleared={extends=\"$parent\",filesystem={$joined},network={enabled=$network}}")
 }
 
 host_run() {
   local code usage_json
+  . "$here/../lib/common.sh"
   events=$(mktemp) body=$(mktemp)
   trap 'rm -f "$events" "$body"' EXIT
   host_permissions || return $?
@@ -45,10 +65,32 @@ host_run() {
     echo 'Codex did not start: codex is not installed on the host.' > "$body"
     contract_usage '{}'; contract_report codex 2 "$body"; return 2
   fi
+  if [ -z "${ORCH_TEXT_ONLY:-}" ] && [ -n "${ORCH_LANE:-}" ]; then
+    local wait_minutes deadline
+    wait_minutes=$(conf_get lanes heavy_wait_minutes)
+    [[ "$wait_minutes" =~ ^[0-9]+$ ]] || wait_minutes=30
+    deadline=$(( $(date +%s) + wait_minutes * 60 ))
+    mkdir -p "$ORCH_STATE_DIR"
+    exec 8> "$ORCH_STATE_DIR/heavy.lock"
+    while :; do
+      if flock -n 8 && [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2>/dev/null)" ] \
+        && [ "$("$ORCH_HOME/host-state.sh" 2>/dev/null | jq -r '.free_for_a_ci_run // false')" = true ]; then break; fi
+      flock -u 8 || true
+      if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo 'Codex did not start: the host stayed busy for the configured heavy-command wait.' > "$body"
+        contract_usage '{}'; contract_report codex 2 "$body"; return 2
+      fi
+      sleep 20
+    done
+    export CLEARED_HEAVY_SLOT="$ORCH_STATE_DIR/heavy.lock"
+  fi
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
   [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral)
   set +e
-  env -u OPENAI_API_KEY codex "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
+  env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN -u LINEAR_API_KEY -u LINEAR_APP_CLIENT_ID -u LINEAR_APP_CLIENT_SECRET -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
+    TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
+    codex "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
     fromjson? | if .type == "item.completed" and .item.type == "agent_message" then .item.text
       elif .type == "item.started" and .item.type == "command_execution" then "  > " + (.item.command // "command")
       else empty end' 2>/dev/null
@@ -77,21 +119,8 @@ case "${1:-}" in
     fi
     ;;
   talk)
-    [ "$runner" = host ] || { echo "codex: no conversation from the container runner" >&2; exit 2; }
-    shift
-    talk_model= talk_prompt=
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --model) talk_model=$2 ;;
-        --prompt-file) talk_prompt=$2 ;;
-        --session-id) ;; # Codex assigns its own session ID.
-        *) echo "talk: unknown option $1" >&2; exit 64 ;;
-      esac
-      shift 2
-    done
-    [ -n "$talk_model" ] && [ -f "$talk_prompt" ] || { echo 'talk: model and prompt file are required' >&2; exit 64; }
-    host_permissions || exit $?
-    env -u OPENAI_API_KEY codex -m "$talk_model" -C "$PWD" -a never "${codex_policy[@]}" "$(cat "$talk_prompt")"
+    echo 'codex: interactive discussion is not available from this adapter' >&2
+    exit 2
     ;;
   version)
     if [ "$runner" = container ]; then

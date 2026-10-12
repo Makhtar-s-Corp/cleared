@@ -24,7 +24,7 @@ This diagram shows the normal path for an application change. The configured too
 - Application changes require a human to approve the version shown to them. Paths explicitly configured as `tooling_paths` can merge after review and green checks without a ticket approval; audit that list before using unattended shipping.
 - Today, review requires a different model from the one that wrote the change. A fresh session on the same subscription, without the author's context, is planned for developers who have only one model.
 - Cleared runs on your CLI subscriptions and your Linux host. It does not resell model calls.
-- Claude Code and Codex run on the host under the same configured role policy. Codex can instead use a project-owned container runner. Either host harness can read every file readable by the Cleared account; use a dedicated system account without other projects' secrets if you need stronger isolation.
+- Claude Code and Codex coding lanes run on the host under the same configured role policy. Codex can instead use a project-owned container runner. Either host harness can read every file readable by the Cleared account; use a dedicated system account without other projects' secrets if you need stronger isolation.
 - The ledger records runs, costs, events, and decisions so the process can be inspected.
 
 ## Status

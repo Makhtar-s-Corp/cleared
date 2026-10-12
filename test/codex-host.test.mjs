@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME, loadConf } from '../lib/conf.mjs';
@@ -11,6 +11,7 @@ const example = loadConf(join(ORCH_HOME, 'agents.example.conf'));
 function fakeClis(dir) {
   writeFileSync(join(dir, 'codex'), `#!/usr/bin/env bash
 printf '%s\\n' "$@" > "$FAKE_ARGS"
+printf '%s\\n' "\${GH_TOKEN:-}" "\${GITHUB_TOKEN:-}" "\${SSH_AUTH_SOCK:-}" "$TMPDIR" > "$FAKE_ENV"
 last=
 previous=
 for arg in "$@"; do
@@ -28,6 +29,7 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
 `, { mode: 0o755 });
   writeFileSync(join(dir, 'claude'), `#!/usr/bin/env bash
 printf '%s\\n' "$@" > "$FAKE_ARGS"
+printf '%s\\n' "\${GH_TOKEN:-}" "\${GITHUB_TOKEN:-}" "\${SSH_AUTH_SOCK:-}" "\${TMPDIR:-}" > "$FAKE_ENV"
 cat > "$FAKE_PROMPT"
 if [ "\${FAKE_COMMIT:-}" = yes ]; then
   printf 'work from Claude\\n' > note.txt
@@ -52,6 +54,7 @@ function runRole(role, adapter, repo = fixtureProject(), extra = {}) {
     CLEARED_CONF: join(ORCH_HOME, 'agents.example.conf'),
     CLEARED_STATE_DIR: join(dir, 'state'),
     FAKE_ARGS: join(dir, 'args'),
+    FAKE_ENV: join(dir, 'env'),
     FAKE_PROMPT: join(dir, 'received'),
     ...extra,
   };
@@ -60,20 +63,23 @@ function runRole(role, adapter, repo = fixtureProject(), extra = {}) {
   });
   return {
     run,
-    args: readFileSync(join(dir, 'args'), 'utf8').trim().split('\n'),
-    prompt: readFileSync(join(dir, 'received'), 'utf8'),
-    report: readFileSync(report, 'utf8'),
-    usage: JSON.parse(readFileSync(usage, 'utf8')),
+    args: existsSync(join(dir, 'args')) ? readFileSync(join(dir, 'args'), 'utf8').trim().split('\n') : [],
+    prompt: existsSync(join(dir, 'received')) ? readFileSync(join(dir, 'received'), 'utf8') : '',
+    report: existsSync(report) ? readFileSync(report, 'utf8') : '',
+    usage: existsSync(usage) ? JSON.parse(readFileSync(usage, 'utf8')) : {},
+    cliEnv: existsSync(join(dir, 'env')) ? readFileSync(join(dir, 'env'), 'utf8').trimEnd().split('\n') : [],
   };
 }
 
 test('every role gives Claude and host Codex the same configured edit and network intent', () => {
   const repo = fixtureProject();
+  execFileSync('git', ['-C', repo, 'checkout', '-q', '-b', 'dev/X-99']);
   for (const [name, settings] of Object.entries(example.sections).filter(([key]) => key.startsWith('permissions.'))) {
     const role = name.slice('permissions.'.length);
     const claude = runRole(role, 'claude', repo);
     const codex = runRole(role, 'codex', repo, {
       ADAPTER_TASK_SCRIPT: '/does/not/exist', ADAPTER_TASK_TOOLS: 'yes', ADAPTER_COMMITS: 'no',
+      GH_TOKEN: 'test-forge-token', GITHUB_TOKEN: 'test-github-token', SSH_AUTH_SOCK: '/tmp/test-agent.sock',
     });
     assert.equal(claude.run.status, 0, `${role}: ${claude.run.stderr}`);
     assert.equal(codex.run.status, 0, `${role}: ${codex.run.stderr}`);
@@ -88,8 +94,24 @@ test('every role gives Claude and host Codex the same configured edit and networ
     assert.match(profile, new RegExp(`network=\\{enabled=${settings.network === 'yes' ? 'true' : 'false'}\\}`), role);
     assert.ok(codex.args.includes('approval_policy="never"'), role);
     assert.ok(codex.args.includes('--ignore-user-config'), role);
+    assert.ok(codex.args.some((arg) => arg.startsWith('projects.') && arg.endsWith('trust_level="untrusted"')), `${role}: project config is isolated`);
     assert.ok(!codex.args.includes('/does/not/exist'), `${role}: container setting ignored`);
+    assert.deepEqual(codex.cliEnv.slice(0, 3), ['', '', ''], `${role}: forge credentials are removed`);
+    assert.match(codex.cliEnv[3], /cleared-tmp$/, `${role}: lane-local temporary directory`);
   }
+});
+
+test('a host Codex work session does not start when its heavy-command slot cannot open', () => {
+  const repo = fixtureProject();
+  const dir = scratch('cleared-gate-');
+  const conf = join(dir, 'agents.conf');
+  writeFileSync(conf, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace('heavy_wait_minutes = 30', 'heavy_wait_minutes = 0'));
+  const result = runRole('review', 'codex', repo, {
+    CLEARED_CONF: conf, ORCH_LANE: 'review/X-99', CLEARED_STATE_DIR: join(dir, 'state'),
+  });
+  assert.equal(result.run.status, 2, result.run.stderr);
+  assert.deepEqual(result.args, []);
+  assert.match(result.report, /host stayed busy/);
 });
 
 for (const harness of ['codex', 'claude']) test(`host ${harness} commits in its lane and the shared push guard checks the commit`, () => {
