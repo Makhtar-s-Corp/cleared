@@ -15,15 +15,29 @@ case "$runner" in host | container) ;; *) echo "codex: unknown runner: $runner (
 # needs that metadata writable in addition to the lane's files.
 host_permissions() {
   local mode=${ORCH_PERMISSION_MODE:-read-only} network=${ORCH_NETWORK:-no} parent path key joined= gitdir common branch
-  local paths=() denies=() entries=('":tmpdir"="deny"' '":slash_tmp"="deny"')
+  local paths=() readonlys=() denies=() entries=('":tmpdir"="deny"' '":slash_tmp"="deny"') sibling
   case "$mode" in read-only) parent=:read-only ;; accept-edits) parent=:workspace ;; *) echo "codex: unknown permission mode: $mode" >&2; return 64 ;; esac
   case "$network" in yes) network=true ;; no) network=false ;; *) echo "codex: unknown network permission: $network" >&2; return 64 ;; esac
   if [ "$mode" = accept-edits ] && [[ ",${ORCH_ALLOW:-}," == *"git commit"* ]]; then
     gitdir=$(git rev-parse --absolute-git-dir)
     common=$(git rev-parse --path-format=absolute --git-common-dir)
+    [ "$gitdir" != "$common" ] || { echo 'codex: a commit-capable host run requires a linked lane worktree' >&2; return 64; }
     branch=$(git symbolic-ref -q --short HEAD) || { echo 'codex: a commit-capable lane needs a branch' >&2; return 64; }
     [[ "$branch" == */* ]] || { echo 'codex: a commit-capable lane needs a namespaced branch' >&2; return 64; }
     paths+=("$gitdir" "$common/objects" "$common/refs/heads/${branch%/*}" "$common/logs/refs/heads/${branch%/*}")
+    # Git needs a writable index and ref lock directory. Its control files
+    # must stay read-only: a rewritten commondir or config.worktree would be
+    # read by the next unsandboxed dispatcher Git command.
+    [ -e "$gitdir/config.worktree" ] || : > "$gitdir/config.worktree"
+    for path in "$gitdir/commondir" "$gitdir/gitdir" "$gitdir/HEAD" "$gitdir/config.worktree" "$common/objects/info" "$common/objects/pack"; do
+      [ ! -e "$path" ] || readonlys+=("$path")
+    done
+    while IFS= read -r sibling; do
+      [ "$sibling" = "$branch" ] && continue
+      for path in "$common/refs/heads/$sibling" "$common/logs/refs/heads/$sibling"; do
+        [ ! -e "$path" ] || denies+=("$path")
+      done
+    done < <(git for-each-ref --format='%(refname:short)' "refs/heads/${branch%/*}/")
   fi
   gitdir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
   codex_tmp=${gitdir:+$gitdir/cleared-tmp}
@@ -43,6 +57,10 @@ host_permissions() {
     [ -n "$path" ] || continue
     key=$(jq -Rn --arg path "$path" '$path')
     entries+=("$key=\"write\"")
+  done
+  for path in "${readonlys[@]}"; do
+    key=$(jq -Rn --arg path "$path" '$path')
+    entries+=("$key=\"read\"")
   done
   for path in "${denies[@]}"; do
     key=$(jq -Rn --arg path "$path" '$path')
@@ -85,7 +103,7 @@ host_run() {
     export CLEARED_HEAVY_SLOT="$ORCH_STATE_DIR/heavy.lock"
   fi
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
-  [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral)
+  [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral --skip-git-repo-check)
   set +e
   env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN -u LINEAR_API_KEY -u LINEAR_APP_CLIENT_ID -u LINEAR_APP_CLIENT_SECRET -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
     TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \

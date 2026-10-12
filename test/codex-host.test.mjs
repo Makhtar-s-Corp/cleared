@@ -72,8 +72,8 @@ function runRole(role, adapter, repo = fixtureProject(), extra = {}) {
 }
 
 test('every role gives Claude and host Codex the same configured edit and network intent', () => {
-  const repo = fixtureProject();
-  execFileSync('git', ['-C', repo, 'checkout', '-q', '-b', 'dev/X-99']);
+  const { path: repo } = laneWithRemote('dev/X-99', null);
+  execFileSync('git', ['-C', repo, 'branch', 'dev/X-98']);
   for (const [name, settings] of Object.entries(example.sections).filter(([key]) => key.startsWith('permissions.'))) {
     const role = name.slice('permissions.'.length);
     const claude = runRole(role, 'claude', repo);
@@ -98,6 +98,12 @@ test('every role gives Claude and host Codex the same configured edit and networ
     assert.ok(!codex.args.includes('/does/not/exist'), `${role}: container setting ignored`);
     assert.deepEqual(codex.cliEnv.slice(0, 3), ['', '', ''], `${role}: forge credentials are removed`);
     assert.match(codex.cliEnv[3], /cleared-tmp$/, `${role}: lane-local temporary directory`);
+    if (settings.mode === 'accept-edits' && settings.allow?.includes('git commit')) {
+      assert.match(profile, /commondir"="read"/, `${role}: Git common-directory pointer is protected`);
+      assert.match(profile, /config\.worktree"="read"/, `${role}: worktree config is protected`);
+      assert.match(profile, /objects\/info"="read"/, `${role}: alternate object store is protected`);
+      assert.match(profile, /refs\/heads\/dev\/X-98"="deny"/, `${role}: sibling branch is protected`);
+    }
   }
 });
 
@@ -112,6 +118,23 @@ test('a host Codex work session does not start when its heavy-command slot canno
   assert.equal(result.run.status, 2, result.run.stderr);
   assert.deepEqual(result.args, []);
   assert.match(result.report, /host stayed busy/);
+});
+
+test('a text-only Codex write-up can run outside a Git checkout', () => {
+  const empty = scratch('cleared-writeup-');
+  const result = runRole('writing', 'codex', empty, { ORCH_TEXT_ONLY: '1' });
+  assert.equal(result.run.status, 0, result.run.stderr);
+  assert.ok(result.args.includes('--ephemeral'));
+  assert.ok(result.args.includes('--skip-git-repo-check'));
+});
+
+test('a commit-capable host run refuses the main checkout', () => {
+  const repo = fixtureProject();
+  execFileSync('git', ['-C', repo, 'checkout', '-q', '-b', 'dev/X-100']);
+  const result = runRole('dev', 'codex', repo);
+  assert.equal(result.run.status, 64);
+  assert.match(result.run.stderr, /linked lane worktree/);
+  assert.deepEqual(result.args, []);
 });
 
 for (const harness of ['codex', 'claude']) test(`host ${harness} commits in its lane and the shared push guard checks the commit`, () => {
