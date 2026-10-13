@@ -15,11 +15,14 @@ const state = stateDir();
 const repo = projectDir();
 const serviceUid = process.getuid();
 const agentName = conf.sections.security?.agent_user || '';
+const sharedUidSetting = conf.sections.security?.allow_shared_uid || '';
+if (sharedUidSetting && !['true', 'false'].includes(sharedUidSetting)) throw new Error('[security] allow_shared_uid must be true or false');
+const allowSharedUid = sharedUidSetting === 'true';
 const passwd = agentName ? execFileSync('getent', ['passwd', agentName], { encoding: 'utf8' }).trim().split(':') : null;
 const agentUid = passwd ? Number(passwd[2]) : serviceUid;
 const humanName = conf.sections.security?.human_user || (conf.sections.tracker?.adapter === 'local' ? conf.sections.tracker?.owner_id : '');
 const humanPasswd = humanName ? execFileSync('getent', ['passwd', humanName], { encoding: 'utf8' }).trim().split(':') : null;
-const humanUid = humanPasswd ? Number(humanPasswd[2]) : null;
+const humanUid = humanPasswd ? Number(humanPasswd[2]) : !agentName && allowSharedUid ? serviceUid : null;
 if (!Number.isSafeInteger(agentUid) || agentUid < 0 || (agentName && agentUid === serviceUid)) throw new Error('Invalid [security] agent_user');
 if (humanUid !== null && (!Number.isSafeInteger(humanUid) || humanUid < 0 || (agentName && humanUid === agentUid))) throw new Error('Invalid [security] human_user: it must differ from agent_user');
 if (agentName && !conf.sections.security?.socket_path && !process.env.CLEARED_RELEASE_SOCKET) throw new Error('[security] socket_path is required when agent_user is configured');
@@ -73,8 +76,8 @@ function command(file, args, input = '', extraEnv = {}) {
     let stdout = '', stderr = '';
     child.stdout.on('data', (b) => { if (stdout.length < 100000) stdout += b; });
     child.stderr.on('data', (b) => { if (stderr.length < 100000) stderr += b; });
-    child.on('error', (error) => resolve({ code: 1, stdout, stderr: error.message }));
-    child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on('error', (error) => resolve({ code: 69, stdout, stderr: error.message }));
+    child.on('close', (code) => resolve({ code: code ?? 69, stdout, stderr }));
     child.stdin.end(input);
   });
 }
@@ -91,20 +94,24 @@ async function handle(input, uid) {
   const validPr = Number.isSafeInteger(pr) && pr > 0;
   let commit = null;
   const permitted = uid === serviceUid || (agentName && uid === agentUid) || uid === humanUid;
-  const reject = (reason) => { event(validTicket ? ticket : null, validPr ? pr : null, uid, false, reason, commit, operation); return { ok: false, code: 6, reason, commit }; };
+  const reject = (reason) => { event(validTicket ? ticket : null, validPr ? pr : null, uid, false, reason, commit, operation); return { ok: false, code: 1, definitive: true, reason, commit }; };
   if (!permitted) return reject('Caller UID is not an authorized agent or service account');
   if (!['request_release', 'request_rollback', 'status'].includes(operation)) return reject('Unknown operation');
   if (!validTicket) return reject('Invalid ticket');
   if (operation === 'status') {
     const db = openLedger();
     let release, error;
-    try { release = db.prepare('SELECT ticket,pr,merge_sha,status,last_health FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket); }
+    try {
+      release = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'releases'").get()
+        ? db.prepare('SELECT ticket,pr,merge_sha,status,last_health FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket) : null;
+    }
     catch (caught) { error = caught; }
     finally { db.close(); }
     if (error) return reject(`Cannot read release status: ${error.message}`);
     event(ticket, null, uid, true, 'status read', release?.merge_sha || null, operation);
     return { ok: true, release: release || null, problem: agentName ? null : 'release lock is not a security boundary: agents run as the service account' };
   }
+  if (!agentName && !allowSharedUid) return reject('Release lock requires [security] agent_user; create a separate agent account and run serve/install.sh, or explicitly set [security] allow_shared_uid = true to accept the shared-UID risk');
   if (busy) { event(ticket, validPr ? pr : null, uid, false, 'Another release operation is running', commit, operation);
     return { ok: false, code: 5, reason: 'Another release operation is running', commit }; }
   if (validPr) commit = currentHead(pr);
@@ -120,11 +127,15 @@ async function handle(input, uid) {
         if (!Array.isArray(captures) || captures.length > 8 || captures.some((c) => typeof c?.path !== 'string' || typeof c?.caption !== 'string' || c.path.length > 1000 || c.caption.length > 200)) return reject('Invalid captures');
         const result = await command(join(home, 'ask-validation.sh'), [ticket, '-', ...prs.flatMap((n) => ['--pr', String(n)]), ...captures.flatMap((c) => ['--capture', c.path, c.caption])], input.approval_request);
         event(ticket, pr, uid, result.code === 0, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
-        return { ok: result.code === 0, code: result.code, reason: result.stderr.trim(), output: result.stdout.trim(), commit };
+        return { ok: result.code === 0, code: result.code === 0 ? 0 : 69, reason: result.stderr.trim(), output: result.stdout.trim(), commit };
       }
       const result = await command(join(home, 'merge-pr.sh'), [String(pr), ticket, '-'], input.announcement, input.from_queue && uid === serviceUid ? { ORCH_FROM_QUEUE: '1' } : {});
       event(ticket, pr, uid, result.code === 0 || result.code === 3, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
-      return { ok: result.code === 0, code: result.code, reason: result.stderr.trim(), output: result.stdout.trim(), commit };
+      // Audited merge-pr.sh: only no() exits 6 for a definitive refusal.
+      // die(), GitHub failures, lock failures and unhandled script errors exit 1
+      // or another code and must remain retryable in the queue.
+      const code = result.code === 6 ? 1 : result.code === 0 ? 0 : result.code === 3 || result.code === 5 ? 5 : 69;
+      return { ok: result.code === 0, code, definitive: code === 1, reason: result.stderr.trim(), output: result.stdout.trim(), commit };
     } finally { busy = false; }
   }
   if (uid !== humanUid) return reject('Only the configured human account can request manual rollback');
@@ -137,7 +148,7 @@ async function handle(input, uid) {
     finally { release.close(); }
     const result = await command('flock', ['-x', '-w', '120', join(state, 'merge.lock'), process.execPath, join(home, 'lib/release.mjs'), 'rollback', ticket, ...flags]);
     event(ticket, null, uid, result.code === 0, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
-    return { ok: result.code === 0, code: result.code, reason: result.stderr.trim(), output: result.stdout.trim() };
+    return { ok: result.code === 0, code: result.code === 0 ? 0 : 69, reason: result.stderr.trim(), output: result.stdout.trim() };
   } finally { busy = false; }
 }
 if (existsSync(socketPath)) {
@@ -157,7 +168,7 @@ const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     try { reply = await handle(JSON.parse(data), uid); }
     catch (error) {
       try { event(null, null, uid, false, error.message, null, 'invalid_request'); } catch {}
-      reply = { ok: false, code: 1, reason: error.message };
+      reply = { ok: false, code: 69, reason: error.message };
     }
     socket.end(JSON.stringify(reply) + '\n');
   });

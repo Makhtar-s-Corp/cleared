@@ -35,6 +35,9 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
+[ -n "$(conf_get security agent_user)" ] || [ "$(conf_get security allow_shared_uid)" = true ] \
+  || { echo "merge-pr.sh: release lock requires [security] agent_user; create a separate agent account and run serve/install.sh, or explicitly set [security] allow_shared_uid = true" >&2; exit 6; }
+
 # Only the service account's broker may enter the merge implementation.
 # The secret lives in service-owned state; a harness cannot read it.
 [ "$(/usr/bin/id -u)" = "$(/usr/bin/stat -c %u "$ORCH_HOME/merge-pr.sh")" ] \

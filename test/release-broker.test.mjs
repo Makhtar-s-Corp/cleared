@@ -9,17 +9,15 @@ import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
 import { reviewedPull } from './support.mjs';
 
-async function fixture(t, { humanUser = '' } = {}) {
+async function fixture(t, { humanUser = '', allowSharedUid = true } = {}) {
   const pull = reviewedPull(['server/a.mjs']);
   const { home, state } = pull.box;
   chmodSync(state, 0o700);
   mkdirSync(join(home, 'serve'), { recursive: true });
   copyFileSync(join(ORCH_HOME, 'serve/release-broker.mjs'), join(home, 'serve/release-broker.mjs'));
   copyFileSync(join(ORCH_HOME, 'release-request.mjs'), join(home, 'release-request.mjs'));
-  if (humanUser) {
-    const path = join(home, 'agents.conf');
-    writeFileSync(path, `${readFileSync(path, 'utf8')}\n[security]\nhuman_user = ${humanUser}\n`);
-  }
+  const configPath = join(home, 'agents.conf');
+  writeFileSync(configPath, `${readFileSync(configPath, 'utf8').replace('allow_shared_uid = true', `allow_shared_uid = ${allowSharedUid}`)}\n[security]\n${humanUser ? `human_user = ${humanUser}\n` : ''}`);
   const socket = join(home, 'release.sock');
   const env = { ...pull.env, CLEARED_RELEASE_SOCKET: socket };
   const broker = spawn(process.execPath, [join(home, 'serve/release-broker.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -45,9 +43,41 @@ test('broker refuses an unapproved release, records the peer UID and commit, and
   mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
   writeFileSync(join(pull.box.state, 'validations/X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-01T00:00:00Z', pulls: [{ pr: 7, head: pull.headOf() }] }));
   const refused = call(['request_release', 'X-5', '7'], 'Announcement');
-  assert.equal(refused.status, 6, refused.stderr);
+  assert.equal(refused.status, 1, refused.stderr);
   assert.match(refused.stderr, /not agreed/);
   assert.deepEqual(events().map((e) => [e.uid, e.accepted, e.commit]), [[process.getuid(), false, pull.headOf()]]);
+});
+
+test('shared UID is refused by default and explicitly allowed with a permanent status warning', async (t) => {
+  const disabled = await fixture(t, { allowSharedUid: false });
+  const release = disabled.call(['request_release', 'X-5', '7'], 'Announcement');
+  const rollback = disabled.call(['request_rollback', 'X-5']);
+  assert.equal(release.status, 1);
+  assert.equal(rollback.status, 1);
+  assert.match(release.stderr, /\[security\] agent_user.*allow_shared_uid = true/);
+  assert.match(rollback.stderr, /\[security\] agent_user.*allow_shared_uid = true/);
+  assert.equal(disabled.events().filter((event) => !event.accepted).length, 2);
+  const secret = readFileSync(join(disabled.pull.box.state, 'release-broker.secret'), 'utf8');
+  const directMerge = spawnSync(join(disabled.pull.box.home, 'merge-pr.sh'), ['7', 'X-5'],
+    { env: { ...disabled.pull.env, ORCH_BROKER_SECRET: secret }, encoding: 'utf8' });
+  assert.equal(directMerge.status, 6);
+  assert.match(directMerge.stderr, /release lock requires \[security\] agent_user/i);
+  const directRollback = spawnSync(process.execPath, [join(disabled.pull.box.home, 'lib/release.mjs'), 'rollback', 'X-5', '--yes'],
+    { env: { ...disabled.pull.env, ORCH_BROKER_SECRET: secret }, encoding: 'utf8' });
+  assert.notEqual(directRollback.status, 0);
+  assert.match(directRollback.stderr, /Release lock requires \[security\] agent_user/);
+  const enabled = await fixture(t);
+  const status = enabled.call(['status', 'X-5']);
+  assert.equal(status.status, 0, status.stderr);
+  assert.match(status.stdout, /release lock is not a security boundary: agents run as the service account/);
+  assert.equal(enabled.call(['request_release', 'X-5', '7', '--ask'], 'Please approve this version.').status, 0);
+});
+
+test('a transient GitHub failure returns a retryable code, never the definitive code 1', async (t) => {
+  const { pull, call } = await fixture(t);
+  writeFileSync(join(pull.box.home, 'bin/gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const result = call(['request_release', 'X-5', '7'], 'Announcement');
+  assert.equal(result.status, 69, result.stderr);
 });
 
 test('broker refuses a socket directly in a sticky shared directory', () => {
@@ -67,12 +97,12 @@ test('broker posts the request in service state and rejects approval before it o
   const shown = JSON.parse(readFileSync(join(pull.box.state, 'validations/X-5.json'), 'utf8'));
   assert.equal(shown.pulls[0].head, pull.headOf());
   writeFileSync(join(pull.box.home, 'tracker-moved'), '8');
-  assert.equal(call(['request_release', 'X-5', '7'], 'Announcement').status, 6);
+  assert.equal(call(['request_release', 'X-5', '7'], 'Announcement').status, 1);
   writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
-  assert.equal(call(['request_release', 'X-5', '8'], 'Announcement').status, 6);
+  assert.equal(call(['request_release', 'X-5', '8'], 'Announcement').status, 1);
   pull.git('commit', '-q', '--allow-empty', '-m', 'new version');
   pull.publish();
-  assert.equal(call(['request_release', 'X-5', '7'], 'Announcement').status, 6);
+  assert.equal(call(['request_release', 'X-5', '7'], 'Announcement').status, 1);
   assert.equal(events().filter((e) => !e.accepted).length, 3);
 });
 
@@ -106,7 +136,7 @@ test('broker refuses an empty announcement even after valid human approval', asy
   assert.equal(call(['request_release', 'X-5', '7', '--ask'], 'Please approve this version.').status, 0);
   writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
   const refused = call(['request_release', 'X-5', '7']);
-  assert.equal(refused.status, 6, refused.stderr);
+  assert.equal(refused.status, 1, refused.stderr);
   assert.match(refused.stderr, /announcement is needed/);
   assert.equal(pull.merged(), null);
   assert.equal(events().at(-1).accepted, false);
@@ -124,7 +154,7 @@ test('broker refuses manual rollback from the service UID when a separate human 
   const humanUser = userInfo().username === 'nobody' ? 'root' : 'nobody';
   const { call, events } = await fixture(t, { humanUser });
   const refused = call(['request_rollback', 'X-5']);
-  assert.equal(refused.status, 6, refused.stderr);
+  assert.equal(refused.status, 1, refused.stderr);
   assert.match(refused.stderr, /Only the configured human account/);
   assert.deepEqual(events().at(-1), {
     operation: 'request_rollback', uid: process.getuid(), accepted: false,

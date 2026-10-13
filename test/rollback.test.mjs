@@ -259,7 +259,7 @@ test('local human CLI previews, confirms and pushes a revert through the broker'
   writeFileSync(keyPath, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
   chmodSync(keyPath, 0o600);
   const owner = userInfo().username;
-  const configuration = (id, uid) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n`;
+  const configuration = (id, uid) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n[security]\nallow_shared_uid = true\n`;
   const socket = join(root, 'broker.sock');
   const env = { ...process.env, CLEARED_REPO: x.repo, CLEARED_STATE_DIR: root, CLEARED_CONF: configPath, CLEARED_RELEASE_SOCKET: socket };
   writeFileSync(configPath, configuration(owner, '999999'));

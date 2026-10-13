@@ -109,6 +109,7 @@ Classifies paths and sets the guarded shipping policy.
 | `lines_until` | Cutoff for old written `Fusion:` or `Merge:` approval lines. | Optional; no default |
 | `separate_identity` | Require independently attributable agent and human actions. | Default: required |
 | `queue_hours` | How long a blocked merge remains queued. | Default: 24 |
+| `queue_max_attempts` | Maximum transient failures before a queued merge is refused and reported. A broker-busy reply does not count as a failure. | Default: 30 |
 
 ## `[release]`
 
@@ -486,7 +487,8 @@ The read-only Cleared app. It only reads the ledger, the tracker and the state t
 | Setting | Meaning | Requirement |
 | --- | --- | --- |
 | `agent_user` | System account used for both Claude Code and Codex processes. Set it to a distinct account and grant that account worktree access without Cleared state write access. | Optional; no default |
-| `human_user` | Unix account permitted to run `cleared rollback` through the broker. Required for manual rollback with a remote tracker; the local tracker defaults to `[tracker] owner_id`. Must differ from `agent_user`. | Optional; no default |
+| `allow_shared_uid` | Explicitly allow release and manual rollback without `agent_user`. The lock is then not a security boundary and `cleared status` keeps a permanent warning. | Default: false |
+| `human_user` | Unix account permitted to run `cleared rollback` through the broker. Required for manual rollback with a remote tracker in split-account mode; the local tracker defaults to `[tracker] owner_id`. In explicit shared-UID mode the service UID is accepted if omitted. Must differ from `agent_user`. | Optional; no default |
 | `socket_path` | Absolute local Unix socket path for the service-owned release broker. Required when `agent_user` is set; its parent must be traversable by that account. | Optional; no default |
 | `bwrap_path` | Bubblewrap executable used to mount shared Git metadata read-only inside agent processes. | Optional; no default |
 

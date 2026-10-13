@@ -450,9 +450,11 @@ drop_queued_review() {
 # good leaves the queue: written to the ledger (merge_refused) and told to
 # the lead at its next wake.
 open_queued_merges() {
-  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why hours since
+  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why hours since attempts max_attempts
   hours=$(conf_get merge queue_hours)
   [[ "$hours" =~ ^[0-9]+$ ]] || hours=24
+  max_attempts=$(conf_get merge queue_max_attempts)
+  [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=30
   ls "$queue"/*.json > /dev/null 2>&1 || return 0
   while IFS= read -r entry; do
     if ! jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1; then
@@ -465,23 +467,33 @@ open_queued_merges() {
     if [ -n "${ORCH_BROKER_SECRET:-}" ]; then
       # Test fixtures execute the old merge checks with a fixture-only key.
       why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
+    elif [ -n "$said" ] && [ ! -r "$said" ]; then
+      code=69 why="queued announcement cannot be read: $said"
     else
       why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/release-request.mjs" request_release "$ticket" "$pr" < "${said:-/dev/null}" 2>&1 > /dev/null) || code=$?
     fi
+    # A process crash can also exit 1. Only this broker marker makes it a
+    # definitive refusal; otherwise it uses the bounded retry path.
+    if [ "$code" = 1 ] && [[ "$why" != release\ broker\ definitive\ refusal$'\n'* ]]; then code=69; fi
     case "$code" in
       0) rm -f "$entry" "$queue/$pr.announcement.md"; return 0 ;;
-      5|69)
-        # It does not wait for ever. Only a time in the form merge-pr.sh
-        # writes counts: anything else is no time, and it leaves too.
-        since=$(jq -r '.at // ""' "$entry")
-        if ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || [[ "$since" < "$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)" ]]; then
-          ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr waited more than $hours hours in the queue ($(tr '\n' ' ' <<<"$why" | cut -c1-300)): it left the queue, and is to be asked for again"
-          rm -f "$entry" "$queue/$pr.announcement.md"
-        fi
+      1|6)
+        ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue after a definitive broker refusal: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
+        rm -f "$entry" "$queue/$pr.announcement.md"
         ;;
       *)
-        ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue without being done: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
-        rm -f "$entry" "$queue/$pr.announcement.md"
+        attempts=$(jq -r '.attempts // 0' "$entry")
+        [[ "$attempts" =~ ^[0-9]+$ ]] || attempts=0
+        if [ "$code" != 5 ]; then
+          attempts=$((attempts + 1))
+          jq --argjson attempts "$attempts" '.attempts = $attempts' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        fi
+        # Busy waits are bounded by age; other failures also have an attempt cap.
+        since=$(jq -r '.at // ""' "$entry")
+        if [ "$attempts" -ge "$max_attempts" ] || ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || [[ "$since" < "$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+          ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue after $attempts failed attempts or $hours hours ($(tr '\n' ' ' <<<"$why" | cut -c1-300)): ask for it again"
+          rm -f "$entry" "$queue/$pr.announcement.md"
+        fi
         ;;
     esac
   done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry" 2> /dev/null)" "$entry"; done | sort | cut -f2)

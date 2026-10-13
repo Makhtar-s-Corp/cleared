@@ -807,7 +807,7 @@ test('a queued release survives a broker restart or missing socket', () => {
   delete env.ORCH_BROKER_SECRET;
   const retry = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
   assert.equal(retry.status, 0, retry.stderr);
-  assert.ok(readFileSync(entry, 'utf8').includes('"pr":7'));
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).pr, 7);
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: '2020-01-01T00:00:00Z', announcement: '' }));
   const expired = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
   assert.equal(expired.status, 0, expired.stderr);
@@ -816,11 +816,27 @@ test('a queued release survives a broker restart or missing socket', () => {
   // A broker reply with a permanent merge failure must be reported now,
   // not retried until the queue deadline.
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
-  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho permanent merge refusal >&2\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\nprintf "release broker definitive refusal\\npermanent merge refusal\\n" >&2\nexit 1\n', { mode: 0o755 });
   const refused = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
   assert.equal(refused.status, 0, refused.stderr);
   assert.equal(existsSync(entry), false);
   assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*permanent merge refusal/);
+  // A temporary failure keeps its request, then the configured attempt cap
+  // removes and reports it instead of retrying for ever.
+  const confPath = join(pull.box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('queue_hours = 24', 'queue_hours = 24\nqueue_max_attempts = 2'));
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho client crashed >&2\nexit 1\n', { mode: 0o755 });
+  const transient = () => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
+  assert.equal(transient().status, 0);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).attempts, 1);
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho temporary GitHub failure >&2\nexit 69\n', { mode: 0o755 });
+  assert.equal(transient().status, 0);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).attempts, 1);
+  assert.equal(transient().status, 0);
+  assert.equal(existsSync(entry), false);
+  assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*2 failed attempts.*temporary GitHub failure/);
 });
 
 test('split-account review takes its author from the service ledger and rejects an agent claim', () => {

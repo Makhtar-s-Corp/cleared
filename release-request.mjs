@@ -2,6 +2,8 @@
 import net from 'node:net';
 import { lstatSync, statSync } from 'node:fs';
 import { loadConf, stateDir } from './lib/conf.mjs';
+process.on('uncaughtException', (error) => { console.error(`release broker client failed: ${error.message}`); process.exit(69); });
+process.on('unhandledRejection', (error) => { console.error(`release broker client failed: ${error?.message || error}`); process.exit(69); });
 const [operation, ticket, pr, ...flags] = process.argv.slice(2);
 if (!['request_release', 'request_rollback', 'status'].includes(operation) || !ticket) {
   console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [--force-with-migrations] | status TICKET'); process.exit(64);
@@ -44,7 +46,13 @@ let reply = '';
 client.on('connect', () => client.end(JSON.stringify(request)));
 client.on('data', (chunk) => reply += chunk);
 client.on('end', () => {
-  try { const result = JSON.parse(reply); const message = result.output || result.reason || JSON.stringify(result); (result.ok ? console.log : console.error)(message); process.exitCode = result.code ?? (result.ok ? 0 : 1); }
+  try {
+    const result = JSON.parse(reply);
+    const message = result.output || result.reason || JSON.stringify(result);
+    if (result.code === 1 && result.definitive === true) console.error('release broker definitive refusal');
+    (result.ok ? console.log : console.error)(message);
+    process.exitCode = result.code === 1 && result.definitive !== true ? 69 : result.code ?? (result.ok ? 0 : 69);
+  }
   catch { console.error('Invalid release broker reply'); process.exitCode = 69; }
 });
 client.on('error', (error) => { console.error(`release broker unavailable: ${error.message}`); process.exitCode = 69; });
