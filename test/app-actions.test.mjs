@@ -220,9 +220,10 @@ test('Undo during the grace delay writes nothing; too late is too late', async (
     await r.register(browser);
     const { confirmed } = await r.confirmClear(browser);
     const other = await r.browser();
-    assert.equal((await other.json('/api/actions/undo', { pendingId: 'unknown' })).status, 404);
-    // The same human, on another device, sees it and may undo it.
-    assert.equal((await fetch(`${r.base}/api/me`, { headers: { cookie: other.cookie } }).then((x) => x.json())).actions.pending.length, 1);
+    assert.equal((await other.json('/api/actions/undo', { pendingId: confirmed.body.pendingId })).status, 404, 'another session cannot undo it');
+    // Another device sees it waiting, without the means to undo it.
+    const seen = (await fetch(`${r.base}/api/me`, { headers: { cookie: other.cookie } }).then((x) => x.json())).actions.pending;
+    assert.equal(seen.length, 1); assert.equal(seen[0].id, null);
     assert.equal((await browser.json('/api/actions/undo', { pendingId: confirmed.body.pendingId })).status, 200);
     assert.equal(r.timers[0].cancelled, true);
     await r.timers[0].fn();
@@ -415,5 +416,21 @@ test('without a secure address, even an answer is refused', async () => {
     const browser = await r.browser();
     assert.equal((await browser.json('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' })).body.error, 'insecure');
     assert.deepEqual(r.ran, []);
+  } finally { await r.close(); }
+});
+
+test('a Send back is refused while the Clear of the same ticket is being written', async () => {
+  let release; const gate = new Promise((resolve) => { release = resolve; });
+  const r = await rig({ run: async (q) => { if (q.op === 'approve') await gate; return { ok: true }; } });
+  try {
+    const browser = await r.browser();
+    await r.register(browser);
+    await r.confirmClear(browser);
+    const writing = r.timers[0].fn();
+    await new Promise((resolve) => setImmediate(resolve));
+    const asked = await browser.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-31', versions: VERSIONS, text: 'Stop' });
+    const done = await browser.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey), text: 'Stop' });
+    assert.equal(done.status, 409); assert.equal(done.body.error, 'too_late');
+    release(); await writing;
   } finally { await r.close(); }
 });

@@ -9,7 +9,7 @@ import { stateDir } from '../../lib/conf.mjs';
 const writer = join(dirname(fileURLToPath(import.meta.url)), '..', 'human-write.mjs');
 
 export function runWriter(request, { state = stateDir(), env = process.env, timeoutMs = 90000 } = {}) {
-  const command = request.op === 'approve'
+  const command = request.op !== 'answer'
     ? ['flock', ['-x', '-w', '30', join(state, 'merge.lock'), process.execPath, writer]]
     : [process.execPath, [writer]];
   return new Promise((resolve) => {

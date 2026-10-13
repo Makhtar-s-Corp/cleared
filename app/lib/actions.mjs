@@ -51,9 +51,9 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     const keys = stored();
     const reason = !where ? 'insecure' : keys.length ? null : 'no_passkey';
     return { confirm: reason === null, reason, passkeys: keys.length, graceMs, rpId: where?.rpId ?? null,
-      pending: [...pending.values()].map(view) };
+      pending: [...pending.values()].map((p) => view(p, p.session === session.id)) };
   }
-  const view = (p) => ({ id: p.id, ticket: p.ticket, versions: p.versions, state: p.state, dueAt: p.dueAt, leftMs: Math.max(0, p.dueAt - now()), result: p.result ? { ok: Boolean(p.result.ok), code: p.result.code } : null });
+  const view = (p, mine = true) => ({ id: mine ? p.id : null, ticket: p.ticket, versions: p.versions, state: p.state, dueAt: p.dueAt, leftMs: Math.max(0, p.dueAt - now()), result: p.result ? { ok: Boolean(p.result.ok), code: p.result.code } : null });
 
   // ---- confirmation ---------------------------------------------------------------
   async function begin(session, body) {
@@ -102,6 +102,7 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     if (entry.gesture === 'sendback') {
       if (hash(body.text) !== entry.textHash) throw fail(403, 'text_changed');
       // The human's last word wins: a clear still in its grace delay, from any device, is withdrawn.
+      if ([...pending.values()].some((p) => p.ticket === entry.ticket && p.state === 'writing')) throw fail(409, 'too_late');
       for (const p of pending.values()) if (p.ticket === entry.ticket && p.state === 'waiting') withdraw(p, session, 'undone_by_sendback');
       return write(session, entry.gesture, { op: 'sendback', ticket: entry.ticket, text: body.text, versions: entry.versions });
     }
@@ -119,10 +120,10 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     p.state = 'undone'; p.finishedAt = now(); p.result = { ok: false, code: 'undone' };
     log(session, 'clear', p.ticket, p.versions, result, { pending: p.id });
   }
-  // The same human on any of their devices may undo.
+  // Only the device that confirmed may undo; the others see the clear waiting, and a Send back withdraws it.
   function undo(session, body) {
     const p = pending.get(body?.pendingId);
-    if (!p) throw fail(404, 'pending');
+    if (!p || p.session !== session.id) throw fail(404, 'pending');
     if (p.state !== 'waiting') throw fail(409, 'too_late');
     withdraw(p, session, 'undone');
     return { ok: true };
@@ -206,5 +207,5 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
   }
 
   const stop = () => { for (const p of pending.values()) if (p.state === 'waiting') cancel(p.timer); };
-  return { status, begin, confirm, undo, answer, mintGrant, registerOptions, registerFinish, stop, pendingOf: () => [...pending.values()].map(view) };
+  return { status, begin, confirm, undo, answer, mintGrant, registerOptions, registerFinish, stop, pendingOf: (session) => [...pending.values()].map((p) => view(p, p.session === session.id)) };
 }

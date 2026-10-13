@@ -44,7 +44,8 @@ export async function perform(request, { conf, creds, settings = {}, project }) 
       if (!validText(request.text)) throw refused('input', 'Invalid text');
       await client.comment(request.ticket, request.text);
       await client.move(request.ticket, states.back);
-      const by = await client.lastMoveBy(request.ticket, states.back);
+      let by = null;
+      try { by = await client.lastMoveBy(request.ticket, states.back); } catch { /* not readable yet; the move was made */ }
       return { ok: true, author: who.id, verified: by?.kind === 'human' };
     }
     if (request.op === 'approve') {

@@ -73,7 +73,7 @@ function humanUid() {
   const uidOf = (user) => Number(execFileSync('getent', ['passwd', user], { encoding: 'utf8' }).trim().split(':')[2]);
   const agent = security.agent_user ? uidOf(security.agent_user) : null;
   const human = name ? uidOf(name) : security.allow_shared_uid === 'true' && !security.agent_user ? process.getuid() : null;
-  if (human !== null && (!Number.isSafeInteger(human) || human === agent || (agent !== null && human === process.getuid()))) {
+  if (human !== null && (!Number.isSafeInteger(human) || human === agent || (agent !== null && human === process.getuid()) || (human === process.getuid() && security.allow_shared_uid !== 'true'))) {
     console.error('cleared app: [security] human_user must differ from agent_user and from the app\'s own account when agent_user is set; no passkey grant will be given');
     return null;
   }
