@@ -19,8 +19,8 @@ fi
 [ $# -eq 2 ] || die "usage: adopt-lane.sh <worktree name> <terminal handle> | --forget <worktree name>"
 lane=$1 handle=$2
 worktree=$(lane_worktree "$lane") || die "git knows no worktree named \"$lane\" (or several): nothing written"
-found=$(orca_terminal "$handle")
-[ -n "$found" ] || die "Orca shows no terminal $handle: nothing written"
+found=$(terminal show "$handle")
+[ -n "$found" ] || die "no terminal $handle is shown: nothing written"
 [ "$found" = "true $worktree" ] || die "the terminal $handle is not connected, or is not in the worktree \"$lane\" ($worktree): nothing written"
 mkdir -p "$ORCH_STATE_DIR"
 [ -f "$known" ] || echo '{}' > "$known"

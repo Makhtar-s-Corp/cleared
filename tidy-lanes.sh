@@ -174,8 +174,8 @@ while IFS=$'\t' read -r path branch; do
     fi
   fi
   # 4: its terminals, its worktree.
-  orca terminal close --worktree "path:$path" --all > /dev/null 2>&1 || true
-  orca worktree rm --worktree "path:$path" --force > /dev/null 2>&1 || git -C "$ORCH_REPO" worktree remove --force "$path" 2> /dev/null || true
+  terminal close-worktree "$path"
+  terminal remove-worktree "$path" 2> /dev/null || true
   [ ! -d "$path" ] || { kept "$lane" "its worktree could not be removed"; continue; }
   jq -nc --arg lane "$lane" --arg name "$name" --arg why "$why" '{lane: $lane, name: $name, why: $why}' >> "$out/closed.jsonl"
 done < <(git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}')

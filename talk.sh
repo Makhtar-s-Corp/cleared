@@ -124,9 +124,9 @@ printf '%s\n' "$chain" > "$run_dir/chain.json"
 } > "$run_dir/talk.env"
 
 echo "opening $(date +%s)" > "$ORCH_STATE_DIR/wake/talk"
-# The mark holds the wakes from here on; their lock is not kept while Orca opens the terminal.
+# The mark holds the wakes from here on; their lock is not kept while the terminal opens.
 exec 8>&-
-open_terminal "$worktree" "$lane · discussion · $(jq -r '.[0].alias' <<<"$chain")" "$ORCH_HOME/talk-run.sh $run_dir" > "$run_dir/terminal.handle" \
-  || { rm -f "$ORCH_STATE_DIR/wake/talk"; die "Orca did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"; }
+terminal open "$worktree" "$lane · discussion · $(jq -r '.[0].alias' <<<"$chain")" "$ORCH_HOME/talk-run.sh $run_dir" "$run_dir" > "$run_dir/terminal.handle" \
+  || { rm -f "$ORCH_STATE_DIR/wake/talk"; die "the terminal adapter ($terminal_loaded) did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"; }
 user_message talk_opened "lane=$lane" "model=$(jq -r '.[0].alias' <<<"$chain")"
 echo "$run_dir"

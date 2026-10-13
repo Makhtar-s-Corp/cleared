@@ -9,6 +9,7 @@
 #   3. Something moved: starts one short session of the lead's role, in its
 #      one stable lane (release/lead, which Orca shows), with the model the
 #      routing table gives that role, and hands it the list of what moved.
+#      The session is started by the terminal adapter and outlives the wake.
 #
 #   wake.sh [--dry-run]     --dry-run prints what moved and starts nothing
 #   wake.sh --handover <file>
@@ -244,6 +245,8 @@ elif [ -n "$(git -C "$worktree" status --porcelain --untracked-files=no)" ] \
   die "the lane of the project lead ($worktree) has changes or commits of its own: left untouched, no session started"
 fi
 rm -f "$wake_dir/blocked"
+# A terminal adapter the project names wrongly is said before a session is prepared.
+terminal_adapter
 
 run_base="lead-$(date -u +%Y%m%dT%H%M%SZ)"
 run_dir="$ORCH_STATE_DIR/runs/$run_base"
@@ -293,8 +296,8 @@ fi
 watching=" · observation"
 [ -z "$acting" ] || watching=""
 [ -z "$handover" ] || watching=" · passation"
-open_terminal "$worktree" "$lane · $(jq -r '.[0].alias' <<<"$chain")$watching" "$ORCH_HOME/lane-run.sh $run_dir" > "$run_dir/terminal.handle" \
-  || die "Orca did not open the terminal of the project lead; what moved stays for the next wake"
+terminal open "$worktree" "$lane · $(jq -r '.[0].alias' <<<"$chain")$watching" "$ORCH_HOME/lane-run.sh $run_dir" "$run_dir" > "$run_dir/terminal.handle" \
+  || die "the terminal adapter ($terminal_loaded) did not start the session of the project lead; what moved stays for the next wake"
 
 # The session has the events: they are not handed out again.
 echo "$run_dir" > "$current"

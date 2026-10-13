@@ -386,7 +386,7 @@ one_lane() {
       [ "$age" -ge $(( session_hours * 60 )) ] || return 0
       say "$ticket: its session runs for more than $session_hours hours: stopped"
       [ -z "$dry" ] || return 0
-      orca terminal close --terminal "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" > /dev/null 2>&1 || true
+      terminal close "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" || true
       kill "$pid" 2> /dev/null || true
       echo 124 > "$ORCH_STATE_DIR/runs/$last/exit-code"
     elif [ -n "$pid" ]; then
@@ -473,8 +473,8 @@ one_lane() {
           return 0
         fi
       fi
-      orca terminal close --worktree "path:$worktree" --all > /dev/null 2>&1 || true
-      orca worktree rm --worktree "path:$worktree" --force > /dev/null 2>&1 || git -C "$ORCH_REPO" worktree remove --force "$worktree" 2> /dev/null || true
+      terminal close-worktree "$worktree"
+      terminal remove-worktree "$worktree" 2> /dev/null || true
       [ -d "$worktree" ] || say "$ticket: session over, work sent: its worktree is closed"
     fi
   fi

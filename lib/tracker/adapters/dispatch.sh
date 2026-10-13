@@ -3,13 +3,15 @@ set -euo pipefail
 . "$(cd "$(dirname "$0")/../../.." && pwd)/lib/common.sh"
 adapter=$(conf_get tracker adapter)
 [ -n "$adapter" ] || die "Missing required [tracker] adapter (linear | github | local)"
-if [ "${1:-}" = decorate-worktree ] && [ "$adapter" != linear ]; then
-  orca worktree set --worktree "path:$2" --display-name "$3" --comment "$5"
-  exit $?
-fi
 if [ "${1:-}" = legacy-line-allowed ]; then
   [ "$adapter" = linear ]
   exit $?
+fi
+# The kind of issue a terminal can link a worktree to (Orca links those of
+# Linear): printed when the tracker is one, nothing otherwise.
+if [ "${1:-}" = linkable-issue ]; then
+  [ "$adapter" != linear ] || echo linear
+  exit 0
 fi
 if [ "${1:-}" = ticket-prefix ]; then
   case "$adapter" in
