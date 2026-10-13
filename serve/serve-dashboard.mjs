@@ -54,6 +54,11 @@ export function dashboardServer({ file, ranges = TAILSCALE, language = 'en' }) {
       response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end(message('http_not_found', language));
       return;
     }
+    // The app replaced this page: send the reader there when it is configured.
+    if (process.env.CLEARED_APP_URL && (path === '/' || path === '/index.html')) {
+      response.writeHead(302, { location: process.env.CLEARED_APP_URL, 'cache-control': 'no-store' }).end();
+      return;
+    }
     try {
       const page = await readFile(file);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(request.method === 'HEAD' ? undefined : page);

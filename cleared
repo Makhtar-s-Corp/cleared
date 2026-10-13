@@ -14,6 +14,10 @@ if (area === 'status') {
     'status', ...[action, ...args].filter(Boolean)], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
+if (area === 'app') {
+  const result = spawnSync(process.execPath, [new URL('./app/main.mjs', import.meta.url).pathname, ...[action, ...args].filter(Boolean)], { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
 if (area === 'rollback') {
   if (!action || action.startsWith('--')) { console.error('usage: cleared rollback <ticket> [--yes] [--force-with-migrations] [--approval-comment ID]'); process.exit(64); }
   mkdirSync(stateDir(), { recursive: true });

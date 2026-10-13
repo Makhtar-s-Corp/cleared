@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Cleared Cockpit</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip" href="#tower" data-i="app_skip">Skip to the tower</a>
+<header class="top">
+  <div class="bar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z" class="logo"/></svg>
+      <span class="name">Cleared</span><span class="slash" aria-hidden="true">/</span>
+      <span id="project" class="project"></span>
+    </div>
+    <nav class="views" aria-label="Views">
+      <a href="#tower" aria-current="page" data-i="app_nav_tower">Tower</a>
+      <span aria-disabled="true" data-soon="app_nav_landed" title="soon">Landed</span>
+      <span aria-disabled="true" data-soon="app_nav_fuel" title="soon">Fuel</span>
+      <span aria-disabled="true" data-soon="app_nav_rules" title="soon">Rules</span>
+    </nav>
+    <div class="right">
+      <div id="health" class="pill"></div>
+      <time id="clock" class="mono faint"></time>
+      <button id="theme" class="plain small" type="button" data-i="app_theme_dark">Dark</button>
+      <span id="avatar" class="avatar" aria-hidden="true" hidden></span>
+    </div>
+  </div>
+  <div id="conn" class="conn" role="status" aria-live="polite" hidden></div>
+</header>
+
+<section class="band" aria-label="Today">
+  <div class="greeting">
+    <div id="dateline" class="label faint"></div>
+    <h1 id="greeting" class="display"></h1>
+    <p id="health-age" class="age mono faint"></p>
+  </div>
+  <div id="stats" class="stats" role="list"></div>
+</section>
+
+<main id="tower" class="tower" aria-label="Tower"></main>
+
+<section id="landed" class="landed" aria-labelledby="landed-title">
+  <div class="landed-head"><h2 id="landed-title" data-i="app_landed_title">Landed today</h2><span id="landed-summary" class="muted"></span><span class="view-all faint" aria-disabled="true" data-soon="app_view_all">View all</span></div>
+  <div id="landed-rows" class="landed-rows" role="table" aria-labelledby="landed-title"></div>
+</section>
+
+<aside id="porthole" class="porthole" role="dialog" aria-modal="false" aria-labelledby="ph-title" hidden>
+  <header class="ph-head">
+    <button id="ph-close" class="back" type="button" aria-label="Back to the tower"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <span id="ph-id" class="mono faint"></span>
+    <span id="ph-chip" class="chip"></span>
+  </header>
+  <div id="ph-body" class="ph-body"></div>
+  <div class="ph-actions">
+    <button type="button" class="soon-btn ghost" disabled aria-disabled="true" data-soon="app_send_back">Send back</button>
+    <button type="button" class="soon-btn ink" disabled aria-disabled="true" data-soon="app_clear">Clear to land</button>
+  </div>
+</aside>
+<div id="zoom" class="zoom" role="dialog" aria-modal="true" aria-label="Enlarged capture" hidden><button class="plain" type="button" id="zoom-close" data-i="app_close">Close</button><img alt=""></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

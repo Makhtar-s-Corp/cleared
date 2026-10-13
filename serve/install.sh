@@ -14,6 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/common.sh"
 
 port=${CLEARED_DASHBOARD_PORT:-8787}
+app_port=${CLEARED_APP_PORT:-8788}
 bind=$(tailscale ip -4 | head -n 1)
 [ -n "$bind" ] || die "the Tailscale address of this machine could not be read"
 # The project this copy works on is written where every script finds it: in
@@ -66,12 +67,14 @@ printf '%s\n' "$project" > "$named"
 mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
   unit=$(basename "$unit")
-  sed -e "s|@PORT@|$port|; s|@BIND@|$bind|; s|@DASHBOARD_DIR@|$ORCH_STATE_DIR/dashboard|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
+  sed -e "s|@PORT@|$port|; s|@APP_PORT@|$app_port|; s|@BIND@|$bind|; s|@DASHBOARD_DIR@|$ORCH_STATE_DIR/dashboard|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
 done
 systemctl --user daemon-reload
 systemctl --user enable --now cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer
-systemctl --user restart cleared-dashboard.service
+systemctl --user enable --now cleared-app.service
+systemctl --user restart cleared-dashboard.service cleared-app.service
 "$ORCH_HOME/dashboard.sh" > /dev/null
 sleep 1
 "$here/check.sh"
-echo "Dashboard: http://$bind:$port/"
+echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
+echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."

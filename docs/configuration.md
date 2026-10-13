@@ -468,3 +468,16 @@ Rate used only to express estimated costs in euros.
 - [Ticket lifecycle and caps](concepts.md)
 - [Adapter and Codex task script contract](adapters.md)
 - [Identity, guard, and permission limits](security.md)
+
+## `[app]`
+
+The read-only Cleared app. It only reads the ledger, the tracker and the state the last wake recorded (it never runs `cleared status`), and no route changes anything. See [The Cleared app](app.md).
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `bind` | Address the app listens on. Use the Tailscale address to reach it from a phone; the installer does this. | Default: 127.0.0.1 |
+| `port` | Port the app listens on. | Default: 8788 |
+| `ranges` | Peers allowed to connect, as CIDR ranges separated by spaces or commas. | Optional; no default (Tailscale ranges and this machine are used) |
+| `hosts` | Extra host names the browser may use, besides addresses, `localhost` and `*.ts.net`. | Optional; no default |
+| `token_file` | Private file (mode `0600`, owned by the service account, outside the project) holding the access token. Created on first start if missing. | Optional; no default (`~/.config/cleared/app-token` is used) |
+
