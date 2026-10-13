@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Writes down the terminal of a lane already at work, so that the project
 # lead can answer it (tell-lane.sh). Run by whoever hands lanes over to the
-# lead, never by the lead itself: a terminal is only written down when Orca
-# shows it connected, in the worktree of that name (the whole path git gives).
+# lead, never by the lead itself: a terminal is only written down when the
+# terminal adapter shows it connected, in the worktree of that name (the
+# whole path git gives).
 # With [terminal] adapter = none there is no terminal to write down: refused.
 #
 #   adopt-lane.sh <worktree name> <terminal handle>

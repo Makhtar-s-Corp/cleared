@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Opens a lane for one role on one ticket: a git worktree on the branch
-# <role>/<ticket> (Orca shows it as a lane of that name) and a terminal in it
-# that runs the model picked by agents.conf ([terminal] adapter: a terminal
-# of Orca, or none, the session then runs detached).
+# <role>/<ticket> and a terminal in it that runs the model picked by
+# agents.conf ([terminal] adapter: a terminal of Orca, or none, the session
+# then runs detached).
 #
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
@@ -221,7 +221,7 @@ if [ -z "$there" ] && [ "$open" -ge "$max" ] && takes_a_place "$role"; then
 fi
 [ -z "${switched_event:-}" ] || [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$switched_event"
 
-# 4. The worktree. Orca lists any git worktree of the repository by itself.
+# 4. The worktree.
 root=$(expand_home "$(conf_get lanes root)")
 base=$(conf_get lanes base)
 [ -n "$pr_head" ] && base="origin/$pr_head"

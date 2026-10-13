@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Says something to a lane already at work, in its own Orca terminal: the one
+# Says something to a lane already at work, in its own terminal: the one
 # way the project lead answers a lane. The lane is named by its worktree, and
 # its terminal is the one adopt-lane.sh wrote in state/lanes.json; nothing is
 # sent to a terminal that is not known for that lane, nor to one that has

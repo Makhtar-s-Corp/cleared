@@ -136,7 +136,7 @@
   "talk_discussion_ended": "Discussion terminée. Décisions enregistrées pendant cette discussion :",
   "talk_none": "- aucune",
   "talk_no_ticket": "sans ticket",
-  "talk_opened": "Discussion ouverte dans l’équipe Orca {lane} (onglet discussion), modèle {model}.",
+  "talk_opened": "Discussion ouverte dans un terminal de l’équipe {lane}, modèle {model}.",
   "decision_confirm_from_terminal": "Ou, depuis un autre terminal : {command} {id} ; pour l’abandonner : confirm-decision.sh --drop {id}",
   "app_skip": "Aller à la tour",
   "app_cockpit": "Cockpit",

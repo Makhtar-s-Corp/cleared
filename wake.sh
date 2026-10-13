@@ -7,7 +7,7 @@
 #   2. Nothing moved: writes "wake skipped" to the ledger and stops there.
 #      Zero token.
 #   3. Something moved: starts one short session of the lead's role, in its
-#      one stable lane (release/lead, which Orca shows), with the model the
+#      one stable lane (release/lead), with the model the
 #      routing table gives that role, and hands it the list of what moved.
 #      The session is started by the terminal adapter and outlives the wake.
 #
