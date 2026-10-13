@@ -2,9 +2,8 @@
 // Local release executor. The peer UID comes from Linux SO_PEERCRED, never JSON.
 import net from 'node:net';
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, statSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConf, projectDir, stateDir } from '../lib/conf.mjs';
@@ -20,13 +19,12 @@ const passwd = agentName ? execFileSync('getent', ['passwd', agentName], { encod
 const agentUid = passwd ? Number(passwd[2]) : serviceUid;
 if (!Number.isSafeInteger(agentUid) || agentUid < 0 || (agentName && agentUid === serviceUid)) throw new Error('Invalid [security] agent_user');
 if (agentName && !conf.sections.security?.socket_path && !process.env.CLEARED_RELEASE_SOCKET) throw new Error('[security] socket_path is required when agent_user is configured');
-const hash = createHash('sha256').update(repo).digest('hex').slice(0, 12);
-export const socketPath = process.env.CLEARED_RELEASE_SOCKET || conf.sections.security?.socket_path || join(tmpdir(), `cleared-release-${serviceUid}-${hash}.sock`);
+mkdirSync(state, { recursive: true, mode: 0o700 });
+export const socketPath = process.env.CLEARED_RELEASE_SOCKET || conf.sections.security?.socket_path || join(state, 'release.sock');
 if (!isAbsolute(socketPath) || Buffer.byteLength(socketPath) > 100) throw new Error('Release socket path must be a short absolute path');
 const socketParent = statSync(dirname(socketPath));
-if (socketParent.uid !== serviceUid && !(socketParent.uid === 0 && (socketParent.mode & 0o1000))) throw new Error('Release socket parent must be owned by the service account or root with sticky bit');
+if (socketParent.uid !== serviceUid || (socketParent.mode & 0o022)) throw new Error('Release socket parent must be service-owned and not group/world-writable');
 const secretPath = join(state, 'release-broker.secret');
-mkdirSync(state, { recursive: true, mode: 0o700 });
 const stateStat = lstatSync(state);
 if (stateStat.uid !== serviceUid || (stateStat.mode & 0o002) !== 0) throw new Error('State directory must be service-owned and not world-writable');
 if (agentName) {
@@ -38,6 +36,12 @@ if (agentName) {
   try { writable = execFileSync('sudo', ['-n', '-u', agentName, '--', 'find', state, '-writable', '-print', '-quit'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
   catch { /* No traversal means there is no reachable writable path. */ }
   if (writable) throw new Error(`Agent account can write Cleared state: ${writable}`);
+  for (const protectedPath of [home, repo, process.env.ORCH_CONF || join(repo, '.cleared', 'agents.conf')]) {
+    try { execFileSync('sudo', ['-n', '-u', agentName, '--', 'test', '!', '-w', protectedPath]); }
+    catch { throw new Error(`Agent account can write protected path or cannot be verified: ${protectedPath}`); }
+  }
+  try { execFileSync('sudo', ['-n', '-u', agentName, '--', 'test', '!', '-w', dirname(socketPath)]); }
+  catch { throw new Error('Agent account can write the socket directory or cannot be verified'); }
 }
 
 writeFileSync(secretPath, randomBytes(32).toString('hex'), { mode: 0o600, flag: 'w' });
@@ -60,8 +64,8 @@ function command(file, args, input = '', extraEnv = {}) {
   return new Promise((resolve) => {
     const child = spawn(file, args, { cwd: repo, env: { ...process.env, ORCH_BROKER_SECRET: secret, ORCH_REPO: repo, ORCH_STATE_DIR: state, ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
-    child.stdout.on('data', (b) => { stdout += b; if (stdout.length > 100000) child.kill(); });
-    child.stderr.on('data', (b) => { stderr += b; if (stderr.length > 100000) child.kill(); });
+    child.stdout.on('data', (b) => { if (stdout.length < 100000) stdout += b; });
+    child.stderr.on('data', (b) => { if (stderr.length < 100000) stderr += b; });
     child.on('error', (error) => resolve({ code: 1, stdout, stderr: error.message }));
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
     child.stdin.end(input);
@@ -82,17 +86,21 @@ async function handle(input, uid) {
   const permitted = uid === serviceUid || (agentName && uid === agentUid);
   const reject = (reason) => { event(validTicket ? ticket : null, validPr ? pr : null, uid, false, reason, commit, operation); return { ok: false, code: 6, reason, commit }; };
   if (!permitted) return reject('Caller UID is not an authorized agent or service account');
-  if (validPr) commit = currentHead(pr);
   if (!['request_release', 'request_rollback', 'status'].includes(operation)) return reject('Unknown operation');
   if (!validTicket) return reject('Invalid ticket');
   if (operation === 'status') {
     const db = openLedger();
-    try { const release = db.prepare('SELECT ticket,pr,merge_sha,status,last_health FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket);
-      return { ok: true, release: release || null, problem: agentName ? null : 'release lock is not a security boundary: agents run as the service account' }; }
-    catch { return { ok: true, release: null, problem: agentName ? null : 'release lock is not a security boundary: agents run as the service account' }; }
+    let release, error;
+    try { release = db.prepare('SELECT ticket,pr,merge_sha,status,last_health FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket); }
+    catch (caught) { error = caught; }
     finally { db.close(); }
+    if (error) return reject(`Cannot read release status: ${error.message}`);
+    event(ticket, null, uid, true, 'status read', release?.merge_sha || null, operation);
+    return { ok: true, release: release || null, problem: agentName ? null : 'release lock is not a security boundary: agents run as the service account' };
   }
-  if (busy) return reject('Another release operation is running');
+  if (busy) { event(ticket, validPr ? pr : null, uid, false, 'Another release operation is running', commit, operation);
+    return { ok: false, code: 5, reason: 'Another release operation is running', commit }; }
+  if (validPr) commit = currentHead(pr);
   if (operation === 'request_release') {
     if (!validPr || typeof input.announcement !== 'string' || input.announcement.length > 20000) return reject('Invalid PR or announcement');
     busy = true;
@@ -122,8 +130,11 @@ async function handle(input, uid) {
     if (input.approval_comment) flags.push('--approval-comment', input.approval_comment);
     if (input.force_with_migrations) flags.push('--force-with-migrations');
     if (uid !== serviceUid && !input.approval_comment) return reject('An agent must supply a tracker approval comment for rollback');
-    const result = await command(process.execPath, [join(home, 'lib/release.mjs'), 'rollback', ticket, ...flags], '', uid !== serviceUid ? { ORCH_BROKER_AGENT_REQUEST: '1' } : {});
-    event(ticket, null, uid, result.code === 0, result.stderr || result.stdout || `exit ${result.code}`, null, operation);
+    const release = openLedger();
+    try { commit = release.prepare('SELECT merge_sha FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket)?.merge_sha || null; }
+    finally { release.close(); }
+    const result = await command('flock', ['-x', '-w', '120', join(state, 'merge.lock'), process.execPath, join(home, 'lib/release.mjs'), 'rollback', ticket, ...flags], '', uid !== serviceUid ? { ORCH_BROKER_AGENT_REQUEST: '1' } : {});
+    event(ticket, null, uid, result.code === 0, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
     return { ok: result.code === 0, code: result.code, reason: result.stderr.trim(), output: result.stdout.trim() };
   } finally { busy = false; }
 }
@@ -132,6 +143,7 @@ if (existsSync(socketPath)) {
   unlinkSync(socketPath);
 }
 const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+  socket.setEncoding('utf8');
   let uid;
   try { uid = peerUid(socket); } catch { socket.end(JSON.stringify({ ok: false, reason: 'Cannot identify peer UID' }) + '\n'); return; }
   let data = '';

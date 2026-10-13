@@ -71,7 +71,7 @@ function runRole(role, adapter, repo = fixtureProject(), extra = {}) {
   };
 }
 
-test('each safe role maps to both CLIs, while host Codex refuses trusted-script write roles', () => {
+test('each role maps to both CLIs, while host Codex refuses other trusted-script write roles', () => {
   const { path: repo } = laneWithRemote('dev/X-99', null);
   execFileSync('git', ['-C', repo, 'branch', 'dev/X-98']);
   for (const [name, settings] of Object.entries(example.sections).filter(([key]) => key.startsWith('permissions.'))) {
@@ -82,11 +82,6 @@ test('each safe role maps to both CLIs, while host Codex refuses trusted-script 
       GH_TOKEN: 'test-forge-token', GITHUB_TOKEN: 'test-github-token', SSH_AUTH_SOCK: '/tmp/test-agent.sock',
     });
     assert.equal(claude.run.status, 0, `${role}: ${claude.run.stderr}`);
-    if (role === 'release-live') {
-      assert.equal(codex.run.status, 2, role);
-      assert.match(codex.report, /requires \[security\] agent_user/, role);
-      continue;
-    }
     if (settings.mode === 'read-only' && settings.write) {
       assert.equal(codex.run.status, 2, role);
       assert.match(codex.report, /needs trusted scripts to write state/, role);
@@ -97,6 +92,10 @@ test('each safe role maps to both CLIs, while host Codex refuses trusted-script 
     assert.equal(codex.prompt, claude.prompt, role);
     assert.match(codex.report, /adapter: codex/);
     assert.equal(codex.usage.tokens_total, 12);
+    if (role === 'release-live') {
+      assert.ok(codex.args.includes('danger-full-access'));
+      continue;
+    }
     if (settings.mode === 'accept-edits') assert.equal(claude.args[claude.args.indexOf('--permission-mode') + 1], 'acceptEdits', role);
     if (settings.mode === 'read-only') assert.ok(claude.args.includes('Edit'), `${role}: Claude edit denied`);
     const profile = codex.args.find((arg) => arg.startsWith('permissions.cleared='));

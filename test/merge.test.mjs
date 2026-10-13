@@ -797,6 +797,38 @@ test('a go-live that only waits is kept and done by the wake, with every check a
   assert.equal(red.merged(), null);
 });
 
+test('a queued release survives a broker restart or missing socket', () => {
+  const pull = reviewedPull(['ops/cleared/wake.sh']);
+  const queue = join(pull.box.state, 'merge-queue');
+  mkdirSync(queue, { recursive: true });
+  const entry = join(queue, '7.json');
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  const env = { ...pull.env };
+  delete env.ORCH_BROKER_SECRET;
+  const retry = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.ok(readFileSync(entry, 'utf8').includes('"pr":7'));
+});
+
+test('split-account review takes its author from the service ledger and rejects an agent claim', () => {
+  const lane = laneWithRemote('feat/auth', 'feat: authored change');
+  const { box } = lane;
+  const head = execFileSync('git', ['-C', lane.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/auth']);
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', title: 'feat: authored change', body: 'X-5', headRefName: 'feat/auth', headRefOid: head, additions: 1, deletions: 0, files: [{ path: 'server/a.mjs' }] }));
+  const db = openLedger(join(box.state, 'ledger.db'));
+  db.prepare("INSERT INTO runs (run_id,role,model,started_at,ended_at,outcome,pr_number,source) VALUES ('author-run','dev','m1','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','done',7,'dispatcher')").run();
+  db.close();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8') + '\n[security]\nagent_user = test-agent\n');
+  const env = { ...box.env, HOME: box.home };
+  const review = spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--dry-run'], { env, encoding: 'utf8' });
+  assert.equal(review.status, 0, review.stderr);
+  const forged = spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--dry-run', '--author-model', 'm2'], { env: { ...env, SUDO_UID: '9999' }, encoding: 'utf8' });
+  assert.equal(forged.status, 6);
+  assert.match(forged.stderr, /cannot claim the author model/);
+});
+
 
 test('[Linear adapter] the scripts act in the tracker under the name of the agents, never under the one of the user: a token of the application, asked once and kept out of sight', () => {
   const dir = scratch('orch-tracker-');

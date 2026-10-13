@@ -68,6 +68,7 @@ mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
 # The service keeps its state private. Account creation and sudo grants are
 # administrator actions, never an installer side effect.
 agent_user=$(conf_get security agent_user)
+command -v python3 > /dev/null || die "Install Python 3 for the local socket peer-UID check"
 if [ -n "$agent_user" ]; then
   getent passwd "$agent_user" > /dev/null || die "Create [security] agent_user=$agent_user first; see docs/security.md"
   [ "$(id -u "$agent_user")" != "$(id -u)" ] || die "agent_user must differ from the service account"
@@ -75,6 +76,14 @@ if [ -n "$agent_user" ]; then
   bwrap_path=${bwrap_path:-/usr/bin/bwrap}
   [ -x "$bwrap_path" ] || die "Install bubblewrap or set [security] bwrap_path to its executable; see docs/security.md"
   [ -n "$(conf_get security socket_path)" ] || die "Set [security] socket_path to a shared local Unix path; see docs/security.md"
+  socket_parent=$(dirname "$(conf_get security socket_path)")
+  [ -d "$socket_parent" ] || die "Create the service-owned socket directory $socket_parent first"
+  [ "$(stat -c %u "$socket_parent")" = "$(id -u)" ] || die "Socket directory must belong to the service account"
+  socket_mode=$(stat -c %a "$socket_parent")
+  (( (8#$socket_mode & 022) == 0 )) || die "Socket directory must not be group/world-writable"
+  if sudo -n -u "$agent_user" -- test -w "$socket_parent" 2>/dev/null; then
+    die "$agent_user can write the socket directory $socket_parent"
+  fi
   if ! sudo -n -u "$agent_user" -- true 2>/dev/null; then
     die "Configure noninteractive sudo from the service account to $agent_user for the harness CLIs; see docs/security.md"
   fi

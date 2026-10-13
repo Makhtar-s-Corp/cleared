@@ -180,7 +180,7 @@ if [ "$needs" != tooling ]; then
     *) die "tracker could not say who moved $ticket" ;;
   esac
   [ -n "$agreed" ] || no "the user has not agreed: $ticket is not in « $go »$([ "$needs" != guarded ] || echo ' (it touches the checks of the CI, the deployment, his written rules or the tooling of the go-lives: his own agreement is needed, tooling or not)'). Ask him (ask-validation.sh $ticket - --pr $pr)"
-  [ -n "$announcement" ] || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
+  [ -n "$announcement" ] && grep -q '[^[:space:]]' "$announcement" || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
 fi
 
 # 4b. A ticket he gave to two teams: one result goes live, the one he named.

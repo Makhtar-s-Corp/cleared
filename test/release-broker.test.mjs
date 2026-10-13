@@ -45,6 +45,16 @@ test('broker refuses an unapproved release, records the peer UID and commit, and
   assert.deepEqual(events().map((e) => [e.uid, e.accepted, e.commit]), [[process.getuid(), false, pull.headOf()]]);
 });
 
+test('broker refuses a socket directly in a sticky shared directory', () => {
+  const pull = reviewedPull(['server/a.mjs']);
+  const path = join('/tmp', `cleared-socket-rejected-${process.pid}.sock`);
+  const broker = spawnSync(process.execPath, [join(ORCH_HOME, 'serve/release-broker.mjs')],
+    { env: { ...pull.env, CLEARED_RELEASE_SOCKET: path }, encoding: 'utf8' });
+  assert.notEqual(broker.status, 0);
+  assert.match(broker.stderr, /socket parent must be service-owned/i);
+  assert.equal(existsSync(path), false);
+});
+
 test('broker posts the request in service state and rejects approval before it or for another commit or PR', async (t) => {
   const { pull, call, events } = await fixture(t);
   const asked = call(['request_release', 'X-5', '7', '--ask'], 'Please approve this version.');
@@ -86,6 +96,17 @@ test('broker accepts the shown, reviewed and approved commit and starts release 
   finally { db.close(); }
 });
 
+test('broker refuses an empty announcement even after valid human approval', async (t) => {
+  const { pull, call, events } = await fixture(t);
+  assert.equal(call(['request_release', 'X-5', '7', '--ask'], 'Please approve this version.').status, 0);
+  writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
+  const refused = call(['request_release', 'X-5', '7']);
+  assert.equal(refused.status, 6, refused.stderr);
+  assert.match(refused.stderr, /announcement is needed/);
+  assert.equal(pull.merged(), null);
+  assert.equal(events().at(-1).accepted, false);
+});
+
 test('manual rollback implementation refuses a direct call outside the broker', async (t) => {
   const { pull } = await fixture(t);
   const direct = spawnSync(process.execPath, [join(pull.box.home, 'lib/release.mjs'), 'rollback', 'X-5', '--yes'],
@@ -104,4 +125,6 @@ test('lead action bridge exposes no merge or tracker move action', async (t) => 
     const refused = spawnSync(process.execPath, [client, action], { env, encoding: 'utf8' });
     assert.notEqual(refused.status, 0, action);
   }
+  const forgedAuthor = spawnSync(process.execPath, [client, 'review', '7', 'X-5', 'forged-model'], { env, encoding: 'utf8' });
+  assert.notEqual(forgedAuthor.status, 0);
 });

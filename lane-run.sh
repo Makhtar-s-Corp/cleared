@@ -128,8 +128,8 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
   rm -rf .commit-message
   if [ -n "$(git status --porcelain 2> /dev/null)" ]; then
     [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
-    git add -A
-    git -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
+    git -c core.hooksPath=/dev/null add -A
+    git -c core.hooksPath=/dev/null -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
       || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
   fi
   rm -f "$message"

@@ -37,8 +37,8 @@ if (bodyActions.has(action)) {
 }
 switch (action) {
   case 'review':
-    if (!pr(args[0]) || !ticket(args[1]) || (args.length !== 2 && !(args.length === 3 && short(args[2])))) throw new Error('usage: review PR TICKET [AUTHOR_MODEL]');
-    command = 'review-pr.sh'; options = [args[0], args[1], ...(args[2] ? ['--author-model', args[2]] : [])]; break;
+    if (!pr(args[0]) || !ticket(args[1]) || args.length !== 2) throw new Error('usage: review PR TICKET');
+    command = 'review-pr.sh'; options = [args[0], args[1]]; break;
   case 'comment':
     if (!ticket(args[0]) || args.length !== 1) throw new Error('usage: comment TICKET');
     command = 'tracker.sh'; options = ['comment', args[0], file]; break;

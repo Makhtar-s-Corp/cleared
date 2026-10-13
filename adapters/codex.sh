@@ -143,12 +143,9 @@ host_run() {
     codex_cmd=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" "${agent_prefix[@]}" codex)
   fi
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
-  if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ] && [ -z "$agent_user" ]; then
-    echo 'Codex release role requires [security] agent_user because its Linux sandbox cannot mount the release socket' > "$error_body"
-    contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
-  fi
-  if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ] && [ -n "$agent_user" ]; then
-    # Only the distinct OS account is the filesystem boundary in this mode.
+  if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ]; then
+    # The Linux Codex sandbox cannot mount a Unix socket. With agent_user,
+    # the distinct OS account is the boundary. Without it status warns.
     args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config
       -c 'approval_policy="never"' --sandbox danger-full-access)
   fi

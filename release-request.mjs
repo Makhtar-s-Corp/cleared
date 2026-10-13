@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import net from 'node:net';
-import { createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { projectDir, loadConf } from './lib/conf.mjs';
+import { lstatSync, statSync } from 'node:fs';
+import { loadConf, stateDir } from './lib/conf.mjs';
 const [operation, ticket, pr, ...flags] = process.argv.slice(2);
 if (!['request_release', 'request_rollback', 'status'].includes(operation) || !ticket) {
   console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [APPROVAL_COMMENT] | status TICKET'); process.exit(64);
 }
-const path = process.env.CLEARED_RELEASE_SOCKET || loadConf().sections.security?.socket_path || join(tmpdir(), `cleared-release-${process.getuid()}-${createHash('sha256').update(projectDir()).digest('hex').slice(0, 12)}.sock`);
+const path = process.env.CLEARED_RELEASE_SOCKET || loadConf().sections.security?.socket_path || `${stateDir()}/release.sock`;
+try {
+  const socket = lstatSync(path);
+  if (!socket.isSocket() || socket.uid !== statSync(stateDir()).uid) throw new Error('socket is not owned by the service account');
+} catch (error) { console.error(`release broker: ${error.message}`); process.exit(1); }
 let announcement = '';
 if (operation === 'request_release') for await (const chunk of process.stdin) announcement += chunk;
 const request = { operation, ticket };

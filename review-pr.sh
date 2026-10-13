@@ -87,9 +87,15 @@ while IFS= read -r commit; do
   [ -n "$commit" ] && git -C "$ORCH_REPO" merge-base --is-ancestor "$commit" "origin/$branch" 2> /dev/null && since=$commit
 done < <(jq -r '.[]' <<<"$reviewed")
 
-# Who wrote it: the session of the worktree on that branch.
+# In split-account mode, only the service-owned run ledger may identify the
+# author. An agent cannot supply this evidence through the lead bridge.
+if [ -n "$(conf_get security agent_user)" ]; then
+  author=$(ledger sql "select model from runs where pr_number = $pr and role != 'review' and outcome = 'done' and model is not null order by started_at desc limit 1" | jq -r '.[0].model // empty')
+  if [ -n "${SUDO_UID:-}" ] && [ -n "$said_author" ]; then never "an agent cannot claim the author model"; fi
+fi
+# In single-account mode, use the session of the worktree on that branch.
 worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '/^worktree /{w = substr($0, 10)} $0 == b {print w}')
-[ -z "$worktree" ] || author=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" author "$worktree")
+[ -n "$(conf_get security agent_user)" ] || [ -z "$worktree" ] || author=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" author "$worktree")
 # What can be read wins over what is said.
 [ -n "$author" ] || author=$said_author
 
