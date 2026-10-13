@@ -37,8 +37,9 @@ none_session() {
 # The command runs in the worktree, its input empty, its output in
 # terminal.log. The process is the session's own leader: its number is the
 # one of its process group, which holds the harness it starts. The handle and
-# the worktree are also kept in terminal.none, in the run folder: closing the
-# terminals of a worktree finds them there. Nothing waits for the session.
+# the worktree (its resolved path) are also kept in terminal.none, in the run
+# folder: closing the terminals of a worktree finds them there, whichever
+# path names it. Nothing waits for the session.
 terminal_open() {
   local worktree=$1 title=$2 command=$3 run_dir=$4 ticket=${5:-} log pid stat fields handle launch
   log="$run_dir/terminal.log"
@@ -66,7 +67,9 @@ echo "$!"'
   stat=$(cat "/proc/$pid/stat" 2> /dev/null) || stat=
   read -r -a fields <<<"${stat##*) }"
   handle="none:$pid:${fields[19]:-0}:$(cat /proc/sys/kernel/random/boot_id 2> /dev/null)"
-  printf '%s\n%s\n' "$handle" "$worktree" > "$run_dir/terminal.none"
+  # The worktree as the file system resolves it: git names it so, whatever
+  # link the configured root goes through.
+  printf '%s\n%s\n' "$handle" "$(realpath -m -- "$worktree")" > "$run_dir/terminal.none"
   printf '%s\n' "$handle"
 }
 
@@ -89,9 +92,10 @@ terminal_close() {
 }
 
 terminal_close_worktree() {
-  local mark
+  local mark worktree
+  worktree=$(realpath -m -- "$1")
   for mark in "$ORCH_STATE_DIR"/runs/*/terminal.none; do
-    [ -f "$mark" ] && [ "$(sed -n '2p' "$mark")" = "$1" ] || continue
+    [ -f "$mark" ] && [ "$(sed -n '2p' "$mark")" = "$worktree" ] || continue
     terminal_close "$(sed -n '1p' "$mark")" || true
   done
   return 0

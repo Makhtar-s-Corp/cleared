@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
@@ -183,6 +183,30 @@ test('with [terminal] adapter = none and no Orca on the host, spawn-lane, wake a
   assert.ok(await until(() => existsSync(join(runDir, 'exit-code'))), 'the session of the lead ran to its end');
   assert.match(readFileSync(join(runDir, 'terminal.log'), 'utf8'), /── release\/lead · release · a/);
   assert.equal(existsSync(join(box.home, 'orca-calls')), false);
+});
+
+
+test('with [terminal] adapter = none, closing a worktree stops its live session whatever path names it: a lanes root behind a link, the path git gives', async (t) => {
+  const box = noneBox();
+  const real = join(box.home, 'real-lanes');
+  const linked = join(box.home, 'linked-lanes');
+  mkdirSync(real);
+  symlinkSync(real, linked);
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace(`root = ${join(box.home, 'lanes')}`, `root = ${linked}`));
+  const spawned = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-4', '--comment-on', 'none'], { env: { ...box.env, FAKE_LEAVES: 'sleep 30' }, encoding: 'utf8', timeout: 60000 });
+  assert.equal(spawned.status, 0, spawned.stderr);
+  const lane = JSON.parse(spawned.stdout);
+  const pid = Number(lane.terminal.split(':')[1]);
+  t.after(() => stopGroup(pid));
+  assert.equal(lane.worktree, join(linked, 'dev-X-4'));
+  assert.match(spawnSync('git', ['-C', box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).stdout, new RegExp(`^worktree ${join(real, 'dev-X-4')}$`, 'm'), 'git names it by the resolved path');
+  let harness = 0;
+  assert.ok(await until(() => (harness = Number(spawnSync('pgrep', ['-g', String(pid), '-x', 'sleep'], { encoding: 'utf8' }).stdout.trim())) > 0), 'the session is at work');
+  const killed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-4', '--force'], { env: box.env, encoding: 'utf8' });
+  assert.equal(killed.status, 0, killed.stderr);
+  assert.ok(await until(() => !alive(pid) && !alive(harness), 10000), 'the session and its harness were stopped before their worktree went');
+  assert.equal(existsSync(join(real, 'dev-X-4')), false);
 });
 
 
