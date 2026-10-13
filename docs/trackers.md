@@ -25,3 +25,19 @@ Set `adapter = local` and the six state names. Tickets, comments, history, and i
 Local approval needs two separate system accounts. Set `agents_uid` to the UID running Cleared and `owner_id` to the human account name. Set `human_private_key` to an absolute path readable only by that human account, and commit `human_public_key` as base64-encoded PEM in the project config. Generate an Ed25519 key pair with `openssl genpkey -algorithm Ed25519 -out ~/.config/cleared/tracker.key` and `openssl pkey -in ~/.config/cleared/tracker.key -pubout | base64 -w0`. Set mode `0600` on the private key; the CLI checks its owner and mode before signing. Give both accounts access to the state directory and SQLite file through a dedicated group, while keeping the private key outside that group. A human ticket creation signs its title, body, labels, and project. A human status change or comment is also signed; an approval signature binds the request timestamp and all presented pull-request heads. Unsigned, altered, or replayed approval rows cannot authorize a different request. An agent running under the same UID as the human cannot create a verifiable approval.
 
 Local mode has no remote ticket notifications, browser UI, or shareable ticket URLs. The CLI is the user interface, and the daemon discovers changes by reading SQLite on each wake. The project still needs GitHub for pull requests and merges. SQLite and project access must be backed up together. The signing key proves attribution of a status transition; it does not protect the database against deletion by an account with write access.
+
+## The human's accesses for the app
+
+The [app](app.md) writes as the human, with accesses of their own, distinct from the agents'. Put them in `[app] human_credentials_dir` (default `~/.config/cleared/human`, mode `0700`, owned by the account that runs the app, outside the project, unreadable by the agents' account) as `credentials.json`, mode `0600`:
+
+```json
+{ "linear_token": "…", "github_token": "…" }
+```
+
+Only the adapter in use is needed. The tracker must see the access as `[tracker] owner_id`; the writer checks it before every write and refuses an application or installation token.
+
+- **Linear.** An OAuth access token in *user* mode (not the application of the agents): create a Linear OAuth application, authorise it once as yourself with the `read` and `write` scopes (authorisation-code flow, no `actor=app`), and keep the access token (and refresh it when it expires, replacing the file). `owner_id` is your Linear user id. A personal API key also works for the writer but Linear cannot then tell a program acting under your account from you, so prefer the OAuth token.
+- **GitHub.** A fine-grained personal access token of the owner account (`owner_id`), limited to the repository, with *Issues: read and write* (and *Projects: read and write* when `project_v2_id` is set), kept in `github_token`. It must not be the GitHub App's installation token: the writer reads `/user` and refuses a bot.
+- **Local SQLite.** The signing key that goes with `human_public_key`: copy the human's Ed25519 private key to `human-signing.key` in the credentials directory, owned by the app's account, mode `0600` (the human's own copy stays in their account). The app signs its writes with it, so the tracker's history shows them as the human's.
+
+A different API address (GitHub Enterprise, a test double) is set in the service's environment (`CLEARED_APP_GITHUB_API`, `CLEARED_APP_LINEAR_API`), never in the project's settings.

@@ -130,7 +130,7 @@ Order: a 3 px × 56 px flat amber bar above the title when it waits for the huma
 - Show me, non-screen ticket: one concrete before/after example, the tests with their state, one sentence on what it touches. The diff is only a link.
 - The squad: one white outlined list, a row per role (harness square, role, harness and exact model in mono).
 - Black box: vertical timeline on a hairline, one dot per event in its stage color, time in mono, one plain sentence.
-- Future actions (Clear to land, Send back) appear as disabled placeholders labelled "soon". Nothing pretends to act.
+- Actions: "Clear to land" is a solid ink button that carries the exact version ("Clear to land · a1b2c3d"); "Send back" is an outlined button. When the board shows a newer version than the one on screen, one ink button reads "New version, review again". A click asks for a passkey, then a **grace bar** appears: a 4 px flat track with an ink fill that empties over 60 seconds, "Clearing in 42 s" in mono and an ink "Undo" beside it. Never a gradient. After the write the card says "Cleared by you at 14:02, landing" in place of its status line until the next snapshot. A question's options are outlined buttons above a text field. Without a passkey (or a secure address) the buttons are disabled and say why. Nothing pretends to act.
 
 ## 5. Layout
 

@@ -109,6 +109,22 @@ if [ -n "$agent_user" ]; then
   if [ -n "$probe" ]; then rm -f "$probe"; die "$agent_user wrote to Cleared state; remove that access before installing"; fi
   writable=$(sudo -n -u "$agent_user" -- find "$ORCH_STATE_DIR" -writable -print -quit 2>/dev/null || true)
   [ -z "$writable" ] || die "$agent_user can write Cleared state path $writable"
+  # The human's own accesses (tracker tokens, signing key, passkeys) and the app's access token belong to this
+  # account alone: the agents' account must read none of them, nor traverse their directory.
+  human_dir=$(conf_get app human_credentials_dir) || human_dir=
+  human_dir=${human_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/cleared/human}; human_dir=${human_dir/#\~/$HOME}
+  app_token=$(conf_get app token_file) || app_token=
+  app_token=${app_token:-${XDG_CONFIG_HOME:-$HOME/.config}/cleared/app-token}; app_token=${app_token/#\~/$HOME}
+  for secret in "$human_dir" "$human_dir/credentials.json" "$human_dir/passkeys.json" "$human_dir/human-signing.key" "$app_token"; do
+    [ -e "$secret" ] || continue
+    if sudo -n -u "$agent_user" -- test -r "$secret" 2>/dev/null || sudo -n -u "$agent_user" -- test -x "$secret" 2>/dev/null || sudo -n -u "$agent_user" -- test -w "$secret" 2>/dev/null; then
+      die "$agent_user can reach $secret: the human's accesses and the app token must be closed to it (mode 0700 / 0600, owned by this account)"
+    fi
+  done
+  grant_socket=$(conf_get app grant_socket) || grant_socket=
+  if [ -n "$grant_socket" ] && sudo -n -u "$agent_user" -- test -w "$(dirname "$grant_socket")" 2>/dev/null; then
+    die "$agent_user can write the directory of [app] grant_socket"
+  fi
   for protected in "$ORCH_HOME" "$project"; do
     writable=$(sudo -n -u "$agent_user" -- find "$protected" -writable -print -quit 2>/dev/null || true)
     [ -z "$writable" ] || die "$agent_user can write protected path $writable"
