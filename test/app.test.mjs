@@ -264,11 +264,11 @@ test('the old dashboard address redirects to the app when one is configured, and
 test('the design is followed: no gradient, fonts served by the app, light by default, amber only for the human', async () => {
   const pub = join(import.meta.dirname, '..', 'app', 'public');
   const css = readFileSync(join(pub, 'style.css'), 'utf8');
-  for (const f of ['style.css', 'app.js', 'index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
+  for (const f of ['style.css', 'app.js', 'actions.js', 'register.js', 'index.html', 'login.html', 'register.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
   assert.match(css, /font-family: Geist;[^}]*\/fonts\/Geist-Variable\.woff2/);
   assert.match(css, /font-family: "Geist Mono";[^}]*\/fonts\/GeistMono-Variable\.woff2/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/, 'light by default; dark only when chosen');
-  assert.doesNotMatch(readFileSync(join(pub, 'app.js'), 'utf8'), /\.style\.cssText|setAttribute\('style'/, 'no inline style, which the content policy refuses');
+  for (const f of ['app.js', 'actions.js', 'register.js']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\.style\.cssText|setAttribute\('style'/, `${f}: no inline style, which the content policy refuses`);
   // the tokens of DESIGN.md are the ones of the style sheet
   for (const hex of ['#FAFAFA', '#FFFFFF', '#F4F4F4', '#EAEAEA', '#171717', '#4D4D4D', '#666666', '#8F8F8F', '#F5A623', '#AB570A', '#FFFBF2', '#FCE2B3', '#16A34A', '#F2FBF5', '#EE0000', '#0070F3', '#7928CA', '#0A9DB0', '#D97757', '#10A37F'])
     assert.ok(css.toUpperCase().includes(hex), `${hex} is in the style sheet`);
@@ -276,7 +276,7 @@ test('the design is followed: no gradient, fonts served by the app, light by def
   assert.deepEqual(amberViolations(css), [], 'amber used outside what waits for the human');
   assert.ok(amberViolations('.conn2 { background: var(--awaiting); }\n.x { color: #F5A623; }').length === 2, 'the check can fail');
   assert.doesNotMatch(css, /(^|\n)button\.ink/, 'the login button style does not leak to the placeholders');
-  for (const f of ['index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
+  for (const f of ['index.html', 'login.html', 'register.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
   const s = await serve();
   try {
     const font = await s.call('/fonts/Geist-Variable.woff2');

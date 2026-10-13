@@ -103,7 +103,9 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     if (request.method === 'POST') return write(request, response, path, mine);
     if (OPEN[path]) return send(response, request, OPEN[path]);
     if (!signedIn) {
-      if (path === '/' || path === '/register') return text(response, 302, '', undefined, { location: '/login' });
+      if (path === '/') return text(response, 302, '', undefined, { location: '/login' });
+      // The address that registers a passkey carries a grant after the #; the sign-in page must not take it for a token.
+      if (path === '/register') return text(response, 302, '', undefined, { location: '/login?next=register' });
       return text(response, 401, 'Token required');
     }
     try {

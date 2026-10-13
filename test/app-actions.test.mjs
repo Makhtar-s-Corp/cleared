@@ -7,7 +7,7 @@ import { demoSource, DEMO_HEAD, DEMO_HEAD_NEXT } from '../app/sources/demo.mjs';
 import { createActions } from '../app/lib/actions.mjs';
 import { grantServer, requestGrant } from '../app/lib/grant-socket.mjs';
 import { Authenticator } from './app-authenticator.mjs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -330,4 +330,19 @@ test('the registration socket gives a grant to the human account and to nobody e
   await new Promise((resolve) => orphan.on('listening', resolve));
   try { assert.equal((await requestGrant(join(dir, 'b.sock'))).ok, false, 'with no human account configured, nobody gets a grant'); } finally { await new Promise((r) => orphan.close(r)); }
   assert.equal(minted, 1);
+});
+
+test('the address that registers a passkey goes through sign-in without ever sending its grant as a token', async () => {
+  const r = await rig();
+  try {
+    const unsigned = await fetch(`${r.base}/register`, { redirect: 'manual' });
+    assert.equal(unsigned.status, 302);
+    assert.equal(unsigned.headers.get('location'), '/login?next=register');
+    assert.equal((await fetch(`${r.base}/login?next=register`)).status, 200, 'the sign-in page is served with the query');
+    const js = readFileSync(join(import.meta.dirname, '..', 'app', 'public', 'login.js'), 'utf8');
+    assert.match(js, /next'\) === 'register'/);
+    assert.match(js, /if \(afterRegister\) \{[^}]*grant = fromHash[\s\S]*else if \(fromHash\) \{[^}]*enter\(fromHash\)/, 'with next=register the # part is kept, not sent to /session');
+    const browser = await r.browser();
+    assert.equal((await fetch(`${r.base}/register`, { headers: { cookie: browser.cookie } })).status, 200, 'signed in, the page opens');
+  } finally { await r.close(); }
 });

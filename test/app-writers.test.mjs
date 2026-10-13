@@ -266,8 +266,10 @@ const agentUser = process.env.CLEARED_TEST_AGENT_USER;
 test('the agents\' account cannot read the human credentials, the passkeys or the access token', { skip: agentUser ? false : 'set CLEARED_TEST_AGENT_USER (a second account reachable with sudo -n) to run it' }, () => {
   const b = box('github');
   b.credentials({ github_token: HUMAN_GH });
-  for (const path of [b.creds, join(b.creds, 'credentials.json'), join(b.creds, 'human-signing.key')]) {
+  writeFileSync(join(b.creds, 'passkeys.json'), '[]', { mode: 0o600 });
+  for (const path of [b.creds, join(b.creds, 'credentials.json'), join(b.creds, 'human-signing.key'), join(b.creds, 'passkeys.json'), process.env.CLEARED_TEST_APP_TOKEN].filter(Boolean)) {
     const probe = spawnSync('sudo', ['-n', '-u', agentUser, '--', 'test', '-r', path]);
     assert.notEqual(probe.status, 0, `${path} must not be readable by ${agentUser}`);
+    assert.notEqual(spawnSync('sudo', ['-n', '-u', agentUser, '--', 'test', '-w', path]).status, 0, `${path} must not be writable by ${agentUser}`);
   }
 });
