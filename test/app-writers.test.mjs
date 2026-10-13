@@ -1,56 +1,23 @@
-// What the app writes to the three trackers, and as whom. Each gesture runs through the real
-// writer process (app/human-write.mjs) against the real local tracker, or against a fake
-// GitHub or Linear server: the author the tracker records must be the human.
-import test, { after } from 'node:test';
+// What the app writes to the trackers, and as whom. Each gesture runs through the real writer
+// process (app/human-write.mjs) against the real local tracker, or against a fake GitHub server:
+// the author the tracker records must be the human.
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
-import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ORCH_HOME, parseConf } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
 import { LocalTracker } from '../lib/tracker/adapters/local.mjs';
 import { privateDir, privateFile, readCredentials } from '../app/lib/credentials.mjs';
-import { perform, targetStates } from '../app/lib/human-tracker.mjs';
+import { targetStates } from '../app/lib/human-tracker.mjs';
+import { bearer, body, box as scratchBox, HEAD, listen, VERSIONS } from './app-box.mjs';
 
-const dirs = [];
-after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
-const HEAD = 'a'.repeat(40);
-const VERSIONS = [{ pr: 7, head: HEAD }];
 const HUMAN_GH = 'ghp_humanhumanhumanhuman1234';
 const AGENT_GH = 'ghs_agentsagentsagentsagent99';
-const HUMAN_LIN = 'lin_oauth_humanhumanhuman1234';
-const APP_LIN = 'lin_oauth_agentsagentsagents99';
-
-function box(adapter, extra = '') {
-  const root = mkdtempSync(join(tmpdir(), 'cleared-writer-')); dirs.push(root);
-  const repo = join(root, 'repo'), state = join(root, 'state'), creds = join(root, 'creds');
-  for (const d of [repo, state, creds, join(state, 'validations')]) mkdirSync(d, { recursive: true });
-  for (const d of [state, creds]) chmodSync(d, 0o700);
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  writeFileSync(join(creds, 'human-signing.key'), privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-  const publicB64 = Buffer.from(publicKey.export({ type: 'spki', format: 'pem' })).toString('base64');
-  const ticket = { local: 'LOCAL-1', github: 'GH-12', linear: 'ENG-12' }[adapter];
-  const conf = `[tracker]\nadapter = ${adapter}\nowner_id = ${adapter === 'linear' ? 'lin-human' : 'alice'}\nvalidate_state = Needs Approval\ngo_state = Ready to Ship\ndone_state = Done\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\n`
-    + `team = ENG\nrepository = o/r\napp_login = cleared[bot]\nagents_uid = 99999\nhuman_public_key = ${publicB64}\n[app]\nhuman_credentials_dir = ${creds}\n${extra}`;
-  const confPath = join(root, 'agents.conf'); writeFileSync(confPath, conf);
-  const env = { PATH: process.env.PATH, HOME: root, ORCH_CONF: confPath, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_LEDGER: join(state, 'ledger.db'), XDG_CONFIG_HOME: join(root, 'cfg') };
-  const approvalRecord = (head = HEAD) => writeFileSync(join(state, 'validations', `${ticket}.json`), JSON.stringify({ ticket, at: '2026-10-13T09:00:00.000Z', pulls: [{ pr: 7, head }] }));
-  const credentials = (value) => writeFileSync(join(creds, 'credentials.json'), JSON.stringify(value), { mode: 0o600 });
-  const write = (request, over = {}) => new Promise((resolve) => {
-    const child = spawn(process.execPath, [join(ORCH_HOME, 'app/human-write.mjs')], { env: { ...env, ...over }, stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = ''; child.stdout.on('data', (c) => { out += c; });
-    child.on('close', () => resolve(JSON.parse(out.trim().split('\n').at(-1))));
-    child.stdin.end(JSON.stringify(request));
-  });
-  return { root, repo, state, creds, env, ticket, conf: parseConf(conf), approvalRecord, credentials, write, confPath, publicB64 };
-}
-
-const listen = (handler) => new Promise((resolve) => { const s = http.createServer(handler).listen(0, '127.0.0.1', () => resolve(s)); });
-const body = (request) => new Promise((resolve) => { let d = ''; request.on('data', (c) => { d += c; }); request.on('end', () => resolve(d)); });
-const bearer = (request) => /^Bearer (\S+)$/.exec(request.headers.authorization ?? '')?.[1];
+const TICKETS = { local: 'LOCAL-1', github: 'GH-12' };
+const box = (adapter, extra = '') => scratchBox(adapter, { ticket: TICKETS[adapter], extra });
 
 // ---- GitHub ---------------------------------------------------------------------
 async function fakeGithub(t) {
@@ -76,31 +43,6 @@ async function fakeGithub(t) {
   });
   t.after(() => server.close());
   return { state, env: { CLEARED_APP_GITHUB_API: `http://127.0.0.1:${server.address().port}` } };
-}
-
-// ---- Linear ---------------------------------------------------------------------
-async function fakeLinear(t) {
-  const state = { state: 'Needs Approval', history: [], comments: [], tokens: new Set() };
-  const viewer = (token) => (token === HUMAN_LIN ? { id: 'lin-human', app: false } : { id: 'lin-app', app: true });
-  const server = await listen(async (request, response) => {
-    const token = bearer(request); state.tokens.add(token);
-    const { query, variables } = JSON.parse(await body(request));
-    const reply = (data) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data }));
-    if (!token) return response.writeHead(401).end('{}');
-    if (query.includes('history(first')) return reply({ viewer: viewer(token), issue: { history: { nodes: state.history } } });
-    if (query.includes('teams(filter')) return reply({ issue: { id: 'iid' }, teams: { nodes: [{ states: { nodes: ['Ready to Ship', 'In Progress', 'Needs Approval'].map((name) => ({ id: `id-${name}`, name })) } }] } });
-    if (query.includes('viewer { id app }')) return reply({ viewer: viewer(token) });
-    if (query.includes('state { name }')) return reply({ issue: { state: { name: state.state } } });
-    if (query.includes('issueUpdate')) {
-      const name = variables.input.stateId.replace(/^id-/, '');
-      state.state = name; state.history.push({ createdAt: new Date().toISOString(), actorId: viewer(token).id, actor: { id: viewer(token).id, app: viewer(token).app }, botActor: null, toState: { name } });
-      return reply({ issueUpdate: { success: true } });
-    }
-    if (query.includes('commentCreate')) { state.comments.push({ body: variables.input.body, by: viewer(token).id }); return reply({ commentCreate: { success: true } }); }
-    return reply({ issue: { id: 'iid' } });
-  });
-  t.after(() => server.close());
-  return { state, env: { CLEARED_APP_LINEAR_API: `http://127.0.0.1:${server.address().port}/graphql` } };
 }
 
 test('local tracker: the three gestures are written, signed as the human, and the tracker reads them as his', async () => {
@@ -161,7 +103,7 @@ test('local tracker: a move written by anyone else than the human never reads as
 test('GitHub: the three gestures are written with the human\'s own token, and the timeline shows the human', async (t) => {
   const fake = await fakeGithub(t);
   const b = box('github');
-  b.credentials({ github_token: HUMAN_GH }); b.approvalRecord();
+  b.credentials(HUMAN_GH); b.approvalRecord();
   const run = (request) => b.write(request, fake.env);
   assert.equal((await run({ op: 'answer', ticket: b.ticket, text: 'Yes' })).ok, true);
   assert.deepEqual(fake.state.comments, [{ body: 'Yes', by: 'alice' }]);
@@ -182,7 +124,7 @@ test('GitHub: the three gestures are written with the human\'s own token, and th
 test('GitHub: the agents\' installation token is refused as an identity, and nothing is written', async (t) => {
   const fake = await fakeGithub(t);
   const b = box('github');
-  b.credentials({ github_token: AGENT_GH }); b.approvalRecord();
+  b.credentials(AGENT_GH); b.approvalRecord();
   for (const request of [{ op: 'approve', ticket: b.ticket, versions: VERSIONS }, { op: 'sendback', ticket: b.ticket, text: 'x' }, { op: 'answer', ticket: b.ticket, text: 'x' }]) {
     const result = await b.write(request, fake.env);
     assert.equal(result.ok, false); assert.equal(result.code, 'identity');
@@ -190,38 +132,9 @@ test('GitHub: the agents\' installation token is refused as an identity, and not
   assert.deepEqual(fake.state.comments, []); assert.deepEqual(fake.state.labels, ['status:Needs Approval']);
 });
 
-test('Linear: the three gestures are written with the human\'s own token, and the history shows the human', async (t) => {
-  const fake = await fakeLinear(t);
-  const b = box('linear');
-  b.credentials({ linear_token: HUMAN_LIN }); b.approvalRecord();
-  const run = (request) => b.write(request, fake.env);
-  assert.equal((await run({ op: 'answer', ticket: b.ticket, text: 'No' })).ok, true);
-  assert.deepEqual(fake.state.comments, [{ body: 'No', by: 'lin-human' }]);
-  assert.equal((await run({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'd'.repeat(40) }] })).code, 'version');
-  assert.equal(fake.state.state, 'Needs Approval');
-  const approved = await run({ op: 'approve', ticket: b.ticket, versions: VERSIONS });
-  assert.equal(approved.ok, true, JSON.stringify(approved)); assert.equal(approved.verified, true);
-  assert.equal(fake.state.state, 'Ready to Ship'); assert.equal(fake.state.history.at(-1).actorId, 'lin-human');
-  fake.state.state = 'Needs Approval'; b.approvalRecord();
-  const back = await run({ op: 'sendback', ticket: b.ticket, text: 'Round it.' });
-  assert.equal(back.ok, true, JSON.stringify(back)); assert.equal(fake.state.state, 'In Progress');
-  assert.deepEqual([...fake.state.tokens], [HUMAN_LIN]);
-});
-
-test('Linear: the application of the agents is refused as an identity, and nothing is written', async (t) => {
-  const fake = await fakeLinear(t);
-  const b = box('linear');
-  b.credentials({ linear_token: APP_LIN }); b.approvalRecord();
-  for (const request of [{ op: 'approve', ticket: b.ticket, versions: VERSIONS }, { op: 'sendback', ticket: b.ticket, text: 'x' }, { op: 'answer', ticket: b.ticket, text: 'x' }]) {
-    const result = await b.write(request, fake.env);
-    assert.equal(result.ok, false); assert.equal(result.code, 'identity');
-  }
-  assert.deepEqual(fake.state.comments, []); assert.equal(fake.state.state, 'Needs Approval');
-});
-
 test('the writer cannot be pointed at another place by the project settings, and takes only plain https or this machine', async () => {
-  const b = box('github', 'github_api_url = https://evil.example\nlinear_api_url = https://evil.example\n');
-  b.credentials({ github_token: HUMAN_GH });
+  const b = box('github', 'github_api_url = https://evil.example\n');
+  b.credentials(HUMAN_GH);
   // The settings keys are not read; the default address is api.github.com (unreachable here, so it fails, but never reaches evil.example).
   const result = await b.write({ op: 'answer', ticket: b.ticket, text: 'x' }, { CLEARED_APP_GITHUB_API: 'http://evil.example' });
   assert.equal(result.ok, false);
@@ -237,8 +150,8 @@ test('the gesture text and the target statuses are checked: no empty text, and a
 
 test('human credentials: a private directory and files outside the project, owned by the app account, closed to every other account', () => {
   const b = box('github');
-  b.credentials({ github_token: HUMAN_GH });
-  assert.equal(readCredentials(b.creds, { project: b.repo, adapter: 'github' }).github_token, HUMAN_GH);
+  b.credentials(HUMAN_GH);
+  assert.equal(readCredentials(b.creds, { project: b.repo, adapter: 'github' }).token, HUMAN_GH);
   // Readable by the group or by others: refused (this is what keeps the agents' account out).
   chmodSync(join(b.creds, 'credentials.json'), 0o640);
   assert.throws(() => readCredentials(b.creds, { project: b.repo, adapter: 'github' }), /private regular file/);
@@ -253,7 +166,7 @@ test('human credentials: a private directory and files outside the project, owne
   // A link is not a file.
   symlinkSync(join(b.creds, 'credentials.json'), join(b.creds, 'link.json'));
   assert.throws(() => privateFile(join(b.creds, 'link.json')), /private regular file/);
-  assert.throws(() => readCredentials(b.creds, { project: b.repo, adapter: 'linear' }), /no a Linear user token|Linear user token/);
+  assert.throws(() => readCredentials(b.creds, { project: b.repo, adapter: 'other' }), /no user token/);
   // The writer refuses to start from loose credentials: nothing is presented to any tracker.
   chmodSync(join(b.creds, 'credentials.json'), 0o644);
   const run = spawnSync(process.execPath, [join(ORCH_HOME, 'app/human-write.mjs')], { env: b.env, input: JSON.stringify({ op: 'answer', ticket: b.ticket, text: 'x' }), encoding: 'utf8' });
@@ -265,7 +178,7 @@ test('human credentials: a private directory and files outside the project, owne
 const agentUser = process.env.CLEARED_TEST_AGENT_USER;
 test('the agents\' account cannot read the human credentials, the passkeys or the access token', { skip: agentUser ? false : 'set CLEARED_TEST_AGENT_USER (a second account reachable with sudo -n) to run it' }, () => {
   const b = box('github');
-  b.credentials({ github_token: HUMAN_GH });
+  b.credentials(HUMAN_GH);
   writeFileSync(join(b.creds, 'passkeys.json'), '[]', { mode: 0o600 });
   for (const path of [b.creds, join(b.creds, 'credentials.json'), join(b.creds, 'human-signing.key'), join(b.creds, 'passkeys.json'), process.env.CLEARED_TEST_APP_TOKEN].filter(Boolean)) {
     const probe = spawnSync('sudo', ['-n', '-u', agentUser, '--', 'test', '-r', path]);

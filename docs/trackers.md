@@ -31,13 +31,13 @@ Local mode has no remote ticket notifications, browser UI, or shareable ticket U
 The [app](app.md) writes as the human, with accesses of their own, distinct from the agents'. Put them in `[app] human_credentials_dir` (default `~/.config/cleared/human`, mode `0700`, owned by the account that runs the app, outside the project, unreadable by the agents' account) as `credentials.json`, mode `0600`:
 
 ```json
-{ "linear_token": "…", "github_token": "…" }
+{ "linear": "…", "github": "…" }
 ```
 
-Only the adapter in use is needed. The tracker must see the access as `[tracker] owner_id`; the writer checks it before every write and refuses an application or installation token.
+One user token per adapter, keyed by the adapter's name; only the adapter in use is needed (the local tracker needs none, it signs with `human-signing.key`). The tracker must see the access as `[tracker] owner_id`; the writer checks it before every write and refuses an application or installation token.
 
 - **Linear.** An OAuth access token in *user* mode (not the application of the agents): create a Linear OAuth application, authorise it once as yourself with the `read` and `write` scopes (authorisation-code flow, no `actor=app`), and keep the access token (and refresh it when it expires, replacing the file). `owner_id` is your Linear user id. A personal API key also works for the writer but Linear cannot then tell a program acting under your account from you, so prefer the OAuth token.
-- **GitHub.** A fine-grained personal access token of the owner account (`owner_id`), limited to the repository, with *Issues: read and write* (and *Projects: read and write* when `project_v2_id` is set), kept in `github_token`. It must not be the GitHub App's installation token: the writer reads `/user` and refuses a bot.
+- **GitHub.** A fine-grained personal access token of the owner account (`owner_id`), limited to the repository, with *Issues: read and write* (and *Projects: read and write* when `project_v2_id` is set), kept under `github`. It must not be the GitHub App's installation token: the writer reads `/user` and refuses a bot.
 - **Local SQLite.** The signing key that goes with `human_public_key`: copy the human's Ed25519 private key to `human-signing.key` in the credentials directory, owned by the app's account, mode `0600` (the human's own copy stays in their account). The app signs its writes with it, so the tracker's history shows them as the human's.
 
 A different API address (GitHub Enterprise, a test double) is set in the service's environment (`CLEARED_APP_GITHUB_API`, `CLEARED_APP_LINEAR_API`), never in the project's settings.

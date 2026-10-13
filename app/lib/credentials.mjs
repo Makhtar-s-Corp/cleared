@@ -35,16 +35,19 @@ export function privateFile(path, { project } = {}) {
   return readFileSync(path, 'utf8');
 }
 
-const NAMES = { linear_token: 'a Linear user token', github_token: 'a GitHub user token' };
-// credentials.json: {"linear_token": "...", "github_token": "..."}; only the adapter in use is needed.
+// credentials.json: {"<adapter>": "<the human's user token>"}, only the adapter in use is needed (the local
+// tracker has none: it signs with human-signing.key).
 export function readCredentials(dir, { project, adapter } = {}) {
   const root = privateDir(dir, { project });
   let data;
   try { data = JSON.parse(privateFile(join(root, 'credentials.json'), { project })); }
-  catch (error) { throw new Error(`No usable human credentials in ${root}: ${error.code === 'ENOENT' ? 'credentials.json is missing' : error.message}`); }
-  const key = adapter === 'linear' ? 'linear_token' : adapter === 'github' ? 'github_token' : null;
-  if (key && (typeof data[key] !== 'string' || data[key].length < 20)) throw new Error(`credentials.json has no ${NAMES[key]} (${key})`);
-  return { linear_token: data.linear_token, github_token: data.github_token, signingKey: join(root, 'human-signing.key') };
+  catch (error) {
+    if (adapter !== 'local') throw new Error(`No usable human credentials in ${root}: ${error.code === 'ENOENT' ? 'credentials.json is missing' : error.message}`);
+    data = {};
+  }
+  const token = data?.[adapter];
+  if (adapter !== 'local' && (typeof token !== 'string' || token.length < 20)) throw new Error(`credentials.json has no user token for the “${adapter}” adapter`);
+  return { token: typeof token === 'string' ? token : undefined, signingKey: join(root, 'human-signing.key') };
 }
 
 export function readPasskeys(dir, { project } = {}) {
