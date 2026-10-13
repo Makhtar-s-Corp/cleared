@@ -64,6 +64,10 @@ test('[terminal] adapter is orca when the project says nothing, and a name with 
   assert.deepEqual(loaded.stdout.trim().split('\n'), ['orca', 'orca']);
 
   const wrong = noneBox({ adapter: 'tmux' });
+  const dry = spawnSync(join(wrong.home, 'spawn-lane.sh'), ['dev', 'X-2', '--dry-run'], { env: wrong.env, encoding: 'utf8' });
+  assert.equal(dry.status, 1, 'a dry run says it too');
+  assert.match(dry.stderr, /unknown \[terminal\] adapter "tmux"/);
+  assert.equal(existsSync(join(wrong.state, 'ledger.db')), false, 'nothing was made, not even the ledger');
   const run = spawnSync(join(wrong.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: wrong.env, encoding: 'utf8' });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /unknown \[terminal\] adapter "tmux".*\(known: none orca\)/);

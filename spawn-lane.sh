@@ -67,6 +67,9 @@ while [ $# -gt 0 ]; do
 done
 [[ "$ticket" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$ticket\" is not a ticket identifier"
 [ -n "$(conf_get roles "$role")" ] || die "unknown role \"$role\" (roles of agents.conf: $(conf_keys roles | paste -sd' '))"
+# A terminal adapter the project names wrongly stops the spawn, dry run or
+# not, before anything is made.
+terminal_adapter
 
 [ -z "$message_file" ] || [ -f "$message_file" ] || die "no such file: $message_file"
 [ -z "$team" ] || [ "$team" = 2 ] || die "\"$team\" is not a team of a ticket (the second one is 2; the first has no number)"
@@ -195,8 +198,6 @@ fi
 
 prompt_file=${prompt_file:-$(prompt_file "$role")}
 [ -f "$prompt_file" ] || die "no prompt for the role \"$role\": $prompt_file"
-# A terminal adapter the project names wrongly stops the spawn before anything is made.
-terminal_adapter
 
 # 3. The limit on lanes running at once is applied here, not left to a rule.
 # One spawn at a time counts and creates: two at once would both fit under
