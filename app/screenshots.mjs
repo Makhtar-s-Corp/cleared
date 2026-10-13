@@ -15,7 +15,7 @@ const server = appServer({ source: demoSource(), token, ranges: ['127.0.0.0/8'],
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
-const signIn = await fetch(`http://127.0.0.1:${port}/session`, { headers: { authorization: `Bearer ${token}` } });
+const signIn = await fetch(`http://127.0.0.1:${port}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
 const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie'))[1];
 
 const cache = join(process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright'));

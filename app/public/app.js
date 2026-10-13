@@ -1,5 +1,6 @@
 // The Cockpit page. Everything from the server is put on the page as text
 // (never as HTML), and nothing is fetched from another site.
+import { initActions } from '/actions.js';
 let M = {};
 const t = (key, values = {}) => (M[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => values[k] ?? '');
 const $ = (id) => document.getElementById(id);
@@ -57,7 +58,6 @@ function renderHeader(s) {
   $('avatar').textContent = name ? [...name][0].toUpperCase() : '';
   // Places for what is not built yet: dimmed, not clickable, and said to be coming ("soon") in words for a screen reader and on the buttons.
   for (const n of document.querySelectorAll('.views [data-soon], .view-all')) n.replaceChildren(t(n.dataset.soon), el('span', { className: 'sr-only', textContent: ` ${t('app_soon')}` }));
-  for (const n of document.querySelectorAll('.soon-btn')) n.textContent = `${t(n.dataset.soon)} · ${t('app_soon')}`;
 }
 function tickClock() {
   $('clock').textContent = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
@@ -128,7 +128,7 @@ function card(ticket) {
       ticket.kind === 'queued' ? null : mono(dur(ticket.flightMinutes)),
       el('span', { className: 'share', title: t('app_share_label') }, pct(ticket.quotaShare), el('span', { className: 'sr-only', textContent: ` ${t('app_share_label')}` }))));
   }
-  const sentence = cap(ticket.queued || ticket.kind === 'question' ? ticket.reason : ticket.statusLine);
+  const sentence = actions.noteFor(ticket.id) ?? cap(ticket.queued || ticket.kind === 'question' ? ticket.reason : ticket.statusLine);
   if (sentence) parts.push(el('div', { className: 'line', textContent: sentence }));
   const btn = el('button', { type: 'button' }, parts);
   btn.addEventListener('click', () => openTicket(ticket.id));
@@ -165,7 +165,7 @@ let shown = { top: '', tower: '', landed: '' };
 function render(s) {
   state.snap = s;
   const top = JSON.stringify([s.projects, s.fuel, s.health, s.mode, s.owner, s.stats, s.tickets.map((x) => [x.waiting, x.kind])]);
-  const tower = JSON.stringify(s.tickets);
+  const tower = JSON.stringify([s.tickets, s.generatedAt]);
   const landed = JSON.stringify(s.landed);
   if (top !== shown.top) { shown.top = top; renderHeader(s); renderGreeting(s); renderStats(s); }
   if (landed !== shown.landed) { shown.landed = landed; renderLanded(s); renderStats(s); }
@@ -175,6 +175,7 @@ function render(s) {
     renderTower(s);
     if (focused) document.querySelector(`.card[data-id="${CSS.escape(focused)}"] button`)?.focus();
   }
+  if (state.open) actions.mount(s.tickets.find((x) => x.id === state.open));
   tickClock();
 }
 
@@ -203,15 +204,22 @@ async function openTicket(id) {
     chip.className = `chip${d.kind === 'question' ? ' q' : d.kind === 'ready' ? '' : ' stage'}`;
     chip.textContent = d.kind === 'ready' ? t('app_chip_ready') : d.kind === 'question' ? t('app_chip_question') : t(`app_col_${d.column}`);
     $('ph-body').replaceChildren(...porthole(d));
+    await actions.load();
+    if (state.open !== id) return;
+    actions.mount(state.snap?.tickets.find((x) => x.id === id), { fresh: true });
     $('ph-close').focus();
   } catch { $('ph-body').replaceChildren(el('p', { className: 'danger', textContent: t('app_unavailable') })); }
 }
 function closeTicket() {
+  actions.mount(null);
   $('porthole').hidden = true; document.body.classList.remove('has-ph'); state.open = null; setCovered(false);
   const back = state.opener?.isConnected ? state.opener : document.querySelector('.card button');
   back?.focus(); state.opener = null;
 }
 $('ph-close').addEventListener('click', closeTicket);
+const actions = initActions({ t, el, $, state, clock,
+  redraw: () => { shown.tower = ''; if (state.snap) render(state.snap); },
+  reopen: (id) => openTicket(id) });
 function closeZoom() { $('zoom').hidden = true; state.zoomer?.focus(); }
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { if (!$('zoom').hidden) closeZoom(); else if (!$('porthole').hidden) closeTicket(); }
@@ -291,6 +299,7 @@ function live() {
 (async () => {
   try { M = await (await fetch('/api/messages', { credentials: 'same-origin' })).json(); } catch { /* English keys */ }
   theme();
+  await actions.load();
   const first = await fetch('/api/snapshot', { credentials: 'same-origin' }).catch(() => null);
   if (first?.status === 401) return location.replace('/login');
   if (!first?.ok) { state.reason = 'data'; connection(false); $('conn').textContent = t('app_connecting'); live(); return; }

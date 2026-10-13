@@ -27,6 +27,12 @@ const validDetail = (detail) => record(detail) && string(detail.id) && string(de
         && (detail.show.example === null || record(detail.show.example)) && string(detail.show.touches))
   && Array.isArray(detail.blackBox) && detail.blackBox.every((event) => record(event)
     && time(event.at) && string(event.text) && string(event.stage) && record(event.raw));
+// What the three gestures rely on: the tracker reference, the version the user was shown, the team's options.
+const validGesture = (ticket) => (ticket.ref === undefined || ticket.ref === null || (string(ticket.ref) && /^[A-Z][A-Z0-9]*-[0-9]+$/.test(ticket.ref)))
+  && (ticket.approval === undefined || ticket.approval === null || (record(ticket.approval) && time(ticket.approval.at) && Array.isArray(ticket.approval.versions)
+    && ticket.approval.versions.length >= 1 && ticket.approval.versions.length <= 8
+    && ticket.approval.versions.every((v) => record(v) && Number.isSafeInteger(v.pr) && string(v.head) && /^[0-9a-f]{40}$/.test(v.head))))
+  && (ticket.options === undefined || (Array.isArray(ticket.options) && ticket.options.length <= 4 && ticket.options.every((o) => string(o) && o.length <= 80)));
 export function validBoard(value) {
   return record(value) && value.schema === 1 && string(value.project)
     && Array.isArray(value.projects) && value.projects.every((project) => record(project) && string(project.id) && string(project.name))
@@ -47,6 +53,7 @@ export function validBoard(value) {
       && string(ticket.title) && ['progress', 'checks', 'review', 'awaiting'].includes(ticket.column)
       && string(ticket.kind) && string(ticket.model) && string(ticket.statusLine)
       && Number.isFinite(ticket.flightMinutes) && Number.isFinite(ticket.quotaShare)
+      && validGesture(ticket)
       && (ticket.captures === null || record(ticket.captures) && mediaUrl(ticket.captures.before) && mediaUrl(ticket.captures.after))
       && Object.hasOwn(value.details, ticket.id) && validDetail(value.details[ticket.id]))
     && Object.values(value.details).every(validDetail);

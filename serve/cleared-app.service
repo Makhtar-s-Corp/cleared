@@ -1,8 +1,11 @@
-# systemd user unit, installed by serve/install.sh: the read-only Cleared app
-# (Cockpit). It listens on the Tailscale address only, refuses any peer outside
-# the allowed ranges, and wants an access token kept outside the repository.
+# systemd user unit, installed by serve/install.sh: the Cleared app (Cockpit).
+# It listens on the Tailscale address only, refuses any peer outside the
+# allowed ranges, and wants an access token kept outside the repository. It
+# also holds the human's own tracker accesses ([app] human_credentials_dir) to
+# write the three gestures of the human: run it as the app's service account,
+# never as the agents' account.
 [Unit]
-Description=Cleared app (read only, Tailscale only)
+Description=Cleared app (Tailscale only; writes only the human's three gestures)
 
 [Service]
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin

@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSyn
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appServer, ROUTES } from '../app/server.mjs';
+import { appServer, ROUTES, WRITES } from '../app/server.mjs';
 import { demoSource } from '../app/sources/demo.mjs';
 import { describeRun, scrub, statusLineOf, boardCollector, writeBoardSnapshot } from '../lib/board-collector.mjs';
 import { liveSource } from '../app/sources/live.mjs';
@@ -30,26 +30,27 @@ async function serve(options = {}) {
 }
 const auth = { authorization: `Bearer ${TOKEN}` };
 
-test('every route of the server is a read, and a write request is refused on all of them', async () => {
+test('the read routes are GET only; the write routes are the listed POSTs, and nothing else is accepted', async () => {
   assert.ok(ROUTES.every((r) => r.startsWith('GET ')), 'the route table lists reads only');
+  assert.ok(WRITES.every((r) => r.startsWith('POST ')), 'the write table lists POSTs only');
   const s = await serve();
   try {
     for (const route of ROUTES) {
       const path = route.slice(4).replace(':id', 'EX-31');
-      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE']) {
-        if (method === 'TRACE') continue;
-        const r = await s.call(path, { method, headers: { ...auth, 'content-type': 'application/json' }, body: ['POST', 'PUT', 'PATCH'].includes(method) ? '{"status":"Done"}' : undefined });
+      for (const method of ['PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+        const r = await s.call(path, { method, headers: { ...auth, 'content-type': 'application/json' }, body: ['PUT', 'PATCH'].includes(method) ? '{"status":"Done"}' : undefined });
         assert.equal(r.status, 405, `${method} ${path}`);
-        assert.equal(r.headers.get('allow'), 'GET, HEAD');
+        assert.equal(r.headers.get('allow'), 'GET, HEAD, POST');
       }
+      // A POST to a read route is not a route.
+      assert.equal((await s.call(path, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })).status, path === '/session' ? 401 : 404, `POST ${path}`);
     }
-    // Even before signing in, a write is refused for what it is, not asked for a token.
-    assert.equal((await s.call('/api/tickets/EX-31', { method: 'POST' })).status, 405);
+    assert.equal((await s.call('/api/tickets/EX-31', { method: 'POST' })).status, 404);
   } finally { await s.close(); }
 });
 
 test('the server code holds no way to write: no tracker, ledger or process write is imported or called', () => {
-  const files = ['app/server.mjs', 'app/main.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs'];
+  const files = ['app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs', 'app/lib/session.mjs', 'app/lib/actions.mjs', 'app/lib/webauthn.mjs'];
   for (const f of files) {
     const code = readFileSync(join(import.meta.dirname, '..', f), 'utf8').replace(/\/\/.*$/gm, '');
     for (const forbidden of [/\.createTicket\(/, /\.moveTicket\(/, /\.comment\(/, /\.editComment\(/, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b/, /writeFile|appendFile|unlink|rmSync/, /runStart|runEnd|addEvent/, /spawn-lane|merge-pr|kill-lane/])
@@ -77,8 +78,8 @@ test('a peer outside the allowed ranges, a wrong host and a missing or wrong tok
     const login = await s.call('/login');
     assert.equal(login.status, 200);
     assert.doesNotMatch(await login.text(), /sample-app|EX-\d+/, 'the sign-in page carries no data');
-    assert.equal((await s.call('/session', { headers: { authorization: 'Bearer wrong' } })).status, 401);
-    const session = await s.call('/session', { headers: auth });
+    assert.equal((await s.call('/session', { method: 'POST', headers: { authorization: 'Bearer wrong' } })).status, 401);
+    const session = await s.call('/session', { method: 'POST', headers: auth });
     assert.equal(session.status, 204);
     const cookie = session.headers.get('set-cookie');
     assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/);
@@ -200,8 +201,8 @@ test('the app messages exist in English and French', () => {
 test('the cookie never holds the token, and a range without a prefix length is refused', async () => {
   const s = await serve();
   try {
-    const cookie = (await s.call('/session', { headers: auth })).headers.get('set-cookie');
-    assert.ok(!cookie.includes(TOKEN), 'the cookie is a derived session value');
+    const cookie = (await s.call('/session', { method: 'POST', headers: auth })).headers.get('set-cookie');
+    assert.ok(!cookie.includes(TOKEN), 'the cookie is a random session id, not the token');
     assert.equal((await s.call('/api/snapshot', { headers: { cookie: `cleared_app=${TOKEN}` } })).status, 401, 'the token itself is not a cookie');
     assert.equal((await s.call('/events', { method: 'HEAD', headers: auth })).status, 200, 'HEAD on the stream does not open one');
   } finally { await s.close(); }
@@ -263,11 +264,11 @@ test('the old dashboard address redirects to the app when one is configured, and
 test('the design is followed: no gradient, fonts served by the app, light by default, amber only for the human', async () => {
   const pub = join(import.meta.dirname, '..', 'app', 'public');
   const css = readFileSync(join(pub, 'style.css'), 'utf8');
-  for (const f of ['style.css', 'app.js', 'index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
+  for (const f of ['style.css', 'app.js', 'actions.js', 'register.js', 'index.html', 'login.html', 'register.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
   assert.match(css, /font-family: Geist;[^}]*\/fonts\/Geist-Variable\.woff2/);
   assert.match(css, /font-family: "Geist Mono";[^}]*\/fonts\/GeistMono-Variable\.woff2/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/, 'light by default; dark only when chosen');
-  assert.doesNotMatch(readFileSync(join(pub, 'app.js'), 'utf8'), /\.style\.cssText|setAttribute\('style'/, 'no inline style, which the content policy refuses');
+  for (const f of ['app.js', 'actions.js', 'register.js']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\.style\.cssText|setAttribute\('style'/, `${f}: no inline style, which the content policy refuses`);
   // the tokens of DESIGN.md are the ones of the style sheet
   for (const hex of ['#FAFAFA', '#FFFFFF', '#F4F4F4', '#EAEAEA', '#171717', '#4D4D4D', '#666666', '#8F8F8F', '#F5A623', '#AB570A', '#FFFBF2', '#FCE2B3', '#16A34A', '#F2FBF5', '#EE0000', '#0070F3', '#7928CA', '#0A9DB0', '#D97757', '#10A37F'])
     assert.ok(css.toUpperCase().includes(hex), `${hex} is in the style sheet`);
@@ -275,7 +276,7 @@ test('the design is followed: no gradient, fonts served by the app, light by def
   assert.deepEqual(amberViolations(css), [], 'amber used outside what waits for the human');
   assert.ok(amberViolations('.conn2 { background: var(--awaiting); }\n.x { color: #F5A623; }').length === 2, 'the check can fail');
   assert.doesNotMatch(css, /(^|\n)button\.ink/, 'the login button style does not leak to the placeholders');
-  for (const f of ['index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
+  for (const f of ['index.html', 'login.html', 'register.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
   const s = await serve();
   try {
     const font = await s.call('/fonts/Geist-Variable.woff2');
@@ -329,7 +330,7 @@ async function boardFixture(adapter = 'local', imageUrl = null) {
 }
 
 test('the app source has no tracker, forge, process or network dependency', () => {
-  for (const path of ['app/main.mjs', 'app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs']) {
+  for (const path of ['app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs', 'app/lib/session.mjs', 'app/lib/actions.mjs', 'app/lib/webauthn.mjs']) {
     const code = readFileSync(join(import.meta.dirname, '..', path), 'utf8').replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(code, /tracker\/contract|tracker\/adapters|\bgh\b|fetch\(|execFile|spawn\(|https?\.request|createConnection/, path);
   }

@@ -1,11 +1,14 @@
-# The Cleared app (Cockpit), read only
+# The Cleared app (Cockpit)
 
-`cleared app` starts one interface for desktop and phone that shows the factory live. This first version **only reads**: it writes nothing, runs no command that writes and makes no outside call of its own (no GitHub, no tracker probe, no quota probe). The wake collects the board into a versioned `snapshot.json` in the project state directory. The app reads that file and the ledger only; GitHub and Linear delays cannot block its requests. No route writes, moves a ticket, answers a question, or starts or stops a team. Places where actions will come later are marked as reserved and are not clickable.
+`cleared app` starts one interface for desktop and phone that shows the factory live, and lets the human do three things from it: **clear a ticket to land**, **send it back** and **answer a question**. It makes no outside call of its own to read: the wake collects the board into a versioned `snapshot.json` in the project state directory, and the app reads that file and the ledger only, so GitHub and Linear delays cannot block its pages. Its only writes are the three gestures below (and the sign-in and passkey routes they need). It never starts or stops a team and never talks to the release service: giving an agreement is all it does, the lock does the rest.
+
+The principle: **the app has no privilege.** It writes into the ticket tracker exactly what the human would write by hand, under the human's own identity, and the normal circuit (the wake, the lock) does the rest. See [Gestures](#gestures) and [Setup for the gestures](#setup-for-the-gestures).
 
 ```sh
 cleared app            # serves the app; the installer registers it as cleared-app.service
 cleared app --link     # prints http://<bind>:<port>/login#<token> to open on your phone
 cleared app --demo     # serves invented data, for a look without a project
+cleared app passkey    # (the human's own account) prints the address that registers a passkey on a phone
 ```
 
 ## Views
@@ -16,7 +19,7 @@ The look follows [`app/DESIGN.md`](../app/DESIGN.md) (a light, Vercel/Geist-base
 - **Greeting band**: the date and pilot mode, a greeting with what waits for you ("Two things are ready to land." / "Nothing needs you."), and the stat strip: *In flight*, *Landed today*, *First-time clean* and *Fuel left this week* (one bar per subscription, never money; "not measured" otherwise).
 - **Tower**: four columns (In progress, Checks, Review, Awaiting you), one card per open ticket. A card that waits for you carries the amber stripe: *Ready to land* (with before/after tiles for a screen ticket) or *Question*. A team waiting for a place has a dashed card with the reason. On a phone the tower is one list, awaiting cards first.
 - **Landed today**: what shipped today, with its model and outcome (clean first time, review rounds, rolled back).
-- **Porthole**: a right panel on a computer, a page on a phone. Title, stat strip (flight, share of this week's usage, tests), *Show me* (device frames for a screen ticket; otherwise an example, the tests and what it touches), *Where we are*, *The squad* and the *Black box* timeline (raw event on unfold). *Send back* and *Clear to land* are disabled placeholders marked soon.
+- **Porthole**: a right panel on a computer, a page on a phone. Title, stat strip (flight, share of this week's usage, tests), *Show me* (device frames for a screen ticket; otherwise an example, the tests and what it touches), *Where we are*, *The squad* and the *Black box* timeline (raw event on unfold). *Clear to land*, *Send back* and the answer form of a question are real, see [Gestures](#gestures).
 
 The interface language follows `[owner] language` through the message catalog (`app_*` keys in `lib/i18n/`).
 
@@ -41,7 +44,42 @@ At the end of a successful wake, `lib/board-collector.mjs` collects cards, porth
 
 ## Access
 
-The server listens on `[app] bind` and refuses any peer outside `[app] ranges` (Tailscale and this machine by default) and any `Host` it does not expect. Every route except the sign-in page needs the access token, from a cookie or an `Authorization: Bearer` header. The token file is a private regular file (mode `0600`) outside the project; `cleared app` creates it on first start and never prints it except for `--link`. The sign-in page reads the token after the `#` sign (never sent in a request), sends it in a header to `/session` and gets an `HttpOnly`, `SameSite=Strict` cookie. Only `GET` and `HEAD` are accepted; anything else is `405`. The page loads no script, font, image or style from another site (`Content-Security-Policy: default-src 'self'`).
+The server listens on `[app] bind` and refuses any peer outside `[app] ranges` (Tailscale and this machine by default) and any `Host` it does not expect. Every route except the sign-in page needs the access token (an `Authorization: Bearer` header) or a session. The token file is a private regular file (mode `0600`) outside the project; `cleared app` creates it on first start and never prints it except for `--link`. The sign-in page reads the token after the `#` sign (never sent in a request) and sends it in a header to `POST /session`, which answers with a **session cookie**: a random id, `HttpOnly`, `SameSite=Strict`, `Secure` whenever the connection is encrypted (TLS, or a proxy on this machine such as `tailscale serve` that says `X-Forwarded-Proto: https`). The cookie holds no token; the id is a key into the server's memory, and a restart ends every session. Wrong tokens are counted per peer (ten a minute, then `429`); a right one always gets in.
+
+Reads are `GET` and `HEAD`. The only writes are the `POST` routes of the table below. **Every write needs the session cookie** (the access token alone is refused), the **anti-forgery token** of that session in an `X-CSRF-Token` header (read from `GET /api/me`), an `Origin` equal to the app's own address (`[app] public_origin` when set), `Sec-Fetch-Site: same-origin` when the browser sends it, and a JSON body of 16 KB at most. The page loads no script, font, image or style from another site (`Content-Security-Policy: default-src 'self'`).
+
+| Route | Needs |
+| --- | --- |
+| `POST /session`, `POST /session/logout` | the access token (sign-in) / the session |
+| `POST /api/actions/challenge`, `POST /api/actions/confirm` | session, anti-forgery token, **passkey** |
+| `POST /api/actions/undo` | session, anti-forgery token (only the session that confirmed) |
+| `POST /api/actions/answer` | session, anti-forgery token (no passkey: an answer puts nothing live) |
+| `POST /api/passkeys/options`, `POST /api/passkeys/finish` | session, anti-forgery token, a one-time grant from the human's account |
+
+## Gestures
+
+### Clear to land
+Offered only on a card that waits for an agreement (*Ready to land*), with the request the team made on the ticket. The button carries the **exact version** (the first seven characters of each commit) from the request kept in `state/validations/<ticket>.json`. If a new commit arrives while the porthole is open, the board changes under it, the button becomes **New version, review again** and an agreement on the old one is no longer possible. A click asks for a **passkey** (fingerprint or Face ID on the phone), then starts a **60 second grace delay held on the server** with a thin bar that empties and an **Undo** beside it. Nothing is written during that time. Undo before the end writes nothing. When it ends, the server reads the board again; if the version is still the one shown, it writes the human's agreement (moves the ticket to `[tracker] go_state`) under the human's identity, for that version, while holding the same lock (`state/merge.lock`) as `ask-validation.sh` and `merge-pr.sh`. After the write the tracker's history is read back: the result says whether it already shows the human as the author (a tracker's history may lag, and the lock checks it again at merge); a move that was made is never reported as a failure. Only one Clear can wait per ticket; every device of the human sees it and may Undo it; a Send back made meanwhile (from any device) withdraws it; and an agreement answers the exact request on screen, so a request made again for the same commit voids a waiting one. The card then reads "Cleared by you at 14:02, landing" until the next snapshot. If the app restarts during the delay, nothing is written (the ledger shows `confirmed` and no `written`).
+
+### Send back
+A required text ("what needs to change") and a passkey. The app writes the text as a comment, then moves the ticket to `[app] sent_back_state` (default `[tracker] progress_state`), both as the human. The team reopens with that word through the existing circuit: a comment of the owner after the last run is handed to the lane, and the ticket shows at work.
+
+### Answer a question
+On a *Question* card the options the team put under its question (lines like `- text`, `1. text` or `A) text`, four at most) become buttons, plus a free text field. It needs the session only, no passkey. The app writes the answer as a comment as the human.
+
+### The ledger
+Every gesture attempt, refused or not, is one `app_gesture` event: `{gesture, result, device, version}` with the time and the ticket. Results: `confirmed` (grace started), `undone`, `written`, `refused_new_version`, `failed_<code>`, `registered` (a passkey). The device is a short name from the browser ("iPhone · 3fa1") and the first four characters of the session.
+
+## Setup for the gestures
+
+The gestures stay greyed out, with the reason shown, until all of this exists.
+
+1. **A secure address.** Passkeys work only on `https` (or `localhost`). Put the app behind `tailscale serve` (`tailscale serve --bg 8788`), which gives `https://<machine>.<tailnet>.ts.net`, and set `[app] public_origin` to it. When it is set, a write is refused unless the request carries that origin.
+2. **The human's own accesses to the tracker**, in `[app] human_credentials_dir` (default `~/.config/cleared/human` of the account that runs the app): the directory `0700`, `credentials.json` `0600`, owned by the app's service account, outside the project and the Cleared checkout. **The agents' account must not be able to read it**; the app refuses a directory or file that is looser, and `serve/install.sh` probes it as the agents' account. How to get each access is in [Ticket trackers](trackers.md#the-humans-accesses-for-the-app).
+3. **`[tracker] owner_id`** (the human's login or Linear id), as for the lock.
+4. **A passkey.** On the machine, under the human's own Unix account (`[security] human_user`, or the local tracker's `owner_id`): `cleared app passkey`. It asks the running app, over the Unix socket `[app] grant_socket` (an absolute path in a service-owned directory the human can traverse, like the release broker's socket), for a one-time grant. The app reads the caller's UID from the kernel (`SO_PEERCRED`) and answers only the human's UID, so the agents' account cannot obtain one however it reaches the app. The command prints an address; open it on the phone while signed in to the app (the grant is valid for ten minutes and works once), and confirm with fingerprint or Face ID. Up to five passkeys can be registered.
+
+The app writes through a short-lived child process (`app/human-write.mjs`) that reads the credentials, checks the tracker sees them as the human (the tracker's own "who am I", and `[tracker] owner_id`), writes, and reads the history back. The web server itself never holds the tokens. The API address of GitHub or Linear can be changed only in the service's environment (`CLEARED_APP_GITHUB_API`, `CLEARED_APP_LINEAR_API`, for GitHub Enterprise or a test double), never by the project's settings.
 
 ## Live events
 
@@ -65,4 +103,4 @@ The page shows "Connection lost, last update HH:MM" at the top when the stream b
 
 ## Limits of this version
 
-One project per server (tabs appear when a source lists several). No accounts. No flight plans, estimates or money amounts.
+One project per server (tabs appear when a source lists several). One human, no accounts. No rollback button (rollback stays `cleared rollback` on the machine and the automatic one on health), no free conversation with the tower or the teams. No flight plans, estimates or money amounts.

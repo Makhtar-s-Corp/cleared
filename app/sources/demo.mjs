@@ -14,11 +14,14 @@ const image = (title, tone, lines) => {
   return `/media/${id}`;
 };
 
+// The commit the demo asks agreement for, and the one that arrives after it.
+export const DEMO_HEAD = 'a1b2c3d4e5'.repeat(4);
+export const DEMO_HEAD_NEXT = 'f9e8d7c6b5'.repeat(4);
 const NOW = () => Date.now();
 const iso = (minutesAgo) => new Date(NOW() - minutesAgo * 60000).toISOString();
 
 export function demoSource() {
-  const base = { kind: 'normal', harness: '', model: '', flightMinutes: 0, quotaShare: 0, statusLine: '', screen: false, pr: null, queued: false, live: false, round: 0, tests: null, captures: null, reason: '' };
+  const base = { ref: null, approval: null, options: [], kind: 'normal', harness: '', model: '', flightMinutes: 0, quotaShare: 0, statusLine: '', screen: false, pr: null, queued: false, live: false, round: 0, tests: null, captures: null, reason: '' };
   const tickets = [
     { ...base, id: 'EX-31', title: 'Payments already taken no longer count in what is left to pay', column: 'awaiting', waiting: true, kind: 'ready',
       reason: 'Your approval is needed before this ships', harness: 'claude', model: 'claude-opus-5-5', flightMinutes: 84, quotaShare: 0.7, round: 1,
@@ -37,6 +40,8 @@ export function demoSource() {
   const before = image('Order page: before', '#d9d3c4', ['Delivery: 14 Nov', '[ contact support to change ]']);
   const after = image('Order page: after', '#d9d3c4', ['Delivery: 14 Nov  [ change ]', 'Pick a date: 15 – 21 Nov']);
   tickets[0].captures = { before, after };
+  tickets[0].ref = 'EX-31'; tickets[0].approval = { at: iso(30), versions: [{ pr: 88, head: DEMO_HEAD }] };
+  tickets[1].ref = 'EX-39'; tickets[1].options = ['Yes, take the charges out first', 'No, count the full amount'];
   const squad = (...rows) => rows.map(([role, harness, model]) => ({ role, harness, model }));
   const details = {
     'EX-31': { where: ['Rent paid on the 3rd now leaves what is left to pay that same day.', 'One rounding fix on “Upcoming” was asked in review, fixed and tested.'],
@@ -70,6 +75,12 @@ export function demoSource() {
   return {
     // A test moves a card; the next read shows it, as the real source would.
     move(id, column) { tickets.find((t) => t.id === id).column = column; },
+    // A newer commit arrives: the request for agreement is made again for it.
+    newVersion(id, next = DEMO_HEAD_NEXT) { const t = tickets.find((x) => x.id === id); t.approval = { at: iso(0), versions: t.approval.versions.map((v) => ({ ...v, head: next })) }; },
+    // The agent asks again for the same commit: a new request, the old agreement no longer answers it.
+    askAgain(id) { const t = tickets.find((x) => x.id === id); t.approval = { ...t.approval, at: new Date(Date.now() + 1000).toISOString() }; },
+    // The user's agreement, as the real tracker would show it on the next wake.
+    cleared(id) { tickets.find((t) => t.id === id).column = 'review'; },
     async snapshot() {
       const today = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return new Date(Math.min(d.getTime(), Date.now() - 5 * 60000)).toISOString(); };
       return structuredClone({ schema: 1, owner: { name: 'Alex' }, stats: { inFlight: 4, firstTimeClean: 78 },
