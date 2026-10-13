@@ -210,6 +210,16 @@ test('with [terminal] adapter = none, closing a worktree stops its live session 
 });
 
 
+test('[Linear adapter] the default terminal adapter names the worktree in Orca and links it to its Linear issue', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[tracker]\nadapter = local\n', '[tracker]\nadapter = linear\n'));
+  const run = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-2', '--comment-on', 'none'], { env: box.env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(readFileSync(join(box.home, 'orca-named'), 'utf8'), /^--worktree path:.*\/dev-X-2 --display-name X-2 · Titre de X-2 --linear-issue X-2 --comment dev · a · opened by Cleared$/m);
+});
+
+
 test('with [terminal] adapter = none, talk.sh holds the conversation in the terminal it is run from, and refuses to start one from none', () => {
   const box = noneBox();
   // No terminal: nothing is held, the mark that keeps the wakes back is taken away, the way to run it is said.

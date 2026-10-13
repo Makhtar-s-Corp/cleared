@@ -69,7 +69,6 @@ esac
   fake('second', '${SECOND_EXIT:-0}');
   // tracker and GitHub as files the test writes: what they "say now".
   writeFileSync(join(home, 'tracker.sh'), `#!/usr/bin/env bash
-if [ "$1" = decorate-worktree ]; then orca worktree set --worktree "path:$2" --display-name "$3" --comment "$5"; exit; fi
 if [ "$1" = ticket-prefix ]; then echo X; exit; fi
 if [ "$1" = legacy-line-allowed ]; then exit 0; fi
 if [ "$1" = changes ]; then cat "${join(home, 'tracker-now.json')}"; exit; fi

@@ -74,11 +74,10 @@ terminal_remove_worktree() {
 }
 
 # The name Orca shows for the worktree, and the ticket it is linked to when
-# the tracker is one whose issues Orca links (tracker.sh linkable-issue).
+# the tracker is one whose issues Orca links.
 terminal_name_worktree() {
-  local kind linked=()
-  kind=$("$ORCH_HOME/tracker.sh" linkable-issue 2> /dev/null) || kind=
-  [[ ! "$kind" =~ ^[a-z]+$ ]] || linked=("--$kind-issue" "$3")
+  local linked=()
+  case "$(conf_get tracker adapter)" in linear) linked=(--linear-issue "$3") ;; esac
   orca worktree set --worktree "path:$1" --display-name "$2" "${linked[@]}" --comment "$4"
 }
 
