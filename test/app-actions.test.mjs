@@ -3,7 +3,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { appServer, WRITES } from '../app/server.mjs';
-import { demoSource } from '../app/sources/demo.mjs';
+import { demoSource, DEMO_HEAD, DEMO_HEAD_NEXT } from '../app/sources/demo.mjs';
 import { createActions } from '../app/lib/actions.mjs';
 import { grantServer, requestGrant } from '../app/lib/grant-socket.mjs';
 import { Authenticator } from './app-authenticator.mjs';
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const TOKEN = 'b'.repeat(64);
-const HEAD_A = 'a'.repeat(40);
+const HEAD_A = DEMO_HEAD;
 const VERSIONS = [{ pr: 88, head: HEAD_A }];
 const dirs = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
@@ -204,7 +204,7 @@ test('Clear to land: the grace delay is held on the server, and the agreement is
     assert.deepEqual(r.ran, [{ op: 'approve', ticket: 'EX-31', versions: VERSIONS }]);
     const written = r.records.find((e) => e.result === 'written');
     assert.equal(written.gesture, 'clear');
-    assert.deepEqual(written.version, ['88:aaaaaaa']);
+    assert.deepEqual(written.version, ['88:a1b2c3d']);
     assert.match(written.device, /^iPhone · [0-9a-f]{4}$/);
     assert.deepEqual(r.records.filter((e) => e.gesture === 'clear').map((e) => e.result), ['confirmed', 'written']);
   } finally { await r.close(); }
@@ -247,7 +247,7 @@ test('the agreement is for the version shown: a newer version makes it impossibl
     const stale = await browser.json('/api/actions/challenge', { gesture: 'clear', ticket: 'EX-31', versions: VERSIONS });
     assert.equal(stale.status, 409); assert.equal(stale.body.error, 'new_version');
     // Between the challenge and its confirmation: the board moved, the grace delay then refuses it.
-    const fresh = [{ pr: 88, head: 'b'.repeat(40) }];
+    const fresh = [{ pr: 88, head: DEMO_HEAD_NEXT }];
     const asked = await browser.json('/api/actions/challenge', { gesture: 'clear', ticket: 'EX-31', versions: fresh });
     assert.equal(asked.status, 200, 'the page that shows the new version may ask for it');
     // A version made up by the page is refused as well.

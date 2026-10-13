@@ -302,7 +302,6 @@
   "app_act_cleared_note": "Cleared by you at {time}, landing",
   "app_act_sent_back_note": "Sent back by you at {time}",
   "app_act_answered_note": "Answered by you at {time}",
-  "app_act_note_time": "{time}",
   "app_act_new_version": "New version, review again",
   "app_act_new_version_hint": "A new version arrived while you were looking. Your agreement was for the old one.",
   "app_act_no_request": "The team has not asked for your agreement for a version yet.",
@@ -329,10 +328,5 @@
   "app_err_author": "The tracker did not show you as the author. Check the access.",
   "app_err_config": "The app is not set up to write. See the setup notes.",
   "app_err_too_late": "It is too late to undo: the agreement is being written.",
-  "app_err_undone": "Undone. Nothing was written.",
-  "app_reg_title": "Register a passkey",
-  "app_reg_go": "Register this phone",
-  "app_reg_done": "Passkey registered. You can close this page.",
-  "app_reg_missing": "Open the address printed by “cleared app passkey”.",
-  "app_reg_failed": "The passkey could not be registered."
+  "app_err_undone": "Undone. Nothing was written."
 }

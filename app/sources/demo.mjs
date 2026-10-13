@@ -14,6 +14,9 @@ const image = (title, tone, lines) => {
   return `/media/${id}`;
 };
 
+// The commit the demo asks agreement for, and the one that arrives after it.
+export const DEMO_HEAD = 'a1b2c3d4e5'.repeat(4);
+export const DEMO_HEAD_NEXT = 'f9e8d7c6b5'.repeat(4);
 const NOW = () => Date.now();
 const iso = (minutesAgo) => new Date(NOW() - minutesAgo * 60000).toISOString();
 
@@ -37,8 +40,7 @@ export function demoSource() {
   const before = image('Order page: before', '#d9d3c4', ['Delivery: 14 Nov', '[ contact support to change ]']);
   const after = image('Order page: after', '#d9d3c4', ['Delivery: 14 Nov  [ change ]', 'Pick a date: 15 – 21 Nov']);
   tickets[0].captures = { before, after };
-  const head = (c) => c.repeat(40);
-  tickets[0].ref = 'EX-31'; tickets[0].approval = { at: iso(30), versions: [{ pr: 88, head: head('a') }] };
+  tickets[0].ref = 'EX-31'; tickets[0].approval = { at: iso(30), versions: [{ pr: 88, head: DEMO_HEAD }] };
   tickets[1].ref = 'EX-39'; tickets[1].options = ['Yes, take the charges out first', 'No, count the full amount'];
   const squad = (...rows) => rows.map(([role, harness, model]) => ({ role, harness, model }));
   const details = {
@@ -74,7 +76,7 @@ export function demoSource() {
     // A test moves a card; the next read shows it, as the real source would.
     move(id, column) { tickets.find((t) => t.id === id).column = column; },
     // A newer commit arrives: the request for agreement is made again for it.
-    newVersion(id, letter = 'b') { const t = tickets.find((x) => x.id === id); t.approval = { at: iso(0), versions: t.approval.versions.map((v) => ({ ...v, head: head(letter) })) }; },
+    newVersion(id, next = DEMO_HEAD_NEXT) { const t = tickets.find((x) => x.id === id); t.approval = { at: iso(0), versions: t.approval.versions.map((v) => ({ ...v, head: next })) }; },
     // The user's agreement, as the real tracker would show it on the next wake.
     cleared(id) { tickets.find((t) => t.id === id).column = 'review'; },
     async snapshot() {

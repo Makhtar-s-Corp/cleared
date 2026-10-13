@@ -43,7 +43,6 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   }
 
   const note = (card, message) => { notes.set(card.id, { text: message, generatedAt: state.snap?.generatedAt }); mode = { name: 'idle' }; redraw(); mount(card); };
-  const stamp = () => t('app_act_note_time', { time: clock(new Date().toISOString()) });
 
   function stopTicker() { clearInterval(ticker); ticker = null; }
   function grace(card, pending) {

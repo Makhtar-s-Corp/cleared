@@ -301,7 +301,6 @@
   "app_act_cleared_note": "Accord donné par vous à {time}, mise en ligne en cours",
   "app_act_sent_back_note": "Renvoyé par vous à {time}",
   "app_act_answered_note": "Réponse donnée par vous à {time}",
-  "app_act_note_time": "{time}",
   "app_act_new_version": "Nouvelle version, à revoir",
   "app_act_new_version_hint": "Une nouvelle version est arrivée pendant que vous regardiez. Votre accord valait pour l’ancienne.",
   "app_act_no_request": "L’équipe n’a pas encore demandé votre accord pour une version.",
@@ -328,10 +327,5 @@
   "app_err_author": "Le suivi ne vous montre pas comme auteur. Vérifiez l’accès.",
   "app_err_config": "L’app n’est pas réglée pour écrire. Voir les notes d’installation.",
   "app_err_too_late": "Trop tard pour annuler : l’accord est en cours d’écriture.",
-  "app_err_undone": "Annulé. Rien n’a été écrit.",
-  "app_reg_title": "Enregistrer une clé d’accès",
-  "app_reg_go": "Enregistrer ce téléphone",
-  "app_reg_done": "Clé d’accès enregistrée. Vous pouvez fermer cette page.",
-  "app_reg_missing": "Ouvrez l’adresse affichée par « cleared app passkey ».",
-  "app_reg_failed": "La clé d’accès n’a pas pu être enregistrée."
+  "app_err_undone": "Annulé. Rien n’a été écrit."
 }
