@@ -8,6 +8,20 @@ import { message } from '../../lib/i18n.mjs';
 import { scrub } from '../../lib/board-scrub.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/;
+const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+export function validBoard(value) {
+  return record(value) && value.schema === 1 && typeof value.project === 'string'
+    && Array.isArray(value.projects) && ['en', 'fr'].includes(value.language)
+    && Number.isFinite(Date.parse(value.generatedAt)) && record(value.owner) && typeof value.owner.name === 'string'
+    && record(value.stats) && Number.isFinite(value.stats.inFlight)
+    && (value.stats.firstTimeClean === null || Number.isFinite(value.stats.firstTimeClean))
+    && Array.isArray(value.landed) && Array.isArray(value.fuel) && Array.isArray(value.tickets)
+    && record(value.details) && record(value.mode) && typeof value.mode.short === 'string'
+    && typeof value.mode.label === 'string' && record(value.health) && Array.isArray(value.health.problems)
+    && value.tickets.every((ticket) => record(ticket) && /^[A-Za-z0-9._-]{1,40}$/.test(ticket.id)
+      && typeof ticket.title === 'string' && typeof ticket.column === 'string' && Object.hasOwn(value.details, ticket.id))
+    && Object.values(value.details).every(record);
+}
 export function liveSource({ conf = loadConf(), now = () => Date.now(), dir = stateDir() } = {}) {
   const language = section(conf, 'owner').language || 'en';
   const interval = Number(section(conf, 'heartbeat').wake_interval_minutes) || 1;
@@ -20,7 +34,8 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), dir = st
     try {
       db = openLedger(ledgerPath(), { readOnly: true });
       const get = (key) => { try { return db.prepare('SELECT value FROM heartbeat_state WHERE key = ?').get(key)?.value || null; } catch { return null; } };
-      const lastWake = get('last_wake_at');
+      const lastWakeRaw = get('last_wake_at');
+      const lastWake = lastWakeRaw && /^\d{4}-\d{2}-\d{2}T/.test(lastWakeRaw) && Number.isFinite(Date.parse(lastWakeRaw)) ? lastWakeRaw : null;
       const age = lastWake ? now() - Date.parse(lastWake) : null;
       const problems = [];
       if (!lastWake) problems.push(problem('wake_missing', 'app_srv_problem_wake_missing'));
@@ -46,8 +61,8 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), dir = st
       const bytes = readFileSync(path, 'utf8');
       if (bytes !== signature) {
         const value = JSON.parse(bytes);
-        if (value.schema !== 1 || !Array.isArray(value.tickets) || !value.details || !Array.isArray(value.landed) || !Array.isArray(value.fuel))
-          throw new Error('version');
+        if (value.schema !== 1) throw new Error('version');
+        if (!validBoard(value)) throw new Error('incomplete');
         cached = value; signature = bytes;
       }
     } catch (error) {

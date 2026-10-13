@@ -321,6 +321,7 @@ async function boardFixture(adapter = 'local', imageUrl = null) {
   const trackerClient = {
     listTickets: ({ status }) => status === 'Needs Approval' ? [ticket] : [],
     getTicket: () => ticket,
+    downloadCapture: () => png,
     comments: () => [{ body: `**Before**\n![Before](${url})\n**After**\n![After](${afterUrl})` }],
   };
   const conf = boardConf(adapter);
@@ -374,6 +375,9 @@ test('missing, stale and unknown-version snapshots are visible as health problem
     snap.schema = 99;
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
     assert.match((await source.snapshot()).health.problems[0].message, /format is unknown/);
+    snap.schema = 1; delete snap.owner;
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
   } finally { f.close(); }
 });
 
@@ -411,18 +415,18 @@ test('ticket text and health names cannot put secrets, amounts or host paths in 
   const f = await boardFixture();
   try {
     const secret = 'ghp_' + 'A'.repeat(30);
-    const ticket = { id: 'LOCAL-1', identifier: 'LOCAL-1', title: `Saved /home/private/key ${secret} for 12.40 $`, status: 'Needs Approval' };
+    const ticket = { id: 'LOCAL-1', identifier: 'LOCAL-1', title: `Saved /data/customer/private.key ${secret} for £12.40`, status: 'Needs Approval' };
     f.trackerClient.listTickets = ({ status }) => status === 'Needs Approval' ? [ticket] : [];
     f.trackerClient.getTicket = () => ticket;
-    f.trackerClient.comments = () => [{ body: `Agree with /home/private/key and ${secret}? Costs 12.40 $.` }];
+    f.trackerClient.comments = () => [{ body: `Agree with /data/customer/private.key and ${secret}? Costs £12.40.` }];
     await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
     const disk = readFileSync(join(f.dir, 'snapshot.json'), 'utf8');
-    assert.doesNotMatch(disk, /\/home\/private|ghp_|12\.40|\$/);
+    assert.doesNotMatch(disk, /\/data\/customer|ghp_|12\.40|£/);
     const { openLedger } = await import('../lib/ledger.mjs');
     const db = openLedger();
     db.prepare('INSERT INTO heartbeat_incidents VALUES (?,?,?,1)').run(`service_unreachable:/home/private/${secret}`, new Date().toISOString(), new Date().toISOString());
     db.close();
-    assert.doesNotMatch(JSON.stringify(await liveSource({ conf: f.conf, dir: f.dir }).snapshot()), /\/home\/private|ghp_|12\.40|\$/);
+    assert.doesNotMatch(JSON.stringify(await liveSource({ conf: f.conf, dir: f.dir }).snapshot()), /\/data\/customer|ghp_|12\.40|£/);
   } finally { f.close(); }
 });
 
@@ -453,5 +457,17 @@ test('renaming a new snapshot pushes an event on the existing stream', async () 
       assert.match(await next(), /event: ticket.updated/);
       reader.cancel();
     } finally { await s.close(); }
+  } finally { f.close(); }
+});
+
+test('Landed today keeps the tracker title for a remote adapter', async () => {
+  const f = await boardFixture('github', 'https://github.com/owner/repo/raw/' + 'a'.repeat(40) + '/captures/a.png');
+  try {
+    const { openLedger, addEvent } = await import('../lib/ledger.mjs');
+    const db = openLedger();
+    addEvent(db, { kind: 'merged_by_script', ticket: '1' });
+    db.close();
+    const snap = await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot();
+    assert.equal(snap.landed[0].title, 'Screen before and after');
   } finally { f.close(); }
 });

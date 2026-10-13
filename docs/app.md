@@ -33,7 +33,7 @@ The interface language follows `[owner] language` through the message catalog (`
 | In flight | Tickets whose last author run is still running. |
 | Health | What the wake recorded (`heartbeat_state` and `heartbeat_incidents`, read-only), plus the snapshot generation time. The app shows the snapshot age and reports one older than three wake intervals. It also reports a missing or unknown snapshot format. |
 | Pilot mode | Derived from `[merge] tooling_paths`: whether tooling paths may merge after review. |
-| Captures | The wake copies images from local, GitHub or Linear ticket comments to the project state cache. The snapshot contains only local `/media/` references. |
+| Captures | The wake copies images from local, GitHub or Linear ticket comments to the project state cache, using the configured tracker identity for private remote assets. The snapshot contains only local `/media/` references. |
 
 ## Snapshot publication
 

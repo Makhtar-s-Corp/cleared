@@ -228,7 +228,7 @@
   "app_srv_problem_orphan_process": "un processus Cleared est orphelin ({name})",
   "app_srv_problem_diagnostic_failed": "le diagnostic de santé a échoué",
   "app_srv_problem_other": "problème : {code}",
-  "app_status_age": "état d’il y a {age}",
+  "app_status_age": "instantané du tableau datant de {age}",
   "app_age_s": "{n} s",
   "app_age_min": "{n} min",
   "app_age_h": "{n} h",
