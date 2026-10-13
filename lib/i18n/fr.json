@@ -244,10 +244,8 @@
   "app_greet_evening": "Bonsoir",
   "app_wait_ready_one_tone": "{n} chose est ",
   "app_wait_ready_other_tone": "{n} choses sont ",
-  "app_wait_ready_key": "prête à partir.",
   "app_wait_need_one_tone": "{n} chose ",
   "app_wait_need_other_tone": "{n} choses ",
-  "app_wait_need_key": "vous attend.",
   "app_wait_none": "Rien ne vous attend.",
   "app_stat_flight": "En vol",
   "app_stat_landed": "Posés aujourd’hui",
@@ -276,5 +274,13 @@
   "app_clear": "Autoriser la mise en ligne",
   "app_theme_dark": "Sombre",
   "app_theme_light": "Clair",
-  "app_project": "Projet"
+  "app_project": "Projet",
+  "app_landed_col_time": "Heure",
+  "app_landed_col_what": "Ce qui est parti",
+  "app_landed_col_model": "Modèle",
+  "app_landed_col_out": "Résultat",
+  "app_wait_ready_key_one": "prête à partir.",
+  "app_wait_ready_key_other": "prêtes à partir.",
+  "app_wait_need_key_one": "vous attend.",
+  "app_wait_need_key_other": "vous attendent."
 }

@@ -149,9 +149,11 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
         if (before && after) captures = { before: `/media/${before.digest}`, after: `/media/${after.digest}` };
       } catch { /* a card without tiles */ }
     }
-    return { id, title: scrub(t.title, 160), column, waiting, kind: queued ? 'queued' : isQuestion ? 'question' : waiting ? 'ready' : 'normal',
+    // A question card says the question itself (the event's text), and keeps the ticket title as its sentence.
+    const question = isQuestion ? scrub(asks?.detail, 160) : '';
+    return { id, title: question || scrub(t.title, 160), column, waiting, kind: queued ? 'queued' : isQuestion ? 'question' : waiting ? 'ready' : 'normal',
       live: Boolean(last && last.outcome === 'running' && !last.ended_at), round: reviews, tests: testsCount(handover), captures,
-      reason: queued ? message('app_srv_queued', language) : reason, queued,
+      reason: queued ? message('app_srv_queued', language) : question ? scrub(t.title, 160) : reason, queued,
       harness: scrub(harness, 40), model: scrub(model, 60), flightMinutes: Math.round(minutes),
       quotaShare: weekTokens ? Math.round((tokens / weekTokens) * 1000) / 10 : 0,
       statusLine: scrub(statusLineOf({ handover, reviews, column, waiting, reason, language }), 120), screen: /\b(?:screen|capture|page|tab|button)\b/i.test(`${t.title} ${t.body ?? ''}`),
@@ -161,6 +163,7 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
   // What shipped in the last two days (the page keeps today's), and how many went through first time.
   const titles = new Map();
   const titleOf = (id) => {
+    if (tracker.adapter !== 'local') return ''; // a remote tracker is not called for this: the id is shown
     if (!titles.has(id)) { try { titles.set(id, scrub(issues().getTicket(id)?.title, 160)); } catch { titles.set(id, ''); } }
     return titles.get(id);
   };

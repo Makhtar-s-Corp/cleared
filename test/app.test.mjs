@@ -12,6 +12,10 @@ import { checkRanges, ensureToken, hostAllowed, readToken, TAILSCALE } from '../
 import { spawnSync } from 'node:child_process';
 
 const TOKEN = 'a'.repeat(64);
+// Amber (token or value) may appear only in the rules of what waits for the human, the greeting highlight, the project dot and the token definitions.
+const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.chip\.q|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
+const AMBER = /var\(--(?:awaiting|e-awaiting)[^)]*\)|#F5A623|#AB570A|#FFFBF2|#FCE2B3|245,\s*166,\s*35|171,\s*87,\s*10/i;
+const amberViolations = (css) => css.split('\n').filter((line) => AMBER.test(line) && !ALLOWED_AMBER.test(line)).map((line) => line.trim().slice(0, 80));
 const dirs = [];
 const scratch = () => { const d = mkdtempSync(join(tmpdir(), 'cleared-app-')); dirs.push(d); return d; };
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
@@ -147,6 +151,8 @@ test('events are diffed by ticket, fuel and health', () => {
   const a = { tickets: [{ id: 'A', column: 'progress' }, { id: 'B', column: 'review' }], fuel: [], health: { ok: true, problems: [] }, mode: 'm' };
   const b = { tickets: [{ id: 'A', column: 'review' }], fuel: [{ adapter: 'x' }], health: { ok: false, problems: [{ code: 'x' }] }, mode: 'm' };
   assert.deepEqual(diffSnapshots(a, b).map((e) => e.type), ['ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated']);
+  const c = { ...b, landed: [{ id: 'EX-1' }], stats: { inFlight: 1 } };
+  assert.deepEqual(diffSnapshots(b, c).map((e) => e.type), ['stats.updated'], 'a release that lands reaches the page');
   assert.deepEqual(diffSnapshots(a, a), []);
 });
 
@@ -375,9 +381,11 @@ test('the design is followed: no gradient, fonts served by the app, light by def
   // the tokens of DESIGN.md are the ones of the style sheet
   for (const hex of ['#FAFAFA', '#FFFFFF', '#F4F4F4', '#EAEAEA', '#171717', '#4D4D4D', '#666666', '#8F8F8F', '#F5A623', '#AB570A', '#FFFBF2', '#FCE2B3', '#16A34A', '#F2FBF5', '#EE0000', '#0070F3', '#7928CA', '#0A9DB0', '#D97757', '#10A37F'])
     assert.ok(css.toUpperCase().includes(hex), `${hex} is in the style sheet`);
-  // amber is used for the human only
-  const amber = [...css.matchAll(/^(.*var\(--(?:awaiting|e-awaiting)[^)]*\).*)$/gm)].map((m) => m[1].trim());
-  for (const line of amber) assert.match(line, /\.key|\.ready|\.question|\.chip\.q|\.amber-bar|\.project|data-col="awaiting"|\.d-awaiting|st-awaiting|\.card\.ready|--awaiting|:root/, `amber used outside what waits for the human: ${line.slice(0, 80)}`);
+  // amber is used for the human only: every rule that names an amber token or value is one of the rules for what waits
+  assert.deepEqual(amberViolations(css), [], 'amber used outside what waits for the human');
+  assert.ok(amberViolations('.conn2 { background: var(--awaiting); }\n.x { color: #F5A623; }').length === 2, 'the check can fail');
+  assert.doesNotMatch(css, /(^|\n)button\.ink/, 'the login button style does not leak to the placeholders');
+  for (const f of ['index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
   const s = await serve();
   try {
     const font = await s.call('/fonts/Geist-Variable.woff2');
@@ -389,8 +397,10 @@ test('the design is followed: no gradient, fonts served by the app, light by def
   const en = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', 'en.json'), 'utf8'));
   const fr = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', 'fr.json'), 'utf8'));
   const js = readFileSync(join(pub, 'app.js'), 'utf8');
-  for (const key of ['app_wait_ready_one_tone', 'app_wait_ready_other_tone', 'app_wait_ready_key', 'app_wait_need_one_tone', 'app_wait_need_other_tone', 'app_wait_need_key', 'app_wait_none', 'app_col_progress', 'app_col_checks', 'app_col_review', 'app_col_awaiting'])
+  for (const key of ['app_wait_ready_one_tone', 'app_wait_ready_other_tone', 'app_wait_ready_key_one', 'app_wait_ready_key_other', 'app_wait_need_one_tone', 'app_wait_need_other_tone', 'app_wait_need_key_one', 'app_wait_need_key_other', 'app_wait_none', 'app_col_progress', 'app_col_checks', 'app_col_review', 'app_col_awaiting'])
     assert.ok(en[key] && fr[key], key);
   assert.match(en.app_share_label, /share of this week.s usage/);
+  assert.equal(fr.app_wait_need_key_other, 'vous attendent.', 'two things wait: the verb agrees');
+  assert.equal(fr.app_wait_ready_key_other, 'prêtes à partir.');
   assert.match(js, /app_share_label/);
 });

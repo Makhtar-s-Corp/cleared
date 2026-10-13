@@ -2,7 +2,7 @@
 // light and dark, at 1440, 768 and 390 px wide, from the demonstration data.
 //   npm install && node screenshots.mjs [output folder]
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appServer } from './server.mjs';
@@ -51,12 +51,10 @@ for (const width of [1440, 768, 390]) {
     await context.close();
   }
 }
-// The mockups of the design, rendered the same way (their font link is answered from the fonts the app serves, so nothing leaves this machine).
-const fontCss = `@font-face{font-family:Geist;src:url(data:font/woff2;base64,${readFileSync(new URL('./public/fonts/Geist-Variable.woff2', import.meta.url)).toString('base64')}) format("woff2");font-weight:100 900}@font-face{font-family:"Geist Mono";src:url(data:font/woff2;base64,${readFileSync(new URL('./public/fonts/GeistMono-Variable.woff2', import.meta.url)).toString('base64')}) format("woff2");font-weight:100 900}`;
+// The mockups of the design, rendered the same way (they load the fonts from app/public/fonts, nothing from outside).
 for (const [file, width, height] of [['tower', 1440, 900], ['porthole-phone', 390, 844]]) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
-  await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ contentType: 'text/css', body: fontCss }));
   await page.goto(new URL(`./reference/${file}.html`, import.meta.url).href);
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(out, `reference-${file}.png`), fullPage: file === 'tower' });

@@ -19,9 +19,9 @@
     </div>
     <nav class="views" aria-label="Views">
       <a href="#tower" aria-current="page" data-i="app_nav_tower">Tower</a>
-      <span aria-disabled="true" data-soon="app_nav_landed">Landed</span>
-      <span aria-disabled="true" data-soon="app_nav_fuel">Fuel</span>
-      <span aria-disabled="true" data-soon="app_nav_rules">Rules</span>
+      <span aria-disabled="true" data-soon="app_nav_landed" title="soon">Landed</span>
+      <span aria-disabled="true" data-soon="app_nav_fuel" title="soon">Fuel</span>
+      <span aria-disabled="true" data-soon="app_nav_rules" title="soon">Rules</span>
     </nav>
     <div class="right">
       <div id="health" class="pill"></div>
@@ -46,7 +46,7 @@
 
 <section id="landed" class="landed" aria-labelledby="landed-title">
   <div class="landed-head"><h2 id="landed-title" data-i="app_landed_title">Landed today</h2><span id="landed-summary" class="muted"></span><span class="view-all faint" aria-disabled="true" data-soon="app_view_all">View all</span></div>
-  <div id="landed-rows" class="landed-rows"></div>
+  <div id="landed-rows" class="landed-rows" role="table" aria-labelledby="landed-title"></div>
 </section>
 
 <aside id="porthole" class="porthole" role="dialog" aria-modal="false" aria-labelledby="ph-title" hidden>

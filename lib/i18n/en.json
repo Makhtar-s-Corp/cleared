@@ -245,10 +245,8 @@
   "app_greet_evening": "Good evening",
   "app_wait_ready_one_tone": "{n} thing is ",
   "app_wait_ready_other_tone": "{n} things are ",
-  "app_wait_ready_key": "ready to land.",
   "app_wait_need_one_tone": "{n} thing is ",
   "app_wait_need_other_tone": "{n} things are ",
-  "app_wait_need_key": "waiting for you.",
   "app_wait_none": "Nothing needs you.",
   "app_stat_flight": "In flight",
   "app_stat_landed": "Landed today",
@@ -277,5 +275,13 @@
   "app_clear": "Clear to land",
   "app_theme_dark": "Dark",
   "app_theme_light": "Light",
-  "app_project": "Project"
+  "app_project": "Project",
+  "app_landed_col_time": "Time",
+  "app_landed_col_what": "What shipped",
+  "app_landed_col_model": "Model",
+  "app_landed_col_out": "Outcome",
+  "app_wait_ready_key_one": "ready to land.",
+  "app_wait_ready_key_other": "ready to land.",
+  "app_wait_need_key_one": "waiting for you.",
+  "app_wait_need_key_other": "waiting for you."
 }

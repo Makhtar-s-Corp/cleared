@@ -54,6 +54,7 @@ The server listens on `[app] bind` and refuses any peer outside `[app] ranges` (
 | `ticket.removed` | `{ "id": "EX-12" }` |
 | `fuel.updated` | The list of fuel entries. |
 | `health.updated` | `{ "health": {...}, "mode": {...} }` |
+| `stats.updated` | `{ "stats": {...}, "landed": [...], "owner": {...} }`: the stat strip and the Landed today table. |
 | `heartbeat` | `{}` every 15 s, so the page can tell silence from calm. |
 
 The page shows "Connection lost, last update HH:MM" at the top when the stream breaks or no frame arrives for 40 s. The names are dotted, `data` is plain JSON and there is no library dependency, so a later converter can map them to AG-UI: `snapshot` to `STATE_SNAPSHOT`, `*.updated` and `*.removed` to `STATE_DELTA`, `heartbeat` to a custom event.

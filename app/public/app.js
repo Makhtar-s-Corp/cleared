@@ -14,8 +14,9 @@ const el = (tag, props = {}, ...kids) => {
 };
 const fr = () => document.documentElement.lang === 'fr';
 const locale = () => (fr() ? 'fr-FR' : 'en-US');
-const clock = (iso) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
-const when = (iso) => new Intl.DateTimeFormat(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+const clock = (iso) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+const when = (iso) => new Intl.DateTimeFormat(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+const cap = (text) => (text ? text[0].toUpperCase() + text.slice(1) : text);
 const dur = (m) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`);
 const pct = (n) => `${String(n).replace('.', fr() ? ',' : '.')}%`;
 const mono = (text, cls = '') => el('span', { className: `mono ${cls}`.trim(), textContent: text });
@@ -59,7 +60,7 @@ function renderHeader(s) {
   for (const n of document.querySelectorAll('.soon-btn')) n.textContent = `${t(n.dataset.soon)} · ${t('app_soon')}`;
 }
 function tickClock() {
-  $('clock').textContent = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+  $('clock').textContent = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   const at = state.snap?.health?.recordedAt;
   $('health-age').textContent = at ? t('app_status_age', { age: ageText(at) }) : '';
 }
@@ -79,7 +80,7 @@ function renderGreeting(s) {
   const allReady = waiting.length > 0 && waiting.every((x) => x.kind === 'ready');
   const n = waiting.length;
   const second = n === 0 ? [null, t('app_wait_none')]
-    : [t(`app_wait_${allReady ? 'ready' : 'need'}_${n === 1 ? 'one' : 'other'}_tone`, { n: word(n) }), t(`app_wait_${allReady ? 'ready' : 'need'}_key`)];
+    : [t(`app_wait_${allReady ? 'ready' : 'need'}_${n === 1 ? 'one' : 'other'}_tone`, { n: word(n) }), t(`app_wait_${allReady ? 'ready' : 'need'}_key_${n === 1 ? 'one' : 'other'}`)];
   const h1 = $('greeting');
   h1.replaceChildren(`${greet}${s.owner?.name ? `, ${s.owner.name}` : ''}.`, el('br'),
     second[0] ? el('span', { className: 'tone', textContent: second[0] }) : null, el('span', { className: n ? 'key' : 'tone', textContent: second[1] }));
@@ -95,7 +96,7 @@ function renderStats(s) {
   const fuel = el('div', { className: 'stat fuel', role: 'listitem' }, el('div', { className: 'k', textContent: t('app_stat_fuel') }),
     ...s.fuel.map((f) => {
       const bar = el('span', { className: `h-${harnessClass(f.adapter)}` });
-      if (f.measured) bar.style.width = `${f.left}%`;
+      bar.style.width = f.measured ? `${f.left}%` : '0';
       return el('div', { className: 'fuelrow' }, el('span', { className: 'n', textContent: f.adapter }),
         el('span', { className: 'bar6', role: 'img', ariaLabel: f.measured ? `${f.adapter} ${f.left}%` : `${f.adapter} ${t('app_not_measured')}` }, bar),
         f.measured ? mono(`${f.left}%`, 'p') : el('span', { className: 'p faint', textContent: t('app_not_measured') }));
@@ -110,10 +111,10 @@ function card(ticket) {
   const top = el('div', { className: 'top-row' }, el('span', { className: 'id', textContent: ticket.id }));
   if (ticket.kind === 'ready') top.append(el('span', { className: 'chip', textContent: t('app_chip_ready') }));
   else if (ticket.kind === 'question') top.append(el('span', { className: 'chip q', textContent: t('app_chip_question') }));
-  else if (ticket.kind === 'queued') top.append(el('span', { className: 'hint', textContent: t('app_queued_tag') }));
+  else if (ticket.kind === 'queued') top.append(el('span', { className: 'hint', textContent: cap(t('app_queued_tag')) }));
   else if (ticket.live) top.append(el('span', { className: 'hint progress' }, el('i', { className: 'live' }), t('app_hint_building')));
   else if (ticket.column === 'checks' && ticket.tests) top.append(el('span', { className: 'hint checks', textContent: String(ticket.tests) }));
-  else if (ticket.round > 1) top.append(el('span', { className: 'hint', textContent: t('app_hint_round', { n: ticket.round }) }));
+  else if (ticket.round > 1) top.append(el('span', { className: 'hint round', textContent: t('app_hint_round', { n: ticket.round }) }));
   const parts = [top, el('h3', { textContent: ticket.title })];
   if (ticket.kind === 'ready' && ticket.captures) {
     parts.push(el('div', { className: 'tiles' },
@@ -127,7 +128,7 @@ function card(ticket) {
       ticket.kind === 'queued' ? null : mono(dur(ticket.flightMinutes)),
       el('span', { className: 'share', title: t('app_share_label') }, pct(ticket.quotaShare), el('span', { className: 'sr-only', textContent: ` ${t('app_share_label')}` }))));
   }
-  const sentence = ticket.queued || ticket.kind === 'question' ? ticket.reason : ticket.kind === 'ready' ? '' : ticket.statusLine;
+  const sentence = cap(ticket.queued || ticket.kind === 'question' ? ticket.reason : ticket.statusLine);
   if (sentence) parts.push(el('div', { className: 'line', textContent: sentence }));
   const btn = el('button', { type: 'button' }, parts);
   btn.addEventListener('click', () => openTicket(ticket.id));
@@ -149,13 +150,14 @@ function renderLanded(s) {
   $('landed-summary').textContent = rows.length
     ? t(rows.length === 1 ? 'app_landed_summary_one' : 'app_landed_summary', { n: rows.length, r: back, p: String(share).replace('.', fr() ? ',' : '.') })
     : '';
-  const cells = rows.flatMap((r) => {
+  const heads = ['time', 'what', 'model', 'out'].map((k) => el('span', { role: 'columnheader', textContent: t(`app_landed_col_${k}`) }));
+  const lines = rows.map((r) => {
     const out = r.rolledBackAt ? ['danger', t('app_outcome_rolled', { time: clock(r.rolledBackAt) })]
       : r.fixes === 0 ? ['success', t('app_outcome_clean')] : ['success', r.fixes === 1 ? t('app_outcome_rounds_one') : t('app_outcome_rounds', { n: r.fixes })];
-    return [el('div', { className: 'time' }, el('time', { dateTime: r.at, textContent: clock(r.at) })), el('div', { className: 'what', textContent: r.title }),
-      el('div', { className: 'model', textContent: r.model }), el('div', { className: 'out' }, el('span', { className: out[0] }, el('i'), out[1]))];
+    return el('div', { role: 'row' }, el('div', { className: 'time', role: 'cell' }, el('time', { dateTime: r.at, textContent: clock(r.at) })), el('div', { className: 'what', role: 'cell', textContent: r.title }),
+      el('div', { className: 'model', role: 'cell', textContent: r.model }), el('div', { className: 'out', role: 'cell' }, el('span', { className: out[0] }, el('i'), out[1])));
   });
-  $('landed-rows').replaceChildren(...(cells.length ? cells : [el('p', { className: 'empty', textContent: t('app_landed_empty') })]));
+  $('landed-rows').replaceChildren(...(lines.length ? [el('div', { role: 'row' }, heads), ...lines] : [el('p', { className: 'empty', role: 'row', textContent: t('app_landed_empty') })]));
 }
 
 // Redrawing keeps the keyboard where it was, and skips what did not change.
@@ -177,12 +179,18 @@ function render(s) {
 }
 
 // --- porthole ----------------------------------------------------------------
+// Where the panel covers the page (a phone, a narrow window), what is behind it leaves the keyboard and the screen reader.
+function setCovered(on) {
+  const covers = matchMedia('(max-width: 1279px)').matches;
+  for (const sel of ['.top', '.band', '.tower', '.landed']) document.querySelector(sel).inert = on && covers;
+}
 async function openTicket(id) {
   const ph = $('porthole');
   state.opener = document.activeElement;
   state.open = id;
   ph.hidden = false;
   document.body.classList.add('has-ph');
+  setCovered(true);
   $('ph-id').textContent = id;
   $('ph-chip').textContent = '';
   $('ph-body').replaceChildren(el('p', { textContent: '…' }));
@@ -199,7 +207,7 @@ async function openTicket(id) {
   } catch { $('ph-body').replaceChildren(el('p', { className: 'danger', textContent: t('app_unavailable') })); }
 }
 function closeTicket() {
-  $('porthole').hidden = true; document.body.classList.remove('has-ph'); state.open = null;
+  $('porthole').hidden = true; document.body.classList.remove('has-ph'); state.open = null; setCovered(false);
   const back = state.opener?.isConnected ? state.opener : document.querySelector('.card button');
   back?.focus(); state.opener = null;
 }
@@ -220,7 +228,7 @@ const section = (label, ...kids) => el('section', { className: 'sec' }, el('span
 
 function porthole(d) {
   const out = [];
-  out.push(el('div', {}, d.waiting ? el('div', { className: 'amber-bar' }) : null, el('h1', { id: 'ph-title', textContent: d.title })));
+  out.push(el('div', {}, d.waiting ? el('div', { className: 'amber-bar' }) : null, el('h2', { id: 'ph-title', textContent: d.title })));
   out.push(el('div', { className: 'pstats' },
     el('div', {}, el('div', { className: 'k', textContent: t('app_stat_p_flight') }), el('div', { className: 'v', textContent: dur(d.flightMinutes) })),
     el('div', {}, el('div', { className: 'k', textContent: t('app_stat_p_usage') }), el('div', { className: 'v', textContent: pct(d.quotaShare) })),
@@ -264,13 +272,14 @@ function apply(e) {
   if (e.type === 'ticket.removed') s.tickets = s.tickets.filter((x) => x.id !== e.data.id);
   if (e.type === 'fuel.updated') s.fuel = e.data;
   if (e.type === 'health.updated') { s.health = e.data.health; s.mode = e.data.mode; }
+  if (e.type === 'stats.updated') { s.stats = e.data.stats; s.landed = e.data.landed; s.owner = e.data.owner; }
   render(s);
 }
 function live() {
   const source = new EventSource('/events');
   let beat = setTimeout(() => { state.reason = 'data'; connection(false); }, 40000);
   const stamp = () => { clearTimeout(beat); beat = setTimeout(() => { state.reason = 'link'; connection(false); }, 40000); connection(true); };
-  for (const type of ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'heartbeat'])
+  for (const type of ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'stats.updated', 'heartbeat'])
     source.addEventListener(type, (m) => { const e = JSON.parse(m.data); stamp(); if (e.type !== 'heartbeat') apply(e); else state.last = e.at; });
   source.onerror = async () => {
     state.reason = 'link'; connection(false);

@@ -4,7 +4,7 @@
 //
 // `type` is a dotted name; `data` is plain JSON. See docs/app.md for the
 // mapping to AG-UI, planned for later without any AG-UI library today.
-export const EVENT_TYPES = ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'heartbeat'];
+export const EVENT_TYPES = ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'stats.updated', 'heartbeat'];
 
 let counter = 0;
 export function envelope(type, data, now = Date.now()) {
@@ -23,6 +23,7 @@ export function diffSnapshots(before, after, now = Date.now()) {
   for (const ticket of after.tickets) if (!same(old.get(ticket.id), ticket)) events.push(envelope('ticket.updated', ticket, now));
   for (const id of old.keys()) if (!next.has(id)) events.push(envelope('ticket.removed', { id }, now));
   if (!same(before.fuel, after.fuel)) events.push(envelope('fuel.updated', after.fuel, now));
+  if (!same([before.stats, before.landed, before.owner], [after.stats, after.landed, after.owner])) events.push(envelope('stats.updated', { stats: after.stats, landed: after.landed, owner: after.owner }, now));
   if (!same(before.health, after.health) || !same(before.mode, after.mode)) events.push(envelope('health.updated', { health: after.health, mode: after.mode }, now));
   return events;
 }
