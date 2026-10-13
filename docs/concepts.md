@@ -4,7 +4,7 @@ Cleared is a set of scripts around a Git repository and a configured ticket trac
 
 ## Team (lane)
 
-A team is a Git worktree and a branch such as `dev/EX-12`. `spawn-lane.sh` chooses a configured model, opens the worktree, and starts a terminal through Orca. The team receives the ticket and user comments as quoted data. It can commit on its branch; Cleared pushes and opens a draft pull request after the session. `flow-lanes.sh` reopens it for failed checks, reviewer findings, a changed base, or a new user comment. A ticket can have two independent teams when its owner writes `Teams: both` or the French equivalent. The owner then chooses `Team 1` or `Team 2` on the ticket.
+A team is a Git worktree and a branch such as `dev/EX-12`. `spawn-lane.sh` chooses a configured model, opens the worktree, and starts the session through the terminal adapter named by `[terminal] adapter`: an Orca terminal by default, or `none`, a detached session with no terminal. Either way, the harness runs under `[security] agent_user` when it is set. The team receives the ticket and user comments as quoted data. It can commit on its branch; Cleared pushes and opens a draft pull request after the session. `flow-lanes.sh` reopens it for failed checks, reviewer findings, a changed base, or a new user comment. A ticket can have two independent teams when its owner writes `Teams: both` or the French equivalent. The owner then chooses `Team 1` or `Team 2` on the ticket.
 
 A team's role is a permission and routing profile, not a different program. Example roles are `dev`, `mechanical`, `review`, `release`, `talk`, and `writing`. `[roles]` picks an alias; `[rules]` can override it using ticket labels, ticket project, changed paths, or pull request size. `[fallbacks]` applies only when a model cannot start. A model failure does not silently try another model. `[review] differs_from_author` prevents a model from reviewing its own change. The release role observes events and asks for work through scripts; it has no authority to bypass those scripts.
 
@@ -31,7 +31,7 @@ CLI-reported cost is used when available. Otherwise `[prices]` and `[currency]` 
 ## Commands in daily use
 
 - `spawn-lane.sh dev EX-12 --dry-run` shows routing before opening anything.
-- `spawn-lane.sh dev EX-12` opens a team and terminal.
+- `spawn-lane.sh dev EX-12` opens a team and starts its session.
 - `review-pr.sh 41 EX-12` opens a separate read-only review.
 - `ask-validation.sh EX-12 request.md --pr 41` shows the user the commit to approve.
 - `release-request.mjs request_release EX-12 41 < announcement.md` asks the local broker to verify and ship.

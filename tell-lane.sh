@@ -11,7 +11,9 @@
 #                                               handed to it at a session the rules open for that
 #   tell-lane.sh --list                         the lanes that can be told something
 #
-# Every message is kept in state/lane-messages.jsonl.
+# Every message is kept in state/lane-messages.jsonl. With [terminal]
+# adapter = none there is no terminal to type in: only a lane of the
+# dispatcher, named by its ticket, is told something (at its next session).
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 

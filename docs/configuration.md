@@ -237,6 +237,18 @@ Worktree layout, captures, checks, and cleanup settings.
 | `tidy_reason_waiting` | Reason recorded when work waits for approval. | Optional; no default |
 | `tidy_summary` | Formatting template for a cleanup summary. | Optional; no default |
 
+## `[terminal]`
+
+Where team and project lead sessions run. An unknown value stops `spawn-lane.sh` and the wake with an error before anything is created.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `adapter` | `orca` opens each session in an Orca terminal under its worktree. `none` needs no terminal: each session starts detached, in its own process session, with output in `terminal.log` of its run folder. | Default: orca |
+
+The harness always starts under `[security] agent_user`, whichever adapter is used. With `none`, the handle in a run folder's `terminal.handle` is `none:<pid>:<start>:<boot>`. Before signalling, Cleared checks that the process still has that start time and boot, and that its command line is a Cleared session script. It then sends SIGTERM to the session's process group, which includes the harness. A session started by the wake must outlive the `cleared-wake.service` oneshot unit, because systemd stops the processes of a unit when it ends. Cleared therefore starts it in its own transient scope of the user's systemd manager (`systemd-run --user --scope --collect`). The release watch also relies on that manager for its transient unit. Without a user manager, for example a script run by hand outside a login session, `setsid` alone detaches it. No unit file changes are needed.
+
+With `none`, nobody can watch a session live or type in it. `tell-lane.sh <ticket>` keeps a message for the lane's next session. `adopt-lane.sh` and `tell-lane.sh <worktree name>` refuse because there is no terminal. `talk.sh` holds the conversation in the terminal it is run from and returns when it ends. Run without a terminal, it refuses and prints the command to run by hand. Worktree names shown by Orca are not set.
+
 ## `[owner]`
 
 How Cleared addresses the human and which language its direct user messages use.

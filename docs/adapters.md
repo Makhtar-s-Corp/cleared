@@ -41,4 +41,4 @@ The optional container task script receives `<worktree> <prompt-file> <model> [-
 4. Add `[adapter.<name>]` settings and `[models]` aliases to the project config, with a fallback and prices if known.
 5. Test no-output, cannot-start, guard-refusal, success, and an actual report. The dispatcher must be able to tell code 2 from a failed run.
 
-The adapter contract is stable for this alpha only as exercised by the tests; check existing callers before changing a report field. A terminal backend independent of Orca is on the [roadmap](roadmap.md).
+The adapter contract is stable for this alpha only as exercised by the tests; check existing callers before changing a report field. Terminals have their own adapters, chosen by `[terminal] adapter` (see [Configuration](configuration.md#terminal)); their contract is at the top of `lib/terminal/orca.sh`.

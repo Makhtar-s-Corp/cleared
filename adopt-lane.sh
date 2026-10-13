@@ -3,6 +3,7 @@
 # lead can answer it (tell-lane.sh). Run by whoever hands lanes over to the
 # lead, never by the lead itself: a terminal is only written down when Orca
 # shows it connected, in the worktree of that name (the whole path git gives).
+# With [terminal] adapter = none there is no terminal to write down: refused.
 #
 #   adopt-lane.sh <worktree name> <terminal handle>
 #   adopt-lane.sh --forget <worktree name>
