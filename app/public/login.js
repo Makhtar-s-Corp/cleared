@@ -10,7 +10,7 @@ document.querySelector('label').textContent = words.label;
 document.querySelector('button').textContent = words.open;
 try { const saved = localStorage.getItem('cleared-theme'); if (saved) document.documentElement.dataset.theme = saved; } catch { /* light */ }
 async function enter(token) {
-  const response = await fetch('/session', { headers: { authorization: `Bearer ${token}` }, credentials: 'same-origin' });
+  const response = await fetch('/session', { method: 'POST', headers: { authorization: `Bearer ${token}` }, credentials: 'same-origin' });
   if (response.status === 204) { history.replaceState(null, '', '/login'); location.replace('/'); return; }
   err.textContent = words.refused; err.hidden = false;
 }

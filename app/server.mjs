@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-// The Cleared app server. It only reads: GET and HEAD, nothing else, and every
-// route below returns data or files. No route writes, moves a ticket, starts or
-// stops anything. Every connection is checked first: peer address, Host
-// header, then the access token (cookie or bearer header).
+// The Cleared app server. Its reads are GET and HEAD: data and files from the
+// board snapshot and the ledger. Its only writes are the three gestures of the
+// human (clear to land, send back, answer) and the sign-in and passkey routes
+// they need; nothing starts or stops a team, and nothing talks to the release
+// service. Every connection is checked first: peer address, Host header, then
+// the access token or session. A write needs more: the session cookie (never
+// the bearer token), the anti-forgery header, a same-origin request, and for
+// the gestures that change a ticket's course a passkey confirmation.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allowed, TAILSCALE, bearerToken, cookieToken, hostAllowed, sameToken, sessionSecret, sessionValue } from './lib/access.mjs';
+import { allowed, TAILSCALE, bearerToken, hostAllowed, sameToken } from './lib/access.mjs';
+import { attempts, COOKIE, cookieValue, sameSecret, sessionStore } from './lib/session.mjs';
+import { originInfo } from './lib/actions.mjs';
 import { diffSnapshots, envelope, frame } from './lib/events.mjs';
 import { message } from '../lib/i18n.mjs';
 import { readFileSync } from 'node:fs';
@@ -17,7 +23,10 @@ const PUBLIC = join(here, 'public');
 const FILES = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/actions.js': ['actions.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/register': ['register.html', 'text/html; charset=utf-8'],
+  '/register.js': ['register.js', 'text/javascript; charset=utf-8'],
 };
 // The only things served without the token: the sign-in page and its two files.
 const OPEN = {
@@ -32,8 +41,11 @@ const HEADERS = {
   'content-security-policy': "default-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin',
 };
-export const ROUTES = ['GET /', 'GET /app.js', 'GET /style.css', 'GET /fonts/:file', 'GET /login', 'GET /login.js', 'GET /session', 'GET /api/snapshot',
-  'GET /api/messages', 'GET /api/tickets/:id', 'GET /media/:id', 'GET /events'];
+export const ROUTES = ['GET /', 'GET /app.js', 'GET /actions.js', 'GET /style.css', 'GET /register', 'GET /register.js', 'GET /fonts/:file', 'GET /login', 'GET /login.js', 'GET /api/snapshot',
+  'GET /api/me', 'GET /api/messages', 'GET /api/tickets/:id', 'GET /media/:id', 'GET /events'];
+// Everything that writes. All need the session cookie and the anti-forgery header, except sign-in (the access token).
+export const WRITES = ['POST /session', 'POST /session/logout', 'POST /api/actions/challenge', 'POST /api/actions/confirm', 'POST /api/actions/undo',
+  'POST /api/actions/answer', 'POST /api/passkeys/options', 'POST /api/passkeys/finish'];
 
 const MESSAGE_KEYS = (language) => {
   const out = {};
@@ -45,7 +57,7 @@ const MESSAGE_KEYS = (language) => {
   return out;
 };
 
-export function appServer({ source, token, ranges = TAILSCALE, language = 'en', hosts = [], pollMs = 2000, heartbeatMs = 15000 }) {
+export function appServer({ source, token, ranges = TAILSCALE, language = 'en', hosts = [], pollMs = 2000, heartbeatMs = 15000, actions = null, origin = '', owner = '', now = () => Date.now() }) {
   const text = (response, status, body, type = 'text/plain; charset=utf-8', extra = {}) =>
     response.writeHead(status, { ...HEADERS, 'content-type': type, ...extra }).end(body);
   const json = (response, status, value) => text(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
@@ -55,8 +67,20 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
   };
   const streams = new Set();
   const unwatch = source.watch?.(() => { cached = null; for (const entry of streams) entry.tick(); }) ?? (() => {});
-  const secret = sessionSecret();
-  const session = sessionValue(token, secret);
+  const sessions = sessionStore({ now });
+  const failures = attempts({ now });
+  const configured = originInfo(origin);
+  const loopback = (address) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
+  // Secure whenever the browser's connection is encrypted: TLS here, or a proxy on this machine (tailscale serve) that says so.
+  const encrypted = (request) => Boolean(request.socket.encrypted) || (loopback(request.socket.remoteAddress) && request.headers['x-forwarded-proto'] === 'https');
+  const expectedOrigin = (request) => configured?.origin ?? `${encrypted(request) ? 'https' : 'http'}://${request.headers.host}`;
+  const body = (request) => new Promise((resolve, reject) => {
+    let data = '', size = 0;
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => { size += chunk.length; if (size > 16384) { reject(Object.assign(new Error('big'), { status: 413, code: 'too_big' })); request.destroy(); } else data += chunk; });
+    request.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { reject(Object.assign(new Error('json'), { status: 400, code: 'json' })); } });
+    request.on('error', reject);
+  });
   // One read at a time, shared by every page: a slow source is never asked twice at once.
   let reading = null, readAt = 0, cached = null;
   const read = () => {
@@ -68,26 +92,27 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
   const server = createServer(async (request, response) => {
     if (!allowed(request.socket.remoteAddress, ranges)) return text(response, 403, message('http_forbidden', language), undefined, { connection: 'close' });
     if (!hostAllowed(request.headers.host, hosts)) return text(response, 421, message('http_forbidden', language), undefined, { connection: 'close' });
-    // Reads only. Anything else is refused before any routing happens.
-    if (!['GET', 'HEAD'].includes(request.method)) return text(response, 405, 'Read only', undefined, { allow: 'GET, HEAD' });
+    // Reads, and the few writes in WRITES. Anything else is refused before any routing happens.
+    if (!['GET', 'HEAD', 'POST'].includes(request.method)) return text(response, 405, 'Method not allowed', undefined, { allow: 'GET, HEAD, POST' });
     let url;
     try { url = new URL(request.url, 'http://x'); } catch { return text(response, 400, message('http_bad_request', language)); }
     const path = url.pathname;
-    const signedIn = sameToken(bearerToken(request.headers.authorization), token) || sameToken(cookieToken(request.headers.cookie), session);
+    const mine = sessions.get(cookieValue(request.headers.cookie, COOKIE));
+    const signedIn = Boolean(mine) || sameToken(bearerToken(request.headers.authorization), token);
 
+    if (request.method === 'POST') return write(request, response, path, mine);
     if (OPEN[path]) return send(response, request, OPEN[path]);
-    if (path === '/session') {
-      // Sign-in: the page sends the token in a header (never in the address) and gets a cookie back.
-      if (!sameToken(bearerToken(request.headers.authorization), token)) return text(response, 401, 'Token required');
-      return text(response, 204, undefined, undefined, { 'set-cookie': `cleared_app=${session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800` });
-    }
     if (!signedIn) {
-      if (path === '/' ) return text(response, 302, '', undefined, { location: '/login' });
+      if (path === '/' || path === '/register') return text(response, 302, '', undefined, { location: '/login' });
       return text(response, 401, 'Token required');
     }
     try {
       if (FILES[path]) return await send(response, request, FILES[path]);
       if (path === '/api/snapshot') return json(response, 200, await read());
+      if (path === '/api/me') {
+        if (!mine) return text(response, 401, 'Session required');
+        return json(response, 200, { csrf: mine.csrf, device: mine.device, owner, actions: actions ? actions.status(mine) : null });
+      }
       if (path === '/api/messages') return json(response, 200, MESSAGE_KEYS(language));
       const ticket = /^\/api\/tickets\/([A-Za-z0-9._-]{1,40})$/.exec(path);
       if (ticket) {
@@ -106,6 +131,36 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     }
     return text(response, 404, message('http_not_found', language));
   });
+
+  // ---- the writes ---------------------------------------------------------------
+  async function write(request, response, path, mine) {
+    const error = (status, code) => json(response, status, { error: code });
+    try {
+      if (path === '/session') {
+        // Sign-in: the access token comes in a header (never in the address) and a session cookie goes back.
+        const peer = request.socket.remoteAddress;
+        if (failures.blocked(peer)) return text(response, 429, 'Too many attempts', undefined, { 'retry-after': '60' });
+        if (!sameToken(bearerToken(request.headers.authorization), token)) { failures.fail(peer); return text(response, 401, 'Token required'); }
+        const made = sessions.create(request.headers['user-agent']);
+        return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=${made.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${made.maxAge}${encrypted(request) ? '; Secure' : ''}` });
+      }
+      if (!WRITES.includes(`POST ${path}`)) return text(response, 404, message('http_not_found', language));
+      // Every other write: the session cookie, not the token; the anti-forgery header; a request from this very site.
+      if (!mine) return error(401, 'session');
+      if (!sameSecret(request.headers['x-csrf-token'], mine.csrf)) return error(403, 'csrf');
+      if (request.headers.origin !== expectedOrigin(request) || (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin')) return error(403, 'origin');
+      if (!String(request.headers['content-type'] || '').startsWith('application/json')) return error(415, 'type');
+      if (path === '/session/logout') { sessions.revoke(cookieValue(request.headers.cookie, COOKIE)); return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); }
+      if (!actions) return error(503, 'unavailable');
+      const input = await body(request);
+      const run = { '/api/actions/challenge': 'begin', '/api/actions/confirm': 'confirm', '/api/actions/undo': 'undo', '/api/actions/answer': 'answer',
+        '/api/passkeys/options': 'registerOptions', '/api/passkeys/finish': 'registerFinish' }[path];
+      return json(response, 200, await actions[run](mine, input));
+    } catch (caught) {
+      if (caught?.status) return error(caught.status, caught.code);
+      return error(500, 'failed');
+    }
+  }
 
   async function stream(request, response) {
     response.writeHead(200, { ...HEADERS, 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive', 'x-accel-buffering': 'no' });
@@ -133,6 +188,6 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
   }
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
   const close = server.close.bind(server);
-  server.close = (callback) => { unwatch(); for (const entry of [...streams]) { entry.stop(); entry.response.end(); } server.closeAllConnections?.(); return close(callback); };
+  server.close = (callback) => { unwatch(); actions?.stop?.(); for (const entry of [...streams]) { entry.stop(); entry.response.end(); } server.closeAllConnections?.(); return close(callback); };
   return server;
 }

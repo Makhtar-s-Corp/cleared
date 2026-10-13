@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSyn
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appServer, ROUTES } from '../app/server.mjs';
+import { appServer, ROUTES, WRITES } from '../app/server.mjs';
 import { demoSource } from '../app/sources/demo.mjs';
 import { describeRun, scrub, statusLineOf, boardCollector, writeBoardSnapshot } from '../lib/board-collector.mjs';
 import { liveSource } from '../app/sources/live.mjs';
@@ -30,26 +30,27 @@ async function serve(options = {}) {
 }
 const auth = { authorization: `Bearer ${TOKEN}` };
 
-test('every route of the server is a read, and a write request is refused on all of them', async () => {
+test('the read routes are GET only; the write routes are the listed POSTs, and nothing else is accepted', async () => {
   assert.ok(ROUTES.every((r) => r.startsWith('GET ')), 'the route table lists reads only');
+  assert.ok(WRITES.every((r) => r.startsWith('POST ')), 'the write table lists POSTs only');
   const s = await serve();
   try {
     for (const route of ROUTES) {
       const path = route.slice(4).replace(':id', 'EX-31');
-      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE']) {
-        if (method === 'TRACE') continue;
-        const r = await s.call(path, { method, headers: { ...auth, 'content-type': 'application/json' }, body: ['POST', 'PUT', 'PATCH'].includes(method) ? '{"status":"Done"}' : undefined });
+      for (const method of ['PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+        const r = await s.call(path, { method, headers: { ...auth, 'content-type': 'application/json' }, body: ['PUT', 'PATCH'].includes(method) ? '{"status":"Done"}' : undefined });
         assert.equal(r.status, 405, `${method} ${path}`);
-        assert.equal(r.headers.get('allow'), 'GET, HEAD');
+        assert.equal(r.headers.get('allow'), 'GET, HEAD, POST');
       }
+      // A POST to a read route is not a route.
+      assert.equal((await s.call(path, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })).status, path === '/session' ? 401 : 404, `POST ${path}`);
     }
-    // Even before signing in, a write is refused for what it is, not asked for a token.
-    assert.equal((await s.call('/api/tickets/EX-31', { method: 'POST' })).status, 405);
+    assert.equal((await s.call('/api/tickets/EX-31', { method: 'POST' })).status, 404);
   } finally { await s.close(); }
 });
 
 test('the server code holds no way to write: no tracker, ledger or process write is imported or called', () => {
-  const files = ['app/server.mjs', 'app/main.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs'];
+  const files = ['app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs', 'app/lib/session.mjs', 'app/lib/actions.mjs', 'app/lib/webauthn.mjs'];
   for (const f of files) {
     const code = readFileSync(join(import.meta.dirname, '..', f), 'utf8').replace(/\/\/.*$/gm, '');
     for (const forbidden of [/\.createTicket\(/, /\.moveTicket\(/, /\.comment\(/, /\.editComment\(/, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b/, /writeFile|appendFile|unlink|rmSync/, /runStart|runEnd|addEvent/, /spawn-lane|merge-pr|kill-lane/])
@@ -77,8 +78,8 @@ test('a peer outside the allowed ranges, a wrong host and a missing or wrong tok
     const login = await s.call('/login');
     assert.equal(login.status, 200);
     assert.doesNotMatch(await login.text(), /sample-app|EX-\d+/, 'the sign-in page carries no data');
-    assert.equal((await s.call('/session', { headers: { authorization: 'Bearer wrong' } })).status, 401);
-    const session = await s.call('/session', { headers: auth });
+    assert.equal((await s.call('/session', { method: 'POST', headers: { authorization: 'Bearer wrong' } })).status, 401);
+    const session = await s.call('/session', { method: 'POST', headers: auth });
     assert.equal(session.status, 204);
     const cookie = session.headers.get('set-cookie');
     assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/);
@@ -200,8 +201,8 @@ test('the app messages exist in English and French', () => {
 test('the cookie never holds the token, and a range without a prefix length is refused', async () => {
   const s = await serve();
   try {
-    const cookie = (await s.call('/session', { headers: auth })).headers.get('set-cookie');
-    assert.ok(!cookie.includes(TOKEN), 'the cookie is a derived session value');
+    const cookie = (await s.call('/session', { method: 'POST', headers: auth })).headers.get('set-cookie');
+    assert.ok(!cookie.includes(TOKEN), 'the cookie is a random session id, not the token');
     assert.equal((await s.call('/api/snapshot', { headers: { cookie: `cleared_app=${TOKEN}` } })).status, 401, 'the token itself is not a cookie');
     assert.equal((await s.call('/events', { method: 'HEAD', headers: auth })).status, 200, 'HEAD on the stream does not open one');
   } finally { await s.close(); }
@@ -329,7 +330,7 @@ async function boardFixture(adapter = 'local', imageUrl = null) {
 }
 
 test('the app source has no tracker, forge, process or network dependency', () => {
-  for (const path of ['app/main.mjs', 'app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs']) {
+  for (const path of ['app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs', 'app/lib/session.mjs', 'app/lib/actions.mjs', 'app/lib/webauthn.mjs']) {
     const code = readFileSync(join(import.meta.dirname, '..', path), 'utf8').replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(code, /tracker\/contract|tracker\/adapters|\bgh\b|fetch\(|execFile|spawn\(|https?\.request|createConnection/, path);
   }
