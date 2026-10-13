@@ -1,12 +1,13 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appServer, ROUTES } from '../app/server.mjs';
 import { demoSource } from '../app/sources/demo.mjs';
-import { describeRun, scrub, statusLineOf } from '../app/sources/live.mjs';
+import { describeRun, scrub, statusLineOf, boardCollector, writeBoardSnapshot } from '../lib/board-collector.mjs';
+import { liveSource } from '../app/sources/live.mjs';
 import { diffSnapshots } from '../app/lib/events.mjs';
 import { checkRanges, ensureToken, hostAllowed, readToken, TAILSCALE } from '../app/lib/access.mjs';
 import { spawnSync } from 'node:child_process';
@@ -196,53 +197,6 @@ test('the app messages exist in English and French', () => {
   for (const k of used) assert.ok(read('en')[k], `missing ${k}`);
 });
 
-test('the live source reads a real ledger and a local tracker, read only, and leaks no path or amount', async () => {
-  const dir = scratch();
-  process.env.ORCH_LEDGER = join(dir, 'ledger.db');
-  process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
-  const { openLedger, runStart, addEvent } = await import('../lib/ledger.mjs');
-  const { LocalTracker } = await import('../lib/tracker/adapters/local.mjs');
-  const { liveSource } = await import('../app/sources/live.mjs');
-  const db = openLedger();
-  const conf = { sections: { owner: { language: 'fr' }, models: { a: 'claude:claude-opus-5-5', b: 'codex:gpt-6-luna' }, merge: { tooling_paths: 'docs/' },
-    tracker: { adapter: 'local', agents_uid: '999999', owner_id: 'nobody', todo_state: 'Todo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship', done_state: 'Done' } } };
-  new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'x' } });
-  const at = new Date().toISOString();
-  for (const [title, status] of [['Add a delivery date button on the order page', 'In Progress'], ['Show totals', 'In Review'], ['Waiting ticket', 'Needs Approval']])
-    db.prepare('INSERT INTO tracker_tickets(title, body, labels, status, created_at, updated_at) VALUES (?,?,?,?,?,?)').run(title, '', '[]', status, at, at);
-  runStart(db, { runId: 'r1', role: 'dev', ticket: 'LOCAL-1', model: 'claude-opus-5-5', provider: 'claude', source: 'dispatcher' });
-  db.prepare("UPDATE runs SET outcome='done', pr_number=7, tokens_total=1000, ended_at=? WHERE run_id='r1'").run(at);
-  runStart(db, { runId: 'r2', role: 'review', ticket: 'LOCAL-2', model: 'claude-sonnet-5-5', provider: 'claude', source: 'dispatcher' });
-  addEvent(db, { kind: 'handover_missing', ticket: 'LOCAL-2', detail: 'saved at /home/someone/.local/state/x/failed.md' });
-  addEvent(db, { kind: 'ticket_cost', ticket: 'LOCAL-2', detail: 'the lane of EX-2 has cost 12.40 $ at list price, for a cap of 10 $ ghs_AbCdEfGh1234567890', value: 12.4 });
-  db.exec('CREATE TABLE memory_entries (id TEXT PRIMARY KEY, type TEXT NOT NULL, scope TEXT NOT NULL, content TEXT NOT NULL, source_who TEXT NOT NULL, source_where TEXT NOT NULL, source_when TEXT NOT NULL, status TEXT NOT NULL, links TEXT NOT NULL, supersedes TEXT, last_used_at TEXT)');
-  db.prepare("INSERT INTO memory_entries(id,type,scope,content,source_who,source_where,status,source_when,links) VALUES ('h1','handover','ticket:LOCAL-2','## Done\nTotals now show with and without tax. 1 044 tests green.\n## Left to do\nNothing.','agent','s','proposed',?,'[]')").run(at);
-  db.close();
-  const count = () => { const d = openLedger(process.env.ORCH_LEDGER, { readOnly: true }); const n = JSON.stringify([d.prepare('SELECT COUNT(*) c FROM runs').get(), d.prepare('SELECT COUNT(*) c FROM events').get(), d.prepare('SELECT COUNT(*) c FROM tracker_tickets').get()]); d.close(); return n; };
-  const rowsBefore = count();
-  const source = liveSource({ conf });
-  const snap = await source.snapshot();
-  const by = Object.fromEntries(snap.tickets.map((t) => [t.title, t]));
-  assert.equal(by['Add a delivery date button on the order page'].column, 'checks', 'author finished with a PR, no review yet');
-  assert.equal(by['Show totals'].column, 'review');
-  assert.ok(by['Waiting ticket'].waiting && by['Waiting ticket'].column === 'awaiting');
-  assert.equal(snap.tickets[0].title, 'Waiting ticket', 'cards that wait for the human come first');
-  assert.equal(by['Show totals'].statusLine, '1 044 tests green');
-  assert.equal(by['Add a delivery date button on the order page'].model, 'claude-opus-5-5');
-  assert.equal(snap.language, 'fr');
-  assert.ok(snap.fuel.some((f) => f.adapter === 'codex' && f.measured === false));
-  const detail = await source.ticket('2');
-  assert.ok(detail.where.length && detail.where.length <= 3);
-  assert.ok(detail.blackBox.length >= 2);
-  assert.doesNotMatch(JSON.stringify([snap, detail]), /\/home\/|€|\$|euro|cost_eur/i);
-  assert.equal(await source.ticket('../../etc/passwd'), null);
-  const everything = JSON.stringify(detail);
-  assert.match(everything, /plafond/, "the cost event is said in the owner language");
-  assert.doesNotMatch(everything, /12\.4|\$|ghs_|someone/, 'a cost event shows no amount, no secret, no path');
-  assert.equal(count(), rowsBefore.replace(/x/, 'x'), 'reading changed nothing in the ledger or the tracker');
-  delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
-});
-
 test('the cookie never holds the token, and a range without a prefix length is refused', async () => {
   const s = await serve();
   try {
@@ -306,70 +260,6 @@ test('the old dashboard address redirects to the app when one is configured, and
   try { assert.deepEqual(await ask(), [302, 'http://100.64.0.9:8788/']); } finally { delete process.env.CLEARED_APP_URL; }
 });
 
-test('what the app shows in "Where we are" is filtered before it is cut into sentences, and captures written in a request are found', async () => {
-  const dir = scratch();
-  process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
-  const { openLedger } = await import('../lib/ledger.mjs');
-  const { LocalTracker } = await import('../lib/tracker/adapters/local.mjs');
-  const { liveSource } = await import('../app/sources/live.mjs');
-  const db = openLedger();
-  const conf = { sections: { owner: { language: 'en' }, tracker: { adapter: 'local', agents_uid: '999999', owner_id: 'nobody', todo_state: 'Todo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship', done_state: 'Done' } } };
-  const tracker = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'x' } });
-  const at = new Date().toISOString();
-  db.prepare('INSERT INTO tracker_tickets(title, body, labels, status, created_at, updated_at) VALUES (?,?,?,?,?,?)').run('A screen change', '', '[]', 'Needs Approval', at, at);
-  db.prepare('INSERT INTO tracker_tickets(title, body, labels, status, created_at, updated_at) VALUES (?,?,?,?,?,?)').run('Closed one', '', '[]', 'Done', at, at);
-  const a = 'a'.repeat(64), b = 'b'.repeat(64);
-  tracker.comment('LOCAL-1', `Do you agree? The lane has cost 12.40 $ at list price. EUR 12.40 too, and 1 044,50 € more. See /home/jean-luc/orca-workspaces/shop-app/logs and xoxb-1234567890-AbCdEfGhIjKl.\n\n**Before**\n\n![Before](local://capture/${a})\n\n**After**\n\n![After](local://capture/${b})\n`);
-  db.close();
-  const detail = await liveSource({ conf }).ticket('1');
-  const shown = JSON.stringify(detail.where);
-  assert.doesNotMatch(shown, /12[.,]40|1 044|xoxb|jean|luc|orca-workspaces|\$|€|EUR/);
-  assert.deepEqual([detail.show.before.map((i) => i.url), detail.show.after.map((i) => i.url)], [[`/media/${a}`], [`/media/${b}`]]);
-  assert.equal(await liveSource({ conf }).ticket('2'), null, 'a closed ticket is not served');
-  delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
-});
-
-test('the app writes nothing and calls nothing outside: health is the state the wake recorded, with its age', async () => {
-  const dir = scratch();
-  process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
-  const { openLedger } = await import('../lib/ledger.mjs');
-  const { initHeartbeat } = await import('../lib/heartbeat.mjs');
-  const { LocalTracker } = await import('../lib/tracker/adapters/local.mjs');
-  const { liveSource } = await import('../app/sources/live.mjs');
-  const db = openLedger();
-  const conf = { sections: { owner: { language: 'en' }, heartbeat: { wake_interval_minutes: '1' }, tracker: { adapter: 'local', agents_uid: '999999', owner_id: 'nobody', todo_state: 'Todo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship', done_state: 'Done' } } };
-  new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'x' } });
-  initHeartbeat(db);
-  let clock = Date.parse('2026-10-13T10:00:00Z');
-  const put = (k, v) => db.prepare('INSERT OR REPLACE INTO heartbeat_state(key,value) VALUES (?,?)').run(k, v);
-  put('last_wake_at', new Date(clock - 40000).toISOString()); put('last_wake_ok', 'true');
-  db.prepare("INSERT INTO heartbeat_incidents(id, first_seen, last_seen, active) VALUES ('service_unreachable:tracker', ?, ?, 1)").run(new Date(clock).toISOString(), new Date(clock).toISOString());
-  const everything = () => { const d = openLedger(process.env.ORCH_LEDGER, { readOnly: true }); const rows = JSON.stringify(['runs', 'events', 'tracker_tickets', 'heartbeat_state', 'heartbeat_incidents'].map((t) => d.prepare(`SELECT * FROM ${t}`).all())); d.close(); return rows; };
-  db.close();
-  const before = everything();
-  // A stub gh/curl that would leave a mark, a fetch that fails the test, and the status command made unreachable.
-  const bin = scratch(); const mark = join(bin, 'called');
-  for (const name of ['gh', 'curl', 'tracker.sh']) writeFileSync(join(bin, name), `#!/bin/sh\necho ${name} >> ${mark}\n`, { mode: 0o755 });
-  const realFetch = globalThis.fetch, realPath = process.env.PATH;
-  globalThis.fetch = () => { throw new Error('an outside call was made'); };
-  process.env.PATH = `${bin}:${realPath}`;
-  try {
-    const source = liveSource({ conf, now: () => clock });
-    let snap = await source.snapshot();
-    assert.deepEqual(snap.health.problems.map((p) => p.message), ['tracker has been unreachable for a while']);
-    assert.equal(snap.health.recordedAt, new Date(clock - 40000).toISOString(), 'the page can say "status from 40 s ago"');
-    clock += 4 * 60000 + 30000; // the wake stops reporting
-    snap = await liveSource({ conf, now: () => clock }).snapshot();
-    assert.ok(snap.health.problems.some((p) => p.message === 'wake has not reported for 5 min'), snap.health.problems.map((p) => p.message).join('|'));
-    assert.ok(!snap.health.ok);
-  } finally { globalThis.fetch = realFetch; process.env.PATH = realPath; }
-  assert.equal(readdirSync(bin).includes('called'), false, 'no outside command was run (gh, curl, tracker probe)');
-  assert.equal(everything(), before, 'nothing was written: runs, events, tickets, heartbeat state and incidents are as they were');
-  const code = readFileSync(join(import.meta.dirname, '..', 'app', 'sources', 'live.mjs'), 'utf8').replace(/\/\/.*$/gm, '');
-  assert.doesNotMatch(code, /heartbeat\.mjs|'status'|--json|collectStatus|fetch\(/, 'the source never runs status or fetches');
-  delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
-});
-
 test('the design is followed: no gradient, fonts served by the app, light by default, amber only for the human', async () => {
   const pub = join(import.meta.dirname, '..', 'app', 'public');
   const css = readFileSync(join(pub, 'style.css'), 'utf8');
@@ -403,4 +293,189 @@ test('the design is followed: no gradient, fonts served by the app, light by def
   assert.equal(fr.app_wait_need_key_other, 'vous attendent.', 'two things wait: the verb agrees');
   assert.equal(fr.app_wait_ready_key_other, 'prêtes à partir.');
   assert.match(js, /app_share_label/);
+});
+
+const boardConf = (adapter = 'local') => ({ sections: { owner: { language: 'en' }, heartbeat: { wake_interval_minutes: '1' },
+  tracker: { adapter, repository: 'owner/repo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } });
+async function boardFixture(adapter = 'local', imageUrl = null) {
+  const dir = scratch();
+  process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
+  const { openLedger } = await import('../lib/ledger.mjs');
+  const db = openLedger();
+  db.exec('CREATE TABLE heartbeat_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE heartbeat_incidents (id TEXT PRIMARY KEY, first_seen TEXT, last_seen TEXT, active INTEGER);');
+  db.prepare('INSERT INTO heartbeat_state VALUES (?,?)').run('last_wake_at', new Date().toISOString());
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
+  const pngAfter = Buffer.from(png); pngAfter[pngAfter.length - 1] ^= 1;
+  const digest = (await import('node:crypto')).createHash('sha256').update(png).digest('hex');
+  const digestAfter = (await import('node:crypto')).createHash('sha256').update(pngAfter).digest('hex');
+  if (adapter === 'local') {
+    db.exec('CREATE TABLE tracker_images (digest TEXT PRIMARY KEY, mime TEXT, body BLOB);');
+    db.prepare('INSERT INTO tracker_images VALUES (?,?,?)').run(digest, 'image/png', png);
+    db.prepare('INSERT INTO tracker_images VALUES (?,?,?)').run(digestAfter, 'image/png', pngAfter);
+  }
+  db.close();
+  const ref = adapter === 'local' ? 'LOCAL-1' : adapter === 'github' ? '1' : 'TKT-1';
+  const ticket = { id: ref, identifier: ref, title: 'Screen before and after', body: '', status: 'Needs Approval' };
+  const url = imageUrl || `local://capture/${digest}`;
+  const afterUrl = imageUrl ? `${imageUrl}?after=1` : `local://capture/${digestAfter}`;
+  const trackerClient = {
+    listTickets: ({ status }) => status === 'Needs Approval' ? [ticket] : [],
+    getTicket: () => ticket,
+    downloadCapture: () => png,
+    comments: () => [{ body: `**Before**\n![Before](${url})\n**After**\n![After](${afterUrl})` }],
+  };
+  const conf = boardConf(adapter);
+  return { dir, png, digest, trackerClient, conf, close: () => { delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR; } };
+}
+
+test('the app source has no tracker, forge, process or network dependency', () => {
+  for (const path of ['app/main.mjs', 'app/server.mjs', 'app/sources/live.mjs', 'app/lib/events.mjs']) {
+    const code = readFileSync(join(import.meta.dirname, '..', path), 'utf8').replace(/\/\/.*$/gm, '');
+    assert.doesNotMatch(code, /tracker\/contract|tracker\/adapters|\bgh\b|fetch\(|execFile|spawn\(|https?\.request|createConnection/, path);
+  }
+});
+
+test('a hung tracker cannot delay the app response from the last snapshot', async () => {
+  const f = await boardFixture();
+  try {
+    await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
+    f.trackerClient.listTickets = () => { throw new Error('tracker unreachable'); };
+    const s = await serve({ source: liveSource({ conf: f.conf, dir: f.dir }) });
+    try {
+      const start = performance.now();
+      const response = await s.call('/api/snapshot', { headers: auth });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).tickets.length, 1);
+      assert.ok(performance.now() - start < 200, 'served in under 200 ms');
+    } finally { await s.close(); }
+  } finally { f.close(); }
+});
+
+test('an interrupted collection leaves the complete prior snapshot intact', async () => {
+  const f = await boardFixture();
+  try {
+    await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
+    const path = join(f.dir, 'snapshot.json');
+    const before = readFileSync(path);
+    f.trackerClient.comments = () => { throw new Error('lost connection'); };
+    await assert.rejects(writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir }));
+    assert.deepEqual(readFileSync(path), before);
+  } finally { f.close(); }
+});
+
+test('missing, stale and unknown-version snapshots are visible as health problems', async () => {
+  const f = await boardFixture();
+  try {
+    const source = liveSource({ conf: f.conf, dir: f.dir });
+    assert.match((await source.snapshot()).health.problems[0].message, /No board snapshot/);
+    const snap = await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot();
+    snap.generatedAt = new Date(Date.now() - 5 * 60000).toISOString();
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /5 min old/);
+    snap.schema = 99;
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /format is unknown/);
+    snap.schema = 1; delete snap.owner;
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    snap.owner = { name: 'Owner' }; snap.generatedAt = new Date().toISOString();
+    snap.details[snap.tickets[0].id] = {};
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    snap.details = (await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot()).details;
+    snap.fuel = [null];
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+  } finally { f.close(); }
+});
+
+test('[Linear adapter] the wake caches captures for all three trackers', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    for (const [adapter, url] of [['local', null], ['github', 'https://github.com/owner/repo/raw/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/captures/a.png'], ['linear', 'https://uploads.linear.app/a.png']]) {
+      const f = await boardFixture(adapter, url);
+      globalThis.fetch = async () => new Response(f.png, { status: 200 });
+      try {
+        await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
+        const source = liveSource({ conf: f.conf, dir: f.dir });
+        const snap = await source.snapshot();
+        assert.equal(snap.tickets[0].captures.before, `/media/${f.digest}`, adapter);
+        assert.deepEqual((await source.media(f.digest)).body, f.png, adapter);
+      } finally { f.close(); }
+    }
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('the snapshot file is published only after a full write and rename', async () => {
+  const f = await boardFixture();
+  try {
+    const collector = boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] });
+    await writeBoardSnapshot({ collector, dir: f.dir });
+    const source = liveSource({ conf: f.conf, dir: f.dir });
+    const previous = await source.snapshot();
+    writeFileSync(join(f.dir, 'snapshot.json.partial'), '{broken');
+    assert.deepEqual((await source.snapshot()).tickets, previous.tickets);
+    assert.equal(readdirSync(f.dir).filter((name) => name.startsWith('snapshot.json.')).length, 1);
+  } finally { f.close(); }
+});
+
+test('ticket text and health names cannot put secrets, amounts or host paths in the snapshot or page', async () => {
+  const f = await boardFixture();
+  try {
+    const secret = 'ghp_' + 'A'.repeat(30);
+    const ticket = { id: 'LOCAL-1', identifier: 'LOCAL-1', title: `Saved /data/customer/private.key ${secret} for £-12.40 and GBP -8.25`, status: 'Needs Approval' };
+    f.trackerClient.listTickets = ({ status }) => status === 'Needs Approval' ? [ticket] : [];
+    f.trackerClient.getTicket = () => ticket;
+    f.trackerClient.comments = () => [{ body: `Agree with /data/customer/private.key and ${secret}? Costs -12.40 GBP.` }];
+    await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
+    const disk = readFileSync(join(f.dir, 'snapshot.json'), 'utf8');
+    assert.doesNotMatch(disk, /\/data\/customer|ghp_|12\.40|8\.25|GBP|£/);
+    const { openLedger } = await import('../lib/ledger.mjs');
+    const db = openLedger();
+    db.prepare('INSERT INTO heartbeat_incidents VALUES (?,?,?,1)').run(`service_unreachable:/home/private/${secret}`, new Date().toISOString(), new Date().toISOString());
+    db.close();
+    assert.doesNotMatch(JSON.stringify(await liveSource({ conf: f.conf, dir: f.dir }).snapshot()), /\/data\/customer|ghp_|12\.40|8\.25|GBP|£/);
+  } finally { f.close(); }
+});
+
+
+test('renaming a new snapshot pushes an event on the existing stream', async () => {
+  const f = await boardFixture();
+  try {
+    await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
+    const source = liveSource({ conf: f.conf, dir: f.dir });
+    const s = await serve({ source, pollMs: 10000, heartbeatMs: 10000 });
+    try {
+      const reader = (await s.call('/events', { headers: auth })).body.getReader();
+      const next = async () => {
+        let buffer = '';
+        while (!buffer.includes('\n\n')) {
+          const result = await Promise.race([reader.read(), new Promise((_, reject) => setTimeout(() => reject(new Error('no snapshot event')), 1000))]);
+          buffer += new TextDecoder().decode(result.value);
+        }
+        return buffer;
+      };
+      assert.match(await next(), /event: snapshot/);
+      const path = join(f.dir, 'snapshot.json');
+      const changed = JSON.parse(readFileSync(path));
+      changed.generatedAt = new Date(Date.now() + 1000).toISOString();
+      changed.tickets[0].title = 'Updated from new snapshot';
+      writeFileSync(`${path}.tmp`, JSON.stringify(changed));
+      renameSync(`${path}.tmp`, path);
+      assert.match(await next(), /event: ticket.updated/);
+      reader.cancel();
+    } finally { await s.close(); }
+  } finally { f.close(); }
+});
+
+test('Landed today keeps the tracker title for a remote adapter', async () => {
+  const f = await boardFixture('github', 'https://github.com/owner/repo/raw/' + 'a'.repeat(40) + '/captures/a.png');
+  try {
+    const { openLedger, addEvent } = await import('../lib/ledger.mjs');
+    const db = openLedger();
+    addEvent(db, { kind: 'merged_by_script', ticket: '1' });
+    db.close();
+    const snap = await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot();
+    assert.equal(snap.landed[0].title, 'Screen before and after');
+  } finally { f.close(); }
 });

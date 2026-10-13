@@ -110,6 +110,13 @@ owner_id() {
 ticket_ok() { [[ "$1" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$1\" is not a ticket identifier"; }
 
 case "${1:-}" in
+  download-capture)
+    # The asset remains private on Linear. Read it with the same identity as
+    # GraphQL; the token is supplied through a curl header file descriptor.
+    [[ "${2:-}" == https://uploads.linear.app/* ]] && [[ "$2" != *"@"* ]] && [[ "$2" != *"#"* ]] || die "capture URL is outside uploads.linear.app"
+    if [ "$identity" = app ]; then authorization="Bearer $(app_token)"; else authorization=$key; fi
+    curl -sS --fail --max-time 15 --max-filesize 5000000 -H @<(printf 'Authorization: %s' "$authorization") "$2"
+    ;;
   decorate-worktree)
     orca worktree set --worktree "path:$2" --display-name "$3" --linear-issue "$4" --comment "$5"
     ;;

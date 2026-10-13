@@ -649,3 +649,37 @@ node ${fake} "$@"
   assert.equal(shipped.status, 0, shipped.stderr);
   assert.equal(JSON.parse(readFile(stateFile, 'utf8')).status, 'Done');
 });
+
+test('GitHub private captures use the installation token and repository contents API', () => {
+  const dir = scratch('cleared-capture-api-');
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const marker = join(dir, 'request');
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\nprintf '%s\\n' "$GH_TOKEN" "$*" > '${marker}'\nprintf '\\211PNG\\r\\n\\032\\n'\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  try {
+    const tracker = new GithubTracker({ conf: { sections: { tracker: {
+      repository: 'owner/repo', owner_id: 'person', app_login: 'bot',
+    } } }, tokens: { get: () => 'installation-token' } });
+    const bytes = tracker.downloadCapture('https://github.com/owner/repo/raw/' + 'a'.repeat(40) + '/captures/a.png');
+    assert.deepEqual(bytes.subarray(0, 8), Buffer.from('89504e470d0a1a0a', 'hex'));
+    const request = readFileSync(marker, 'utf8');
+    assert.match(request, /^installation-token\n/);
+    assert.match(request, /api \/repos\/owner\/repo\/contents\/captures\/a\.png\?ref=/);
+    assert.throws(() => tracker.downloadCapture('https://github.com/other/repo/raw/' + 'a'.repeat(40) + '/captures/a.png'), /configured repository/);
+  } finally { process.env.PATH = oldPath; }
+});
+
+test('[Linear adapter] private capture download uses the tracker authorization header', () => {
+  const box = sandbox();
+  const marker = join(box.home, 'capture-header');
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!/bin/bash\nprev=\nfor arg in "$@"; do\n  if [ "$prev" = -H ]; then cat "\${arg#@}" > '${marker}'; fi\n  prev=$arg\ndone\nprintf '\\211PNG\\r\\n\\032\\n'\n`, { mode: 0o755 });
+  const run = (url) => spawnSync(join(box.home, 'lib', 'tracker', 'adapters', 'linear.sh'), ['download-capture', url],
+    { env: { ...box.env, LINEAR_API_KEY: 'test-key' } });
+  const ok = run('https://uploads.linear.app/workspace/asset');
+  assert.equal(ok.status, 0, ok.stderr.toString());
+  assert.deepEqual(ok.stdout.subarray(0, 8), Buffer.from('89504e470d0a1a0a', 'hex'));
+  assert.equal(readFileSync(marker, 'utf8'), 'Authorization: test-key');
+  assert.notEqual(run('https://uploads.linear.app.evil.test/asset').status, 0);
+});

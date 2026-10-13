@@ -56,8 +56,12 @@ wake_cleanup() {
   trap - EXIT
   [ -z "$work" ] || rm -rf "$work"
   if [ -z "$handover$dry_run" ]; then
+    if [ "$result" -eq 0 ]; then
+      node --no-warnings "$ORCH_HOME/lib/board-collector.mjs" > /dev/null || result=1
+    fi
     node --no-warnings "$ORCH_HOME/lib/heartbeat.mjs" wake-end "$result" > /dev/null || true
   fi
+  exit "$result"
 }
 trap wake_cleanup EXIT
 # So does the checkout of the project: what went live there (its settings,

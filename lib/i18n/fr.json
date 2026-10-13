@@ -228,7 +228,7 @@
   "app_srv_problem_orphan_process": "un processus Cleared est orphelin ({name})",
   "app_srv_problem_diagnostic_failed": "le diagnostic de santé a échoué",
   "app_srv_problem_other": "problème : {code}",
-  "app_status_age": "état d’il y a {age}",
+  "app_status_age": "instantané du tableau datant de {age}",
   "app_age_s": "{n} s",
   "app_age_min": "{n} min",
   "app_age_h": "{n} h",
@@ -282,5 +282,9 @@
   "app_wait_ready_key_one": "prête à partir.",
   "app_wait_ready_key_other": "prêtes à partir.",
   "app_wait_need_key_one": "vous attend.",
-  "app_wait_need_key_other": "vous attendent."
+  "app_wait_need_key_other": "vous attendent.",
+  "app_snapshot_missing": "Aucun instantané du tableau pour le moment",
+  "app_snapshot_version": "Format de l’instantané du tableau inconnu",
+  "app_snapshot_unreadable": "Impossible de lire l’instantané du tableau",
+  "app_snapshot_old": "L’instantané du tableau date de {minutes} min"
 }

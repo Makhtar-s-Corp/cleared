@@ -54,6 +54,7 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     catch { text(response, 503, message('http_unavailable', language)); }
   };
   const streams = new Set();
+  const unwatch = source.watch?.(() => { cached = null; for (const entry of streams) entry.tick(); }) ?? (() => {});
   const secret = sessionSecret();
   const session = sessionValue(token, secret);
   // One read at a time, shared by every page: a slow source is never asked twice at once.
@@ -125,13 +126,13 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     const poll = setInterval(tick, pollMs);
     // The heartbeat only says "alive" while the reads succeed.
     const beat = setInterval(() => { if (healthy) response.write(frame(envelope('heartbeat', {}))); }, heartbeatMs);
-    const entry = { response, stop: () => { stopped = true; clearInterval(poll); clearInterval(beat); streams.delete(entry); } };
+    const entry = { response, tick, stop: () => { stopped = true; clearInterval(poll); clearInterval(beat); streams.delete(entry); } };
     streams.add(entry);
     request.on('close', entry.stop);
     await tick();
   }
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
   const close = server.close.bind(server);
-  server.close = (callback) => { for (const entry of [...streams]) { entry.stop(); entry.response.end(); } server.closeAllConnections?.(); return close(callback); };
+  server.close = (callback) => { unwatch(); for (const entry of [...streams]) { entry.stop(); entry.response.end(); } server.closeAllConnections?.(); return close(callback); };
   return server;
 }
