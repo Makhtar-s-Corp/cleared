@@ -130,7 +130,10 @@ test('[terminal] adapter = none signals only the process its handle names: anoth
 });
 
 
-test('[terminal] adapter = none puts the session in a scope of the user\'s systemd manager when there is one: a wake that ends does not take it along', (t) => {
+// What this proves is how systemd-run is asked (a scope of the user's manager, collected) and that the process it
+// hands over is the session. That a real oneshot unit ends without taking the session along needs a user manager,
+// which the checks do not have: it is not covered here.
+test('[terminal] adapter = none asks systemd-run --user for a scope of its own when it can, and the session is the process it runs', (t) => {
   const box = noneBox();
   const { opened, handle } = openHeld(box, { FAKE_SCOPE: '1' });
   assert.equal(opened.status, 0, opened.stderr);
@@ -139,7 +142,11 @@ test('[terminal] adapter = none puts the session in a scope of the user\'s syste
   assert.match(readFileSync(join(box.home, 'systemd-run-calls'), 'utf8'), /^--user --scope --collect --quiet --description=Cleared: X-1 · dev · a -- bash -c /m);
   assert.ok(alive(pid));
   assert.equal(stat(pid)[3], String(pid));
-  // Started by a unit, with no scope to be had: the session still starts, and it is said that it may end with the unit.
+});
+
+
+test('[terminal] adapter = none with no scope to be had: the session starts with setsid alone, and started by a unit it says it may end with it', (t) => {
+  const box = noneBox();
   const unscoped = openHeld(box, { INVOCATION_ID: 'a-unit' });
   const other = Number(unscoped.handle.split(':')[1]);
   t.after(() => stopGroup(other));
