@@ -1,0 +1,16 @@
+# systemd user unit, installed by serve/install.sh: the read-only Cleared app
+# (Cockpit). It listens on the Tailscale address only, refuses any peer outside
+# the allowed ranges, and wants an access token kept outside the repository.
+[Unit]
+Description=Cleared app (read only, Tailscale only)
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ORCH_REPO=@ORCH_REPO@
+Environment=LANG=C.UTF-8
+ExecStart=/usr/bin/node @ORCH_HOME@/cleared app --bind @BIND@ --port @APP_PORT@
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

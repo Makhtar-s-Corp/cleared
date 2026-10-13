@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Cleared Cockpit</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip" href="#tower" data-i="app_skip">Skip to the tower</a>
+<header class="top">
+  <div class="bar">
+    <h1 class="brand">Cleared <span data-i="app_cockpit">Cockpit</span></h1>
+    <nav id="projects" class="tabs" aria-label="Projects" hidden></nav>
+    <button id="theme" class="plain" type="button" data-i="app_theme">Theme</button>
+  </div>
+  <div id="conn" class="conn" role="status" aria-live="polite" hidden></div>
+  <section class="strip" aria-label="Status">
+    <div class="fuel"><h2 data-i="app_fuel">Fuel</h2><ul id="fuel"></ul></div>
+    <div class="health"><h2 data-i="app_health">Health</h2><div id="health"></div></div>
+    <div class="mode"><h2 data-i="app_mode">Mode</h2><div id="mode"></div></div>
+  </section>
+</header>
+<main id="tower" class="tower" aria-label="Tower"></main>
+<aside id="porthole" class="porthole" role="dialog" aria-modal="false" aria-labelledby="ph-title" hidden>
+  <div class="ph-head"><h2 id="ph-title"></h2><button id="ph-close" class="plain" type="button" data-i="app_close">Close</button></div>
+  <div id="ph-body"></div>
+</aside>
+<div id="zoom" class="zoom" role="dialog" aria-modal="true" hidden><button class="plain" type="button" id="zoom-close" data-i="app_close">Close</button><img alt=""></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

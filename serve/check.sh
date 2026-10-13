@@ -11,7 +11,11 @@ container=${CLEARED_CHECK_CONTAINER:-${ORCH_CHECK_CONTAINER:-}}
 failed=0
 say() { if [ "$2" = "$3" ]; then echo "ok    $1 ($2)"; else echo "FAIL  $1: got $2, expected $3"; failed=1; fi; }
 
-say "this machine, through its Tailscale address" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:$port/")" 200
+dashboard_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:$port/")
+case "$dashboard_status" in 302) dashboard_status=200 ;; esac # the old page redirects to the app
+say "this machine, through its Tailscale address" "$dashboard_status" 200
+app_port=${CLEARED_APP_PORT:-8788}
+say "the app, without a token" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:$app_port/api/snapshot")" 401
 say "this machine, a path other than the page" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:$port/ledger.db")" 404
 
 if [ -n "$container" ]; then

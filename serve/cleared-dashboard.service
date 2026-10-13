@@ -14,6 +14,8 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # The project this copy of the tool works on, written by install.sh.
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
+# The old page is replaced by the app: every request to the page is sent there.
+Environment=CLEARED_APP_URL=http://@BIND@:@APP_PORT@/
 ExecStart=/usr/bin/node @ORCH_HOME@/serve/serve-dashboard.mjs @BIND@ @PORT@ @DASHBOARD_DIR@/index.html
 Restart=on-failure
 RestartSec=30

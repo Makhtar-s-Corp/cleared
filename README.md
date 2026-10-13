@@ -34,7 +34,7 @@ This diagram shows the normal path for an application change. The configured too
 
 ## Status
 
-**Alpha, Linux only.** Cleared was used on one production project in October 2026; that installation is currently disconnected pending a clean reinstall. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Claude Code and Codex CLI are supported today. Cleared aims to support many coding harnesses; OpenCode, Gemini CLI, and Copilot CLI are planned. Setup still assumes a GitHub repository for pull requests, a Node-oriented project, and project-specific rules. Ticket tracking can use Linear, GitHub Issues, or local SQLite. Automatic terminals currently require Orca. A terminal adapter for Orca, tmux, or no terminal is planned so Cleared can also run without a graphical terminal. A Cleared app is planned. Tooling-only changes are exempt from the ticket approval check when configured that way. Claude CLI permissions and the private-term guard are safeguards; Codex also applies an operating-system sandbox to its commands. Neither isolates files readable by the Cleared account.
+**Alpha, Linux only.** Cleared was used on one production project in October 2026; that installation is currently disconnected pending a clean reinstall. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Claude Code and Codex CLI are supported today. Cleared aims to support many coding harnesses; OpenCode, Gemini CLI, and Copilot CLI are planned. Setup still assumes a GitHub repository for pull requests, a Node-oriented project, and project-specific rules. Ticket tracking can use Linear, GitHub Issues, or local SQLite. Automatic terminals currently require Orca. A terminal adapter for Orca, tmux, or no terminal is planned so Cleared can also run without a graphical terminal. The read-only Cleared app (Cockpit) shows the factory live on desktop and phone. Tooling-only changes are exempt from the ticket approval check when configured that way. Claude CLI permissions and the private-term guard are safeguards; Codex also applies an operating-system sandbox to its commands. Neither isolates files readable by the Cleared account.
 
 ## Requirements
 
@@ -63,6 +63,7 @@ In the editor, set `[guard] salt` to the random value printed above and set `ter
 
 - [Concepts and ticket lifecycle](docs/concepts.md)
 - [Heartbeat and status](docs/heartbeat.md)
+- [The Cleared app](docs/app.md)
 - [Memory contract and briefing](docs/memory.md)
 - [Configuration reference](docs/configuration.md)
 - [Model adapters](docs/adapters.md)

@@ -1,0 +1,8 @@
+{
+  "name": "cleared-app",
+  "private": true,
+  "type": "module",
+  "description": "Cleared app (Cockpit). The server has no dependency; Playwright is used only to take the screenshots.",
+  "scripts": { "screenshots": "node screenshots.mjs" },
+  "devDependencies": { "playwright-core": "1.57.0" }
+}
