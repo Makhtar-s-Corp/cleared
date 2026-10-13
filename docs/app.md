@@ -1,6 +1,6 @@
 # The Cleared app (Cockpit), read only
 
-`cleared app` starts one interface for desktop and phone that shows the factory live. This first version **only reads**: it writes nothing, runs no command that writes and makes no outside call (no GitHub, no tracker probe, no quota probe). No route writes, moves a ticket, answers a question, or starts or stops a team. Places where actions will come later are marked as reserved and are not clickable.
+`cleared app` starts one interface for desktop and phone that shows the factory live. This first version **only reads**: it writes nothing, runs no command that writes and makes no outside call of its own (no GitHub, no tracker probe, no quota probe). One exception: with Linear or GitHub as tracker, listing and opening tickets goes through that tracker's adapter, which calls it (synchronously, every 30 s at most); with the local tracker there is no outside call. No route writes, moves a ticket, answers a question, or starts or stops a team. Places where actions will come later are marked as reserved and are not clickable.
 
 ```sh
 cleared app            # serves the app; the installer registers it as cleared-app.service

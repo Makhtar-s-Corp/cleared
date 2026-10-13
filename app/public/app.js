@@ -157,7 +157,7 @@ function renderLanded(s) {
     return el('div', { role: 'row' }, el('div', { className: 'time', role: 'cell' }, el('time', { dateTime: r.at, textContent: clock(r.at) })), el('div', { className: 'what', role: 'cell', textContent: r.title }),
       el('div', { className: 'model', role: 'cell', textContent: r.model }), el('div', { className: 'out', role: 'cell' }, el('span', { className: out[0] }, el('i'), out[1])));
   });
-  $('landed-rows').replaceChildren(...(lines.length ? [el('div', { role: 'row' }, heads), ...lines] : [el('p', { className: 'empty', role: 'row', textContent: t('app_landed_empty') })]));
+  $('landed-rows').replaceChildren(...(lines.length ? [el('div', { role: 'row' }, heads), ...lines] : [el('p', { className: 'empty', textContent: t('app_landed_empty') })]));
 }
 
 // Redrawing keeps the keyboard where it was, and skips what did not change.
@@ -181,7 +181,7 @@ function render(s) {
 // --- porthole ----------------------------------------------------------------
 // Where the panel covers the page (a phone, a narrow window), what is behind it leaves the keyboard and the screen reader.
 function setCovered(on) {
-  const covers = matchMedia('(max-width: 1279px)').matches;
+  const covers = matchMedia('(max-width: 767px)').matches; // only where the panel is a full page
   for (const sel of ['.top', '.band', '.tower', '.landed']) document.querySelector(sel).inert = on && covers;
 }
 async function openTicket(id) {

@@ -176,3 +176,4 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .landed-rows [role="row"] { display: contents; } .landed-rows [role="columnheader"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .hint.round { font-family: var(--mono); }
 .landed-rows { position: relative; }
+.landed-rows > .empty { grid-column: 1 / -1; padding: 14px 18px; }

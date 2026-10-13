@@ -1,5 +1,5 @@
 // The real source: reads the ledger (read only), the tracker through its
-// contract, `cleared status --json` and the quota summary. It writes nothing itself.
+// contract, the state the wake recorded and the quota summary. It writes nothing itself.
 // Only an allowlist of fields leaves this file; no path, no secret, no cost.
 // Nothing is run, probed or written: health is read from what the wake recorded.
 import { execFile } from 'node:child_process';

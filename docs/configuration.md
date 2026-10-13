@@ -471,7 +471,7 @@ Rate used only to express estimated costs in euros.
 
 ## `[app]`
 
-The read-only Cleared app. It only reads the ledger, the tracker and `cleared status`, and no route changes anything. See [The Cleared app](app.md).
+The read-only Cleared app. It only reads the ledger, the tracker and the state the last wake recorded (it never runs `cleared status`), and no route changes anything. See [The Cleared app](app.md).
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |

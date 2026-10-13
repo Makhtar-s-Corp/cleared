@@ -11,7 +11,7 @@ colors:
   text: "#171717"
   text-secondary: "#4D4D4D"
   text-muted: "#666666"
-  text-faint: "#8F8F8F"
+  text-faint: "#707070"  # darkened from #8F8F8F so that text reaches 4.5:1 (section 8)
   ink: "#171717"
   on-ink: "#FFFFFF"
   awaiting: "#F5A623"
@@ -19,6 +19,7 @@ colors:
   awaiting-surface: "#FFFBF2"
   awaiting-highlight: "#FCE2B3"
   success: "#16A34A"
+  success-text: "#15803D"  # success as text on white; #16A34A stays for dots, outlines and fills
   success-surface: "#F2FBF5"
   danger: "#EE0000"
   link: "#0070F3"
