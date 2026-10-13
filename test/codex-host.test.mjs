@@ -82,6 +82,11 @@ test('each safe role maps to both CLIs, while host Codex refuses trusted-script 
       GH_TOKEN: 'test-forge-token', GITHUB_TOKEN: 'test-github-token', SSH_AUTH_SOCK: '/tmp/test-agent.sock',
     });
     assert.equal(claude.run.status, 0, `${role}: ${claude.run.stderr}`);
+    if (role === 'release-live') {
+      assert.equal(codex.run.status, 2, role);
+      assert.match(codex.report, /requires \[security\] agent_user/, role);
+      continue;
+    }
     if (settings.mode === 'read-only' && settings.write) {
       assert.equal(codex.run.status, 2, role);
       assert.match(codex.report, /needs trusted scripts to write state/, role);

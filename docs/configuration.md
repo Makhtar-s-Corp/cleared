@@ -481,3 +481,12 @@ The read-only Cleared app. It only reads the ledger, the tracker and the state t
 | `hosts` | Extra host names the browser may use, besides addresses, `localhost` and `*.ts.net`. | Optional; no default |
 | `token_file` | Private file (mode `0600`, owned by the service account, outside the project) holding the access token. Created on first start if missing. | Optional; no default (`~/.config/cleared/app-token` is used) |
 
+## `[security]`
+
+| Setting | Meaning | Requirement |
+| --- | --- | --- |
+| `agent_user` | System account used for both Claude Code and Codex processes. Set it to a distinct account and grant that account worktree access without Cleared state write access. | Optional; no default |
+| `socket_path` | Absolute local Unix socket path for the service-owned release broker. Required when `agent_user` is set; its parent must be traversable by that account. | Optional; no default |
+| `bwrap_path` | Bubblewrap executable used to mount shared Git metadata read-only inside agent processes. | Optional; no default |
+
+See [the release lock installation guide](security.md#installing-the-release-account-boundary) for account creation, ownership checks, and the Codex socket path.

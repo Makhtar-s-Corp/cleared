@@ -6,8 +6,17 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/contract.sh"
-
+. "$here/../lib/common.sh"
+agent_user=$(conf_get security agent_user)
+verify_agent_account
+agent_home=
+[ -z "$agent_user" ] || agent_home=$(getent passwd "$agent_user" | cut -d: -f6)
 runner=${ADAPTER_RUNNER:-host}
+if [ -n "$agent_user" ] && [ "$runner" = container ]; then
+  echo 'codex: [security] agent_user requires the host runner; container UID is not verified' >&2
+  exit 2
+fi
+
 case "$runner" in host | container) ;; *) echo "codex: unknown runner: $runner (use host or container)" >&2; exit 64 ;; esac
 
 # Codex profiles enforce filesystem and command-network boundaries. A linked
@@ -44,9 +53,13 @@ host_permissions() {
     done < <(git for-each-ref --format='%(refname:short)' "refs/heads/${branch%/*}/")
   fi
   gitdir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
-  codex_tmp=${gitdir:+$gitdir/cleared-tmp}
-  codex_tmp=${codex_tmp:-$ORCH_STATE_DIR/tmp/codex-${ORCH_RUN_ID:-text}}
-  mkdir -p "$codex_tmp"
+  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+    codex_tmp=$(sudo -n -u "$agent_user" -- mktemp -d /tmp/cleared-codex-XXXXXX) || return 2
+  else
+    codex_tmp=${gitdir:+$gitdir/cleared-tmp}
+    codex_tmp=${codex_tmp:-$ORCH_STATE_DIR/tmp/codex-${ORCH_RUN_ID:-text}}
+    mkdir -p "$codex_tmp"
+  fi
   paths+=("$codex_tmp")
   while IFS= read -r path; do
     path=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' <<<"$path")
@@ -80,16 +93,28 @@ host_permissions() {
 host_run() {
   local code usage_json
   . "$here/../lib/common.sh"
-  events=$(mktemp) body=$(mktemp)
-  trap 'rm -f "$events" "$body"' EXIT
+  events=$(mktemp) body=$(mktemp) permission_errors=$(mktemp)
+  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+    # The answer is created in an agent-owned private directory. Copy it back
+    # through sudo after the CLI exits; the service never makes it world-readable.
+    service_body=$body
+    body_dir=$(sudo -n -u "$agent_user" -- mktemp -d /tmp/cleared-codex-answer-XXXXXX) || return 2
+    body="$body_dir/answer"
+  fi
+  trap 'rm -f "$events" "$permission_errors" "${service_body:-$body}"; if [ -n "${body_dir:-}" ]; then sudo -n -u "$agent_user" -- rm -rf "$body_dir" 2>/dev/null || true; fi; if [ -n "${agent_user:-}" ] && [ -n "${codex_tmp:-}" ]; then sudo -n -u "$agent_user" -- rmdir "$codex_tmp" 2>/dev/null || true; fi' EXIT
   set +e
-  host_permissions 2> "$body"
+  host_permissions 2> "$permission_errors"
   code=$?
   set -e
-  if [ "$code" != 0 ]; then contract_usage '{}'; contract_report codex "$code" "$body"; return "$code"; fi
-  if ! command -v codex >/dev/null 2>&1; then
-    echo 'Codex did not start: codex is not installed on the host.' > "$body"
-    contract_usage '{}'; contract_report codex 2 "$body"; return 2
+  if [ "$code" != 0 ]; then
+    [ -z "${service_body:-}" ] || body=$service_body
+    cp "$permission_errors" "$body"
+    contract_usage '{}'; contract_report codex "$code" "$body"; return "$code"
+  fi
+  error_body=${service_body:-$body}
+  if [ -z "$agent_user" ] && ! command -v codex >/dev/null 2>&1; then
+    echo 'Codex did not start: codex is not installed on the host.' > "$error_body"
+    contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
   fi
   if [ -z "${ORCH_TEXT_ONLY:-}" ] && [ -n "${ORCH_LANE:-}" ]; then
     local wait_minutes deadline
@@ -103,14 +128,30 @@ host_run() {
         && [ "$("$ORCH_HOME/host-state.sh" 2>/dev/null | jq -r '.free_for_a_ci_run // false')" = true ]; then break; fi
       flock -u 8 || true
       if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo 'Codex did not start: the host stayed busy for the configured heavy-command wait.' > "$body"
-        contract_usage '{}'; contract_report codex 2 "$body"; return 2
+        echo 'Codex did not start: the host stayed busy for the configured heavy-command wait.' > "$error_body"
+        contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
       fi
       sleep 20
     done
     export CLEARED_HEAVY_SLOT="$ORCH_STATE_DIR/heavy.lock"
   fi
+  local codex_cmd=(codex)
+  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+    agent_mount_args
+    agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
+    [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
+    codex_cmd=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" "${agent_prefix[@]}" codex)
+  fi
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
+  if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ] && [ -z "$agent_user" ]; then
+    echo 'Codex release role requires [security] agent_user because its Linux sandbox cannot mount the release socket' > "$error_body"
+    contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
+  fi
+  if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ] && [ -n "$agent_user" ]; then
+    # Only the distinct OS account is the filesystem boundary in this mode.
+    args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config
+      -c 'approval_policy="never"' --sandbox danger-full-access)
+  fi
   [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral --skip-git-repo-check)
   set +e
   . "$ORCH_HOME/lib/tracker/adapters/env.sh"
@@ -119,12 +160,16 @@ host_run() {
   env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
     TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
     GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
-    codex "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
+    "${codex_cmd[@]}" "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
     fromjson? | if .type == "item.completed" and .item.type == "agent_message" then .item.text
       elif .type == "item.started" and .item.type == "command_execution" then "  > " + (.item.command // "command")
       else empty end' 2>/dev/null
   code=${PIPESTATUS[0]}
   set -e
+  if [ -n "${service_body:-}" ]; then
+    sudo -n -u "$agent_user" -- cat "$body" > "$service_body" 2>/dev/null || true
+    body=$service_body
+  fi
   [ -s "$body" ] || echo "Codex returned no text (exit $code)." > "$body"
   usage_json=$(jq -sc '[.[] | select(.type == "turn.completed") | .usage] | last // {} | {
     tokens_in: (.input_tokens // null), tokens_out: (.output_tokens // null),
@@ -139,8 +184,13 @@ case "${1:-}" in
     shift
     # Codex keeps the list its server sent it: no call is needed.
     cache="${CODEX_HOME:-$HOME/.codex}/models_cache.json"
-    [ -f "$cache" ] || exit 0
-    listed=$(jq -r '.. | objects | select(has("slug")) | .slug' "$cache" | sort -u)
+    if [ -n "$agent_user" ]; then
+      cache="$agent_home/.codex/models_cache.json"
+      listed=$(sudo -n -u "$agent_user" -- cat "$cache" 2>/dev/null | jq -r '.. | objects | select(has("slug")) | .slug' | sort -u) || listed=
+    else
+      [ -f "$cache" ] || exit 0
+      listed=$(jq -r '.. | objects | select(has("slug")) | .slug' "$cache" | sort -u)
+    fi
     if [ $# -eq 0 ]; then
       printf '%s\n' "$listed"
     else
@@ -158,7 +208,11 @@ case "${1:-}" in
       mounted=$(grep -o -m 1 -E '/[^ :"]+/node_modules/@openai/codex' "$task_script" 2>/dev/null || true)
       installed=$(jq -r '.version' "$mounted/package.json" 2>/dev/null || codex --version 2>/dev/null | awk '{print $NF}')
     else
-      installed=$(codex --version 2>/dev/null | awk '{print $NF}')
+      if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+        installed=$(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" codex --version 2>/dev/null | awk '{print $NF}')
+      else
+        installed=$(codex --version 2>/dev/null | awk '{print $NF}')
+      fi
     fi
     contract_npm_version codex "${ADAPTER_PACKAGE:-}" "$installed"
     ;;

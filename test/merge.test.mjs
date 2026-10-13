@@ -125,7 +125,7 @@ test('what a review says comes back to the lead at its next wake, once; one that
   const listed = changes(first.next, [], [], new Set(), '2026-01-02T10:05:00Z', [], null, { reviews: [{ ...reviews[1], text: 'Défauts :\n- le premier\n- le second\n' }] });
   assert.equal(listed.events[0].text, 'Défauts :\n- le premier\n- le second');
   assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('review_done'));
-  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('{orch}/review-pr.sh'));
+  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('{orch}/lead-command.mjs'));
 });
 
 

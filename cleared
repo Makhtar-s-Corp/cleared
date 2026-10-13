@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline/promises';
+import { openLedger } from './lib/ledger.mjs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { loadConf, stateDir } from './lib/conf.mjs';
 import { createTracker } from './lib/tracker/contract.mjs';
@@ -19,10 +21,34 @@ if (area === 'app') {
   process.exit(result.status ?? 1);
 }
 if (area === 'rollback') {
-  if (!action || action.startsWith('--')) { console.error('usage: cleared rollback <ticket> [--yes] [--force-with-migrations] [--approval-comment ID]'); process.exit(64); }
-  mkdirSync(stateDir(), { recursive: true });
-  const result = spawnSync('flock', ['-x', '-w', '120', join(stateDir(), 'merge.lock'), process.execPath,
-    new URL('./lib/release.mjs', import.meta.url).pathname, 'rollback', action, ...args], { stdio: 'inherit' });
+  const ticket = action;
+  const usage = 'usage: cleared rollback <ticket> [--yes] [--force-with-migrations] [--approval-comment ID]';
+  if (!ticket || ticket.startsWith('--')) { console.error(usage); process.exit(64); }
+  let yes = false, force = false, comment = '';
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--yes') yes = true;
+    else if (args[i] === '--force-with-migrations') force = true;
+    else if (args[i] === '--approval-comment' && args[i + 1]) comment = args[++i];
+    else { console.error(usage); process.exit(64); }
+  }
+  if (!yes) {
+    let db;
+    try {
+      db = openLedger(undefined, { readOnly: true });
+      const row = db.prepare('SELECT merge_sha,title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket);
+      if (!row) throw new Error(`No Cleared release recorded for ${ticket}`);
+      const files = execFileSync('git', ['-C', process.env.CLEARED_REPO || process.env.ORCH_REPO || process.cwd(), 'diff', '--name-only', `${row.merge_sha}^1`, row.merge_sha], { encoding: 'utf8' }).trim();
+      console.log(`Ticket: ${ticket} — ${row.title}\nMerge to revert: ${row.merge_sha}\nFiles:\n${files}`);
+      const prompt = createInterface({ input: process.stdin, output: process.stdout });
+      let answer;
+      try { answer = await prompt.question('Type "rollback" to confirm: '); }
+      finally { prompt.close(); }
+      if (answer.trim() !== 'rollback') { console.error('Rollback cancelled'); process.exit(1); }
+    } catch (error) { console.error(`cleared: ${error.message}`); process.exit(1); }
+    finally { db?.close(); }
+  }
+  const result = spawnSync(process.execPath, [new URL('./release-request.mjs', import.meta.url).pathname,
+    'request_rollback', ticket, ...(comment ? ['--approval-comment', comment] : []), ...(force ? ['--force-with-migrations'] : [])], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
 if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action)) {

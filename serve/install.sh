@@ -65,16 +65,60 @@ fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
 mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
+# The service keeps its state private. Account creation and sudo grants are
+# administrator actions, never an installer side effect.
+agent_user=$(conf_get security agent_user)
+if [ -n "$agent_user" ]; then
+  getent passwd "$agent_user" > /dev/null || die "Create [security] agent_user=$agent_user first; see docs/security.md"
+  [ "$(id -u "$agent_user")" != "$(id -u)" ] || die "agent_user must differ from the service account"
+  bwrap_path=$(conf_get security bwrap_path)
+  bwrap_path=${bwrap_path:-/usr/bin/bwrap}
+  [ -x "$bwrap_path" ] || die "Install bubblewrap or set [security] bwrap_path to its executable; see docs/security.md"
+  [ -n "$(conf_get security socket_path)" ] || die "Set [security] socket_path to a shared local Unix path; see docs/security.md"
+  if ! sudo -n -u "$agent_user" -- true 2>/dev/null; then
+    die "Configure noninteractive sudo from the service account to $agent_user for the harness CLIs; see docs/security.md"
+  fi
+  for protected in "$ORCH_STATE_DIR" "$ORCH_HOME" "$project" "$ORCH_CONF"; do
+    if sudo -n -u "$agent_user" -- test -w "$protected" 2>/dev/null; then
+      die "$agent_user can write protected path $protected: remove that access before installing"
+    fi
+  done
+  probe=$(sudo -n -u "$agent_user" -- mktemp "$ORCH_STATE_DIR/.agent-write-probe.XXXXXX" 2>/dev/null || true)
+  if [ -n "$probe" ]; then rm -f "$probe"; die "$agent_user wrote to Cleared state; remove that access before installing"; fi
+  writable=$(sudo -n -u "$agent_user" -- find "$ORCH_STATE_DIR" -writable -print -quit 2>/dev/null || true)
+  [ -z "$writable" ] || die "$agent_user can write Cleared state path $writable"
+  for protected in "$ORCH_HOME" "$project"; do
+    writable=$(sudo -n -u "$agent_user" -- find "$protected" -writable -print -quit 2>/dev/null || true)
+    [ -z "$writable" ] || die "$agent_user can write protected path $writable"
+  done
+  if ! sudo -n -u "$agent_user" -- test -r "$ORCH_HOME/release-request.mjs" 2>/dev/null; then
+    die "$agent_user cannot read the release client: grant read and path traversal, not write"
+  fi
+  if ! sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+    node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1; then
+    die "Configure the narrow agent-to-service sudo rule for serve/lead-actions.mjs; see docs/security.md"
+  fi
+fi
+chmod o-w "$ORCH_STATE_DIR"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
   unit=$(basename "$unit")
   sed -e "s|@PORT@|$port|; s|@APP_PORT@|$app_port|; s|@BIND@|$bind|; s|@DASHBOARD_DIR@|$ORCH_STATE_DIR/dashboard|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
 done
 systemctl --user daemon-reload
-systemctl --user enable --now cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer
-systemctl --user enable --now cleared-app.service
-systemctl --user restart cleared-dashboard.service cleared-app.service
+systemctl --user enable --now cleared-release-broker.service cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer cleared-app.service
+systemctl --user restart cleared-release-broker.service cleared-dashboard.service cleared-app.service
+if [ -n "$agent_user" ]; then
+  reachable=
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+      node "$ORCH_HOME/release-request.mjs" status TEST-0 > /dev/null 2>&1; then reachable=1; break; fi
+    sleep 0.2
+  done
+  [ -n "$reachable" ] || die "$agent_user cannot reach the release socket; check [security] socket_path and directory traversal"
+fi
 "$ORCH_HOME/dashboard.sh" > /dev/null
 sleep 1
 "$here/check.sh"
 echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
 echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."
+[ -n "$agent_user" ] || echo "release lock is not a security boundary: agents run as the service account"

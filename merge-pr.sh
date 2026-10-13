@@ -35,6 +35,12 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
+# Only the service account's broker may enter the merge implementation.
+# The secret lives in service-owned state; a harness cannot read it.
+[ -n "${ORCH_BROKER_SECRET:-}" ] && [ -r "$ORCH_STATE_DIR/release-broker.secret" ] \
+  && [ "$ORCH_BROKER_SECRET" = "$(cat "$ORCH_STATE_DIR/release-broker.secret")" ] \
+  || { echo "merge-pr.sh: only the release broker can execute a merge" >&2; exit 6; }
+
 usage="usage: merge-pr.sh <pull request> <ticket> [<announcement file|->] [--dry-run]"
 [ $# -ge 2 ] && [[ "$1" =~ ^[0-9]+$ ]] && [[ "$2" =~ ^[A-Z]+-[0-9]+$ ]] || die "$usage"
 pr=$1 ticket=$2 announcement= dry_run=

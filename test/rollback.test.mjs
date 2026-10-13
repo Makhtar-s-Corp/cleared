@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as pause } from 'node:timers/promises';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
 import { releaseSettings, canHumanRollback, canAutoRollback, shouldRollback, touchesMigrations,
   activeRelease, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
@@ -282,7 +283,7 @@ test('manual rollback previews the exact merge and needs explicit confirmation',
   assert.equal(confirmedRollback('', true), true);
 });
 
-test('local CLI refuses an agent and lets a human preview, confirm and push a revert', (t) => {
+test('local CLI refuses an agent and lets a human preview, confirm and push a revert', async (t) => {
   const x = releasedProject(t);
   const root = join(x.repo, '..');
   const configPath = join(root, 'agents.conf');
@@ -292,7 +293,12 @@ test('local CLI refuses an agent and lets a human preview, confirm and push a re
   chmodSync(keyPath, 0o600);
   const owner = userInfo().username;
   const configuration = (id, uid) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n`;
-  const env = { ...process.env, CLEARED_REPO: x.repo, CLEARED_STATE_DIR: root, CLEARED_CONF: configPath };
+  const socket = join(root, 'broker.sock');
+  const env = { ...process.env, CLEARED_REPO: x.repo, CLEARED_STATE_DIR: root, CLEARED_CONF: configPath, CLEARED_RELEASE_SOCKET: socket };
+  const broker = spawn(process.execPath, [new URL('../serve/release-broker.mjs', import.meta.url).pathname], { env, stdio: 'ignore' });
+  t.after(() => broker.kill('SIGTERM'));
+  for (let i = 0; i < 100 && !existsSync(socket); i++) await pause(25);
+  assert.ok(existsSync(socket));
   const cli = (...args) => spawnSync(process.execPath, [new URL('../cleared', import.meta.url).pathname, ...args], { env, encoding: 'utf8' });
   writeFileSync(configPath, configuration('another-user', String(process.getuid())));
   const agent = cli('rollback', 'LOCAL-1', '--yes');
