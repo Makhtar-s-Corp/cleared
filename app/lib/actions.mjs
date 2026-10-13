@@ -191,7 +191,7 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     if (keys.length >= 5) throw fail(409, 'too_many');
     keys.push({ ...made, name: String(body.name || session.device).slice(0, 40), createdAt: new Date(now()).toISOString() });
     writePasskeys(keys);
-    log(session, 'passkey_registered', null, null, 'written', { key: made.id.slice(0, 8) });
+    log(session, 'passkey_registered', null, null, 'registered', { key: made.id.slice(0, 8) });
     return { ok: true, passkeys: keys.length };
   }
 

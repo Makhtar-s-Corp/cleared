@@ -139,8 +139,11 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
       if (path === '/session') {
         // Sign-in: the access token comes in a header (never in the address) and a session cookie goes back.
         const peer = request.socket.remoteAddress;
-        if (failures.blocked(peer)) return text(response, 429, 'Too many attempts', undefined, { 'retry-after': '60' });
-        if (!sameToken(bearerToken(request.headers.authorization), token)) { failures.fail(peer); return text(response, 401, 'Token required'); }
+        // A right token always gets in (the peer may be a proxy on this machine that others share); wrong ones are counted and slowed.
+        if (!sameToken(bearerToken(request.headers.authorization), token)) {
+          if (failures.blocked(peer)) return text(response, 429, 'Too many attempts', undefined, { 'retry-after': '60' });
+          failures.fail(peer); return text(response, 401, 'Token required');
+        }
         const made = sessions.create(request.headers['user-agent']);
         return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=${made.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${made.maxAge}${encrypted(request) ? '; Secure' : ''}` });
       }

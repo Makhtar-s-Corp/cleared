@@ -19,7 +19,9 @@ import { validText } from './text.mjs';
 
 const refused = (code, message) => Object.assign(new Error(message), { code });
 
-// An address the app may call: https, or http on this very machine (tests, a local proxy).
+// An address the app may call: https, or http on this very machine (tests, a local proxy). A different
+// address (GitHub Enterprise, a test double) is set in the service's environment, never in the project's
+// settings: a settings change must not be able to send the human's token somewhere else.
 const endpoint = (value, fallback) => {
   const url = new URL(value || fallback);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) throw new Error(`${url.origin} must be https`);
@@ -43,7 +45,7 @@ function local({ conf, creds }) {
 
 // ---- GitHub: the human's token (a user token, never the agents' installation token).
 function github({ conf, creds, settings }) {
-  const base = endpoint(settings.github_api_url, 'https://api.github.com');
+  const base = endpoint(process.env.CLEARED_APP_GITHUB_API, 'https://api.github.com');
   if (!/^[A-Za-z0-9_.=-]{20,255}$/.test(creds.github_token)) throw new Error('credentials.json: github_token has an unexpected form');
   // The token goes to curl on its standard input (as a config file), never in an argument or the environment.
   const curl = (target, method, input) => {
@@ -83,7 +85,7 @@ function github({ conf, creds, settings }) {
 
 // ---- Linear: the human's OAuth token (user mode), not the application of the agents.
 function linear({ conf, creds, settings }) {
-  const url = endpoint(settings.linear_api_url, 'https://api.linear.app/graphql');
+  const url = endpoint(process.env.CLEARED_APP_LINEAR_API, 'https://api.linear.app/graphql');
   const owner = conf.sections.tracker.owner_id;
   const team = conf.sections.tracker.team;
   const gql = async (query, variables = {}) => {
