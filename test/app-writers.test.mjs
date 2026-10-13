@@ -60,11 +60,11 @@ test('local tracker: the three gestures are written, signed as the human, and th
     assert.equal(comment.body, 'Yes, take the charges out first');
     assert.deepEqual(comment.by, { kind: 'human', id: 'alice' }); assert.equal(comment.byOwner, true);
     // A stale version is refused; nothing moves.
-    const stale = await b.write({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'b'.repeat(40) }] });
+    const stale = await b.write({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'b'.repeat(40) }], at: b.at });
     assert.equal(stale.ok, false); assert.equal(stale.code, 'version');
     assert.equal(agents.getTicket(b.ticket).status, 'Needs Approval');
     // The agreement, for the version on record: the move is the human's, proven by his key.
-    const approved = await b.write({ op: 'approve', ticket: b.ticket, versions: VERSIONS });
+    const approved = await b.write({ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at });
     assert.equal(approved.ok, true, JSON.stringify(approved)); assert.equal(approved.verified, true);
     const last = agents.history(b.ticket).at(-1);
     assert.equal(last.status, 'Ready to Ship'); assert.deepEqual(last.by, { kind: 'human', id: 'alice' });
@@ -77,7 +77,7 @@ test('local tracker: the three gestures are written, signed as the human, and th
     assert.equal(agents.comments(b.ticket)[0].body, 'Round the figure to the cent.');
     assert.equal(agents.history(b.ticket).at(-1).by.kind, 'human');
     // Not waiting for him any more: refused.
-    const late = await b.write({ op: 'approve', ticket: b.ticket, versions: VERSIONS });
+    const late = await b.write({ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at });
     assert.equal(late.code, 'state');
   } finally { agents.close(); }
 });
@@ -107,9 +107,9 @@ test('GitHub: the three gestures are written with the human\'s own token, and th
   const run = (request) => b.write(request, fake.env);
   assert.equal((await run({ op: 'answer', ticket: b.ticket, text: 'Yes' })).ok, true);
   assert.deepEqual(fake.state.comments, [{ body: 'Yes', by: 'alice' }]);
-  const stale = await run({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'c'.repeat(40) }] });
+  const stale = await run({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'c'.repeat(40) }], at: b.at });
   assert.equal(stale.code, 'version'); assert.deepEqual(fake.state.labels, ['status:Needs Approval']);
-  const approved = await run({ op: 'approve', ticket: b.ticket, versions: VERSIONS });
+  const approved = await run({ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at });
   assert.equal(approved.ok, true, JSON.stringify(approved)); assert.equal(approved.verified, true);
   assert.deepEqual(fake.state.labels, ['status:Ready to Ship']);
   assert.equal(fake.state.timeline.at(-1).actor.login, 'alice');
@@ -125,7 +125,7 @@ test('GitHub: the agents\' installation token is refused as an identity, and not
   const fake = await fakeGithub(t);
   const b = box('github');
   b.credentials(AGENT_GH); b.approvalRecord();
-  for (const request of [{ op: 'approve', ticket: b.ticket, versions: VERSIONS }, { op: 'sendback', ticket: b.ticket, text: 'x' }, { op: 'answer', ticket: b.ticket, text: 'x' }]) {
+  for (const request of [{ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at }, { op: 'sendback', ticket: b.ticket, text: 'x' }, { op: 'answer', ticket: b.ticket, text: 'x' }]) {
     const result = await b.write(request, fake.env);
     assert.equal(result.ok, false); assert.equal(result.code, 'identity');
   }
@@ -138,7 +138,7 @@ test('the writer cannot be pointed at another place by the project settings, and
   // The settings keys are not read; the default address is api.github.com (unreachable here, so it fails, but never reaches evil.example).
   const result = await b.write({ op: 'answer', ticket: b.ticket, text: 'x' }, { CLEARED_APP_GITHUB_API: 'http://evil.example' });
   assert.equal(result.ok, false);
-  assert.match(result.message, /must be https|curl|Command failed/);
+  assert.equal(result.code, 'failed', 'the browser gets a code, not the reason');
 });
 
 test('the gesture text and the target statuses are checked: no empty text, and a sent-back ticket never lands in agreement or done', () => {

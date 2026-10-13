@@ -31,7 +31,9 @@ const demo = flag('--demo');
 const conf = demo ? { sections: {} } : loadConf();
 const settings = section(conf, 'app');
 const port = Number(value('--port') || settings.port || 8788);
-const bind = value('--bind') || settings.bind || '127.0.0.1';
+const publicHttps = /^https:\/\//.test(settings.public_origin || '');
+// Behind a TLS proxy on this machine (tailscale serve) the app listens on this machine only: the proxy's address is what says the connection is encrypted.
+const bind = publicHttps ? (settings.bind || '127.0.0.1') : (value('--bind') || settings.bind || '127.0.0.1');
 const tokenFile = expandHome(settings.token_file || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'cleared', 'app-token'));
 let ranges;
 try { ranges = checkRanges(settings.ranges ? settings.ranges.split(/[\s,]+/).filter(Boolean) : [...TAILSCALE, '127.0.0.0/8', '::1/128']); }
@@ -67,8 +69,15 @@ const source = demo ? demoSource() : liveSource({ conf });
 function humanUid() {
   const security = section(conf, 'security');
   const name = security.human_user || (section(conf, 'tracker').adapter === 'local' ? section(conf, 'tracker').owner_id : '');
-  if (name) return Number(execFileSync('getent', ['passwd', name], { encoding: 'utf8' }).trim().split(':')[2]);
-  return security.allow_shared_uid === 'true' && !security.agent_user ? process.getuid() : null;
+  // The same rules as the release broker: the human is never the agents' account, and never taken for the app's own account when agents exist.
+  const uidOf = (user) => Number(execFileSync('getent', ['passwd', user], { encoding: 'utf8' }).trim().split(':')[2]);
+  const agent = security.agent_user ? uidOf(security.agent_user) : null;
+  const human = name ? uidOf(name) : security.allow_shared_uid === 'true' && !security.agent_user ? process.getuid() : null;
+  if (human !== null && (!Number.isSafeInteger(human) || human === agent || (agent !== null && human === process.getuid()))) {
+    console.error('cleared app: [security] human_user must differ from agent_user and from the app\'s own account when agent_user is set; no passkey grant will be given');
+    return null;
+  }
+  return human;
 }
 const owner = demo ? 'you' : section(conf, 'tracker').owner_id || '';
 const record = demo ? () => {} : (event) => {

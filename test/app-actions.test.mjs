@@ -175,10 +175,12 @@ test('a passkey confirmation is needed for Clear to land and Send back: no asser
     asked = await ask();
     const good = r.authenticator.get(asked.body.publicKey);
     assert.equal((await browser.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: good })).status, 200);
+    const waitingOne = (await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } }).then((x) => x.json())).actions.pending[0];
+    await browser.json('/api/actions/undo', { pendingId: waitingOne.id });
     const replay = await ask();
     r.authenticator.counter -= 1;
     assert.equal((await browser.json('/api/actions/confirm', { challengeId: replay.body.challengeId, assertion: r.authenticator.get(replay.body.publicKey) })).status, 403, 'a counter that did not advance');
-    assert.deepEqual(r.ran, [], 'nothing was written: the grace delay of the one good confirmation is still running');
+    assert.deepEqual(r.ran, [], 'nothing was written: the one good confirmation only started a grace delay');
     // Send back: the same, and the text confirmed is the text written.
     const back = await browser.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-31', versions: VERSIONS, text: 'Round the figure' });
     assert.equal((await browser.json('/api/actions/confirm', { challengeId: back.body.challengeId, assertion: r.authenticator.get(back.body.publicKey), text: 'Something else entirely' })).body.error, 'text_changed');
@@ -198,10 +200,11 @@ test('Clear to land: the grace delay is held on the server, and the agreement is
     assert.equal(r.timers.length, 1);
     assert.equal(r.timers[0].ms, 60000, 'sixty seconds, on the server');
     assert.deepEqual(r.ran, [], 'nothing is written during the grace delay');
-    assert.equal((await r.browser()).me.actions.pending.length, 0, 'another session does not see it');
+    assert.equal((await r.browser()).me.actions.pending.length, 1, 'every device of the human sees it');
     assert.equal((await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } }).then((x) => x.json())).actions.pending[0].state, 'waiting');
     await r.timers[0].fn();
-    assert.deepEqual(r.ran, [{ op: 'approve', ticket: 'EX-31', versions: VERSIONS }]);
+    assert.equal(r.ran.length, 1); assert.deepEqual({ ...r.ran[0], at: undefined }, { op: 'approve', ticket: 'EX-31', versions: VERSIONS, at: undefined });
+    assert.match(r.ran[0].at, /^\d{4}-\d\d-\d\dT/, 'the request the agreement answers is named');
     const written = r.records.find((e) => e.result === 'written');
     assert.equal(written.gesture, 'clear');
     assert.deepEqual(written.version, ['88:a1b2c3d']);
@@ -217,7 +220,9 @@ test('Undo during the grace delay writes nothing; too late is too late', async (
     await r.register(browser);
     const { confirmed } = await r.confirmClear(browser);
     const other = await r.browser();
-    assert.equal((await other.json('/api/actions/undo', { pendingId: confirmed.body.pendingId })).status, 404, 'another session cannot undo it');
+    assert.equal((await other.json('/api/actions/undo', { pendingId: 'unknown' })).status, 404);
+    // The same human, on another device, sees it and may undo it.
+    assert.equal((await fetch(`${r.base}/api/me`, { headers: { cookie: other.cookie } }).then((x) => x.json())).actions.pending.length, 1);
     assert.equal((await browser.json('/api/actions/undo', { pendingId: confirmed.body.pendingId })).status, 200);
     assert.equal(r.timers[0].cancelled, true);
     await r.timers[0].fn();
@@ -344,5 +349,71 @@ test('the address that registers a passkey goes through sign-in without ever sen
     assert.match(js, /if \(afterRegister\) \{[^}]*grant = fromHash[\s\S]*else if \(fromHash\) \{[^}]*enter\(fromHash\)/, 'with next=register the # part is kept, not sent to /session');
     const browser = await r.browser();
     assert.equal((await fetch(`${r.base}/register`, { headers: { cookie: browser.cookie } })).status, 200, 'signed in, the page opens');
+  } finally { await r.close(); }
+});
+
+test('a Send back withdraws a Clear still in its grace delay, from any device; one Clear per ticket at a time', async () => {
+  const r = await rig();
+  try {
+    const phone = await r.browser(); const laptop = await r.browser();
+    await r.register(phone);
+    const { confirmed } = await r.confirmClear(phone);
+    assert.equal(confirmed.status, 200);
+    // A second Clear on the same ticket is refused while the first waits.
+    assert.equal((await r.confirmClear(laptop)).asked.status, 409);
+    // The human sends it back from the laptop.
+    const asked = await laptop.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-31', versions: VERSIONS, text: 'No: round it.' });
+    const done = await laptop.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey), text: 'No: round it.' });
+    assert.equal(done.status, 200);
+    assert.equal(r.timers[0].cancelled, true, 'the waiting clear is withdrawn');
+    await r.timers[0].fn();
+    assert.deepEqual(r.ran.map((x) => x.op), ['sendback'], 'the agreement is never written after the send back');
+    assert.deepEqual(r.records.filter((e) => e.gesture === 'clear').map((e) => e.result), ['confirmed', 'undone_by_sendback']);
+  } finally { await r.close(); }
+});
+
+test('an agreement answers the request that was on screen: a request made again for the same commit voids it', async () => {
+  const r = await rig();
+  try {
+    const browser = await r.browser();
+    await r.register(browser);
+    await r.confirmClear(browser);
+    r.demo.askAgain('EX-31'); // same commit, a new request (the agent asked again)
+    await r.timers[0].fn();
+    assert.deepEqual(r.ran, []);
+    assert.equal(r.records.at(-1).result, 'refused_new_version');
+  } finally { await r.close(); }
+});
+
+test('with an https address configured, a session made over plain http writes nothing; behind the local TLS proxy it does; the cookie is Secure', async () => {
+  const origin = 'https://cockpit.example.ts.net';
+  const demo = demoSource(); const ran = [];
+  const actions = createActions({ source: demo, origin, owner: 'alice', readPasskeys: () => [], writePasskeys: () => {}, run: async (q) => { ran.push(q); return { ok: true }; } });
+  const server = appServer({ source: demo, token: TOKEN, ranges: ['127.0.0.0/8'], actions, origin, owner: 'alice' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const sign = async (extra = {}) => {
+      const signed = await fetch(`${base}/session`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, ...extra } });
+      const cookie = signed.headers.get('set-cookie'); assert.match(cookie, /; Secure/);
+      const c = cookie.split(';')[0];
+      const me = await (await fetch(`${base}/api/me`, { headers: { cookie: c } })).json();
+      return (path, body) => fetch(base + path, { method: 'POST', headers: { cookie: c, 'x-csrf-token': me.csrf, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    };
+    const plain = await sign();
+    const refused = await plain('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' });
+    assert.equal(refused.status, 403); assert.equal((await refused.json()).error, 'insecure_session');
+    const proxied = await sign({ 'x-forwarded-proto': 'https' });
+    assert.equal((await proxied('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' })).status, 200);
+    assert.equal(ran.length, 1);
+  } finally { await new Promise((r) => server.close(r)); }
+});
+
+test('without a secure address, even an answer is refused', async () => {
+  const r = await rig({ origin: false });
+  try {
+    const browser = await r.browser();
+    assert.equal((await browser.json('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' })).body.error, 'insecure');
+    assert.deepEqual(r.ran, []);
   } finally { await r.close(); }
 });

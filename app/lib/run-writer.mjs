@@ -13,9 +13,9 @@ export function runWriter(request, { state = stateDir(), env = process.env, time
     ? ['flock', ['-x', '-w', '30', join(state, 'merge.lock'), process.execPath, writer]]
     : [process.execPath, [writer]];
   return new Promise((resolve) => {
-    const child = spawn(command[0], command[1], { env, stdio: ['pipe', 'pipe', 'ignore'] });
+    const child = spawn(command[0], command[1], { env, stdio: ['pipe', 'pipe', 'inherit'], detached: true });
     let out = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    const timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } }, timeoutMs);
     child.stdout.on('data', (chunk) => { if (out.length < 20000) out += chunk; });
     child.on('error', () => { clearTimeout(timer); resolve({ ok: false, code: 'failed', message: 'the writer could not start' }); });
     child.on('close', () => {

@@ -26,7 +26,7 @@ export function box(adapter, { owner = 'alice', ticket, extra = '' } = {}) {
     + `team = ENG\nrepository = o/r\napp_login = cleared[bot]\nagents_uid = 99999\nhuman_public_key = ${publicB64}\n[app]\nhuman_credentials_dir = ${creds}\n${extra}`;
   const confPath = join(root, 'agents.conf'); writeFileSync(confPath, conf);
   const env = { PATH: process.env.PATH, HOME: root, ORCH_CONF: confPath, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_LEDGER: join(state, 'ledger.db'), XDG_CONFIG_HOME: join(root, 'cfg') };
-  const approvalRecord = (head = HEAD) => writeFileSync(join(state, 'validations', `${ticket}.json`), JSON.stringify({ ticket, at: '2026-10-13T09:00:00.000Z', pulls: [{ pr: 7, head }] }));
+  const approvalRecord = (head = HEAD) => writeFileSync(join(state, 'validations', `${ticket}.json`), JSON.stringify({ ticket, at, pulls: [{ pr: 7, head }] }));
   const credentials = (token) => writeFileSync(join(creds, 'credentials.json'), JSON.stringify(token && typeof token === 'object' ? token : { [adapter]: token }), { mode: 0o600 });
   const write = (request, over = {}) => new Promise((resolve) => {
     const child = spawn(process.execPath, [join(ORCH_HOME, 'app/human-write.mjs')], { env: { ...env, ...over }, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -34,7 +34,8 @@ export function box(adapter, { owner = 'alice', ticket, extra = '' } = {}) {
     child.on('close', () => resolve(JSON.parse(out.trim().split('\n').at(-1))));
     child.stdin.end(JSON.stringify(request));
   });
-  return { root, repo, state, creds, env, ticket, conf: parseConf(conf), approvalRecord, credentials, write, confPath, publicB64 };
+  const at = '2026-10-13T09:00:00.000Z';
+  return { at, root, repo, state, creds, env, ticket, conf: parseConf(conf), approvalRecord, credentials, write, confPath, publicB64 };
 }
 
 

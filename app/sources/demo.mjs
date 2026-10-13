@@ -77,6 +77,8 @@ export function demoSource() {
     move(id, column) { tickets.find((t) => t.id === id).column = column; },
     // A newer commit arrives: the request for agreement is made again for it.
     newVersion(id, next = DEMO_HEAD_NEXT) { const t = tickets.find((x) => x.id === id); t.approval = { at: iso(0), versions: t.approval.versions.map((v) => ({ ...v, head: next })) }; },
+    // The agent asks again for the same commit: a new request, the old agreement no longer answers it.
+    askAgain(id) { const t = tickets.find((x) => x.id === id); t.approval = { ...t.approval, at: new Date(Date.now() + 1000).toISOString() }; },
     // The user's agreement, as the real tracker would show it on the next wake.
     cleared(id) { tickets.find((t) => t.id === id).column = 'review'; },
     async snapshot() {

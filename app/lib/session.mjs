@@ -20,11 +20,11 @@ export function sessionStore({ now = () => Date.now(), ttlMs = 7 * 24 * 3600 * 1
   const live = new Map();
   const sweep = () => { for (const [key, value] of live) if (value.expires <= now()) live.delete(key); };
   return {
-    create(userAgent) {
+    create(userAgent, { encrypted = false } = {}) {
       sweep();
       while (live.size >= max) live.delete(live.keys().next().value);
       const id = randomBytes(32).toString('hex');
-      const entry = { id: hash(id).slice(0, 16), csrf: randomBytes(32).toString('hex'), createdAt: now(), expires: now() + ttlMs };
+      const entry = { encrypted, id: hash(id).slice(0, 16), csrf: randomBytes(32).toString('hex'), createdAt: now(), expires: now() + ttlMs };
       entry.device = deviceName(userAgent, entry.id);
       live.set(hash(id), entry);
       return { id, entry, maxAge: Math.floor(ttlMs / 1000) };

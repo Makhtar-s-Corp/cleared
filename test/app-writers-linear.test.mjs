@@ -39,9 +39,9 @@ test('[Linear adapter] the three gestures use the human\'s own token and the his
   const run = (request) => b.write(request, server.env);
   assert.equal((await run({ op: 'answer', ticket: b.ticket, text: 'No' })).ok, true);
   assert.deepEqual(server.state.comments, [{ body: 'No', by: 'lin-human' }]);
-  assert.equal((await run({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'd'.repeat(40) }] })).code, 'version');
+  assert.equal((await run({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'd'.repeat(40) }], at: b.at })).code, 'version');
   assert.equal(server.state.state, 'Needs Approval', 'a version that is not the one shown moves nothing');
-  const approved = await run({ op: 'approve', ticket: b.ticket, versions: VERSIONS });
+  const approved = await run({ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at });
   assert.equal(approved.ok, true, JSON.stringify(approved)); assert.equal(approved.verified, true);
   assert.equal(server.state.state, 'Ready to Ship'); assert.equal(server.state.history.at(-1).actorId, 'lin-human');
   server.state.state = 'Needs Approval'; b.approvalRecord();
@@ -53,7 +53,7 @@ test('[Linear adapter] the three gestures use the human\'s own token and the his
   // The application of the agents: not the human, so nothing is written.
   server = await fake(); b = scratch();
   b.credentials(APP); b.approvalRecord();
-  for (const request of [{ op: 'approve', ticket: b.ticket, versions: VERSIONS }, { op: 'sendback', ticket: b.ticket, text: 'x' }, { op: 'answer', ticket: b.ticket, text: 'x' }]) {
+  for (const request of [{ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at }, { op: 'sendback', ticket: b.ticket, text: 'x' }, { op: 'answer', ticket: b.ticket, text: 'x' }]) {
     const result = await b.write(request, server.env);
     assert.equal(result.ok, false); assert.equal(result.code, 'identity');
   }

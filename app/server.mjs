@@ -146,13 +146,15 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
           if (failures.blocked(peer)) return text(response, 429, 'Too many attempts', undefined, { 'retry-after': '60' });
           failures.fail(peer); return text(response, 401, 'Token required');
         }
-        const made = sessions.create(request.headers['user-agent']);
-        return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=${made.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${made.maxAge}${encrypted(request) ? '; Secure' : ''}` });
+        const made = sessions.create(request.headers['user-agent'], { encrypted: encrypted(request) });
+        return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=${made.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${made.maxAge}${encrypted(request) || configured?.secure ? '; Secure' : ''}` });
       }
       if (!WRITES.includes(`POST ${path}`)) return text(response, 404, message('http_not_found', language));
       // Every other write: the session cookie, not the token; the anti-forgery header; a request from this very site.
       if (!mine) return error(401, 'session');
       if (!sameSecret(request.headers['x-csrf-token'], mine.csrf)) return error(403, 'csrf');
+      // With an https address configured, a session made over plain http (its cookie could have travelled in the clear) writes nothing.
+      if (configured?.secure && !mine.encrypted) return error(403, 'insecure_session');
       if (request.headers.origin !== expectedOrigin(request) || (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin')) return error(403, 'origin');
       if (!String(request.headers['content-type'] || '').startsWith('application/json')) return error(415, 'type');
       if (path === '/session/logout') { sessions.revoke(cookieValue(request.headers.cookie, COOKIE)); return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); }

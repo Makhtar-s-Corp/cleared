@@ -17,5 +17,7 @@ try {
   const creds = readCredentials(dir, { project: projectDir(), adapter });
   answer(await perform(request, { conf, creds, settings, project: { state: stateDir() } }));
 } catch (error) {
-  answer({ ok: false, code: error.code && /^[a-z]{3,12}$/.test(error.code) ? error.code : 'failed', message: String(error.message).slice(0, 300) });
+  // The reason stays in the server's journal; the browser gets the code only.
+  console.error(`human-write: ${String(error.message).slice(0, 300)}`);
+  answer({ ok: false, code: error.code && /^[a-z]{3,12}$/.test(error.code) ? error.code : 'failed' });
 }

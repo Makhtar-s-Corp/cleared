@@ -47,6 +47,8 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   function stopTicker() { clearInterval(ticker); ticker = null; }
   function grace(card, pending) {
     stopTicker();
+    // The server's remaining time, not its clock: a phone whose clock is off must not see Undo after the write.
+    if (pending.leftMs !== undefined) pending = { ...pending, dueAt: Date.now() + pending.leftMs };
     mode = { name: 'grace', pending };
     const total = me.actions.graceMs;
     const fill = el('i');
@@ -151,7 +153,7 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
       button(label, 'ink', async (e) => {
         const b = e.currentTarget; b.disabled = true;
         const r = await confirmed('clear', card);
-        if (r.ok && r.json.pendingId) { await load(); return grace(card, me.actions.pending.find((p) => p.id === r.json.pendingId) ?? { id: r.json.pendingId, dueAt: r.json.dueAt }); }
+        if (r.ok && r.json.pendingId) { await load(); return grace(card, me.actions.pending.find((p) => p.id === r.json.pendingId) ?? { id: r.json.pendingId, leftMs: r.json.graceMs }); }
         b.disabled = false;
         if (r.json?.error === 'new_version') { await load(); redraw(); }
         mode = { name: 'error', text: failure(r.json) }; mount(card);

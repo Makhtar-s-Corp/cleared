@@ -50,11 +50,14 @@ export async function perform(request, { conf, creds, settings = {}, project }) 
     if (request.op === 'approve') {
       const record = approvalOf(request.ticket, project.state);
       if (!record) throw refused('version', 'No request for agreement is kept for this ticket');
+      if (request.at !== record.at) throw refused('version', 'The request for agreement was made again since: review again');
       if (!sameVersions(record.versions, request.versions)) throw refused('version', 'The version asked for is not the one that was shown: review again');
       await client.move(request.ticket, states.go);
-      const by = await client.lastMoveBy(request.ticket, states.go);
-      if (by?.kind !== 'human') throw refused('author', 'The tracker does not show the human as the author of the move');
-      return { ok: true, author: who.id, verified: true };
+      // The move is done and cannot be reported as a failure whatever the read-back says (a tracker's history may
+      // lag): verified says whether the tracker already shows the human as the author. The lock checks it again.
+      let by = null;
+      try { by = await client.lastMoveBy(request.ticket, states.go); } catch { /* not readable yet */ }
+      return { ok: true, author: who.id, verified: by?.kind === 'human' };
     }
     throw refused('input', 'Unknown operation');
   } finally { client.close(); }

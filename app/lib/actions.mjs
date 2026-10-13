@@ -39,6 +39,7 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     for (const [key, value] of pending) if (value.finishedAt && value.finishedAt + 600000 <= now()) pending.delete(key);
   };
   const stored = () => readPasskeys();
+  const waiting = (ticket) => [...pending.values()].find((p) => p.ticket === ticket && p.state === 'waiting');
   const note = (entry) => { try { record(entry); } catch { /* the ledger being full or locked must not undo a gesture; the result is still returned */ } };
 
   const card = async (ticket) => {
@@ -50,9 +51,9 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     const keys = stored();
     const reason = !where ? 'insecure' : keys.length ? null : 'no_passkey';
     return { confirm: reason === null, reason, passkeys: keys.length, graceMs, rpId: where?.rpId ?? null,
-      pending: [...pending.values()].filter((p) => p.session === session.id).map(view) };
+      pending: [...pending.values()].map(view) };
   }
-  const view = (p) => ({ id: p.id, ticket: p.ticket, versions: p.versions, state: p.state, dueAt: p.dueAt, result: p.result ?? null });
+  const view = (p) => ({ id: p.id, ticket: p.ticket, versions: p.versions, state: p.state, dueAt: p.dueAt, leftMs: Math.max(0, p.dueAt - now()), result: p.result ? { ok: Boolean(p.result.ok), code: p.result.code } : null });
 
   // ---- confirmation ---------------------------------------------------------------
   async function begin(session, body) {
@@ -68,8 +69,9 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     // The version on screen must still be the one that was asked for. If not, the page must show the new version first.
     if (!sameVersions(c.approval.versions, body.versions)) throw fail(409, 'new_version');
     if (gesture === 'sendback' && !validText(body.text)) throw fail(400, 'text');
+    if (gesture === 'clear' && waiting(body.ticket)) throw fail(409, 'busy');
     if ([...challenges.values()].filter((x) => x.session === session.id).length >= 20) throw fail(429, 'busy');
-    const entry = { id: id(), challenge: newChallenge(), session: session.id, gesture, ticket: body.ticket, versions: c.approval.versions,
+    const entry = { id: id(), challenge: newChallenge(), session: session.id, gesture, ticket: body.ticket, versions: c.approval.versions, at: c.approval.at,
       textHash: gesture === 'sendback' ? hash(body.text) : null, expires: now() + 120000 };
     challenges.set(entry.id, entry);
     return { challengeId: entry.id, publicKey: { challenge: entry.challenge, rpId: where.rpId, timeout: 60000, userVerification: 'required',
@@ -99,9 +101,12 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     const entry = check(session, body);
     if (entry.gesture === 'sendback') {
       if (hash(body.text) !== entry.textHash) throw fail(403, 'text_changed');
+      // The human's last word wins: a clear still in its grace delay, from any device, is withdrawn.
+      for (const p of pending.values()) if (p.ticket === entry.ticket && p.state === 'waiting') withdraw(p, session, 'undone_by_sendback');
       return write(session, entry.gesture, { op: 'sendback', ticket: entry.ticket, text: body.text, versions: entry.versions });
     }
-    const p = { id: id(), ticket: entry.ticket, versions: entry.versions, session: session.id, device: session.device, state: 'waiting', dueAt: now() + graceMs, timer: null };
+    if (waiting(entry.ticket)) throw fail(409, 'busy');
+    const p = { id: id(), ticket: entry.ticket, versions: entry.versions, at: entry.at, session: session.id, device: session.device, state: 'waiting', dueAt: now() + graceMs, timer: null };
     p.timer = schedule(() => finalize(p, session), graceMs);
     p.timer.unref?.();
     pending.set(p.id, p);
@@ -109,13 +114,17 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     return { pendingId: p.id, dueAt: p.dueAt, graceMs };
   }
 
-  function undo(session, body) {
-    const p = pending.get(body?.pendingId);
-    if (!p || p.session !== session.id) throw fail(404, 'pending');
-    if (p.state !== 'waiting') throw fail(409, 'too_late');
+  function withdraw(p, session, result) {
     cancel(p.timer);
     p.state = 'undone'; p.finishedAt = now(); p.result = { ok: false, code: 'undone' };
-    log(session, 'clear', p.ticket, p.versions, 'undone', { pending: p.id });
+    log(session, 'clear', p.ticket, p.versions, result, { pending: p.id });
+  }
+  // The same human on any of their devices may undo.
+  function undo(session, body) {
+    const p = pending.get(body?.pendingId);
+    if (!p) throw fail(404, 'pending');
+    if (p.state !== 'waiting') throw fail(409, 'too_late');
+    withdraw(p, session, 'undone');
     return { ok: true };
   }
 
@@ -125,15 +134,15 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     try {
       // The board is read again now: a newer version, or a ticket no longer waiting, ends it here.
       const c = await card(p.ticket);
-      if (!c || c.kind !== 'ready' || !c.approval || !sameVersions(c.approval.versions, p.versions)) {
+      if (!c || c.kind !== 'ready' || !c.approval || !sameVersions(c.approval.versions, p.versions) || c.approval.at !== p.at) {
         p.result = { ok: false, code: 'new_version' };
         log(session, 'clear', p.ticket, p.versions, 'refused_new_version', { pending: p.id });
       } else {
-        p.result = await run({ op: 'approve', ticket: p.ticket, versions: p.versions });
-        log(session, 'clear', p.ticket, p.versions, p.result.ok ? 'written' : `failed_${p.result.code}`, { pending: p.id, author: p.result.author ?? null });
+        p.result = await run({ op: 'approve', ticket: p.ticket, versions: p.versions, at: p.at });
+        log(session, 'clear', p.ticket, p.versions, p.result.ok ? 'written' : `failed_${p.result.code}`, { pending: p.id, author: p.result.author ?? null, verified: p.result.verified ?? null });
       }
     } catch (error) {
-      p.result = { ok: false, code: 'failed', message: String(error.message).slice(0, 200) };
+      p.result = { ok: false, code: 'failed' };
       log(session, 'clear', p.ticket, p.versions, 'failed', { pending: p.id });
     }
     p.state = p.result.ok ? 'written' : 'failed';
@@ -142,13 +151,14 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
 
   async function write(session, gesture, request) {
     let result;
-    try { result = await run(request); } catch (error) { result = { ok: false, code: 'failed', message: String(error.message).slice(0, 200) }; }
+    try { result = await run(request); } catch (error) { result = { ok: false, code: 'failed' }; }
     log(session, gesture, request.ticket, request.versions ?? null, result.ok ? 'written' : `failed_${result.code}`, { author: result.author ?? null });
-    return { ok: Boolean(result.ok), code: result.ok ? undefined : result.code ?? 'failed', message: result.ok ? undefined : result.message };
+    return { ok: Boolean(result.ok), code: result.ok ? undefined : result.code ?? 'failed' };
   }
 
   async function answer(session, body) {
     sweep();
+    if (!where) throw fail(409, 'insecure');
     if (!REF.test(String(body?.ticket))) throw fail(400, 'ticket');
     if (!validText(body.text)) throw fail(400, 'text');
     const c = await card(body.ticket);
@@ -196,5 +206,5 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
   }
 
   const stop = () => { for (const p of pending.values()) if (p.state === 'waiting') cancel(p.timer); };
-  return { status, begin, confirm, undo, answer, mintGrant, registerOptions, registerFinish, stop, pendingOf: (session) => [...pending.values()].filter((p) => p.session === session.id).map(view) };
+  return { status, begin, confirm, undo, answer, mintGrant, registerOptions, registerFinish, stop, pendingOf: () => [...pending.values()].map(view) };
 }
