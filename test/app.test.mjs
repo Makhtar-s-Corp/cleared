@@ -93,7 +93,7 @@ test('responses carry a content policy that forbids loading anything from anothe
     assert.match(r.headers.get('content-security-policy'), /default-src 'self'/);
     assert.equal(r.headers.get('cache-control'), 'no-store');
   } finally { await s.close(); }
-  for (const f of readdirSync(join(import.meta.dirname, '..', 'app', 'public'))) {
+  for (const f of readdirSync(join(import.meta.dirname, '..', 'app', 'public')).filter((n) => /\.(html|css|js)$/.test(n))) {
     const text = readFileSync(join(import.meta.dirname, '..', 'app', 'public', f), 'utf8');
     assert.doesNotMatch(text, /https?:\/\/(?!www\.w3\.org)/, `${f} names another site`);
     assert.doesNotMatch(text, /@import|innerHTML|insertAdjacentHTML|document\.write|eval\(/, `${f}`);
@@ -105,7 +105,7 @@ test('the demo data covers the seven cases, with no money amount, path or secret
   const byId = Object.fromEntries(snap.tickets.map((t) => [t.id, t]));
   assert.ok(byId['EX-31'].screen && byId['EX-31'].waiting && byId['EX-31'].column === 'awaiting', 'a screen ticket that waits for the human');
   assert.ok(!byId['EX-34'].screen, 'a ticket without a screen');
-  assert.ok(Object.values(byId).some((t) => t.queued && /place/.test(t.reason)), 'a team waiting for a place');
+  assert.ok(Object.values(byId).some((t) => t.queued && /slot|place/.test(t.reason)), 'a team waiting for a place');
   assert.ok(snap.fuel.some((f) => !f.measured), 'a subscription that is not measured');
   assert.ok(!snap.health.ok && snap.health.problems.length, 'a problem reported by status');
   const screen = await demoSource().ticket('EX-31');
@@ -362,4 +362,35 @@ test('the app writes nothing and calls nothing outside: health is the state the 
   const code = readFileSync(join(import.meta.dirname, '..', 'app', 'sources', 'live.mjs'), 'utf8').replace(/\/\/.*$/gm, '');
   assert.doesNotMatch(code, /heartbeat\.mjs|'status'|--json|collectStatus|fetch\(/, 'the source never runs status or fetches');
   delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
+});
+
+test('the design is followed: no gradient, fonts served by the app, light by default, amber only for the human', async () => {
+  const pub = join(import.meta.dirname, '..', 'app', 'public');
+  const css = readFileSync(join(pub, 'style.css'), 'utf8');
+  for (const f of ['style.css', 'app.js', 'index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
+  assert.match(css, /font-family: Geist;[^}]*\/fonts\/Geist-Variable\.woff2/);
+  assert.match(css, /font-family: "Geist Mono";[^}]*\/fonts\/GeistMono-Variable\.woff2/);
+  assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/, 'light by default; dark only when chosen');
+  assert.doesNotMatch(readFileSync(join(pub, 'app.js'), 'utf8'), /\.style\.cssText|setAttribute\('style'/, 'no inline style, which the content policy refuses');
+  // the tokens of DESIGN.md are the ones of the style sheet
+  for (const hex of ['#FAFAFA', '#FFFFFF', '#F4F4F4', '#EAEAEA', '#171717', '#4D4D4D', '#666666', '#8F8F8F', '#F5A623', '#AB570A', '#FFFBF2', '#FCE2B3', '#16A34A', '#F2FBF5', '#EE0000', '#0070F3', '#7928CA', '#0A9DB0', '#D97757', '#10A37F'])
+    assert.ok(css.toUpperCase().includes(hex), `${hex} is in the style sheet`);
+  // amber is used for the human only
+  const amber = [...css.matchAll(/^(.*var\(--(?:awaiting|e-awaiting)[^)]*\).*)$/gm)].map((m) => m[1].trim());
+  for (const line of amber) assert.match(line, /\.key|\.ready|\.question|\.chip\.q|\.amber-bar|\.project|data-col="awaiting"|\.d-awaiting|st-awaiting|\.card\.ready|--awaiting|:root/, `amber used outside what waits for the human: ${line.slice(0, 80)}`);
+  const s = await serve();
+  try {
+    const font = await s.call('/fonts/Geist-Variable.woff2');
+    assert.equal(font.status, 200); assert.equal(font.headers.get('content-type'), 'font/woff2');
+    assert.equal((await s.call('/fonts/GeistMono-Variable.woff2')).status, 200);
+    assert.equal((await s.call('/fonts/../server.mjs', { headers: auth })).status, 404);
+    assert.equal((await s.call('/fonts/LICENSE.txt', { headers: auth })).status, 404, 'only the two font files are served');
+  } finally { await s.close(); }
+  const en = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', 'en.json'), 'utf8'));
+  const fr = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', 'fr.json'), 'utf8'));
+  const js = readFileSync(join(pub, 'app.js'), 'utf8');
+  for (const key of ['app_wait_ready_one_tone', 'app_wait_ready_other_tone', 'app_wait_ready_key', 'app_wait_need_one_tone', 'app_wait_need_other_tone', 'app_wait_need_key', 'app_wait_none', 'app_col_progress', 'app_col_checks', 'app_col_review', 'app_col_awaiting'])
+    assert.ok(en[key] && fr[key], key);
+  assert.match(en.app_share_label, /share of this week.s usage/);
+  assert.match(js, /app_share_label/);
 });

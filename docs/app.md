@@ -10,9 +10,13 @@ cleared app --demo     # serves invented data, for a look without a project
 
 ## Views
 
-- **Tower**: four columns (In progress, Checks, Review, Awaiting you), one card per open ticket. Cards that wait for you are yellow and first in their column. A team waiting for a place on the machine has a dashed card with the reason. On a phone the tower is one list, with the cards that wait for you first.
-- **Porthole**: one ticket and its squad. *Where we are*, *The squad*, *Show me* (before/after captures for a screen ticket; otherwise an example, the tests added or changed and what it touches), and the *Black box*, a plain-language timeline from the ledger; unfold a line for the raw event.
-- **Top bar**: project tabs when there are several, **Fuel** (the most constraining window per subscription and its reset time, never a money amount; `not measured` otherwise), the recorded health of the wake, and the pilot mode.
+The look follows [`app/DESIGN.md`](../app/DESIGN.md) (a light, Vercel/Geist-based design; mockups in `app/reference/`). Geist and Geist Mono are served by the app itself (`app/public/fonts/`, SIL Open Font License); nothing is loaded from another site. Light is the default; dark is a button, never the system setting.
+
+- **Header**: logo, project, views (only *Tower* exists; *Landed*, *Fuel* and *Rules* are dimmed and marked soon), the health pill, the time and the theme button.
+- **Greeting band**: the date and pilot mode, a greeting with what waits for you ("Two things are ready to land." / "Nothing needs you."), and the stat strip: *In flight*, *Landed today*, *First-time clean* and *Fuel left this week* (one bar per subscription, never money; "not measured" otherwise).
+- **Tower**: four columns (In progress, Checks, Review, Awaiting you), one card per open ticket. A card that waits for you carries the amber stripe: *Ready to land* (with before/after tiles for a screen ticket) or *Question*. A team waiting for a place has a dashed card with the reason. On a phone the tower is one list, awaiting cards first.
+- **Landed today**: what shipped today, with its model and outcome (clean first time, review rounds, rolled back).
+- **Porthole**: a right panel on a computer, a page on a phone. Title, stat strip (flight, share of this week's usage, tests), *Show me* (device frames for a screen ticket; otherwise an example, the tests and what it touches), *Where we are*, *The squad* and the *Black box* timeline (raw event on unfold). *Send back* and *Clear to land* are disabled placeholders marked soon.
 
 The interface language follows `[owner] language` through the message catalog (`app_*` keys in `lib/i18n/`).
 
@@ -24,7 +28,9 @@ The interface language follows `[owner] language` through the message catalog (`
 | Harness, model, flight time | `runs` (provider, model, started/ended). |
 | Share of this week's usage, on a card | The ticket's tokens divided by all tokens of the last seven days. It is a share of Cleared's own usage, not a share of the subscription: the subscription reports only percentages per window, not per ticket. |
 | Status line, Where we are, tests, example | The ticket's handover (`memory_entries`) and the approval request comment. A line like "1 044 tests green" is shown only if the handover says it. |
-| Fuel | `lib/limits.mjs summary`. |
+| Fuel | `lib/limits.mjs summary` (the share left is 100 minus the most constraining window). |
+| Landed today, first-time clean | `merged_by_script` events, with the ticket's runs: no changes asked by a review means clean first time; a `prod_revert` or `rollback_pushed` after the merge means rolled back. First-time clean is counted over the last seven days. |
+| In flight | Tickets whose last author run is still running. |
 | Health | What the wake recorded (`heartbeat_state` and `heartbeat_incidents`, read-only), with its age ("status from 40 s ago"). If the wake has not reported for more than three wake intervals, that is itself shown as a problem ("wake has not reported for 4 min"). The app never runs `cleared status`. |
 | Pilot mode | Derived from `[merge] tooling_paths`: whether tooling paths may merge after review. |
 | Captures | Images attached to the ticket's comments, for the local tracker. Remote tracker images are not proxied in this version. |

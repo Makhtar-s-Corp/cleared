@@ -2,7 +2,7 @@
 // light and dark, at 1440, 768 and 390 px wide, from the demonstration data.
 //   npm install && node screenshots.mjs [output folder]
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appServer } from './server.mjs';
@@ -25,14 +25,16 @@ const browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] }
 
 for (const width of [1440, 768, 390]) {
   for (const theme of ['light', 'dark']) {
-    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme: theme, deviceScaleFactor: 1 });
+    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, deviceScaleFactor: 1 });
+    if (theme === 'dark') await context.addInitScript(() => { try { localStorage.setItem('cleared-theme', 'dark'); } catch { /* light */ } });
     await context.addCookies([{ name: 'cleared_app', value: session, url: `http://127.0.0.1:${port}` }]);
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${port}/`);
     await page.waitForSelector('.card');
-    await page.screenshot({ path: join(out, `tower-${theme}-${width}.png`), fullPage: width === 390 });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(out, `tower-${theme}-${width}.png`), fullPage: true });
     await page.click('.card[data-id="EX-31"] button');
-    await page.waitForSelector('.pair img');
+    await page.waitForSelector('.device img');
     await page.waitForTimeout(150);
     await page.screenshot({ path: join(out, `porthole-${theme}-${width}.png`) });
     if (width === 1440 && theme === 'light') {
@@ -48,6 +50,17 @@ for (const width of [1440, 768, 390]) {
     }
     await context.close();
   }
+}
+// The mockups of the design, rendered the same way (their font link is answered from the fonts the app serves, so nothing leaves this machine).
+const fontCss = `@font-face{font-family:Geist;src:url(data:font/woff2;base64,${readFileSync(new URL('./public/fonts/Geist-Variable.woff2', import.meta.url)).toString('base64')}) format("woff2");font-weight:100 900}@font-face{font-family:"Geist Mono";src:url(data:font/woff2;base64,${readFileSync(new URL('./public/fonts/GeistMono-Variable.woff2', import.meta.url)).toString('base64')}) format("woff2");font-weight:100 900}`;
+for (const [file, width, height] of [['tower', 1440, 900], ['porthole-phone', 390, 844]]) {
+  const context = await browser.newContext({ viewport: { width, height } });
+  const page = await context.newPage();
+  await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ contentType: 'text/css', body: fontCss }));
+  await page.goto(new URL(`./reference/${file}.html`, import.meta.url).href);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(out, `reference-${file}.png`), fullPage: file === 'tower' });
+  await context.close();
 }
 await browser.close();
 server.close();

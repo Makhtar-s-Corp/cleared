@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cleared, tower, Vercel base</title>
+</head>
+<body>
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0}
+a{color:#0070F3}a:hover{color:#0059C1}
+</style>
+
+<div style="min-height: 1000px; box-sizing: border-box; display: flex; flex-direction: column; color: #171717; font-family: 'Geist', -apple-system, 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.45; background-color: #FAFAFA">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 14px 32px; background: rgba(255,255,255,0.85); box-shadow: 0 1px 0 rgba(0,0,0,0.08)">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z" fill="#171717"></path></svg>
+      <span style="font-weight: 600; font-size: 16px; letter-spacing: -0.02em">Cleared</span>
+      <span style="color: #EAEAEA; font-size: 20px; font-weight: 300">/</span>
+      <button style="display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: none; background: transparent; font: inherit; font-weight: 500; color: #171717; cursor: pointer"><span style="width: 18px; height: 18px; border-radius: 50%; background: #F5A623"></span>sample-app<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8F8F8F" stroke-width="2" aria-hidden="true"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"></path></svg></button>
+    </div>
+    <nav aria-label="Views" style="display: flex; gap: 2px; font-size: 14px">
+      <a href="#tower" style="padding: 6px 12px; border-radius: 6px; color: #171717; text-decoration: none; font-weight: 500; background: rgba(0,0,0,0.05)">Tower</a>
+      <a href="#landed" style="padding: 6px 12px; border-radius: 6px; color: #666666; text-decoration: none">Landed</a>
+      <a href="#fuel" style="padding: 6px 12px; border-radius: 6px; color: #666666; text-decoration: none">Fuel</a>
+      <a href="#rules" style="padding: 6px 12px; border-radius: 6px; color: #666666; text-decoration: none">Rules</a>
+    </nav>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 999px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); font-size: 13px; color: #171717"><span style="width: 8px; height: 8px; border-radius: 50%; background: #16A34A"></span>All systems normal</div>
+      <span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">08:41</span>
+      <div style="width: 30px; height: 30px; border-radius: 50%; background: #171717; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">M</div>
+    </div>
+  </header>
+
+  <section style="padding: 40px 32px 8px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 32px">
+    <div style="flex: 1 1 520px; min-width: 0">
+      <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px">Tue 13 Oct · guarded mode</div>
+      <h1 style="margin: 0; font-size: 40px; font-weight: 600; letter-spacing: -0.045em; line-height: 1.1">Good morning, Alex.<br><span style="color: #8F8F8F">Two things are </span><span style="color: #171717; box-shadow: inset 0 -0.32em 0 #FCE2B3">ready to land.</span></h1>
+    </div>
+    <div style="display: flex; background: #FFFFFF; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 2px 2px rgba(0,0,0,0.04)">
+      <div style="padding: 14px 20px; min-width: 100px"><div style="font-size: 13px; color: #666666">In flight</div><div style="font-size: 28px; font-weight: 600; letter-spacing: -0.03em">4</div></div>
+      <div style="width: 1px; background: #EAEAEA"></div>
+      <div style="padding: 14px 20px; min-width: 100px"><div style="font-size: 13px; color: #666666">Landed today</div><div style="font-size: 28px; font-weight: 600; letter-spacing: -0.03em">3</div></div>
+      <div style="width: 1px; background: #EAEAEA"></div>
+      <div style="padding: 14px 20px; min-width: 120px"><div style="font-size: 13px; color: #666666">First-time clean</div><div style="font-size: 28px; font-weight: 600; letter-spacing: -0.03em">78<span style="font-size: 16px; color: #8F8F8F">%</span></div></div>
+      <div style="width: 1px; background: #EAEAEA"></div>
+      <div style="padding: 14px 20px; min-width: 170px">
+        <div style="font-size: 13px; color: #666666; margin-bottom: 8px">Fuel left this week</div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px"><span style="width: 44px; color: #4D4D4D">Claude</span><span style="flex: 1; height: 6px; border-radius: 3px; background: #EAEAEA; overflow: hidden"><span style="display: block; width: 38%; height: 100%; background: #D97757"></span></span><span style="font-family: 'Geist Mono', monospace; color: #171717">38%</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px"><span style="width: 44px; color: #4D4D4D">Codex</span><span style="flex: 1; height: 6px; border-radius: 3px; background: #EAEAEA; overflow: hidden"><span style="display: block; width: 91%; height: 100%; background: #10A37F"></span></span><span style="font-family: 'Geist Mono', monospace; color: #171717">91%</span></div>
+      </div>
+    </div>
+  </section>
+
+  <main style="padding: 28px 32px 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; align-items: start">
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 2px 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #0070F3"></span><h2 style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: #4D4D4D">In progress</h2><span style="margin-left: auto; font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">2</span></div>
+
+      <article style="padding: 16px; border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 2px 2px rgba(0,0,0,0.04)">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px"><span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">EX-137</span><span style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #0070F3"><span style="width: 6px; height: 6px; border-radius: 50%; background: #0070F3; box-shadow: 0 0 0 3px rgba(0,112,243,0.15)"></span>Building</span></div>
+        <h3 style="margin: 0 0 14px; font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em">Create a fixed charge straight from a bank operation</h3>
+        <div style="display: flex; gap: 3px; margin-bottom: 12px"><span style="flex: 1; height: 4px; border-radius: 2px; background: #0070F3"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA"></span></div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #666666"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #10A37F"></span><span style="font-family: 'Geist Mono', monospace; color: #171717">gpt-6-sol</span></span><span style="font-family: 'Geist Mono', monospace">42m</span><span style="font-family: 'Geist Mono', monospace; margin-left: auto">0.6%</span></div>
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #EAEAEA; font-size: 13px; color: #4D4D4D">Writing the form and its tests</div>
+      </article>
+
+      <article style="padding: 16px; border-radius: 12px; background: #F4F4F4; border: 1px dashed #D4D4D4">
+        <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F; margin-bottom: 8px">EX-152 · queued</div>
+        <h3 style="margin: 0 0 8px; font-size: 15px; font-weight: 600; line-height: 1.35; color: #4D4D4D">Previous months on an envelope: three fixes</h3>
+        <div style="font-size: 13px; color: #666666">Waiting for a free slot on the machine</div>
+      </article>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 2px 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #7928CA"></span><h2 style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: #4D4D4D">Checks</h2><span style="margin-left: auto; font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">1</span></div>
+      <article style="padding: 16px; border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 2px 2px rgba(0,0,0,0.04)">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px"><span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">EX-121</span><span style="margin-left: auto; font-family: 'Geist Mono', monospace; font-size: 12px; color: #7928CA">812 / 1,044</span></div>
+        <h3 style="margin: 0 0 14px; font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em">Two reads crossing no longer leave a stale figure on screen</h3>
+        <div style="display: flex; gap: 3px; margin-bottom: 12px"><span style="flex: 1; height: 4px; border-radius: 2px; background: #0070F3"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA; overflow: hidden"><span style="display: block; width: 78%; height: 100%; background: #7928CA"></span></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA"></span></div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #666666"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #D97757"></span><span style="font-family: 'Geist Mono', monospace; color: #171717">opus-5.5</span></span><span style="font-family: 'Geist Mono', monospace">1h10</span><span style="font-family: 'Geist Mono', monospace; margin-left: auto">1.9%</span></div>
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #EAEAEA; font-size: 13px; color: #4D4D4D">Tests running</div>
+      </article>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 2px 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #0A9DB0"></span><h2 style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: #4D4D4D">Review</h2><span style="margin-left: auto; font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">1</span></div>
+      <article style="padding: 16px; border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 2px 2px rgba(0,0,0,0.04)">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px"><span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">EX-127</span><span style="margin-left: auto; font-size: 12px; color: #666666">Round 2 of 2</span></div>
+        <h3 style="margin: 0 0 14px; font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em">Your typical month: you start working for yourself on the 29th</h3>
+        <div style="display: flex; gap: 3px; margin-bottom: 12px"><span style="flex: 1; height: 4px; border-radius: 2px; background: #0070F3"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #7928CA"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #0A9DB0"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #EAEAEA"></span></div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #666666"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #10A37F"></span><span style="font-family: 'Geist Mono', monospace; color: #171717">gpt-6-luna</span></span><span style="font-family: 'Geist Mono', monospace">1h35</span><span style="font-family: 'Geist Mono', monospace; margin-left: auto">0.4%</span></div>
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #EAEAEA; font-size: 13px; color: #4D4D4D">Reviewed by Sonnet · one fix asked, fixed</div>
+      </article>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 2px 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F5A623; box-shadow: 0 0 0 3px rgba(245,166,35,0.2)"></span><h2 style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #171717">Awaiting you</h2><span style="margin-left: auto; font-family: 'Geist Mono', monospace; font-size: 12px; color: #AB570A">2</span></div>
+
+      <article style="position: relative; overflow: hidden; padding: 16px; border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(245,166,35,0.55), 0 8px 24px -8px rgba(245,166,35,0.45)">
+        <div style="position: absolute; left: 0; top: 0; right: 0; height: 3px; background: #F5A623"></div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px"><span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">EX-40</span><span style="margin-left: auto; padding: 2px 9px; border-radius: 999px; background: #171717; color: #FFFFFF; font-size: 12px; font-weight: 500">Ready to land</span></div>
+        <h3 style="margin: 0 0 12px; font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em">Payments already taken no longer count in what is left to pay</h3>
+        <div style="display: flex; gap: 6px; margin-bottom: 12px">
+          <div style="flex: 1; height: 58px; border-radius: 8px; background: #FAFAFA; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); padding: 8px 10px; box-sizing: border-box; font-size: 10px"><div style="color: #8F8F8F">Before</div><div style="font-size: 15px; font-weight: 600; color: #EE0000">-16 €</div></div>
+          <div style="flex: 1; height: 58px; border-radius: 8px; background: #F2FBF5; box-shadow: 0 0 0 1px rgba(22,163,74,0.35); padding: 8px 10px; box-sizing: border-box; font-size: 10px"><div style="color: #8F8F8F">After</div><div style="font-size: 15px; font-weight: 600; color: #16A34A">1 184 €</div></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #666666"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #D97757"></span><span style="font-family: 'Geist Mono', monospace; color: #171717">sonnet-5.5</span></span><span style="font-family: 'Geist Mono', monospace">1h24</span><span style="margin-left: auto">1,044 tests green</span></div>
+      </article>
+
+      <article style="padding: 16px; border-radius: 12px; background: #FFFBF2; box-shadow: 0 0 0 1px rgba(245,166,35,0.45)">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px"><span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8F8F8F">EX-127</span><span style="margin-left: auto; padding: 2px 9px; border-radius: 999px; box-shadow: 0 0 0 1px rgba(171,87,10,0.4); color: #AB570A; font-size: 12px; font-weight: 500">Question</span></div>
+        <h3 style="margin: 0 0 8px; font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em">For a freelancer, take out social charges before counting the 30 days?</h3>
+        <div style="font-size: 13px; color: #4D4D4D">4 500 € earned, 1 000 € of charges: we count on 3 500 €. The squad recommends yes.</div>
+      </article>
+    </section>
+  </main>
+
+  <section style="margin: 32px 32px 32px; border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 2px 2px rgba(0,0,0,0.04)">
+    <div style="display: flex; align-items: baseline; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #EAEAEA"><h2 style="margin: 0; font-size: 14px; font-weight: 600">Landed today</h2><span style="font-size: 13px; color: #666666">3 releases · 1 rolled back · 6.2% of the week used</span><a href="#landed" style="margin-left: auto; font-size: 13px; text-decoration: none">View all</a></div>
+    <div style="display: grid; grid-template-columns: 90px 1fr 140px 160px; font-size: 13px">
+      <div style="padding: 12px 18px; font-family: 'Geist Mono', monospace; color: #666666; border-bottom: 1px solid #EAEAEA">07:34</div>
+      <div style="padding: 12px 0; font-weight: 500; border-bottom: 1px solid #EAEAEA">Stale figures no longer survive two crossing reads</div>
+      <div style="padding: 12px 0; font-family: 'Geist Mono', monospace; color: #4D4D4D; border-bottom: 1px solid #EAEAEA">opus-5.5</div>
+      <div style="padding: 12px 18px 12px 0; border-bottom: 1px solid #EAEAEA"><span style="display: inline-flex; align-items: center; gap: 6px; color: #16A34A"><span style="width: 6px; height: 6px; border-radius: 50%; background: #16A34A"></span>Clean first time</span></div>
+      <div style="padding: 12px 18px; font-family: 'Geist Mono', monospace; color: #666666; border-bottom: 1px solid #EAEAEA">09:22</div>
+      <div style="padding: 12px 0; font-weight: 500; border-bottom: 1px solid #EAEAEA">The envelope sheet shows its previous months</div>
+      <div style="padding: 12px 0; font-family: 'Geist Mono', monospace; color: #4D4D4D; border-bottom: 1px solid #EAEAEA">sonnet-5.5</div>
+      <div style="padding: 12px 18px 12px 0; border-bottom: 1px solid #EAEAEA"><span style="display: inline-flex; align-items: center; gap: 6px; color: #16A34A"><span style="width: 6px; height: 6px; border-radius: 50%; background: #16A34A"></span>One review round</span></div>
+      <div style="padding: 12px 18px; font-family: 'Geist Mono', monospace; color: #666666">11:41</div>
+      <div style="padding: 12px 0; font-weight: 500">Subscription logos</div>
+      <div style="padding: 12px 0; font-family: 'Geist Mono', monospace; color: #4D4D4D">gpt-6-sol</div>
+      <div style="padding: 12px 18px 12px 0"><span style="display: inline-flex; align-items: center; gap: 6px; color: #EE0000"><span style="width: 6px; height: 6px; border-radius: 50%; background: #EE0000"></span>Rolled back 11:49</span></div>
+    </div>
+  </section>
+</div>
+
+</body>
+</html>

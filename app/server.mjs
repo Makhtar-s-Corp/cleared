@@ -24,12 +24,15 @@ const OPEN = {
   '/login': ['login.html', 'text/html; charset=utf-8'],
   '/login.js': ['login.js', 'text/javascript; charset=utf-8'],
   '/style.css': FILES['/style.css'],
+  // The two typefaces, served by the app itself (nothing is loaded from another site). No data in them.
+  '/fonts/Geist-Variable.woff2': ['fonts/Geist-Variable.woff2', 'font/woff2'],
+  '/fonts/GeistMono-Variable.woff2': ['fonts/GeistMono-Variable.woff2', 'font/woff2'],
 };
 const HEADERS = {
   'content-security-policy': "default-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin',
 };
-export const ROUTES = ['GET /', 'GET /app.js', 'GET /style.css', 'GET /login', 'GET /login.js', 'GET /session', 'GET /api/snapshot',
+export const ROUTES = ['GET /', 'GET /app.js', 'GET /style.css', 'GET /fonts/:file', 'GET /login', 'GET /login.js', 'GET /session', 'GET /api/snapshot',
   'GET /api/messages', 'GET /api/tickets/:id', 'GET /media/:id', 'GET /events'];
 
 const MESSAGE_KEYS = (language) => {
@@ -47,7 +50,7 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     response.writeHead(status, { ...HEADERS, 'content-type': type, ...extra }).end(body);
   const json = (response, status, value) => text(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
   const send = async (response, request, [file, type]) => {
-    try { text(response, 200, request.method === 'HEAD' ? undefined : await readFile(join(PUBLIC, file)), type); }
+    try { text(response, 200, request.method === 'HEAD' ? undefined : await readFile(join(PUBLIC, file)), type, type === 'font/woff2' ? { 'cache-control': 'public, max-age=86400' } : {}); }
     catch { text(response, 503, message('http_unavailable', language)); }
   };
   const streams = new Set();

@@ -102,7 +102,7 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     try { rows = JSON.parse(await cleared(join(ORCH_HOME, 'lib', 'limits.mjs'), 'summary')); } catch { /* not measured */ }
     const out = rows.map((row) => {
       const [name, window] = Object.entries(row.windows).sort((a, b) => b[1].used - a[1].used)[0] ?? [];
-      return window ? { adapter: scrub(row.adapter, 40), measured: true, window: scrub(name, 40), used: Math.round(window.used), resetsAt: window.resets_at } : null;
+      return window ? { adapter: scrub(row.adapter, 40), measured: true, window: scrub(name, 40), used: Math.round(window.used), left: Math.max(0, 100 - Math.round(window.used)), resetsAt: window.resets_at } : null;
     }).filter(Boolean);
     for (const value of Object.values(conf.sections.models ?? {})) {
       const adapter = String(value).split(':')[0];
@@ -139,11 +139,46 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     const tokens = runs.filter((r) => Date.parse(r.started_at) >= now() - 7 * DAY).reduce((s, r) => s + (r.tokens_total ?? 0), 0);
     const handover = handoverOf(t.identifier ?? t.id);
     const [harness, model] = [last?.provider ?? '', last?.model ?? last?.requested_model ?? ''];
-    return { id, title: scrub(t.title, 160), column, waiting, reason: queued ? message('app_srv_queued', language) : reason, queued,
+    const isQuestion = waiting && stateName !== states.validate;
+    // Small before/after tiles on a card that waits for approval: the first capture of each side (local tracker only: no extra call to a remote one).
+    let captures = null;
+    if (waiting && !isQuestion && tracker.adapter === 'local') {
+      try {
+        const images = imagesOf(issues().comments(t.identifier ?? t.id));
+        const before = images.find((i) => /before|avant/i.test(i.text)), after = images.find((i) => !/before|avant/i.test(i.text));
+        if (before && after) captures = { before: `/media/${before.digest}`, after: `/media/${after.digest}` };
+      } catch { /* a card without tiles */ }
+    }
+    return { id, title: scrub(t.title, 160), column, waiting, kind: queued ? 'queued' : isQuestion ? 'question' : waiting ? 'ready' : 'normal',
+      live: Boolean(last && last.outcome === 'running' && !last.ended_at), round: reviews, tests: testsCount(handover), captures,
+      reason: queued ? message('app_srv_queued', language) : reason, queued,
       harness: scrub(harness, 40), model: scrub(model, 60), flightMinutes: Math.round(minutes),
       quotaShare: weekTokens ? Math.round((tokens / weekTokens) * 1000) / 10 : 0,
       statusLine: scrub(statusLineOf({ handover, reviews, column, waiting, reason, language }), 120), screen: /\b(?:screen|capture|page|tab|button)\b/i.test(`${t.title} ${t.body ?? ''}`),
       pr: pr ? { number: Number(pr), url: prUrl(pr) } : null };
+  }
+
+  // What shipped in the last two days (the page keeps today's), and how many went through first time.
+  const titles = new Map();
+  const titleOf = (id) => {
+    if (!titles.has(id)) { try { titles.set(id, scrub(issues().getTicket(id)?.title, 160)); } catch { titles.set(id, ''); } }
+    return titles.get(id);
+  };
+  function landedOf(weekTokens) {
+    const merged = db().prepare("SELECT ticket, at FROM events WHERE kind = 'merged_by_script' AND ticket IS NOT NULL AND at >= ? ORDER BY at DESC").all(new Date(now() - 7 * DAY).toISOString());
+    const rows = merged.map((m) => {
+      const runs = runsOf(m.ticket);
+      const author = [...runs].reverse().find((r) => r.role !== 'review');
+      const fixes = runs.filter((r) => r.role === 'review' && ['changes', 'fix'].includes(r.outcome)).length;
+      const back = db().prepare("SELECT MIN(at) at FROM events WHERE ticket = ? AND at >= ? AND kind IN ('prod_revert','rollback_pushed')").get(m.ticket, m.at)?.at ?? null;
+      const tokens = runs.reduce((sum, r) => sum + (r.tokens_total ?? 0), 0);
+      return { at: m.at, id: scrub(String(m.ticket).replace(/^LOCAL-/, ''), 40), title: titleOf(m.ticket) || scrub(m.ticket, 40), model: scrub(author?.model || author?.requested_model, 60),
+        harness: scrub(author?.provider, 40), fixes, rolledBackAt: back, tokens, share: weekTokens ? Math.round((tokens / weekTokens) * 1000) / 10 : 0 };
+    });
+    const clean = rows.filter((r) => r.fixes === 0 && !r.rolledBackAt).length;
+    const cutoff = now() - 2 * DAY;
+    return { landed: rows.filter((r) => Date.parse(r.at) >= cutoff).map(({ tokens, ...r }) => r),
+      firstTimeClean: rows.length ? Math.round((clean / rows.length) * 100) : null };
   }
 
   async function build() {
@@ -154,9 +189,11 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     const order = { awaiting: 0, progress: 1, checks: 2, review: 3 };
     tickets.sort((a, b) => Number(b.waiting) - Number(a.waiting) || order[a.column] - order[b.column] || a.id.localeCompare(b.id, 'en', { numeric: true }));
     const guarded = Boolean(section(conf, 'merge').tooling_paths && section(conf, 'merge').tooling_paths !== 'none');
+    const { landed, firstTimeClean } = landedOf(weekTokens);
     cache.value = { schema: 1, project, projects: [{ id: project, name: project }], language, generatedAt: new Date(now()).toISOString(),
+      owner: { name: scrub(section(conf, 'owner').name, 60) }, stats: { inFlight: tickets.filter((x) => x.live).length, firstTimeClean }, landed,
       health: health(), fuel: cache.slow.fuel, tickets,
-      mode: { key: guarded ? 'guarded-tooling' : 'guarded', label: message(guarded ? 'app_srv_mode_tooling' : 'app_srv_mode_guarded', language) } };
+      mode: { key: guarded ? 'guarded-tooling' : 'guarded', short: message('app_srv_mode_short', language), label: message(guarded ? 'app_srv_mode_tooling' : 'app_srv_mode_guarded', language) } };
     cache.at = now();
     return cache.value;
     
@@ -183,22 +220,21 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
       const seen = new Set();
       const squad = runs.map((r) => ({ role: roleName(r.role), harness: scrub(r.provider, 40), model: scrub(r.model || r.requested_model, 60) }))
         .filter((s) => s.model && !seen.has(`${s.role}/${s.model}`) && seen.add(`${s.role}/${s.model}`));
-      // The request posts its captures in the text: **Caption** then ![Caption](local://capture/<digest>).
-      const inText = comments.flatMap((c) => [...String(c.body ?? '').matchAll(/(?:\*\*([^*\n]{1,80})\*\*\s*)?!\[([^\]\n]{0,80})\]\(local:\/\/capture\/([a-f0-9]{64})\)/g)]
-        .map((m) => ({ digest: m[3], text: m[1] || m[2] || '' })));
-      const images = [...comments.flatMap((c) => (c.images ?? []).map((ref_) => ({ digest: /[a-f0-9]{64}/.exec(String(ref_))?.[0], text: c.body ?? '' }))), ...inText].filter((i) => i.digest)
-        .filter((i, n, all) => all.findIndex((o) => o.digest === i.digest) === n);
+      const images = imagesOf(comments);
       const show = images.length
         ? { kind: 'screen',
           before: images.filter((i) => /before|avant/i.test(i.text)).map((i) => ({ url: `/media/${i.digest}`, caption: scrub(i.text, 80) || 'Before' })),
           after: images.filter((i) => !/before|avant/i.test(i.text)).map((i) => ({ url: `/media/${i.digest}`, caption: scrub(i.text, 80) || 'After' })) }
         : { kind: 'code', example: exampleOf(`${handover}\n${request?.body ?? ''}`), tests: testsOf(handover), touches: sentences(section_(handover, 'Done'), 1)[0] ?? '' };
       const blackBox = [
-        ...runs.map((r) => ({ at: r.started_at, kind: r.role === 'review' ? 'review' : 'run', text: describeRun(r, language), raw: { kind: 'run', role: scrub(r.role, 20), outcome: scrub(r.outcome, 40), at: r.started_at } })),
-        ...eventsOf(ref).map((e) => ({ at: e.at, kind: e.kind, text: describeEvent(e, language), raw: { kind: e.kind, at: e.at } })),
+        ...runs.map((r) => ({ at: r.started_at, kind: r.role === 'review' ? 'review' : 'run', text: describeRun(r, language), stage: r.role === 'review' ? 'review' : 'progress', raw: { kind: 'run', role: scrub(r.role, 20), outcome: scrub(r.outcome, 40), at: r.started_at } })),
+        ...eventsOf(ref).map((e) => ({ at: e.at, kind: e.kind, text: describeEvent(e, language), stage: stageOf(e.kind), raw: { kind: e.kind, at: e.at } })),
       ].sort((a, b) => a.at.localeCompare(b.at));
       const n = runs.map((r) => r.pr_number).filter(Boolean).at(-1);
-      return { id, title: scrub(t.title, 160), pr: n ? { number: Number(n), url: prUrl(n) } : null, where, squad, show, blackBox };
+      const weekTokens = db().prepare('SELECT COALESCE(SUM(tokens_total),0) AS n FROM runs WHERE started_at >= ?').get(new Date(now() - 7 * DAY).toISOString()).n;
+      const c = card(t, weekTokens);
+      return { id, title: scrub(t.title, 160), pr: n ? { number: Number(n), url: prUrl(n) } : null, column: c.column, kind: c.kind, waiting: c.waiting,
+        flightMinutes: c.flightMinutes, quotaShare: c.quotaShare, tests: c.tests, where, squad, show, blackBox };
     },
     async media(digest) {
       try {
@@ -208,6 +244,18 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     },
   };
 }
+
+// The request posts its captures in the text: **Caption** then ![Caption](local://capture/<digest>).
+function imagesOf(comments) {
+  const inText = comments.flatMap((c) => [...String(c.body ?? '').matchAll(/(?:\*\*([^*\n]{1,80})\*\*\s*)?!\[([^\]\n]{0,80})\]\(local:\/\/capture\/([a-f0-9]{64})\)/g)]
+    .map((m) => ({ digest: m[3], text: m[1] || m[2] || '' })));
+  return [...comments.flatMap((c) => (c.images ?? []).map((ref_) => ({ digest: /[a-f0-9]{64}/.exec(String(ref_))?.[0], text: c.body ?? '' }))), ...inText].filter((i) => i.digest)
+    .filter((i, n, all) => all.findIndex((o) => o.digest === i.digest) === n);
+}
+const testsCount = (text) => { const m = TESTS.exec(text || ''); return m ? Number(m[1].replace(/\D/g, '')) : null; };
+// The stage a Black box line belongs to: the colour of its dot.
+export const stageOf = (kind) => ({ review: 'review', lane_asks: 'awaiting', teams_ready: 'awaiting', ask: 'awaiting', merged_by_script: 'done',
+  prod_revert: 'danger', merge_refused: 'danger', lane_stuck: 'danger', rollback_started: 'danger', rollback_pushed: 'danger' })[kind] ?? 'progress';
 
 function exampleOf(text) {
   const before = /before\s*[:\-–]\s*(.{3,160})/i.exec(text)?.[1], after = /after\s*[:\-–]\s*(.{3,160})/i.exec(text)?.[1];
