@@ -812,6 +812,15 @@ test('a queued release survives a broker restart or missing socket', () => {
   const expired = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
   assert.equal(expired.status, 0, expired.stderr);
   assert.equal(existsSync(entry), false);
+  assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
+  // A broker reply with a permanent merge failure must be reported now,
+  // not retried until the queue deadline.
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho permanent merge refusal >&2\nexit 1\n', { mode: 0o755 });
+  const refused = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
+  assert.equal(refused.status, 0, refused.stderr);
+  assert.equal(existsSync(entry), false);
+  assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*permanent merge refusal/);
 });
 
 test('split-account review takes its author from the service ledger and rejects an agent claim', () => {

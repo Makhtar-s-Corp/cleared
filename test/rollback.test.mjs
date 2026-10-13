@@ -269,6 +269,8 @@ test('a remote owner comment must be fresh, unedited and name the exact merge', 
   try {
     const sharedIdentity = { whoAmI: () => ({ kind: 'human', id: 'human' }), comments: () => [comment(60000)] };
     assert.throws(() => authorizeManualRollback(x.conf, x.db, sharedIdentity, row, 'c1'), /verified human/);
+    const mismatchedKinds = { whoAmI: () => ({ kind: 'agents', id: 'human' }), comments: () => [comment(60000)] };
+    assert.throws(() => authorizeManualRollback(x.conf, x.db, mismatchedKinds, row, 'c1'), /verified human/);
     assert.equal(authorizeManualRollback(x.conf, x.db, tracker(comment(60000)), row, 'c1'), 'human');
   } finally {
     if (previous === undefined) delete process.env.ORCH_BROKER_AGENT_REQUEST;
