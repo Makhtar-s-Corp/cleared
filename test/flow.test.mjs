@@ -56,7 +56,7 @@ test('the pre-check of the project lead: what the user and the outside world did
 test('the wake of the project lead: nothing moved, nothing starts; a comment of the user starts one session, once', () => {
   const box = sandbox();
   const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
-  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, ticket from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, ticket from events order by rowid').all().filter((row) => !row.kind.startsWith('heartbeat_')).map((row) => ({ ...row })); db.close(); return rows; };
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
   const old = { id: 'c0', createdAt: '2026-01-01T00:00:00Z', url: 'u#c0', body: 'déjà là' };
@@ -134,7 +134,7 @@ test('wake.sh: a draft opened starts nothing and opens no terminal; the next com
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('live = no\n', 'live = no\nwake_on = comment, pr_checks\nterminals_kept = 3\n'));
   const wake = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
-  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, detail from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, detail from events order by rowid').all().filter((row) => !row.kind.startsWith('heartbeat_')).map((row) => ({ ...row })); db.close(); return rows; };
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
   const issue = (comments) => [{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }];
   writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify(issue([])));
@@ -217,7 +217,7 @@ test('wake.sh during an outage of GitHub: no session for its events, the outage 
   const box = sandbox();
   const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   const calls = () => { try { return Number(readFileSync(join(box.home, 'orca-calls'), 'utf8')); } catch { return 0; } };
-  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, at, value, detail from events order by rowid').all().map((row) => ({ ...row })); db.close(); return rows; };
+  const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, at, value, detail from events order by rowid').all().filter((row) => !row.kind.startsWith('heartbeat_')).map((row) => ({ ...row })); db.close(); return rows; };
   const status = (actions) => writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'operational' }, { name: 'Actions', status: actions }, { name: 'Webhooks', status: 'degraded_performance' }] }));
   const pull = (checks) => [{ number: 7, title: 'Une PR', headRefName: 'b', isDraft: false, state: 'OPEN', updatedAt: new Date().toISOString(), statusCheckRollup: [{ conclusion: checks }] }];
   writeFileSync(join(box.home, 'pulls-now.json'), JSON.stringify(pull('SUCCESS')));

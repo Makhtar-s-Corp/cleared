@@ -50,6 +50,16 @@ flock -n 8 || busy "another wake is at work"
 if [ -z "$handover$dry_run" ] && [ -z "${ORCH_SELF_UPDATED:-}" ] && [ -x "$ORCH_HOME/self-update.sh" ] && "$ORCH_HOME/self-update.sh" > /dev/null 2>&1; then
   ORCH_SELF_UPDATED=1 exec "$0" "$@"
 fi
+work=
+wake_cleanup() {
+  local result=$?
+  trap - EXIT
+  [ -z "$work" ] || rm -rf "$work"
+  if [ -z "$handover$dry_run" ]; then
+    node --no-warnings "$ORCH_HOME/lib/heartbeat.mjs" wake-end "$result" > /dev/null || true
+  fi
+}
+trap wake_cleanup EXIT
 # So does the checkout of the project: what went live there (its settings,
 # its prompts, its rules) is what this wake reads.
 if [ -z "$handover$dry_run" ] && [ -x "$ORCH_HOME/project-update.sh" ]; then "$ORCH_HOME/project-update.sh" > /dev/null 2>&1 || true; fi
@@ -118,7 +128,6 @@ fi
 ! talk_open || busy "a discussion is open in the lane of the project lead"
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 state="$wake_dir/state.json"
 count=0
 if [ -z "$handover" ]; then
@@ -181,6 +190,9 @@ if [ -z "$handover" ]; then
   fi
   node --no-warnings "$ORCH_HOME/lib/wake.mjs" "$state" "$work/tracker.json" "$work/pulls.json" "$work/agent-ids.txt" "$read_at" "$work/reports.json" "$(conf_get lead wake_on)" "${github_out:+down}" "$work/reviews.json" "$(conf_get tracker go_state)" "$work/nights.json" > "$work/changes.json"
   count=$(jq '.events | length' "$work/changes.json")
+  if [ -z "$dry_run" ] && [ "$count" -gt 0 ] && [ ! -f "$wake_dir/pending-action" ]; then
+    printf '%s\n' "$read_at" > "$wake_dir/pending-action"
+  fi
 
   if [ -n "$dry_run" ]; then
     jq '.events' "$work/changes.json"
@@ -188,6 +200,7 @@ if [ -z "$handover" ]; then
   fi
 
   if [ "$count" = 0 ]; then
+    rm -f "$wake_dir/pending-action"
     # Nothing moved, or nothing worth a session: what waits is kept for the next one.
     waiting=$(jq '.next.waiting | length' "$work/changes.json")
     [ -z "$last" ] || ledger event --kind wake_skipped --detail "nothing worth a session since $last ($waiting waiting for the next one)${github_out:+; GitHub is down ($github_out): its events wait}"
@@ -289,6 +302,7 @@ jq '.next' "$work/changes.json" > "$state.next" && mv "$state.next" "$state"
 # Why this session was started, for whoever counts the wakes.
 ledger event --kind wake_started --run-id "$run_base-$role-a1" \
   --detail "$(jq -r '[.events[] | "\(.kind) \(if .pr then "#\(.pr)" else (.ticket // .lane) end)"] | join(", ")' "$work/changes.json")"
+rm -f "$wake_dir/pending-action"
 # How long a comment of the user waited before a session took it.
 jq -c '.events[] | select(.kind == "comment")' "$work/changes.json" | while IFS= read -r event; do
   minutes=$(( ($(date +%s) - $(date -d "$(jq -r '.at' <<<"$event")" +%s)) / 60 ))

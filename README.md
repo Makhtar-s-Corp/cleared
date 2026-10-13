@@ -6,6 +6,8 @@ Cleared is for developers who want coding agents to work on tickets while keepin
 
 Optional release health checks can watch the application after Cleared merges a PR. Repeated failures can trigger a revert of that exact merge, and a verified human owner can request the same revert with `cleared rollback TICKET`. Cleared pushes the revert to the base branch so the project's own deployment platform can redeploy it. See [Release configuration](docs/configuration.md#release) for the required health probe, branch permissions and migration limits.
 
+`cleared status` shows the last wake, service reachability and stalled work without starting a model. An optional push heartbeat lets an external service alert you when Cleared stops waking or gets stuck. See [Heartbeat and status](docs/heartbeat.md).
+
 ```mermaid
 flowchart LR
   A[Ticket moves to Todo] --> B[Open team and worktree]
@@ -60,6 +62,7 @@ In the editor, set `[guard] salt` to the random value printed above and set `ter
 ## Read more
 
 - [Concepts and ticket lifecycle](docs/concepts.md)
+- [Heartbeat and status](docs/heartbeat.md)
 - [Memory contract and briefing](docs/memory.md)
 - [Configuration reference](docs/configuration.md)
 - [Model adapters](docs/adapters.md)
