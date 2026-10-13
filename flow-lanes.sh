@@ -386,7 +386,7 @@ one_lane() {
       [ "$age" -ge $(( session_hours * 60 )) ] || return 0
       say "$ticket: its session runs for more than $session_hours hours: stopped"
       [ -z "$dry" ] || return 0
-      terminal close "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" || true
+      terminal stop "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" || true
       kill "$pid" 2> /dev/null || true
       echo 124 > "$ORCH_STATE_DIR/runs/$last/exit-code"
     elif [ -n "$pid" ]; then

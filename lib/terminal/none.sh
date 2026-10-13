@@ -91,6 +91,8 @@ terminal_close() {
   if [ "${fields[2]:-}" = "$pid" ]; then kill -TERM -- "-$pid" 2> /dev/null; else kill -TERM "$pid" 2> /dev/null; fi
 }
 
+terminal_stop() { terminal_close "$1"; }
+
 terminal_close_worktree() {
   local mark worktree
   worktree=$(realpath -m -- "$1")

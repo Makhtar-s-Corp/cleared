@@ -137,7 +137,7 @@ if [ "$1 $2" = "worktree set" ]; then shift 2; printf '%s\\n' "$*" >> "${join(ho
 if [ "$1 $2" = "terminal create" ]; then printf '%s\\n' "$*" >> "${join(home, 'orca-terminals')}"; fi
 if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; cat "${join(home, 'terminals.json')}" 2>/dev/null || echo '{"result":{"terminals":[]}}'; fi
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
-if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
+if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; printf '%s\n' "$*" >> "${join(home, 'orca-close-args')}"; fi
 `, { mode: 0o755 });
   mkdirSync(state, { recursive: true });
   writeFileSync(join(state, 'release-broker.secret'), 'fixture-broker-secret', { mode: 0o600 });

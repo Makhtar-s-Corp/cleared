@@ -8,6 +8,7 @@
 #       runs the command in the worktree, prints a handle; never waits for its end
 #   terminal_show <handle>          "<connected> <worktree path>", nothing when gone
 #   terminal_close <handle>         0 once it is closed, or no longer there
+#   terminal_stop <handle>          stops a session that runs for too long
 #   terminal_close_worktree <path>  closes every terminal in that worktree
 #   terminal_remove_worktree <path> removes the worktree
 #   terminal_name_worktree <path> <name> <ticket> <comment>   a name a person reads
@@ -56,6 +57,11 @@ terminal_close() {
   orca terminal close --terminal "$1" --tab > /dev/null 2>&1 && return 0
   listed=$(orca terminal list --json 2> /dev/null) \
     && jq -e --arg handle "$1" '(.result.terminals // .result) | type == "array" and (any(.handle == $handle) | not)' <<<"$listed" > /dev/null 2>&1
+}
+
+# The terminal alone, not its tab: a session stopped before its end.
+terminal_stop() {
+  orca terminal close --terminal "$1" > /dev/null 2>&1
 }
 
 terminal_close_worktree() {

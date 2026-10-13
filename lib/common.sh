@@ -132,7 +132,7 @@ lane_worktree() {
 # terminal <verb> [<argument>...]: what is done with the terminals of the
 # lanes, by the adapter the project names ([terminal] adapter: orca when it
 # says nothing). The verbs and what each one promises are written at the top
-# of lib/terminal/orca.sh; open, show, close, close-worktree,
+# of lib/terminal/orca.sh; open, show, close, stop, close-worktree,
 # remove-worktree, name-worktree, send, has-screen. A name with no adapter
 # is said and stops the script, before anything is done with it.
 terminal() {
