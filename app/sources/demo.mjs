@@ -57,7 +57,7 @@ export function demoSource() {
   };
   const state = {
     project: 'sample-app',
-    health: { ok: false, problems: [{ code: 'tracker_unreachable', message: 'The ticket tracker did not answer for 12 minutes.' }] },
+    health: { ok: false, problems: [{ code: 'wake_late', message: 'wake has not reported for 4 min' }] },
     mode: { key: 'guarded', label: 'Guarded: you approve every application change' },
     fuel: [{ adapter: 'claude', measured: true, window: 'week', used: 62, resetsAt: iso(-60 * 40) },
       { adapter: 'codex', measured: true, window: 'short', used: 91, resetsAt: iso(-90) },
@@ -68,7 +68,7 @@ export function demoSource() {
     move(id, column) { tickets.find((t) => t.id === id).column = column; },
     async snapshot() {
       return structuredClone({ schema: 1, project: state.project, projects: [{ id: 'sample-app', name: 'sample-app' }], language: 'en', generatedAt: new Date().toISOString(),
-        health: state.health, mode: state.mode, fuel: state.fuel, tickets });
+        health: { ...state.health, recordedAt: iso(40 / 60) }, mode: state.mode, fuel: state.fuel, tickets });
     },
     async ticket(id) {
       const ticket = tickets.find((t) => t.id === id);

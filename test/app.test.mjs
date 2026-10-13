@@ -322,3 +322,44 @@ test('what the app shows in "Where we are" is filtered before it is cut into sen
   assert.equal(await liveSource({ conf }).ticket('2'), null, 'a closed ticket is not served');
   delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
 });
+
+test('the app writes nothing and calls nothing outside: health is the state the wake recorded, with its age', async () => {
+  const dir = scratch();
+  process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
+  const { openLedger } = await import('../lib/ledger.mjs');
+  const { initHeartbeat } = await import('../lib/heartbeat.mjs');
+  const { LocalTracker } = await import('../lib/tracker/adapters/local.mjs');
+  const { liveSource } = await import('../app/sources/live.mjs');
+  const db = openLedger();
+  const conf = { sections: { owner: { language: 'en' }, heartbeat: { wake_interval_minutes: '1' }, tracker: { adapter: 'local', agents_uid: '999999', owner_id: 'nobody', todo_state: 'Todo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship', done_state: 'Done' } } };
+  new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'x' } });
+  initHeartbeat(db);
+  let clock = Date.parse('2026-10-13T10:00:00Z');
+  const put = (k, v) => db.prepare('INSERT OR REPLACE INTO heartbeat_state(key,value) VALUES (?,?)').run(k, v);
+  put('last_wake_at', new Date(clock - 40000).toISOString()); put('last_wake_ok', 'true');
+  db.prepare("INSERT INTO heartbeat_incidents(id, first_seen, last_seen, active) VALUES ('service_unreachable:tracker', ?, ?, 1)").run(new Date(clock).toISOString(), new Date(clock).toISOString());
+  const everything = () => { const d = openLedger(process.env.ORCH_LEDGER, { readOnly: true }); const rows = JSON.stringify(['runs', 'events', 'tracker_tickets', 'heartbeat_state', 'heartbeat_incidents'].map((t) => d.prepare(`SELECT * FROM ${t}`).all())); d.close(); return rows; };
+  db.close();
+  const before = everything();
+  // A stub gh/curl that would leave a mark, a fetch that fails the test, and the status command made unreachable.
+  const bin = scratch(); const mark = join(bin, 'called');
+  for (const name of ['gh', 'curl', 'tracker.sh']) writeFileSync(join(bin, name), `#!/bin/sh\necho ${name} >> ${mark}\n`, { mode: 0o755 });
+  const realFetch = globalThis.fetch, realPath = process.env.PATH;
+  globalThis.fetch = () => { throw new Error('an outside call was made'); };
+  process.env.PATH = `${bin}:${realPath}`;
+  try {
+    const source = liveSource({ conf, now: () => clock });
+    let snap = await source.snapshot();
+    assert.deepEqual(snap.health.problems.map((p) => p.message), ['tracker has been unreachable for a while']);
+    assert.equal(snap.health.recordedAt, new Date(clock - 40000).toISOString(), 'the page can say "status from 40 s ago"');
+    clock += 4 * 60000 + 30000; // the wake stops reporting
+    snap = await liveSource({ conf, now: () => clock }).snapshot();
+    assert.ok(snap.health.problems.some((p) => p.message === 'wake has not reported for 5 min'), snap.health.problems.map((p) => p.message).join('|'));
+    assert.ok(!snap.health.ok);
+  } finally { globalThis.fetch = realFetch; process.env.PATH = realPath; }
+  assert.equal(readdirSync(bin).includes('called'), false, 'no outside command was run (gh, curl, tracker probe)');
+  assert.equal(everything(), before, 'nothing was written: runs, events, tickets, heartbeat state and incidents are as they were');
+  const code = readFileSync(join(import.meta.dirname, '..', 'app', 'sources', 'live.mjs'), 'utf8').replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(code, /heartbeat\.mjs|'status'|--json|collectStatus|fetch\(/, 'the source never runs status or fetches');
+  delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
+});

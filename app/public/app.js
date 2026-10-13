@@ -18,6 +18,18 @@ const when = (iso) => new Intl.DateTimeFormat(locale(), { month: 'short', day: '
 const dur = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`);
 const mono = (text) => el('span', { className: 'mono', textContent: text });
 
+function ageText(iso) {
+  const sec = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  return sec < 90 ? t('app_age_s', { n: sec }) : sec < 5400 ? t('app_age_min', { n: Math.round(sec / 60) }) : t('app_age_h', { n: Math.round(sec / 3600) });
+}
+// The age of the recorded status is shown, and keeps counting between updates.
+function tickAge() {
+  const node = $('health-age');
+  const at = state.snap?.health?.recordedAt;
+  if (node) node.textContent = at ? t('app_status_age', { age: ageText(at) }) : '';
+}
+setInterval(tickAge, 5000);
+
 const COLUMNS = ['progress', 'checks', 'review', 'awaiting'];
 const state = { snap: null, last: null, open: null, project: null, connected: false, opener: null };
 
@@ -41,7 +53,9 @@ function renderTop(s) {
     f.measured ? [mono(`${f.used} %`), ` ${t('app_of_window', { window: f.window })} · ${t('app_resets')} `, el('time', { className: 'mono', dateTime: f.resetsAt, textContent: when(f.resetsAt) })] : t('app_not_measured'))));
   const h = $('health');
   h.replaceChildren(s.health.ok ? el('span', { className: 'ok' }, el('span', { className: 'dot' }), t('app_all_good'))
-    : el('ul', {}, ...s.health.problems.map((p) => el('li', { className: 'bad', textContent: p.message }))));
+    : el('ul', {}, ...s.health.problems.map((p) => el('li', { className: 'bad', textContent: p.message }))),
+  el('div', { className: 'age mono', id: 'health-age' }));
+  tickAge();
   $('mode').textContent = s.mode.label;
 }
 

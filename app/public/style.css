@@ -64,3 +64,4 @@ button, a { color: inherit; }
 .box time { white-space: nowrap; }
 .ph-head button { flex: 0 0 auto; white-space: nowrap; }
 .card.waiting button:focus-visible { outline-color: var(--atc-ink); }
+.age { font-size: .78rem; color: var(--muted); margin-top: .2rem; }

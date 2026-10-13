@@ -1,8 +1,7 @@
 // The real source: reads the ledger (read only), the tracker through its
 // contract, `cleared status --json` and the quota summary. It writes nothing itself.
 // Only an allowlist of fields leaves this file; no path, no secret, no cost.
-// One thing is not a pure read: `cleared status` (the health box) records its own
-// heartbeat state in the ledger, as it does from a terminal. See docs/app.md.
+// Nothing is run, probed or written: health is read from what the wake recorded.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { basename, join } from 'node:path';
@@ -74,13 +73,29 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     return trk;
   };
   const cleared = (...args) => run(process.execPath, args, { timeout: 15000, env: process.env, maxBuffer: 4e6 }).then((r) => r.stdout);
-  // `status` exits with 1 when it finds a problem: its output is still the answer.
-  const clearedStatus = () => cleared(join(ORCH_HOME, 'cleared'), 'status', '--json').catch((error) => { if (error.stdout) return error.stdout; throw error; });
-  async function health() {
-    try {
-      const status = JSON.parse(await clearedStatus());
-      return { ok: Boolean(status.ok), problems: (status.problems ?? []).map((p) => ({ code: scrub(p.code, 60), message: scrub(p.message, 240) })) };
-    } catch { return { ok: false, problems: [{ code: 'status_unavailable', message: message('app_srv_status_unavailable', language) }] }; }
+  // Health is what the wake recorded (heartbeat_state, heartbeat_incidents), read on a
+  // read-only handle. Nothing is run, probed or written here; the age says how old it is.
+  const WAKE = { wake_late: 'app_srv_problem_wake_late', wake_missing: 'app_srv_problem_wake_missing', wake_failed: 'app_srv_problem_wake_failed' };
+  function health() {
+    const get = (key) => { try { return db().prepare('SELECT value FROM heartbeat_state WHERE key = ?').get(key)?.value || null; } catch { return null; } };
+    const lastWake = get('last_wake_at');
+    const interval = Number(section(conf, 'heartbeat').wake_interval_minutes) || 1;
+    const age = lastWake ? now() - Date.parse(lastWake) : null;
+    const problems = [];
+    if (!lastWake) problems.push({ code: 'wake_missing', message: message(WAKE.wake_missing, language) });
+    else if (age > 3 * interval * 60000) problems.push({ code: 'wake_late', message: message(WAKE.wake_late, language, { minutes: Math.floor(age / 60000) }) });
+    else if (get('last_wake_ok') === 'false') problems.push({ code: 'wake_failed', message: message(WAKE.wake_failed, language) });
+    let incidents = [];
+    try { incidents = db().prepare('SELECT id FROM heartbeat_incidents WHERE active = 1 ORDER BY first_seen').all(); } catch { /* none recorded yet */ }
+    for (const { id } of incidents) {
+      const [code, ...rest] = String(id).split(':');
+      if (WAKE[code]) continue; // the age above says it afresh
+      const key = `app_srv_problem_${code}`;
+      let text;
+      try { text = message(key, language, { name: scrub(rest.join(':'), 60) }); } catch { text = message('app_srv_problem_other', language, { code: scrub(code, 40) }); }
+      problems.push({ code: scrub(code, 40), message: text });
+    }
+    return { ok: problems.length === 0, problems, recordedAt: lastWake };
   }
   async function fuel() {
     let rows = [];
@@ -135,12 +150,12 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     const weekTokens = db().prepare('SELECT COALESCE(SUM(tokens_total),0) AS n FROM runs WHERE started_at >= ?').get(new Date(now() - 7 * DAY).toISOString()).n;
     const tickets = [];
     for (const state of [states.progress, states.review, states.validate, states.go]) if (state) for (const t of issues().listTickets({ status: state })) tickets.push(card(t, weekTokens));
-    if (!cache.slow || now() - cache.slow.at > statusTtlMs) cache.slow = { at: now(), health: await health(), fuel: await fuel() };
+    if (!cache.slow || now() - cache.slow.at > statusTtlMs) cache.slow = { at: now(), fuel: await fuel() };
     const order = { awaiting: 0, progress: 1, checks: 2, review: 3 };
     tickets.sort((a, b) => Number(b.waiting) - Number(a.waiting) || order[a.column] - order[b.column] || a.id.localeCompare(b.id, 'en', { numeric: true }));
     const guarded = Boolean(section(conf, 'merge').tooling_paths && section(conf, 'merge').tooling_paths !== 'none');
     cache.value = { schema: 1, project, projects: [{ id: project, name: project }], language, generatedAt: new Date(now()).toISOString(),
-      health: cache.slow.health, fuel: cache.slow.fuel, tickets,
+      health: health(), fuel: cache.slow.fuel, tickets,
       mode: { key: guarded ? 'guarded-tooling' : 'guarded', label: message(guarded ? 'app_srv_mode_tooling' : 'app_srv_mode_guarded', language) } };
     cache.at = now();
     return cache.value;
