@@ -1,0 +1,14 @@
+[Unit]
+Description=Cleared local release broker
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ORCH_REPO=@ORCH_REPO@
+Environment=LANG=C.UTF-8
+ExecStart=/usr/bin/node @ORCH_HOME@/serve/release-broker.mjs
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

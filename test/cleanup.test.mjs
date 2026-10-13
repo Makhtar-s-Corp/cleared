@@ -483,7 +483,7 @@ test('the installer of the services names one project for the machine and never 
   const units = join(home, '.config', 'systemd', 'user');
   for (const unit of readdirSync(units).filter((name) => name.endsWith('.service'))) assert.match(readFileSync(join(units, unit), 'utf8'), new RegExp(`^Environment=ORCH_REPO=${project}$`, 'm'), unit);
   assert.match(readFileSync(join(units, 'cleared-wake.service'), 'utf8'), new RegExp(`^ExecStart=${tool}/wake\\.sh$`, 'm'));
-  assert.match(calls(), /enable --now cleared-dashboard\.service cleared-dashboard-refresh\.timer cleared-wake\.timer/);
+  assert.match(calls(), /enable --now cleared-release-broker\.service cleared-dashboard\.service cleared-dashboard-refresh\.timer cleared-wake\.timer/);
   // Run again for the same project: fine. For another one: refused, the machine already works on one.
   assert.equal(install({ ORCH_REPO: project }).status, 0);
   const second = install({ ORCH_REPO: other });

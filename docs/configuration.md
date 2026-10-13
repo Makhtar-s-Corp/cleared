@@ -109,6 +109,7 @@ Classifies paths and sets the guarded shipping policy.
 | `lines_until` | Cutoff for old written `Fusion:` or `Merge:` approval lines. | Optional; no default |
 | `separate_identity` | Require independently attributable agent and human actions. | Default: required |
 | `queue_hours` | How long a blocked merge remains queued. | Default: 24 |
+| `queue_max_attempts` | Maximum transient failures before a queued merge is refused and reported. A broker-busy reply does not count as a failure. | Default: 30 |
 
 ## `[release]`
 
@@ -125,7 +126,7 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `reopen_state` | Configured non-approval tracker status to use after a rollback. | Required before any rollback; no default |
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
 
-Automatic rollback requires a git credential that can push a normal commit to the base branch. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET`; a remote tracker owner may provide `--approval-comment COMMENT_ID` after posting exactly `Rollback TICKET MERGE_SHA` on the ticket. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never identity verification.
+Automatic rollback requires a git credential that can push a normal commit to the base branch. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET` from the configured human Unix account. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never the broker's peer-UID check. Tracker comments cannot authorize rollback.
 
 ## `[heartbeat]`
 
@@ -146,7 +147,7 @@ Optional push heartbeat for a monitoring service. Cleared sends a GET to `ping_u
 | `lane_idle_minutes` | Time without a lane branch or ledger movement. | Default: 120 |
 | `orphan_hours` | Age before an unattached Cleared process is considered orphaned. | Default: 6 |
 | `reap_owner_uid` | Unix UID allowed to run `status --reap`; required for non-local trackers. Must differ from `[tracker] agents_uid`. | Optional; no default |
-The approval comment must be unedited, posted after the merge, and no more than ten minutes old when used. If the monitor cannot start after a merge, Cleared comments on the ticket and records the failure; rerun `node lib/release.mjs start TICKET PR` after fixing the cause. A stopped monitor is restarted on the next wake. An interrupted revert is reconciled from its marked commit on the base; otherwise it is marked failed and the owner is alerted.
+If the monitor cannot start after a merge, Cleared comments on the ticket and records the failure; rerun `node lib/release.mjs start TICKET PR` after fixing the cause. A stopped monitor is restarted on the next wake. An interrupted revert is reconciled from its marked commit on the base; otherwise it is marked failed and the owner is alerted.
 
 ## `[limits]`
 
@@ -481,3 +482,14 @@ The read-only Cleared app. It only reads the ledger, the tracker and the state t
 | `hosts` | Extra host names the browser may use, besides addresses, `localhost` and `*.ts.net`. | Optional; no default |
 | `token_file` | Private file (mode `0600`, owned by the service account, outside the project) holding the access token. Created on first start if missing. | Optional; no default (`~/.config/cleared/app-token` is used) |
 
+## `[security]`
+
+| Setting | Meaning | Requirement |
+| --- | --- | --- |
+| `agent_user` | System account used for both Claude Code and Codex processes. Set it to a distinct account and grant that account worktree access without Cleared state write access. | Optional; no default |
+| `allow_shared_uid` | Explicitly allow release and manual rollback without `agent_user`. The lock is then not a security boundary and `cleared status` keeps a permanent warning. | Default: false |
+| `human_user` | Unix account permitted to run `cleared rollback` through the broker. Required for manual rollback with a remote tracker in split-account mode; the local tracker defaults to `[tracker] owner_id`. In explicit shared-UID mode the service UID is accepted if omitted. Must differ from `agent_user`. | Optional; no default |
+| `socket_path` | Absolute local Unix socket path for the service-owned release broker. Required when `agent_user` is set; its parent must be traversable by that account. | Optional; no default |
+| `bwrap_path` | Bubblewrap executable used to mount shared Git metadata read-only inside agent processes. | Optional; no default |
+
+See [the release lock installation guide](security.md#installing-the-release-account-boundary) for account creation, ownership checks, and the Codex socket path.

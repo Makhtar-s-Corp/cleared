@@ -95,7 +95,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
   writeFileSync(join(home, 'prompts', 'release-live.md'), 'acting lead prompt\n');
   writeFileSync(join(home, 'prompts', 'review.md'), 'review prompt\n');
   writeFileSync(join(home, 'prompts', 'talk.md'), 'talk prompt, decisions in @DECISIONS@, default ticket @REPORT_ON@\n');
-  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[tracker]\nadapter = local\nteam = X\nowner_name = the user\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n[rules]\n`);
+  writeFileSync(join(home, 'agents.conf'), `[models]\na = first:m1\nb = second:m2\n[fallbacks]\na = b\nb = a\n[roles]\ndev = a\nrelease = a\ntalk = a\nreview = a\n[review]\ndiffers_from_author = yes\nwhen_same = b\nauthor_role = dev\nper_hour = 3\n[talk]\nrole = talk\n[permissions.talk]\nmode = read-only\nallow = only-for-the-talk\ndeny = never\n[policy]\nguard_refusal = ${policy}\n[limits]\nmax_lanes = ${maxLanes}\ncounted_roles = dev\n[lanes]\nroot = ${join(home, 'lanes')}\nbase = main\npush_roles = dev talk\n[tracker]\nadapter = local\nteam = X\nowner_name = the user\nprogress_state = In Progress\nreview_state = In Review\ntodo_state = Todo\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\nwriteup_role =\n[lead]\nrole = release\nlive = no\nmax_minutes = 20\nname = chef de projet\nreport_on = X-100\nreport_hours = 6\nmessages_per_lane_per_hour = 2\n[permissions.release-live]\nmode = read-only\nallow = only-for-the-acting-lead\ndeny = never\n[currency]\nusd_eur = 1\n[rules]\n[security]\nallow_shared_uid = true\n`);
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   // What the guard must know of the project (its private terms, as fingerprints, and the values it allows) is the
@@ -139,7 +139,9 @@ if [ "$1 $2" = "terminal list" ]; then [ -z "\${FAKE_ORCA_DOWN:-}" ] || exit 1; 
 if [ "$1 $2" = "terminal send" ]; then printf '%s\\n' "$@" > "${join(home, 'orca-sent')}"; fi
 if [ "$1 $2" = "terminal close" ]; then [ -z "\${FAKE_ORCA_CLOSE_FAILS:-}" ] || exit 1; echo "$4" >> "${join(home, 'orca-closed')}"; fi
 `, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_GUARD_REF: 'main', ORCH_GITHUB_STATUS: `file://${join(home, 'github-status.json')}` };
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, 'release-broker.secret'), 'fixture-broker-secret', { mode: 0o600 });
+  const env = { ...process.env, PATH: `${join(home, 'bin')}:${process.env.PATH}`, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_CONF: join(home, 'agents.conf'), ORCH_BROKER_SECRET: 'fixture-broker-secret', ORCH_GUARD_REF: 'main', ORCH_GITHUB_STATUS: `file://${join(home, 'github-status.json')}` };
   return { home, state, repo, env, git };
 }
 

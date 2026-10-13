@@ -35,6 +35,17 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
+[ -n "$(conf_get security agent_user)" ] || [ "$(conf_get security allow_shared_uid)" = true ] \
+  || { echo "merge-pr.sh: release lock requires [security] agent_user; create a separate agent account and run serve/install.sh, or explicitly set [security] allow_shared_uid = true" >&2; exit 6; }
+
+# Only the service account's broker may enter the merge implementation.
+# The secret lives in service-owned state; a harness cannot read it.
+[ "$(/usr/bin/id -u)" = "$(/usr/bin/stat -c %u "$ORCH_HOME/merge-pr.sh")" ] \
+  || { echo "merge-pr.sh: only the service account can execute a merge" >&2; exit 6; }
+[ -n "${ORCH_BROKER_SECRET:-}" ] && [ -r "$ORCH_STATE_DIR/release-broker.secret" ] \
+  && [ "$ORCH_BROKER_SECRET" = "$(/usr/bin/cat "$ORCH_STATE_DIR/release-broker.secret")" ] \
+  || { echo "merge-pr.sh: only the release broker can execute a merge" >&2; exit 6; }
+
 usage="usage: merge-pr.sh <pull request> <ticket> [<announcement file|->] [--dry-run]"
 [ $# -ge 2 ] && [[ "$1" =~ ^[0-9]+$ ]] && [[ "$2" =~ ^[A-Z]+-[0-9]+$ ]] || die "$usage"
 pr=$1 ticket=$2 announcement= dry_run=
@@ -174,7 +185,7 @@ if [ "$needs" != tooling ]; then
     *) die "tracker could not say who moved $ticket" ;;
   esac
   [ -n "$agreed" ] || no "the user has not agreed: $ticket is not in « $go »$([ "$needs" != guarded ] || echo ' (it touches the checks of the CI, the deployment, his written rules or the tooling of the go-lives: his own agreement is needed, tooling or not)'). Ask him (ask-validation.sh $ticket - --pr $pr)"
-  [ -n "$announcement" ] || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
+  [ -n "$announcement" ] && grep -q '[^[:space:]]' "$announcement" || no "an announcement is needed for what the user agreed to: what changes, where to see it, how to check"
 fi
 
 # 4b. A ticket he gave to two teams: one result goes live, the one he named.

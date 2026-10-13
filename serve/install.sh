@@ -64,17 +64,100 @@ if [ "${CLEARED_INSTALL_FROM_WAKE:-}" != 1 ]; then
 fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
+chmod go-w "$named"
+# The agent-to-service lead bridge reads this fixed service-owned pointer,
+# independent of an agent-supplied XDG_CONFIG_HOME.
+service_named="$HOME/.config/cleared/project"
+mkdir -p "$(dirname "$service_named")"
+chmod go-w "$(dirname "$service_named")"
+if [ "$named" != "$service_named" ]; then
+  printf '%s\n' "$project" > "$service_named"
+  chmod go-w "$service_named"
+fi
+printf '%s\n' "$ORCH_STATE_DIR" > "$HOME/.config/cleared/state"
+chmod go-w "$HOME/.config/cleared/state"
 mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
+# The service keeps its state private. Account creation and sudo grants are
+# administrator actions, never an installer side effect.
+agent_user=$(conf_get security agent_user)
+command -v python3 > /dev/null || die "Install Python 3 for the local socket peer-UID check"
+if [ -n "$agent_user" ]; then
+  getent passwd "$agent_user" > /dev/null || die "Create [security] agent_user=$agent_user first; see docs/security.md"
+  [ "$(id -u "$agent_user")" != "$(id -u)" ] || die "agent_user must differ from the service account"
+  bwrap_path=$(conf_get security bwrap_path)
+  bwrap_path=${bwrap_path:-/usr/bin/bwrap}
+  [ -x "$bwrap_path" ] || die "Install bubblewrap or set [security] bwrap_path to its executable; see docs/security.md"
+  [ -n "$(conf_get security socket_path)" ] || die "Set [security] socket_path to a shared local Unix path; see docs/security.md"
+  socket_parent=$(dirname "$(conf_get security socket_path)")
+  [ -d "$socket_parent" ] || die "Create the service-owned socket directory $socket_parent first"
+  [ "$(stat -c %u "$socket_parent")" = "$(id -u)" ] || die "Socket directory must belong to the service account"
+  socket_mode=$(stat -c %a "$socket_parent")
+  (( (8#$socket_mode & 022) == 0 )) || die "Socket directory must not be group/world-writable"
+  if sudo -n -u "$agent_user" -- test -w "$socket_parent" 2>/dev/null; then
+    die "$agent_user can write the socket directory $socket_parent"
+  fi
+  if ! sudo -n -u "$agent_user" -- true 2>/dev/null; then
+    die "Configure noninteractive sudo from the service account to $agent_user for the harness CLIs; see docs/security.md"
+  fi
+  for protected in "$ORCH_STATE_DIR" "$ORCH_HOME" "$project" "$ORCH_CONF" "$HOME" "$HOME/.config/cleared" "$HOME/.local/bin"; do
+    [ -e "$protected" ] || continue
+    if sudo -n -u "$agent_user" -- test -w "$protected" 2>/dev/null; then
+      die "$agent_user can write protected path $protected: remove that access before installing"
+    fi
+  done
+  probe=$(sudo -n -u "$agent_user" -- mktemp "$ORCH_STATE_DIR/.agent-write-probe.XXXXXX" 2>/dev/null || true)
+  if [ -n "$probe" ]; then rm -f "$probe"; die "$agent_user wrote to Cleared state; remove that access before installing"; fi
+  writable=$(sudo -n -u "$agent_user" -- find "$ORCH_STATE_DIR" -writable -print -quit 2>/dev/null || true)
+  [ -z "$writable" ] || die "$agent_user can write Cleared state path $writable"
+  for protected in "$ORCH_HOME" "$project"; do
+    writable=$(sudo -n -u "$agent_user" -- find "$protected" -writable -print -quit 2>/dev/null || true)
+    [ -z "$writable" ] || die "$agent_user can write protected path $writable"
+  done
+  if ! sudo -n -u "$agent_user" -- test -r "$ORCH_HOME/release-request.mjs" 2>/dev/null; then
+    die "$agent_user cannot read the release client: grant read and path traversal, not write"
+  fi
+  if ! sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+    node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1; then
+    die "Configure the narrow agent-to-service sudo rule for serve/lead-actions.mjs; see docs/security.md"
+  fi
+  # NODE_OPTIONS runs before lead-actions.mjs can scrub the environment. Prove
+  # sudoers drops it, including when an agent explicitly asks sudo to keep env.
+  env_probe=$(mktemp -d)
+  chmod 755 "$env_probe"
+  : > "$env_probe/marker"
+  chmod 600 "$env_probe/marker"
+  cat > "$env_probe/probe.cjs" <<EOF
+if (process.getuid() === $(id -u)) require('node:fs').writeFileSync('$env_probe/marker', 'injected');
+EOF
+  chmod 644 "$env_probe/probe.cjs"
+  sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+    node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1 || die "The lead client failed the sudo environment probe"
+  sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" \
+    sudo -n -E -u "$(id -un)" /usr/bin/node "$ORCH_HOME/serve/lead-actions.mjs" ping > /dev/null 2>&1 || true
+  [ ! -s "$env_probe/marker" ] || die "The reverse sudo rule preserves NODE_OPTIONS; require env_reset and forbid SETENV"
+  rm -f "$env_probe/marker" "$env_probe/probe.cjs"
+  rmdir "$env_probe"
+fi
+chmod o-w "$ORCH_STATE_DIR"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
   unit=$(basename "$unit")
   sed -e "s|@PORT@|$port|; s|@APP_PORT@|$app_port|; s|@BIND@|$bind|; s|@DASHBOARD_DIR@|$ORCH_STATE_DIR/dashboard|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
 done
 systemctl --user daemon-reload
-systemctl --user enable --now cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer
-systemctl --user enable --now cleared-app.service
-systemctl --user restart cleared-dashboard.service cleared-app.service
+systemctl --user enable --now cleared-release-broker.service cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer cleared-app.service
+systemctl --user restart cleared-release-broker.service cleared-dashboard.service cleared-app.service
+if [ -n "$agent_user" ]; then
+  reachable=
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+      node "$ORCH_HOME/release-request.mjs" status TEST-0 > /dev/null 2>&1; then reachable=1; break; fi
+    sleep 0.2
+  done
+  [ -n "$reachable" ] || die "$agent_user cannot reach the release socket; check [security] socket_path and directory traversal"
+fi
 "$ORCH_HOME/dashboard.sh" > /dev/null
 sleep 1
 "$here/check.sh"
 echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
 echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."
+[ -n "$agent_user" ] || echo "release lock is not a security boundary: agents run as the service account"

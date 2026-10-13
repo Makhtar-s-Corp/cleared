@@ -117,8 +117,9 @@ capture_handover
 # not part of its work). Without this the work would wait for another model
 # to commit it. A backend that commits by itself is left alone: what it did
 # not commit is its to sort out.
-if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
-  && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ] \
+if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
+  && { [ -n "$(conf_get security agent_user)" ] || { [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
+       && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ]; }; } \
   && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   message=$(mktemp)
   # A real file that says something: a blank one, or anything else by that
@@ -127,8 +128,8 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && [ "$(conf_get "adapter.$
   rm -rf .commit-message
   if [ -n "$(git status --porcelain 2> /dev/null)" ]; then
     [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
-    git add -A
-    git -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
+    git -c core.hooksPath=/dev/null add -A
+    git -c core.hooksPath=/dev/null -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
       || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
   fi
   rm -f "$message"

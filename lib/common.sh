@@ -76,6 +76,45 @@ prompt_text() {
 
 die() { echo "$(basename "$0"): $*" >&2; exit 1; }
 
+agent_mount_args() {
+  # The model sees the team files, but Git's control data remains read-only
+  # even when the worktree root itself is writable. The dispatcher commits.
+  local bwrap worktree common expected
+  bwrap=$(conf_get security bwrap_path)
+  bwrap=${bwrap:-/usr/bin/bwrap}
+  worktree=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ]; then
+    [ "$worktree" = "$ORCH_REPO" ] || die "release role must run from the service-owned main checkout"
+    # Its sudo bridge needs setuid, which bubblewrap's NoNewPrivs forbids.
+    # The account cannot write the main checkout or Cleared state.
+    AGENT_MOUNT_ARGS=()
+    return 0
+  fi
+  [ -x "$bwrap" ] || die "[security] agent_user needs bubblewrap at $bwrap"
+  AGENT_MOUNT_ARGS=("$bwrap" --dev-bind / /)
+  [ -n "$worktree" ] || return 0
+  expected=$(git -C "$ORCH_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  [ -n "$expected" ] && [ "$common" = "$expected" ] || die "agent worktree does not share the service-owned project Git directory"
+  AGENT_MOUNT_ARGS+=(--ro-bind "$common" "$common")
+  [ ! -e "$worktree/.git" ] || AGENT_MOUNT_ARGS+=(--ro-bind "$worktree/.git" "$worktree/.git")
+}
+
+verify_agent_account() {
+  local agent_user expected actual
+  agent_user=$(conf_get security agent_user)
+  [ -n "$agent_user" ] || return 0
+  expected=$(id -u "$agent_user") || die "agent account $agent_user does not exist"
+  if [ "$(id -u)" = "$expected" ]; then actual=$expected
+  else actual=$(sudo -n -u "$agent_user" -- id -u) || die "cannot launch harness under $agent_user"; fi
+  [ "$actual" = "$expected" ] || die "harness would run as UID $actual instead of $expected"
+  if [ "$(id -u)" = "$expected" ]; then
+    [ ! -w "$ORCH_STATE_DIR" ] || die "agent account can write Cleared state"
+  else
+    sudo -n -u "$agent_user" -- test ! -w "$ORCH_STATE_DIR" || die "agent account can write Cleared state"
+  fi
+}
+
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 expand_home() { case "$1" in "~/"*) printf '%s\n' "$HOME/${1#\~/}" ;; *) printf '%s\n' "$1" ;; esac; }
@@ -222,7 +261,8 @@ adapter_env() {
 # separated command prefixes), plus ORCH_NETWORK and ORCH_WRITE for host
 # sandbox translation. No section: nothing is set for the provider CLI.
 permissions_env() {
-  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR ORCH_READ ORCH_NETWORK ORCH_WRITE
+  unset ORCH_PERMISSION_MODE ORCH_ALLOW ORCH_DENY ORCH_ADVISOR ORCH_READ ORCH_NETWORK ORCH_WRITE ORCH_ACTIVE_PERMISSION_ROLE
+  export ORCH_ACTIVE_PERMISSION_ROLE=$1
   local mode
   # advisor = no: the role runs without the helper model the CLI may consult.
   [ "$(conf_get "permissions.$1" advisor)" != no ] || export ORCH_ADVISOR=no
@@ -231,11 +271,32 @@ permissions_env() {
   export ORCH_PERMISSION_MODE=$mode ORCH_ALLOW ORCH_DENY ORCH_NETWORK ORCH_WRITE
   ORCH_ALLOW=$(conf_get "permissions.$1" allow)
   ORCH_DENY=$(conf_get "permissions.$1" deny)
+  if [ -n "$(conf_get security agent_user)" ]; then
+    # The agent only edits team files; the dispatcher commits after the run.
+    local item agent_allow=
+    while IFS= read -r item; do
+      item=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<"$item")
+      case "$item" in 'git add'|'git commit'|'git merge'|'git reset'|'git checkout') ;; *) [ -z "$item" ] || agent_allow="${agent_allow:+$agent_allow, }$item" ;; esac
+    done < <(tr ',' '\n' <<<"$ORCH_ALLOW")
+    ORCH_ALLOW=$agent_allow
+    ORCH_DENY="${ORCH_DENY:+$ORCH_DENY, }git add, git commit, git merge, git reset, git checkout"
+  fi
   ORCH_NETWORK=$(conf_get "permissions.$1" network)
   ORCH_NETWORK=${ORCH_NETWORK:-no}
   ORCH_WRITE=$(conf_get "permissions.$1" write)
   ORCH_WRITE=${ORCH_WRITE//\{state\}/"$ORCH_STATE_DIR"}
   ORCH_WRITE=${ORCH_WRITE//\{repo\}/"$ORCH_REPO"}
+  if [ "$1" = release-live ]; then
+    # An installed project may still carry the old trusted-script grants.
+    # They cannot survive the broker upgrade, even before its config is edited.
+    ORCH_WRITE=
+    local item safe_allow=
+    while IFS= read -r item; do
+      item=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<"$item")
+      case "$item" in *merge-pr.sh*|*ask-validation.sh*|*tracker.sh*|*tell-lane.sh*|*review-pr.sh*|*digest-note.sh*|*host-state.sh*) ;; *) [ -z "$item" ] || safe_allow="${safe_allow:+$safe_allow, }$item" ;; esac
+    done < <(tr ',' '\n' <<<"$ORCH_ALLOW")
+    ORCH_ALLOW="${safe_allow:+$safe_allow, }{orch}/lead-command.mjs, {orch}/release-request.mjs"
+  fi
   # {orch} is where these scripts are: a lane is handed the dispatcher's own
   # copy of a script, never the one of the branch it works on.
   ORCH_ALLOW=${ORCH_ALLOW//\{orch\}/"$ORCH_HOME"}
@@ -389,9 +450,11 @@ drop_queued_review() {
 # good leaves the queue: written to the ledger (merge_refused) and told to
 # the lead at its next wake.
 open_queued_merges() {
-  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why hours since
+  local queue="$ORCH_STATE_DIR/merge-queue" entry pr ticket said code why hours since attempts max_attempts
   hours=$(conf_get merge queue_hours)
   [[ "$hours" =~ ^[0-9]+$ ]] || hours=24
+  max_attempts=$(conf_get merge queue_max_attempts)
+  [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || max_attempts=30
   ls "$queue"/*.json > /dev/null 2>&1 || return 0
   while IFS= read -r entry; do
     if ! jq -e '(.pr | type) == "number" and (.ticket | type) == "string"' "$entry" > /dev/null 2>&1; then
@@ -401,21 +464,36 @@ open_queued_merges() {
     fi
     pr=$(jq -r '.pr' "$entry") ticket=$(jq -r '.ticket' "$entry") said=$(jq -r '.announcement // ""' "$entry")
     code=0
-    why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
+    if [ -n "${ORCH_BROKER_SECRET:-}" ]; then
+      # Test fixtures execute the old merge checks with a fixture-only key.
+      why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
+    elif [ -n "$said" ] && [ ! -r "$said" ]; then
+      code=69 why="queued announcement cannot be read: $said"
+    else
+      why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/release-request.mjs" request_release "$ticket" "$pr" < "${said:-/dev/null}" 2>&1 > /dev/null) || code=$?
+    fi
+    # A process crash can also exit 1. Only this broker marker makes it a
+    # definitive refusal; otherwise it uses the bounded retry path.
+    if [ "$code" = 1 ] && [[ "$why" != release\ broker\ definitive\ refusal$'\n'* ]]; then code=69; fi
     case "$code" in
       0) rm -f "$entry" "$queue/$pr.announcement.md"; return 0 ;;
-      5)
-        # It does not wait for ever. Only a time in the form merge-pr.sh
-        # writes counts: anything else is no time, and it leaves too.
-        since=$(jq -r '.at // ""' "$entry")
-        if ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || [[ "$since" < "$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)" ]]; then
-          ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr waited more than $hours hours in the queue ($(tr '\n' ' ' <<<"$why" | cut -c1-300)): it left the queue, and is to be asked for again"
-          rm -f "$entry" "$queue/$pr.announcement.md"
-        fi
+      1|6)
+        ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue after a definitive broker refusal: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
+        rm -f "$entry" "$queue/$pr.announcement.md"
         ;;
       *)
-        ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue without being done: $(tr '\n' ' ' <<<"$why" | cut -c1-400)"
-        rm -f "$entry" "$queue/$pr.announcement.md"
+        attempts=$(jq -r '.attempts // 0' "$entry")
+        [[ "$attempts" =~ ^[0-9]+$ ]] || attempts=0
+        if [ "$code" != 5 ]; then
+          attempts=$((attempts + 1))
+          jq --argjson attempts "$attempts" '.attempts = $attempts' "$entry" > "$entry.next" && mv "$entry.next" "$entry"
+        fi
+        # Busy waits are bounded by age; other failures also have an attempt cap.
+        since=$(jq -r '.at // ""' "$entry")
+        if [ "$attempts" -ge "$max_attempts" ] || ! [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || [[ "$since" < "$(date -u -d "$hours hours ago" +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+          ledger event --kind merge_refused --ticket "$ticket" --value "$pr" --detail "the go-live of #$pr left the queue after $attempts failed attempts or $hours hours ($(tr '\n' ' ' <<<"$why" | cut -c1-300)): ask for it again"
+          rm -f "$entry" "$queue/$pr.announcement.md"
+        fi
         ;;
     esac
   done < <(for entry in "$queue"/*.json; do printf '%s\t%s\n' "$(jq -r '.at // ""' "$entry" 2> /dev/null)" "$entry"; done | sort | cut -f2)

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -125,7 +125,7 @@ test('what a review says comes back to the lead at its next wake, once; one that
   const listed = changes(first.next, [], [], new Set(), '2026-01-02T10:05:00Z', [], null, { reviews: [{ ...reviews[1], text: 'Défauts :\n- le premier\n- le second\n' }] });
   assert.equal(listed.events[0].text, 'Défauts :\n- le premier\n- le second');
   assert.ok(conf.sections.lead.wake_on.split(',').map((kind) => kind.trim()).includes('review_done'));
-  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('{orch}/review-pr.sh'));
+  assert.ok(conf.sections['permissions.release-live'].allow.split(',').map((item) => item.trim()).includes('{orch}/lead-command.mjs'));
 });
 
 
@@ -795,6 +795,67 @@ test('a go-live that only waits is kept and done by the wake, with every check a
   assert.equal(behind.status, 6);
   assert.match(behind.stderr, /lacks code that is on main/);
   assert.equal(red.merged(), null);
+});
+
+test('a queued release survives a broker restart or missing socket', () => {
+  const pull = reviewedPull(['ops/cleared/wake.sh']);
+  const queue = join(pull.box.state, 'merge-queue');
+  mkdirSync(queue, { recursive: true });
+  const entry = join(queue, '7.json');
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  const env = { ...pull.env };
+  delete env.ORCH_BROKER_SECRET;
+  const retry = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).pr, 7);
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: '2020-01-01T00:00:00Z', announcement: '' }));
+  const expired = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
+  assert.equal(expired.status, 0, expired.stderr);
+  assert.equal(existsSync(entry), false);
+  assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
+  // A broker reply with a permanent merge failure must be reported now,
+  // not retried until the queue deadline.
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\nprintf "release broker definitive refusal\\npermanent merge refusal\\n" >&2\nexit 1\n', { mode: 0o755 });
+  const refused = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
+  assert.equal(refused.status, 0, refused.stderr);
+  assert.equal(existsSync(entry), false);
+  assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*permanent merge refusal/);
+  // A temporary failure keeps its request, then the configured attempt cap
+  // removes and reports it instead of retrying for ever.
+  const confPath = join(pull.box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('queue_hours = 24', 'queue_hours = 24\nqueue_max_attempts = 2'));
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho client crashed >&2\nexit 1\n', { mode: 0o755 });
+  const transient = () => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
+  assert.equal(transient().status, 0);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).attempts, 1);
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
+  writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho temporary GitHub failure >&2\nexit 69\n', { mode: 0o755 });
+  assert.equal(transient().status, 0);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).attempts, 1);
+  assert.equal(transient().status, 0);
+  assert.equal(existsSync(entry), false);
+  assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*2 failed attempts.*temporary GitHub failure/);
+});
+
+test('split-account review takes its author from the service ledger and rejects an agent claim', () => {
+  const lane = laneWithRemote('feat/auth', 'feat: authored change');
+  const { box } = lane;
+  const head = execFileSync('git', ['-C', lane.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', lane.path, 'push', '-q', 'origin', 'feat/auth']);
+  writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', title: 'feat: authored change', body: 'X-5', headRefName: 'feat/auth', headRefOid: head, additions: 1, deletions: 0, files: [{ path: 'server/a.mjs' }] }));
+  const db = openLedger(join(box.state, 'ledger.db'));
+  db.prepare("INSERT INTO runs (run_id,role,model,started_at,ended_at,outcome,pr_number,source) VALUES ('author-run','dev','m1','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','done',7,'dispatcher')").run();
+  db.close();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8') + '\n[security]\nagent_user = test-agent\n');
+  const env = { ...box.env, HOME: box.home };
+  const review = spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--dry-run'], { env, encoding: 'utf8' });
+  assert.equal(review.status, 0, review.stderr);
+  const forged = spawnSync(join(box.home, 'review-pr.sh'), ['7', 'X-5', '--dry-run', '--author-model', 'm2'], { env: { ...env, SUDO_UID: '9999' }, encoding: 'utf8' });
+  assert.equal(forged.status, 6);
+  assert.match(forged.stderr, /cannot claim the author model/);
 });
 
 

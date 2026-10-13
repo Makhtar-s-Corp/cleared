@@ -155,7 +155,7 @@ test('installer allows its own wake to refresh units during self update', () => 
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *"is-enabled cleared-wake.timer"*) echo enabled; exit 0;; *"show "*cleared-wake.service*) echo activating; exit 0;; *"is-active "*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
   const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', CLEARED_INSTALL_FROM_WAKE: '1', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.doesNotMatch(result.stderr, /wake.*active/i);
-  assert.match(readFileSync(log, 'utf8'), /enable --now cleared-dashboard\.service .*cleared-wake\.timer/);
+  assert.match(readFileSync(log, 'utf8'), /enable --now cleared-release-broker\.service cleared-dashboard\.service .*cleared-wake\.timer/);
 }));
 
 test('missing trusted project configuration refuses the guard instead of disabling it', () => committedGuardProject(({ project, commit, check }) => {

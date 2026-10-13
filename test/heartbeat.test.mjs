@@ -45,7 +45,7 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   });
   const healthy = await wake();
   assert.equal(healthy.code, 0, healthy.stderr);
-  assert.deepEqual(calls, ['/ping']);
+  assert.deepEqual(calls, ['/fail'], 'without agent_user the release lock remains a permanent problem');
   const snapshot = JSON.parse(readFileSync(join(box.state, 'snapshot.json'), 'utf8'));
   assert.equal(snapshot.schema, 1);
   assert.ok(Array.isArray(snapshot.tickets) && snapshot.details);
@@ -55,14 +55,14 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   db.close();
   const late = await wake();
   assert.equal(late.code, 0, late.stderr);
-  assert.deepEqual(calls, ['/ping', '/fail'], 'a live but delayed wake reports the stall');
+  assert.deepEqual(calls, ['/fail', '/fail'], 'a live but delayed wake reports the stall');
   const failed = await wake({ FAKE_GH_LIST_DOWN: '1' });
   assert.notEqual(failed.code, 0);
-  assert.deepEqual(calls, ['/ping', '/fail', '/fail']);
+  assert.deepEqual(calls, ['/fail', '/fail', '/fail']);
   appendFileSync(join(box.home, 'agents.conf'), '\n[heartbeat]\ntimeout_secs = 0\n');
   const misconfigured = await wake();
   assert.equal(misconfigured.code, 0);
-  assert.deepEqual(calls, ['/ping', '/fail', '/fail', '/fail'], 'a bad timeout still calls the valid failure URL');
+  assert.deepEqual(calls, ['/fail', '/fail', '/fail', '/fail'], 'a bad timeout still calls the valid failure URL');
 });
 
 test('status JSON uses exit 2 and a stable error object when configuration is unreadable', () => {
@@ -243,4 +243,13 @@ test('an editor viewing a Cleared script is not identified as an orphan process'
   const script = new URL('../when-free.sh', import.meta.url).pathname;
   assert.equal(matchesClearedCommand(['/usr/bin/vim', script], 'wait'), false);
   assert.equal(matchesClearedCommand(['/usr/bin/bash', script], 'wait'), true);
+});
+
+test('status permanently warns when agents share the service account', () => {
+  const box = sandbox();
+  const result = spawnSync(process.execPath, [join(box.home, 'lib/heartbeat.mjs'), 'status', '--json'],
+    { env: box.env, encoding: 'utf8' });
+  const status = JSON.parse(result.stdout);
+  assert.equal(status.ok, false);
+  assert.ok(status.problems.some((p) => p.message === 'release lock is not a security boundary: agents run as the service account'));
 });

@@ -3,13 +3,28 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/contract.sh"
+. "$here/../lib/common.sh"
 . "$here/../lib/tracker/adapters/env.sh"
 tracker_unset=()
 for tracker_secret in "${TRACKER_SECRET_ENV[@]}"; do tracker_unset+=(-u "$tracker_secret"); done
 
+agent_user=$(conf_get security agent_user)
+verify_agent_account
+agent_home=
+[ -z "$agent_user" ] || agent_home=$(getent passwd "$agent_user" | cut -d: -f6)
 # The subscription pays, never an API key: a key left in the environment
 # (for instance after loading .env.local) would move the billing to it.
-cli() { env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" claude "$@"; }
+cli() {
+  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+    agent_mount_args
+    agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
+    [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
+    sudo -n -u "$agent_user" -- env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" \
+      PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_STATE_DIR="$ORCH_STATE_DIR" ORCH_CONF="$ORCH_CONF" "${agent_prefix[@]}" claude "$@"
+  else
+    env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" claude "$@"
+  fi
+}
 
 case "${1:-}" in
   list-models)
@@ -17,6 +32,7 @@ case "${1:-}" in
     # The CLI has no command that lists models: each candidate is asked for
     # one word, from an empty directory and without tools.
     empty=$(mktemp -d)
+    [ -z "$agent_user" ] || chmod 755 "$empty"
     trap 'rm -rf "$empty"' EXIT
     for candidate in "$@"; do
       if out=$(cd "$empty" && timeout 120 cli -p --model "$candidate" --no-session-persistence \

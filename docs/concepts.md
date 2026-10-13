@@ -10,7 +10,7 @@ A team's role is a permission and routing profile, not a different program. Exam
 
 ## Ticket states and approval
 
-The names are configured in `[tracker]`. A typical path is `Todo` → `In Progress` → `In Review` → `Needs Approval` → `Ready to Ship` → `Done`. A ticket moved to Todo can open a team. Once checks pass and a different model has reviewed its pull request, `ask-validation.sh` posts a product-language request showing the exact commit and moves the ticket to the validation state. The owner personally moves it to the configured go state to approve shipping. `merge-pr.sh` checks who moved the ticket and whether the reviewed commit is still the version shown. If a team changed its code after the request, Cleared asks again. A merge of the base that changes no team code can retain approval. For two teams, only the selected pull request can ship.
+The names are configured in `[tracker]`. A typical path is `Todo` → `In Progress` → `In Review` → `Needs Approval` → `Ready to Ship` → `Done`. A ticket moved to Todo can open a team. Once checks pass and a different model has reviewed its pull request, the release broker posts a product-language request showing the exact commit and moves the ticket to the validation state. The owner personally moves it to the configured go state to approve shipping. the release broker checks who moved the ticket and whether the reviewed commit is still the version shown. If a team changed its code after the request, Cleared asks again. A merge of the base that changes no team code can retain approval. For two teams, only the selected pull request can ship.
 
 Paths under `[merge] tooling_paths` may merge without a ticket approval once review and checks pass. This is a real exception to the normal human approval step; configure the list narrowly. Paths under `guarded_paths`, including the scripts that enforce shipping, always require the owner's own approval. These rules classify paths; they never let a model grant itself approval.
 
@@ -34,7 +34,7 @@ CLI-reported cost is used when available. Otherwise `[prices]` and `[currency]` 
 - `spawn-lane.sh dev EX-12` opens a team and terminal.
 - `review-pr.sh 41 EX-12` opens a separate read-only review.
 - `ask-validation.sh EX-12 request.md --pr 41` shows the user the commit to approve.
-- `merge-pr.sh 41 EX-12 announcement.md --dry-run` checks whether shipping would be allowed.
+- `release-request.mjs request_release EX-12 41 < announcement.md` asks the local broker to verify and ship.
 - `dashboard.sh` rewrites the static dashboard page.
 
 For command flags and settings, use [Configuration](configuration.md), [Adapters](adapters.md), and [Security](security.md).

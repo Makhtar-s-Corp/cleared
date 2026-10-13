@@ -4,7 +4,7 @@
 
 Cleared is for developers who want coding agents to work on tickets while keeping review and shipping decisions visible. Scripts take a ticket through a coding team, checks, an independent review, human approval, and a guarded merge; Git worktrees isolate the work, and a SQLite ledger records actions, costs, and decisions.
 
-Optional release health checks can watch the application after Cleared merges a PR. Repeated failures can trigger a revert of that exact merge, and a verified human owner can request the same revert with `cleared rollback TICKET`. Cleared pushes the revert to the base branch so the project's own deployment platform can redeploy it. See [Release configuration](docs/configuration.md#release) for the required health probe, branch permissions and migration limits.
+A local release broker checks tracker approval and the reviewed PR before merging; agent harnesses only request release over its Unix socket. Optional release health checks can watch the application after Cleared merges a PR. Repeated failures can trigger a revert of that exact merge, and a verified human owner can request the same revert with `cleared rollback TICKET`. Cleared pushes the revert to the base branch so the project's own deployment platform can redeploy it. See [Release configuration](docs/configuration.md#release) for the required health probe, branch permissions and migration limits.
 
 `cleared status` shows the last wake, service reachability and stalled work without starting a model. An optional push heartbeat lets an external service alert you when Cleared stops waking or gets stuck. See [Heartbeat and status](docs/heartbeat.md).
 

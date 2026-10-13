@@ -758,8 +758,8 @@ test('the night checks are followed: green, nothing is said and nobody is woken;
   assert.ok(prompt.includes(`\`${join(box.home, 'tracker.sh')} create "Infra" "Bug"`), prompt);
   assert.doesNotMatch(prompt, /\{orch\}|ops\/orchestration\//);
   const allowed = conf.sections['permissions.release-live'].allow;
-  assert.match(allowed, /\{orch\}\/tracker\.sh create/);
-  assert.match(allowed, /\{orch\}\/digest-note\.sh/);
+  assert.match(allowed, /\{orch\}\/lead-command\.mjs/);
+  assert.match(allowed, /\{orch\}\/release-request\.mjs/);
   // The note for the digest: kept with the state, read by the guard like anything meant for the user.
   const note = spawnSync(join(box.home, 'digest-note.sh'), ['-'], { env: { ...box.env, ORCH_SIGNED: 'chef de projet' }, encoding: 'utf8', input: 'Le contrôle de nuit est rouge : ticket ouvert (X-9).' });
   assert.equal(note.status, 0, note.stderr);
@@ -1495,7 +1495,7 @@ test('the acting lead: a report of a lane wakes it, with the prompt and the perm
   assert.match(laneEnv, /ORCH_COMMENT_ON=none/);
   // The run gets the permissions of the acting lead, not those of the role.
   spawnSync(join(box.home, 'lane-run.sh'), [runDir], { cwd: box.repo, env, encoding: 'utf8' });
-  assert.equal(readFileSync(join(box.state, 'allowed-first'), 'utf8').trim(), 'read-only|only-for-the-acting-lead|never');
+  assert.equal(readFileSync(join(box.state, 'allowed-first'), 'utf8').trim(), `read-only|only-for-the-acting-lead, ${box.home}/lead-command.mjs, ${box.home}/release-request.mjs|never`);
   // What it writes to the user says which model wrote it.
   assert.equal(readFileSync(join(box.state, 'signed-first'), 'utf8').trim(), 'chef de projet, model a');
   // Said once: the next wake does not hand the same report again.
@@ -1512,7 +1512,7 @@ test('the acting lead may answer and read, nothing more: its permissions refuse 
   const scripts = list(live.allow).filter((item) => item.startsWith('{orch}/'));
   // It answers by two scripts; the rest only reads (what the user wrote in tracker, the state of the host).
   // Since 2026-10-08 it also opens a ticket, for one thing: a night check that came out red (rule of the user), and keeps a note for the digest.
-  assert.deepEqual([...scripts].sort(), ['{orch}/tracker.sh create', '{orch}/digest-note.sh', '{orch}/tracker.sh comment', '{orch}/tracker.sh comments', '{orch}/tracker.sh issue', '{orch}/tracker.sh waiting', '{orch}/tell-lane.sh', '{orch}/host-state.sh', '{orch}/review-pr.sh', '{orch}/ask-validation.sh', '{orch}/merge-pr.sh'].sort());
+  assert.deepEqual([...scripts].sort(), ['{orch}/lead-command.mjs', '{orch}/release-request.mjs'].sort());
   // It never changes a status itself: the one script that does only goes to the two statuses a script may set.
   assert.ok(list(live.deny).includes('{orch}/tracker.sh move'));
   for (const refused of ['{orch}/tidy-lanes.sh', '{orch}/spawn-lane.sh', '{orch}/kill-lane.sh', '{orch}/push-lane.sh', 'gh', 'orca', 'git push']) assert.ok(list(live.deny).includes(refused), refused);
