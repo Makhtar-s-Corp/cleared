@@ -37,8 +37,10 @@ set -euo pipefail
 
 # Only the service account's broker may enter the merge implementation.
 # The secret lives in service-owned state; a harness cannot read it.
+[ "$(/usr/bin/id -u)" = "$(/usr/bin/stat -c %u "$ORCH_HOME/merge-pr.sh")" ] \
+  || { echo "merge-pr.sh: only the service account can execute a merge" >&2; exit 6; }
 [ -n "${ORCH_BROKER_SECRET:-}" ] && [ -r "$ORCH_STATE_DIR/release-broker.secret" ] \
-  && [ "$ORCH_BROKER_SECRET" = "$(cat "$ORCH_STATE_DIR/release-broker.secret")" ] \
+  && [ "$ORCH_BROKER_SECRET" = "$(/usr/bin/cat "$ORCH_STATE_DIR/release-broker.secret")" ] \
   || { echo "merge-pr.sh: only the release broker can execute a merge" >&2; exit 6; }
 
 usage="usage: merge-pr.sh <pull request> <ticket> [<announcement file|->] [--dry-run]"

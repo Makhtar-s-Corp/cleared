@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -808,6 +808,10 @@ test('a queued release survives a broker restart or missing socket', () => {
   const retry = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
   assert.equal(retry.status, 0, retry.stderr);
   assert.ok(readFileSync(entry, 'utf8').includes('"pr":7'));
+  writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: '2020-01-01T00:00:00Z', announcement: '' }));
+  const expired = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
+  assert.equal(expired.status, 0, expired.stderr);
+  assert.equal(existsSync(entry), false);
 });
 
 test('split-account review takes its author from the service ledger and rejects an agent claim', () => {

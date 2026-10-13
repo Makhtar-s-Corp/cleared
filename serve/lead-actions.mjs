@@ -2,19 +2,48 @@
 // Narrow service-account entrypoint for the project lead's existing non-release
 // scripts. Sudoers must allow this file only, with the script path fixed.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConf, projectDir } from '../lib/conf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-process.env.PATH = `${join(homedir(), '.local/bin')}:/usr/local/bin:/usr/bin:/bin`; 
-const conf = loadConf();
+const sudoUid = process.env.SUDO_UID;
+let conf;
+if (sudoUid) {
+  // Sudoers should use env_reset, but the wrapper must not rely on it. Read
+  // the service-owned project pointer before trusting any caller environment.
+  const account = execFileSync('/usr/bin/getent', ['passwd', String(process.getuid())], { encoding: 'utf8' }).trim().split(':');
+  const serviceHome = account[5];
+  const configDir = join(serviceHome, '.config', 'cleared');
+  const configRecord = statSync(configDir);
+  if (configRecord.uid !== process.getuid() || (configRecord.mode & 0o022)) throw new Error('Service configuration directory is not private');
+  const named = join(configDir, 'project');
+  const pointer = statSync(named);
+  if (pointer.uid !== process.getuid() || (pointer.mode & 0o022)) throw new Error('Service project pointer is not private');
+  const project = readFileSync(named, 'utf8').split('\n')[0].trim();
+  if (!project || statSync(project).uid !== process.getuid()) throw new Error('Service project is not owned by the service account');
+  const statePointer = join(configDir, 'state');
+  const stateRecord = statSync(statePointer);
+  if (stateRecord.uid !== process.getuid() || (stateRecord.mode & 0o022)) throw new Error('Service state pointer is not private');
+  const state = readFileSync(statePointer, 'utf8').split('\n')[0].trim();
+  if (!state || statSync(state).uid !== process.getuid()) throw new Error('Service state is not owned by the service account');
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  process.env.HOME = serviceHome;
+  process.env.PATH = `${join(serviceHome, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
+  process.env.ORCH_REPO = project;
+  process.env.ORCH_STATE_DIR = state;
+  process.env.SUDO_UID = sudoUid;
+  conf = loadConf(join(project, '.cleared', 'agents.conf'));
+} else {
+  process.env.PATH = `${join(homedir(), '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
+  conf = loadConf();
+}
 const agent = conf.sections.security?.agent_user;
 if (agent) {
-  const line = execFileSync('getent', ['passwd', agent], { encoding: 'utf8' }).trim().split(':');
-  if (String(process.env.SUDO_UID) !== line[2] || process.getuid() === Number(line[2])) throw new Error('Lead action caller is not the configured agent account');
+  const line = execFileSync('/usr/bin/getent', ['passwd', agent], { encoding: 'utf8' }).trim().split(':');
+  if (String(sudoUid) !== line[2] || process.getuid() === Number(line[2])) throw new Error('Lead action caller is not the configured agent account');
 } else if (process.env.ORCH_LEAD_LOCAL !== '1') throw new Error('Local lead action requires the service-account client');
 const [action, ...args] = process.argv.slice(2);
 const ticket = (value) => typeof value === 'string' && /^[A-Z][A-Z0-9]*-[1-9][0-9]*$/.test(value);

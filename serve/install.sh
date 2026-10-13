@@ -64,6 +64,18 @@ if [ "${CLEARED_INSTALL_FROM_WAKE:-}" != 1 ]; then
 fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
+chmod go-w "$named"
+# The agent-to-service lead bridge reads this fixed service-owned pointer,
+# independent of an agent-supplied XDG_CONFIG_HOME.
+service_named="$HOME/.config/cleared/project"
+mkdir -p "$(dirname "$service_named")"
+chmod go-w "$(dirname "$service_named")"
+if [ "$named" != "$service_named" ]; then
+  printf '%s\n' "$project" > "$service_named"
+  chmod go-w "$service_named"
+fi
+printf '%s\n' "$ORCH_STATE_DIR" > "$HOME/.config/cleared/state"
+chmod go-w "$HOME/.config/cleared/state"
 mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
 # The service keeps its state private. Account creation and sudo grants are
 # administrator actions, never an installer side effect.
@@ -87,7 +99,8 @@ if [ -n "$agent_user" ]; then
   if ! sudo -n -u "$agent_user" -- true 2>/dev/null; then
     die "Configure noninteractive sudo from the service account to $agent_user for the harness CLIs; see docs/security.md"
   fi
-  for protected in "$ORCH_STATE_DIR" "$ORCH_HOME" "$project" "$ORCH_CONF"; do
+  for protected in "$ORCH_STATE_DIR" "$ORCH_HOME" "$project" "$ORCH_CONF" "$HOME" "$HOME/.config/cleared" "$HOME/.local/bin"; do
+    [ -e "$protected" ] || continue
     if sudo -n -u "$agent_user" -- test -w "$protected" 2>/dev/null; then
       die "$agent_user can write protected path $protected: remove that access before installing"
     fi
@@ -107,6 +120,23 @@ if [ -n "$agent_user" ]; then
     node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1; then
     die "Configure the narrow agent-to-service sudo rule for serve/lead-actions.mjs; see docs/security.md"
   fi
+  # NODE_OPTIONS runs before lead-actions.mjs can scrub the environment. Prove
+  # sudoers drops it, including when an agent explicitly asks sudo to keep env.
+  env_probe=$(mktemp -d)
+  chmod 755 "$env_probe"
+  : > "$env_probe/marker"
+  chmod 600 "$env_probe/marker"
+  cat > "$env_probe/probe.cjs" <<EOF
+if (process.getuid() === $(id -u)) require('node:fs').writeFileSync('$env_probe/marker', 'injected');
+EOF
+  chmod 644 "$env_probe/probe.cjs"
+  sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+    node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1 || die "The lead client failed the sudo environment probe"
+  sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" \
+    sudo -n -E -u "$(id -un)" /usr/bin/node "$ORCH_HOME/serve/lead-actions.mjs" ping > /dev/null 2>&1 || true
+  [ ! -s "$env_probe/marker" ] || die "The reverse sudo rule preserves NODE_OPTIONS; require env_reset and forbid SETENV"
+  rm -f "$env_probe/marker" "$env_probe/probe.cjs"
+  rmdir "$env_probe"
 fi
 chmod o-w "$ORCH_STATE_DIR"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do

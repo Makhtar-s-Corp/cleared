@@ -4,13 +4,13 @@ import { lstatSync, statSync } from 'node:fs';
 import { loadConf, stateDir } from './lib/conf.mjs';
 const [operation, ticket, pr, ...flags] = process.argv.slice(2);
 if (!['request_release', 'request_rollback', 'status'].includes(operation) || !ticket) {
-  console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [APPROVAL_COMMENT] | status TICKET'); process.exit(64);
+  console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [--approval-comment ID] | status TICKET'); process.exit(64);
 }
 const path = process.env.CLEARED_RELEASE_SOCKET || loadConf().sections.security?.socket_path || `${stateDir()}/release.sock`;
 try {
   const socket = lstatSync(path);
   if (!socket.isSocket() || socket.uid !== statSync(stateDir()).uid) throw new Error('socket is not owned by the service account');
-} catch (error) { console.error(`release broker: ${error.message}`); process.exit(1); }
+} catch (error) { console.error(`release broker is not running or its socket is unsafe; run serve/install.sh (${error.message})`); process.exit(69); }
 let announcement = '';
 if (operation === 'request_release') for await (const chunk of process.stdin) announcement += chunk;
 const request = { operation, ticket };
@@ -46,6 +46,6 @@ client.on('connect', () => client.end(JSON.stringify(request)));
 client.on('data', (chunk) => reply += chunk);
 client.on('end', () => {
   try { const result = JSON.parse(reply); const message = result.output || result.reason || JSON.stringify(result); (result.ok ? console.log : console.error)(message); process.exitCode = result.code ?? (result.ok ? 0 : 1); }
-  catch { console.error('Invalid release broker reply'); process.exitCode = 1; }
+  catch { console.error('Invalid release broker reply'); process.exitCode = 69; }
 });
-client.on('error', (error) => { console.error(`release broker: ${error.message}`); process.exitCode = 1; });
+client.on('error', (error) => { console.error(`release broker unavailable: ${error.message}`); process.exitCode = 69; });

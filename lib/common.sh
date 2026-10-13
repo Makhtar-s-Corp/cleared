@@ -470,9 +470,7 @@ open_queued_merges() {
     fi
     case "$code" in
       0) rm -f "$entry" "$queue/$pr.announcement.md"; return 0 ;;
-      1) # Broker unavailable: retain the approved queue entry for the next wake.
-        ;;
-      5)
+      1|5|69)
         # It does not wait for ever. Only a time in the form merge-pr.sh
         # writes counts: anything else is no time, and it leaves too.
         since=$(jq -r '.at // ""' "$entry")

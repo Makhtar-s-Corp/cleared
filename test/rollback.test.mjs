@@ -264,6 +264,16 @@ test('a remote owner comment must be fresh, unedited and name the exact merge', 
   assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(60000, new Date().toISOString())), row, 'c1'), /verified human/);
   assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(60000, null, 'Rollback another merge')), row, 'c1'), /verified human/);
   assert.equal(authorizeManualRollback(x.conf, x.db, tracker(comment(60000)), row, 'c1'), 'human');
+  const previous = process.env.ORCH_BROKER_AGENT_REQUEST;
+  process.env.ORCH_BROKER_AGENT_REQUEST = '1';
+  try {
+    const sharedIdentity = { whoAmI: () => ({ kind: 'human', id: 'human' }), comments: () => [comment(60000)] };
+    assert.throws(() => authorizeManualRollback(x.conf, x.db, sharedIdentity, row, 'c1'), /verified human/);
+    assert.equal(authorizeManualRollback(x.conf, x.db, tracker(comment(60000)), row, 'c1'), 'human');
+  } finally {
+    if (previous === undefined) delete process.env.ORCH_BROKER_AGENT_REQUEST;
+    else process.env.ORCH_BROKER_AGENT_REQUEST = previous;
+  }
 });
 
 test('direct automatic rollback is refused without a live failed watch', (t) => {

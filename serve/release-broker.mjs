@@ -36,7 +36,10 @@ if (agentName) {
   try { writable = execFileSync('sudo', ['-n', '-u', agentName, '--', 'find', state, '-writable', '-print', '-quit'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
   catch { /* No traversal means there is no reachable writable path. */ }
   if (writable) throw new Error(`Agent account can write Cleared state: ${writable}`);
-  for (const protectedPath of [home, repo, process.env.ORCH_CONF || join(repo, '.cleared', 'agents.conf')]) {
+  const serviceHome = execFileSync('getent', ['passwd', String(serviceUid)], { encoding: 'utf8' }).trim().split(':')[5];
+  for (const protectedPath of [home, repo, process.env.ORCH_CONF || join(repo, '.cleared', 'agents.conf'), serviceHome,
+    join(serviceHome, '.config', 'cleared'), join(serviceHome, '.local', 'bin')]) {
+    if (!existsSync(protectedPath)) continue;
     try { execFileSync('sudo', ['-n', '-u', agentName, '--', 'test', '!', '-w', protectedPath]); }
     catch { throw new Error(`Agent account can write protected path or cannot be verified: ${protectedPath}`); }
   }
@@ -108,7 +111,7 @@ async function handle(input, uid) {
       if (typeof input.approval_request === 'string') {
         if (!input.approval_request.trim() || input.approval_request.length > 20000) return reject('Invalid approval request');
         const prs = Array.isArray(input.approval_prs) ? input.approval_prs : [pr];
-        if (!prs.includes(pr) || prs.some((n) => !Number.isSafeInteger(n) || n <= 0)) return reject('Invalid approval PRs');
+        if (!prs.includes(pr) || prs.length > 8 || prs.some((n) => !Number.isSafeInteger(n) || n <= 0)) return reject('Invalid approval PRs');
         const captures = input.captures || [];
         if (!Array.isArray(captures) || captures.length > 8 || captures.some((c) => typeof c?.path !== 'string' || typeof c?.caption !== 'string' || c.path.length > 1000 || c.caption.length > 200)) return reject('Invalid captures');
         const result = await command(join(home, 'ask-validation.sh'), [ticket, '-', ...prs.flatMap((n) => ['--pr', String(n)]), ...captures.flatMap((c) => ['--capture', c.path, c.caption])], input.approval_request);
@@ -147,8 +150,10 @@ const server = net.createServer({ allowHalfOpen: true }, (socket) => {
   let uid;
   try { uid = peerUid(socket); } catch { socket.end(JSON.stringify({ ok: false, reason: 'Cannot identify peer UID' }) + '\n'); return; }
   let data = '';
-  socket.on('data', (chunk) => { data += chunk; if (data.length > 25000) socket.destroy(); });
+  socket.setTimeout(5000, () => socket.destroy());
+  socket.on('data', (chunk) => { data += chunk; if (data.length > 256000) socket.destroy(); });
   socket.on('end', async () => {
+    socket.setTimeout(0);
     let reply;
     try { reply = await handle(JSON.parse(data), uid); }
     catch (error) {
