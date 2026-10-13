@@ -1,6 +1,8 @@
 // The real source: reads the ledger (read only), the tracker through its
-// contract, `cleared status --json` and the quota summary. It never writes.
+// contract, `cleared status --json` and the quota summary. It writes nothing itself.
 // Only an allowlist of fields leaves this file; no path, no secret, no cost.
+// One thing is not a pure read: `cleared status` (the health box) records its own
+// heartbeat state in the ledger, as it does from a terminal. See docs/app.md.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { basename, join } from 'node:path';
@@ -21,7 +23,7 @@ export function scrub(text, max = 400) {
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/gi, '[credentials]@')
     .replace(/\b(?:sk-|ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|xox[a-z]-|lin_api_|AKIA)[A-Za-z0-9_-]{8,}/g, '[secret]')
     .replace(/\b[A-Za-z0-9_-]{32,}\b/g, '[secret]')
-    .replace(/\d+(?:[.,]\d+)?\s?(?:\$|€|USD|EUR|dollars?|euros?)|(?:\$|€)\s?\d+(?:[.,]\d+)?/gi, '[amount]')
+    .replace(/(?:\b(?:USD|EUR)\s?)?\d[\d\s\u202f.,]*\d?\s?(?:\$|€|\bUSD\b|\bEUR\b|dollars?|euros?)|(?:\$|€|\bUSD\b|\bEUR\b)\s?\d[\d\s\u202f.,]*\d?/gi, '[amount]')
     .slice(0, max);
 }
 
@@ -52,7 +54,8 @@ export function statusLineOf({ handover, reviews, column, waiting, reason, langu
   if (waiting) return reason;
   return column ? message(`app_srv_line_${column}`, language) : '';
 }
-const sentences = (text, n = 3) => (String(text).replace(/^#+.*$/gm, ' ').replace(/[`*_>#-]/g, ' ').match(/[^.!?\n]+[.!?]/g) ?? []).map((s) => scrub(s.trim(), 220)).filter((s) => s.length > 8).slice(0, n);
+// Filtered first, split after: splitting on a dot would cut an amount or a path in pieces the filter no longer recognises.
+const sentences = (text, n = 3) => (scrub(String(text).replace(/^#+.*$/gm, ' '), 4000).replace(/[`*>#]/g, ' ').match(/[^.!?\n]+[.!?]/g) ?? []).map((x) => x.trim().slice(0, 220)).filter((x) => x.length > 8).slice(0, n);
 const section_ = (text, heading) => new RegExp(`## ${heading}\\n([\\s\\S]*?)(?=\\n## |$)`).exec(text)?.[1] ?? '';
 
 export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTtlMs = 60000 } = {}) {
@@ -98,8 +101,8 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
     try { return db().prepare("SELECT content FROM memory_entries WHERE type = 'handover' AND scope = ? ORDER BY rowid DESC LIMIT 1").get(`ticket:${id}`)?.content ?? ''; } catch { return ''; }
   };
   const prUrl = (number) => {
-    if (!number || !tracker.repository) return null;
-    return `https://github.com/${scrub(tracker.repository, 100)}/pull/${Number(number)}`;
+    if (!number || !/^[\w.-]+\/[\w.-]+$/.test(tracker.repository ?? '')) return null;
+    return `https://github.com/${tracker.repository}/pull/${Number(number)}`;
   };
 
   function card(t, weekTokens) {
@@ -156,7 +159,7 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
       const ref = tracker.adapter === 'local' && /^\d+$/.test(id) ? `LOCAL-${id}` : id;
       let t;
       try { t = issues().getTicket(ref); } catch { return null; }
-      if (!t) return null;
+      if (!t || ![states.progress, states.review, states.validate, states.go].includes(t.status ?? t.state)) return null;
       const runs = runsOf(ref);
       const handover = handoverOf(ref);
       const comments = (() => { try { return issues().comments(ref); } catch { return []; } })();
@@ -165,11 +168,15 @@ export function liveSource({ conf = loadConf(), now = () => Date.now(), statusTt
       const seen = new Set();
       const squad = runs.map((r) => ({ role: roleName(r.role), harness: scrub(r.provider, 40), model: scrub(r.model || r.requested_model, 60) }))
         .filter((s) => s.model && !seen.has(`${s.role}/${s.model}`) && seen.add(`${s.role}/${s.model}`));
-      const images = comments.flatMap((c) => (c.images ?? []).map((ref_) => ({ digest: /[a-f0-9]{64}/.exec(String(ref_))?.[0], text: c.body ?? '' }))).filter((i) => i.digest);
+      // The request posts its captures in the text: **Caption** then ![Caption](local://capture/<digest>).
+      const inText = comments.flatMap((c) => [...String(c.body ?? '').matchAll(/(?:\*\*([^*\n]{1,80})\*\*\s*)?!\[([^\]\n]{0,80})\]\(local:\/\/capture\/([a-f0-9]{64})\)/g)]
+        .map((m) => ({ digest: m[3], text: m[1] || m[2] || '' })));
+      const images = [...comments.flatMap((c) => (c.images ?? []).map((ref_) => ({ digest: /[a-f0-9]{64}/.exec(String(ref_))?.[0], text: c.body ?? '' }))), ...inText].filter((i) => i.digest)
+        .filter((i, n, all) => all.findIndex((o) => o.digest === i.digest) === n);
       const show = images.length
         ? { kind: 'screen',
-          before: images.filter((i) => /before|avant/i.test(i.text)).map((i) => ({ url: `/media/${i.digest}`, caption: 'Before' })),
-          after: images.filter((i) => !/before|avant/i.test(i.text)).map((i) => ({ url: `/media/${i.digest}`, caption: 'After' })) }
+          before: images.filter((i) => /before|avant/i.test(i.text)).map((i) => ({ url: `/media/${i.digest}`, caption: scrub(i.text, 80) || 'Before' })),
+          after: images.filter((i) => !/before|avant/i.test(i.text)).map((i) => ({ url: `/media/${i.digest}`, caption: scrub(i.text, 80) || 'After' })) }
         : { kind: 'code', example: exampleOf(`${handover}\n${request?.body ?? ''}`), tests: testsOf(handover), touches: sentences(section_(handover, 'Done'), 1)[0] ?? '' };
       const blackBox = [
         ...runs.map((r) => ({ at: r.started_at, kind: r.role === 'review' ? 'review' : 'run', text: describeRun(r, language), raw: { kind: 'run', role: scrub(r.role, 20), outcome: scrub(r.outcome, 40), at: r.started_at } })),

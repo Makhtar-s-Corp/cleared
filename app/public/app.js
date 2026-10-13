@@ -93,6 +93,7 @@ async function openTicket(id) {
     const r = await fetch(`/api/tickets/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
     if (!r.ok) throw new Error('x');
     const d = await r.json();
+    if (state.open !== id) return; // another ticket was opened meanwhile
     $('ph-title').textContent = `${d.id} · ${d.title}`;
     $('ph-body').replaceChildren(...porthole(d));
     $('ph-close').focus();
@@ -164,7 +165,11 @@ function live() {
   const stamp = () => { clearTimeout(beat); beat = setTimeout(() => { state.reason = 'link'; connection(false); }, 40000); connection(true); };
   for (const type of ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'heartbeat'])
     source.addEventListener(type, (m) => { const e = JSON.parse(m.data); stamp(); if (e.type !== 'heartbeat') apply(e); else state.last = e.at; });
-  source.onerror = () => { state.reason = 'link'; connection(false); };
+  source.onerror = async () => {
+    state.reason = 'link'; connection(false);
+    // A restart or an expired session refuses the stream: go back to sign in instead of staying "lost".
+    try { if ((await fetch('/api/snapshot', { credentials: 'same-origin' })).status === 401) location.replace('/login'); } catch { /* still unreachable */ }
+  };
 }
 
 (async () => {

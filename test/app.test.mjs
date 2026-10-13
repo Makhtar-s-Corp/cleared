@@ -299,3 +299,26 @@ test('the old dashboard address redirects to the app when one is configured, and
   process.env.CLEARED_APP_URL = 'http://100.64.0.9:8788/';
   try { assert.deepEqual(await ask(), [302, 'http://100.64.0.9:8788/']); } finally { delete process.env.CLEARED_APP_URL; }
 });
+
+test('what the app shows in "Where we are" is filtered before it is cut into sentences, and captures written in a request are found', async () => {
+  const dir = scratch();
+  process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
+  const { openLedger } = await import('../lib/ledger.mjs');
+  const { LocalTracker } = await import('../lib/tracker/adapters/local.mjs');
+  const { liveSource } = await import('../app/sources/live.mjs');
+  const db = openLedger();
+  const conf = { sections: { owner: { language: 'en' }, tracker: { adapter: 'local', agents_uid: '999999', owner_id: 'nobody', todo_state: 'Todo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship', done_state: 'Done' } } };
+  const tracker = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'x' } });
+  const at = new Date().toISOString();
+  db.prepare('INSERT INTO tracker_tickets(title, body, labels, status, created_at, updated_at) VALUES (?,?,?,?,?,?)').run('A screen change', '', '[]', 'Needs Approval', at, at);
+  db.prepare('INSERT INTO tracker_tickets(title, body, labels, status, created_at, updated_at) VALUES (?,?,?,?,?,?)').run('Closed one', '', '[]', 'Done', at, at);
+  const a = 'a'.repeat(64), b = 'b'.repeat(64);
+  tracker.comment('LOCAL-1', `Do you agree? The lane has cost 12.40 $ at list price. EUR 12.40 too, and 1 044,50 € more. See /home/jean-luc/orca-workspaces/shop-app/logs and xoxb-1234567890-AbCdEfGhIjKl.\n\n**Before**\n\n![Before](local://capture/${a})\n\n**After**\n\n![After](local://capture/${b})\n`);
+  db.close();
+  const detail = await liveSource({ conf }).ticket('1');
+  const shown = JSON.stringify(detail.where);
+  assert.doesNotMatch(shown, /12[.,]40|1 044|xoxb|jean|luc|orca-workspaces|\$|€|EUR/);
+  assert.deepEqual([detail.show.before.map((i) => i.url), detail.show.after.map((i) => i.url)], [[`/media/${a}`], [`/media/${b}`]]);
+  assert.equal(await liveSource({ conf }).ticket('2'), null, 'a closed ticket is not served');
+  delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
+});

@@ -22,8 +22,8 @@ if (args.some((a, i) => a.startsWith('--') && !known.includes(a)) ) { console.er
 const demo = flag('--demo');
 const conf = demo ? { sections: {} } : loadConf();
 const settings = section(conf, 'app');
-const port = Number(value('--port') ?? settings.port ?? 8788);
-const bind = value('--bind') ?? settings.bind ?? '127.0.0.1';
+const port = Number(value('--port') || settings.port || 8788);
+const bind = value('--bind') || settings.bind || '127.0.0.1';
 const tokenFile = expandHome(settings.token_file || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'cleared', 'app-token'));
 let ranges;
 try { ranges = checkRanges(settings.ranges ? settings.ranges.split(/[\s,]+/).filter(Boolean) : [...TAILSCALE, '127.0.0.0/8', '::1/128']); }
