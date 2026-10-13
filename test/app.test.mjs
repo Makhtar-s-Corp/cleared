@@ -378,6 +378,14 @@ test('missing, stale and unknown-version snapshots are visible as health problem
     snap.schema = 1; delete snap.owner;
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
     assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    snap.owner = { name: 'Owner' }; snap.generatedAt = new Date().toISOString();
+    snap.details[snap.tickets[0].id] = {};
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    snap.details = (await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot()).details;
+    snap.fuel = [null];
+    writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
+    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
   } finally { f.close(); }
 });
 
@@ -415,18 +423,18 @@ test('ticket text and health names cannot put secrets, amounts or host paths in 
   const f = await boardFixture();
   try {
     const secret = 'ghp_' + 'A'.repeat(30);
-    const ticket = { id: 'LOCAL-1', identifier: 'LOCAL-1', title: `Saved /data/customer/private.key ${secret} for £12.40`, status: 'Needs Approval' };
+    const ticket = { id: 'LOCAL-1', identifier: 'LOCAL-1', title: `Saved /data/customer/private.key ${secret} for £-12.40 and GBP -8.25`, status: 'Needs Approval' };
     f.trackerClient.listTickets = ({ status }) => status === 'Needs Approval' ? [ticket] : [];
     f.trackerClient.getTicket = () => ticket;
-    f.trackerClient.comments = () => [{ body: `Agree with /data/customer/private.key and ${secret}? Costs £12.40.` }];
+    f.trackerClient.comments = () => [{ body: `Agree with /data/customer/private.key and ${secret}? Costs -12.40 GBP.` }];
     await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
     const disk = readFileSync(join(f.dir, 'snapshot.json'), 'utf8');
-    assert.doesNotMatch(disk, /\/data\/customer|ghp_|12\.40|£/);
+    assert.doesNotMatch(disk, /\/data\/customer|ghp_|12\.40|8\.25|GBP|£/);
     const { openLedger } = await import('../lib/ledger.mjs');
     const db = openLedger();
     db.prepare('INSERT INTO heartbeat_incidents VALUES (?,?,?,1)').run(`service_unreachable:/home/private/${secret}`, new Date().toISOString(), new Date().toISOString());
     db.close();
-    assert.doesNotMatch(JSON.stringify(await liveSource({ conf: f.conf, dir: f.dir }).snapshot()), /\/data\/customer|ghp_|12\.40|£/);
+    assert.doesNotMatch(JSON.stringify(await liveSource({ conf: f.conf, dir: f.dir }).snapshot()), /\/data\/customer|ghp_|12\.40|8\.25|GBP|£/);
   } finally { f.close(); }
 });
 

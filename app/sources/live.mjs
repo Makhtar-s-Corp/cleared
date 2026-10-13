@@ -9,18 +9,47 @@ import { scrub } from '../../lib/board-scrub.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const string = (value) => typeof value === 'string';
+const time = (value) => string(value) && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
+const mediaUrl = (value) => string(value) && /^\/media\/[a-f0-9]{64}$/.test(value);
+const validDetail = (detail) => record(detail) && string(detail.id) && string(detail.title)
+  && string(detail.column) && string(detail.kind) && typeof detail.waiting === 'boolean'
+  && Number.isFinite(detail.flightMinutes) && Number.isFinite(detail.quotaShare)
+  && Array.isArray(detail.where) && detail.where.every(string)
+  && Array.isArray(detail.squad) && detail.squad.every((entry) => record(entry)
+    && string(entry.role) && string(entry.harness) && string(entry.model))
+  && record(detail.show) && (
+    detail.show.kind === 'screen'
+      ? ['before', 'after'].every((side) => Array.isArray(detail.show[side])
+        && detail.show[side].every((image) => record(image) && mediaUrl(image.url) && string(image.caption)))
+      : detail.show.kind === 'code' && Array.isArray(detail.show.tests)
+        && detail.show.tests.every((test) => record(test) && string(test.name) && string(test.change) && string(test.state))
+        && (detail.show.example === null || record(detail.show.example)) && string(detail.show.touches))
+  && Array.isArray(detail.blackBox) && detail.blackBox.every((event) => record(event)
+    && time(event.at) && string(event.text) && string(event.stage) && record(event.raw));
 export function validBoard(value) {
-  return record(value) && value.schema === 1 && typeof value.project === 'string'
-    && Array.isArray(value.projects) && ['en', 'fr'].includes(value.language)
-    && Number.isFinite(Date.parse(value.generatedAt)) && record(value.owner) && typeof value.owner.name === 'string'
+  return record(value) && value.schema === 1 && string(value.project)
+    && Array.isArray(value.projects) && value.projects.every((project) => record(project) && string(project.id) && string(project.name))
+    && ['en', 'fr'].includes(value.language) && time(value.generatedAt)
+    && record(value.owner) && string(value.owner.name)
     && record(value.stats) && Number.isFinite(value.stats.inFlight)
     && (value.stats.firstTimeClean === null || Number.isFinite(value.stats.firstTimeClean))
-    && Array.isArray(value.landed) && Array.isArray(value.fuel) && Array.isArray(value.tickets)
-    && record(value.details) && record(value.mode) && typeof value.mode.short === 'string'
-    && typeof value.mode.label === 'string' && record(value.health) && Array.isArray(value.health.problems)
+    && Array.isArray(value.landed) && value.landed.every((row) => record(row) && time(row.at)
+      && string(row.id) && string(row.title) && string(row.model) && string(row.harness)
+      && Number.isFinite(row.fixes) && (row.rolledBackAt === null || time(row.rolledBackAt)) && Number.isFinite(row.share))
+    && Array.isArray(value.fuel) && value.fuel.every((entry) => record(entry) && string(entry.adapter)
+      && typeof entry.measured === 'boolean' && (!entry.measured || Number.isFinite(entry.left)))
+    && Array.isArray(value.tickets) && record(value.details)
+    && record(value.mode) && string(value.mode.short) && string(value.mode.label)
+    && record(value.health) && Array.isArray(value.health.problems)
+    && value.health.problems.every((entry) => record(entry) && string(entry.message))
     && value.tickets.every((ticket) => record(ticket) && /^[A-Za-z0-9._-]{1,40}$/.test(ticket.id)
-      && typeof ticket.title === 'string' && typeof ticket.column === 'string' && Object.hasOwn(value.details, ticket.id))
-    && Object.values(value.details).every(record);
+      && string(ticket.title) && ['progress', 'checks', 'review', 'awaiting'].includes(ticket.column)
+      && string(ticket.kind) && string(ticket.model) && string(ticket.statusLine)
+      && Number.isFinite(ticket.flightMinutes) && Number.isFinite(ticket.quotaShare)
+      && (ticket.captures === null || record(ticket.captures) && mediaUrl(ticket.captures.before) && mediaUrl(ticket.captures.after))
+      && Object.hasOwn(value.details, ticket.id) && validDetail(value.details[ticket.id]))
+    && Object.values(value.details).every(validDetail);
 }
 export function liveSource({ conf = loadConf(), now = () => Date.now(), dir = stateDir() } = {}) {
   const language = section(conf, 'owner').language || 'en';
