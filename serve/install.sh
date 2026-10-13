@@ -77,4 +77,4 @@ systemctl --user restart cleared-dashboard.service cleared-app.service
 sleep 1
 "$here/check.sh"
 echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
-echo "Access token: run '$ORCH_HOME/cleared app --link' on this machine to print the sign-in address; the token file stays outside the project."
+echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."

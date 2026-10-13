@@ -30,4 +30,10 @@ fi
 
 listening=$(ss -ltnH "sport = :$port" | awk '{print $4}' | sort -u | paste -sd' ')
 say "listening addresses" "$listening" "$address:$port"
+app_listening=$(ss -ltnH "sport = :$app_port" | awk '{print $4}' | sort -u | paste -sd' ')
+say "listening addresses of the app" "$app_listening" "$address:$app_port"
+if [ -n "$container" ]; then
+  app_from_container=$(docker exec "$container" wget -q -O /dev/null --timeout=4 "http://$address:$app_port/" 2>&1 | grep -o -E '403|refused|timed out|bad address|unreachable' | head -n 1)
+  say "a container, to the app" "$app_from_container" 403
+fi
 exit "$failed"

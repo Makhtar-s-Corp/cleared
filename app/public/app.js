@@ -19,7 +19,7 @@ const dur = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 
 const mono = (text) => el('span', { className: 'mono', textContent: text });
 
 const COLUMNS = ['progress', 'checks', 'review', 'awaiting'];
-const state = { snap: null, last: null, open: null, project: null, connected: false };
+const state = { snap: null, last: null, open: null, project: null, connected: false, opener: null };
 
 function theme() {
   const saved = (() => { try { return localStorage.getItem('cleared-theme'); } catch { return null; } })();
@@ -50,7 +50,7 @@ function card(ticket) {
     el('span', { textContent: `${ticket.harness} · ${ticket.model}`.replace(/^ · $/, '') }),
     el('span', { textContent: `✈ ${dur(ticket.flightMinutes)}` }),
     el('span', { textContent: `${String(ticket.quotaShare).replace('.', locale() === 'fr-FR' ? ',' : '.')} % ${t('app_quota')}` }));
-  const btn = el('button', { type: 'button', ariaLabel: `${ticket.id}, ${ticket.title}` },
+  const btn = el('button', { type: 'button' },
     el('span', { className: 'id', textContent: ticket.id }), el('span', { className: 'title', textContent: ticket.title }), meta,
     el('span', { className: 'line', textContent: ticket.queued ? ticket.reason : ticket.waiting ? `${t('app_waiting')}: ${ticket.reason}` : ticket.statusLine }));
   btn.addEventListener('click', () => openTicket(ticket.id));
@@ -66,10 +66,24 @@ function renderTower(s) {
       mine.length ? el('ul', { className: 'cards' }, ...mine.map(card)) : el('p', { className: 'empty', textContent: t('app_none') }));
   }));
 }
-function render(s) { state.snap = s; renderTop(s); renderTower(s); }
+// Redrawing keeps the keyboard where it was, and skips what did not change.
+let shown = { top: '', tower: '' };
+function render(s) {
+  state.snap = s;
+  const top = JSON.stringify([s.projects, s.fuel, s.health, s.mode]);
+  const tower = JSON.stringify(s.tickets);
+  if (top !== shown.top) { shown.top = top; renderTop(s); }
+  if (tower !== shown.tower) {
+    shown.tower = tower;
+    const focused = document.activeElement?.closest?.('.card')?.dataset.id;
+    renderTower(s);
+    if (focused) document.querySelector(`.card[data-id="${CSS.escape(focused)}"] button`)?.focus();
+  }
+}
 
 async function openTicket(id) {
   const ph = $('porthole');
+  state.opener = document.activeElement;
   state.open = id;
   ph.hidden = false;
   document.body.classList.add('has-ph');
@@ -84,16 +98,24 @@ async function openTicket(id) {
     $('ph-close').focus();
   } catch { $('ph-body').replaceChildren(el('p', { className: 'bad', textContent: t('app_unavailable') })); }
 }
-function closeTicket() { $('porthole').hidden = true; document.body.classList.remove('has-ph'); state.open = null; }
+function closeTicket() {
+  $('porthole').hidden = true; document.body.classList.remove('has-ph'); state.open = null;
+  const back = state.opener?.isConnected ? state.opener : document.querySelector('.card button');
+  back?.focus(); state.opener = null;
+}
 $('ph-close').addEventListener('click', closeTicket);
-addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (!$('zoom').hidden) $('zoom').hidden = true; else closeTicket(); } });
+function closeZoom() { $('zoom').hidden = true; state.zoomer?.focus(); }
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { if (!$('zoom').hidden) closeZoom(); else if (!$('porthole').hidden) closeTicket(); }
+  if (e.key === 'Tab' && !$('zoom').hidden) { e.preventDefault(); $('zoom-close').focus(); } // the enlarged capture holds the focus
+});
 
 function figure(img) {
   const b = el('button', { type: 'button', ariaLabel: `${t('app_enlarge')}: ${img.caption}` }, el('img', { src: img.url, alt: img.caption }));
-  b.addEventListener('click', () => { $('zoom').querySelector('img').src = img.url; $('zoom').querySelector('img').alt = img.caption; $('zoom').hidden = false; $('zoom-close').focus(); });
+  b.addEventListener('click', () => { state.zoomer = b; $('zoom').querySelector('img').src = img.url; $('zoom').querySelector('img').alt = img.caption; $('zoom').hidden = false; $('zoom-close').focus(); });
   return el('figure', {}, b, el('figcaption', { textContent: img.caption }));
 }
-$('zoom-close').addEventListener('click', () => { $('zoom').hidden = true; });
+$('zoom-close').addEventListener('click', closeZoom);
 
 function porthole(d) {
   const out = [];
@@ -123,7 +145,7 @@ function connection(ok) {
   state.connected = ok;
   const c = $('conn');
   c.hidden = ok;
-  if (!ok) c.textContent = state.last ? t('app_lost', { time: clock(state.last) }) : t('app_connecting');
+  if (!ok) c.textContent = state.last ? t(state.reason === 'data' ? 'app_data_unavailable' : 'app_lost', { time: clock(state.last) }) : t('app_connecting');
 }
 function apply(e) {
   state.last = e.at;
@@ -138,21 +160,23 @@ function apply(e) {
 }
 function live() {
   const source = new EventSource('/events');
-  let beat = setTimeout(() => connection(false), 40000);
-  const stamp = () => { clearTimeout(beat); beat = setTimeout(() => connection(false), 40000); connection(true); };
+  let beat = setTimeout(() => { state.reason = 'data'; connection(false); }, 40000);
+  const stamp = () => { clearTimeout(beat); beat = setTimeout(() => { state.reason = 'link'; connection(false); }, 40000); connection(true); };
   for (const type of ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'heartbeat'])
     source.addEventListener(type, (m) => { const e = JSON.parse(m.data); stamp(); if (e.type !== 'heartbeat') apply(e); else state.last = e.at; });
-  source.onerror = () => connection(false);
+  source.onerror = () => { state.reason = 'link'; connection(false); };
 }
 
 (async () => {
   theme();
   try { M = await (await fetch('/api/messages', { credentials: 'same-origin' })).json(); } catch { /* English keys */ }
-  const first = await fetch('/api/snapshot', { credentials: 'same-origin' });
-  if (first.status === 401) return location.replace('/login');
+  const first = await fetch('/api/snapshot', { credentials: 'same-origin' }).catch(() => null);
+  if (first?.status === 401) return location.replace('/login');
+  if (!first?.ok) { state.reason = 'data'; connection(false); $('conn').textContent = t('app_connecting'); live(); return; }
   const s = await first.json();
   document.documentElement.lang = s.language === 'fr' ? 'fr' : 'en';
   for (const n of document.querySelectorAll('[data-i]')) n.textContent = t(n.dataset.i);
+  $('zoom').setAttribute('aria-label', t('app_ph_close_zoom'));
   state.last = s.generatedAt;
   render(s);
   live();

@@ -1,6 +1,6 @@
 // Who may talk to the app: the peer address (same ranges as the old dashboard),
 // the Host header (against DNS rebinding) and a private access token.
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isIP } from 'node:net';
@@ -53,4 +53,23 @@ export function cookieToken(header) {
 export function bearerToken(header) {
   const match = /^Bearer\s+(\S+)$/i.exec(String(header || ''));
   return match ? match[1] : '';
+}
+
+// The cookie never holds the token: it holds a value derived from it with a
+// secret drawn at each start, so a cookie sent to another service on this
+// machine cannot be used as the token, and a restart ends every session.
+export const sessionSecret = () => randomBytes(32);
+export const sessionValue = (token, secret) => createHmac('sha256', secret).update(`cleared-app-session:${token}`).digest('hex');
+
+// A range must be written address/length. An entry without a length would
+// match every address of its family: refused rather than guessed.
+export function checkRanges(ranges) {
+  for (const range of ranges) {
+    const [network, length, extra] = range.split('/');
+    const family = isIP(network);
+    const bits = Number(length);
+    if (!family || extra !== undefined || length === undefined || !/^\d{1,3}$/.test(length) || bits > (family === 4 ? 32 : 128))
+      throw new Error(`[app] ranges: "${range}" must be an address and a prefix length, like 100.64.0.0/10`);
+  }
+  return ranges;
 }

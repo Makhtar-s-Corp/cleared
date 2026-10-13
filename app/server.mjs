@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allowed, TAILSCALE, bearerToken, cookieToken, hostAllowed, sameToken } from './lib/access.mjs';
+import { allowed, TAILSCALE, bearerToken, cookieToken, hostAllowed, sameToken, sessionSecret, sessionValue } from './lib/access.mjs';
 import { diffSnapshots, envelope, frame } from './lib/events.mjs';
 import { message } from '../lib/i18n.mjs';
 import { readFileSync } from 'node:fs';
@@ -51,6 +51,15 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     catch { text(response, 503, message('http_unavailable', language)); }
   };
   const streams = new Set();
+  const secret = sessionSecret();
+  const session = sessionValue(token, secret);
+  // One read at a time, shared by every page: a slow source is never asked twice at once.
+  let reading = null, readAt = 0, cached = null;
+  const read = () => {
+    if (cached && Date.now() - readAt < pollMs / 2) return Promise.resolve(cached);
+    reading ??= Promise.resolve().then(() => source.snapshot()).then((value) => { cached = value; readAt = Date.now(); return value; }).finally(() => { reading = null; });
+    return reading;
+  };
 
   const server = createServer(async (request, response) => {
     if (!allowed(request.socket.remoteAddress, ranges)) return text(response, 403, message('http_forbidden', language), undefined, { connection: 'close' });
@@ -60,14 +69,13 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     let url;
     try { url = new URL(request.url, 'http://x'); } catch { return text(response, 400, message('http_bad_request', language)); }
     const path = url.pathname;
-    const given = bearerToken(request.headers.authorization) || cookieToken(request.headers.cookie);
-    const signedIn = sameToken(given, token);
+    const signedIn = sameToken(bearerToken(request.headers.authorization), token) || sameToken(cookieToken(request.headers.cookie), session);
 
     if (OPEN[path]) return send(response, request, OPEN[path]);
     if (path === '/session') {
       // Sign-in: the page sends the token in a header (never in the address) and gets a cookie back.
       if (!sameToken(bearerToken(request.headers.authorization), token)) return text(response, 401, 'Token required');
-      return text(response, 204, undefined, undefined, { 'set-cookie': `cleared_app=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000` });
+      return text(response, 204, undefined, undefined, { 'set-cookie': `cleared_app=${session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800` });
     }
     if (!signedIn) {
       if (path === '/' ) return text(response, 302, '', undefined, { location: '/login' });
@@ -75,7 +83,7 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     }
     try {
       if (FILES[path]) return await send(response, request, FILES[path]);
-      if (path === '/api/snapshot') return json(response, 200, await source.snapshot());
+      if (path === '/api/snapshot') return json(response, 200, await read());
       if (path === '/api/messages') return json(response, 200, MESSAGE_KEYS(language));
       const ticket = /^\/api\/tickets\/([A-Za-z0-9._-]{1,40})$/.exec(path);
       if (ticket) {
@@ -87,7 +95,7 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
         const image = await source.media?.(media[1]);
         return image ? text(response, 200, request.method === 'HEAD' ? undefined : image.body, image.mime) : text(response, 404, message('http_not_found', language));
       }
-      if (path === '/events') return stream(request, response);
+      if (path === '/events') return request.method === 'HEAD' ? text(response, 200, undefined, 'text/event-stream; charset=utf-8') : stream(request, response);
     } catch {
       // The reason stays in the server; the browser gets no detail, no path.
       return text(response, 503, message('http_unavailable', language));
@@ -98,21 +106,26 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
   async function stream(request, response) {
     response.writeHead(200, { ...HEADERS, 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     response.write('retry: 3000\n\n');
-    let last;
+    let last = null, healthy = false, busy = false, stopped = false;
     const tick = async () => {
+      if (busy || stopped) return;
+      busy = true;
       try {
-        const next = await source.snapshot();
+        const next = await read();
+        if (stopped) return;
         if (!last) response.write(frame(envelope('snapshot', next)));
         else for (const event of diffSnapshots(last, next)) response.write(frame(event));
-        last = next;
-      } catch { /* a failed read is silence, not a stale "fresh" update: the client sees the heartbeat stop */ }
+        last = next; healthy = true;
+      } catch { healthy = false; } // a failed read is silence: no heartbeat follows, so the page says the link is lost
+      finally { busy = false; }
     };
-    await tick();
     const poll = setInterval(tick, pollMs);
-    const beat = setInterval(() => response.write(frame(envelope('heartbeat', {}))), heartbeatMs);
-    const entry = { response, stop: () => { clearInterval(poll); clearInterval(beat); streams.delete(entry); } };
+    // The heartbeat only says "alive" while the reads succeed.
+    const beat = setInterval(() => { if (healthy) response.write(frame(envelope('heartbeat', {}))); }, heartbeatMs);
+    const entry = { response, stop: () => { stopped = true; clearInterval(poll); clearInterval(beat); streams.delete(entry); } };
     streams.add(entry);
     request.on('close', entry.stop);
+    await tick();
   }
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
   const close = server.close.bind(server);

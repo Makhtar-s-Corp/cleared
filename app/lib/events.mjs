@@ -23,6 +23,6 @@ export function diffSnapshots(before, after, now = Date.now()) {
   for (const ticket of after.tickets) if (!same(old.get(ticket.id), ticket)) events.push(envelope('ticket.updated', ticket, now));
   for (const id of old.keys()) if (!next.has(id)) events.push(envelope('ticket.removed', { id }, now));
   if (!same(before.fuel, after.fuel)) events.push(envelope('fuel.updated', after.fuel, now));
-  if (!same(before.health, after.health) || before.mode !== after.mode) events.push(envelope('health.updated', { health: after.health, mode: after.mode }, now));
+  if (!same(before.health, after.health) || !same(before.mode, after.mode)) events.push(envelope('health.updated', { health: after.health, mode: after.mode }, now));
   return events;
 }

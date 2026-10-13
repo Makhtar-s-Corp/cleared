@@ -15,6 +15,9 @@ const server = appServer({ source: demoSource(), token, ranges: ['127.0.0.0/8'],
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
+const signIn = await fetch(`http://127.0.0.1:${port}/session`, { headers: { authorization: `Bearer ${token}` } });
+const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie'))[1];
+
 const cache = join(process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright'));
 const bundled = existsSync(cache) ? readdirSync(cache).filter((d) => d.startsWith('chromium-')).map((d) => join(cache, d, 'chrome-linux64', 'chrome')).find(existsSync) : null;
 const executablePath = process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome';
@@ -23,7 +26,7 @@ const browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] }
 for (const width of [1440, 768, 390]) {
   for (const theme of ['light', 'dark']) {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme: theme, deviceScaleFactor: 1 });
-    await context.addCookies([{ name: 'cleared_app', value: token, url: `http://127.0.0.1:${port}` }]);
+    await context.addCookies([{ name: 'cleared_app', value: session, url: `http://127.0.0.1:${port}` }]);
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${port}/`);
     await page.waitForSelector('.card');

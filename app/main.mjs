@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadConf, projectDir, section, expandHome } from '../lib/conf.mjs';
 import { appServer } from './server.mjs';
-import { ensureToken, TAILSCALE } from './lib/access.mjs';
+import { checkRanges, ensureToken, TAILSCALE } from './lib/access.mjs';
 import { demoSource } from './sources/demo.mjs';
 import { liveSource } from './sources/live.mjs';
 
@@ -25,7 +25,9 @@ const settings = section(conf, 'app');
 const port = Number(value('--port') ?? settings.port ?? 8788);
 const bind = value('--bind') ?? settings.bind ?? '127.0.0.1';
 const tokenFile = expandHome(settings.token_file || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'cleared', 'app-token'));
-const ranges = settings.ranges ? settings.ranges.split(/[\s,]+/).filter(Boolean) : [...TAILSCALE, '127.0.0.0/8', '::1/128'];
+let ranges;
+try { ranges = checkRanges(settings.ranges ? settings.ranges.split(/[\s,]+/).filter(Boolean) : [...TAILSCALE, '127.0.0.0/8', '::1/128']); }
+catch (error) { console.error(`cleared app: ${error.message}`); process.exit(2); }
 const hosts = (settings.hosts ?? '').split(/[\s,]+/).filter(Boolean).map((h) => h.toLowerCase());
 if (!Number.isInteger(port) || port < 1 || port > 65535) { console.error('cleared app: invalid port'); process.exit(64); }
 

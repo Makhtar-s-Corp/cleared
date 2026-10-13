@@ -8,7 +8,8 @@ import { appServer, ROUTES } from '../app/server.mjs';
 import { demoSource } from '../app/sources/demo.mjs';
 import { describeRun, scrub, statusLineOf } from '../app/sources/live.mjs';
 import { diffSnapshots } from '../app/lib/events.mjs';
-import { ensureToken, hostAllowed, readToken, TAILSCALE } from '../app/lib/access.mjs';
+import { checkRanges, ensureToken, hostAllowed, readToken, TAILSCALE } from '../app/lib/access.mjs';
+import { spawnSync } from 'node:child_process';
 
 const TOKEN = 'a'.repeat(64);
 const dirs = [];
@@ -173,8 +174,10 @@ test('plain-language lines come from runs and events; nothing sensitive passes t
   assert.equal(describeRun({ role: 'dev', model: 'gpt-6-luna' }), 'Team started: gpt-6-luna');
   assert.equal(statusLineOf({ handover: '- 1 044 tests green', reviews: 0, column: 'review' }), '1 044 tests green');
   assert.equal(statusLineOf({ handover: '', reviews: 2, column: 'review' }), 'second review round');
-  const dirty = scrub('saved at /home/makhtar/.local/state/x/y.md with ghp_abcdefghijklmnop and ' + 'f'.repeat(44) + ' ~/.cleared');
+  const dirty = scrub('saved at /home/someone/.local/state/x/y.md with ghp_abcdefghijklmnop and ' + 'f'.repeat(44) + ' ~/.cleared');
   assert.doesNotMatch(dirty, /\/home|ghp_|f{40}|~\//);
+  const more = scrub('push failed https://x-access-token:ghs_AbCdEfGh1234567890@github.com/o/r.git and lane EX-31 has cost 12.40 $ at list price, cap $10, 8 € spent; key ' + 'A1b2'.repeat(9));
+  assert.doesNotMatch(more, /ghs_|x-access-token:|12\.40|\$10|8 €|A1b2A1b2/);
 });
 
 test('the app messages exist in English and French', () => {
@@ -205,9 +208,12 @@ test('the live source reads a real ledger and a local tracker, read only, and le
   db.prepare("UPDATE runs SET outcome='done', pr_number=7, tokens_total=1000, ended_at=? WHERE run_id='r1'").run(at);
   runStart(db, { runId: 'r2', role: 'review', ticket: 'LOCAL-2', model: 'claude-sonnet-5-5', provider: 'claude', source: 'dispatcher' });
   addEvent(db, { kind: 'handover_missing', ticket: 'LOCAL-2', detail: 'saved at /home/someone/.local/state/x/failed.md' });
+  addEvent(db, { kind: 'ticket_cost', ticket: 'LOCAL-2', detail: 'the lane of EX-2 has cost 12.40 $ at list price, for a cap of 10 $ ghs_AbCdEfGh1234567890', value: 12.4 });
   db.exec('CREATE TABLE memory_entries (id TEXT PRIMARY KEY, type TEXT NOT NULL, scope TEXT NOT NULL, content TEXT NOT NULL, source_who TEXT NOT NULL, source_where TEXT NOT NULL, source_when TEXT NOT NULL, status TEXT NOT NULL, links TEXT NOT NULL, supersedes TEXT, last_used_at TEXT)');
   db.prepare("INSERT INTO memory_entries(id,type,scope,content,source_who,source_where,status,source_when,links) VALUES ('h1','handover','ticket:LOCAL-2','## Done\nTotals now show with and without tax. 1 044 tests green.\n## Left to do\nNothing.','agent','s','proposed',?,'[]')").run(at);
   db.close();
+  const count = () => { const d = openLedger(process.env.ORCH_LEDGER, { readOnly: true }); const n = JSON.stringify([d.prepare('SELECT COUNT(*) c FROM runs').get(), d.prepare('SELECT COUNT(*) c FROM events').get(), d.prepare('SELECT COUNT(*) c FROM tracker_tickets').get()]); d.close(); return n; };
+  const rowsBefore = count();
   const source = liveSource({ conf });
   const snap = await source.snapshot();
   const by = Object.fromEntries(snap.tickets.map((t) => [t.title, t]));
@@ -222,7 +228,74 @@ test('the live source reads a real ledger and a local tracker, read only, and le
   const detail = await source.ticket('2');
   assert.ok(detail.where.length && detail.where.length <= 3);
   assert.ok(detail.blackBox.length >= 2);
-  assert.doesNotMatch(JSON.stringify([snap, detail]), /\/home\/|cost|euro|€/i);
+  assert.doesNotMatch(JSON.stringify([snap, detail]), /\/home\/|€|\$|euro|cost_eur/i);
   assert.equal(await source.ticket('../../etc/passwd'), null);
+  const everything = JSON.stringify(detail);
+  assert.match(everything, /plafond/, "the cost event is said in the owner language");
+  assert.doesNotMatch(everything, /12\.4|\$|ghs_|someone/, 'a cost event shows no amount, no secret, no path');
+  assert.equal(count(), rowsBefore.replace(/x/, 'x'), 'reading changed nothing in the ledger or the tracker');
   delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR;
+});
+
+test('the cookie never holds the token, and a range without a prefix length is refused', async () => {
+  const s = await serve();
+  try {
+    const cookie = (await s.call('/session', { headers: auth })).headers.get('set-cookie');
+    assert.ok(!cookie.includes(TOKEN), 'the cookie is a derived session value');
+    assert.equal((await s.call('/api/snapshot', { headers: { cookie: `cleared_app=${TOKEN}` } })).status, 401, 'the token itself is not a cookie');
+    assert.equal((await s.call('/events', { method: 'HEAD', headers: auth })).status, 200, 'HEAD on the stream does not open one');
+  } finally { await s.close(); }
+  assert.deepEqual(checkRanges(['100.64.0.0/10', 'fd7a:115c:a1e0::/48']), ['100.64.0.0/10', 'fd7a:115c:a1e0::/48']);
+  for (const bad of ['192.168.1.20', '10.0.0.0/33', '::1/129', 'foo/8', '10.0.0.0/8/1', '10.0.0.0/']) assert.throws(() => checkRanges([bad]), /prefix length/, bad);
+});
+
+test('a failed read ends the heartbeat: the page cannot take stale cards for live ones', async () => {
+  const source = demoSource();
+  let fail = false;
+  const real = source.snapshot.bind(source);
+  source.snapshot = async () => { if (fail) throw new Error('down'); return real(); };
+  const s = await serve({ source, pollMs: 30, heartbeatMs: 60 });
+  try {
+    const reader = (await s.call('/events', { headers: auth })).body.getReader();
+    let buffer = '', pending = null;
+    const pump = async (ms) => { const end = Date.now() + ms; while (Date.now() < end) { pending ??= reader.read(); const r = await Promise.race([pending, new Promise((res) => setTimeout(() => res(null), 40))]); if (r) { pending = null; if (r.value) buffer += new TextDecoder().decode(r.value); } } };
+    await pump(250);
+    assert.match(buffer, /event: heartbeat/);
+    fail = true; await pump(100); buffer = '';
+    await pump(300);
+    assert.doesNotMatch(buffer, /event: heartbeat/);
+    reader.cancel();
+  } finally { await s.close(); }
+});
+
+test('`cleared app` refuses a bad range and prints the address of the bind it is given', () => {
+  const dir = scratch();
+  const file = join(scratch(), 'token');
+  ensureToken(file, {});
+  const conf = join(dir, 'agents.conf');
+  const run = (extra, ranges) => {
+    writeFileSync(conf, `[app]\nranges = ${ranges}\ntoken_file = ${file}\n`);
+    return spawnSync(process.execPath, [join(import.meta.dirname, '..', 'cleared'), 'app', ...extra], { encoding: 'utf8', env: { ...process.env, CLEARED_CONF: conf, CLEARED_REPO: dir } });
+  };
+  const bad = run(['--link'], '192.168.1.20');
+  assert.equal(bad.status, 2); assert.match(bad.stderr, /prefix length/);
+  const link = run(['--bind', '100.101.102.103', '--link'], '100.64.0.0/10');
+  assert.equal(link.status, 0, link.stderr);
+  assert.match(link.stdout, /^http:\/\/100\.101\.102\.103:8788\/login#[0-9a-f]{64}\n$/);
+  assert.equal(run(['--nonsense'], '').status, 64);
+});
+
+test('the old dashboard address redirects to the app when one is configured, and stays a page otherwise', async () => {
+  const { dashboardServer } = await import('../serve/serve-dashboard.mjs');
+  const dir = scratch(); writeFileSync(join(dir, 'index.html'), '<p>page</p>');
+  const ask = async () => {
+    const server = dashboardServer({ file: join(dir, 'index.html'), ranges: ['127.0.0.0/8'] });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/`, { redirect: 'manual' });
+    server.closeAllConnections(); server.close();
+    return [r.status, r.headers.get('location')];
+  };
+  assert.deepEqual(await ask(), [200, null]);
+  process.env.CLEARED_APP_URL = 'http://100.64.0.9:8788/';
+  try { assert.deepEqual(await ask(), [302, 'http://100.64.0.9:8788/']); } finally { delete process.env.CLEARED_APP_URL; }
 });
