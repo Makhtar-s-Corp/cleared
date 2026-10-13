@@ -17,7 +17,11 @@ const serviceUid = process.getuid();
 const agentName = conf.sections.security?.agent_user || '';
 const passwd = agentName ? execFileSync('getent', ['passwd', agentName], { encoding: 'utf8' }).trim().split(':') : null;
 const agentUid = passwd ? Number(passwd[2]) : serviceUid;
+const humanName = conf.sections.security?.human_user || (conf.sections.tracker?.adapter === 'local' ? conf.sections.tracker?.owner_id : '');
+const humanPasswd = humanName ? execFileSync('getent', ['passwd', humanName], { encoding: 'utf8' }).trim().split(':') : null;
+const humanUid = humanPasswd ? Number(humanPasswd[2]) : null;
 if (!Number.isSafeInteger(agentUid) || agentUid < 0 || (agentName && agentUid === serviceUid)) throw new Error('Invalid [security] agent_user');
+if (humanUid !== null && (!Number.isSafeInteger(humanUid) || humanUid < 0 || (agentName && humanUid === agentUid))) throw new Error('Invalid [security] human_user: it must differ from agent_user');
 if (agentName && !conf.sections.security?.socket_path && !process.env.CLEARED_RELEASE_SOCKET) throw new Error('[security] socket_path is required when agent_user is configured');
 mkdirSync(state, { recursive: true, mode: 0o700 });
 export const socketPath = process.env.CLEARED_RELEASE_SOCKET || conf.sections.security?.socket_path || join(state, 'release.sock');
@@ -86,7 +90,7 @@ async function handle(input, uid) {
   const validTicket = typeof ticket === 'string' && /^[A-Z][A-Z0-9]*-[0-9]+$/.test(ticket);
   const validPr = Number.isSafeInteger(pr) && pr > 0;
   let commit = null;
-  const permitted = uid === serviceUid || (agentName && uid === agentUid);
+  const permitted = uid === serviceUid || (agentName && uid === agentUid) || uid === humanUid;
   const reject = (reason) => { event(validTicket ? ticket : null, validPr ? pr : null, uid, false, reason, commit, operation); return { ok: false, code: 6, reason, commit }; };
   if (!permitted) return reject('Caller UID is not an authorized agent or service account');
   if (!['request_release', 'request_rollback', 'status'].includes(operation)) return reject('Unknown operation');
@@ -123,20 +127,15 @@ async function handle(input, uid) {
       return { ok: result.code === 0, code: result.code, reason: result.stderr.trim(), output: result.stdout.trim(), commit };
     } finally { busy = false; }
   }
-  if (typeof input.approval_comment !== 'string' && input.approval_comment !== undefined) return reject('Invalid approval comment');
-  if (input.force_with_migrations && uid !== serviceUid) return reject('Only the service account can force rollback with migrations');
+  if (uid !== humanUid) return reject('Only the configured human account can request manual rollback');
   busy = true;
   try {
-    // The tracker contract in release.mjs authenticates the owner's comment.
-    // Agents cannot use the service-account whoAmI shortcut.
     const flags = ['--yes'];
-    if (input.approval_comment) flags.push('--approval-comment', input.approval_comment);
     if (input.force_with_migrations) flags.push('--force-with-migrations');
-    if (uid !== serviceUid && !input.approval_comment) return reject('An agent must supply a tracker approval comment for rollback');
     const release = openLedger();
     try { commit = release.prepare('SELECT merge_sha FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket)?.merge_sha || null; }
     finally { release.close(); }
-    const result = await command('flock', ['-x', '-w', '120', join(state, 'merge.lock'), process.execPath, join(home, 'lib/release.mjs'), 'rollback', ticket, ...flags], '', uid !== serviceUid ? { ORCH_BROKER_AGENT_REQUEST: '1' } : {});
+    const result = await command('flock', ['-x', '-w', '120', join(state, 'merge.lock'), process.execPath, join(home, 'lib/release.mjs'), 'rollback', ticket, ...flags]);
     event(ticket, null, uid, result.code === 0, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
     return { ok: result.code === 0, code: result.code, reason: result.stderr.trim(), output: result.stdout.trim() };
   } finally { busy = false; }

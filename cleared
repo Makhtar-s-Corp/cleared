@@ -22,13 +22,12 @@ if (area === 'app') {
 }
 if (area === 'rollback') {
   const ticket = action;
-  const usage = 'usage: cleared rollback <ticket> [--yes] [--force-with-migrations] [--approval-comment ID]';
+  const usage = 'usage: cleared rollback <ticket> [--yes] [--force-with-migrations]';
   if (!ticket || ticket.startsWith('--')) { console.error(usage); process.exit(64); }
-  let yes = false, force = false, comment = '';
+  let yes = false, force = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--yes') yes = true;
     else if (args[i] === '--force-with-migrations') force = true;
-    else if (args[i] === '--approval-comment' && args[i + 1]) comment = args[++i];
     else { console.error(usage); process.exit(64); }
   }
   if (!yes) {
@@ -48,7 +47,7 @@ if (area === 'rollback') {
     finally { db?.close(); }
   }
   const result = spawnSync(process.execPath, [new URL('./release-request.mjs', import.meta.url).pathname,
-    'request_rollback', ticket, ...(comment ? ['--approval-comment', comment] : []), ...(force ? ['--force-with-migrations'] : [])], { stdio: 'inherit' });
+    'request_rollback', ticket, ...(force ? ['--force-with-migrations'] : [])], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
 if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action)) {

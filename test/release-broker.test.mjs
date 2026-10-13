@@ -3,18 +3,23 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { userInfo } from 'node:os';
 import { setTimeout as pause } from 'node:timers/promises';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
 import { reviewedPull } from './support.mjs';
 
-async function fixture(t) {
+async function fixture(t, { humanUser = '' } = {}) {
   const pull = reviewedPull(['server/a.mjs']);
   const { home, state } = pull.box;
   chmodSync(state, 0o700);
   mkdirSync(join(home, 'serve'), { recursive: true });
   copyFileSync(join(ORCH_HOME, 'serve/release-broker.mjs'), join(home, 'serve/release-broker.mjs'));
   copyFileSync(join(ORCH_HOME, 'release-request.mjs'), join(home, 'release-request.mjs'));
+  if (humanUser) {
+    const path = join(home, 'agents.conf');
+    writeFileSync(path, `${readFileSync(path, 'utf8')}\n[security]\nhuman_user = ${humanUser}\n`);
+  }
   const socket = join(home, 'release.sock');
   const env = { ...pull.env, CLEARED_RELEASE_SOCKET: socket };
   const broker = spawn(process.execPath, [join(home, 'serve/release-broker.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -113,6 +118,18 @@ test('manual rollback implementation refuses a direct call outside the broker', 
     { env: { ...pull.env, ORCH_BROKER_SECRET: '' }, encoding: 'utf8' });
   assert.notEqual(direct.status, 0);
   assert.match(direct.stderr, /Only the release broker/);
+});
+
+test('broker refuses manual rollback from the service UID when a separate human UID is configured', async (t) => {
+  const humanUser = userInfo().username === 'nobody' ? 'root' : 'nobody';
+  const { call, events } = await fixture(t, { humanUser });
+  const refused = call(['request_rollback', 'X-5']);
+  assert.equal(refused.status, 6, refused.stderr);
+  assert.match(refused.stderr, /Only the configured human account/);
+  assert.deepEqual(events().at(-1), {
+    operation: 'request_rollback', uid: process.getuid(), accepted: false,
+    reason: 'Only the configured human account can request manual rollback', commit: null,
+  });
 });
 
 test('lead action bridge exposes no merge or tracker move action', async (t) => {

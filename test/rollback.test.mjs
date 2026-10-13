@@ -7,10 +7,9 @@ import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
-import { releaseSettings, canHumanRollback, canAutoRollback, shouldRollback, touchesMigrations,
+import { releaseSettings, canAutoRollback, shouldRollback, touchesMigrations,
   activeRelease, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
   reconcileNotifications, resumeWatches, retryFetch } from '../lib/release.mjs';
-import { authorizeManualRollback } from '../lib/release.mjs';
 
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
   const off = releaseSettings({ sections: {} });
@@ -27,13 +26,6 @@ test('release defaults are inert and repeated failures trigger only when enabled
     release: { reopen_state: 'Go' } } }), /must not be the approval/);
   assert.throws(() => releaseSettings({ sections: { tracker: { go_state: 'Go', todo_state: 'Todo' },
     release: { reopen_state: 'Unknown' } } }), /configured non-approval/);
-});
-
-test('only the configured human owner can request rollback', () => {
-  assert.equal(canHumanRollback({ kind: 'agents', id: 'bot' }, 'alice'), false);
-  assert.equal(canHumanRollback({ kind: 'shared', id: 'alice' }, 'alice'), false);
-  assert.equal(canHumanRollback({ kind: 'human', id: 'other' }, 'alice'), false);
-  assert.equal(canHumanRollback({ kind: 'human', id: 'alice' }, 'alice'), true);
 });
 
 test('declared migration paths disable automatic rollback', () => {
@@ -241,43 +233,6 @@ test('a later base commit blocks automatic rollback even without a conflict', as
   assert.match(notices[0], /base branch moved/);
 });
 
-test('agent rollback is rejected and audited; human owner may proceed', (t) => {
-  const x = releasedProject(t);
-  assert.throws(() => authorizeManualRollback(x.conf, x.db, {
-    whoAmI: () => ({ kind: 'agents', id: 'bot' }), comments: () => [],
-  }, x.row), /verified human owner/);
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_refused'").get().n, 1);
-  assert.equal(authorizeManualRollback(x.conf, x.db, {
-    whoAmI: () => ({ kind: 'human', id: 'human' }), comments: () => [],
-  }, x.row), 'human');
-});
-
-test('a remote owner comment must be fresh, unedited and name the exact merge', (t) => {
-  const x = releasedProject(t);
-  const row = { ...x.row, merged_at: new Date(Date.now() - 3600000).toISOString() };
-  const comment = (age, editedAt = null, body = `Rollback ${row.ticket} ${row.merge_sha}`) => ({
-    id: 'c1', by: { kind: 'human', id: 'human' }, body,
-    createdAt: new Date(Date.now() - age).toISOString(), editedAt,
-  });
-  const tracker = (entry) => ({ whoAmI: () => ({ kind: 'agents', id: 'bot' }), comments: () => [entry] });
-  assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(11 * 60000)), row, 'c1'), /verified human/);
-  assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(60000, new Date().toISOString())), row, 'c1'), /verified human/);
-  assert.throws(() => authorizeManualRollback(x.conf, x.db, tracker(comment(60000, null, 'Rollback another merge')), row, 'c1'), /verified human/);
-  assert.equal(authorizeManualRollback(x.conf, x.db, tracker(comment(60000)), row, 'c1'), 'human');
-  const previous = process.env.ORCH_BROKER_AGENT_REQUEST;
-  process.env.ORCH_BROKER_AGENT_REQUEST = '1';
-  try {
-    const sharedIdentity = { whoAmI: () => ({ kind: 'human', id: 'human' }), comments: () => [comment(60000)] };
-    assert.throws(() => authorizeManualRollback(x.conf, x.db, sharedIdentity, row, 'c1'), /verified human/);
-    const mismatchedKinds = { whoAmI: () => ({ kind: 'agents', id: 'human' }), comments: () => [comment(60000)] };
-    assert.throws(() => authorizeManualRollback(x.conf, x.db, mismatchedKinds, row, 'c1'), /verified human/);
-    assert.equal(authorizeManualRollback(x.conf, x.db, tracker(comment(60000)), row, 'c1'), 'human');
-  } finally {
-    if (previous === undefined) delete process.env.ORCH_BROKER_AGENT_REQUEST;
-    else process.env.ORCH_BROKER_AGENT_REQUEST = previous;
-  }
-});
-
 test('direct automatic rollback is refused without a live failed watch', (t) => {
   const x = releasedProject(t);
   const settings = releaseSettings(x.conf);
@@ -295,7 +250,7 @@ test('manual rollback previews the exact merge and needs explicit confirmation',
   assert.equal(confirmedRollback('', true), true);
 });
 
-test('local CLI refuses an agent and lets a human preview, confirm and push a revert', async (t) => {
+test('local human CLI previews, confirms and pushes a revert through the broker', async (t) => {
   const x = releasedProject(t);
   const root = join(x.repo, '..');
   const configPath = join(root, 'agents.conf');
@@ -307,17 +262,12 @@ test('local CLI refuses an agent and lets a human preview, confirm and push a re
   const configuration = (id, uid) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n`;
   const socket = join(root, 'broker.sock');
   const env = { ...process.env, CLEARED_REPO: x.repo, CLEARED_STATE_DIR: root, CLEARED_CONF: configPath, CLEARED_RELEASE_SOCKET: socket };
+  writeFileSync(configPath, configuration(owner, '999999'));
   const broker = spawn(process.execPath, [new URL('../serve/release-broker.mjs', import.meta.url).pathname], { env, stdio: 'ignore' });
   t.after(() => broker.kill('SIGTERM'));
   for (let i = 0; i < 100 && !existsSync(socket); i++) await pause(25);
   assert.ok(existsSync(socket));
   const cli = (...args) => spawnSync(process.execPath, [new URL('../cleared', import.meta.url).pathname, ...args], { env, encoding: 'utf8' });
-  writeFileSync(configPath, configuration('another-user', String(process.getuid())));
-  const agent = cli('rollback', 'LOCAL-1', '--yes');
-  assert.notEqual(agent.status, 0);
-  assert.match(agent.stderr, /verified human owner/);
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_refused'").get().n, 1);
-  writeFileSync(configPath, configuration(owner, '999999'));
   const created = cli('ticket', 'new', 'Test release');
   assert.equal(created.status, 0, created.stderr);
   const done = cli('ticket', 'move', 'LOCAL-1', 'Done');

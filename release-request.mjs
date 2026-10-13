@@ -4,7 +4,7 @@ import { lstatSync, statSync } from 'node:fs';
 import { loadConf, stateDir } from './lib/conf.mjs';
 const [operation, ticket, pr, ...flags] = process.argv.slice(2);
 if (!['request_release', 'request_rollback', 'status'].includes(operation) || !ticket) {
-  console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [--approval-comment ID] | status TICKET'); process.exit(64);
+  console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [--force-with-migrations] | status TICKET'); process.exit(64);
 }
 const path = process.env.CLEARED_RELEASE_SOCKET || loadConf().sections.security?.socket_path || `${stateDir()}/release.sock`;
 try {
@@ -35,8 +35,7 @@ if (operation === 'request_rollback') {
   for (let i = 0; i < [pr, ...flags].length; i++) {
     const options = [pr, ...flags];
     if (!options[i]) continue;
-    if (options[i] === '--approval-comment' && options[i + 1]) request.approval_comment = options[++i];
-    else if (options[i] === '--force-with-migrations') request.force_with_migrations = true;
+    if (options[i] === '--force-with-migrations') request.force_with_migrations = true;
     else { console.error('Invalid request_rollback option'); process.exit(64); }
   }
 }
