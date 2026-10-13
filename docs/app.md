@@ -1,6 +1,6 @@
 # The Cleared app (Cockpit), read only
 
-`cleared app` starts one interface for desktop and phone that shows the factory live. This first version **only reads**: it writes nothing, runs no command that writes and makes no outside call of its own (no GitHub, no tracker probe, no quota probe). One exception: with Linear or GitHub as tracker, listing and opening tickets goes through that tracker's adapter, which calls it (synchronously, every 30 s at most); with the local tracker there is no outside call. No route writes, moves a ticket, answers a question, or starts or stops a team. Places where actions will come later are marked as reserved and are not clickable.
+`cleared app` starts one interface for desktop and phone that shows the factory live. This first version **only reads**: it writes nothing, runs no command that writes and makes no outside call of its own (no GitHub, no tracker probe, no quota probe). The wake collects the board into a versioned `snapshot.json` in the project state directory. The app reads that file and the ledger only; GitHub and Linear delays cannot block its requests. No route writes, moves a ticket, answers a question, or starts or stops a team. Places where actions will come later are marked as reserved and are not clickable.
 
 ```sh
 cleared app            # serves the app; the installer registers it as cleared-app.service
@@ -24,16 +24,20 @@ The interface language follows `[owner] language` through the message catalog (`
 
 | Shown | Source |
 | --- | --- |
-| Cards and columns | Tracker tickets in the configured states, plus `runs` and `events` of the ledger. *Checks* is derived: a ticket in the progress state whose author run ended with a pull request and has no review run yet. |
+| Cards and columns | The wake's board snapshot, built from tracker tickets in the configured states, plus `runs` and `events` of the ledger. *Checks* is derived: a ticket in the progress state whose author run ended with a pull request and has no review run yet. |
 | Harness, model, flight time | `runs` (provider, model, started/ended). |
 | Share of this week's usage, on a card | The ticket's tokens divided by all tokens of the last seven days. It is a share of Cleared's own usage, not a share of the subscription: the subscription reports only percentages per window, not per ticket. |
 | Status line, Where we are, tests, example | The ticket's handover (`memory_entries`) and the approval request comment. A line like "1 044 tests green" is shown only if the handover says it. |
-| Fuel | `lib/limits.mjs summary` (the share left is 100 minus the most constraining window). |
+| Fuel | The wake's snapshot of `lib/limits.mjs summary` (the share left is 100 minus the most constraining window). |
 | Landed today, first-time clean | `merged_by_script` events, with the ticket's runs: no changes asked by a review means clean first time; a `prod_revert` or `rollback_pushed` after the merge means rolled back. First-time clean is counted over the last seven days. |
 | In flight | Tickets whose last author run is still running. |
-| Health | What the wake recorded (`heartbeat_state` and `heartbeat_incidents`, read-only), with its age ("status from 40 s ago"). If the wake has not reported for more than three wake intervals, that is itself shown as a problem ("wake has not reported for 4 min"). The app never runs `cleared status`. |
+| Health | What the wake recorded (`heartbeat_state` and `heartbeat_incidents`, read-only), plus the snapshot generation time. The app shows the snapshot age and reports one older than three wake intervals. It also reports a missing or unknown snapshot format. |
 | Pilot mode | Derived from `[merge] tooling_paths`: whether tooling paths may merge after review. |
-| Captures | Images attached to the ticket's comments, for the local tracker. Remote tracker images are not proxied in this version. |
+| Captures | The wake copies images from local, GitHub or Linear ticket comments to the project state cache. The snapshot contains only local `/media/` references. |
+
+## Snapshot publication
+
+At the end of a successful wake, `lib/board-collector.mjs` collects cards, porthole details, Landed today, fuel and health. It validates and caches the captures, then writes `snapshot.json` through a temporary file and rename. A failed collection leaves the last complete file in place and marks the wake failed in health. The JSON format is versioned with `schema: 1`; the app accepts only that version. No server path, secret or money amount is included in JSON.
 
 ## Access
 
@@ -53,7 +57,7 @@ The server listens on `[app] bind` and refuses any peer outside `[app] ranges` (
 | `ticket.updated` | One ticket card (new or changed; a card changing column is this event). |
 | `ticket.removed` | `{ "id": "EX-12" }` |
 | `fuel.updated` | The list of fuel entries. |
-| `health.updated` | `{ "health": {...}, "mode": {...} }` |
+| `health.updated` | `{ "health": {...}, "mode": {...}, "generatedAt": "..." }` |
 | `stats.updated` | `{ "stats": {...}, "landed": [...], "owner": {...} }`: the stat strip and the Landed today table. |
 | `heartbeat` | `{}` every 15 s, so the page can tell silence from calm. |
 

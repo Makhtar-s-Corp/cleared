@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { appendFileSync, chmodSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLedger } from '../lib/ledger.mjs';
 import { collectStatus, diagnose, recordIncidents, sendHeartbeat, heartbeatSettings, matchesClearedCommand, statusJson,
@@ -46,6 +46,9 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   const healthy = await wake();
   assert.equal(healthy.code, 0, healthy.stderr);
   assert.deepEqual(calls, ['/ping']);
+  const snapshot = JSON.parse(readFileSync(join(box.state, 'snapshot.json'), 'utf8'));
+  assert.equal(snapshot.schema, 1);
+  assert.ok(Array.isArray(snapshot.tickets) && snapshot.details);
   const db = openLedger(join(box.state, 'ledger.db'));
   db.prepare("UPDATE heartbeat_state SET value = ? WHERE key = 'last_wake_at'")
     .run(new Date(Date.now() - 5 * 60_000).toISOString());

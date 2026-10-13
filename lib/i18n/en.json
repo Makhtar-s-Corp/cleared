@@ -283,5 +283,9 @@
   "app_wait_ready_key_one": "ready to land.",
   "app_wait_ready_key_other": "ready to land.",
   "app_wait_need_key_one": "waiting for you.",
-  "app_wait_need_key_other": "waiting for you."
+  "app_wait_need_key_other": "waiting for you.",
+  "app_snapshot_missing": "No board snapshot yet",
+  "app_snapshot_version": "Board snapshot format is unknown",
+  "app_snapshot_unreadable": "Board snapshot cannot be read",
+  "app_snapshot_old": "Board snapshot is {minutes} min old"
 }

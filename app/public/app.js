@@ -61,7 +61,7 @@ function renderHeader(s) {
 }
 function tickClock() {
   $('clock').textContent = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
-  const at = state.snap?.health?.recordedAt;
+  const at = state.snap?.generatedAt;
   $('health-age').textContent = at ? t('app_status_age', { age: ageText(at) }) : '';
 }
 function ageText(iso) {
@@ -271,7 +271,7 @@ function apply(e) {
   if (e.type === 'ticket.updated') { const i = s.tickets.findIndex((x) => x.id === e.data.id); if (i < 0) s.tickets.push(e.data); else s.tickets[i] = e.data; }
   if (e.type === 'ticket.removed') s.tickets = s.tickets.filter((x) => x.id !== e.data.id);
   if (e.type === 'fuel.updated') s.fuel = e.data;
-  if (e.type === 'health.updated') { s.health = e.data.health; s.mode = e.data.mode; }
+  if (e.type === 'health.updated') { s.health = e.data.health; s.mode = e.data.mode; s.generatedAt = e.data.generatedAt; }
   if (e.type === 'stats.updated') { s.stats = e.data.stats; s.landed = e.data.landed; s.owner = e.data.owner; }
   render(s);
 }
