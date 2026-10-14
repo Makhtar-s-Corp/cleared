@@ -263,6 +263,22 @@ test('[forge] adapter = github alone, or the example copied as it is, names no a
   assert.equal(forgeSettings(parseConf(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'))), null);
 });
 
+test('serve/install.sh probes that the agents\' account reaches neither the forge\'s app key nor its token', () => {
+  const lane = forgeLane();
+  const paths = (conf) => { writeFileSync(lane.confPath, conf); return script(lane, 'forge_secret_paths').stdout.trim().split('\n'); };
+  const original = readFileSync(lane.confPath, 'utf8');
+  const tokens = [join(lane.box.state, 'forge'), join(lane.box.state, 'forge', 'installation-token.json')];
+  assert.deepEqual(paths(original), [lane.key, ...tokens]);
+  // The tracker's key, once it is lent to the forge.
+  const lent = `${original.slice(0, original.indexOf('[forge]\n'))}[forge]\nuse_tracker_app = yes\n`.replace('[tracker]\nadapter = local\n', '[tracker]\nadapter = github\napp_private_key_file = /srv/keys/tracker.pem\n');
+  assert.deepEqual(paths(lent), ['/srv/keys/tracker.pem', ...tokens]);
+  // The installer reads that list and refuses an agents' account that can read, traverse or write any of it.
+  const install = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8');
+  const probe = install.slice(install.indexOf('while IFS= read -r secret'), install.indexOf('done < <(forge_secret_paths)'));
+  assert.ok(probe.length > 0, 'install.sh does not probe the forge secrets');
+  for (const check of ['test -r', 'test -x', 'test -w', 'die ']) assert.ok(probe.includes(check), check);
+});
+
 test('when lib/forge.mjs itself cannot run, git stops like gh instead of using the ambient credential', () => {
   const lane = forgeLane();
   writeFileSync(join(lane.box.home, 'lib', 'forge.mjs'), 'process.exit(3);\n');

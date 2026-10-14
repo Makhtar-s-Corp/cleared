@@ -906,6 +906,17 @@ gh() {
       ;;
   esac
 }
+# forge_secret_paths: what of the forge only the service account may read,
+# one path a line: the app's private key ([forge] app_private_key_file, or
+# the tracker's when use_tracker_app = yes lends it) and the token cache.
+# serve/install.sh probes that the agents' account reaches none of them.
+forge_secret_paths() {
+  local key
+  key=$(conf_get forge app_private_key_file) || key=
+  if [ -z "$key" ] && [ "$(conf_get forge use_tracker_app)" = yes ]; then key=$(conf_get tracker app_private_key_file) || key=; fi
+  [ -z "$key" ] || printf '%s\n' "$key"
+  printf '%s\n' "$ORCH_STATE_DIR/forge" "$ORCH_STATE_DIR/forge/installation-token.json"
+}
 # forge_harness_unset: the `env -u` arguments (in FORGE_UNSET) a model
 # adapter, or a command of a lane, is started with, so that no forge
 # credential reaches it: with an app, the GitHub token variables, every
