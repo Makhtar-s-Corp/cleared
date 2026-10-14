@@ -27,8 +27,10 @@ done < <(conf_get lanes heavy_commands | tr ',' '\n' | sed 's/^ *//; s/ *$//')
 [ -n "$allowed" ] || die "\"$asked\" is not one of the heavy commands of the project ([lanes] heavy_commands): not run"
 # A host Codex session already holds this lock for its whole run. Its heavy
 # commands may use this script without waiting on the lock they already hold.
+# The command is the lane's: it gets no forge credential (lib/common.sh).
+forge_harness_unset
 if [ "${CLEARED_HEAVY_SLOT:-}" = "$ORCH_STATE_DIR/heavy.lock" ]; then
-  exec "$@"
+  exec env "${FORGE_UNSET[@]}" "$@"
 fi
 wait_minutes=$(conf_get lanes heavy_wait_minutes)
 [[ "$wait_minutes" =~ ^[0-9]+$ ]] || wait_minutes=30
@@ -47,4 +49,4 @@ while :; do
   sleep 20
 done
 # The door stays held while the command runs (the lock is inherited).
-exec "$@"
+exec env "${FORGE_UNSET[@]}" "$@"
