@@ -65,11 +65,47 @@ contract_probe_timeout() {
   [[ "$limit" =~ ^[1-9][0-9]*$ ]] || limit=120
   printf '%s\n' "$limit"
 }
-# contract_probe_reason < text: its first line that says something, cut short,
-# with whatever looks like a key or a token (sk-..., or a run of 32 letters,
-# digits, _ and - or more) hidden. A path stays readable: / and . split runs.
+# contract_probe_reason < text: the line of it that says why, cut short: the
+# first one that names an error (error, failed, denied, not logged,
+# unauthorized, invalid, refused), else the first that says something (a
+# warning or a stack frame often comes before the error). Whatever looks like
+# a key or a token is hidden: a word starting with sk-, a run of 24 or more of
+# A-Z a-z 0-9 _ + / = . - with both cases and a digit (base64, JWT, most
+# keys), or one of 32 or more letters and digits only, with a digit (hex). A
+# path stays readable (a piece of it that looks like a key does not), and so
+# do model ids, error names and words joined by hyphens.
 contract_probe_reason() {
-  tr -d '\r' | sed -n '/[^[:space:]]/{p;q;}' | sed -E 's/sk-[A-Za-z0-9_-]+/[hidden]/g; s/[A-Za-z0-9_-]{32,}/[hidden]/g; s/^[[:space:]]+//' | cut -c1-200
+  tr -d '\r' | awk '
+    function secret(t) {
+      if (t ~ /^sk-/ && length(t) >= 20) return 1
+      if (length(t) >= 24 && t ~ /[a-z]/ && t ~ /[A-Z]/ && t ~ /[0-9]/) return 1
+      return length(t) >= 32 && t ~ /^[A-Za-z0-9]+$/ && t ~ /[0-9]/ && t ~ /[A-Za-z]/
+    }
+    function hide(t,   n, part, i, out) {
+      if (t !~ /^\.?\//) return secret(t) ? "[hidden]" : t
+      n = split(t, part, "/"); out = part[1]
+      for (i = 2; i <= n; i++) out = out "/" (secret(part[i]) ? "[hidden]" : part[i])
+      return out
+    }
+    function clean(line,   out) {
+      out = ""
+      while (match(line, /[A-Za-z0-9_+\/=.-]+/)) {
+        out = out substr(line, 1, RSTART - 1) hide(substr(line, RSTART, RLENGTH))
+        line = substr(line, RSTART + RLENGTH)
+      }
+      return out line
+    }
+    /[^[:space:]]/ {
+      if (!seen++) first = $0
+      if (tolower($0) ~ /error|failed|denied|not logged|unauthorized|invalid|refused/) { said = $0; found = 1; exit }
+    }
+    END {
+      if (!found) said = first
+      if (!found && !seen) exit
+      said = clean(said)
+      sub(/^[[:space:]]+/, "", said)
+      print said
+    }' | cut -c1-200
 }
 # contract_probe_fail <model> <reason>: the line of a probe that failed.
 contract_probe_fail() {

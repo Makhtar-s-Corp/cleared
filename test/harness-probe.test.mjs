@@ -30,6 +30,7 @@ case "$model" in
   answers-*) printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"OK","modelUsage":{}}' ;;
   pretty-*) printf '%s\\n' '{' '  "type": "result",' '  "subtype": "success",' '  "is_error": false,' '  "result": "OK"' '}' ;;
   noisy-*) printf '%s\\n' 'Warning: an update is available' '{"type":"result","subtype":"success","is_error":false,"result":"OK"}' ;;
+  stack-*) printf '%s\\n' 'Warning: an update is available' '    at Object.<anonymous> (/usr/lib/node_modules/cli.js:12:3)' 'Error: not logged in, run /login' >&2; exit 1 ;;
   leak-*) printf '%s\\n' '{"type":"result","is_error":true,"result":"Invalid API key sk-ant-api03-Zm9vYmFyYmF6cXV4cXV1eA · Please run /login"}'; exit 1 ;;
   wrong-*) printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"Hello, how can I help?","modelUsage":{}}' ;;
   slow-*) sleep 30 ;;
@@ -234,6 +235,18 @@ test('probe never prints the key a CLI error carries, and keeps the paths of its
   assert.equal(reason("\n  Error: Cannot find module '/home/service-account/cleared-checkout/lead-command.mjs'\nsecond line\n"),
     "Error: Cannot find module '/home/service-account/cleared-checkout/lead-command.mjs'\n");
   assert.equal(reason('token ghp_0123456789abcdefghijklmnopqrstuvwxyzAB refused\n'), 'token [hidden] refused\n');
+  // Keys with / + = or . (base64, a JWT) are hidden whole, not left in halves; so is a long hex key, and a piece of
+  // a path that looks like one. Model ids, error names and hyphenated words stay.
+  assert.equal(reason('refused AbCd1234/efGH+ijkl5678=mnOPqrst90== and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U\n'),
+    'refused [hidden] and [hidden]\n');
+  assert.equal(reason('invalid 0123456789abcdef0123456789abcdef01 at /run/secrets/AbCd1234efGH5678ijkl9012mnOP\n'), 'invalid [hidden] at /run/secrets/[hidden]\n');
+  assert.equal(reason('failed: claude-sonnet-4-5-20250929 UnhandledPromiseRejectionWarning risk-assessment\n'), 'failed: claude-sonnet-4-5-20250929 UnhandledPromiseRejectionWarning risk-assessment\n');
+  // The line that names the error, not the warning or the stack frame before it; else the first line.
+  assert.equal(reason('Warning: an update is available\n    at Object.<anonymous> (/x/cli.js:1:2)\nError: not logged in\n'), 'Error: not logged in\n');
+  assert.equal(reason('Hello there\nsecond line\n'), 'Hello there\n');
+  const stack = box.adapter('claude', 'probe', 'stack-1');
+  assert.equal(stack.status, 1);
+  assert.equal(stack.stdout, 'FAIL stack-1: Error: not logged in, run /login\n');
 });
 
 const probedConf = `[models]
