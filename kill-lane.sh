@@ -42,11 +42,13 @@ if [ "$force" != --force ]; then
 fi
 
 ledger init > /dev/null
+# Its sessions end first, the harness and all it started with them: a
+# worktree is never taken from under a session that still runs.
+terminal close-worktree "$worktree" || die "a session of $lane could not be stopped: its worktree, its branch and its runs are left as they are (try again, or look at its processes)"
 ledger sql "select run_id from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[].run_id' | while IFS= read -r run_id; do
   ledger run-end --run-id "$run_id" --outcome killed
 done
 
-terminal close-worktree "$worktree"
 terminal remove-worktree "$worktree"
 git -C "$ORCH_REPO" worktree prune
 if git -C "$ORCH_REPO" rev-parse --verify --quiet "refs/heads/$lane" > /dev/null; then

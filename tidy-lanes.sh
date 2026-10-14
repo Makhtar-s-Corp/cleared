@@ -174,7 +174,7 @@ while IFS=$'\t' read -r path branch; do
     fi
   fi
   # 4: its terminals, its worktree.
-  terminal close-worktree "$path"
+  terminal close-worktree "$path" || { kept "$lane" "a session in it could not be stopped"; continue; }
   terminal remove-worktree "$path" 2> /dev/null || true
   [ ! -d "$path" ] || { kept "$lane" "its worktree could not be removed"; continue; }
   jq -nc --arg lane "$lane" --arg name "$name" --arg why "$why" '{lane: $lane, name: $name, why: $why}' >> "$out/closed.jsonl"

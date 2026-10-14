@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
-import { sandbox, scratch } from './support.mjs';
+import { flowBox, sandbox, scratch } from './support.mjs';
 
 // The fields of a process after its name: [0] its state, [2] its process group, [3] its session, [19] its start.
 const stat = (pid) => {
@@ -273,4 +273,182 @@ case "$5" in id) exec id -u "$3" ;; test) exit 0 ;; *) exit 1 ;; esac
   const harness = calls.find((line) => / claude -p --model m1 /.test(line));
   assert.ok(harness, calls.join('\n'));
   assert.match(harness, /^-n -u nobody -- env /);
+});
+
+
+// Closing a lane ends its whole tree (issue #93). Under [security] agent_user the harness runs under another
+// account: the service cannot signal it, and sudo stops passing signals on once it is gone. Here one account plays
+// both: the sudo writes down what it is asked and runs it, and the harness ignores its parent and SIGTERM, so that
+// only a SIGKILL of its group ends it. What this proves is the wiring (which group is signalled, from which
+// account, in which order, and that nothing is left or that what is left is said); that the agents' account really
+// reaches its own processes is proved on the host (see the recipe of the pull request).
+function agentBox(box) {
+  const bin = join(box.home, 'bin');
+  writeFileSync(join(bin, 'sudo'), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${join(box.home, 'sudo-calls')}"
+[ "$1 $2" = "-n -u" ] && [ "$4" = -- ] || exit 1
+shift 4
+# The agents' account says one of its processes is still in the group, whatever is done to it.
+if [ -n "\${FAKE_AGENT_HOLDS:-}" ] && [ "$1" = sh ]; then echo held; exit 0; fi
+exec "$@"
+`, { mode: 0o755 });
+  writeFileSync(join(bin, 'harness'), `#!/usr/bin/env bash
+trap '' TERM HUP INT
+echo $$ >> "${join(box.home, 'harness-pids')}"
+while :; do sleep 0.2; done
+`, { mode: 0o755 });
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nagent_user = nobody\n'));
+  const env = { ...box.env, FAKE_LEAVES: 'harness', ORCH_STOP_GRACE: '1' };
+  const harnesses = () => { try { return readFileSync(join(box.home, 'harness-pids'), 'utf8').trim().split('\n').filter(Boolean).map(Number); } catch { return []; } };
+  const calls = () => { try { return readFileSync(join(box.home, 'sudo-calls'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const group = (pgid) => spawnSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8' }).stdout.trim();
+  return { ...box, env, harnesses, calls, group };
+}
+const stopAll = (box) => { for (const pid of box.harnesses()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } };
+
+
+test('[terminal] adapter = none under [security] agent_user: closing a session ends its whole process group, a harness that ignores its parent and SIGTERM included, from both accounts', async (t) => {
+  const box = agentBox(noneBox());
+  t.after(() => stopAll(box));
+  const { opened, handle } = openHeld(box, { FAKE_LEAVES: 'harness' });
+  assert.equal(opened.status, 0, opened.stderr);
+  const pid = Number(handle.split(':')[1]);
+  t.after(() => stopGroup(pid));
+  assert.ok(await until(() => box.harnesses().length === 1), 'the harness is at work');
+  const [harness] = box.harnesses();
+  assert.equal(stat(harness)[2], String(pid), 'in the process group of the session');
+  const closed = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; terminal close "$1"`, 'close', handle], { env: box.env, encoding: 'utf8' });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.equal(alive(harness), false, 'the harness is gone when the close returns');
+  assert.equal(box.group(pid), '', 'nothing of its group is left');
+  // The agents' account was asked to signal that group, and that one only: TERM, then KILL once the grace was over.
+  const signalled = box.calls().filter((line) => /^-n -u nobody -- kill /.test(line));
+  assert.deepEqual(signalled, [`-n -u nobody -- kill -TERM -- -${pid}`, `-n -u nobody -- kill -KILL -- -${pid}`]);
+  assert.ok(box.calls().some((line) => line.startsWith('-n -u nobody -- sh -c ') && line.endsWith(` cleared-check ${pid}`)), 'and what it still holds was checked');
+});
+
+
+test('[terminal] adapter = none under [security] agent_user: close-worktree and kill-lane end the harness before the worktree goes; a run script that died is no shield for what it left', async (t) => {
+  const box = agentBox(noneBox());
+  t.after(() => stopAll(box));
+  const spawned = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-6', '--comment-on', 'none'], { env: box.env, encoding: 'utf8', timeout: 60000 });
+  assert.equal(spawned.status, 0, spawned.stderr);
+  const lane = JSON.parse(spawned.stdout);
+  const pid = Number(lane.terminal.split(':')[1]);
+  t.after(() => stopGroup(pid));
+  assert.ok(await until(() => box.harnesses().length === 1), 'the harness is at work');
+  const [harness] = box.harnesses();
+  const closed = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; terminal close-worktree "$1"`, 'close', lane.worktree], { env: box.env, encoding: 'utf8' });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.equal(alive(harness), false);
+  assert.equal(box.group(pid), '');
+  assert.ok(existsSync(lane.worktree), 'closing the terminals of a worktree removes nothing');
+
+  // The run script is gone (killed by hand, or by a close that could not reach the agents' account) and the
+  // harness is left in its group: kill-lane still finds it by the group of the handle, and ends it.
+  const again = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-7', '--comment-on', 'none'], { env: box.env, encoding: 'utf8', timeout: 60000 });
+  assert.equal(again.status, 0, again.stderr);
+  const other = JSON.parse(again.stdout);
+  const leader = Number(other.terminal.split(':')[1]);
+  t.after(() => stopGroup(leader));
+  assert.ok(await until(() => box.harnesses().length === 2));
+  const left = box.harnesses()[1];
+  process.kill(leader, 'SIGKILL');
+  assert.ok(await until(() => !alive(leader), 5000));
+  assert.ok(alive(left), 'the harness outlived its run script');
+  const killed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-7', '--force'], { env: box.env, encoding: 'utf8' });
+  assert.equal(killed.status, 0, killed.stderr);
+  assert.equal(alive(left), false, 'no process of the lane remains');
+  assert.equal(box.group(leader), '');
+  assert.ok(box.calls().includes(`-n -u nobody -- kill -TERM -- -${leader}`), box.calls().join('\n'));
+  assert.equal(existsSync(other.worktree), false);
+});
+
+
+test('[terminal] adapter = none under [security] agent_user: what the agents\' account still holds after SIGKILL is said, and kill-lane leaves the worktree, its branch and its runs', async (t) => {
+  const box = agentBox(noneBox());
+  t.after(() => stopAll(box));
+  const spawned = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-8', '--comment-on', 'none'], { env: box.env, encoding: 'utf8', timeout: 60000 });
+  assert.equal(spawned.status, 0, spawned.stderr);
+  const lane = JSON.parse(spawned.stdout);
+  const pid = Number(lane.terminal.split(':')[1]);
+  t.after(() => stopGroup(pid));
+  assert.ok(await until(() => box.harnesses().length === 1));
+  const killed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-8', '--force'], { env: { ...box.env, FAKE_AGENT_HOLDS: '1' }, encoding: 'utf8' });
+  assert.equal(killed.status, 1);
+  assert.match(killed.stderr, new RegExp(`the session ${lane.terminal} is not over: processes of nobody are still in its group ${pid} after SIGKILL`));
+  assert.match(killed.stderr, /kill-lane\.sh: a session of dev\/X-8 could not be stopped: its worktree, its branch and its runs are left as they are/);
+  assert.ok(existsSync(lane.worktree), 'the worktree stays');
+  assert.equal(spawnSync('git', ['-C', box.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/dev/X-8']).status, 0, 'and its branch');
+  const db = openLedger(join(box.state, 'ledger.db'));
+  assert.equal(db.prepare("select count(*) n from events where kind = 'session_not_stopped'").get().n, 1);
+  assert.deepEqual(db.prepare("select outcome from runs where lane = 'dev/X-8'").all().map((row) => row.outcome), ['running'], 'its run is not said killed');
+  db.close();
+});
+
+
+// The bubblewrap prefix of the agents' sessions, run for real with harmless programs: when what started it dies
+// (sudo, under a session that is closed), nothing of the sandbox is left, not even a process that left its process
+// group. Without the options of the prefix, the control shows the sandbox outliving its parent.
+const bwrapWorks = spawnSync('/usr/bin/bwrap', ['--dev-bind', '/', '/', '--die-with-parent', '--unshare-pid', '--proc', '/proc', '--', 'true']).status === 0;
+test('the bubblewrap prefix of agent_mount_args takes the whole sandbox down with its parent (real bubblewrap)', { skip: bwrapWorks ? false : 'needs /usr/bin/bwrap and user namespaces' }, async (t) => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nbwrap_path = /usr/bin/bwrap\n'));
+  const outside = scratch('orch-no-git-');
+  const built = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; agent_mount_args; printf '%s\\n' "\${AGENT_MOUNT_ARGS[@]}"`], { cwd: outside, env: box.env, encoding: 'utf8' });
+  assert.equal(built.status, 0, built.stderr);
+  const prefix = built.stdout.trim().split('\n');
+  assert.deepEqual(prefix, ['/usr/bin/bwrap', '--dev-bind', '/', '/', '--die-with-parent', '--unshare-pid', '--proc', '/proc']);
+  const sleeps = (tag) => readdirSync('/proc').filter((pid) => /^\d+$/.test(pid) && alive(pid) && argv(pid)[0] === 'sleep' && argv(pid)[1]?.startsWith(tag)).map(Number);
+  const trial = async (words) => {
+    const tag = `${4000 + Math.floor(Math.random() * 1000)}.${process.pid}`;
+    // The parent stands for sudo: bwrap is its child and it stays; inside, the harness has a child in its group
+    // and one that left it (setsid).
+    const parent = spawn('bash', ['-c', `"$@" -- bash -c "sleep ${tag}1 & setsid sleep ${tag}2 & exec sleep ${tag}3"; :`, 'parent', ...words], { stdio: 'ignore', detached: true });
+    t.after(() => { for (const pid of sleeps(tag)) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } });
+    assert.ok(await until(() => sleeps(tag).length === 3, 10000), 'the sandbox is at work');
+    process.kill(parent.pid, 'SIGKILL');
+    await until(() => sleeps(tag).length === 0, 5000);
+    return sleeps(tag);
+  };
+  assert.deepEqual(await trial(prefix), [], 'nothing of the sandbox is left');
+  assert.notDeepEqual(await trial(['/usr/bin/bwrap', '--dev-bind', '/', '/']), [], 'without them, the sandbox outlives its parent');
+});
+
+
+test('[terminal] adapter = none under [security] agent_user: the flow stops a session that runs too long, harness included, before it opens the lane again', async (t) => {
+  const flowed = flowBox({ maxLanes: 1 });
+  const { box, todo, by, record } = flowed;
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 9\nsession_hours = 1')}\n[terminal]\nadapter = none\n`);
+  // No user manager here: the sessions start with setsid alone.
+  writeFileSync(join(box.home, 'bin', 'systemd-run'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  const agent = agentBox(box);
+  t.after(() => stopAll(agent));
+  const env = { ...flowed.env, ORCH_STOP_GRACE: '1' };
+  todo(['X-5']);
+  by('X-5', 0);
+  const opened = spawnSync(join(box.home, 'flow-lanes.sh'), [], { env: { ...env, FAKE_LEAVES: 'harness' }, encoding: 'utf8' });
+  assert.equal(opened.status, 0, opened.stderr);
+  assert.ok(await until(() => agent.harnesses().length === 1), `the session of X-5 is at work\n${opened.stdout}${opened.stderr}`);
+  const [harness] = agent.harnesses();
+  const kept = record('X-5');
+  const runDir = join(box.state, 'runs', kept.runs.at(-1).run);
+  const pid = Number(readFileSync(join(runDir, 'terminal.handle'), 'utf8').split(':')[1]);
+  t.after(() => stopGroup(pid));
+  kept.runs.at(-1).at = new Date(Date.now() - 61 * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  const stopped = spawnSync(join(box.home, 'flow-lanes.sh'), [], { env, encoding: 'utf8' });
+  assert.equal(stopped.status, 0, stopped.stderr);
+  assert.match(stopped.stdout, /X-5: its session runs for more than 1 hours: stopped\n/);
+  assert.equal(alive(harness), false, 'its harness is gone');
+  assert.equal(agent.group(pid), '', 'nothing of its group is left');
+  assert.ok(agent.calls().includes(`-n -u nobody -- kill -TERM -- -${pid}`), agent.calls().join('\n'));
+  assert.equal(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '124');
+  // The lane is opened again: its new session is waited for before the files of the test go.
+  const next = join(box.state, 'runs', record('X-5').runs.at(-1).run);
+  assert.notEqual(next, runDir);
+  assert.ok(await until(() => existsSync(join(next, 'exit-code'))), 'the session opened again ran to its end');
 });

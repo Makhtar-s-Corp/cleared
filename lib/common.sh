@@ -91,7 +91,13 @@ agent_mount_args() {
     return 0
   fi
   [ -x "$bwrap" ] || die "[security] agent_user needs bubblewrap at $bwrap"
-  AGENT_MOUNT_ARGS=("$bwrap" --dev-bind / /)
+  # The sandbox dies whole with what started it (sudo, under the session):
+  # --die-with-parent alone kills only the harness, not what it started;
+  # with a process namespace of its own, the end of its first process ends
+  # every other one in it, even one that left the process group (tried on
+  # bubblewrap 0.12). Its /proc is that of the namespace: numbers read there
+  # are the ones the processes inside use.
+  AGENT_MOUNT_ARGS=("$bwrap" --dev-bind / / --die-with-parent --unshare-pid --proc /proc)
   [ -n "$worktree" ] || return 0
   expected=$(git -C "$ORCH_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
   common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
