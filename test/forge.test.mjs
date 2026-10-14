@@ -284,6 +284,46 @@ test('serve/install.sh probes that the agents\' account reaches neither the forg
   for (const check of ['test -r', 'test -x', 'test -w', 'die ']) assert.ok(probe.includes(check), check);
 });
 
+test('the rest of the account\'s git configuration still applies under the app: signing, excludes, proxy, includeIf identity, other hosts; only what touches github.com is dropped', () => {
+  const read = (forge) => {
+    const lane = forgeLane({ forge });
+    writeFileSync(join(lane.box.home, 'included.conf'), '[user]\n\temail = included@example.org\n');
+    writeFileSync(join(lane.box.home, '.gitconfig'), `${readFileSync(join(lane.box.home, '.gitconfig'), 'utf8')}[commit]
+\tgpgsign = true
+[core]
+\texcludesFile = ${join(lane.box.home, 'ignored')}
+[http]
+\tproxy = http://proxy.example.org:3128
+[includeIf "gitdir:${lane.box.repo}/"]
+\tpath = ${join(lane.box.home, 'included.conf')}
+[url "ssh://git@example.org/"]
+\tinsteadOf = https://example.org/
+[url "git@github.com:"]
+\tpushInsteadOf = https://github.com/
+[credential "https://github.com"]
+\thelper = "!echo password=AMBIENT-SCOPED"
+[http "https://github.com/"]
+\textraHeader = AUTHORIZATION: basic AMBIENT-HEADER
+`);
+    const keys = ['commit.gpgsign', 'core.excludesfile', 'http.proxy', 'user.email', 'url.ssh://git@example.org/.insteadof',
+      'url.git@github.com:.pushinsteadof', 'credential.https://github.com.helper', 'http.https://github.com/.extraheader'];
+    const got = script(lane, keys.map((key) => `printf '%s=%s\\n' '${key}' "$(git config --get-all '${key}' | tr '\\n' '|')"`).join('; '));
+    assert.equal(got.status, 0, got.stderr);
+    return Object.fromEntries(got.stdout.trim().split('\n').map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  };
+  const ambient = read(false);
+  const app = read(true);
+  for (const key of ['commit.gpgsign', 'core.excludesfile', 'http.proxy', 'user.email', 'url.ssh://git@example.org/.insteadof']) {
+    assert.ok(ambient[key], key);
+    assert.equal(app[key].replace(/\/tmp\/orch-home-[^/]+/, ''), ambient[key].replace(/\/tmp\/orch-home-[^/]+/, ''), key);
+  }
+  assert.equal(app['user.email'], 'included@example.org|');
+  assert.equal(app['url.git@github.com:.pushinsteadof'], '');
+  assert.doesNotMatch(app['credential.https://github.com.helper'], /AMBIENT/);
+  assert.match(app['credential.https://github.com.helper'], /forge\.mjs' credential\|$/);
+  assert.doesNotMatch(app['http.https://github.com/.extraheader'], /AMBIENT/);
+});
+
 test('a url rewrite in the repository\'s own git configuration that sends the origin to SSH stops every forge call', () => {
   const lane = forgeLane();
   const git = (...args) => execFileSync(realGit, ['-C', lane.box.repo, ...args]);
