@@ -12,9 +12,24 @@ const record = (value) => value !== null && typeof value === 'object' && !Array.
 const string = (value) => typeof value === 'string';
 const time = (value) => string(value) && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
 const mediaUrl = (value) => string(value) && /^\/media\/[a-f0-9]{64}$/.test(value);
+const strings = (value, max = 20, length = 1500) => Array.isArray(value) && value.length <= max && value.every((x) => string(x) && x.length <= length);
+const share = (value) => value === null || Number.isFinite(value);
+const optional = (value, check) => value === undefined || value === null || check(value);
+const count = (value) => value === null || (Number.isSafeInteger(value) && value >= 0);
+// The questions a team ended on: full text, its recommendation when it gave one, its choices.
+const validQuestions = (value) => value === undefined || (Array.isArray(value) && value.length <= 4 && value.every((q) => record(q)
+  && string(q.text) && q.text.length <= 1500 && (q.recommendation === null || (string(q.recommendation) && q.recommendation.length <= 600))
+  && strings(q.options, 4, 80)));
+// What changed: the pull request and what the wake knows of it. Unknown is null, never a guess.
+const validChange = (value) => optional(value, (c) => record(c) && record(c.pr) && Number.isSafeInteger(c.pr.number)
+  && (c.pr.url === null || (string(c.pr.url) && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(c.pr.url)))
+  && ['files', 'additions', 'deletions', 'lines'].every((k) => count(c[k]))
+  && (c.checks === null || ['green', 'red', 'running', 'none'].includes(c.checks)) && (c.draft === null || typeof c.draft === 'boolean'));
+const validReport = (value) => optional(value, (r) => record(r) && time(r.at) && ['done', 'remaining', 'other'].every((k) => strings(r[k], 10, 600)));
 const validDetail = (detail) => record(detail) && string(detail.id) && string(detail.title)
   && string(detail.column) && string(detail.kind) && typeof detail.waiting === 'boolean'
-  && Number.isFinite(detail.flightMinutes) && Number.isFinite(detail.quotaShare)
+  && Number.isFinite(detail.flightMinutes) && share(detail.quotaShare)
+  && optional(detail.since, time) && validQuestions(detail.questions) && validChange(detail.change) && validReport(detail.report)
   && Array.isArray(detail.where) && detail.where.every(string)
   && Array.isArray(detail.squad) && detail.squad.every((entry) => record(entry)
     && string(entry.role) && string(entry.harness) && string(entry.model))
@@ -22,6 +37,7 @@ const validDetail = (detail) => record(detail) && string(detail.id) && string(de
     detail.show.kind === 'screen'
       ? ['before', 'after'].every((side) => Array.isArray(detail.show[side])
         && detail.show[side].every((image) => record(image) && mediaUrl(image.url) && string(image.caption)))
+        && optional(detail.show.missing, (m) => ['working', 'none_kept', 'not_kept'].includes(m))
       : detail.show.kind === 'code' && Array.isArray(detail.show.tests)
         && detail.show.tests.every((test) => record(test) && string(test.name) && string(test.change) && string(test.state))
         && (detail.show.example === null || record(detail.show.example)) && string(detail.show.touches))
@@ -42,7 +58,7 @@ export function validBoard(value) {
     && (value.stats.firstTimeClean === null || Number.isFinite(value.stats.firstTimeClean))
     && Array.isArray(value.landed) && value.landed.every((row) => record(row) && time(row.at)
       && string(row.id) && string(row.title) && string(row.model) && string(row.harness)
-      && Number.isFinite(row.fixes) && (row.rolledBackAt === null || time(row.rolledBackAt)) && Number.isFinite(row.share))
+      && Number.isFinite(row.fixes) && (row.rolledBackAt === null || time(row.rolledBackAt)) && share(row.share))
     && Array.isArray(value.fuel) && value.fuel.every((entry) => record(entry) && string(entry.adapter)
       && typeof entry.measured === 'boolean' && (!entry.measured || Number.isFinite(entry.left)))
     && Array.isArray(value.tickets) && record(value.details)
@@ -52,7 +68,8 @@ export function validBoard(value) {
     && value.tickets.every((ticket) => record(ticket) && /^[A-Za-z0-9._-]{1,40}$/.test(ticket.id)
       && string(ticket.title) && ['progress', 'checks', 'review', 'awaiting'].includes(ticket.column)
       && string(ticket.kind) && string(ticket.model) && string(ticket.statusLine)
-      && Number.isFinite(ticket.flightMinutes) && Number.isFinite(ticket.quotaShare)
+      && Number.isFinite(ticket.flightMinutes) && share(ticket.quotaShare)
+      && optional(ticket.since, time) && validQuestions(ticket.questions) && validChange(ticket.change)
       && validGesture(ticket)
       && (ticket.captures === null || record(ticket.captures) && mediaUrl(ticket.captures.before) && mediaUrl(ticket.captures.after))
       && Object.hasOwn(value.details, ticket.id) && validDetail(value.details[ticket.id]))

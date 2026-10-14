@@ -157,7 +157,7 @@ if [ -z "$handover" ]; then
   if [ -n "$github_out" ]; then
     echo '[]' > "$work/pulls.json"
   else
-    (cd "$ORCH_REPO" && gh pr list --state all --limit 60 --json number,title,headRefName,isDraft,state,updatedAt,statusCheckRollup) > "$work/pulls.json" \
+    (cd "$ORCH_REPO" && gh pr list --state all --limit 60 --json number,title,headRefName,isDraft,state,updatedAt,statusCheckRollup,changedFiles,additions,deletions) > "$work/pulls.json" \
       || die "GitHub did not answer: nothing read, nothing moved"
   fi
   # What the scripts of the dispatcher posted themselves.

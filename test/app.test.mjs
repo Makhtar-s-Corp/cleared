@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 const TOKEN = 'a'.repeat(64);
 // Amber (token or value) may appear only in the rules of what waits for the human, the greeting highlight, the project dot and the token definitions.
-const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.chip\.q|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
+const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.ph-question|\.chip\.q|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
 const AMBER = /var\(--(?:awaiting|e-awaiting)[^)]*\)|#F5A623|#AB570A|#FFFBF2|#FCE2B3|245,\s*166,\s*35|171,\s*87,\s*10/i;
 const amberViolations = (css) => css.split('\n').filter((line) => AMBER.test(line) && !ALLOWED_AMBER.test(line)).map((line) => line.trim().slice(0, 80));
 const dirs = [];
@@ -315,8 +315,11 @@ async function boardFixture(adapter = 'local', imageUrl = null) {
     db.prepare('INSERT INTO tracker_images VALUES (?,?,?)').run(digestAfter, 'image/png', pngAfter);
   }
   db.close();
-  const ref = adapter === 'local' ? 'LOCAL-1' : adapter === 'github' ? '1' : 'TKT-1';
-  const ticket = { id: ref, identifier: ref, title: 'Screen before and after', body: '', status: 'Needs Approval' };
+  const ref = adapter === 'local' ? 'LOCAL-1' : adapter === 'github' ? 'GH-1' : 'TKT-1';
+  const ticket = { id: ref.replace(/^GH-/, ''), identifier: ref, title: 'Screen before and after', body: '', status: 'Needs Approval' };
+  // Cleared asked for this version: the card is ready to land (without the record it is a tracker-only card).
+  mkdirSync(join(dir, 'validations'), { recursive: true });
+  writeFileSync(join(dir, 'validations', `${ref}.json`), JSON.stringify({ ticket: ref, at: new Date().toISOString(), pulls: [{ pr: 7, head: 'b'.repeat(40) }] }));
   const url = imageUrl || `local://capture/${digest}`;
   const afterUrl = imageUrl ? `${imageUrl}?after=1` : `local://capture/${digestAfter}`;
   const trackerClient = {
