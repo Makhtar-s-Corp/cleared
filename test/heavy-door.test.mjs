@@ -8,7 +8,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
-import { sandbox, flowBox, laneWithRemote, scratch } from './support.mjs';
+import { sandbox, flowBox, laneWithRemote, reviewedPull, scratch } from './support.mjs';
 
 const holdThen = 'exec 9< "$1"; flock 9; shift; "$@"';
 
@@ -116,19 +116,19 @@ test('under agent_user a host status that says busy, is stale or cannot be read 
   execFileSync('touch', ['-d', '3 minutes ago', join(lib('printf %s "$ORCH_STATE_DIR"').stdout, 'checks-starting')]);
   writeStatus();
   assert.equal(heavy(['echo', 'screens']).status, 0);
-  // Written more than five minutes ago (the wake stopped): unknown, so not free.
+  // Written more than two minutes ago (the wake stopped): unknown, so not free.
   const old = JSON.parse(readFileSync(statusPath, 'utf8'));
   chmodSync(door, 0o755);
-  writeFileSync(statusPath, JSON.stringify({ ...old, written_epoch: old.written_epoch - 6 * 60 }));
+  writeFileSync(statusPath, JSON.stringify({ ...old, written_epoch: old.written_epoch - 3 * 60 }));
   const stale = heavy(['echo', 'screens']);
   assert.equal(stale.status, 5);
   assert.equal(stale.stdout, '');
-  assert.match(stale.stderr, /is older than 5 minutes or unreadable/);
+  assert.match(stale.stderr, /is older than 2 minutes or unreadable/);
   // From the future, or not a status at all: the same.
   writeFileSync(statusPath, JSON.stringify({ ...old, written_epoch: old.written_epoch + 3600 }));
   assert.equal(heavy(['echo', 'screens']).status, 5);
   writeFileSync(statusPath, 'free');
-  assert.match(heavy(['echo', 'screens']).stderr, /older than 5 minutes or unreadable/);
+  assert.match(heavy(['echo', 'screens']).stderr, /older than 2 minutes or unreadable/);
 });
 
 test('under agent_user the door must be outside the state: one left in it is refused with the setting to change', () => {
@@ -313,6 +313,26 @@ test('a door that cannot be used is said: by the wake once an hour with a ledger
     assert.deepEqual(quiet.events, []);
     assert.equal(quiet.problem, undefined);
   }
+});
+
+test('a merge marks the host busy for the teams before it starts, whatever the last wake wrote', () => {
+  const pull = reviewedPull(['ops/cleared/wake.sh', 'docs/decisions.md']);
+  const confPath = join(pull.box.home, 'agents.conf');
+  const door = join(pull.box.home, 'door');
+  mkdirSync(door);
+  writeFileSync(confPath, readFileSync(confPath, 'utf8')
+    .replace('[lanes]\n', `[lanes]\nheavy_commands = echo screens\nheavy_lock = ${join(door, 'heavy.lock')}\n`)
+    .replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nagent_user = nobody\n'));
+  const lib = (script) => spawnSync('bash', ['-c', `. "$1/lib/common.sh"; ${script}`, '_', pull.box.home], { env: pull.env, encoding: 'utf8' });
+  assert.equal(lib('host_status_write').status, 0);
+  const statusPath = join(door, 'heavy.status.json');
+  assert.equal(JSON.parse(readFileSync(statusPath, 'utf8')).free, true, 'free before the merge');
+  const done = pull.merge();
+  assert.equal(done.status, 0, done.stderr);
+  assert.ok(pull.merged());
+  const after = JSON.parse(readFileSync(statusPath, 'utf8'));
+  assert.equal(after.free, false);
+  assert.equal(after.deployment_settling, true);
 });
 
 test('checks the rules start hold the door while they are said to the teams: a team then finds the host busy; a team holding the door keeps them back', () => {

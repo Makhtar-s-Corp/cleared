@@ -202,9 +202,11 @@ heavy_lock_close() {
 # The host status the teams read instead of asking the host (GitHub, the
 # state), which they cannot under agent_user: written by the service next to
 # the door, readable by everyone, booleans and times only. Written at every
-# wake and when the rules start checks; older than this many minutes, a team
-# takes it for unknown and runs nothing.
-HOST_STATUS_STALE_MINUTES=5
+# wake, when the rules start checks and when a merge starts; older than this
+# many minutes (two wakes), a team takes it for unknown and runs nothing.
+# Looser than asking the host live: a push or a deployment started since the
+# last write is not seen for up to that long.
+HOST_STATUS_STALE_MINUTES=2
 host_status_path() {
   local lock
   lock=$(heavy_lock_path) || return 1
