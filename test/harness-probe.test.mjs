@@ -319,7 +319,7 @@ function installer(conf, { security = '[security]\nagent_user =\n' } = {}) {
   const box = harnessBox();
   const project = join(box.dir, 'project');
   mkdirSync(join(project, '.cleared'), { recursive: true });
-  writeFileSync(join(project, '.cleared', 'agents.conf'), `${conf}[guard]\nterms = none\nallowed = none\n${security.replaceAll('@BOX@', box.dir)}`);
+  writeFileSync(join(project, '.cleared', 'agents.conf'), `${conf.replaceAll('@BOX@', box.dir)}[guard]\nterms = none\nallowed = none\n${security.replaceAll('@BOX@', box.dir)}`);
   const git = (...args) => execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   git('add', '.');
@@ -369,16 +369,27 @@ test('CLEARED_SKIP_HARNESS_PROBE=1 skips the probe, and the installer says so lo
 // Issue #87: the installer's probes that start node as the agents' account inherited the folder it was started
 // from; one closed to that account made node fail on its current directory. The sudo here answers the account
 // checks as a well set up host would, and its node fails as the real one did unless it is started from /.
-function agentInstaller() {
-  const run = installer('', { security: '[security]\nagent_user = nobody\nbwrap_path = @BOX@/bwrap\nsocket_path = @BOX@/run/release.sock\n' });
+function agentInstaller(conf = '') {
+  const run = installer(conf, { security: '[security]\nagent_user = nobody\nbwrap_path = @BOX@/bwrap\nsocket_path = @BOX@/run/release.sock\n' });
   mkdirSync(join(run.box.dir, 'run'), { mode: 0o755 });
+  mkdirSync(join(run.box.dir, 'door'), { mode: 0o755 });
   writeFileSync(join(run.box.dir, 'sudo'), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "${join(run.box.dir, 'sudo-calls')}"
 [ "$1 $2" = "-n -u" ] && [ "$4" = -- ] || exit 1
 case "$5" in
   id) exec id -u "$3" ;;
   true | find) exit 0 ;;
-  test) [ "$6 \${7##*/}" = "-r release-request.mjs" ] && exit 0; exit 1 ;;
+  test)
+    [ "$6 \${7##*/}" = "-r release-request.mjs" ] && exit 0
+    # The door of the heavy commands (#98): its folder is writable to the agents' account only when a test says
+    # so, its host status is readable.
+    [ "$6 $7" = "-w ${join(run.box.dir, 'door')}" ] && [ -n "\${FAKE_AGENT_WRITES_DOOR:-}" ] && exit 0
+    [ "$6 \${7##*.}" = "-r json" ] && exit 0
+    exit 1 ;;
+  bash)
+    printf '%s\n' "$*" >> "${join(run.box.dir, 'door-probes')}"
+    [ -z "\${FAKE_DOOR_CLOSED:-}" ] || { echo "bash: line 1: \${@: -1}: Permission denied" >&2; exit 1; }
+    shift 4; exec "$@" ;;
   env)
     pwd >> "${join(run.box.dir, 'node-cwds')}"
     if [ "$PWD" != / ]; then printf '%s\\n' 'node:internal/bootstrap/switches/does_own_process_state:126' '    cwd = rawMethods.cwd();' 'Error: EACCES: permission denied, uv_cwd' >&2; exit 1; fi
@@ -407,4 +418,48 @@ test('when node fails as the agents\' account, the installer\'s message carries 
   assert.match(run.stderr, /install\.sh: Configure the narrow agent-to-service sudo rule for serve\/lead-actions\.mjs; see docs\/security\.md \(the lead client as nobody said: sudo: a password is required\)$/m);
   assert.doesNotMatch(run.stderr, /a second line/);
   assert.doesNotMatch(systemctl(), /enable --now/);
+});
+
+// #98: the door of the heavy commands under agent_user lives outside the state; the installer makes it and proves,
+// as the agents' account, that it can open it read-only and take its lock, and can write neither it nor its folder.
+const doorConf = (lock = '@BOX@/door/heavy.lock') => `[lanes]\nheavy_commands = npm run test:ui\n${lock ? `heavy_lock = ${lock}\n` : ''}`;
+
+test('the installer makes the door of the heavy commands outside the state and proves the agents\' account takes it read-only (#98)', () => {
+  const { box, install, systemctl } = agentInstaller(doorConf());
+  const run = install({ CLEARED_SKIP_HARNESS_PROBE: '1' });
+  // (As in the tests above, the installer goes on to its units; what follows them needs a real host.)
+  assert.doesNotMatch(run.stderr, /heavy_lock|host status/, run.stderr);
+  const lock = join(box.dir, 'door', 'heavy.lock');
+  assert.equal(execFileSync('stat', ['-c', '%a', lock], { encoding: 'utf8' }).trim(), '644');
+  const status = JSON.parse(readFileSync(join(box.dir, 'door', 'heavy.status.json'), 'utf8'));
+  assert.equal(status.free, false, 'not free until a wake has read the host');
+  assert.match(box.read('door-probes'), new RegExp(`^-n -u nobody -- bash -c exec 8< "\\$1" && flock -w 60 8 _ ${lock}$`, 'm'));
+  assert.match(box.read('sudo-calls'), new RegExp(`-- test -w ${join(box.dir, 'door')}$`, 'm'));
+  assert.match(box.read('sudo-calls'), new RegExp(`-- test -w ${lock}$`, 'm'));
+  assert.match(systemctl(), /enable --now cleared-release-broker\.service/);
+});
+
+for (const [name, extra, expected] of [
+  ['the agents\' account can write the folder of the door', { FAKE_AGENT_WRITES_DOOR: '1' }, /install\.sh: nobody can write the directory of \[lanes\] heavy_lock \(.*\/door\): it may open the door for reading, nothing more$/m],
+  ['the agents\' account cannot open the door read-only', { FAKE_DOOR_CLOSED: '1' }, /install\.sh: nobody cannot open \[lanes\] heavy_lock \(.*\/door\/heavy\.lock\) read-only and take its lock: .*Permission denied/m],
+]) {
+  test(`the installer stops before any unit when ${name} (#98)`, () => {
+    const { box, install, systemctl } = agentInstaller(doorConf());
+    const run = install({ CLEARED_SKIP_HARNESS_PROBE: '1', ...extra });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, expected);
+    assert.doesNotMatch(systemctl(), /enable --now/);
+  });
+}
+
+test('under agent_user the installer refuses heavy commands with no door outside the state, or a door inside it (#98)', () => {
+  const none = agentInstaller(doorConf(''));
+  const missing = none.install({ CLEARED_SKIP_HARNESS_PROBE: '1' });
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /install\.sh: Set \[lanes\] heavy_lock to an absolute path outside Cleared state, .*\(for example .*\/run\/heavy\.lock\)/);
+  assert.doesNotMatch(none.systemctl(), /enable --now/);
+  const inside = agentInstaller(doorConf('@BOX@/state-home/cleared/project/heavy.lock'));
+  const refused = inside.install({ CLEARED_SKIP_HARNESS_PROBE: '1' });
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /install\.sh: \[lanes\] heavy_lock \(.*\) is inside Cleared state, which nobody must not open/);
 });
