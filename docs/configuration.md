@@ -222,7 +222,7 @@ Worktree layout, captures, checks, and cleanup settings.
 | `base_without_model` | Allow a clean base integration by script. | Default: yes |
 | `rerun_steps` | CI steps that may be retried without waking a model. | Optional; no default |
 | `kept_from` | Capture directory inside a team worktree. | Optional; no default |
-| `kept_in` | Capture directory retained in the main project. | Optional; no default |
+| `kept_in` | Capture directory retained in the main project; the app shows the PNG and JPEG files of `<kept_in>/<ticket>/` as the ticket's captures. | Optional; no default |
 | `heavy_commands` | Commands serialized while host resources are busy. | Optional; no default |
 | `heavy_wait_minutes` | How long a heavy command waits for the host. | Default: 30 |
 | `tidy_hour` | Hour of day for cleanup. | Default: 6 |

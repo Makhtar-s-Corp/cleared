@@ -106,21 +106,36 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
     area.focus();
   }
 
+  // The answer to a question: one tap to follow the team's recommendation (only when it gave one),
+  // one tap per choice it offered, or the owner's own words. Each is sent as written here, as a comment.
   function answerForm(card) {
     const area = el('textarea', { className: 'act-text', rows: 2, maxLength: 4000, id: 'an-text', placeholder: t('app_act_answer_hint') });
     const err = el('p', { className: 'act-error danger', role: 'alert' });
-    const send = async (value, ...buttons) => {
+    const all = [];
+    const send = async (value) => {
       if (!value.trim()) return;
-      for (const b of buttons) b.disabled = true;
+      for (const b of all) b.disabled = true;
       const r = await api('/api/actions/answer', { ticket: card.ref, text: value });
       if (r.ok && r.json.ok) return note(card, t('app_act_answered_note', { time: clock(new Date().toISOString()) }));
-      for (const b of buttons) b.disabled = false;
+      for (const b of all) b.disabled = false;
+      go.disabled = !area.value.trim();
       err.textContent = failure(r.json);
     };
-    const options = (card.options ?? []).map((o) => button(o, 'ghost', () => send(o, ...all)));
-    const go = button(t('app_act_send'), 'ink', () => send(area.value, ...all));
-    const all = [...options, go];
-    box.replaceChildren(...(options.length ? [el('div', { className: 'act-options' }, options)] : []), el('label', { className: 'act-label', htmlFor: 'an-text', textContent: t('app_act_answer_label') }), area, err, el('div', { className: 'act-row' }, go));
+    const questions = card.questions?.length ? card.questions : [{ text: '', recommendation: null, options: card.options ?? [] }];
+    const many = questions.length > 1;
+    const blocks = questions.map((q, i) => {
+      const n = i + 1;
+      const buttons = [];
+      if (q.recommendation) buttons.push(button(many ? `${t('app_q_number', { n })} · ${t('app_act_follow')}` : t('app_act_follow'), 'ink',
+        () => send(t(many ? 'app_act_follow_text_n' : 'app_act_follow_text', { n, rec: q.recommendation }))));
+      for (const o of q.options) buttons.push(button(many ? `${n}. ${o}` : o, 'ghost', () => send(many ? t('app_act_option_text_n', { n, option: o }) : o)));
+      all.push(...buttons);
+      return buttons.length ? el('div', { className: 'act-options' }, buttons) : null;
+    }).filter(Boolean);
+    const go = button(t('app_act_send'), 'ink', () => send(area.value), true);
+    area.addEventListener('input', () => { go.disabled = !area.value.trim(); go.toggleAttribute('aria-disabled', go.disabled); });
+    all.push(go);
+    box.replaceChildren(...blocks, el('label', { className: 'act-label', htmlFor: 'an-text', textContent: t('app_act_answer_label') }), area, err, el('div', { className: 'act-row' }, go));
   }
 
   // Called when a ticket is opened (fresh) and each time the board changes under it.
@@ -135,7 +150,7 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
     if (mode.name === 'grace' || mode.name === 'busy') return;
     if (card.kind === 'question') {
       // A redraw of the board must not wipe what is being typed.
-      const key = `${card.ref}|${(card.options ?? []).join('|')}`;
+      const key = `${card.ref}|${JSON.stringify(card.questions ?? card.options ?? [])}`;
       if (!fresh && key === formKey && box.querySelector('#an-text')) return;
       formKey = key;
       return answerForm(card);

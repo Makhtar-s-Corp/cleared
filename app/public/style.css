@@ -132,7 +132,7 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .ph-body h2 { font-size: 24px; font-weight: 600; letter-spacing: -.035em; line-height: 1.2; } .amber-bar { height: 3px; width: 56px; border-radius: 2px; background: var(--awaiting); margin-bottom: 12px; }
 .pstats { display: flex; background: var(--surface); border-radius: 10px; box-shadow: var(--e-outline); } .pstats > div { flex: 1; padding: 10px 12px; min-width: 0; } .pstats > div + div { box-shadow: inset 1px 0 0 var(--hairline); }
 .pstats .k { font-size: 12px; color: var(--text-muted); } .pstats .v { font: 15px var(--mono); }
-.sec .label { font-size: 11px; color: var(--text-faint); margin-bottom: 8px; display: block; }
+.sec .label { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; display: block; }
 .devs { display: flex; gap: 10px; } .devs figure { margin: 0; flex: 1; min-width: 0; } .devs figcaption { font-size: 12px; color: var(--text-muted); margin-top: 6px; text-align: center; } .devs .after figcaption { color: var(--success-text); font-weight: 500; }
 .device { display: block; width: 100%; padding: 5px; border-radius: 16px; background: var(--surface); box-shadow: var(--device-before); border: 0; cursor: zoom-in; } .after .device { box-shadow: var(--e-device-after); }
 .device img { display: block; width: 100%; height: 200px; object-fit: cover; object-position: top left; border-radius: 12px; background: var(--canvas); }
@@ -141,8 +141,8 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .squad { list-style: none; margin: 0; padding: 0; background: var(--surface); border-radius: 10px; box-shadow: var(--e-outline); } .squad li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; } .squad li + li { box-shadow: 0 -1px 0 var(--hairline); } .squad .role { color: var(--text-muted); width: 90px; flex: none; } .squad .who { font: 13px var(--mono); }
 .timeline { list-style: none; margin: 0 0 0 5px; padding: 0; display: flex; flex-direction: column; gap: 12px; box-shadow: inset 1px 0 0 var(--hairline); }
 .timeline li { position: relative; padding-left: 18px; } .timeline li::before { content: ""; position: absolute; left: -4px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--dot, var(--stage-progress)); }
-.timeline time { font: 12px var(--mono); color: var(--text-faint); margin-right: 6px; } .timeline details { display: inline; } .timeline summary { display: inline; cursor: pointer; } .timeline pre { margin: 6px 0 0; font: 11px/1.4 var(--mono); white-space: pre-wrap; color: var(--text-muted); }
-.ph-actions { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 18px; background: var(--surface); box-shadow: 0 -1px 0 var(--outline); }
+.timeline time { font: 12px var(--mono); color: var(--text-faint); margin-right: 6px; } .timeline details { display: inline; } .timeline summary { display: inline; cursor: pointer; } .timeline pre { margin: 6px 0 0; font: 12px/1.4 var(--mono); white-space: pre-wrap; color: var(--text-muted); }
+.ph-actions { flex: none; display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding: 12px 16px 18px; background: var(--surface); box-shadow: 0 -1px 0 var(--outline); }
 .zoom { position: fixed; inset: 0; background: var(--canvas); z-index: 40; display: grid; place-items: center; padding: 16px; } .zoom img { max-width: 100%; max-height: 85vh; border-radius: 12px; box-shadow: var(--e-outline); } .zoom button { position: absolute; top: 8px; right: 8px; }
 [hidden] { display: none !important; }
 
@@ -176,7 +176,7 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .landed-rows > .empty { grid-column: 1 / -1; padding: 14px 18px; }
 
 /* the gestures: black is the action, nothing else here is coloured */
-.act-row { display: flex; gap: 10px; } .act-options { display: flex; flex-direction: column; gap: 8px; }
+.act-row { display: flex; gap: 10px; }
 .act { flex: 1; min-height: 48px; border-radius: 8px; border: 0; font: 500 14px var(--sans); cursor: pointer; padding: 0 12px; }
 .act.ink { flex: 2; background: var(--ink); color: var(--on-ink); } .act.ghost { background: transparent; color: var(--text); box-shadow: 0 0 0 1px rgba(0,0,0,.14); }
 :root[data-theme="dark"] .act.ghost { box-shadow: 0 0 0 1px rgba(255,255,255,.2); }
@@ -189,3 +189,36 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .grace-text { font-size: 13px; color: var(--text); }
 .grace-bar { height: 4px; border-radius: 2px; background: var(--hairline); overflow: hidden; } .grace-bar i { display: block; height: 100%; background: var(--ink); }
 .undo { min-height: 44px; min-width: 88px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--ink); color: var(--on-ink); font: 600 14px var(--sans); cursor: pointer; } .undo:disabled { background: var(--surface-muted); color: var(--text-faint); cursor: not-allowed; }
+
+/* what waits for the human, said in full: the question, the team's recommendation, the age */
+.card .q-rest, .card .q-rec { font-size: 13px; color: var(--text-secondary); margin: -6px 0 10px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.card .q-rec b { font-weight: 600; color: var(--text); }
+.card .q-meta { font-size: 12px; color: var(--text-muted); margin: -4px 0 8px; }
+.card .q-ticket { font-size: 12px; color: var(--text-muted); }
+.card .foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-top: 12px; font-size: 12px; }
+.card .foot .age { font-family: var(--mono); color: var(--text-muted); }
+.card.question .open { font-weight: 600; color: var(--awaiting-text); text-decoration: underline; text-underline-offset: 3px; }
+.card .change-line { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+.card.tracker { background: var(--surface-muted); box-shadow: 0 0 0 1px var(--hairline); } .card.tracker h3 { color: var(--text-secondary); margin-bottom: 8px; } .card.tracker .line { box-shadow: none; padding: 0; margin: 0; color: var(--text-muted); font-size: 12px; }
+.col .apart { margin: 8px 2px 0; font: 500 12px/1.4 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.ph-since { margin-top: 6px; font: 13px var(--mono); color: var(--text-muted); }
+.ph-question { padding: 14px; border-radius: 10px; background: var(--awaiting-surface); box-shadow: 0 0 0 1px rgba(245,166,35,.45); }
+.ph-question .label { display: block; margin-bottom: 8px; color: var(--text-muted); }
+.ph-question .q + .q { margin-top: 14px; padding-top: 14px; box-shadow: 0 -1px 0 var(--hairline); }
+.ph-question .q-n { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.ph-question .q-text { font-size: 16px; font-weight: 500; line-height: 1.45; color: var(--text); }
+.ph-question .q-rec { margin-top: 12px; padding-top: 10px; box-shadow: 0 -1px 0 var(--awaiting-highlight); font-size: 14px; color: var(--text); }
+.ph-question .q-rec b { display: block; font: 500 12px/1.4 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; }
+.ph-question .q-options { margin: 10px 0 0; padding-left: 18px; font-size: 14px; color: var(--text-secondary); }
+/* the choices are buttons below when the answer form is there: not said twice */
+.porthole:has(#ph-actions:not([hidden]) .act-options) .q-options { display: none; }
+.act-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; } .act-options .act.ink { grid-column: 1 / -1; }
+.act-options .act { padding: 8px 12px; line-height: 1.3; }
+.pr-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .pr-row .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; box-shadow: var(--e-outline); color: var(--text-muted); }
+.pr-facts { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+.no-capture { font-size: 13px; color: var(--text-secondary); padding: 12px 14px; border-radius: 10px; border: 1px dashed var(--dashed); }
+.sec > .example, .sec > .tests, .sec > .devs { margin-top: 10px; }
+.report-at { font-size: 12px; margin-bottom: 4px; }
+.report-h { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 10px 0 4px; }
+.report { margin: 0; padding-left: 18px; } .report li { margin: 4px 0; }
+.tracker-note { font-size: 13px; color: var(--text-secondary); }
