@@ -134,7 +134,7 @@ none_orphans() {
       free | taken | foreign) return 1 ;;
       *)
         echo "$(basename "$0"): the session $1 cannot be said over: its run script is gone and sudo -n -u $agent could not say whether processes of $agent are left in its group $pid; its worktree is left as it is" >&2
-        ledger event --kind session_not_stopped --detail "the session $1 cannot be said over: sudo -n -u $agent did not answer for its group $pid" > /dev/null 2>&1 || true
+        ledger event --kind session_not_stopped --detail "the session $1 cannot be said over: $agent gave no answer through sudo for its group $pid" > /dev/null 2>&1 || true
         return 2
         ;;
     esac
