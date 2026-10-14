@@ -86,8 +86,8 @@ async function project({ status = 'In Progress', title = 'Rename the screen titl
     mkdirSync(join(dir, 'validations'), { recursive: true });
     writeFileSync(join(dir, 'validations', 'EX-7.json'), JSON.stringify({ ticket: 'EX-7', at: '2026-10-14T15:00:00.000Z', pulls: [{ pr: 314, head: 'a'.repeat(40) }] }));
   }
-  const conf = { sections: { owner: { language: 'fr' }, heartbeat: { wake_interval_minutes: '1' }, lanes: keptIn ? { kept_in: keptIn } : {},
-    tracker: { adapter: 'github', repository: 'owner/repo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } };
+  const conf = { sections: { owner: { language: 'fr' }, heartbeat: { wake_interval_minutes: '1' }, lanes: { push_roles: 'dev mechanical talk', ...(keptIn ? { kept_in: keptIn } : {}) },
+    tracker: { adapter: 'github', repository: 'owner/repo', writeup_role: 'writing', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } };
   const trackerClient = { listTickets: ({ status: s }) => (s === ticket.status ? [ticket] : []), getTicket: () => ticket, comments: () => [] };
   const run = (id, over = {}) => db.prepare('INSERT INTO runs (run_id, ticket, role, model, provider, started_at, ended_at, outcome, tokens_total, pr_number, lines_changed) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
     .run(id, over.ticket ?? 'EX-7', over.role ?? 'dev', 'claude-opus-5-5', 'claude', over.started ?? new Date(Date.now() - 3600e3).toISOString(), over.ended === undefined ? new Date(Date.now() - 1800e3).toISOString() : over.ended, over.outcome ?? 'done', over.tokens ?? 1000, over.pr ?? null, over.lines ?? null);
@@ -134,6 +134,33 @@ test('Where we are comes from the team report to the user, never from its handov
     p.run('r1-writing-a1', { role: 'writing', started: new Date(Date.now() - 1700e3).toISOString(), ended: new Date(Date.now() - 1600e3).toISOString() });
     p.report('r1-writing-a1', '## Fait\n\n- Version mise en forme pour vous.');
     assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['Version mise en forme pour vous.']);
+  } finally { p.close(); }
+});
+
+test('Where we are is the report of the team that wrote the change (or its rewrite for the user), never a later triage, cleanup or lead run', async () => {
+  const p = await project();
+  try {
+    const at = (minutes) => new Date(Date.now() - minutes * 60e3).toISOString();
+    p.run('b1-dev-a1', { started: at(120), ended: at(100) });
+    p.report('b1-dev-a1', '## Done\n\n- The title now reads Upcoming.');
+    p.run('b2-triage-a1', { role: 'triage', started: at(50), ended: at(40) });
+    p.report('b2-triage-a1', '## Done\n\n- Triaged: labels set.');
+    p.run('b3-cleanup-a1', { role: 'cleanup', started: at(30), ended: at(25) });
+    p.report('b3-cleanup-a1', '## Done\n\n- Cleaned the worktree.');
+    p.run('b3-release-a1', { role: 'release', started: at(20), ended: at(15) });
+    p.report('b3-release-a1', '## Done\n\n- Told the lane.');
+    // The rewrite of the triage run is not the team's report either.
+    p.run('b2-writing-a1', { role: 'writing', started: at(39), ended: at(38) });
+    p.report('b2-writing-a1', '## Done\n\n- Triage, formatted.');
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['The title now reads Upcoming.']);
+    // The rewrite of the dev run is, and wins over the dev's own words.
+    p.run('b1-writing-a1', { role: 'writing', started: at(99), ended: at(98) });
+    p.report('b1-writing-a1', '## Done\n\n- The screen title is now “Upcoming”.');
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['The screen title is now “Upcoming”.']);
+    // A newer session of a pushed role (a second dev round) takes over.
+    p.run('b4-mechanical-a1', { role: 'mechanical', started: at(10), ended: at(5) });
+    p.report('b4-mechanical-a1', '## Done\n\n- Round two: the test name follows.');
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['Round two: the test name follows.']);
   } finally { p.close(); }
 });
 
