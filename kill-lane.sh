@@ -32,6 +32,7 @@ if ! grep -qxF -- "$lane" <<<"$lanes"; then
 fi
 worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs/heads/$lane" '/^worktree /{w = substr($0, 10)} $0 == b {print w}')
 [ -d "$worktree" ] || die "no worktree for $lane"
+[ "$(realpath -m -- "$worktree")" != "$(realpath -m -- "$ORCH_REPO")" ] || die "$lane is checked out in the project's main checkout ($ORCH_REPO), which is never closed: check out the base there first"
 
 if [ "$force" != --force ]; then
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "$lane has uncommitted changes (use --force to drop them)"
@@ -42,11 +43,13 @@ if [ "$force" != --force ]; then
 fi
 
 ledger init > /dev/null
+# Its sessions end first, the harness and all it started with them: a
+# worktree is never taken from under a session that still runs.
+terminal close-worktree "$worktree" || die "a session of $lane could not be stopped: its worktree, its branch and its runs are left as they are (try again, or look at its processes)"
 ledger sql "select run_id from runs where lane = '$lane' and outcome = 'running'" | jq -r '.[].run_id' | while IFS= read -r run_id; do
   ledger run-end --run-id "$run_id" --outcome killed
 done
 
-terminal close-worktree "$worktree"
 terminal remove-worktree "$worktree"
 git -C "$ORCH_REPO" worktree prune
 if git -C "$ORCH_REPO" rev-parse --verify --quiet "refs/heads/$lane" > /dev/null; then

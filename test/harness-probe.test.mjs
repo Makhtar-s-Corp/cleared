@@ -129,7 +129,7 @@ for (const agentUser of [false, true]) {
     if (agentUser) {
       const sudo = box.read('sudo-calls').split('\n').filter((line) => / claude -p /.test(line));
       assert.equal(sudo.length, 3, box.read('sudo-calls'));
-      for (const line of sudo) assert.match(line, new RegExp(`^-n -u nobody -- env .* timeout -k 10 120 ${join(box.dir, 'bwrap')} --dev-bind / / -- claude -p `));
+      for (const line of sudo) assert.match(line, new RegExp(`^-n -u nobody -- env .* timeout -k 10 120 ${join(box.dir, 'bwrap')} --dev-bind / / --die-with-parent --unshare-pid --proc /proc -- claude -p `));
       assert.equal(box.read('bwrap-calls').split('\n').filter(Boolean).length, 3);
     } else {
       assert.equal(box.read('sudo-calls'), '');
@@ -202,7 +202,7 @@ for (const [adapter, key] of [['claude', 'ANTHROPIC_API_KEY'], ['codex', 'OPENAI
       if (agentUser) {
         const started = box.read('sudo-calls').split('\n').filter((line) => new RegExp(` ${adapter} `).test(line));
         assert.equal(started.length, 1, box.read('sudo-calls'));
-        assert.match(started[0], new RegExp(`^-n -u nobody -- env .* timeout -k 10 120 ${join(box.dir, 'bwrap')} --dev-bind / / -- ${adapter} `));
+        assert.match(started[0], new RegExp(`^-n -u nobody -- env .* timeout -k 10 120 ${join(box.dir, 'bwrap')} --dev-bind / / --die-with-parent --unshare-pid --proc /proc -- ${adapter} `));
       } else {
         assert.equal(box.read('sudo-calls'), '');
       }

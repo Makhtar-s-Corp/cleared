@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -469,7 +469,10 @@ test('what the push script says is read from its last line, whatever git or gh w
   const lane = (script) => {
     const box = sandbox();
     writeFileSync(join(box.home, 'push-lane.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
-    return runLane(box, 0).comment;
+    // A lane runs in a worktree of its own (from the main checkout, nothing is pushed: below).
+    const worktree = join(box.home, 'lanes', 'dev-X-1');
+    box.git('worktree', 'add', '-q', '-b', 'dev/X-1', worktree, 'main');
+    return runLane(box, 0, {}, worktree).comment;
   };
   assert.match(lane('echo "remote: Create a pull request" >&2; echo "warning from gh"; echo "#41"'), /Pull request opened or updated: #41/);
   assert.match(lane('echo "nothing to push: dev/X-1 has no commit of its own"'), /Nothing to push/);
@@ -2181,4 +2184,49 @@ test('a lane is not opened again for ever for one reason: three times in a day f
   writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'c9', createdAt: '2099-01-01T10:00:00Z', body: 'Laisse ce test de côté.', byOwner: true }]));
   assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
   assert.equal(record('X-5').runs.length, 5);
+});
+
+
+test('with Orca, a session that runs too long is stopped even when Orca does not answer: its run script is signalled and the session counts as stopped short', async () => {
+  const { flow, todo, by, record, box } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 9\nsession_hours = 1'));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  const runDir = join(box.state, 'runs', kept.runs.at(-1).run);
+  const long = spawn('sleep', ['60'], { stdio: 'ignore' });
+  const ended = new Promise((done) => long.on('exit', done));
+  writeFileSync(join(runDir, 'pid'), `${long.pid}\n`);
+  kept.runs.at(-1).at = new Date(Date.now() - 61 * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  const stopped = flow({ FAKE_ORCA_CLOSE_FAILS: '1', FAKE_ORCA_DOWN: '1' });
+  assert.match(stopped.stdout, /X-5: its session runs for more than 1 hours: stopped\n/, stopped.stderr);
+  assert.equal(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '124');
+  const signal = await Promise.race([ended.then(() => 'ended'), new Promise((done) => setTimeout(() => done('still running'), 5000))]);
+  if (signal !== 'ended') long.kill('SIGKILL');
+  assert.equal(signal, 'ended', 'its run script was signalled');
+});
+
+
+test('nothing is committed nor pushed from the project\'s main checkout, where the acting lead runs under [security] agent_user, even for a role whose work is pushed', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('push_roles = dev talk', 'push_roles = dev talk release')}\n[adapter.first]\ncommits = no\n`);
+  writeFileSync(join(box.home, 'push-lane.sh'), `#!/usr/bin/env bash\necho "$1" >> "${join(box.home, 'pushed-from')}"\necho "#41"\n`, { mode: 0o755 });
+  const head = () => execFileSync('git', ['-C', box.repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const before = head();
+  // The session leaves a file in the checkout it runs in.
+  const run = runLane(box, 0, { FAKE_LEAVES: 'echo note > left.txt' });
+  assert.equal(run.status, 0);
+  assert.equal(existsSync(join(box.home, 'pushed-from')), false, 'push-lane.sh never ran');
+  assert.doesNotMatch(run.comment, /Pull request opened|not pushed|Nothing to push/);
+  assert.equal(head(), before, 'nothing was committed');
+  // From a worktree of a lane, the same session is committed and pushed as always.
+  const worktree = join(box.home, 'lanes', 'dev-X-1');
+  box.git('worktree', 'add', '-q', '-b', 'dev/X-1', worktree, 'main');
+  const lane = runLane(box, 0, {}, worktree);
+  assert.match(lane.comment, /Pull request opened or updated: #41/);
+  assert.equal(readFileSync(join(box.home, 'pushed-from'), 'utf8').trim(), worktree);
 });

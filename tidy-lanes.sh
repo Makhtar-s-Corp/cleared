@@ -50,6 +50,8 @@ ledger init > /dev/null
 while IFS=$'\t' read -r path branch; do
   [ -n "$branch" ] || continue
   case "$path" in "$root"/*) ;; *) continue ;; esac
+  # The main checkout, even under the lanes root, is no lane: never closed.
+  [ "$(realpath -m -- "$path")" != "$(realpath -m -- "$ORCH_REPO")" ] || continue
   lane=$(basename "$path")
   [ "$branch" != "$lead_lane" ] && [ "$branch" != "${base#origin/}" ] || continue
   if tr ' ,' '\n\n' <<<"$(conf_get lead not_lanes)" | grep -qxF -- "$lane"; then continue; fi
@@ -174,7 +176,7 @@ while IFS=$'\t' read -r path branch; do
     fi
   fi
   # 4: its terminals, its worktree.
-  terminal close-worktree "$path"
+  terminal close-worktree "$path" || { kept "$lane" "a session in it could not be stopped"; continue; }
   terminal remove-worktree "$path" 2> /dev/null || true
   [ ! -d "$path" ] || { kept "$lane" "its worktree could not be removed"; continue; }
   jq -nc --arg lane "$lane" --arg name "$name" --arg why "$why" '{lane: $lane, name: $name, why: $why}' >> "$out/closed.jsonl"

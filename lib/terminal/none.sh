@@ -80,27 +80,189 @@ terminal_show() {
 }
 terminal_send() { terminal_show; }
 
-# SIGTERM to the session and the process group it leads (its harness, under
-# sudo, gets it from sudo). A process that is gone, or that is no longer the
-# session of that handle, is left alone: there is nothing of it to close.
+# Closing a session ends its whole process group: the run script, sudo, and
+# the harness under [security] agent_user with what it started. The account
+# of the service cannot signal the processes of the agents' account, and
+# sudo stops passing signals on once it is gone: the group is therefore
+# signalled from both accounts (sudo -n -u <agent_user> -- kill, the rule the
+# harness starts with), SIGTERM, then SIGKILL after ORCH_STOP_GRACE seconds
+# (10). The only number signalled is the one the service wrote in the handle,
+# once checked (none_session), or a group of that number that only the
+# session can have left (none_orphans). What is still there after the KILL is
+# said, on stderr and in the ledger, and the close fails: nobody takes a
+# worktree from under a session that runs.
+#
+# none_members <group>: the live processes of that process group, one number
+# a line, as /proc shows them.
+none_members() {
+  local dir stat fields
+  for dir in /proc/[0-9]*; do
+    stat=
+    read -r -d '' stat 2> /dev/null < "$dir/stat" || [ -n "$stat" ] || continue
+    read -r -a fields <<<"${stat##*) }"
+    [ "${fields[2]:-}" = "$1" ] && [ "${fields[0]:-}" != Z ] && printf '%s\n' "${dir#/proc/}"
+  done
+  return 0
+}
+
+# none_orphans <handle>: the number of the process group of that handle when
+# its leader is gone but processes of the group are left (a run script that
+# died, killed, or stopped by an earlier close that could not reach the
+# agents' account). A group outlives its leader under the same number, which
+# the system gives to no other process while the group has a member; members
+# can only join a group of their own session. So: the same boot, no process
+# of that number, and every member in the session of that number, started
+# after the leader.
+#
+# When /proc shows the service nothing of the group (mounted with hidepid,
+# it hides the processes of the agents' account), the agents' account is
+# asked, by the same rules read from its own view of /proc
+# (none_agent_orphans): "nothing left" never rests on what the service sees
+# alone. Its silence (sudo that does not answer) is said, and the close
+# fails.
+none_orphans() {
+  local kind pid start boot member stat fields members agent seen
+  IFS=: read -r kind pid start boot <<<"$1"
+  [ "$kind" = none ] && [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$start" =~ ^[0-9]+$ ]] || return 1
+  [ "$boot" = "$(cat /proc/sys/kernel/random/boot_id 2> /dev/null)" ] && [ ! -e "/proc/$pid" ] || return 1
+  members=$(none_members "$pid")
+  if [ -z "$members" ]; then
+    agent=$(none_agent) || return 1
+    seen=$(none_agent_orphans "$pid" "$start" "$agent") || seen=
+    case "$seen" in
+      held) printf '%s\n' "$pid"; return 0 ;;
+      free | taken | foreign) return 1 ;;
+      *)
+        echo "$(basename "$0"): the session $1 cannot be said over: its run script is gone and sudo -n -u $agent could not say whether processes of $agent are left in its group $pid; its worktree is left as it is" >&2
+        ledger event --kind session_not_stopped --detail "the session $1 cannot be said over: $agent gave no answer through sudo for its group $pid" > /dev/null 2>&1 || true
+        return 2
+        ;;
+    esac
+  fi
+  while IFS= read -r member; do
+    stat=$(cat "/proc/$member/stat" 2> /dev/null) || continue
+    read -r -a fields <<<"${stat##*) }"
+    [ "${fields[3]:-}" = "$pid" ] && [ "${fields[19]:-0}" -ge "$start" ] || return 1
+  done <<<"$members"
+  printf '%s\n' "$pid"
+}
+
+# none_agent: the agents' account, when the harness runs under another one
+# than this script's.
+none_agent() {
+  local agent
+  agent=$(conf_get security agent_user 2> /dev/null) || agent=
+  [ -n "$agent" ] && [ "$agent" != "$(id -un)" ] && printf '%s\n' "$agent"
+}
+
+# none_sudo <agent account> <command>...: the command as the agents' account,
+# for CLEARED_SUDO_WAIT seconds at most (30): a sudo that hangs is one that
+# does not answer, never one that said all was well.
+none_sudo() {
+  local agent=$1 wait=${ORCH_SUDO_WAIT:-30}
+  shift
+  [[ "$wait" =~ ^[1-9][0-9]*$ ]] || wait=30
+  timeout -k 5 "$wait" sudo -n -u "$agent" -- "$@"
+}
+
+# none_signal <signal> <group> [<agent account>]: the group, from this
+# account and from the agents' one.
+none_signal() {
+  kill -"$1" -- "-$2" 2> /dev/null || true
+  [ -z "${3:-}" ] || none_sudo "$3" kill -"$1" -- "-$2" > /dev/null 2>&1 || true
+}
+
+# none_agent_holds <group> <agent account>: what the agents' account says of
+# the group: "held" (a process of its own is still in it), "free", or nothing
+# when sudo could not ask it. (/proc may hide its processes from the service.)
+none_agent_holds() {
+  none_sudo "$2" sh -c 'if kill -0 "-$1" 2> /dev/null; then echo held; else echo free; fi' cleared-check "$1" 2> /dev/null
+}
+
+# none_agent_orphans <group> <start> <agent account>: the agents' account
+# reads /proc as it sees it: "taken" (a process of its own has the number of
+# the group: the number went to another process), "foreign" (a member of the
+# group is in another session, or started before the leader), "held" (members
+# of the group are left, all in its session, started after it), "free" (none);
+# nothing when sudo could not ask it.
+none_agent_orphans() {
+  # shellcheck disable=SC2016
+  # (The list of /proc is expanded before globbing is turned off for the
+  # split of each line: turned off first, the loop would see one literal word.)
+  none_sudo "$3" sh -c 'group=$1 start=$2 found=
+[ ! -e "/proc/$group" ] || { echo taken; exit 0; }
+for dir in /proc/[0-9]*; do
+  { read -r line < "$dir/stat"; } 2> /dev/null || continue
+  set -f
+  set -- ${line##*) }
+  set +f
+  [ "$3" = "$group" ] && [ "$1" != Z ] || continue
+  [ "$4" = "$group" ] && [ "${20}" -ge "$start" ] || { echo foreign; exit 0; }
+  found=1
+done
+if [ -n "$found" ]; then echo held; else echo free; fi' cleared-check "$1" "$2" 2> /dev/null
+}
+
+# none_stop_group <group> <handle>: TERM, the grace, KILL, and the check that
+# nothing of the group is left.
+none_stop_group() {
+  local group=$1 agent grace=${ORCH_STOP_GRACE:-10} tries left held=free why
+  agent=$(none_agent) || agent=
+  [[ "$grace" =~ ^[0-9]+$ ]] || grace=10
+  none_signal TERM "$group" "$agent"
+  for ((tries = grace * 5; tries > 0; tries--)); do
+    [ -n "$(none_members "$group")" ] || break
+    sleep 0.2
+  done
+  [ -z "$agent" ] || held=$(none_agent_holds "$group" "$agent") || held=
+  if [ -n "$(none_members "$group")" ] || [ "$held" != free ]; then
+    # Something of the group is still there: its number is still its own.
+    none_signal KILL "$group" "$agent"
+    for ((tries = 25; tries > 0; tries--)); do
+      [ -n "$(none_members "$group")" ] || break
+      sleep 0.2
+    done
+    [ -z "$agent" ] || held=$(none_agent_holds "$group" "$agent") || held=
+  fi
+  left=$(none_members "$group" | paste -sd' ' -)
+  if [ -z "$left" ] && [ "$held" = free ]; then return 0; fi
+  if [ -n "$left" ]; then why="process(es) $left of its group $group are still running after SIGKILL"
+  elif [ -z "$held" ]; then why="sudo -n -u $agent could not stop and check the processes of $agent in its group $group"
+  else why="processes of $agent are still in its group $group after SIGKILL"; fi
+  echo "$(basename "$0"): the session $2 is not over: $why; its worktree is left as it is" >&2
+  ledger event --kind session_not_stopped --detail "the session $2 is not over: $why" > /dev/null 2>&1 || true
+  return 1
+}
+
+# 0 once the session and every process of its group are gone, or when the
+# handle names no session of Cleared any more; 1, said, when something of it
+# is left.
 terminal_close() {
-  local pid stat fields
-  pid=$(none_session "$1") || return 0
-  stat=$(cat "/proc/$pid/stat" 2> /dev/null) || return 0
-  read -r -a fields <<<"${stat##*) }"
-  if [ "${fields[2]:-}" = "$pid" ]; then kill -TERM -- "-$pid" 2> /dev/null; else kill -TERM "$pid" 2> /dev/null; fi
+  local pid stat fields orphans=0
+  if pid=$(none_session "$1"); then
+    stat=$(cat "/proc/$pid/stat" 2> /dev/null) || return 0
+    read -r -a fields <<<"${stat##*) }"
+    # A session that leads no process group of its own (none starts so): it alone.
+    if [ "${fields[2]:-}" != "$pid" ]; then kill -TERM "$pid" 2> /dev/null; return 0; fi
+  else
+    # Nothing of it left (1), or nobody could say (2: said, the close fails).
+    pid=$(none_orphans "$1") || orphans=$?
+    [ "$orphans" = 0 ] || { [ "$orphans" != 2 ]; return; }
+  fi
+  none_stop_group "$pid" "$1"
 }
 
 terminal_stop() { terminal_close "$1"; }
 
+# Fails when a session in that worktree could not be ended.
 terminal_close_worktree() {
-  local mark worktree
+  local mark worktree code=0
   worktree=$(realpath -m -- "$1")
   for mark in "$ORCH_STATE_DIR"/runs/*/terminal.none; do
     [ -f "$mark" ] && [ "$(sed -n '2p' "$mark")" = "$worktree" ] || continue
-    terminal_close "$(sed -n '1p' "$mark")" || true
+    terminal_close "$(sed -n '1p' "$mark")" || code=1
   done
-  return 0
+  return "$code"
 }
 
 terminal_remove_worktree() { git -C "$ORCH_REPO" worktree remove --force "$1"; }

@@ -363,7 +363,7 @@ second_team() {
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken refused
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken refused stopped
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record") team=$(jq -r '.team // empty' "$record")
   # What is said of the second team of a ticket names it (<ticket>.2): two
@@ -384,9 +384,18 @@ one_lane() {
     age=$(( ( $(date +%s) - $(date -d "$(jq -r '.runs[-1].at' "$record")" +%s) ) / 60 ))
     if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
       [ "$age" -ge $(( session_hours * 60 )) ] || return 0
+      stopped=0
+      [ -n "$dry" ] || terminal stop "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" || stopped=$?
+      if [ "$stopped" = 1 ]; then
+        # Seen still running (the harness under the agents' account): it is
+        # not over, nothing is opened in its worktree; tried again at the
+        # next wake. An adapter that cannot tell (2: Orca that does not
+        # answer) stops what it can below, as it always did.
+        say "$ticket: its session runs for more than $session_hours hours and could not be stopped: tried again at the next wake"
+        return 0
+      fi
       say "$ticket: its session runs for more than $session_hours hours: stopped"
       [ -z "$dry" ] || return 0
-      terminal stop "$(cat "$ORCH_STATE_DIR/runs/$last/terminal.handle" 2> /dev/null)" || true
       kill "$pid" 2> /dev/null || true
       echo 124 > "$ORCH_STATE_DIR/runs/$last/exit-code"
     elif [ -n "$pid" ]; then
@@ -473,7 +482,10 @@ one_lane() {
           return 0
         fi
       fi
-      terminal close-worktree "$worktree"
+      if ! terminal close-worktree "$worktree"; then
+        say "$ticket: a process of its session is still running: its worktree stays, looked at again at the next wake"
+        return 0
+      fi
       terminal remove-worktree "$worktree" 2> /dev/null || true
       [ -d "$worktree" ] || say "$ticket: session over, work sent: its worktree is closed"
     fi

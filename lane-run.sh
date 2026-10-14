@@ -117,7 +117,10 @@ capture_handover
 # not part of its work). Without this the work would wait for another model
 # to commit it. A backend that commits by itself is left alone: what it did
 # not commit is its to sort out.
+# Never in the project's main checkout, where the acting lead runs under
+# [security] agent_user (wake.sh): that checkout is the service's.
 if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
+  && [ "$(realpath -m -- "$PWD")" != "$(realpath -m -- "$ORCH_REPO")" ] \
   && { [ -n "$(conf_get security agent_user)" ] || { [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
        && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ]; }; } \
   && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
@@ -172,7 +175,10 @@ fi
 # this is where its branch leaves and its pull request opens.
 pushed_note=
 # (Also the work of a session its budget stopped: what it committed is not lost.)
-if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
+# Never from the project's main checkout, as for the commit above.
+if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
+  && [ "$(realpath -m -- "$PWD")" != "$(realpath -m -- "$ORCH_REPO")" ] \
+  && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   # Its answer is its last line on stdout. What git and gh say on the way is
   # kept in a file and shown once the script has ended.
   push_err=$(mktemp)
