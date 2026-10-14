@@ -277,3 +277,37 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
   assert.match(seen, /^screens$/m, 'its heavy command did not wait on the door its own session holds');
   assert.equal(spawnSync('bash', ['-c', 'exec 8< "$1" && flock -n 8', '_', lock]).status, 0, 'let go when the session ends');
 });
+
+test('the dev prompt: unchanged without agent_user; under agent_user the dispatcher saves the work and the team must not try to commit nor report it as a block', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  const told = () => {
+    const run = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; prompt_text "$(prompt_file dev)"', '_', ORCH_HOME], { env: { ...box.env, CLEARED_CONF: confPath }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout;
+  };
+  // Word for word what it said before the placeholders (#98), without agent_user.
+  const before = readFileSync(join(ORCH_HOME, 'prompts', 'dev.md'), 'utf8')
+    .replace('@COMMIT_RULE@', 'Commit on this branch, with English commit messages. Write the test first, show it failing, and name it in the commit message.')
+    .replace('@COMMIT_INDEPENDENT@', 'complete and commit independent work')
+    .replaceAll('{owner_language}', 'en').replaceAll('{orch}', ORCH_HOME);
+  const plain = told();
+  assert.equal(plain, before);
+  assert.match(plain, /Commit on this branch, with English commit messages\./);
+  assert.match(plain, /complete and commit independent work/);
+  assert.doesNotMatch(plain, /@COMMIT/);
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nagent_user = nobody\n'));
+  const split = told();
+  assert.doesNotMatch(split, /@COMMIT/);
+  assert.doesNotMatch(split, /Commit on this branch/);
+  assert.doesNotMatch(split, /complete and commit/);
+  assert.match(split, /Do not commit, and do not try to/);
+  assert.match(split, /Cleared commits every change of this worktree on this branch after your session, so your work is saved/);
+  assert.match(split, /it is not a block nor a rights problem, and you must not report it as one/);
+  assert.match(split, /write `\.commit-message` at the repository root/);
+  assert.match(split, /Write the test first, show it failing/);
+  assert.match(split, /complete independent work \(Cleared commits it after your session\), then ask the question/);
+  // The rest is the same prompt.
+  assert.match(split, new RegExp(`\`${ORCH_HOME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/when-free\\.sh npm run test:ui\``));
+  assert.equal(split.split('\n').length, plain.split('\n').length);
+});

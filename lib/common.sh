@@ -52,7 +52,7 @@ prompt_file() { prompt_asset "$1.md"; }
 # Written as it is, whatever characters the path holds (a quoted replacement
 # is taken literally).
 prompt_text() {
-  local text language verdict report_on
+  local text language verdict report_on commit_rule commit_independent
   [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
   text=$(cat "$1"; printf x)
   text=${text%x}
@@ -63,6 +63,20 @@ prompt_text() {
   if [[ "$text" == *'@REPORT_ON@'* ]]; then
     report_on=$(conf_get lead report_on) || return 1
     text=${text//@REPORT_ON@/$report_on}
+  fi
+  # Who saves the work: under [security] agent_user, Git's control files are
+  # read-only around the harness and lane-run.sh commits after the session;
+  # a team told to commit would take the refusal for a block.
+  if [[ "$text" == *'@COMMIT_RULE@'* || "$text" == *'@COMMIT_INDEPENDENT@'* ]]; then
+    if [ -n "$(conf_get security agent_user)" ]; then
+      commit_rule="Do not commit, and do not try to: in this installation Git's control files are read-only for you, so \`git commit\` fails by design. Cleared commits every change of this worktree on this branch after your session, so your work is saved. Not being able to commit is expected: it is not a block nor a rights problem, and you must not report it as one. Instead, write \`.commit-message\` at the repository root: an English conventional commit subject, a blank line, then a short paragraph. Write the test first, show it failing, and name it in \`.commit-message\`."
+      commit_independent='complete independent work (Cleared commits it after your session)'
+    else
+      commit_rule='Commit on this branch, with English commit messages. Write the test first, show it failing, and name it in the commit message.'
+      commit_independent='complete and commit independent work'
+    fi
+    text=${text//@COMMIT_RULE@/"$commit_rule"}
+    text=${text//@COMMIT_INDEPENDENT@/"$commit_independent"}
   fi
   language=$(conf_get owner language)
   language=${language:-en}
