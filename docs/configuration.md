@@ -297,7 +297,7 @@ Which GitHub identity the forge calls use: pushing and fetching branches, openin
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
-| `adapter` | Forge in use. Only `github` exists. | Default: github |
+| `adapter` | Forge in use. Only `github` exists, and it is what an absent key means. | Optional; no default (`github`) |
 | `app_id` | Numeric GitHub App ID used to sign short-lived JWTs. | Optional; no default |
 | `installation_id` | Numeric ID of the app's installation on the project repository. | Required with `app_id` |
 | `app_private_key_file` | Absolute path to the app's RSA private key, outside the repository, owned by the service account with mode `0600`. | Required with `app_id` |
