@@ -401,16 +401,26 @@ test('cleared status says which identity the forge calls use, and reports a conf
 });
 const rmCache = (lane) => execFileSync('rm', ['-rf', join(lane.box.state, 'forge')]);
 
-// Every script that calls gh or reaches the remote with git gets the forge credential from lib/common.sh, and every
-// node file that runs gh or a network git command gets it from lib/forge.mjs: a new call site cannot miss it.
-test('no forge call site is left outside the forge credential', () => {
+// A tripwire over the source text, not a proof. It finds: shell scripts that call gh or a network git command
+// without sourcing lib/common.sh; shell code that runs gh around the gh function of lib/common.sh (command, exec,
+// env, nohup, timeout, xargs, a .../bin/gh path, or `sh -c`/`bash -c` strings), whose call would take the ambient
+// credential; and node files that run gh, or git with a literal push/fetch/pull/ls-remote/clone argument or a
+// `...` spread of arguments, without lib/forge.mjs. It does not see a command assembled at run time (a variable
+// holding gh or the git verb, eval, a program handed the name), nor a node file that receives its git arguments
+// from elsewhere without spreading them: a reviewer still reads new forge calls.
+test('scripts that call the forge source lib/common.sh, none runs gh around its function, and node forge calls use lib/forge.mjs', () => {
   const shell = [...readdirSync(ORCH_HOME).filter((name) => name.endsWith('.sh')),
     ...['adapters', 'lib', 'serve'].flatMap((dir) => readdirSync(join(ORCH_HOME, dir), { recursive: true })
       .map((name) => join(dir, String(name))).filter((name) => name.endsWith('.sh')))];
   const calls = /(^|[\s($`;|&])gh (pr|run|api|issue|repo|workflow)\b|\bgit\b[^\n|;]*\s(push|fetch|pull|ls-remote|clone)\b/m;
+  const around = /(^|[\s($`;|&])(command|exec|env(\s+(-u\s+\S+|-\S+|\w+=\S*))*|nohup|xargs(\s+-\S+)*|timeout(\s+-\S+)*\s+\S+)\s+gh\b|\/bin\/gh\b|\b(ba)?sh\s+-c\s+["'][^"'\n]*\bgh\s/m;
   let checked = 0;
   for (const name of shell) {
     const text = readFileSync(join(ORCH_HOME, name), 'utf8').split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+    // The one place gh is meant to be run directly: the function that hands it the token.
+    const own = name === 'lib/common.sh' ? text.replace(/GH_TOKEN=\$forge_token GITHUB_TOKEN=\$forge_token command gh "\$@"|ambient\) command gh "\$@"/g, '') : text;
+    const bypass = own.match(around);
+    assert.equal(bypass, null, `${name} runs gh around the forge credential of lib/common.sh: ${bypass?.[0]}`);
     if (!calls.test(text) || name === 'lib/common.sh') continue;
     checked += 1;
     assert.match(text, /lib\/common\.sh"|\.\.\/lib\/common\.sh"|\.\.\/\.\.\/\.\.\)" && pwd\)\/lib\/common\.sh"/, `${name} calls the forge without lib/common.sh`);
@@ -422,7 +432,9 @@ test('no forge call site is left outside the forge credential', () => {
   for (const name of node) {
     if (name === 'lib/tracker/adapters/github.mjs') continue; // the tracker's own calls, with the tracker's token
     const text = readFileSync(join(ORCH_HOME, name), 'utf8');
-    if (/(execFileSync|execFile|spawnSync|spawn)\(\s*'gh'|run\('gh'/.test(text)) assert.match(text, /forgeGhEnv/, `${name} runs gh without the forge credential`);
-    if (/'(push|fetch|pull|ls-remote|clone)'/.test(text) && /'git'/.test(text)) assert.match(text, /forgeEnv/, `${name} runs a network git command without the forge credential`);
+    if (/(execFileSync|execFile|spawnSync|spawn)\(\s*'gh'|run\('gh'|exec(Sync)?\(\s*[`'"][^`'"]*\bgh\s/.test(text)) assert.match(text, /forgeGhEnv/, `${name} runs gh without the forge credential`);
+    const networkGit = /'(push|fetch|pull|ls-remote|clone)'/.test(text) && /'git'/.test(text);
+    const spreadGit = /(execFileSync|execFile|spawnSync|spawn)\(\s*'git',\s*\[[^\]]*\.\.\.\w+/.test(text);
+    if (networkGit || spreadGit) assert.match(text, /forgeEnv/, `${name} may run a network git command without the forge credential`);
   }
 });
