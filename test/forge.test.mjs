@@ -219,6 +219,11 @@ test('a token that cannot be minted stops forge calls with the setting to look a
   assert.notEqual(fill.status, 0);
   assert.doesNotMatch(fill.stdout, /AMBIENT/);
   assert.match(fill.stderr, /forge credential/);
+  // Nor an askpass program of the account: the helper tells git to quit.
+  writeFileSync(join(lane.bin, 'askpass'), '#!/bin/sh\necho AMBIENT-ASKPASS\n', { mode: 0o755 });
+  const asked = script(lane, 'printf "protocol=https\\nhost=github.com\\n\\n" | git credential fill', { ...failing, GIT_ASKPASS: join(lane.bin, 'askpass') });
+  assert.notEqual(asked.status, 0);
+  assert.doesNotMatch(asked.stdout, /AMBIENT/);
   // Said in the ledger once an hour, without the token or the key.
   const db = openLedger(join(lane.box.state, 'ledger.db'));
   const said = db.prepare("select detail from events where kind = 'forge_token_failed'").all();
@@ -277,6 +282,30 @@ test('serve/install.sh probes that the agents\' account reaches neither the forg
   const probe = install.slice(install.indexOf('while IFS= read -r secret'), install.indexOf('done < <(forge_secret_paths)'));
   assert.ok(probe.length > 0, 'install.sh does not probe the forge secrets');
   for (const check of ['test -r', 'test -x', 'test -w', 'die ']) assert.ok(probe.includes(check), check);
+});
+
+test('a url rewrite in the repository\'s own git configuration that sends the origin to SSH stops every forge call', () => {
+  const lane = forgeLane();
+  const git = (...args) => execFileSync(realGit, ['-C', lane.box.repo, ...args]);
+  git('remote', 'set-url', 'origin', 'https://github.com/example/project.git');
+  const state = () => script(lane, 'echo "$CLEARED_FORGE_MODE"; gh pr list --state open > /dev/null');
+  assert.equal(state().stdout.trim(), 'app', 'an https origin on github.com is the app\'s');
+  for (const rule of ['pushInsteadOf', 'insteadOf']) {
+    git('config', `url.git@github.com:.${rule}`, 'https://github.com/');
+    const refused = state();
+    assert.equal(refused.stdout.trim(), 'error', rule);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /origin of the project leads to git@github\.com:example\/project\.git, not https:\/\/github\.com\//);
+    // git refuses too, before any SSH connection: no ambient key is tried.
+    const pushed = script(lane, 'git push origin HEAD:refs/heads/x');
+    assert.notEqual(pushed.status, 0);
+    assert.match(pushed.stderr, /cleared forge credential: the origin of the project leads to/);
+    git('config', '--unset', `url.git@github.com:.${rule}`);
+  }
+  assert.ok(!lane.read('gh-seen').split('\n').some((line) => line.includes('ambient')));
+  // A local or file:// origin needs no credential and is accepted (the other tests push to one).
+  git('remote', 'set-url', 'origin', lane.remote);
+  assert.equal(state().stdout.trim(), 'app');
 });
 
 test('when lib/forge.mjs itself cannot run, git stops like gh instead of using the ambient credential', () => {

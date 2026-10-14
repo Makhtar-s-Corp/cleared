@@ -886,11 +886,12 @@ forge_git_closed() {
     count=$((count + 1))
   done <<'SETTINGS'
 credential.https://github.com.helper|
-credential.https://github.com.helper|!f() { echo "cleared forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used" >&2; exit 1; }; f
+credential.https://github.com.helper|!f() { echo "cleared forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used" >&2; echo quit=1; }; f
 url.https://github.com/.insteadOf|git@github.com:
 url.https://github.com/.insteadOf|ssh://git@github.com/
 SETTINGS
   export GIT_CONFIG_COUNT=$count GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
+  export GIT_SSH_COMMAND='f() { echo "cleared forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used" >&2; exit 1; }; f'
 }
 gh() {
   case "${CLEARED_FORGE_MODE:-ambient}" in
@@ -926,7 +927,7 @@ forge_harness_unset() {
   local name
   FORGE_UNSET=()
   [ "${CLEARED_FORGE_MODE:-ambient}" != ambient ] || return 0
-  FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_NOSYSTEM
+  FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_NOSYSTEM -u GIT_SSH_COMMAND
     -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL)
   while IFS= read -r name; do FORGE_UNSET+=(-u "$name"); done < <(compgen -e | grep -E '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true)
 }
