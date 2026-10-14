@@ -16,6 +16,12 @@ agent_home=
 # (for instance after loading .env.local) would move the billing to it.
 # No forge credential either (lib/common.sh, forge_harness_unset): the
 # dispatcher pushes and opens pull requests, never the model.
+# CLI_LIMIT (for instance `timeout 120`) is put in front of the program
+# itself, inside the command: `timeout cli` cannot work, timeout runs
+# programs and cli is a function of this shell (it exited 127, and no model
+# was ever said available). Under the agents' account it runs as that account,
+# so that what it stops (bubblewrap, the CLI and its children) is its own.
+CLI_LIMIT=()
 cli() {
   forge_harness_unset
   if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
@@ -23,9 +29,9 @@ cli() {
     agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
     [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
     sudo -n -u "$agent_user" -- env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" \
-      PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_STATE_DIR="$ORCH_STATE_DIR" ORCH_CONF="$ORCH_CONF" "${agent_prefix[@]}" claude "$@"
+      PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_STATE_DIR="$ORCH_STATE_DIR" ORCH_CONF="$ORCH_CONF" "${CLI_LIMIT[@]}" "${agent_prefix[@]}" claude "$@"
   else
-    env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" claude "$@"
+    env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" "${CLI_LIMIT[@]}" claude "$@"
   fi
 }
 
@@ -37,9 +43,12 @@ case "${1:-}" in
     empty=$(mktemp -d)
     [ -z "$agent_user" ] || chmod 755 "$empty"
     trap 'rm -rf "$empty"' EXIT
+    # timeout puts the CLI in a process group of its own: stdin from
+    # nowhere, so that it never waits stopped on a terminal it cannot read.
+    CLI_LIMIT=(timeout -k 10 120)
     for candidate in "$@"; do
-      if out=$(cd "$empty" && timeout 120 cli -p --model "$candidate" --no-session-persistence \
-          --strict-mcp-config --tools "" --output-format json 'Reply with the single word OK.' 2>/dev/null) \
+      if out=$(cd "$empty" && cli -p --model "$candidate" --no-session-persistence \
+          --strict-mcp-config --tools "" --output-format json 'Reply with the single word OK.' < /dev/null 2>/dev/null) \
         && [ "$(jq -r '.is_error' <<<"$out" 2>/dev/null)" = false ]; then
         echo "$candidate"
       fi
