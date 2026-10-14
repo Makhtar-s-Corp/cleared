@@ -127,7 +127,8 @@ White outlined table at the bottom of the tower: time (mono), what shipped (plai
 
 ### Porthole
 Desktop: right panel. Phone: full page with a back button, the ticket id and the status chip in a white header.
-Order: a 3 px × 56 px flat amber bar above the title when it waits for the human, the title (`title`) and "Waiting since 16:05 (1h35)" in mono, the question block (`awaiting-surface`, amber outline, the whole question at 16 px, the team's recommendation below a highlight hairline), a stat strip (flight, checks, share of the week only when measured), What changed, Where we are, The squad, Black box.
+Order: a 3 px × 56 px flat amber bar above the title when it waits for the human, the title (`title`) and "Waiting since 16:05 (1h35)" in mono, the question block (`awaiting-surface`, amber outline, the whole question at 16 px, the team's recommendation below a highlight hairline), What changed (so that the pull request line and the captures are seen without scrolling), a stat strip (flight, checks, share of the week only when measured), Where we are, The squad, Black box.
+- The action panel stays at the bottom: at most 36 % of the height on a computer (60 % on a phone), the free-text answer and its button on one row. While the porthole has more below, the panel casts a soft shadow upward over it (the one shadow besides the three levels of section 6): the panel never reads as the end.
 - What changed: the pull request link with a "draft" tag, one line of facts (files, +added −removed, checks in `success-text` or `danger`), then the captures, or one dashed box "No capture yet: …" with the reason.
 - Where we are: the team's report to the user, "Done" and "Still to do" as short lists, the time of the report in `text-faint`; "No report from the team yet." otherwise.
 - What changed, screen ticket: before and after inside device frames (radius `device`, 5 px white bezel, outline), after with `elevation.device-after`.
@@ -145,7 +146,7 @@ Order: a 3 px × 56 px flat amber bar above the title when it waits for the huma
 
 ## 6. Depth
 
-Three levels: canvas, card (one-pixel shadow outline plus a 2 px soft shadow), awaiting card (amber outline plus an amber soft shadow). No other shadows. Borders are shadows or hairlines, never thick.
+Three levels: canvas, card (one-pixel shadow outline plus a 2 px soft shadow), awaiting card (amber outline plus an amber soft shadow). No other shadows, except the scroll cue of the porthole's action panel (section 4). Borders are shadows or hairlines, never thick.
 
 ## 7. Do's and don'ts
 

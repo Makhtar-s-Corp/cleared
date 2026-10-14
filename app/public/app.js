@@ -266,6 +266,14 @@ function closeTicket() {
   back?.focus(); state.opener = null;
 }
 $('ph-close').addEventListener('click', closeTicket);
+// Something below the fold of the porthole: the action panel casts a shadow over it, so the panel never looks like the end.
+function scrollCue() {
+  const body = $('ph-body');
+  $('porthole').classList.toggle('more-below', body.scrollHeight - body.clientHeight - body.scrollTop > 8);
+}
+$('ph-body').addEventListener('scroll', scrollCue, { passive: true });
+new ResizeObserver(scrollCue).observe($('ph-body'));
+new MutationObserver(scrollCue).observe($('porthole'), { childList: true, subtree: true });
 const actions = initActions({ t, el, $, state, clock,
   redraw: () => { shown.tower = ''; if (state.snap) render(state.snap); },
   reopen: (id) => openTicket(id) });
@@ -306,7 +314,6 @@ function porthole(d) {
   const stats = [[t('app_stat_p_flight'), dur(d.flightMinutes), '']];
   stats.push([t('app_stat_p_checks'), d.change?.checks ? t(`app_checks_${d.change.checks}`) : t('app_not_measured'), checksClass(d.change)]);
   if (d.quotaShare != null) stats.push([t('app_stat_p_usage'), pct(d.quotaShare), '']);
-  out.push(el('div', { className: 'pstats' }, ...stats.map(([k, v, cls]) => el('div', {}, el('div', { className: 'k', textContent: k }), el('div', { className: `v ${cls}`.trim(), textContent: v })))));
 
   // What changed: the pull request, its size and its checks; the captures of a screen; an example.
   const changed = [];
@@ -327,6 +334,8 @@ function porthole(d) {
   if (d.show.kind === 'code' && d.show.tests.length) changed.push(el('ul', { className: 'tests box-card' }, ...d.show.tests.map((x) => el('li', {}, mono(x.name), ` · ${t(`app_test_${x.change}`)} · `, el('span', { className: x.state === 'pass' ? 'success' : x.state === 'fail' ? 'danger' : 'faint', textContent: t(`app_state_${x.state}`) })))));
   if (d.show.kind === 'code' && d.show.touches) changed.push(el('p', { textContent: d.show.touches }));
   out.push(section(t('app_changed'), changed));
+  // The numbers after what changed: the pull request line and the captures are seen first.
+  out.push(el('div', { className: 'pstats' }, ...stats.map(([k, v, cls]) => el('div', {}, el('div', { className: 'k', textContent: k }), el('div', { className: `v ${cls}`.trim(), textContent: v })))));
 
   // Where we are: the team's report to the user (Done, Still to do), never its internal handover.
   const where = [];

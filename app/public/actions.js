@@ -109,7 +109,7 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   // The answer to a question: one tap to follow the team's recommendation (only when it gave one),
   // one tap per choice it offered, or the owner's own words. Each is sent as written here, as a comment.
   function answerForm(card) {
-    const area = el('textarea', { className: 'act-text', rows: 2, maxLength: 4000, id: 'an-text', placeholder: t('app_act_answer_hint') });
+    const area = el('textarea', { className: 'act-text', rows: 1, maxLength: 4000, id: 'an-text', placeholder: t('app_act_answer_hint') });
     const err = el('p', { className: 'act-error danger', role: 'alert' });
     const all = [];
     const send = async (value) => {
@@ -135,7 +135,8 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
     const go = button(t('app_act_send'), 'ink', () => send(area.value), true);
     area.addEventListener('input', () => { go.disabled = !area.value.trim(); go.toggleAttribute('aria-disabled', go.disabled); });
     all.push(go);
-    box.replaceChildren(...blocks, el('label', { className: 'act-label', htmlFor: 'an-text', textContent: t('app_act_answer_label') }), area, err, el('div', { className: 'act-row' }, go));
+    // The text and its button side by side: the panel stays short and what changed stays in sight.
+    box.replaceChildren(...blocks, el('label', { className: 'act-label', htmlFor: 'an-text', textContent: t('app_act_answer_label') }), el('div', { className: 'answer-row' }, area, go), err);
   }
 
   // Called when a ticket is opened (fresh) and each time the board changes under it.
