@@ -40,7 +40,7 @@ case "${1:-}" in
     shift
     # The CLI has no command that lists models: each candidate is asked for
     # one word, from an empty directory and without tools.
-    empty=$(mktemp -d)
+    empty=$(contract_probe_dir)
     [ -z "$agent_user" ] || chmod 755 "$empty"
     trap 'rm -rf "$empty"' EXIT
     # timeout puts the CLI in a process group of its own: stdin from
@@ -62,7 +62,7 @@ case "${1:-}" in
     # cost; the budget is only a guard behind it.
     model=${2:-}
     [ -n "$model" ] || { echo "usage: claude.sh probe <model>" >&2; exit 64; }
-    empty=$(mktemp -d) err=$(mktemp)
+    empty=$(contract_probe_dir) err=$(mktemp)
     [ -z "$agent_user" ] || chmod 755 "$empty"
     trap 'rm -rf "$empty" "$err"' EXIT
     limit=$(contract_probe_timeout)

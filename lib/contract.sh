@@ -107,6 +107,11 @@ contract_probe_reason() {
       print said
     }' | cut -c1-200
 }
+# contract_probe_dir: the empty folder a probe starts its CLI from. Made in
+# /tmp, never under the service's own TMPDIR, which may be closed to the
+# agents' account (mode 0700, a private /tmp of its own): the CLI would then
+# fail on its current directory and the probe would give the wrong reason.
+contract_probe_dir() { mktemp -d /tmp/cleared-probe-XXXXXX; }
 # contract_probe_fail <model> <reason>: the line of a probe that failed.
 contract_probe_fail() {
   printf 'FAIL %s: %s\n' "$1" "${2:-no reason given}"

@@ -225,7 +225,7 @@ case "${1:-}" in
       echo "skip $model: [adapter.codex] runner = container, the project's task script is not probed"
       exit 0
     fi
-    empty=$(mktemp -d) err=$(mktemp) codex_tmp=
+    empty=$(contract_probe_dir) err=$(mktemp) codex_tmp=
     trap 'rm -rf "$empty" "$err"; if [ -n "$codex_tmp" ] && [ "$codex_tmp" != "$empty/tmp" ]; then sudo -n -u "$agent_user" -- rm -rf "$codex_tmp" 2>/dev/null || true; fi' EXIT
     if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
       chmod 755 "$empty"

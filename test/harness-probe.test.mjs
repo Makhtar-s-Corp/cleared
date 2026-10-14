@@ -23,6 +23,7 @@ n=$(wc -l < "${join(dir, 'calls')}")
 env > "${join(dir, 'env-')}$n"
 ps -o comm= -p "$PPID" >> "${join(dir, 'parents')}"
 pwd >> "${join(dir, 'cwds')}"
+stat -c %a . >> "${join(dir, 'modes')}"
 model=
 previous=
 for arg in "$@"; do [ "$previous" != --model ] || model=$arg; previous=$arg; done
@@ -45,6 +46,7 @@ n=$(wc -l < "${join(dir, 'calls')}")
 env > "${join(dir, 'env-')}$n"
 ps -o comm= -p "$PPID" >> "${join(dir, 'parents')}"
 pwd >> "${join(dir, 'cwds')}"
+stat -c %a . >> "${join(dir, 'modes')}"
 model=
 previous=
 for arg in "$@"; do [ "$previous" != --model ] || model=$arg; previous=$arg; done
@@ -80,8 +82,11 @@ export function harnessBox({ agentUser = false, conf = '' } = {}) {
   writeFileSync(join(dir, 'bwrap'), fakeBwrap(dir), { mode: 0o755 });
   const security = agentUser ? `[security]\nagent_user = nobody\nbwrap_path = ${join(dir, 'bwrap')}\n` : '[security]\nagent_user =\n';
   writeFileSync(join(dir, 'agents.conf'), `${conf}${security}`);
+  // The service's own temporary folder, closed to anybody else.
+  const tmp = join(dir, 'private-tmp');
+  mkdirSync(tmp, { mode: 0o700 });
   const env = {
-    PATH: `${dir}:${process.env.PATH}`, HOME: dir, XDG_CONFIG_HOME: join(dir, 'config'),
+    PATH: `${dir}:${process.env.PATH}`, HOME: dir, XDG_CONFIG_HOME: join(dir, 'config'), TMPDIR: tmp,
     CLEARED_REPO: dir, CLEARED_CONF: join(dir, 'agents.conf'), CLEARED_STATE_DIR: state,
     // Never handed to the CLI: the subscription pays.
     ANTHROPIC_API_KEY: 'sk-ant-test-not-for-the-cli', OPENAI_API_KEY: 'sk-test-not-for-the-cli',
@@ -97,6 +102,7 @@ export function harnessBox({ agentUser = false, conf = '' } = {}) {
     cliEnv: (n) => read(`env-${n}`),
     parents: () => read('parents').split('\n').filter(Boolean),
     cwds: () => read('cwds').split('\n').filter(Boolean),
+    modes: () => read('modes').split('\n').filter(Boolean),
   };
 }
 
@@ -117,6 +123,8 @@ for (const agentUser of [false, true]) {
     }
     // The timeout is the program that started the CLI, in both cases.
     assert.deepEqual(box.parents(), ['timeout', 'timeout', 'timeout']);
+    for (const cwd of box.cwds()) assert.match(cwd, /^\/tmp\/cleared-probe-[^/]+$/);
+    if (agentUser) assert.deepEqual(box.modes(), ['755', '755', '755']);
     assert.doesNotMatch(box.cliEnv(1), /^ANTHROPIC_API_KEY=/m);
     if (agentUser) {
       const sudo = box.read('sudo-calls').split('\n').filter((line) => / claude -p /.test(line));
@@ -184,9 +192,11 @@ for (const [adapter, key] of [['claude', 'ANTHROPIC_API_KEY'], ['codex', 'OPENAI
       }
       assert.equal(args[args.indexOf('--model') + 1], 'answers-1');
       assert.deepEqual(box.parents(), ['timeout']);
-      // A folder of its own, not the one the probe was started from.
+      // A folder of its own in /tmp, not the one the probe was started from nor under the service's TMPDIR (closed
+      // here, as a private one would be); open to the agents' account when there is one.
       const [cwd] = box.cwds();
-      assert.notEqual(cwd, box.dir);
+      assert.match(cwd, /^\/tmp\/cleared-probe-[^/]+$/);
+      if (agentUser) assert.deepEqual(box.modes(), ['755']);
       assert.equal(existsSync(cwd), false, 'the empty folder is removed afterwards');
       assert.doesNotMatch(box.cliEnv(1), new RegExp(`^${key}=`, 'm'));
       if (agentUser) {
