@@ -21,7 +21,10 @@ function doorBox({ agentUser = false, heavyLock = agentUser, wait = 0 } = {}) {
   const door = join(box.home, 'door');
   mkdirSync(door);
   const lock = join(door, 'heavy.lock');
-  let conf = readFileSync(confPath, 'utf8').replace('[lanes]\n', `[lanes]\nheavy_commands = echo screens, sleep 3\nheavy_wait_minutes = ${wait}\n${heavyLock ? `heavy_lock = ${lock}\n` : ''}`);
+  // hold.sh <marker> <release>: a heavy command that says it runs (the marker), then runs until it is told to end.
+  const hold = join(box.home, 'hold.sh');
+  writeFileSync(hold, '#!/usr/bin/env bash\n: > "$1"\nfor _ in $(seq 300); do [ -e "$2" ] && exit 0; sleep 0.1; done\nexit 1\n', { mode: 0o755 });
+  let conf = readFileSync(confPath, 'utf8').replace('[lanes]\n', `[lanes]\nheavy_commands = echo screens, ${hold}\nheavy_wait_minutes = ${wait}\n${heavyLock ? `heavy_lock = ${lock}\n` : ''}`);
   if (agentUser) conf = conf.replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nagent_user = nobody\n');
   writeFileSync(confPath, conf);
   mkdirSync(join(box.home, 'proc-none'), { recursive: true });
@@ -150,11 +153,15 @@ test('under agent_user a door held by the service, or by another team, keeps a t
   assert.equal(held.status, 5);
   assert.match(held.stderr, /the host is not free/);
   // Two teams: while one runs its heavy command (it keeps the door for its whole run), the other is kept out.
-  const firstTeam = spawn(join(box.home, 'when-free.sh'), ['sleep', '3'], { env: teamEnv, stdio: 'ignore' });
+  // (The first one's command says when it runs, and runs until told to end: nothing here depends on timing.)
+  const marker = join(box.home, 'first-runs');
+  const release = join(box.home, 'first-may-end');
+  const firstTeam = spawn(join(box.home, 'when-free.sh'), [join(box.home, 'hold.sh'), marker, release], { env: teamEnv, stdio: 'ignore' });
   const firstDone = new Promise((resolve) => firstTeam.on('exit', resolve));
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  while (!existsSync(marker)) await new Promise((resolve) => setTimeout(resolve, 50));
   const second = heavy(['echo', 'screens']);
   assert.equal(second.status, 5, 'the second team is kept out while the first one runs');
+  writeFileSync(release, '');
   assert.equal(await firstDone, 0);
   assert.equal(heavy(['echo', 'screens']).status, 0, 'and goes once the first one is done');
 });
