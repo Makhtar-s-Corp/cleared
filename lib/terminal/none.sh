@@ -177,11 +177,15 @@ none_agent_holds() {
 # nothing when sudo could not ask it.
 none_agent_orphans() {
   # shellcheck disable=SC2016
-  sudo -n -u "$3" -- sh -c 'set -f; group=$1 start=$2 found=
+  # (The list of /proc is expanded before globbing is turned off for the
+  # split of each line: turned off first, the loop would see one literal word.)
+  sudo -n -u "$3" -- sh -c 'group=$1 start=$2 found=
 [ ! -e "/proc/$group" ] || { echo taken; exit 0; }
 for dir in /proc/[0-9]*; do
   { read -r line < "$dir/stat"; } 2> /dev/null || continue
+  set -f
   set -- ${line##*) }
+  set +f
   [ "$3" = "$group" ] && [ "$1" != Z ] || continue
   [ "$4" = "$group" ] && [ "${20}" -ge "$start" ] || { echo foreign; exit 0; }
   found=1

@@ -627,3 +627,30 @@ test('[terminal] adapter = none under [security] agent_user: a sudo that does no
   assert.equal(strict.stdout, '');
   assert.match(strict.stderr, new RegExp(`the session ${handle} is not over: sudo -n -u nobody could not stop and check the processes of nobody in its group ${pid}; its worktree is left as it is`));
 });
+
+
+// What the agents' account is asked runs for real here: the sudo of agentBox only passes the command on (no answer
+// is made up), against a group whose leader is really gone and whose member is really left.
+test('[terminal] adapter = none: the questions put to the agents\' account read its /proc for real: a group left by its leader is held, one with an older member is foreign, a number in use is taken, an ended one is free', async (t) => {
+  const box = agentBox(noneBox());
+  const ask = (fn, ...args) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; terminal_adapter; ${fn} "$@"`, 'ask', ...args], { env: box.env, encoding: 'utf8' }).stdout.trim();
+  // A leader of its own session and group, with a member in the background; the leader ends when told.
+  const leader = spawn('setsid', ['sh', '-c', 'sleep 300 & read word'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  t.after(() => stopGroup(leader.pid));
+  assert.ok(await until(() => alive(leader.pid) && stat(leader.pid)[2] === String(leader.pid) && box.group(leader.pid).split('\n').length === 2, 5000), 'the leader and its member are there');
+  const start = Number(stat(leader.pid)[19]);
+  assert.equal(ask('none_agent_holds', String(leader.pid), 'nobody'), 'held');
+  leader.stdin.end();
+  assert.ok(await until(() => !alive(leader.pid), 5000), 'the leader is gone');
+  const [member] = box.group(leader.pid).split('\n').map(Number);
+  assert.ok(alive(member), 'its member is left in its group');
+  assert.equal(stat(member)[3], String(leader.pid), 'in its session');
+  assert.equal(ask('none_agent_orphans', String(leader.pid), String(start), 'nobody'), 'held');
+  assert.equal(ask('none_agent_orphans', String(leader.pid), String(Number(stat(member)[19]) + 1), 'nobody'), 'foreign', 'a member older than the leader is not of its session');
+  assert.equal(ask('none_agent_orphans', String(process.pid), '0', 'nobody'), 'taken', 'a number a process has is not a group left behind');
+  assert.equal(ask('none_agent_holds', String(leader.pid), 'nobody'), 'held');
+  process.kill(member, 'SIGKILL');
+  assert.ok(await until(() => box.group(leader.pid) === '', 5000));
+  assert.equal(ask('none_agent_orphans', String(leader.pid), String(start), 'nobody'), 'free');
+  assert.equal(ask('none_agent_holds', String(leader.pid), 'nobody'), 'free');
+});
