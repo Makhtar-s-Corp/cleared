@@ -166,16 +166,19 @@ heavy_lock_in_state() {
   case "$(realpath -m -- "$1")/" in "$(realpath -m -- "$ORCH_STATE_DIR")"/*) return 0 ;; esac
   return 1
 }
-# heavy_lock_open <path>: the door, opened READ-ONLY on a new descriptor, in
-# HEAVY_FD. flock takes an exclusive lock on a descriptor opened for reading
-# as well, so nobody needs the right to write the file: the agents' account
-# never gets it. A missing file is created by whoever may write its
-# directory (the service, never a team: theirs is not writable to them).
-# Closed with heavy_lock_close.
+# heavy_lock_open <path>: the door, opened on a new descriptor, in HEAVY_FD.
+# Whoever may write the file (the service, and everyone without agent_user)
+# opens it for writing, as before: flock on some file systems (NFS) needs a
+# descriptor open for writing. Whoever may not (the agents' account) opens it
+# READ-ONLY: on a local file system flock takes an exclusive lock on such a
+# descriptor too, so that account never needs the right to write it. A
+# missing file is created by whoever may write its directory (the service,
+# never a team: theirs is not writable to them). Closed with heavy_lock_close.
 heavy_lock_open() {
   if [ ! -e "$1" ]; then (umask 022 && : >> "$1") 2> /dev/null || true; fi
   [ -f "$1" ] || return 1
-  exec {HEAVY_FD}< "$1"
+  if [ -w "$1" ]; then exec {HEAVY_FD}>> "$1"
+  else exec {HEAVY_FD}< "$1"; fi
 }
 heavy_lock_close() {
   [ -z "${HEAVY_FD:-}" ] || exec {HEAVY_FD}<&-

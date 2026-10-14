@@ -59,7 +59,7 @@ The optional dashboard contains ticket titles and host status. `serve/install.sh
 
 ## The door of the heavy commands
 
-Heavy commands (screen tests, captures), the checks the rules start and a host Codex session hold one lock, so that they do not run at the same time on the host. The lock is a file held with `flock`. `flock` takes an exclusive lock on a descriptor opened for reading only, so everyone opens the file read-only, and nobody needs write access to it.
+Heavy commands (screen tests, captures), the checks the rules start and a host Codex session hold one lock, so that they do not run at the same time on the host. The lock is a file held with `flock`. `flock` takes an exclusive lock on a descriptor opened for reading only, so the agents' account opens the file read-only and needs no write access to it. The service, which may write the file, opens it for writing, as before.
 
 Under `[security] agent_user`, the teams cannot open a file in the service-owned state, and they must not be able to. Set [`[lanes] heavy_lock`](configuration.md#lanes) to a file outside the state, in a directory owned by the service that the agents' account can traverse but not write. `serve/install.sh` creates the file with mode `0644`. It proves, as the agents' account, that the account can open the file read-only and take the lock, and that it can write neither the file nor its directory. The agents' account gets no new write access anywhere.
 

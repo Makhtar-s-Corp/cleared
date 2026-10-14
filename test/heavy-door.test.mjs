@@ -198,6 +198,22 @@ test('flock on a descriptor opened read-only takes the exclusive lock and keeps 
   await new Promise((resolve) => writer.on('exit', resolve));
 });
 
+test('the door is opened for writing by whoever may write it (as before, for flock on NFS), read-only by whoever may not', () => {
+  const { box, lib } = doorBox();
+  const lock = join(box.state, 'heavy.lock');
+  // The open flags of HEAVY_FD, as the kernel has them: O_ACCMODE is 0 for read-only, 1 for write-only.
+  const mode = () => {
+    const run = lib('heavy_lock_open "$(heavy_lock_path)"; awk \'/^flags/ { print $2 }\' "/proc/$$/fdinfo/$HEAVY_FD"');
+    assert.equal(run.status, 0, run.stderr);
+    return parseInt(run.stdout.trim(), 8) & 3;
+  };
+  assert.equal(mode(), 1, 'missing: created, then opened for writing');
+  assert.ok(existsSync(lock));
+  assert.equal(mode(), 1, 'writable: opened for writing');
+  chmodSync(lock, 0o444);
+  assert.equal(mode(), 0, 'not writable: opened read-only');
+});
+
 test('checks the rules start hold the door while they are said to the teams: a team then finds the host busy; a team holding the door keeps them back', () => {
   const { flow, todo, by, session, pull, box, env } = flowBox();
   const confPath = join(box.home, 'agents.conf');
