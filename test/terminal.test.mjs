@@ -290,6 +290,8 @@ printf '%s\\n' "$*" >> "${join(box.home, 'sudo-calls')}"
 shift 4
 # The agents' account says one of its processes is still in the group, whatever is done to it.
 if [ -n "\${FAKE_AGENT_HOLDS:-}" ] && [ "$1" = sh ]; then echo held; exit 0; fi
+# A sudo that does not answer for the agents' account when it is asked what is left (it still signals).
+if [ -n "\${FAKE_AGENT_SILENT:-}" ] && [ "$1" = sh ]; then exit 1; fi
 exec "$@"
 `, { mode: 0o755 });
   writeFileSync(join(bin, 'harness'), `#!/usr/bin/env bash
@@ -573,4 +575,39 @@ test('the project\'s main checkout is never closed nor removed as the worktree o
     assert.match(killed.stderr, /dev\/X-9 is checked out in the project's main checkout .* which is never closed/);
     assert.ok(existsSync(join(box.repo, '.git')));
   }
+});
+
+
+test('[terminal] adapter = none under [security] agent_user: when the run script is gone and the service sees nothing of its group (/proc with hidepid), the agents\' account is asked; what it holds, or its silence, keeps the worktree', async (t) => {
+  const box = agentBox(noneBox());
+  t.after(() => stopAll(box));
+  const open = async (ticket) => {
+    const spawned = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', ticket, '--comment-on', 'none'], { env: box.env, encoding: 'utf8', timeout: 60000 });
+    assert.equal(spawned.status, 0, spawned.stderr);
+    const lane = JSON.parse(spawned.stdout);
+    const pid = Number(lane.terminal.split(':')[1]);
+    t.after(() => stopGroup(pid));
+    const count = box.harnesses().length;
+    assert.ok(await until(() => box.harnesses().length === count + 1));
+    // The whole group ends here, as far as the service can see: what the agents' account still holds there is
+    // only what its sudo says (a /proc mounted with hidepid shows the service nothing of it).
+    process.kill(-pid, 'SIGKILL');
+    assert.ok(await until(() => box.group(pid) === '', 5000));
+    return { lane, pid };
+  };
+  const held = await open('X-10');
+  const kept = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-10', '--force'], { env: { ...box.env, FAKE_AGENT_HOLDS: '1' }, encoding: 'utf8' });
+  assert.equal(kept.status, 1, kept.stderr);
+  assert.match(kept.stderr, new RegExp(`the session ${held.lane.terminal} is not over: processes of nobody are still in its group ${held.pid} after SIGKILL`));
+  assert.ok(existsSync(held.lane.worktree), 'the worktree stays');
+  assert.ok(box.calls().includes(`-n -u nobody -- kill -KILL -- -${held.pid}`), 'the group the agents\' account holds was signalled');
+  // The agents' account does not answer: nobody can say the session is over.
+  const silent = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-10', '--force'], { env: { ...box.env, FAKE_AGENT_SILENT: '1' }, encoding: 'utf8' });
+  assert.equal(silent.status, 1);
+  assert.match(silent.stderr, new RegExp(`the session ${held.lane.terminal} cannot be said over: its run script is gone and sudo -n -u nobody could not say whether processes of nobody are left in its group ${held.pid}`));
+  assert.ok(existsSync(held.lane.worktree));
+  // It says nothing is left: the lane closes.
+  const closed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-10', '--force'], { env: box.env, encoding: 'utf8' });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.equal(existsSync(held.lane.worktree), false);
 });
