@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
+import { openLedger } from '../lib/ledger.mjs';
 import { sandbox, flowBox, laneWithRemote, scratch } from './support.mjs';
 
 const holdThen = 'exec 9< "$1"; flock 9; shift; "$@"';
@@ -234,6 +235,46 @@ test('within a wake, GitHub\'s status page is read once: the host status and the
   execFileSync('rm', ['-f', cache]);
   assert.equal(lib('github_down', { CLEARED_GITHUB_DOWN_CACHE: cache }).status, 2);
   assert.equal(lib('github_down', { CLEARED_GITHUB_DOWN_CACHE: cache }).status, 2);
+});
+
+test('a wake under agent_user writes the teams\' host status even when nothing moved; a host that cannot be read writes « not free » and stops neither the wake nor its heartbeat', () => {
+  const { box, env, status, statusPath, lock } = doorBox({ agentUser: true });
+  const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8', timeout: 90000 });
+  const heartbeat = () => {
+    const db = openLedger(join(box.state, 'ledger.db'));
+    const row = db.prepare("SELECT value FROM heartbeat_state WHERE key = 'last_wake_ok'").get();
+    const started = db.prepare("SELECT count(*) n FROM events WHERE kind = 'wake_started'").get().n;
+    db.close();
+    return { ok: row?.value, started };
+  };
+  const quiet = wake();
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.ok(existsSync(lock), 'the door is made when missing');
+  assert.equal(status().free, true);
+  assert.equal(status().host_read, true);
+  assert.ok(Date.now() / 1000 - status().written_epoch < 60);
+  assert.equal(heartbeat().ok, 'true');
+  assert.equal(heartbeat().started, 0, 'nothing moved: no session of the lead');
+  // GitHub fails on the host's reading of the runs, or hangs on it: the status says « not free » (never an old
+  // « free »), within the bound, and the wake and its heartbeat go on.
+  const bin = join(box.home, 'failing-bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash
+case "$*" in *status,headBranch,event*) [ -z "\${GH_HANGS:-}" ] || exec sleep 60; exit 1 ;; esac
+exec "${join(box.home, 'bin', 'gh')}" "$@"
+`, { mode: 0o755 });
+  for (const extra of [{}, { GH_HANGS: '1', ORCH_HOST_STATE_TIMEOUT: '2' }]) {
+    const before = status().written_epoch;
+    const started = Date.now();
+    const run = wake({ ...extra, PATH: `${bin}:${env.PATH}` });
+    assert.equal(run.status, 0, run.stderr);
+    assert.ok(Date.now() - started < 30000, 'a hung GitHub is cut short');
+    assert.equal(status().free, false);
+    assert.equal(status().host_read, false);
+    assert.ok(status().written_epoch >= before);
+    assert.equal(heartbeat().ok, 'true');
+  }
+  assert.ok(existsSync(statusPath));
 });
 
 test('checks the rules start hold the door while they are said to the teams: a team then finds the host busy; a team holding the door keeps them back', () => {
