@@ -865,12 +865,30 @@ forge_setup() {
   if ! lines=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" shell); then
     CLEARED_FORGE_MODE=error CLEARED_FORGE_ERROR="forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used"
     unset GH_TOKEN GITHUB_TOKEN
+    forge_git_closed
     return 0
   fi
   eval "$lines"
   # An ambient GitHub token of the service has no use left here: gh gets the
   # app's, and nothing started from these scripts may take the other one.
   [ "$CLEARED_FORGE_MODE" = ambient ] || unset GH_TOKEN GITHUB_TOKEN
+}
+# forge_git_closed: when lib/forge.mjs cannot even say what to do, git gets
+# the same settings it would have given, with a helper that only refuses:
+# git, like gh, stops instead of using the ambient credential.
+forge_git_closed() {
+  local count=${GIT_CONFIG_COUNT:-0} key value
+  [[ "$count" =~ ^[0-9]+$ ]] || count=0
+  while IFS='|' read -r key value; do
+    export "GIT_CONFIG_KEY_$count=$key" "GIT_CONFIG_VALUE_$count=$value"
+    count=$((count + 1))
+  done <<'SETTINGS'
+credential.https://github.com.helper|
+credential.https://github.com.helper|!f() { echo "cleared forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used" >&2; exit 1; }; f
+url.https://github.com/.insteadOf|git@github.com:
+url.https://github.com/.insteadOf|ssh://git@github.com/
+SETTINGS
+  export GIT_CONFIG_COUNT=$count GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
 }
 gh() {
   case "${CLEARED_FORGE_MODE:-ambient}" in

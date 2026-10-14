@@ -249,6 +249,27 @@ test('the account\'s own git configuration cannot send a forge push to SSH: its 
   }
 });
 
+test('when lib/forge.mjs itself cannot run, git stops like gh instead of using the ambient credential', () => {
+  const lane = forgeLane();
+  writeFileSync(join(lane.box.home, 'lib', 'forge.mjs'), 'process.exit(3);\n');
+  writeFileSync(join(lane.box.home, '.gitconfig'), `${readFileSync(join(lane.box.home, '.gitconfig'), 'utf8')}[url "git@github.com:"]\n\tpushInsteadOf = https://github.com/\n`);
+  const listed = script(lane, 'gh pr list --state open');
+  assert.notEqual(listed.status, 0);
+  assert.match(listed.stderr, /\[forge\] could not be read/);
+  assert.equal(lane.read('gh-seen'), '');
+  const fill = script(lane, 'printf "protocol=https\\nhost=github.com\\n\\n" | git credential fill');
+  assert.notEqual(fill.status, 0);
+  assert.doesNotMatch(fill.stdout, /AMBIENT/);
+  assert.match(fill.stderr, /\[forge\] could not be read/);
+  const clone = scratch('cleared-forge-closed-');
+  execFileSync(realGit, ['init', '-q', clone]);
+  execFileSync(realGit, ['-C', clone, 'remote', 'add', 'origin', 'git@github.com:example/project.git']);
+  assert.equal(script(lane, `git -C '${clone}' remote get-url --push origin`).stdout.trim(), 'https://github.com/example/project.git');
+  // Nor does any of it reach a harness.
+  const unset = script(lane, 'forge_harness_unset; printf "%s\\n" "${FORGE_UNSET[@]}"');
+  for (const name of ['GH_TOKEN', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_GLOBAL']) assert.ok(unset.stdout.split('\n').includes(name), name);
+});
+
 test('a key file other accounts can read is refused before anything is asked of GitHub', () => {
   const lane = forgeLane({ keyMode: 0o640 });
   const listed = script(lane, 'gh pr list --state open');
