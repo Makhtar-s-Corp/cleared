@@ -72,7 +72,11 @@ case "${1:-}" in
       --settings '{"advisorModel":""}' --max-budget-usd 0.5 --output-format json "$CONTRACT_PROBE_PROMPT" < /dev/null 2> "$err")
     code=$?
     set -e
-    result=$(jq -R -c 'fromjson? | select(type == "object" and .type == "result")' <<<"$out" 2>/dev/null | tail -n 1)
+    # Read as a stream of JSON values, whatever their line breaks; a line
+    # that is not JSON (a warning on stdout) breaks the stream: then each
+    # line is read on its own.
+    result=$(jq -c 'select(type == "object" and .type == "result")' <<<"$out" 2>/dev/null | tail -n 1) || true
+    [ -n "$result" ] || result=$(jq -R -c 'fromjson? | select(type == "object" and .type == "result")' <<<"$out" 2>/dev/null | tail -n 1)
     if [ "$code" = 124 ] || [ "$code" = 137 ]; then
       contract_probe_fail "$model" "no answer within ${limit}s"
     elif [ -z "$result" ]; then

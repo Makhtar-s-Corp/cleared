@@ -28,6 +28,8 @@ previous=
 for arg in "$@"; do [ "$previous" != --model ] || model=$arg; previous=$arg; done
 case "$model" in
   answers-*) printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"OK","modelUsage":{}}' ;;
+  pretty-*) printf '%s\\n' '{' '  "type": "result",' '  "subtype": "success",' '  "is_error": false,' '  "result": "OK"' '}' ;;
+  noisy-*) printf '%s\\n' 'Warning: an update is available' '{"type":"result","subtype":"success","is_error":false,"result":"OK"}' ;;
   leak-*) printf '%s\\n' '{"type":"result","is_error":true,"result":"Invalid API key sk-ant-api03-Zm9vYmFyYmF6cXV4cXV1eA · Please run /login"}'; exit 1 ;;
   wrong-*) printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"Hello, how can I help?","modelUsage":{}}' ;;
   slow-*) sleep 30 ;;
@@ -212,6 +214,15 @@ for (const [adapter, key] of [['claude', 'ANTHROPIC_API_KEY'], ['codex', 'OPENAI
     assert.ok(Date.now() - started < 20000, 'stopped by its timeout, not by the end of the fake');
   });
 }
+
+test('probe of the claude adapter reads the result printed on one line, pretty-printed over several, or after a line that is not JSON', () => {
+  const box = harnessBox();
+  for (const model of ['answers-1', 'pretty-1', 'noisy-1']) {
+    const run = box.adapter('claude', 'probe', model);
+    assert.equal(run.status, 0, `${model}: ${run.stdout}${run.stderr}`);
+    assert.equal(run.stdout, `ok ${model}\n`);
+  }
+});
 
 test('probe never prints the key a CLI error carries, and keeps the paths of its reason readable', () => {
   const box = harnessBox();
