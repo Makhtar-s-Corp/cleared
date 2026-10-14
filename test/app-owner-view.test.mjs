@@ -5,11 +5,11 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boardCollector, SHARE_MIN_TICKETS } from '../lib/board-collector.mjs';
-import { questionsOf, reportSections } from '../lib/board-report.mjs';
+import { ASKED_MAX, QUESTION_MAX, questionsOf, reportSections } from '../lib/board-report.mjs';
 import { prReport } from '../lib/pr-body.mjs';
 import { changes } from '../lib/wake.mjs';
 import { validBoard } from '../app/sources/live.mjs';
@@ -51,6 +51,27 @@ test('choices are the short lines under a question; a numbered line that asks is
   assert.match(plain[0].text, /longue explication/);
   assert.deepEqual(questionsOf('None.'), []);
   assert.deepEqual(questionsOf('Aucune.'), []);
+});
+
+test('four long questions reach the ledger whole: the event keeps four times what the app shows of one, cut on a character', () => {
+  const long = (n) => `${n}. Faut-il ${'élargir la colonne « À venir » '.repeat(36).trim()} ? Je recommande que oui : ${'la liste se lit mieux sur un téléphone, '.repeat(7).trim()}`;
+  const asked = [1, 2, 3, 4].map(long).join('\n');
+  assert.ok(asked.length > 4 * 1400 && asked.length <= ASKED_MAX, `${asked.length} characters`);
+  assert.ok(long(1).length > 1500 - 400 && long(1).length < QUESTION_MAX);
+  const kept = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'lib', 'board-report.mjs'), 'clip-asked'], { input: `${asked}\n`, encoding: 'utf8' }).stdout;
+  assert.equal(kept, asked, 'nothing cut');
+  const found = questionsOf(kept);
+  assert.equal(found.length, 4);
+  for (const [i, q] of found.entries()) {
+    assert.match(q.text, /colonne « À venir » \?$/, `question ${i + 1} whole`);
+    assert.match(q.recommendation, /sur un téléphone,$/);
+  }
+  // Longer than four questions' worth: cut at the cap, on a character (an accent is never split).
+  const huge = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'lib', 'board-report.mjs'), 'clip-asked'], { input: 'é'.repeat(ASKED_MAX + 50), encoding: 'utf8' }).stdout;
+  assert.equal(huge, 'é'.repeat(ASKED_MAX));
+  const flow = readFileSync(join(import.meta.dirname, '..', 'flow-lanes.sh'), 'utf8');
+  assert.match(flow, /board-report\.mjs" clip-asked/);
+  assert.doesNotMatch(flow, /cut -c1-1500/);
 });
 
 test('a block that opens with its recommendation keeps it as the recommendation, never as the question too', () => {
