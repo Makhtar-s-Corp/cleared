@@ -7,6 +7,7 @@ An adapter is an executable `adapters/<name>.sh`. Routing uses `[models] alias =
 | Command | Required behavior |
 | --- | --- |
 | `list-models [id...]` | Print runnable model IDs, one per line, optionally limited to candidates. An unavailable CLI prints no IDs. |
+| `probe ID` | Ask the real CLI one small question ("Reply with the single word OK.") exactly as `run` starts it (same account, prefixes and environment, no API key), from an empty folder, under a timeout (`CLEARED_PROBE_TIMEOUT` seconds, default 120). Print `ok ID` when the answer holds the word, else `FAIL ID: <reason>` (its first line, with anything that looks like a key hidden) and exit 1. |
 | `version` | Print one JSON object with `cli`, `installed`, `latest`, and `days_behind` (null when unknown). |
 | `run --model ID --prompt-file FILE --report FILE --usage FILE` | Work in the current worktree, save a `lane-report/1` report and usage JSON, and return an exit code below. |
 | `talk --model ID --prompt-file FILE [--session-id UUID]` | Optional interactive session in the current terminal. Return 2 when unavailable here. |
@@ -18,6 +19,8 @@ A model used for `review` must differ from the one recorded as the pull request'
 ## Existing adapters
 
 `adapters/claude.sh` invokes Claude Code on the host. `adapters/codex.sh` invokes Codex on the host by default, in the same lane worktree. Both work in the same lane with its linked dependencies, host-installed browser and test database, heavy-command gate, and capture directory. Provider-specific browser tools still depend on each CLI configuration. A host Codex session holds the heavy-command slot for its entire run and commits its own changes; `task_tools` and `commits` apply only to the container runner. Set `[adapter.codex] runner = container` to use the project's executable named by `task_script`.
+
+Codex's `list-models` only reads the model list the CLI cached from its server (`~/.codex/models_cache.json` of the account that runs it): a listed model proves neither a login nor an answer. `probe` is the proof for both adapters: Claude is asked with `-p --tools "" --no-session-persistence --strict-mcp-config`, no helper model and a small `--max-budget-usd` guard; Codex with `exec --json --ephemeral --skip-git-repo-check --ignore-user-config --sandbox read-only`. With `runner = container`, Codex's `probe` prints `skip` instead: the project's task script is not probed. `serve/check-harness.sh` runs `probe` once for each model the configuration can start, and `serve/install.sh` runs that script before it installs any unit (see [Security](security.md#installing-the-release-account-boundary)).
 
 | Role | Claude Code CLI | Codex CLI on host |
 | --- | --- | --- |
@@ -36,7 +39,7 @@ The optional container task script receives `<worktree> <prompt-file> <model> [-
 ## Add an adapter
 
 1. Copy the command structure of an existing adapter and source `lib/contract.sh` for `run` reports and usage.
-2. Make `list-models` report only IDs that can start now. Keep `version` fast and return null for unavailable metadata.
+2. Make `list-models` report only IDs that can start now. Make `probe` start the CLI with the same function as `run`, so that it proves what a lane would meet. Keep `version` fast and return null for unavailable metadata.
 3. Translate `[permissions.<role>]` into the CLI's own controls. Document any command or file access they cannot enforce.
 4. Add `[adapter.<name>]` settings and `[models]` aliases to the project config, with a fallback and prices if known.
 5. Test no-output, cannot-start, guard-refusal, success, and an actual report. The dispatcher must be able to tell code 2 from a failed run.

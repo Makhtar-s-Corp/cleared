@@ -54,6 +54,37 @@ case "${1:-}" in
       fi
     done
     ;;
+  probe)
+    # The real CLI, started by cli() as a run starts it (under the agents'
+    # account through sudo and bubblewrap, without API key nor forge and
+    # tracker credentials), asked one word from an empty folder: no tools,
+    # no connectors, no helper model, no session kept. The question is the
+    # cost; the budget is only a guard behind it.
+    model=${2:-}
+    [ -n "$model" ] || { echo "usage: claude.sh probe <model>" >&2; exit 64; }
+    empty=$(mktemp -d) err=$(mktemp)
+    [ -z "$agent_user" ] || chmod 755 "$empty"
+    trap 'rm -rf "$empty" "$err"' EXIT
+    limit=$(contract_probe_timeout)
+    CLI_LIMIT=(timeout -k 10 "$limit")
+    set +e
+    out=$(cd "$empty" && cli -p --model "$model" --no-session-persistence --strict-mcp-config --tools "" \
+      --settings '{"advisorModel":""}' --max-budget-usd 0.5 --output-format json "$CONTRACT_PROBE_PROMPT" < /dev/null 2> "$err")
+    code=$?
+    set -e
+    result=$(jq -R -c 'fromjson? | select(type == "object" and .type == "result")' <<<"$out" 2>/dev/null | tail -n 1)
+    if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+      contract_probe_fail "$model" "no answer within ${limit}s"
+    elif [ -z "$result" ]; then
+      reason=$({ cat "$err"; printf '%s\n' "$out"; } | contract_probe_reason)
+      contract_probe_fail "$model" "${reason:-the CLI ended without an answer (exit $code)}"
+    elif [ "$(jq -r '.is_error' <<<"$result")" != false ]; then
+      reason=$(jq -r '.result // .subtype // empty' <<<"$result" | contract_probe_reason)
+      contract_probe_fail "$model" "${reason:-the CLI reported an error (exit $code)}"
+    else
+      contract_probe_answer "$model" "$(jq -r '.result // ""' <<<"$result")"
+    fi
+    ;;
   version)
     contract_npm_version claude "${ADAPTER_PACKAGE:-}" "$(cli --version 2>/dev/null | awk '{print $1}')"
     ;;
@@ -209,7 +240,7 @@ case "${1:-}" in
     exit "$code"
     ;;
   *)
-    echo "usage: $(basename "$0") list-models [<model>...] | version | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
+    echo "usage: $(basename "$0") list-models [<model>...] | probe <model> | version | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
     exit 64
     ;;
 esac

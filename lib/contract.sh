@@ -4,6 +4,14 @@
 #   <adapter> list-models [<model id>...]
 #       prints the model ids this backend can run now, one per line
 #       (limited to the candidates when some are given).
+#   <adapter> probe <model id>
+#       asks the real CLI one small question (CONTRACT_PROBE_PROMPT), exactly
+#       as a run would start it (same account, prefixes and environment, no
+#       API key), from an empty folder, under a timeout (CLEARED_PROBE_TIMEOUT
+#       seconds, 120 by default), and prints one line: `ok <model>` when the
+#       answer holds the word OK, else `FAIL <model>: <reason>` (the first
+#       line of it, never a credential) and exits 1. One small request on the
+#       subscription. serve/check-harness.sh runs it for each configured model.
 #   <adapter> version
 #       prints one JSON line: {cli, installed, latest, days_behind}, where
 #       days_behind is how much older the installed release is than the
@@ -47,6 +55,31 @@ contract_npm_version() {
     | {cli: $cli, installed: $installed, latest: (if $latest == "" then null else $latest end)}
     | .days_behind = (if .latest == null or ($times[$installed] // null) == null or ($times[$latest] // null) == null then null
         else ((($times[$latest] | day) - ($times[$installed] | day)) / 86400 | floor | if . < 0 then 0 else . end) end)'
+}
+
+# The probe: one small question, one word expected back.
+CONTRACT_PROBE_PROMPT='Reply with the single word OK.'
+# contract_probe_timeout: the seconds a probe waits for its answer.
+contract_probe_timeout() {
+  local limit=${ORCH_PROBE_TIMEOUT:-120}
+  [[ "$limit" =~ ^[1-9][0-9]*$ ]] || limit=120
+  printf '%s\n' "$limit"
+}
+# contract_probe_reason < text: its first line that says something, cut short,
+# with whatever looks like a key or a token (sk-..., or a run of 32 letters,
+# digits, _ and - or more) hidden. A path stays readable: / and . split runs.
+contract_probe_reason() {
+  tr -d '\r' | sed -n '/[^[:space:]]/{p;q;}' | sed -E 's/sk-[A-Za-z0-9_-]+/[hidden]/g; s/[A-Za-z0-9_-]{32,}/[hidden]/g; s/^[[:space:]]+//' | cut -c1-200
+}
+# contract_probe_fail <model> <reason>: the line of a probe that failed.
+contract_probe_fail() {
+  printf 'FAIL %s: %s\n' "$1" "${2:-no reason given}"
+  return 1
+}
+# contract_probe_answer <model> <answer>: ok when the answer holds the word.
+contract_probe_answer() {
+  if grep -qiw 'OK' <<<"$2"; then printf 'ok %s\n' "$1"; return 0; fi
+  contract_probe_fail "$1" "the answer was not OK: $(contract_probe_reason <<<"${2:-(empty)}")"
 }
 
 contract_parse_run() {

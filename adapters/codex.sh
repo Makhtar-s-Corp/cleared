@@ -90,6 +90,32 @@ host_permissions() {
     -c "permissions.cleared={extends=\"$parent\",filesystem={$joined},network={enabled=$network}}")
 }
 
+# codex_command: in CODEX_COMMAND, the CLI as a run and the probe start it:
+# without API key, forge or tracker credential, SSH agent nor git user
+# settings, its temporary files in $codex_tmp, and under [security]
+# agent_user through sudo and bubblewrap. CLI_LIMIT (a timeout) is put in
+# front of the program itself, run as the account that runs the CLI: a
+# function of this shell cannot be handed to timeout.
+CLI_LIMIT=()
+codex_command() {
+  local tracker_secret tracker_unset=()
+  . "$ORCH_HOME/lib/tracker/adapters/env.sh"
+  for tracker_secret in "${TRACKER_SECRET_ENV[@]}"; do tracker_unset+=(-u "$tracker_secret"); done
+  # No forge credential (lib/common.sh): the git settings below are the only ones.
+  forge_harness_unset
+  CODEX_COMMAND=(env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH
+    TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+    GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null)
+  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+    agent_mount_args
+    agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
+    [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
+    CODEX_COMMAND+=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" "${CLI_LIMIT[@]}" "${agent_prefix[@]}" codex)
+  else
+    CODEX_COMMAND+=("${CLI_LIMIT[@]}" codex)
+  fi
+}
+
 host_run() {
   local code usage_json
   . "$here/../lib/common.sh"
@@ -135,13 +161,7 @@ host_run() {
     done
     export CLEARED_HEAVY_SLOT="$ORCH_STATE_DIR/heavy.lock"
   fi
-  local codex_cmd=(codex)
-  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
-    agent_mount_args
-    agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
-    [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
-    codex_cmd=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" "${agent_prefix[@]}" codex)
-  fi
+  codex_command
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")
   if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ]; then
     # The Linux Codex sandbox cannot mount a Unix socket. With agent_user,
@@ -151,15 +171,7 @@ host_run() {
   fi
   [ -z "${ORCH_TEXT_ONLY:-}" ] || args+=(--ephemeral --skip-git-repo-check)
   set +e
-  . "$ORCH_HOME/lib/tracker/adapters/env.sh"
-  tracker_unset=()
-  for tracker_secret in "${TRACKER_SECRET_ENV[@]}"; do tracker_unset+=(-u "$tracker_secret"); done
-  # No forge credential (lib/common.sh): the git settings below are the only ones.
-  forge_harness_unset
-  env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
-    TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-    GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
-    "${codex_cmd[@]}" "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
+  "${CODEX_COMMAND[@]}" "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
     fromjson? | if .type == "item.completed" and .item.type == "agent_message" then .item.text
       elif .type == "item.started" and .item.type == "command_execution" then "  > " + (.item.command // "command")
       else empty end' 2>/dev/null
@@ -181,7 +193,9 @@ host_run() {
 case "${1:-}" in
   list-models)
     shift
-    # Codex keeps the list its server sent it: no call is needed.
+    # Codex keeps the list its server sent it: no call is needed. This only
+    # reads a cache file: a model listed there is no proof that the CLI is
+    # signed in, nor that the model answers. That proof is `probe`.
     cache="${CODEX_HOME:-$HOME/.codex}/models_cache.json"
     if [ -n "$agent_user" ]; then
       cache="$agent_home/.codex/models_cache.json"
@@ -194,6 +208,52 @@ case "${1:-}" in
       printf '%s\n' "$listed"
     else
       for candidate in "$@"; do grep -xF -- "$candidate" <<<"$listed" || true; done
+    fi
+    ;;
+  probe)
+    # The real CLI, started by codex_command as a run starts it (under the
+    # agents' account through sudo and bubblewrap, without API key nor forge
+    # and tracker credentials, its temporary files in a folder of the account
+    # that runs it), asked one word from an empty folder: read-only sandbox,
+    # nothing asked for, nothing kept (--ephemeral), user settings ignored.
+    # The CLI offers no cap on tokens that could be checked here: the
+    # question is the cost.
+    model=${2:-}
+    [ -n "$model" ] || { echo "usage: codex.sh probe <model>" >&2; exit 64; }
+    if [ "$runner" = container ]; then
+      # The project's own task script runs the model there: not probed.
+      echo "skip $model: [adapter.codex] runner = container, the project's task script is not probed"
+      exit 0
+    fi
+    empty=$(mktemp -d) err=$(mktemp) codex_tmp=
+    trap 'rm -rf "$empty" "$err"; if [ -n "$codex_tmp" ] && [ "$codex_tmp" != "$empty/tmp" ]; then sudo -n -u "$agent_user" -- rm -rf "$codex_tmp" 2>/dev/null || true; fi' EXIT
+    if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+      chmod 755 "$empty"
+      codex_tmp=$(sudo -n -u "$agent_user" -- mktemp -d /tmp/cleared-codex-XXXXXX 2> "$err") \
+        || { contract_probe_fail "$model" "$agent_user could not make its temporary folder: $(contract_probe_reason < "$err")"; exit 1; }
+    else
+      codex_tmp=$empty/tmp
+      mkdir "$codex_tmp"
+    fi
+    limit=$(contract_probe_timeout)
+    CLI_LIMIT=(timeout -k 10 "$limit")
+    codex_command
+    set +e
+    out=$(cd "$empty" && "${CODEX_COMMAND[@]}" exec --json --ephemeral --skip-git-repo-check --ignore-user-config \
+      --model "$model" --sandbox read-only -c 'approval_policy="never"' "$CONTRACT_PROBE_PROMPT" < /dev/null 2> "$err")
+    code=$?
+    set -e
+    answer=$(jq -R -r 'fromjson? | select(type == "object" and .type == "item.completed" and .item.type == "agent_message") | .item.text // empty' <<<"$out" 2>/dev/null)
+    error=$(jq -R -r 'fromjson? | select(type == "object" and (.type == "error" or .type == "turn.failed")) | .message // .error.message // empty' <<<"$out" 2>/dev/null | contract_probe_reason)
+    if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+      contract_probe_fail "$model" "no answer within ${limit}s"
+    elif [ "$code" = 0 ] && [ -n "$answer" ]; then
+      contract_probe_answer "$model" "$answer"
+    elif [ -n "$error" ]; then
+      contract_probe_fail "$model" "$error"
+    else
+      reason=$(contract_probe_reason < "$err")
+      contract_probe_fail "$model" "${reason:-the CLI ended without an answer (exit $code)}"
     fi
     ;;
   talk)
@@ -327,7 +387,7 @@ case "${1:-}" in
     exit "$code"
     ;;
   *)
-    echo "usage: $(basename "$0") list-models [<model>...] | version | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
+    echo "usage: $(basename "$0") list-models [<model>...] | probe <model> | version | run --model <id> --prompt-file <file> --report <file> --usage <file>" >&2
     exit 64
     ;;
 esac

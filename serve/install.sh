@@ -5,7 +5,10 @@
 #     writes it again;
 #   - the wake of the project lead, every minute;
 #   - the hourly reading of the old sessions into the ledger.
-# Then checks who can reach the dashboard. Run it again from another checkout
+# Before any unit, it proves that each harness model the configuration can
+# start answers, asked as a lane asks it (serve/check-harness.sh; one small
+# request per model, on the subscription; CLEARED_SKIP_HARNESS_PROBE=1 skips
+# it on a host that cannot reach the providers). Then checks who can reach the dashboard. Run it again from another checkout
 # to move every unit there while the wake timer is stopped.
 #
 #   serve/install.sh
@@ -160,6 +163,21 @@ EOF
   [ ! -s "$env_probe/marker" ] || die "The reverse sudo rule preserves NODE_OPTIONS; require env_reset and forbid SETENV"
   rm -f "$env_probe/marker" "$env_probe/probe.cjs"
   rmdir "$env_probe"
+fi
+# Each harness model the configuration can start answers, asked as a lane
+# asks it (under the agents' account when there is one), before any unit is
+# written or started: serve/check-harness.sh, one small request per model on
+# the subscription. A host that cannot reach the providers skips it, loudly.
+if [ "${CLEARED_SKIP_HARNESS_PROBE:-}" = 1 ]; then
+  echo "WARNING: CLEARED_SKIP_HARNESS_PROBE=1: the harness models were NOT probed. Nothing proves that a lane can start${agent_user:+ under $agent_user}; run serve/check-harness.sh once this host can reach the providers." >&2
+else
+  # The table goes out as it is printed; what it says on its error output is kept for the message.
+  { harness_said=$("$here/check-harness.sh" 2>&1 >&3) && harness_code=0 || harness_code=$?; } 3>&1
+  if [ "$harness_code" != 0 ]; then
+    [ -z "$harness_said" ] || printf '%s\n' "$harness_said" >&2
+    harness_first=$(sed -n '1{s/^check-harness\.sh: //;p;}' <<<"$harness_said")
+    die "harness probe failed: ${harness_first:-serve/check-harness.sh exited $harness_code}. No unit was installed or started. Sign the CLI in${agent_user:+ as $agent_user} (or fix [models]) and run this again; on a host that cannot reach the providers, CLEARED_SKIP_HARNESS_PROBE=1 skips the probe"
+  fi
 fi
 chmod o-w "$ORCH_STATE_DIR"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
