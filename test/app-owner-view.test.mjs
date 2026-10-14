@@ -84,6 +84,9 @@ test('a block that opens with its recommendation keeps it as the recommendation,
   const two = questionsOf(`1. Faut-il un titre ? Je recommande non.\n2. ${alone}\nFaut-il le déplacer ?`);
   assert.deepEqual(two.map((q) => [q.text, q.recommendation]), [['Faut-il un titre ?', 'Je recommande non.'], ['Faut-il le déplacer ?', alone]]);
   for (const q of [...questionsOf(alone, { fallback: 'x' }), ...two]) assert.notEqual(q.text, q.recommendation);
+  // A numbered item that is only a recommendation keeps it, with the ticket title as its question; the next item stays its own question.
+  const three = questionsOf('1. Faut-il A ? Je recommande oui.\n2. Je recommande non pour B.\n3. Et C ?', { fallback: 'Renommer le bouton' });
+  assert.deepEqual(three.map((q) => [q.text, q.recommendation]), [['Faut-il A ?', 'Je recommande oui.'], ['Renommer le bouton', 'Je recommande non pour B.'], ['Et C ?', null]]);
 });
 
 test('the report sections are read in either language and whatever their heading style', () => {
