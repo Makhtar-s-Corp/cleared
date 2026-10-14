@@ -46,10 +46,8 @@ ledger sql "select run_id from runs where lane = '$lane' and outcome = 'running'
   ledger run-end --run-id "$run_id" --outcome killed
 done
 
-orca terminal close --worktree "path:$worktree" --all > /dev/null 2>&1 || true
-if ! orca worktree rm --worktree "path:$worktree" --force > /dev/null 2>&1; then
-  git -C "$ORCH_REPO" worktree remove --force "$worktree"
-fi
+terminal close-worktree "$worktree"
+terminal remove-worktree "$worktree"
 git -C "$ORCH_REPO" worktree prune
 if git -C "$ORCH_REPO" rev-parse --verify --quiet "refs/heads/$lane" > /dev/null; then
   git -C "$ORCH_REPO" branch -D "$lane" > /dev/null

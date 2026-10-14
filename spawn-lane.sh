@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Opens a lane for one role on one ticket: a git worktree on the branch
-# <role>/<ticket> (Orca shows it as a lane of that name) and a terminal in it
-# that runs the model picked by agents.conf.
+# <role>/<ticket> and a terminal in it that runs the model picked by
+# agents.conf ([terminal] adapter: a terminal of Orca, or none, the session
+# then runs detached).
 #
 #   spawn-lane.sh <role> <ticket> [--model <alias>] [--prompt-file <file>]
 #                 [--comment-on <ticket>|none] [--pr <number>] [--author-model <alias>]
@@ -66,6 +67,9 @@ while [ $# -gt 0 ]; do
 done
 [[ "$ticket" =~ ^[A-Z]+-[0-9]+$ ]] || die "\"$ticket\" is not a ticket identifier"
 [ -n "$(conf_get roles "$role")" ] || die "unknown role \"$role\" (roles of agents.conf: $(conf_keys roles | paste -sd' '))"
+# A terminal adapter the project names wrongly stops the spawn, dry run or
+# not, before anything is made.
+terminal_adapter
 
 [ -z "$message_file" ] || [ -f "$message_file" ] || die "no such file: $message_file"
 [ -z "$team" ] || [ "$team" = 2 ] || die "\"$team\" is not a team of a ticket (the second one is 2; the first has no number)"
@@ -218,7 +222,7 @@ if [ -z "$there" ] && [ "$open" -ge "$max" ] && takes_a_place "$role"; then
 fi
 [ -z "${switched_event:-}" ] || [ -n "$dry_run" ] || ledger event --kind model_fallback --ticket "$ticket" --detail "$switched_event"
 
-# 4. The worktree. Orca lists any git worktree of the repository by itself.
+# 4. The worktree.
 root=$(expand_home "$(conf_get lanes root)")
 base=$(conf_get lanes base)
 [ -n "$pr_head" ] && base="origin/$pr_head"
@@ -387,12 +391,12 @@ if [ -n "$pushed_role" ]; then
   [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true
 fi
 
-# 6. The terminal, visible in Orca under the lane.
-handle=$(open_terminal "$worktree" "$ticket · $role · $chosen" "$ORCH_HOME/lane-run.sh $run_dir" "$ticket") \
-  || { echo 97 > "$run_dir/exit-code"; die "the worktree $worktree exists but Orca did not open a terminal in it: the session never started (flow-lanes.sh runs it again; to run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir))"; }
-# Orca knows the worktree by now: link it to its ticket.
+# 6. The terminal of the lane ([terminal] adapter: in Orca, under the lane).
+handle=$(terminal open "$worktree" "$ticket · $role · $chosen" "$ORCH_HOME/lane-run.sh $run_dir" "$run_dir" "$ticket") \
+  || { echo 97 > "$run_dir/exit-code"; die "the worktree $worktree exists but the terminal adapter ($terminal_loaded) did not start its session: the session never started (flow-lanes.sh runs it again; to run by hand: (cd $worktree && $ORCH_HOME/lane-run.sh $run_dir))"; }
+# The terminal knows the worktree by now: link it to its ticket.
 # A name anybody can read: the ticket and its title, then who works in it.
-"$ORCH_HOME/tracker.sh" decorate-worktree "$worktree" "$ticket${team:+ (team $team)} · $(jq -r '.title' <<<"$issue" | cut -c1-70)" "$ticket" "$role · $chosen · opened by Cleared" > /dev/null 2>&1 || true
+terminal name-worktree "$worktree" "$ticket${team:+ (team $team)} · $(jq -r '.title' <<<"$issue" | cut -c1-70)" "$ticket" "$role · $chosen · opened by Cleared" > /dev/null 2>&1 || true
 echo "$handle" > "$run_dir/terminal.handle"
 
 jq -n --arg lane "$lane" --arg worktree "$worktree" --arg requested "$requested" --arg chosen "$chosen" --arg rule "$rule" --arg run "$run_dir" --arg terminal "$handle" \

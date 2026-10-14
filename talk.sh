@@ -6,6 +6,9 @@
 #
 #   talk.sh [--dry-run]       --dry-run prints the briefing and opens nothing
 #
+# With [terminal] adapter = none, the conversation is held in the terminal
+# talk.sh is run from, and talk.sh returns when it ends.
+#
 # The session has no right to act: no lane, no merge, no push, no message to
 # a lane. It reads. Its one way to write is decide.sh, which transcribes a
 # decision the user worded: to the ledger, to tracker, and, for a lasting
@@ -124,9 +127,22 @@ printf '%s\n' "$chain" > "$run_dir/chain.json"
 } > "$run_dir/talk.env"
 
 echo "opening $(date +%s)" > "$ORCH_STATE_DIR/wake/talk"
-# The mark holds the wakes from here on; their lock is not kept while Orca opens the terminal.
+# The mark holds the wakes from here on; their lock is not kept while the terminal opens.
 exec 8>&-
-open_terminal "$worktree" "$lane · discussion · $(jq -r '.[0].alias' <<<"$chain")" "$ORCH_HOME/talk-run.sh $run_dir" > "$run_dir/terminal.handle" \
-  || { rm -f "$ORCH_STATE_DIR/wake/talk"; die "Orca did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"; }
+# A terminal adapter that shows no terminal ([terminal] adapter = none) has
+# nowhere to hold a conversation: it is held here, in the terminal talk.sh
+# was started from. Started from none, it is not started at all.
+if ! terminal has-screen; then
+  if [ -z "${ORCH_TTY:-}" ] && ! [ -t 0 ]; then
+    rm -f "$ORCH_STATE_DIR/wake/talk"
+    die "[terminal] adapter = none opens no terminal for the discussion, and talk.sh was not started from one: run it by hand in a terminal: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"
+  fi
+  code=0
+  (cd "$worktree" && exec "$ORCH_HOME/talk-run.sh" "$run_dir") || code=$?
+  echo "$run_dir"
+  exit "$code"
+fi
+terminal open "$worktree" "$lane · discussion · $(jq -r '.[0].alias' <<<"$chain")" "$ORCH_HOME/talk-run.sh $run_dir" "$run_dir" > "$run_dir/terminal.handle" \
+  || { rm -f "$ORCH_STATE_DIR/wake/talk"; die "the terminal adapter ($terminal_loaded) did not open the terminal of the discussion; run it by hand: cd $worktree && $ORCH_HOME/talk-run.sh $run_dir"; }
 user_message talk_opened "lane=$lane" "model=$(jq -r '.[0].alias' <<<"$chain")"
 echo "$run_dir"

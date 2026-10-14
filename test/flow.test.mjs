@@ -1395,6 +1395,8 @@ test('no lane is left waiting in silence: a session that died, never started or 
   const tooLong = runDir();
   assert.match(flow().stdout, /X-5: its session runs for more than 1 hours: stopped\nX-5: opened again \(stopped:/);
   assert.equal(readFileSync(join(tooLong, 'exit-code'), 'utf8').trim(), '124');
+  // Its terminal alone is closed, as Orca was always asked.
+  assert.ok(readFileSync(join(box.home, 'orca-close-args'), 'utf8').split('\n').includes(`terminal close --terminal ${readFileSync(join(tooLong, 'terminal.handle'), 'utf8').trim()}`));
   long.kill();
   assert.equal(record('X-5').runs.length, 4);
   // The user takes the ticket out of the work: its lane waits, nothing is opened again. Back in the work: it goes on.

@@ -117,9 +117,6 @@ case "${1:-}" in
     if [ "$identity" = app ]; then authorization="Bearer $(app_token)"; else authorization=$key; fi
     curl -sS --fail --max-time 15 --max-filesize 5000000 -H @<(printf 'Authorization: %s' "$authorization") "$2"
     ;;
-  decorate-worktree)
-    orca worktree set --worktree "path:$2" --display-name "$3" --linear-issue "$4" --comment "$5"
-    ;;
   identity)
     # app: the scripts act under the name of the agents. shared: under the
     # one of a person, whom the tracker cannot tell from an agent.

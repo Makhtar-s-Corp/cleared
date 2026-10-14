@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Writes down the terminal of a lane already at work, so that the project
 # lead can answer it (tell-lane.sh). Run by whoever hands lanes over to the
-# lead, never by the lead itself: a terminal is only written down when Orca
-# shows it connected, in the worktree of that name (the whole path git gives).
+# lead, never by the lead itself: a terminal is only written down when the
+# terminal adapter shows it connected, in the worktree of that name (the
+# whole path git gives).
+# With [terminal] adapter = none there is no terminal to write down: refused.
 #
 #   adopt-lane.sh <worktree name> <terminal handle>
 #   adopt-lane.sh --forget <worktree name>
@@ -19,8 +21,8 @@ fi
 [ $# -eq 2 ] || die "usage: adopt-lane.sh <worktree name> <terminal handle> | --forget <worktree name>"
 lane=$1 handle=$2
 worktree=$(lane_worktree "$lane") || die "git knows no worktree named \"$lane\" (or several): nothing written"
-found=$(orca_terminal "$handle")
-[ -n "$found" ] || die "Orca shows no terminal $handle: nothing written"
+found=$(terminal show "$handle")
+[ -n "$found" ] || die "no terminal $handle is shown: nothing written"
 [ "$found" = "true $worktree" ] || die "the terminal $handle is not connected, or is not in the worktree \"$lane\" ($worktree): nothing written"
 mkdir -p "$ORCH_STATE_DIR"
 [ -f "$known" ] || echo '{}' > "$known"

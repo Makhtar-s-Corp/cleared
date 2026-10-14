@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Says something to a lane already at work, in its own Orca terminal: the one
+# Says something to a lane already at work, in its own terminal: the one
 # way the project lead answers a lane. The lane is named by its worktree, and
 # its terminal is the one adopt-lane.sh wrote in state/lanes.json; nothing is
 # sent to a terminal that is not known for that lane, nor to one that has
@@ -11,7 +11,9 @@
 #                                               handed to it at a session the rules open for that
 #   tell-lane.sh --list                         the lanes that can be told something
 #
-# Every message is kept in state/lane-messages.jsonl.
+# Every message is kept in state/lane-messages.jsonl. With [terminal]
+# adapter = none there is no terminal to type in: only a lane of the
+# dispatcher, named by its ticket, is told something (at its next session).
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
@@ -75,12 +77,12 @@ fi
 # The terminal must still be there, and be the one of that worktree: the
 # whole path git gives, not a folder of the same name somewhere else.
 worktree=$(lane_worktree "$lane") || die "git knows no worktree named \"$lane\" (or several): nothing sent"
-found=$(orca_terminal "$handle")
+found=$(terminal show "$handle")
 [ -n "$found" ] || die "the terminal of \"$lane\" is gone: nothing sent"
 [ "$found" = "true $worktree" ] || die "the terminal written for \"$lane\" is not connected, or is not in its worktree: nothing sent"
 
 message="To team $lane, from $(conf_get lead name) (a short session; the lead does not read this terminal continuously): $text If you need to ask or report something, put it in your last message in this terminal, starting with 'For the project lead'. No acknowledgement is needed."
-orca terminal send --terminal "$handle" --text "$message" --enter > /dev/null || die "Orca did not take the message for \"$lane\""
+terminal send "$handle" "$message" || die "the terminal did not take the message for \"$lane\""
 mkdir -p "$ORCH_STATE_DIR"
 jq -nc --arg lane "$lane" --arg at "$(now_utc)" --arg text "$text" --arg run "${ORCH_RUN_ID:-}" '{lane: $lane, at: $at, run: $run, text: $text}' >> "$ORCH_STATE_DIR/lane-messages.jsonl"
 echo "told: $lane"

@@ -129,14 +129,24 @@ lane_worktree() {
   [ -n "$found" ] && [ "$(grep -c . <<<"$found")" -eq 1 ] && printf '%s\n' "$found"
 }
 
-# orca_terminal <handle>: "<connected> <worktree path>" of that terminal as
-# Orca shows it now, nothing when Orca has no such terminal. Orca that does
-# not answer, or answers without a list, is said and stops the script.
-orca_terminal() {
-  local listed
-  listed=$(orca terminal list --json 2> /dev/null) || die "Orca did not answer (orca terminal list): nothing done"
-  jq -e '(.result.terminals // .result) | type == "array"' <<<"$listed" > /dev/null 2>&1 || die "Orca gave no list of terminals: nothing done"
-  jq -r --arg handle "$1" '(.result.terminals // .result)[] | select(.handle == $handle) | "\(.connected) \(.worktreePath)"' <<<"$listed" | sed -n '1p'
+# terminal <verb> [<argument>...]: what is done with the terminals of the
+# lanes, by the adapter the project names ([terminal] adapter: orca when it
+# says nothing). The verbs and what each one promises are written at the top
+# of lib/terminal/orca.sh; open, show, close, stop, close-worktree,
+# remove-worktree, name-worktree, send, has-screen. A name with no adapter
+# is said and stops the script, before anything is done with it.
+terminal() {
+  [ -n "${terminal_loaded:-}" ] || terminal_adapter
+  "terminal_${1//-/_}" "${@:2}"
+}
+terminal_adapter() {
+  local name
+  name=$(conf_get terminal adapter)
+  if ! [[ "$name" =~ ^[a-z0-9-]+$ ]] || [ ! -f "$ORCH_HOME/lib/terminal/$name.sh" ]; then
+    die "unknown [terminal] adapter \"$name\" in $ORCH_CONF (known: $(cd "$ORCH_HOME/lib/terminal" && ls -1 -- *.sh | sed 's/\.sh$//' | paste -sd' ' -))"
+  fi
+  . "$ORCH_HOME/lib/terminal/$name.sh"
+  terminal_loaded=$name
 }
 
 # update_setting <key>: a setting of [update]. How the checkouts on this
@@ -529,18 +539,17 @@ talk_open() {
   fi
 }
 
-# close_old_terminals <lane> <kept>: closes in Orca the terminals of the past
+# close_old_terminals <lane> <kept>: closes the terminals of the past
 # sessions of a lane, all but the last <kept> (run folders are named by their
 # time). What a session said stays in its run folder and in the ledger. A
-# terminal is closed once; one that Orca no longer shows is forgotten.
+# terminal is closed once; one that is no longer there is forgotten.
 close_old_terminals() {
-  local lane=$1 kept=$2 env dir handle listed
+  local lane=$1 kept=$2 env dir handle
   while IFS= read -r env; do
     dir=$(dirname "$env")
     [ -s "$dir/terminal.handle" ] && [ ! -f "$dir/terminal.closed" ] || continue
     handle=$(sed -n '1p' "$dir/terminal.handle")
-    if orca terminal close --terminal "$handle" --tab > /dev/null 2>&1 \
-      || { listed=$(orca terminal list --json 2> /dev/null) && jq -e --arg handle "$handle" '(.result.terminals // .result) | type == "array" and (any(.handle == $handle) | not)' <<<"$listed" > /dev/null 2>&1; }; then
+    if terminal close "$handle"; then
       now_utc > "$dir/terminal.closed"
     fi
   done < <(grep -l -x -F "ORCH_LANE=$lane" "$ORCH_STATE_DIR"/runs/*/lane.env 2> /dev/null | head -n "-$kept")
@@ -648,33 +657,6 @@ guard_list() {
       }
       ;;
   esac
-}
-
-# open_terminal <worktree> <title> <command> [<ticket>]: opens a terminal of
-# the lane in Orca and prints its handle. Orca only knows a new worktree a few
-# seconds after git does, sometimes much later: the attempt is repeated for
-# ORCH_ORCA_WAIT seconds (120), then made once more. A wait longer than
-# ORCH_ORCA_SLOW seconds (30), and a failure, are written to the ledger.
-open_terminal() {
-  local worktree=$1 title=$2 command=$3 ticket=${4:-} wait=${ORCH_ORCA_WAIT:-120} step=${ORCH_ORCA_STEP:-5} slow=${ORCH_ORCA_SLOW:-30}
-  local started answer waited last=
-  started=$(date +%s)
-  while :; do
-    if answer=$(orca terminal create --worktree "path:$worktree" --title "$title" --command "$command" --json 2> /dev/null); then
-      waited=$(( $(date +%s) - started ))
-      if [ "$waited" -ge "$slow" ]; then
-        ledger event --kind orca_terminal_delayed --ticket "$ticket" --value "$waited" --detail "$title: Orca took $waited s to open the terminal"
-      fi
-      jq -r '.. | objects | .handle? // empty' <<<"$answer" | sed -n '1p'
-      return 0
-    fi
-    [ -z "$last" ] || break
-    # Past the wait: one more attempt, then give up.
-    if [ $(( $(date +%s) - started )) -ge "$wait" ]; then last=1; fi
-    sleep "$step"
-  done
-  ledger event --kind orca_terminal_failed --ticket "$ticket" --value "$(( $(date +%s) - started ))" --detail "$title: Orca did not open a terminal in $worktree"
-  return 1
 }
 
 # lane_deps <worktree>: the dependencies of the project, at hand in that
