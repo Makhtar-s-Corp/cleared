@@ -454,7 +454,8 @@ test('the installer of the services names one project for the machine and never 
   const project = fixtureProject();
   const other = scratch('orch-other-project-');
   execFileSync('git', ['-C', other, 'init', '-q', '-b', 'main']);
-  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_STATE_HOME: join(home, 'state'), ORCH_GUARD_REF: 'HEAD' };
+  // The harness probe has tests of its own (harness-probe.test.mjs): no CLI is asked here.
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_STATE_HOME: join(home, 'state'), ORCH_GUARD_REF: 'HEAD', CLEARED_SKIP_HARNESS_PROBE: '1' };
   const install = (extra = {}) => spawnSync(join(tool, 'serve', 'install.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
   const named = () => { try { return readFileSync(join(home, 'config', 'cleared', 'project'), 'utf8'); } catch { return null; } };
   const calls = () => { try { return readFileSync(join(home, 'systemctl-calls'), 'utf8'); } catch { return ''; } };
