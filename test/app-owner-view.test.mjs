@@ -231,6 +231,22 @@ test('the app refuses a question that is not of the expected shape, and the demo
   assert.equal(validBoard(tooLong), false);
 });
 
+test('the pull request body keeps the routes of the application and hides only what names this machine', () => {
+  const folders = ['/srv/cleared-service/state', '/opt/cleared'];
+  const said = prReport([
+    '## Done',
+    '- The /invoices page and the route /api/users now answer in French; see https://github.com/o/r/pull/314.',
+    '- Captures in /srv/cleared-service/state/captures/a.png, ~/work/x.png and /tmp/run/b.png; the tool sits in /opt/cleared.',
+    '- Logs of /var/log/app and /home/agent/.cache, token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.',
+  ].join('\n'), { folders });
+  assert.match(said, /The \/invoices page and the route \/api\/users now answer/, 'a route stays');
+  assert.match(said, /https:\/\/github\.com\/o\/r\/pull\/314/, 'a link stays');
+  assert.doesNotMatch(said, /\/srv\/|~\/work|\/tmp\/|\/opt\/cleared|\/var\/|\/home\/|ghp_/);
+  assert.match(said, /Captures in \[path\], \[path\] and \[path\]; the tool sits in \[path\]\./);
+  // The folders of this very checkout are found without being told.
+  assert.equal(prReport(`See ${join(import.meta.dirname, '..', 'lib', 'x.mjs')} and /about.`), 'See [path] and /about.');
+});
+
 test('the pull request opens with the team report to the user, without a path of the machine; a refused report leaves it out', () => {
   assert.equal(prReport('---\noutcome: done\n---\n\n## Report\n\n## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at /home/svc/.local/a.png\n\n## Changed files\n\n- M a'),
     '## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at [path]');
