@@ -384,6 +384,7 @@ case "$5" in
     # The door of the heavy commands (#98): its folder is writable to the agents' account only when a test says
     # so, its host status is readable.
     [ "$6 $7" = "-w ${join(run.box.dir, 'door')}" ] && [ -n "\${FAKE_AGENT_WRITES_DOOR:-}" ] && exit 0
+    [ "$6 $7" = "-w ${join(run.box.dir, 'door')}" ] && [ -n "\${FAKE_AGENT_WRITES_DOOR_PARENT:-}" ] && exit 0
     [ "$6 \${7##*.}" = "-r json" ] && exit 0
     exit 1 ;;
   bash)
@@ -436,6 +437,9 @@ test('the installer makes the door of the heavy commands outside the state and p
   assert.match(box.read('door-probes'), new RegExp(`^-n -u nobody -- bash -c exec 8< "\\$1" && flock -w 60 8 _ ${lock}$`, 'm'));
   assert.match(box.read('sudo-calls'), new RegExp(`-- test -w ${join(box.dir, 'door')}$`, 'm'));
   assert.match(box.read('sudo-calls'), new RegExp(`-- test -w ${lock}$`, 'm'));
+  // Every directory above it, up to /, is checked too.
+  assert.match(box.read('sudo-calls'), new RegExp(`-- test -w ${box.dir}$`, 'm'));
+  assert.match(box.read('sudo-calls'), /-- test -w \/$/m);
   assert.match(systemctl(), /enable --now cleared-release-broker\.service/);
 });
 
@@ -451,6 +455,15 @@ for (const [name, extra, expected] of [
     assert.doesNotMatch(systemctl(), /enable --now/);
   });
 }
+
+test('the installer stops before any unit when the agents\' account can write a directory above the folder of the door (#98)', () => {
+  const { box, install, systemctl } = agentInstaller(doorConf('@BOX@/door/inner/heavy.lock'));
+  mkdirSync(join(box.dir, 'door', 'inner'), { mode: 0o755 });
+  const run = install({ CLEARED_SKIP_HARNESS_PROBE: '1', FAKE_AGENT_WRITES_DOOR_PARENT: '1' });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, new RegExp(`install\\.sh: nobody can write ${join(box.dir, 'door')}, above the directory of \\[lanes\\] heavy_lock: it could put a door and a host status of its own in place of ${join(box.dir, 'door', 'inner')}; choose a directory whose parents it cannot write$`, 'm'));
+  assert.doesNotMatch(systemctl(), /enable --now/);
+});
 
 test('under agent_user the installer refuses heavy commands with no door outside the state, or a door inside it (#98)', () => {
   const none = agentInstaller(doorConf(''));

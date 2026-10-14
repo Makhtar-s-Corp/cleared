@@ -138,6 +138,15 @@ if [ -n "$agent_user" ]; then
     if sudo -n -u "$agent_user" -- test -w "$heavy_dir" 2>/dev/null; then
       die "$agent_user can write the directory of [lanes] heavy_lock ($heavy_dir): it may open the door for reading, nothing more"
     fi
+    # Nor any directory above it: one it could write would let it move that
+    # directory aside and put a door and a host status of its own in its place.
+    heavy_up=$heavy_dir
+    while [ "$heavy_up" != / ]; do
+      heavy_up=$(dirname "$heavy_up")
+      if sudo -n -u "$agent_user" -- test -w "$heavy_up" 2>/dev/null; then
+        die "$agent_user can write $heavy_up, above the directory of [lanes] heavy_lock: it could put a door and a host status of its own in place of $heavy_dir; choose a directory whose parents it cannot write"
+      fi
+    done
     for heavy_file in "$heavy_lock" "$(host_status_path)"; do
       if sudo -n -u "$agent_user" -- test -w "$heavy_file" 2>/dev/null; then
         die "$agent_user can write $heavy_file: it may read it, nothing more"
