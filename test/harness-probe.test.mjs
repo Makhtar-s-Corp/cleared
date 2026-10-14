@@ -462,4 +462,10 @@ test('under agent_user the installer refuses heavy commands with no door outside
   const refused = inside.install({ CLEARED_SKIP_HARNESS_PROBE: '1' });
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /install\.sh: \[lanes\] heavy_lock \(.*\) is inside Cleared state, which nobody must not open/);
+  // A shared door has no « ~ »: the agents' account has another home.
+  const home = agentInstaller(doorConf('~/door/heavy.lock'));
+  const tilde = home.install({ CLEARED_SKIP_HARNESS_PROBE: '1' });
+  assert.notEqual(tilde.status, 0);
+  assert.match(tilde.stderr, /install\.sh: \[lanes\] heavy_lock must be an absolute path, not "~\/door\/heavy\.lock" \(no ~/);
+  assert.doesNotMatch(home.systemctl(), /enable --now/);
 });

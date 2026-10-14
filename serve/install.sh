@@ -119,11 +119,10 @@ if [ -n "$agent_user" ]; then
   # and not write, and the file is readable by it and writable by nobody
   # else. The host status the service writes for the teams sits next to it.
   heavy_lock=$(conf_get lanes heavy_lock) || heavy_lock=
-  heavy_lock=$(expand_home "$heavy_lock")
   if [ -z "$heavy_lock" ]; then
     [ -z "$(conf_get lanes heavy_commands)" ] || die "Set [lanes] heavy_lock to an absolute path outside Cleared state, in a directory this account owns and $agent_user can traverse but not write (for example $socket_parent/heavy.lock): the teams' heavy commands cannot open a door in the state; see docs/configuration.md"
   else
-    case "$heavy_lock" in /*) ;; *) die "[lanes] heavy_lock must be an absolute path, not \"$heavy_lock\"" ;; esac
+    case "$heavy_lock" in /*) ;; *) die "[lanes] heavy_lock must be an absolute path, not \"$heavy_lock\" (no ~: the agents' account has another home)" ;; esac
     ! heavy_lock_in_state "$heavy_lock" || die "[lanes] heavy_lock ($heavy_lock) is inside Cleared state, which $agent_user must not open: name a file in a service-owned directory outside it"
     heavy_dir=$(dirname "$heavy_lock")
     [ -d "$heavy_dir" ] || die "Create the service-owned directory of [lanes] heavy_lock first: $heavy_dir (traversable by $agent_user, writable by this account only)"

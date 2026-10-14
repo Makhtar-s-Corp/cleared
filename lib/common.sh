@@ -153,8 +153,8 @@ expand_home() { case "$1" in "~/"*) printf '%s\n' "$HOME/${1#\~/}" ;; *) printf 
 # write (serve/install.sh checks it).
 heavy_lock_path() {
   local path
+  # (No ~: the door is shared by accounts whose homes differ.)
   path=$(conf_get lanes heavy_lock) || return 1
-  path=$(expand_home "$path")
   if [ -z "$path" ]; then printf '%s\n' "$ORCH_STATE_DIR/heavy.lock"; return 0; fi
   case "$path" in
     /*) printf '%s\n' "$path" ;;

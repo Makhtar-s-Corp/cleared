@@ -70,6 +70,11 @@ trap wake_cleanup EXIT
 # its prompts, its rules) is what this wake reads.
 if [ -z "$handover$dry_run" ] && [ -x "$ORCH_HOME/project-update.sh" ]; then "$ORCH_HOME/project-update.sh" > /dev/null 2>&1 || true; fi
 if [ -z "$handover$dry_run" ]; then node --no-warnings "$ORCH_HOME/lib/release.mjs" reconcile > /dev/null 2>&1 || true; fi
+# Under [security] agent_user the teams cannot ask the host whether it is free
+# (GitHub, the state): the door of the heavy commands reads what the service
+# writes for them next to it (lib/common.sh, host_status_write), every wake,
+# before anything below may stop this one. Nothing without agent_user.
+[ -n "$handover$dry_run" ] || host_status_write || echo "$(basename "$0"): the host status for the teams' heavy commands could not be written" >&2
 
 # What the hourly limit held back leaves now, grouped, if the user may be written.
 [ -n "$handover" ] || flush_outbox
@@ -78,11 +83,6 @@ if [ -z "$handover$dry_run" ]; then node --no-warnings "$ORCH_HOME/lib/release.m
 # So do the go-lives that only waited for the host.
 [ -n "$handover" ] || open_queued_merges
 [ -n "$handover" ] || close_tickets_left_open
-# Under [security] agent_user the teams cannot ask the host whether it is free
-# (GitHub, the state): the door of the heavy commands reads what the service
-# writes for them next to it (lib/common.sh, host_status_write), every wake,
-# before anything below may stop this one. Nothing without agent_user.
-[ -n "$handover$dry_run" ] || host_status_write || echo "$(basename "$0"): the host status for the teams' heavy commands could not be written" >&2
 # The lanes move forward by rule, with no model: opened on the tickets the
 # user said « go » on, their checks started, their review asked for, opened
 # again when something asks for it. Only once the lead acts.
