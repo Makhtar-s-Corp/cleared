@@ -2182,3 +2182,26 @@ test('a lane is not opened again for ever for one reason: three times in a day f
   assert.match(flow().stdout, /X-5: opened again \(said:c9\)/);
   assert.equal(record('X-5').runs.length, 5);
 });
+
+
+test('with Orca, a session that runs too long is stopped even when Orca does not answer: its run script is signalled and the session counts as stopped short', async () => {
+  const { flow, todo, by, record, box } = flowBox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('runs_per_day = 4', 'runs_per_day = 9\nsession_hours = 1'));
+  todo(['X-5']);
+  by('X-5', 0);
+  flow();
+  const kept = record('X-5');
+  const runDir = join(box.state, 'runs', kept.runs.at(-1).run);
+  const long = spawn('sleep', ['60'], { stdio: 'ignore' });
+  const ended = new Promise((done) => long.on('exit', done));
+  writeFileSync(join(runDir, 'pid'), `${long.pid}\n`);
+  kept.runs.at(-1).at = new Date(Date.now() - 61 * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+  writeFileSync(join(box.state, 'lanes', 'X-5.json'), JSON.stringify(kept));
+  const stopped = flow({ FAKE_ORCA_CLOSE_FAILS: '1', FAKE_ORCA_DOWN: '1' });
+  assert.match(stopped.stdout, /X-5: its session runs for more than 1 hours: stopped\n/, stopped.stderr);
+  assert.equal(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '124');
+  const signal = await Promise.race([ended.then(() => 'ended'), new Promise((done) => setTimeout(() => done('still running'), 5000))]);
+  if (signal !== 'ended') long.kill('SIGKILL');
+  assert.equal(signal, 'ended', 'its run script was signalled');
+});

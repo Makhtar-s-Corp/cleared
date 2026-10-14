@@ -8,7 +8,9 @@
 #       runs the command in the worktree, prints a handle; never waits for its end
 #   terminal_show <handle>          "<connected> <worktree path>", nothing when gone
 #   terminal_close <handle>         0 once it is closed, or no longer there
-#   terminal_stop <handle>          stops a session that runs for too long; 0 as close
+#   terminal_stop <handle>          stops a session that runs for too long: 0 once
+#                                   stopped, 1 when it is seen still running, 2
+#                                   when the adapter cannot tell (best effort)
 #   terminal_close_worktree <path>  closes every terminal in that worktree; fails
 #                                   when a session there may still run
 #   terminal_remove_worktree <path> removes the worktree
@@ -62,17 +64,14 @@ terminal_close() {
 }
 
 # The terminal alone, not its tab: a session stopped before its end. 0 once
-# it is closed or no longer there, as for terminal_close: Orca that does not
-# answer stops nothing, and the caller tries again later. (What runs in the
-# terminal gets its hangup; under [security] agent_user, sudo passes it on
-# to the harness, and bubblewrap's sandbox dies with it. Orca names no
-# process group: the acting lead, which runs without bubblewrap, is only
-# reached by that hangup.)
+# Orca closed it; 2 when Orca did not (it does not answer, or the terminal is
+# gone): Orca cannot tell what still runs, and the caller does what it can
+# with the session's run script. (What runs in the terminal gets its
+# hangup; under [security] agent_user, sudo passes it on to the harness, and
+# bubblewrap's sandbox dies with it. Orca names no process group: the acting
+# lead, which runs without bubblewrap, is only reached by that hangup.)
 terminal_stop() {
-  local listed
-  orca terminal close --terminal "$1" > /dev/null 2>&1 && return 0
-  listed=$(orca terminal list --json 2> /dev/null) \
-    && jq -e --arg handle "$1" '(.result.terminals // .result) | type == "array" and (any(.handle == $handle) | not)' <<<"$listed" > /dev/null 2>&1
+  orca terminal close --terminal "$1" > /dev/null 2>&1 || return 2
 }
 
 terminal_close_worktree() {
