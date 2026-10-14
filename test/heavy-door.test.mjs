@@ -277,6 +277,44 @@ exec "${join(box.home, 'bin', 'gh')}" "$@"
   assert.ok(existsSync(statusPath));
 });
 
+test('a door that cannot be used is said: by the wake once an hour with a ledger event, and by cleared status as a problem', () => {
+  const said = (box, env) => {
+    const wake = spawnSync(join(box.home, 'wake.sh'), [], { env, encoding: 'utf8', timeout: 90000 });
+    assert.equal(wake.status, 0, wake.stderr);
+    const db = openLedger(join(box.state, 'ledger.db'));
+    const events = db.prepare("SELECT detail FROM events WHERE kind = 'heavy_lock_invalid'").all().map((row) => row.detail);
+    db.close();
+    const status = JSON.parse(spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--json'], { env, encoding: 'utf8' }).stdout);
+    return { stderr: wake.stderr, events, problem: status.problems.find((item) => item.code === 'heavy_lock_invalid')?.message };
+  };
+  // A relative path: nothing could open it, so no check would ever start.
+  const relative = doorBox();
+  const confPath = join(relative.box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[lanes]\n', '[lanes]\nheavy_lock = door/heavy.lock\n'));
+  const first = said(relative.box, relative.env);
+  assert.match(first.stderr, /^wake\.sh: \[lanes\] heavy_lock must be an absolute path, not "door\/heavy\.lock": no pull request is taken out of draft/m);
+  assert.equal(first.events.length, 1);
+  assert.match(first.problem, /heavy_lock must be an absolute path/);
+  // Once an hour, not every minute.
+  const again = said(relative.box, relative.env);
+  assert.doesNotMatch(again.stderr, /heavy_lock/);
+  assert.equal(again.events.length, 1);
+  assert.match(again.problem, /heavy_lock must be an absolute path/, 'cleared status keeps saying it');
+  // Under agent_user with heavy commands and the door left in the state: the teams could never use it.
+  const inState = doorBox({ agentUser: true, heavyLock: false });
+  const second = said(inState.box, inState.env);
+  assert.match(second.stderr, /\[lanes\] heavy_lock must name a file outside Cleared's state/);
+  assert.equal(second.events.length, 1);
+  assert.match(second.problem, /must name a file outside Cleared's state/);
+  // A door that works says nothing.
+  for (const fine of [doorBox(), doorBox({ agentUser: true })]) {
+    const quiet = said(fine.box, fine.env);
+    assert.doesNotMatch(quiet.stderr, /heavy_lock/);
+    assert.deepEqual(quiet.events, []);
+    assert.equal(quiet.problem, undefined);
+  }
+});
+
 test('checks the rules start hold the door while they are said to the teams: a team then finds the host busy; a team holding the door keeps them back', () => {
   const { flow, todo, by, session, pull, box, env } = flowBox();
   const confPath = join(box.home, 'agents.conf');

@@ -161,6 +161,21 @@ heavy_lock_path() {
     *) echo "$(basename "$0"): [lanes] heavy_lock must be an absolute path, not \"$path\"" >&2; return 1 ;;
   esac
 }
+# heavy_lock_problem: what makes the door unusable, in one line, or nothing.
+# Said by the wake (once an hour, with a ledger event) and by cleared status
+# (lib/heartbeat.mjs): left alone, it would only stop the checks and the
+# heavy commands in silence.
+heavy_lock_problem() {
+  local path
+  path=$(conf_get lanes heavy_lock) || return 0
+  case "$path" in
+    "" | /*) ;;
+    *) echo "[lanes] heavy_lock must be an absolute path, not \"$path\": no pull request is taken out of draft, no check is started again and no heavy command runs until it is fixed"; return 0 ;;
+  esac
+  [ -n "$(conf_get security agent_user)" ] && [ -n "$(conf_get lanes heavy_commands)" ] || return 0
+  heavy_lock_in_state "$(heavy_lock_path)" || return 0
+  echo "with [security] agent_user, [lanes] heavy_lock must name a file outside Cleared's state: the teams' heavy commands cannot run (exit 5) until it is set and serve/install.sh is run again"
+}
 # heavy_lock_in_state <path>: whether that path lies in Cleared's state.
 heavy_lock_in_state() {
   case "$(realpath -m -- "$1")/" in "$(realpath -m -- "$ORCH_STATE_DIR")"/*) return 0 ;; esac

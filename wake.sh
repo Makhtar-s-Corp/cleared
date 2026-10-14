@@ -35,6 +35,18 @@ esac
 wake_dir="$ORCH_STATE_DIR/wake"
 mkdir -p "$wake_dir"
 ledger init > /dev/null
+# A door of the heavy commands that cannot be used stops the checks and the
+# teams' heavy commands without a word: said here, once an hour, and in the
+# ledger; cleared status shows it as a problem meanwhile.
+heavy_problem=$(heavy_lock_problem)
+heavy_said="$wake_dir/heavy-lock-said"
+if [ -z "$heavy_problem" ]; then
+  rm -f "$heavy_said"
+elif [ -z "$handover$dry_run" ] && [ -z "$(find "$heavy_said" -mmin -60 2> /dev/null)" ]; then
+  echo "$(basename "$0"): $heavy_problem" >&2
+  ledger event --kind heavy_lock_invalid --detail "$heavy_problem" > /dev/null || true
+  : > "$heavy_said"
+fi
 # What GitHub's status page says is read once a wake (lib/common.sh,
 # github_down): by the host status below and by the wake itself further on.
 export CLEARED_GITHUB_DOWN_CACHE="$wake_dir/github-status.read"
