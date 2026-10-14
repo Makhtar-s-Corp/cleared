@@ -53,6 +53,18 @@ test('choices are the short lines under a question; a numbered line that asks is
   assert.deepEqual(questionsOf('Aucune.'), []);
 });
 
+test('a block that opens with its recommendation keeps it as the recommendation, never as the question too', () => {
+  const alone = 'Je conseille de garder le bouton (qui sait ?) tel quel.';
+  assert.deepEqual(questionsOf(alone, { fallback: 'Renommer le bouton « Envoyer »' }),
+    [{ text: 'Renommer le bouton « Envoyer »', recommendation: alone, options: [] }], 'the ticket title asks it');
+  assert.deepEqual(questionsOf(alone), [{ text: alone, recommendation: null, options: [] }], 'without a title it is said once');
+  assert.deepEqual(questionsOf(`${alone}\nFaut-il le renommer ?\n- Oui\n- Non`),
+    [{ text: 'Faut-il le renommer ?', recommendation: alone, options: ['Oui', 'Non'] }], 'the next line is the question');
+  const two = questionsOf(`1. Faut-il un titre ? Je recommande non.\n2. ${alone}\nFaut-il le déplacer ?`);
+  assert.deepEqual(two.map((q) => [q.text, q.recommendation]), [['Faut-il un titre ?', 'Je recommande non.'], ['Faut-il le déplacer ?', alone]]);
+  for (const q of [...questionsOf(alone, { fallback: 'x' }), ...two]) assert.notEqual(q.text, q.recommendation);
+});
+
 test('the report sections are read in either language and whatever their heading style', () => {
   const fr = reportSections("## Fait\n\n- Renommé le titre (PR #314).\n  Un test vérifie le nom.\n- Capture : ![avant](/home/x/a.png)\n\n## Reste à faire\n\nRien.\n\n## Questions pour l’utilisateur\n\nAucune.");
   assert.deepEqual(fr.done, ['Renommé le titre (PR #314). Un test vérifie le nom.', 'Capture :']);
