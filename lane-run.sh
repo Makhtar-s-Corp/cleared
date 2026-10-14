@@ -117,7 +117,10 @@ capture_handover
 # not part of its work). Without this the work would wait for another model
 # to commit it. A backend that commits by itself is left alone: what it did
 # not commit is its to sort out.
+# Never in the project's main checkout, where the acting lead runs under
+# [security] agent_user (wake.sh): that checkout is the service's.
 if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
+  && [ "$(realpath -m -- "$PWD")" != "$(realpath -m -- "$ORCH_REPO")" ] \
   && { [ -n "$(conf_get security agent_user)" ] || { [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
        && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ]; }; } \
   && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then

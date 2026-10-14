@@ -32,6 +32,7 @@ if ! grep -qxF -- "$lane" <<<"$lanes"; then
 fi
 worktree=$(git -C "$ORCH_REPO" worktree list --porcelain | awk -v b="branch refs/heads/$lane" '/^worktree /{w = substr($0, 10)} $0 == b {print w}')
 [ -d "$worktree" ] || die "no worktree for $lane"
+[ "$(realpath -m -- "$worktree")" != "$(realpath -m -- "$ORCH_REPO")" ] || die "$lane is checked out in the project's main checkout ($ORCH_REPO), which is never closed: check out the base there first"
 
 if [ "$force" != --force ]; then
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "$lane has uncommitted changes (use --force to drop them)"

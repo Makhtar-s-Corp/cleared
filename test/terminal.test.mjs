@@ -452,3 +452,125 @@ test('[terminal] adapter = none under [security] agent_user: the flow stops a se
   assert.notEqual(next, runDir);
   assert.ok(await until(() => existsSync(join(next, 'exit-code'))), 'the session opened again ran to its end');
 });
+
+
+// The project lead under [security] agent_user (issue #94): the acting lead (permissions release-live) runs without
+// bubblewrap, from the project's main checkout; the lead that observes, and every lead of an install without
+// agent_user, keep the lane of the lead. The real claude adapter runs a fake CLI through a sudo and a bubblewrap
+// that write down what they are asked and pass the command on (the CLI is found first on the PATH sudo is handed).
+function leadBox({ agentUser, live }) {
+  const box = noneBox();
+  const bin = join(box.home, 'bin');
+  writeFileSync(join(box.home, 'adapters', 'claude.sh'), readFileSync(join(ORCH_HOME, 'adapters', 'claude.sh'), 'utf8'), { mode: 0o755 });
+  writeFileSync(join(bin, 'sudo'), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${join(box.home, 'sudo-calls')}"
+[ "$1 $2" = "-n -u" ] && [ "$4" = -- ] || exit 1
+case "$5" in id) exec id -u "$3" ;; test) exit 0 ;; esac
+shift 4
+words=()
+for word in "$@"; do case "$word" in PATH=*) words+=("PATH=${bin}:/usr/bin:/bin") ;; *) words+=("$word") ;; esac; done
+exec "\${words[@]}"
+`, { mode: 0o755 });
+  writeFileSync(join(bin, 'bwrap'), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${join(box.home, 'bwrap-calls')}"
+while [ "$1" != -- ]; do shift; done; shift
+exec "$@"
+`, { mode: 0o755 });
+  writeFileSync(join(bin, 'claude'), `#!/usr/bin/env bash
+pwd -P >> "${join(box.home, 'claude-cwds')}"
+printf '%s\\n' '{"type":"assistant","message":{"model":"m1","content":[{"type":"text","text":"ok"}]}}'
+printf '%s\\n' '{"type":"result","is_error":false,"result":"## Report\\n\\nNothing to do.\\n","total_cost_usd":0,"modelUsage":{}}'
+`, { mode: 0o755 });
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8')
+    .replace('a = first:m1', 'a = claude:m1')
+    .replace('live = no\n', `live = ${live}\n`)
+    .replace('[security]\nallow_shared_uid = true\n', `[security]\nallow_shared_uid = true\n${agentUser ? `agent_user = nobody\nbwrap_path = ${join(bin, 'bwrap')}\n` : ''}`));
+  // The model was seen available a moment ago: no probe.
+  mkdirSync(join(box.state, 'models'), { recursive: true });
+  writeFileSync(join(box.state, 'models', 'claude.available'), `m1\t${Math.floor(Date.now() / 1000)}\n`);
+  const read = (name) => { try { return readFileSync(join(box.home, name), 'utf8'); } catch { return ''; } };
+  // One wake that only reads, then one woken by a comment of the user: it starts a session of the lead.
+  const wake = async () => {
+    const issue = (comments) => writeFileSync(join(box.home, 'tracker-now.json'), JSON.stringify([{ id: 'i1', identifier: 'X-1', title: 'Titre', url: 'u', state: 'Todo', project: 'P', createdAt: '2026-01-01T00:00:00Z', description: 'd', comments }]));
+    const once = () => spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8', timeout: 60000 });
+    issue([]);
+    assert.equal(once().status, 0);
+    issue([{ id: 'c1', createdAt: new Date().toISOString(), url: 'u#c1', body: 'OK, vas-y.' }]);
+    const woke = once();
+    assert.equal(woke.status, 0, woke.stderr);
+    const runDir = woke.stdout.trim().split('\n').at(-1);
+    assert.ok(await until(() => existsSync(join(runDir, 'exit-code'))), 'the session of the lead ran to its end');
+    return { runDir, log: readFileSync(join(runDir, 'terminal.log'), 'utf8'), where: readFileSync(join(runDir, 'terminal.none'), 'utf8').trim().split('\n')[1] };
+  };
+  return { ...box, read, wake };
+}
+
+
+test('with [security] agent_user, the acting project lead starts in the main checkout, without bubblewrap, and its lane is neither made nor touched', async () => {
+  const box = leadBox({ agentUser: true, live: 'yes' });
+  const { runDir, log, where } = await box.wake();
+  assert.doesNotMatch(log, /release role must run from the service-owned main checkout/);
+  assert.equal(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '0', log);
+  assert.equal(where, box.repo, 'the session was opened in the main checkout');
+  assert.deepEqual(box.read('claude-cwds').trim().split('\n'), [box.repo], 'and the CLI ran there');
+  const started = box.read('sudo-calls').split('\n').filter((line) => / claude -p /.test(line));
+  assert.equal(started.length, 1, box.read('sudo-calls'));
+  assert.match(started[0], /^-n -u nobody -- env .* claude -p /);
+  assert.doesNotMatch(started[0], /bwrap/, 'no bubblewrap around the acting lead');
+  assert.equal(box.read('bwrap-calls'), '');
+  assert.equal(existsSync(join(box.home, 'lanes', 'release-lead')), false, 'no worktree is made for it');
+  assert.equal(spawnSync('git', ['-C', box.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/release/lead']).status, 1, 'nor its branch');
+  assert.equal(spawnSync('git', ['-C', box.repo, 'status', '--porcelain'], { encoding: 'utf8' }).stdout, '', 'the main checkout is left as it was');
+});
+
+
+test('with [security] agent_user, the project lead that observes still runs in its lane, through bubblewrap', async () => {
+  const box = leadBox({ agentUser: true, live: 'no' });
+  const { runDir, log, where } = await box.wake();
+  const lane = join(box.home, 'lanes', 'release-lead');
+  assert.equal(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '0', log);
+  assert.equal(where, lane);
+  assert.deepEqual(box.read('claude-cwds').trim().split('\n'), [lane]);
+  assert.match(box.read('bwrap-calls'), /--dev-bind \/ \/ --die-with-parent --unshare-pid --proc \/proc --ro-bind .* -- claude -p /);
+});
+
+
+test('without [security] agent_user, the acting project lead still runs in its lane', async () => {
+  const box = leadBox({ agentUser: false, live: 'yes' });
+  const { runDir, log, where } = await box.wake();
+  const lane = join(box.home, 'lanes', 'release-lead');
+  assert.equal(readFileSync(join(runDir, 'exit-code'), 'utf8').trim(), '0', log);
+  assert.equal(where, lane);
+  assert.deepEqual(box.read('claude-cwds').trim().split('\n'), [lane]);
+  assert.equal(box.read('sudo-calls'), '');
+});
+
+
+test('the project\'s main checkout is never closed nor removed as the worktree of a lane, by any terminal adapter, and kill-lane refuses a lane checked out there', async (t) => {
+  for (const adapter of ['none', 'orca']) {
+    const box = adapter === 'none' ? noneBox() : sandbox();
+    // A session at work in the main checkout, as the acting lead's is.
+    const held = adapter === 'none' ? openHeld(box) : null;
+    const pid = held ? Number(held.handle.split(':')[1]) : 0;
+    if (held) t.after(() => stopGroup(pid));
+    const verb = (name, path) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; terminal "$1" "$2"`, 'verb', name, path], { env: box.env, encoding: 'utf8' });
+    for (const path of [box.repo, `${box.repo}/`, join(box.repo, '..', 'repo')]) {
+      for (const name of ['close-worktree', 'remove-worktree']) {
+        const refused = verb(name, path);
+        assert.equal(refused.status, 1, `${adapter} ${name} ${path}`);
+        assert.match(refused.stderr, /is the project's main checkout, not the worktree of a lane: it is neither closed nor removed/);
+      }
+    }
+    assert.ok(existsSync(join(box.repo, '.git')), 'the main checkout is there');
+    assert.equal(spawnSync('git', ['-C', box.repo, 'status', '--porcelain'], { encoding: 'utf8' }).stdout, '');
+    if (held) assert.ok(alive(pid), 'its session was not stopped');
+    if (adapter === 'orca') assert.equal(existsSync(join(box.home, 'orca-closed')), false, 'Orca was asked nothing');
+    // A lane's branch checked out in the main checkout by hand: kill-lane leaves it.
+    box.git('checkout', '-q', '-b', 'dev/X-9');
+    const killed = spawnSync(join(box.home, 'kill-lane.sh'), ['dev/X-9', '--force'], { env: box.env, encoding: 'utf8' });
+    assert.equal(killed.status, 1);
+    assert.match(killed.stderr, /dev\/X-9 is checked out in the project's main checkout .* which is never closed/);
+    assert.ok(existsSync(join(box.repo, '.git')));
+  }
+});

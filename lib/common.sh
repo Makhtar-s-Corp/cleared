@@ -84,7 +84,9 @@ agent_mount_args() {
   bwrap=${bwrap:-/usr/bin/bwrap}
   worktree=$(git rev-parse --show-toplevel 2>/dev/null || true)
   if [ "${ORCH_ACTIVE_PERMISSION_ROLE:-}" = release-live ]; then
-    [ "$worktree" = "$ORCH_REPO" ] || die "release role must run from the service-owned main checkout"
+    # (Compared as the file system resolves both: git names the top of the
+    # checkout so, whatever link ORCH_REPO goes through.)
+    [ -n "$worktree" ] && [ "$(realpath -m -- "$worktree")" = "$(realpath -m -- "$ORCH_REPO")" ] || die "release role must run from the service-owned main checkout"
     # Its sudo bridge needs setuid, which bubblewrap's NoNewPrivs forbids.
     # The account cannot write the main checkout or Cleared state.
     AGENT_MOUNT_ARGS=()
@@ -141,8 +143,19 @@ lane_worktree() {
 # of lib/terminal/orca.sh; open, show, close, stop, close-worktree,
 # remove-worktree, name-worktree, send, has-screen. A name with no adapter
 # is said and stops the script, before anything is done with it.
+# The project's main checkout is never closed nor removed as a lane, by any
+# adapter: the acting lead runs there under [security] agent_user (wake.sh),
+# and it is the service's own checkout.
 terminal() {
   [ -n "${terminal_loaded:-}" ] || terminal_adapter
+  case "$1" in
+    close-worktree | remove-worktree)
+      if [ "$(realpath -m -- "${2:-}")" = "$(realpath -m -- "$ORCH_REPO")" ]; then
+        echo "$(basename "$0"): $ORCH_REPO is the project's main checkout, not the worktree of a lane: it is neither closed nor removed" >&2
+        return 1
+      fi
+      ;;
+  esac
   "terminal_${1//-/_}" "${@:2}"
 }
 terminal_adapter() {

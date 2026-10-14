@@ -12,6 +12,7 @@
 #   terminal_close_worktree <path>  closes every terminal in that worktree; fails
 #                                   when a session there may still run
 #   terminal_remove_worktree <path> removes the worktree
+#   (lib/common.sh refuses both worktree verbs on the project's main checkout)
 #   terminal_name_worktree <path> <name> <ticket> <comment>   a name a person reads
 #   terminal_send <handle> <text>   types the text in the terminal, and Enter
 #   terminal_has_screen             0 when a person sees the terminals and types in them

@@ -537,7 +537,7 @@ The Cleared app. It reads the board snapshot and the ledger the last wake record
 
 | Setting | Meaning | Requirement |
 | --- | --- | --- |
-| `agent_user` | System account used for both Claude Code and Codex processes. Set it to a distinct account and grant that account worktree access without Cleared state write access. | Optional; no default |
+| `agent_user` | System account used for both Claude Code and Codex processes. Set it to a distinct account and grant that account worktree access without Cleared state write access. With it, the acting lead (`[lead] live = yes`) runs from the project's main checkout, read-only for that account, instead of the lead's lane (see [Security](security.md#installing-the-release-account-boundary)). | Optional; no default |
 | `allow_shared_uid` | Explicitly allow release and manual rollback without `agent_user`. The lock is then not a security boundary and `cleared status` keeps a permanent warning. | Default: false |
 | `human_user` | Unix account permitted to run `cleared rollback` through the broker. Required for manual rollback with a remote tracker in split-account mode; the local tracker defaults to `[tracker] owner_id`. In explicit shared-UID mode the service UID is accepted if omitted. Must differ from `agent_user`. | Optional; no default |
 | `socket_path` | Absolute local Unix socket path for the service-owned release broker. Required when `agent_user` is set; its parent must be traversable by that account. | Optional; no default |

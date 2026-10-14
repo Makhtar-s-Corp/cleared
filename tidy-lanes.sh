@@ -50,6 +50,8 @@ ledger init > /dev/null
 while IFS=$'\t' read -r path branch; do
   [ -n "$branch" ] || continue
   case "$path" in "$root"/*) ;; *) continue ;; esac
+  # The main checkout, even under the lanes root, is no lane: never closed.
+  [ "$(realpath -m -- "$path")" != "$(realpath -m -- "$ORCH_REPO")" ] || continue
   lane=$(basename "$path")
   [ "$branch" != "$lead_lane" ] && [ "$branch" != "${base#origin/}" ] || continue
   if tr ' ,' '\n\n' <<<"$(conf_get lead not_lanes)" | grep -qxF -- "$lane"; then continue; fi

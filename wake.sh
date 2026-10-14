@@ -7,7 +7,8 @@
 #   2. Nothing moved: writes "wake skipped" to the ledger and stops there.
 #      Zero token.
 #   3. Something moved: starts one short session of the lead's role, in its
-#      one stable lane (release/lead), with the model the
+#      one stable lane (release/lead; the acting lead under [security]
+#      agent_user runs in the project's main checkout), with the model the
 #      routing table gives that role, and hands it the list of what moved.
 #      The session is started by the terminal adapter and outlives the wake.
 #
@@ -183,11 +184,11 @@ if [ -z "$handover" ]; then
     root=$(expand_home "$(conf_get lanes root)")
     git -C "$ORCH_REPO" worktree list --porcelain | awk '/^worktree /{path = substr($0, 10)} /^branch /{print path "\t" substr($2, 12)}' \
       | grep -F "$root/" \
-      | awk -F'\t' -v roles="$(conf_keys roles | paste -sd'|')" -v left="$(conf_get lead not_lanes)" '
-          # Not a lane at work: one the dispatcher opened (the lead itself among them), or one it was told to leave alone.
+      | awk -F'\t' -v roles="$(conf_keys roles | paste -sd'|')" -v left="$(conf_get lead not_lanes)" -v main="$(realpath -m -- "$ORCH_REPO")" '
+          # Not a lane at work: one the dispatcher opened (the lead itself among them), one it was told to leave alone, or the main checkout.
           BEGIN { n = split(left, names, /[ ,]+/); for (i = 1; i <= n; i++) skip[names[i]] = 1 }
           { name = $1; sub(/.*\//, "", name) }
-          $2 !~ ("^(" roles ")/") && !(name in skip)' \
+          $2 !~ ("^(" roles ")/") && !(name in skip) && $1 != main' \
       | jq -R -c 'split("\t") | {name: (.[0] | split("/") | last), path: .[0], branch: .[1]}' | jq -sc . > "$work/worktrees.json" || echo '[]' > "$work/worktrees.json"
     node --no-warnings "$ORCH_HOME/lib/lanes.mjs" "$work/worktrees.json" "$(conf_get lead report_hours)" > "$work/reports.json" || echo '[]' > "$work/reports.json"
     # The reviews the dispatcher ran that came to their end: the lead opens them, it is told what they say.
@@ -225,12 +226,31 @@ if [ "$(jq length <<<"$chain")" = 0 ]; then
   die "the model of the project lead ($(jq -r '.chain[0].alias' <<<"$routed")) is not available: no other model takes its place, no session started"
 fi
 
+live=$(conf_get lead live)
+# live = no: the lead observes, it writes what it would do and does nothing.
+# live = yes: it acts, by the few scripts its permissions name (it answers in
+# tracker and to the lanes at work; it opens no lane and merges nothing yet).
+acting=
+[ "$live" != yes ] || acting=1
+
 # Its one lane, kept from wake to wake and brought to the head of the base.
 lane="$role/lead"
 worktree="$(expand_home "$(conf_get lanes root)")/$role-lead"
+# Under [security] agent_user, the acting lead (permissions release-live)
+# runs without bubblewrap, whose NoNewPrivs would block its sudo bridge to
+# the service: it runs from the project's main checkout, which the agents'
+# account cannot write (lib/common.sh, agent_mount_args), and not from a
+# worktree of its own. That checkout is the service's: project-update.sh
+# keeps it at the base, nothing here touches it. A handover, and the lead
+# that observes, keep their lane.
+in_main=
+[ -z "$acting" ] || [ -n "$handover" ] || [ -z "$(conf_get security agent_user)" ] || in_main=1
+[ -z "$in_main" ] || worktree=$ORCH_REPO
 base=$(conf_get lanes base)
 git -C "$ORCH_REPO" fetch --quiet origin "${base#origin/}" || echo "$(basename "$0"): fetch failed, using the local $base" >&2
-if [ ! -d "$worktree" ]; then
+if [ -n "$in_main" ]; then
+  : # nothing to make, nor to bring forward, in the main checkout
+elif [ ! -d "$worktree" ]; then
   git -C "$ORCH_REPO" worktree add --quiet -B "$lane" "$worktree" "$base"
 elif [ -n "$(git -C "$worktree" status --porcelain --untracked-files=no)" ] \
   || [ "$(git -C "$worktree" rev-list --count "$base..HEAD")" != 0 ] \
@@ -253,12 +273,6 @@ run_dir="$ORCH_STATE_DIR/runs/$run_base"
 mkdir -p "$run_dir"
 printf '%s\n' "$chain" > "$run_dir/chain.json"
 [ -n "$handover" ] || jq '.events' "$work/changes.json" > "$run_dir/events.json"
-live=$(conf_get lead live)
-# live = no: the lead observes, it writes what it would do and does nothing.
-# live = yes: it acts, by the few scripts its permissions name (it answers in
-# tracker and to the lanes at work; it opens no lane and merges nothing yet).
-acting=
-[ "$live" != yes ] || acting=1
 if [ -n "$handover" ]; then
   {
     prompt_text "$(prompt_file handover)"
