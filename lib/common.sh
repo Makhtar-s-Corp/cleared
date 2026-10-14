@@ -827,3 +827,75 @@ takes_a_place() {
   counted=$(conf_get limits counted_roles)
   [ -z "$counted" ] || tr -s ' ' '\n' <<<"$counted" | grep -qxF -- "$1"
 }
+
+# The forge: which GitHub credential gh and git use here ([forge],
+# docs/configuration.md#forge, the code in lib/forge.mjs). With no app
+# configured, nothing is changed: gh and git use the ambient credential, as
+# they always did, and no node runs for it. With one, every call of gh in
+# these scripts goes through the function below, which hands gh the
+# installation token for that one call (it never sits in the environment of
+# the script, so nothing it starts inherits it), and git finds the token
+# through the credential helper lib/forge.mjs names in GIT_CONFIG_* for
+# https://github.com (a remote written for SSH included). The commits the
+# dispatcher makes take the app's identity (GIT_AUTHOR_* and
+# GIT_COMMITTER_*). Configured and failing (a key missing, a wrong mode, the
+# app suspended, no network), gh stops with the reason and the setting to
+# look at; it never falls back to the ambient credential.
+forge_wanted() {
+  [ -f "$ORCH_CONF" ] || return 1
+  awk '
+    /^\[/ { section = $0; next }
+    $0 ~ /^[ \t]*#/ { next }
+    {
+      i = index($0, "="); if (!i) next
+      key = substr($0, 1, i - 1); value = substr($0, i + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", value)
+      if (seen[section, key]++ || value == "") next
+      if (section == "[forge]" && key ~ /^(adapter|app_id|installation_id|app_private_key_file)$/) forge = 1
+      if (section == "[tracker]" && key == "adapter" && value == "github") github = 1
+      if (section == "[tracker]" && key ~ /^(app_id|installation_id|app_private_key_file)$/) app = 1
+    }
+    END { exit !(forge || (github && app)) }' "$ORCH_CONF"
+}
+forge_setup() {
+  CLEARED_FORGE_MODE=ambient CLEARED_FORGE_LOGIN= CLEARED_FORGE_ERROR=
+  forge_wanted || return 0
+  local lines
+  if ! lines=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" shell); then
+    CLEARED_FORGE_MODE=error CLEARED_FORGE_ERROR="forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used"
+    unset GH_TOKEN GITHUB_TOKEN
+    return 0
+  fi
+  eval "$lines"
+  # An ambient GitHub token of the service has no use left here: gh gets the
+  # app's, and nothing started from these scripts may take the other one.
+  [ "$CLEARED_FORGE_MODE" = ambient ] || unset GH_TOKEN GITHUB_TOKEN
+}
+gh() {
+  case "${CLEARED_FORGE_MODE:-ambient}" in
+    ambient) command gh "$@" ;;
+    app)
+      local forge_token
+      forge_token=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" token) || return 1
+      GH_TOKEN=$forge_token GITHUB_TOKEN=$forge_token command gh "$@"
+      ;;
+    *)
+      echo "$(basename "$0"): $CLEARED_FORGE_ERROR" >&2
+      return 1
+      ;;
+  esac
+}
+# forge_harness_unset: the `env -u` arguments (in FORGE_UNSET) a model
+# adapter, or a command of a lane, is started with, so that no forge
+# credential reaches it: with an app, the GitHub token variables, every
+# GIT_CONFIG_* (the credential helper) and the commit identity of the
+# dispatcher. None with the ambient credential: nothing changes there.
+forge_harness_unset() {
+  local name
+  FORGE_UNSET=()
+  [ "${CLEARED_FORGE_MODE:-ambient}" != ambient ] || return 0
+  FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT
+    -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL)
+  while IFS= read -r name; do FORGE_UNSET+=(-u "$name"); done < <(compgen -e | grep -E '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true)
+}
+forge_setup
