@@ -307,6 +307,12 @@ test('the pull request body keeps the routes of the application and hides only w
   assert.equal(prReport(`See ${join(import.meta.dirname, '..', 'lib', 'x.mjs')} and /about.`), 'See [path] and /about.');
 });
 
+test('a file:// address in the report is a path of a machine: hidden whole, whatever folder it names', () => {
+  const said = prReport('Logs in file:///home/svc/.local/state/cleared/sample/a.txt, see FILE:///etc/passwd and [the capture](file:///tmp/run/b.png); the /invoices page stays.', { folders: [] });
+  assert.equal(said, 'Logs in [path], see [path] and [the capture]([path]); the /invoices page stays.');
+  assert.doesNotMatch(said, /file:|\/home\/|\/etc\/|\/tmp\//i);
+});
+
 test('the pull request opens with the team report to the user, without a path of the machine; a refused report leaves it out', () => {
   assert.equal(prReport('---\noutcome: done\n---\n\n## Report\n\n## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at /home/svc/.local/a.png\n\n## Changed files\n\n- M a'),
     '## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at [path]');
