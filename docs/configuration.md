@@ -126,7 +126,7 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `reopen_state` | Configured non-approval tracker status to use after a rollback. | Required before any rollback; no default |
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
 
-Automatic rollback requires a git credential that can push a normal commit to the base branch. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET` from the configured human Unix account. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never the broker's peer-UID check. Tracker comments cannot authorize rollback.
+Automatic rollback requires a git credential that can push a normal commit to the base branch: with a GitHub App in [`[forge]`](#forge), the app's installation, which then needs Contents: write and, if a rule blocks direct pushes, to be allowed to bypass it. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET` from the configured human Unix account. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never the broker's peer-UID check. Tracker comments cannot authorize rollback.
 
 ## `[heartbeat]`
 
@@ -290,6 +290,40 @@ Selects the ticket adapter, names the workflow states, and configures identity a
 | `review_state` | State during independent review. | Required |
 | `todo_state` | State that starts work. | Required |
 | `capture_roots` | Allowed roots for capture images; GitHub upload requires OCR and guard approval. | Optional; no default |
+
+## `[forge]`
+
+Which GitHub identity the forge calls use: pushing and fetching branches, opening, reading, readying, closing and merging pull requests, reading and rerunning checks, the rollback revert push, and the commits the dispatcher makes after a session (or when it brings the base into a lane, saves work before closing a lane, or transcribes a decision). With no GitHub App configured, those calls use the service account's own `gh` login and git credentials, as before. With one, they go through the app: pull requests, pushes, merges and dispatcher commits show as its bot. The keys apply whatever the tracker is (Linear, GitHub Issues or local).
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `adapter` | Forge in use. Only `github` exists. | Default: github |
+| `app_id` | Numeric GitHub App ID used to sign short-lived JWTs. | Optional; no default |
+| `installation_id` | Numeric ID of the app's installation on the project repository. | Required with `app_id` |
+| `app_private_key_file` | Absolute path to the app's RSA private key, outside the repository, owned by the service account with mode `0600`. | Required with `app_id` |
+| `app_login` | The bot login of the app, `<app slug>[bot]`; commit author and committer name. | Required with `app_id` |
+| `app_user_id` | The numeric GitHub user ID of that bot; the commit email is `<app_user_id>+<app_login>@users.noreply.github.com`. | Required with `app_id` |
+
+When `[forge]` has no `app_id`, `installation_id` or `app_private_key_file` and `[tracker] adapter = github` has them, the tracker's app is used for both, with `[tracker] app_login` as the bot login. Add `[forge] app_user_id` so the dispatcher's commits carry the bot's identity; without it they keep the local git identity and `cleared status` says so. The bot's user ID is public: `gh api '/users/<app slug>%5Bbot%5D' --jq .id` (the brackets of `[bot]` are URL-encoded) or `curl -s 'https://api.github.com/users/<app slug>%5Bbot%5D'`.
+
+Cleared mints an installation token from the key, keeps it in the state directory (`forge/installation-token.json`, mode `0600`, in a `0700` directory the agents' account cannot read) and reuses it until five minutes before it expires; [GitHub installation tokens expire after one hour](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app). `gh` receives it in `GH_TOKEN` for each call only; git receives it through a credential helper declared in `GIT_CONFIG_*` for `https://github.com` (user name `x-access-token`), which replaces the account's own git credential helpers for that host. A remote written as `git@github.com:` is sent over HTTPS so that it uses the app as well. Neither the user's git configuration nor the project's is written. The model adapters remove these variables before starting a harness. If the key is missing or too open, the IDs are wrong, the app is suspended or uninstalled, or GitHub cannot be reached, every forge call stops with a message that names the setting to check, a `forge_token_failed` event is recorded once an hour, and `cleared status` reports `forge_credential`; Cleared never falls back to the ambient credential. The fetch the tool does to update itself (`[update] self`) also goes through the app when the tool's checkout is hosted on GitHub: keep that repository public or install the app on it.
+
+The installation needs the following repository permissions. The minimum set is Metadata read, Contents write, Pull requests write, Checks read, Statuses read, Actions read and Workflows write.
+
+| Feature | GitHub calls | Permission |
+| --- | --- | --- |
+| Every call | all | Metadata: read |
+| Push a lane's branch, fetch, push the rollback revert | `git push`, `git fetch`, `git ls-remote` | Contents: write |
+| Push or merge a change to `.github/workflows/` | `git push`, `gh pr merge` | Workflows: write |
+| Open, list, read, ready, close pull requests | `gh pr create`, `list`, `view`, `ready`, `close` | Pull requests: write |
+| Merge after approval (release broker) | `gh pr merge` | Pull requests: write and Contents: write |
+| Read check results of a pull request | `gh pr view --json statusCheckRollup` | Checks: read and Statuses: read |
+| Read CI runs, jobs and failed logs; host state; nightly checks | `gh run list`, `gh run view` | Actions: read |
+| Last commit date on the base (host state) | `gh api repos/{owner}/{repo}/commits/...` | Contents: read |
+| Start failed checks again (`[lanes] rerun_steps`) | `gh run rerun --failed` | Actions: write |
+| `cleared status` identity probe | `gh api /installation/repositories` | Metadata: read |
+
+With the minimum set, `gh run rerun` is refused with HTTP 403: `flow-lanes.sh` records `checks_rerun_refused` naming Actions: write and hands the failure to the lane, as for any rerun that cannot start. Grant Actions: write to restore the automatic rerun. When the GitHub Issues tracker shares the app, it also needs Issues: write (and Projects: write with `project_v2_id`).
 
 ## `[permissions.dev]`
 
