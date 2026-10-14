@@ -281,11 +281,11 @@ test('serve/check-harness.sh has nothing to ask when no model is named', () => {
 
 // The installer, up to its units: a project with a committed configuration, Tailscale and systemd as fakes that
 // write down what they are asked.
-function installer(conf) {
+function installer(conf, { security = '[security]\nagent_user =\n' } = {}) {
   const box = harnessBox();
   const project = join(box.dir, 'project');
   mkdirSync(join(project, '.cleared'), { recursive: true });
-  writeFileSync(join(project, '.cleared', 'agents.conf'), `${conf}[guard]\nterms = none\nallowed = none\n[security]\nagent_user =\n`);
+  writeFileSync(join(project, '.cleared', 'agents.conf'), `${conf}[guard]\nterms = none\nallowed = none\n${security.replaceAll('@BOX@', box.dir)}`);
   const git = (...args) => execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   git('init', '-q', '-b', 'main');
   git('add', '.');
@@ -330,4 +330,47 @@ test('CLEARED_SKIP_HARNESS_PROBE=1 skips the probe, and the installer says so lo
   assert.match(run.stderr, /WARNING: CLEARED_SKIP_HARNESS_PROBE=1: the harness models were NOT probed/);
   assert.deepEqual(box.asked(), []);
   assert.match(systemctl(), /enable --now cleared-release-broker\.service/);
+});
+
+// Issue #87: the installer's probes that start node as the agents' account inherited the folder it was started
+// from; one closed to that account made node fail on its current directory. The sudo here answers the account
+// checks as a well set up host would, and its node fails as the real one did unless it is started from /.
+function agentInstaller() {
+  const run = installer('', { security: '[security]\nagent_user = nobody\nbwrap_path = @BOX@/bwrap\nsocket_path = @BOX@/run/release.sock\n' });
+  mkdirSync(join(run.box.dir, 'run'), { mode: 0o755 });
+  writeFileSync(join(run.box.dir, 'sudo'), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${join(run.box.dir, 'sudo-calls')}"
+[ "$1 $2" = "-n -u" ] && [ "$4" = -- ] || exit 1
+case "$5" in
+  id) exec id -u "$3" ;;
+  true | find) exit 0 ;;
+  test) [ "$6 \${7##*/}" = "-r release-request.mjs" ] && exit 0; exit 1 ;;
+  env)
+    pwd >> "${join(run.box.dir, 'node-cwds')}"
+    if [ "$PWD" != / ]; then printf '%s\\n' 'node:internal/bootstrap/switches/does_own_process_state:126' '    cwd = rawMethods.cwd();' 'Error: EACCES: permission denied, uv_cwd' >&2; exit 1; fi
+    [ -z "\${FAKE_NODE_SAYS:-}" ] || { printf '%s\\n' "$FAKE_NODE_SAYS" 'a second line' >&2; exit 1; }
+    exit 0 ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+  return run;
+}
+
+test('the installer starts node as the agents\' account from /, whatever folder it was started from (#87)', () => {
+  const { box, install, systemctl } = agentInstaller();
+  const run = install({ CLEARED_SKIP_HARNESS_PROBE: '1' });
+  assert.doesNotMatch(run.stderr, /lead-actions|environment probe|release socket/, run.stderr);
+  const cwds = box.read('node-cwds').split('\n').filter(Boolean);
+  assert.ok(cwds.length >= 3, box.read('sudo-calls'));
+  assert.deepEqual([...new Set(cwds)], ['/']);
+  assert.match(systemctl(), /enable --now cleared-release-broker\.service/);
+});
+
+test('when node fails as the agents\' account, the installer\'s message carries the first line it wrote (#87)', () => {
+  const { install, systemctl } = agentInstaller();
+  const run = install({ CLEARED_SKIP_HARNESS_PROBE: '1', FAKE_NODE_SAYS: 'sudo: a password is required' });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /install\.sh: Configure the narrow agent-to-service sudo rule for serve\/lead-actions\.mjs; see docs\/security\.md \(the lead client as nobody said: sudo: a password is required\)$/m);
+  assert.doesNotMatch(run.stderr, /a second line/);
+  assert.doesNotMatch(systemctl(), /enable --now/);
 });

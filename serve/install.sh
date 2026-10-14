@@ -15,6 +15,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/common.sh"
+. "$here/../lib/contract.sh"
 
 port=${CLEARED_DASHBOARD_PORT:-8787}
 app_port=${CLEARED_APP_PORT:-8788}
@@ -142,9 +143,13 @@ if [ -n "$agent_user" ]; then
   if ! sudo -n -u "$agent_user" -- test -r "$ORCH_HOME/release-request.mjs" 2>/dev/null; then
     die "$agent_user cannot read the release client: grant read and path traversal, not write"
   fi
-  if ! sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
-    node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1; then
-    die "Configure the narrow agent-to-service sudo rule for serve/lead-actions.mjs; see docs/security.md"
+  # The probes that start node as the agents' account run from /: the folder
+  # this was started from may be closed to that account, and node would then
+  # fail on its current directory instead of on what is probed (#87). The
+  # first line node wrote is part of the message.
+  if ! said=$(cd / && sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+    node "$ORCH_HOME/lead-command.mjs" ping 2>&1 > /dev/null); then
+    die "Configure the narrow agent-to-service sudo rule for serve/lead-actions.mjs; see docs/security.md (the lead client as $agent_user said: $(contract_probe_reason <<<"${said:-nothing}"))"
   fi
   # NODE_OPTIONS runs before lead-actions.mjs can scrub the environment. Prove
   # sudoers drops it, including when an agent explicitly asks sudo to keep env.
@@ -156,10 +161,12 @@ if [ -n "$agent_user" ]; then
 if (process.getuid() === $(id -u)) require('node:fs').writeFileSync('$env_probe/marker', 'injected');
 EOF
   chmod 644 "$env_probe/probe.cjs"
-  sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
-    node "$ORCH_HOME/lead-command.mjs" ping > /dev/null 2>&1 || die "The lead client failed the sudo environment probe"
-  sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" \
-    sudo -n -E -u "$(id -un)" /usr/bin/node "$ORCH_HOME/serve/lead-actions.mjs" ping > /dev/null 2>&1 || true
+  said=$(cd / && sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+    node "$ORCH_HOME/lead-command.mjs" ping 2>&1 > /dev/null) || die "The lead client failed the sudo environment probe: $(contract_probe_reason <<<"${said:-nothing}")"
+  # From / too: a node stopped by its current directory would leave the
+  # marker untouched and prove nothing.
+  (cd / && sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" \
+    sudo -n -E -u "$(id -un)" /usr/bin/node "$ORCH_HOME/serve/lead-actions.mjs" ping > /dev/null 2>&1) || true
   [ ! -s "$env_probe/marker" ] || die "The reverse sudo rule preserves NODE_OPTIONS; require env_reset and forbid SETENV"
   rm -f "$env_probe/marker" "$env_probe/probe.cjs"
   rmdir "$env_probe"
@@ -188,13 +195,13 @@ systemctl --user daemon-reload
 systemctl --user enable --now cleared-release-broker.service cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer cleared-app.service
 systemctl --user restart cleared-release-broker.service cleared-dashboard.service cleared-app.service
 if [ -n "$agent_user" ]; then
-  reachable=
+  reachable= said=
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    if sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
-      node "$ORCH_HOME/release-request.mjs" status TEST-0 > /dev/null 2>&1; then reachable=1; break; fi
+    if said=$(cd / && sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
+      node "$ORCH_HOME/release-request.mjs" status TEST-0 2>&1 > /dev/null); then reachable=1; break; fi
     sleep 0.2
   done
-  [ -n "$reachable" ] || die "$agent_user cannot reach the release socket; check [security] socket_path and directory traversal"
+  [ -n "$reachable" ] || die "$agent_user cannot reach the release socket; check [security] socket_path and directory traversal (the release client said: $(contract_probe_reason <<<"${said:-nothing}"))"
 fi
 "$ORCH_HOME/dashboard.sh" > /dev/null
 sleep 1
