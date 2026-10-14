@@ -207,7 +207,9 @@ host_status_write() {
   lock=$(heavy_lock_path) || return 1
   [ -e "$lock" ] || (umask 022 && : >> "$lock") || return 1
   host=${1:-}
-  [ -n "$host" ] || host=$("$ORCH_HOME/host-state.sh" 2> /dev/null) || host=
+  # (Bounded: a GitHub that hangs leaves a status that says « not free »,
+  # never an old one.)
+  [ -n "$host" ] || host=$(timeout -k 5 "${ORCH_HOST_STATE_TIMEOUT:-40}" "$ORCH_HOME/host-state.sh" 2> /dev/null) || host=
   jq -e 'type == "object"' <<<"$host" > /dev/null 2>&1 || host='{}'
   # Checks the rules have just started are not listed by GitHub for some
   # seconds: for two minutes after it, the host is not free.
@@ -634,12 +636,26 @@ open_queued_merges() {
 # as its public status page has it: nothing when all is well. Exit 2 when the
 # page cannot be read, which says nothing either way. A slowdown is not an
 # outage.
+# With CLEARED_GITHUB_DOWN_CACHE (set by the wake), the answer is kept in that
+# file and read again for a minute: the page is asked once a wake.
 github_down() {
-  local page
-  page=$(curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null) || return 2
-  jq -e '.components | type == "array"' <<<"$page" > /dev/null 2>&1 || return 2
-  jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
-      | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' <<<"$page"
+  local page out code=0 cache=${CLEARED_GITHUB_DOWN_CACHE:-}
+  if [ -n "$cache" ] && [ -f "$cache" ] && [ $(( $(date +%s) - $(stat -c %Y "$cache") )) -lt 60 ]; then
+    code=$(sed -n 1p "$cache")
+    [[ "$code" =~ ^[02]$ ]] || code=2
+    [ "$code" != 0 ] || sed -n '2p' "$cache"
+    return "$code"
+  fi
+  if page=$(curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null) \
+    && jq -e '.components | type == "array"' <<<"$page" > /dev/null 2>&1; then
+    out=$(jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
+        | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' <<<"$page")
+  else
+    code=2
+  fi
+  [ -z "$cache" ] || printf '%s\n%s\n' "$code" "$out" > "$cache" 2> /dev/null || true
+  [ "$code" != 0 ] || printf '%s\n' "$out"
+  return "$code"
 }
 
 # talk_open: is a discussion open in the lane of the lead? talk.sh writes

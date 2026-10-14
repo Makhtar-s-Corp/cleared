@@ -214,6 +214,28 @@ test('the door is opened for writing by whoever may write it (as before, for flo
   assert.equal(mode(), 0, 'not writable: opened read-only');
 });
 
+test('within a wake, GitHub\'s status page is read once: the host status and the wake share the answer', () => {
+  const { box, lib } = doorBox();
+  const cache = join(box.state, 'github-status.read');
+  const page = (status) => writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Actions', status }] }));
+  page('major_outage');
+  const twice = lib('github_down; echo "code=$?"; github_down; echo "code=$?"', { CLEARED_GITHUB_DOWN_CACHE: cache });
+  assert.equal(twice.stdout, 'Actions\ncode=0\nActions\ncode=0\n');
+  // The page changes: the same wake keeps its first answer, a new one (the wake removes the file) reads it again.
+  page('operational');
+  assert.equal(lib('github_down', { CLEARED_GITHUB_DOWN_CACHE: cache }).stdout, 'Actions\n');
+  execFileSync('rm', ['-f', cache]);
+  assert.equal(lib('github_down', { CLEARED_GITHUB_DOWN_CACHE: cache }).stdout, '\n');
+  // Without the setting, nothing is kept: every call reads the page.
+  page('major_outage');
+  assert.equal(lib('github_down').stdout, 'Actions\n');
+  // A page that cannot be read is said so (exit 2), kept the same way.
+  writeFileSync(join(box.home, 'github-status.json'), 'not json');
+  execFileSync('rm', ['-f', cache]);
+  assert.equal(lib('github_down', { CLEARED_GITHUB_DOWN_CACHE: cache }).status, 2);
+  assert.equal(lib('github_down', { CLEARED_GITHUB_DOWN_CACHE: cache }).status, 2);
+});
+
 test('checks the rules start hold the door while they are said to the teams: a team then finds the host busy; a team holding the door keeps them back', () => {
   const { flow, todo, by, session, pull, box, env } = flowBox();
   const confPath = join(box.home, 'agents.conf');

@@ -35,6 +35,21 @@ esac
 wake_dir="$ORCH_STATE_DIR/wake"
 mkdir -p "$wake_dir"
 ledger init > /dev/null
+# What GitHub's status page says is read once a wake (lib/common.sh,
+# github_down): by the host status below and by the wake itself further on.
+export CLEARED_GITHUB_DOWN_CACHE="$wake_dir/github-status.read"
+[ -n "${ORCH_SELF_UPDATED:-}" ] || rm -f "$CLEARED_GITHUB_DOWN_CACHE"
+# Under [security] agent_user the teams cannot ask the host whether it is free
+# (GitHub, the state): the door of the heavy commands reads what the service
+# writes for them next to it (lib/common.sh, host_status_write). First thing,
+# before the updates and the slow steps of a wake, and bounded in time; once
+# a wake (not again after a self-update). Nothing without agent_user. A wake
+# that systemd still runs keeps the next ones from starting: past
+# HOST_STATUS_STALE_MINUTES the teams' heavy commands find the status stale
+# and run nothing (exit 5) until a wake writes it again.
+if [ -z "$handover$dry_run" ] && [ -z "${ORCH_SELF_UPDATED:-}" ]; then
+  host_status_write || echo "$(basename "$0"): the host status for the teams' heavy commands could not be written" >&2
+fi
 
 # One wake at a time.
 # An ordinary wake that finds another one at work, or a session of the lead
@@ -70,11 +85,6 @@ trap wake_cleanup EXIT
 # its prompts, its rules) is what this wake reads.
 if [ -z "$handover$dry_run" ] && [ -x "$ORCH_HOME/project-update.sh" ]; then "$ORCH_HOME/project-update.sh" > /dev/null 2>&1 || true; fi
 if [ -z "$handover$dry_run" ]; then node --no-warnings "$ORCH_HOME/lib/release.mjs" reconcile > /dev/null 2>&1 || true; fi
-# Under [security] agent_user the teams cannot ask the host whether it is free
-# (GitHub, the state): the door of the heavy commands reads what the service
-# writes for them next to it (lib/common.sh, host_status_write), every wake,
-# before anything below may stop this one. Nothing without agent_user.
-[ -n "$handover$dry_run" ] || host_status_write || echo "$(basename "$0"): the host status for the teams' heavy commands could not be written" >&2
 
 # What the hourly limit held back leaves now, grouped, if the user may be written.
 [ -n "$handover" ] || flush_outbox
