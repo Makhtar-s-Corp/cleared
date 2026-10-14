@@ -115,7 +115,7 @@ if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
 elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr ready" ]; then echo "$3 \${4:-}" >> "${join(home, 'pr-ready')}"
 elif [ "$1 $2" = "run view" ]; then case " $* " in *" --json jobs "*) cat "${join(home, 'run-jobs.json')}" 2>/dev/null || echo '{"jobs":[]}' ;; *) echo "$3" >> "${join(home, 'run-viewed')}"; cat "${join(home, 'run-log.txt')}" 2>/dev/null || true ;; esac
-elif [ "$1 $2" = "run rerun" ]; then [ -z "\${FAKE_GH_RERUN_DOWN:-}" ] || exit 1; echo "$3 $4" >> "${join(home, 'run-rerun')}"
+elif [ "$1 $2" = "run rerun" ]; then [ -z "\${FAKE_GH_RERUN_DOWN:-}" ] || exit 1; [ -z "\${FAKE_GH_RERUN_FORBIDDEN:-}" ] || { echo 'HTTP 403: Resource not accessible by integration (https://api.github.com/repos/o/r/actions/runs/77/rerun-failed-jobs)' >&2; exit 1; }; echo "$3 $4" >> "${join(home, 'run-rerun')}"
 elif [ "$1 $2" = "pr close" ]; then [ -z "\${FAKE_GH_CLOSE_DOWN:-}" ] || exit 1; echo "$3" >> "${join(home, 'pr-closed')}"
 elif [ "$1 $2" = "pr merge" ]; then printf '%s\\n' "$@" > "${join(home, 'pr-merged')}"
 elif [ "$1 $2" = "pr view" ]; then [ "\${FAKE_GH_VIEW_DOWN:-}" != "$3" ] || exit 1; cat "${home}/pr-view-$3.json" 2>/dev/null || cat "${join(home, 'pr-view.json')}"

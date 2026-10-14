@@ -2137,6 +2137,21 @@ test('a check the runner broke that the forge refuses to start again is read by 
   assert.match(refused.stdout, /X-5: #41 is red at [0-9a-f]{8} on a step of the runner, and its checks could not be started again: read by the lane/);
   assert.match(refused.stdout, /X-5: opened again \(checks:/);
   assert.equal(record('X-5').runs.length, 3);
+  const refusals = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select ticket, value, detail from events where kind = 'checks_rerun_refused'").all().map((row) => ({ ...row })); db.close(); return rows; };
+  assert.deepEqual(refusals(), [], 'a forge that does not answer is not a missing permission');
+  // The forge answers 403 (a GitHub App installed with Actions read only): the missing permission is written to the
+  // ledger, and the lane reads the failure in the same pass, as for any other refusal.
+  const third = session('X-5', { commit: 'fix: something else' });
+  pull({ headRefOid: third.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+  const forbidden = flow({ FAKE_GH_RERUN_FORBIDDEN: '1' });
+  assert.match(forbidden.stdout, /X-5: #41 is red at [0-9a-f]{8} on a step of the runner, and its checks could not be started again: read by the lane/);
+  assert.match(forbidden.stdout, /X-5: opened again \(checks:/);
+  assert.equal(record('X-5').runs.length, 4);
+  const [said] = refusals();
+  assert.equal(refusals().length, 1);
+  assert.equal(said.ticket, 'X-5');
+  assert.equal(said.value, 41);
+  assert.match(said.detail, /403.*Actions: write/);
 });
 
 
