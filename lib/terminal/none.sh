@@ -200,7 +200,7 @@ none_stop_group() {
     [ -n "$(none_members "$group")" ] || break
     sleep 0.2
   done
-  [ -z "$agent" ] || held=$(none_agent_holds "$group" "$agent")
+  [ -z "$agent" ] || held=$(none_agent_holds "$group" "$agent") || held=
   if [ -n "$(none_members "$group")" ] || [ "$held" != free ]; then
     # Something of the group is still there: its number is still its own.
     none_signal KILL "$group" "$agent"
@@ -208,7 +208,7 @@ none_stop_group() {
       [ -n "$(none_members "$group")" ] || break
       sleep 0.2
     done
-    [ -z "$agent" ] || held=$(none_agent_holds "$group" "$agent")
+    [ -z "$agent" ] || held=$(none_agent_holds "$group" "$agent") || held=
   fi
   left=$(none_members "$group" | paste -sd' ' -)
   if [ -z "$left" ] && [ "$held" = free ]; then return 0; fi

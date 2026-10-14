@@ -611,3 +611,19 @@ test('[terminal] adapter = none under [security] agent_user: when the run script
   assert.equal(closed.status, 0, closed.stderr);
   assert.equal(existsSync(held.lane.worktree), false);
 });
+
+
+test('[terminal] adapter = none under [security] agent_user: a sudo that does not answer is said even by a caller that stops at the first error (set -e)', async (t) => {
+  const box = agentBox(noneBox());
+  t.after(() => stopAll(box));
+  const { opened, handle } = openHeld(box, { FAKE_LEAVES: 'harness' });
+  assert.equal(opened.status, 0, opened.stderr);
+  const pid = Number(handle.split(':')[1]);
+  t.after(() => stopGroup(pid));
+  assert.ok(await until(() => box.harnesses().length === 1));
+  const strict = spawnSync('bash', ['-c', `set -e; . "${join(box.home, 'lib', 'common.sh')}"; terminal_adapter; none_stop_group "$1" "$2"; echo over`, 'strict', String(pid), handle],
+    { env: { ...box.env, FAKE_AGENT_SILENT: '1' }, encoding: 'utf8' });
+  assert.equal(strict.status, 1);
+  assert.equal(strict.stdout, '');
+  assert.match(strict.stderr, new RegExp(`the session ${handle} is not over: sudo -n -u nobody could not stop and check the processes of nobody in its group ${pid}; its worktree is left as it is`));
+});
