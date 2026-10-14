@@ -854,10 +854,9 @@ forge_wanted() {
       gsub(/^[ \t]+|[ \t]+$/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", value)
       if (seen[section, key]++ || value == "") next
       if (section == "[forge]" && key ~ /^(adapter|app_id|installation_id|app_private_key_file)$/) forge = 1
-      if (section == "[tracker]" && key == "adapter" && value == "github") github = 1
-      if (section == "[tracker]" && key ~ /^(app_id|installation_id|app_private_key_file)$/) app = 1
+      if (section == "[forge]" && key == "use_tracker_app" && value != "no") forge = 1
     }
-    END { exit !(forge || (github && app)) }' "$ORCH_CONF"
+    END { exit !forge }' "$ORCH_CONF"
 }
 forge_setup() {
   CLEARED_FORGE_MODE=ambient CLEARED_FORGE_LOGIN= CLEARED_FORGE_ERROR=

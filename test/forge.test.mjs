@@ -164,34 +164,47 @@ test('the installation token is reused within its hour and renewed five minutes 
   assert.equal(statSync(cache).mode & 0o777, 0o600);
 });
 
-test('[forge] falls back to the app keys of the GitHub tracker, one app for both; other trackers and partial settings are not guessed', () => {
-  const tracker = (extra = '') => parseConf(`[tracker]\nadapter = github\nrepository = example/project\napp_login = cleared-test\napp_id = 11\ninstallation_id = 22\napp_private_key_file = /srv/keys/app.pem\n${extra}`);
+test('[forge] use_tracker_app = yes lends the GitHub tracker\'s app to the forge, one app for both; without it, other trackers and partial settings, nothing is guessed', () => {
+  const keys = 'app_login = cleared-test\napp_id = 11\ninstallation_id = 22\napp_private_key_file = /srv/keys/app.pem\n';
+  const tracker = (extra = '[forge]\nuse_tracker_app = yes\n') => parseConf(`[tracker]\nadapter = github\nrepository = example/project\n${keys}${extra}`);
   const shared = forgeSettings(tracker());
   assert.equal(shared.source, 'tracker');
   assert.equal(shared.app_id, '11');
   assert.equal(shared.installation_id, '22');
   assert.equal(shared.login, BOT);
   assert.equal(shared.identity, null, 'no bot user ID: commits keep the local identity');
-  assert.deepEqual(forgeSettings(tracker('[forge]\napp_user_id = 98765\n')).identity, { name: BOT, email: BOT_EMAIL });
+  assert.deepEqual(forgeSettings(tracker('[forge]\nuse_tracker_app = yes\napp_user_id = 98765\n')).identity, { name: BOT, email: BOT_EMAIL });
+  // An installation of the GitHub tracker that has not opted in keeps its ambient forge credential.
+  assert.equal(forgeSettings(tracker('')), null);
+  assert.equal(forgeSettings(tracker('[forge]\nuse_tracker_app = no\n')), null);
   // [forge] keys win over the tracker's.
   assert.equal(forgeSettings(tracker(forgeSection('/srv/keys/forge.pem'))).app_private_key_file, '/srv/keys/forge.pem');
   // Neither: the ambient credential.
-  assert.equal(forgeSettings(parseConf('[tracker]\nadapter = local\napp_id = 11\ninstallation_id = 22\napp_private_key_file = /srv/k.pem\n')), null);
+  assert.equal(forgeSettings(parseConf(`[tracker]\nadapter = local\n${keys}`)), null);
   assert.equal(forgeSettings(parseConf('[tracker]\nadapter = local\n[forge]\nadapter = github\n')), null);
+  assert.throws(() => forgeSettings(parseConf(`[tracker]\nadapter = local\n${keys}[forge]\nuse_tracker_app = yes\n`)), /use_tracker_app = yes needs \[tracker\] adapter = github/);
+  assert.throws(() => forgeSettings(parseConf('[tracker]\nadapter = github\n[forge]\nuse_tracker_app = yes\n')), /\[tracker\] app_id is missing/);
+  assert.throws(() => forgeSettings(tracker('[forge]\nuse_tracker_app = true\n')), /use_tracker_app must be yes or no/);
   assert.throws(() => forgeSettings(parseConf('[forge]\napp_id = 1\napp_private_key_file = /srv/k.pem\napp_login = x[bot]\napp_user_id = 2\n')), /\[forge\] installation_id is missing/);
   assert.throws(() => forgeSettings(parseConf('[forge]\nadapter = gitlab\n')), /unknown \[forge\] adapter/);
   assert.throws(() => forgeSettings(parseConf('[forge]\napp_id = 1\ninstallation_id = 2\napp_private_key_file = relative.pem\napp_login = x[bot]\napp_user_id = 2\n')), /absolute/);
   assert.throws(() => forgeSettings(parseConf('[forge]\napp_id = 1\ninstallation_id = 2\napp_private_key_file = /srv/k.pem\napp_login = x[bot]\n')), /\[forge\] app_user_id is missing/);
 });
 
-test('the GitHub tracker\'s keys make the scripts use the app for the forge too', () => {
+test('the GitHub tracker\'s app is the forge\'s only once [forge] use_tracker_app = yes: an existing installation is unchanged on upgrade', () => {
   const lane = forgeLane({ forge: false });
   writeFileSync(lane.confPath, readFileSync(lane.confPath, 'utf8').replace('[tracker]\nadapter = local\n',
     `[tracker]\nadapter = github\nrepository = example/project\napp_login = cleared-test[bot]\napp_id = 123\ninstallation_id = 456\napp_private_key_file = ${lane.key}\n`));
+  const before = script(lane, 'echo "$CLEARED_FORGE_MODE"; gh pr list --state open > /dev/null');
+  assert.equal(before.status, 0, before.stderr);
+  assert.equal(before.stdout.trim(), 'ambient');
+  assert.match(lane.read('gh-seen'), /^ambient-gh-token\|/);
+  assert.equal(lane.read('curl-args'), '');
+  writeFileSync(lane.confPath, `${readFileSync(lane.confPath, 'utf8')}\n[forge]\nuse_tracker_app = yes\n`);
   const run = script(lane, 'echo "$CLEARED_FORGE_MODE $CLEARED_FORGE_LOGIN"; gh pr list --state open > /dev/null');
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), `app ${BOT}`);
-  assert.match(lane.read('gh-seen'), new RegExp(`^${TOKEN}\\|`));
+  assert.match(lane.read('gh-seen').trim().split('\n').at(-1), new RegExp(`^${TOKEN}\\|`));
 });
 
 test('a token that cannot be minted stops forge calls with the setting to look at, and never falls back to the ambient credential', () => {
