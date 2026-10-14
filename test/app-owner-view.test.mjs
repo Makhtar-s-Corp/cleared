@@ -313,6 +313,13 @@ test('a file:// address in the report is a path of a machine: hidden whole, what
   assert.doesNotMatch(said, /file:|\/home\/|\/etc\/|\/tmp\//i);
 });
 
+test('a JSON Web Token is hidden as one secret, in the pull request body and on the board', async () => {
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+  assert.equal(prReport(`Token ${jwt} expired; unsigned eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0. too.`, { folders: [] }), 'Token [secret] expired; unsigned [secret] too.');
+  const { scrub } = await import('../lib/board-scrub.mjs');
+  assert.equal(scrub(`Token ${jwt} expired`), 'Token [secret] expired');
+});
+
 test('the pull request opens with the team report to the user, without a path of the machine; a refused report leaves it out', () => {
   assert.equal(prReport('---\noutcome: done\n---\n\n## Report\n\n## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at /home/svc/.local/a.png\n\n## Changed files\n\n- M a'),
     '## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at [path]');
