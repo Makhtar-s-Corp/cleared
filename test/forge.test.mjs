@@ -324,6 +324,26 @@ test('the rest of the account\'s git configuration still applies under the app: 
   assert.doesNotMatch(app['http.https://github.com/.extraheader'], /AMBIENT/);
 });
 
+test('the debug switches of gh and git are off wherever the token is: the gh call, the scripts\' git, a harness', () => {
+  const lane = forgeLane();
+  const debug = { GH_DEBUG: 'api', DEBUG: 'api', GIT_TRACE: '1', GIT_TRACE_CURL: '1', GIT_CURL_VERBOSE: '1', GIT_TRACE_REDACT: '0' };
+  writeFileSync(join(lane.bin, 'gh'), `#!/usr/bin/env bash
+env | grep -E '^(GH_DEBUG|DEBUG|GIT_TRACE|GIT_TRACE_CURL|GIT_CURL_VERBOSE|GIT_TRACE_REDACT)=' >> "${join(lane.box.home, 'gh-debug')}"
+printf '%s|%s|%s\\n' "\${GH_TOKEN:-}" "\${GITHUB_TOKEN:-}" "$*" >> "${join(lane.box.home, 'gh-seen')}"
+`, { mode: 0o755 });
+  const run = script(lane, 'gh pr list > /dev/null; env | grep -cE "^(GH_DEBUG|GIT_TRACE|GIT_TRACE_CURL|GIT_CURL_VERBOSE|GIT_TRACE_REDACT)=" || true; forge_harness_unset; printf "%s\\n" "${FORGE_UNSET[@]}"', debug);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(lane.read('gh-seen'), new RegExp(`^${TOKEN}\\|`));
+  assert.equal(lane.read('gh-debug'), '', 'gh ran with a debug switch');
+  const [left, ...unset] = run.stdout.trim().split('\n');
+  assert.equal(left, '0', 'the scripts\' git still has a debug switch');
+  for (const name of Object.keys(debug)) assert.ok(unset.includes(name), name);
+  // Without an app nothing is touched.
+  const ambient = forgeLane({ forge: false });
+  const kept = script(ambient, 'env | grep -c "^GIT_TRACE=1$"', debug);
+  assert.equal(kept.stdout.trim(), '1');
+});
+
 test('a url rewrite in the repository\'s own git configuration that sends the origin to SSH stops every forge call', () => {
   const lane = forgeLane();
   const git = (...args) => execFileSync(realGit, ['-C', lane.box.repo, ...args]);

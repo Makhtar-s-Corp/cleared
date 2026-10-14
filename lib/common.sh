@@ -899,7 +899,11 @@ gh() {
     app)
       local forge_token
       forge_token=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" token) || return 1
-      GH_TOKEN=$forge_token GITHUB_TOKEN=$forge_token command gh "$@"
+      # No debug switch may print the token's header (lib/forge.mjs DEBUG_VARIABLES).
+      (
+        unset GH_DEBUG DEBUG GIT_TRACE GIT_TRACE_CURL GIT_CURL_VERBOSE GIT_TRACE_REDACT
+        GH_TOKEN=$forge_token GITHUB_TOKEN=$forge_token command gh "$@"
+      )
       ;;
     *)
       echo "$(basename "$0"): $CLEARED_FORGE_ERROR" >&2
@@ -928,6 +932,7 @@ forge_harness_unset() {
   FORGE_UNSET=()
   [ "${CLEARED_FORGE_MODE:-ambient}" != ambient ] || return 0
   FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_NOSYSTEM -u GIT_SSH_COMMAND
+    -u GH_DEBUG -u DEBUG -u GIT_TRACE -u GIT_TRACE_CURL -u GIT_CURL_VERBOSE -u GIT_TRACE_REDACT
     -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL)
   while IFS= read -r name; do FORGE_UNSET+=(-u "$name"); done < <(compgen -e | grep -E '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true)
 }
