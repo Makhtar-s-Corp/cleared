@@ -306,6 +306,8 @@ test('the pull request body keeps the routes of the application and hides only w
   assert.match(said, /https:\/\/github\.com\/o\/r\/pull\/314/, 'a link stays');
   assert.doesNotMatch(said, /\/srv\/|~\/work|\/tmp\/|\/opt\/cleared|\/var\/|\/home\/|ghp_/);
   assert.match(said, /Captures in \[path\], \[path\] and \[path\]; the tool sits in \[path\]\./);
+  // Climbing out of a worktree to the checkout names it too; another relative path stays.
+  assert.equal(prReport('See ../../sample-app/.env and ../docs/guide.md.', { folders: ['/srv/work/sample-app'] }), 'See [path] and ../docs/guide.md.');
   // The folders of this very checkout are found without being told.
   assert.equal(prReport(`See ${join(import.meta.dirname, '..', 'lib', 'x.mjs')} and /about.`), 'See [path] and /about.');
 });
