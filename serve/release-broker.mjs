@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConf, projectDir, stateDir } from '../lib/conf.mjs';
 import { addEvent, openLedger } from '../lib/ledger.mjs';
+import { forgeGhEnv } from '../lib/forge.mjs';
 
 const home = fileURLToPath(new URL('..', import.meta.url));
 const conf = loadConf();
@@ -82,7 +83,8 @@ function command(file, args, input = '', extraEnv = {}) {
   });
 }
 function currentHead(pr) {
-  try { const p = JSON.parse(execFileSync('gh', ['pr', 'view', String(pr), '--json', 'headRefOid'], { cwd: repo, encoding: 'utf8', timeout: 10000 })); return p.headRefOid || null; }
+  // The forge credential of the service (lib/forge.mjs): a token minted for this call when an app is configured.
+  try { const p = JSON.parse(execFileSync('gh', ['pr', 'view', String(pr), '--json', 'headRefOid'], { cwd: repo, encoding: 'utf8', timeout: 10000, env: forgeGhEnv(conf, { state }) })); return p.headRefOid || null; }
   catch { return null; }
 }
 let busy = false;

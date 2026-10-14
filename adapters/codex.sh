@@ -154,7 +154,9 @@ host_run() {
   . "$ORCH_HOME/lib/tracker/adapters/env.sh"
   tracker_unset=()
   for tracker_secret in "${TRACKER_SECRET_ENV[@]}"; do tracker_unset+=(-u "$tracker_secret"); done
-  env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
+  # No forge credential (lib/common.sh): the git settings below are the only ones.
+  forge_harness_unset
+  env -u OPENAI_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" -u SSH_AUTH_SOCK -u GIT_ASKPASS -u GIT_SSH_COMMAND -u GIT_SSH \
     TMPDIR="$codex_tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
     GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
     "${codex_cmd[@]}" "${args[@]}" - < "$prompt_file" | tee "$events" | jq -Rr --unbuffered '
@@ -262,7 +264,8 @@ case "${1:-}" in
     tail -f "$err" >&2 &
     follow=$!
     set +e
-    "${launch[@]}" > "$out" 2> "$err"
+    forge_harness_unset
+    env "${FORGE_UNSET[@]}" "${launch[@]}" > "$out" 2> "$err"
     code=$?
     set -e
     sleep 0.3

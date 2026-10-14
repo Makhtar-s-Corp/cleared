@@ -14,15 +14,18 @@ agent_home=
 [ -z "$agent_user" ] || agent_home=$(getent passwd "$agent_user" | cut -d: -f6)
 # The subscription pays, never an API key: a key left in the environment
 # (for instance after loading .env.local) would move the billing to it.
+# No forge credential either (lib/common.sh, forge_harness_unset): the
+# dispatcher pushes and opens pull requests, never the model.
 cli() {
+  forge_harness_unset
   if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
     agent_mount_args
     agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
     [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
-    sudo -n -u "$agent_user" -- env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" \
+    sudo -n -u "$agent_user" -- env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" \
       PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_STATE_DIR="$ORCH_STATE_DIR" ORCH_CONF="$ORCH_CONF" "${agent_prefix[@]}" claude "$@"
   else
-    env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${tracker_unset[@]}" claude "$@"
+    env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" claude "$@"
   fi
 }
 

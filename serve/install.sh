@@ -121,6 +121,13 @@ if [ -n "$agent_user" ]; then
       die "$agent_user can reach $secret: the human's accesses and the app token must be closed to it (mode 0700 / 0600, owned by this account)"
     fi
   done
+  # The forge's app key and its installation token (docs/security.md, Identities and approval) are this account's alone too.
+  while IFS= read -r secret; do
+    [ -e "$secret" ] || continue
+    if sudo -n -u "$agent_user" -- test -r "$secret" 2>/dev/null || sudo -n -u "$agent_user" -- test -x "$secret" 2>/dev/null || sudo -n -u "$agent_user" -- test -w "$secret" 2>/dev/null; then
+      die "$agent_user can reach $secret: the forge's app key and token must be closed to it (mode 0600, owned by this account)"
+    fi
+  done < <(forge_secret_paths)
   grant_socket=$(conf_get app grant_socket) || grant_socket=
   if [ -n "$grant_socket" ] && sudo -n -u "$agent_user" -- test -w "$(dirname "$grant_socket")" 2>/dev/null; then
     die "$agent_user can write the directory of [app] grant_socket"

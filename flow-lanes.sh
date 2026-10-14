@@ -363,7 +363,7 @@ second_team() {
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken refused
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record") team=$(jq -r '.team // empty' "$record")
   # What is said of the second team of a ticket names it (<ticket>.2): two
@@ -686,10 +686,16 @@ one_lane() {
         : > "$work/readied"
         if [ -n "$dry" ]; then say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks would be started again"; return 0; fi
         mark "$record" "rerun:$head"
-        if (cd "$ORCH_REPO" && gh run rerun "$run" --failed) > /dev/null 2>&1; then
+        if refused=$( (cd "$ORCH_REPO" && gh run rerun "$run" --failed) 2>&1 > /dev/null); then
           : > "$ORCH_STATE_DIR/checks-starting"
           say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks are started again, once"
           return 0
+        fi
+        # A forge identity without Actions write (a GitHub App installed with
+        # actions read only) may not start a run again: GitHub answers 403.
+        # Said once for this version, then read by the lane like any failure.
+        if grep -qE 'HTTP 403|Resource not accessible by integration' <<<"$refused"; then
+          ledger event --kind checks_rerun_refused --ticket "$ticket" --value "$pr" --detail "the checks of #$pr could not be started again: the forge answered 403, the identity of the forge calls lacks the Actions: write permission (gh run rerun). Read by the lane instead"
         fi
         say "$ticket: #$pr is red at ${head:0:8} on a step of the runner, and its checks could not be started again: read by the lane"
       fi

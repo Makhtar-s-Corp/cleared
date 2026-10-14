@@ -827,3 +827,122 @@ takes_a_place() {
   counted=$(conf_get limits counted_roles)
   [ -z "$counted" ] || tr -s ' ' '\n' <<<"$counted" | grep -qxF -- "$1"
 }
+
+# The forge: which GitHub credential gh and git use here ([forge],
+# docs/configuration.md#forge, the code in lib/forge.mjs). With no app
+# configured, nothing is changed: gh and git use the ambient credential, as
+# they always did, and no node runs for it. With one, every call of gh in
+# these scripts goes through the function below, which hands gh the
+# installation token for that one call (it never sits in the environment of
+# the script, so nothing it starts inherits it), and git finds the token
+# through the credential helper lib/forge.mjs names in GIT_CONFIG_* for
+# https://github.com (a remote written for SSH included); the account's own
+# git configuration file, whose url rewrites could send a push to SSH around
+# the app, is not read. The commits the
+# dispatcher makes take the app's identity (GIT_AUTHOR_* and
+# GIT_COMMITTER_*). Configured and failing (a key missing, a wrong mode, the
+# app suspended, no network), gh stops with the reason and the setting to
+# look at; it never falls back to the ambient credential.
+# forge_wanted: does the project name an app (its keys, or use_tracker_app)?
+# [forge] adapter alone names none, and starts no node.
+forge_wanted() {
+  [ -f "$ORCH_CONF" ] || return 1
+  awk '
+    /^\[/ { section = $0; next }
+    $0 ~ /^[ \t]*#/ { next }
+    {
+      i = index($0, "="); if (!i) next
+      key = substr($0, 1, i - 1); value = substr($0, i + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", value)
+      if (seen[section, key]++ || value == "") next
+      if (section == "[forge]" && key ~ /^(app_id|installation_id|app_private_key_file)$/) forge = 1
+      if (section == "[forge]" && key == "use_tracker_app" && value != "no") forge = 1
+    }
+    END { exit !forge }' "$ORCH_CONF"
+}
+forge_setup() {
+  CLEARED_FORGE_MODE=ambient CLEARED_FORGE_LOGIN= CLEARED_FORGE_ERROR=
+  forge_wanted || return 0
+  local lines said why
+  said=$(mktemp)
+  if ! lines=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" shell 2> "$said"); then
+    # Why, from the first line node wrote (it mints nothing here: no token
+    # can be in it), kept to characters that are safe inside quotes.
+    why=$(sed -n '1p' "$said" | tr -cd '[:alnum:] ._:/()[]=,+-' | cut -c1-200)
+    rm -f "$said"
+    CLEARED_FORGE_MODE=error CLEARED_FORGE_ERROR="forge credential: [forge] could not be applied, lib/forge.mjs failed${why:+ ($why)}; forge calls stop, the ambient credential is not used"
+    unset GH_TOKEN GITHUB_TOKEN
+    forge_git_closed "$CLEARED_FORGE_ERROR"
+    return 0
+  fi
+  cat "$said" >&2
+  rm -f "$said"
+  eval "$lines"
+  # An ambient GitHub token of the service has no use left here: gh gets the
+  # app's, and nothing started from these scripts may take the other one.
+  [ "$CLEARED_FORGE_MODE" = ambient ] || unset GH_TOKEN GITHUB_TOKEN
+}
+# forge_git_closed <reason>: when lib/forge.mjs cannot even say what to do,
+# git gets the same settings it would have given, with a helper and an SSH
+# command that only refuse with the reason: git, like gh, stops instead of
+# using the ambient credential. (The reason holds no quote nor $.)
+forge_git_closed() {
+  local count=${GIT_CONFIG_COUNT:-0} index
+  local entries=(
+    "credential.https://github.com.helper" ""
+    "credential.https://github.com.helper" "!f() { echo \"cleared $1\" >&2; echo quit=1; }; f"
+    "url.https://github.com/.insteadOf" "git@github.com:"
+    "url.https://github.com/.insteadOf" "ssh://git@github.com/"
+    "http.https://github.com/.extraHeader" "")
+  [[ "$count" =~ ^[0-9]+$ ]] || count=0
+  for ((index = 0; index < ${#entries[@]}; index += 2)); do
+    export "GIT_CONFIG_KEY_$count=${entries[index]}" "GIT_CONFIG_VALUE_$count=${entries[index + 1]}"
+    count=$((count + 1))
+  done
+  export GIT_CONFIG_COUNT=$count GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
+  export GIT_SSH_COMMAND="f() { echo \"cleared $1\" >&2; exit 1; }; f"
+}
+gh() {
+  case "${CLEARED_FORGE_MODE:-ambient}" in
+    ambient) command gh "$@" ;;
+    app)
+      local forge_token
+      forge_token=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" token) || return 1
+      # No debug switch may print the token's header (lib/forge.mjs DEBUG_VARIABLES).
+      (
+        unset GH_DEBUG DEBUG GIT_TRACE GIT_TRACE_CURL GIT_CURL_VERBOSE GIT_TRACE_REDACT
+        GH_TOKEN=$forge_token GITHUB_TOKEN=$forge_token command gh "$@"
+      )
+      ;;
+    *)
+      echo "$(basename "$0"): $CLEARED_FORGE_ERROR" >&2
+      return 1
+      ;;
+  esac
+}
+# forge_secret_paths: what of the forge only the service account may read,
+# one path a line: the app's private key ([forge] app_private_key_file, or
+# the tracker's when use_tracker_app = yes lends it) and the token cache.
+# serve/install.sh probes that the agents' account reaches none of them.
+forge_secret_paths() {
+  local key
+  key=$(conf_get forge app_private_key_file) || key=
+  if [ -z "$key" ] && [ "$(conf_get forge use_tracker_app)" = yes ]; then key=$(conf_get tracker app_private_key_file) || key=; fi
+  [ -z "$key" ] || printf '%s\n' "$key"
+  printf '%s\n' "$ORCH_STATE_DIR/forge" "$ORCH_STATE_DIR/forge/installation-token.json"
+}
+# forge_harness_unset: the `env -u` arguments (in FORGE_UNSET) a model
+# adapter, or a command of a lane, is started with, so that no forge
+# credential reaches it: with an app, the GitHub token variables, every
+# GIT_CONFIG_* (the credential helper) and the commit identity of the
+# dispatcher. None with the ambient credential: nothing changes there.
+forge_harness_unset() {
+  local name
+  FORGE_UNSET=()
+  [ "${CLEARED_FORGE_MODE:-ambient}" != ambient ] || return 0
+  FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_NOSYSTEM -u GIT_SSH_COMMAND
+    -u GH_DEBUG -u DEBUG -u GIT_TRACE -u GIT_TRACE_CURL -u GIT_CURL_VERBOSE -u GIT_TRACE_REDACT
+    -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL)
+  while IFS= read -r name; do FORGE_UNSET+=(-u "$name"); done < <(compgen -e | grep -E '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true)
+}
+forge_setup
