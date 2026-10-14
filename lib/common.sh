@@ -863,35 +863,44 @@ forge_wanted() {
 forge_setup() {
   CLEARED_FORGE_MODE=ambient CLEARED_FORGE_LOGIN= CLEARED_FORGE_ERROR=
   forge_wanted || return 0
-  local lines
-  if ! lines=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" shell); then
-    CLEARED_FORGE_MODE=error CLEARED_FORGE_ERROR="forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used"
+  local lines said why
+  said=$(mktemp)
+  if ! lines=$(node --no-warnings "$ORCH_HOME/lib/forge.mjs" shell 2> "$said"); then
+    # Why, from the first line node wrote (it mints nothing here: no token
+    # can be in it), kept to characters that are safe inside quotes.
+    why=$(sed -n '1p' "$said" | tr -cd '[:alnum:] ._:/()[]=,+-' | cut -c1-200)
+    rm -f "$said"
+    CLEARED_FORGE_MODE=error CLEARED_FORGE_ERROR="forge credential: [forge] could not be applied, lib/forge.mjs failed${why:+ ($why)}; forge calls stop, the ambient credential is not used"
     unset GH_TOKEN GITHUB_TOKEN
-    forge_git_closed
+    forge_git_closed "$CLEARED_FORGE_ERROR"
     return 0
   fi
+  cat "$said" >&2
+  rm -f "$said"
   eval "$lines"
   # An ambient GitHub token of the service has no use left here: gh gets the
   # app's, and nothing started from these scripts may take the other one.
   [ "$CLEARED_FORGE_MODE" = ambient ] || unset GH_TOKEN GITHUB_TOKEN
 }
-# forge_git_closed: when lib/forge.mjs cannot even say what to do, git gets
-# the same settings it would have given, with a helper that only refuses:
-# git, like gh, stops instead of using the ambient credential.
+# forge_git_closed <reason>: when lib/forge.mjs cannot even say what to do,
+# git gets the same settings it would have given, with a helper and an SSH
+# command that only refuse with the reason: git, like gh, stops instead of
+# using the ambient credential. (The reason holds no quote nor $.)
 forge_git_closed() {
-  local count=${GIT_CONFIG_COUNT:-0} key value
+  local count=${GIT_CONFIG_COUNT:-0} index
+  local entries=(
+    "credential.https://github.com.helper" ""
+    "credential.https://github.com.helper" "!f() { echo \"cleared $1\" >&2; echo quit=1; }; f"
+    "url.https://github.com/.insteadOf" "git@github.com:"
+    "url.https://github.com/.insteadOf" "ssh://git@github.com/"
+    "http.https://github.com/.extraHeader" "")
   [[ "$count" =~ ^[0-9]+$ ]] || count=0
-  while IFS='|' read -r key value; do
-    export "GIT_CONFIG_KEY_$count=$key" "GIT_CONFIG_VALUE_$count=$value"
+  for ((index = 0; index < ${#entries[@]}; index += 2)); do
+    export "GIT_CONFIG_KEY_$count=${entries[index]}" "GIT_CONFIG_VALUE_$count=${entries[index + 1]}"
     count=$((count + 1))
-  done <<'SETTINGS'
-credential.https://github.com.helper|
-credential.https://github.com.helper|!f() { echo "cleared forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used" >&2; echo quit=1; }; f
-url.https://github.com/.insteadOf|git@github.com:
-url.https://github.com/.insteadOf|ssh://git@github.com/
-SETTINGS
+  done
   export GIT_CONFIG_COUNT=$count GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
-  export GIT_SSH_COMMAND='f() { echo "cleared forge credential: [forge] could not be read; forge calls stop, the ambient credential is not used" >&2; exit 1; }; f'
+  export GIT_SSH_COMMAND="f() { echo \"cleared $1\" >&2; exit 1; }; f"
 }
 gh() {
   case "${CLEARED_FORGE_MODE:-ambient}" in
