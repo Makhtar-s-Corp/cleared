@@ -56,14 +56,29 @@ mark() { [ -n "$dry" ] || { jq --arg key "$2" --arg at "$(now_utc)" '.done = ((.
 # Free: no checks running, no deployment settling, no screen test or capture
 # at work, and nobody holding the door of the heavy commands (when-free.sh):
 # checks that start under a screen test break both.
+# Free, the door is taken (read-only, lib/common.sh: heavy_lock_open) and kept
+# until checks_start has said that checks start, or heavy_lock_close: a team
+# that comes for it meanwhile finds it held, then the host said busy.
 free_for_a_run() {
   [ ! -f "$work/readied" ] || return 1
-  [ -f "$work/host" ] || { "$ORCH_HOME/host-state.sh" 2> /dev/null | jq -r '(.free_for_a_ci_run // false) and ((.screen_tests_or_captures_running // 0) == 0)' > "$work/host" || echo false > "$work/host"; }
+  if [ ! -f "$work/host" ]; then
+    "$ORCH_HOME/host-state.sh" > "$work/host.json" 2> /dev/null || : > "$work/host.json"
+    jq -r '(.free_for_a_ci_run // false) and ((.screen_tests_or_captures_running // 0) == 0)' "$work/host.json" > "$work/host" 2> /dev/null || echo false > "$work/host"
+  fi
   [ "$(cat "$work/host")" = true ] || return 1
   # Checks started in the last two minutes (by a round before this one) may
   # not be listed by the forge yet: not a second pull request on top of them.
   [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2> /dev/null)" ] || return 1
-  ( exec 6>> "$ORCH_STATE_DIR/heavy.lock" && flock -n 6 ) 2> /dev/null
+  heavy_lock_open "$(heavy_lock_path)" 2> /dev/null || return 1
+  flock -n "$HEAVY_FD" || { heavy_lock_close; return 1; }
+}
+# checks_start: said to the door of the heavy commands before checks start,
+# and to the teams that read the host status (lib/common.sh), while the door
+# is still held; then it is let go.
+checks_start() {
+  : > "$ORCH_STATE_DIR/checks-starting"
+  host_status_write "$(cat "$work/host.json" 2> /dev/null)" || true
+  heavy_lock_close
 }
 session_hours=$(conf_get lanes session_hours)
 [[ "$session_hours" =~ ^[0-9]+$ ]] || session_hours=6
@@ -636,11 +651,11 @@ one_lane() {
     # work, not its pull request put in draft.)
     free_for_a_run || return 0
     : > "$work/readied"
-    if [ -n "$dry" ]; then say "$ticket: #$pr would be taken out of draft, its checks would start"; return 0; fi
+    if [ -n "$dry" ]; then heavy_lock_close; say "$ticket: #$pr would be taken out of draft, its checks would start"; return 0; fi
     say "$ticket: #$pr is taken out of draft, its checks start"
     # Said to the door of the heavy commands before the checks start: a
     # screen test must not begin in the seconds GitHub takes to list them.
-    : > "$ORCH_STATE_DIR/checks-starting"
+    checks_start
     (cd "$ORCH_REPO" && gh pr ready "$pr") > /dev/null 2>&1 || return 0
     mark "$record" "ready:$head"
     [ -z "$review_state" ] || [ "$state" != "$progress_state" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$review_state" > /dev/null 2>&1 || true
@@ -698,13 +713,14 @@ one_lane() {
       if [ -n "$broken" ] && ! grep -vxF -f <(tr ',' '\n' <<<"$rerun" | sed 's/^ *//; s/ *$//' | grep .) <<<"$broken" | grep -q .; then
         free_for_a_run || return 0
         : > "$work/readied"
-        if [ -n "$dry" ]; then say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks would be started again"; return 0; fi
+        if [ -n "$dry" ]; then heavy_lock_close; say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks would be started again"; return 0; fi
         mark "$record" "rerun:$head"
         if refused=$( (cd "$ORCH_REPO" && gh run rerun "$run" --failed) 2>&1 > /dev/null); then
-          : > "$ORCH_STATE_DIR/checks-starting"
+          checks_start
           say "$ticket: #$pr is red at ${head:0:8} on a step of the runner ($(paste -sd, <<<"$broken")): its checks are started again, once"
           return 0
         fi
+        heavy_lock_close
         # A forge identity without Actions write (a GitHub App installed with
         # actions read only) may not start a run again: GitHub answers 403.
         # Said once for this version, then read by the lane like any failure.

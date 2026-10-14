@@ -110,7 +110,9 @@ codex_command() {
     agent_mount_args
     agent_prefix=("${AGENT_MOUNT_ARGS[@]}")
     [ "${#agent_prefix[@]}" = 0 ] || agent_prefix+=(--)
-    CODEX_COMMAND+=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" "${CLI_LIMIT[@]}" "${agent_prefix[@]}" codex)
+    # sudo resets the environment: the slot this session holds (host_run) is
+    # named again, or its heavy commands would wait on their own door.
+    CODEX_COMMAND+=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" ${CLEARED_HEAVY_SLOT:+CLEARED_HEAVY_SLOT="$CLEARED_HEAVY_SLOT"} "${CLI_LIMIT[@]}" "${agent_prefix[@]}" codex)
   else
     CODEX_COMMAND+=("${CLI_LIMIT[@]}" codex)
   fi
@@ -143,23 +145,28 @@ host_run() {
     contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
   fi
   if [ -z "${ORCH_TEXT_ONLY:-}" ] && [ -n "${ORCH_LANE:-}" ]; then
-    local wait_minutes deadline
+    local wait_minutes deadline heavy_lock
     wait_minutes=$(conf_get lanes heavy_wait_minutes)
     [[ "$wait_minutes" =~ ^[0-9]+$ ]] || wait_minutes=30
     deadline=$(( $(date +%s) + wait_minutes * 60 ))
     mkdir -p "$ORCH_STATE_DIR"
-    exec 8> "$ORCH_STATE_DIR/heavy.lock"
+    # The door of the heavy commands (lib/common.sh), held by this, the
+    # service's process, for the whole session.
+    if ! heavy_lock=$(heavy_lock_path) || ! heavy_lock_open "$heavy_lock" 2>/dev/null; then
+      echo "Codex did not start: the door of the heavy commands (${heavy_lock:-[lanes] heavy_lock}) cannot be opened." > "$error_body"
+      contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
+    fi
     while :; do
-      if flock -n 8 && [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2>/dev/null)" ] \
+      if flock -n "$HEAVY_FD" && [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2>/dev/null)" ] \
         && [ "$("$ORCH_HOME/host-state.sh" 2>/dev/null | jq -r '.free_for_a_ci_run // false')" = true ]; then break; fi
-      flock -u 8 || true
+      flock -u "$HEAVY_FD" || true
       if [ "$(date +%s)" -ge "$deadline" ]; then
         echo 'Codex did not start: the host stayed busy for the configured heavy-command wait.' > "$error_body"
         contract_usage '{}'; contract_report codex 2 "$error_body"; return 2
       fi
       sleep 20
     done
-    export CLEARED_HEAVY_SLOT="$ORCH_STATE_DIR/heavy.lock"
+    export CLEARED_HEAVY_SLOT="$heavy_lock"
   fi
   codex_command
   local args=(exec --json --model "$model" --output-last-message "$body" --ignore-user-config "${codex_policy[@]}")

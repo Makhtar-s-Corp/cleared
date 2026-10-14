@@ -113,6 +113,52 @@ if [ -n "$agent_user" ]; then
   if [ -n "$probe" ]; then rm -f "$probe"; die "$agent_user wrote to Cleared state; remove that access before installing"; fi
   writable=$(sudo -n -u "$agent_user" -- find "$ORCH_STATE_DIR" -writable -print -quit 2>/dev/null || true)
   [ -z "$writable" ] || die "$agent_user can write Cleared state path $writable"
+  # The door of the heavy commands (when-free.sh, lib/common.sh): the teams
+  # take it with flock on a descriptor opened read-only, so it lives outside
+  # the state, in a directory of this account that $agent_user may traverse
+  # and not write, and the file is readable by it and writable by nobody
+  # else. The host status the service writes for the teams sits next to it.
+  heavy_lock=$(conf_get lanes heavy_lock) || heavy_lock=
+  if [ -z "$heavy_lock" ]; then
+    [ -z "$(conf_get lanes heavy_commands)" ] || die "Set [lanes] heavy_lock to an absolute path outside Cleared state, in a directory this account owns and $agent_user can traverse but not write (for example $socket_parent/heavy.lock): the teams' heavy commands cannot open a door in the state; see docs/configuration.md"
+  else
+    case "$heavy_lock" in /*) ;; *) die "[lanes] heavy_lock must be an absolute path, not \"$heavy_lock\" (no ~: the agents' account has another home)" ;; esac
+    ! heavy_lock_in_state "$heavy_lock" || die "[lanes] heavy_lock ($heavy_lock) is inside Cleared state, which $agent_user must not open: name a file in a service-owned directory outside it"
+    heavy_dir=$(dirname "$heavy_lock")
+    [ -d "$heavy_dir" ] || die "Create the service-owned directory of [lanes] heavy_lock first: $heavy_dir (traversable by $agent_user, writable by this account only)"
+    [ "$(stat -c %u "$heavy_dir")" = "$(id -u)" ] || die "The directory of [lanes] heavy_lock ($heavy_dir) must belong to the service account"
+    heavy_mode=$(stat -c %a "$heavy_dir")
+    (( (8#$heavy_mode & 022) == 0 )) || die "The directory of [lanes] heavy_lock ($heavy_dir) must not be group/world-writable"
+    [ ! -L "$heavy_lock" ] || die "[lanes] heavy_lock ($heavy_lock) must not be a symbolic link"
+    [ -e "$heavy_lock" ] || (umask 022 && : >> "$heavy_lock") || die "[lanes] heavy_lock ($heavy_lock) could not be created"
+    [ -f "$heavy_lock" ] || die "[lanes] heavy_lock ($heavy_lock) must be a regular file"
+    [ "$(stat -c %u "$heavy_lock")" = "$(id -u)" ] || die "[lanes] heavy_lock ($heavy_lock) must belong to the service account"
+    chmod 0644 "$heavy_lock"
+    host_status_write '{}' || die "the host status next to [lanes] heavy_lock could not be written in $heavy_dir"
+    if sudo -n -u "$agent_user" -- test -w "$heavy_dir" 2>/dev/null; then
+      die "$agent_user can write the directory of [lanes] heavy_lock ($heavy_dir): it may open the door for reading, nothing more"
+    fi
+    # Nor any directory above it: one it could write would let it move that
+    # directory aside and put a door and a host status of its own in its place.
+    heavy_up=$heavy_dir
+    while [ "$heavy_up" != / ]; do
+      heavy_up=$(dirname "$heavy_up")
+      if sudo -n -u "$agent_user" -- test -w "$heavy_up" 2>/dev/null; then
+        die "$agent_user can write $heavy_up, above the directory of [lanes] heavy_lock: it could put a door and a host status of its own in place of $heavy_dir; choose a directory whose parents it cannot write"
+      fi
+    done
+    for heavy_file in "$heavy_lock" "$(host_status_path)"; do
+      if sudo -n -u "$agent_user" -- test -w "$heavy_file" 2>/dev/null; then
+        die "$agent_user can write $heavy_file: it may read it, nothing more"
+      fi
+    done
+    sudo -n -u "$agent_user" -- test -r "$(host_status_path)" 2>/dev/null || die "$agent_user cannot read the host status $(host_status_path): grant traversal of $heavy_dir and read access"
+    # As when-free.sh does it: opened read-only, then flock (the door may be
+    # held by a session at work: it is waited for, a while).
+    if ! said=$(cd / && sudo -n -u "$agent_user" -- bash -c 'exec 8< "$1" && flock -w 60 8' _ "$heavy_lock" 2>&1); then
+      die "$agent_user cannot open [lanes] heavy_lock ($heavy_lock) read-only and take its lock: grant traversal of $heavy_dir and read access to the file, or run this again if a session held it for a minute ($(contract_probe_reason <<<"${said:-nothing}"))"
+    fi
+  fi
   # The human's own accesses (tracker tokens, signing key, passkeys) and the app's access token belong to this
   # account alone: the agents' account must read none of them, nor traverse their directory.
   human_dir=$(conf_get app human_credentials_dir) || human_dir=

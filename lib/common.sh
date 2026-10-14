@@ -52,7 +52,7 @@ prompt_file() { prompt_asset "$1.md"; }
 # Written as it is, whatever characters the path holds (a quoted replacement
 # is taken literally).
 prompt_text() {
-  local text language verdict report_on
+  local text language verdict report_on commit_rule commit_independent
   [ -r "$1" ] || { echo "$(basename "$0"): no prompt to read at $1" >&2; return 1; }
   text=$(cat "$1"; printf x)
   text=${text%x}
@@ -63,6 +63,20 @@ prompt_text() {
   if [[ "$text" == *'@REPORT_ON@'* ]]; then
     report_on=$(conf_get lead report_on) || return 1
     text=${text//@REPORT_ON@/$report_on}
+  fi
+  # Who saves the work: under [security] agent_user, Git's control files are
+  # read-only around the harness and lane-run.sh commits after the session;
+  # a team told to commit would take the refusal for a block.
+  if [[ "$text" == *'@COMMIT_RULE@'* || "$text" == *'@COMMIT_INDEPENDENT@'* ]]; then
+    if [ -n "$(conf_get security agent_user)" ]; then
+      commit_rule="Do not commit, and do not try to: in this installation Git's control files are read-only for you, so \`git commit\` fails by design. Cleared commits every change of this worktree on this branch after your session, so your work is saved. Not being able to commit is expected: it is not a block nor a rights problem, and you must not report it as one. Instead, write \`.commit-message\` at the repository root: an English conventional commit subject, a blank line, then a short paragraph. Write the test first, show it failing, and name it in \`.commit-message\`."
+      commit_independent='complete independent work (Cleared commits it after your session)'
+    else
+      commit_rule='Commit on this branch, with English commit messages. Write the test first, show it failing, and name it in the commit message.'
+      commit_independent='complete and commit independent work'
+    fi
+    text=${text//@COMMIT_RULE@/"$commit_rule"}
+    text=${text//@COMMIT_INDEPENDENT@/"$commit_independent"}
   fi
   language=$(conf_get owner language)
   language=${language:-en}
@@ -126,6 +140,112 @@ verify_agent_account() {
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 expand_home() { case "$1" in "~/"*) printf '%s\n' "$HOME/${1#\~/}" ;; *) printf '%s\n' "$1" ;; esac; }
+
+# The door of the heavy commands (when-free.sh): one file that whoever runs
+# a heavy operation on the host holds with flock for as long as it runs. The
+# teams' heavy commands, the checks the rules start (flow-lanes.sh) and a host
+# Codex session all go through these functions, never through a path of
+# their own.
+# heavy_lock_path: [lanes] heavy_lock (an absolute path), else heavy.lock in
+# the state, as before. Under [security] agent_user the teams cannot open a
+# file of the state: the setting must then name a file outside it, in a
+# directory of the service that the agents' account may traverse but not
+# write (serve/install.sh checks it).
+heavy_lock_path() {
+  local path
+  # (No ~: the door is shared by accounts whose homes differ.)
+  path=$(conf_get lanes heavy_lock) || return 1
+  if [ -z "$path" ]; then printf '%s\n' "$ORCH_STATE_DIR/heavy.lock"; return 0; fi
+  case "$path" in
+    /*) printf '%s\n' "$path" ;;
+    *) echo "$(basename "$0"): [lanes] heavy_lock must be an absolute path, not \"$path\"" >&2; return 1 ;;
+  esac
+}
+# heavy_lock_problem: what makes the door unusable, in one line, or nothing.
+# Said by the wake (once an hour, with a ledger event) and by cleared status
+# (lib/heartbeat.mjs): left alone, it would only stop the checks and the
+# heavy commands in silence.
+heavy_lock_problem() {
+  local path
+  path=$(conf_get lanes heavy_lock) || return 0
+  case "$path" in
+    "" | /*) ;;
+    *) echo "[lanes] heavy_lock must be an absolute path, not \"$path\": no pull request is taken out of draft, no check is started again and no heavy command runs until it is fixed"; return 0 ;;
+  esac
+  [ -n "$(conf_get security agent_user)" ] && [ -n "$(conf_get lanes heavy_commands)" ] || return 0
+  heavy_lock_in_state "$(heavy_lock_path)" || return 0
+  echo "with [security] agent_user, [lanes] heavy_lock must name a file outside Cleared's state: the teams' heavy commands cannot run (exit 5) until it is set and serve/install.sh is run again"
+}
+# heavy_lock_in_state <path>: whether that path lies in Cleared's state.
+heavy_lock_in_state() {
+  case "$(realpath -m -- "$1")/" in "$(realpath -m -- "$ORCH_STATE_DIR")"/*) return 0 ;; esac
+  return 1
+}
+# heavy_lock_open <path>: the door, opened on a new descriptor, in HEAVY_FD.
+# Whoever may write the file (the service, and everyone without agent_user)
+# opens it for writing, as before: flock on some file systems (NFS) needs a
+# descriptor open for writing. Whoever may not (the agents' account) opens it
+# READ-ONLY: on a local file system flock takes an exclusive lock on such a
+# descriptor too, so that account never needs the right to write it. A
+# missing file is created by whoever may write its directory (the service,
+# never a team: theirs is not writable to them). Closed with heavy_lock_close.
+heavy_lock_open() {
+  if [ ! -e "$1" ]; then (umask 022 && : >> "$1") 2> /dev/null || true; fi
+  [ -f "$1" ] || return 1
+  if [ -w "$1" ]; then exec {HEAVY_FD}>> "$1"
+  else exec {HEAVY_FD}< "$1"; fi
+}
+heavy_lock_close() {
+  [ -z "${HEAVY_FD:-}" ] || exec {HEAVY_FD}<&-
+  HEAVY_FD=
+}
+# The host status the teams read instead of asking the host (GitHub, the
+# state), which they cannot under agent_user: written by the service next to
+# the door, readable by everyone, booleans and times only. Written at every
+# wake, when the rules start checks and when a merge starts; older than this
+# many minutes (two wakes), a team takes it for unknown and runs nothing.
+# Looser than asking the host live: a push or a deployment started since the
+# last write is not seen for up to that long.
+HOST_STATUS_STALE_MINUTES=2
+host_status_path() {
+  local lock
+  lock=$(heavy_lock_path) || return 1
+  printf '%s\n' "${lock%.lock}.status.json"
+}
+# host_status_write [<host-state.sh JSON>]: writes it, from that answer or a
+# new one, when [security] agent_user and [lanes] heavy_lock are both set
+# (nothing otherwise: the teams then ask the host themselves). An answer that
+# cannot be read counts as a host that is not free.
+host_status_write() {
+  local status lock host starting part
+  [ -n "$(conf_get security agent_user)" ] && [ -n "$(conf_get lanes heavy_lock)" ] || return 0
+  status=$(host_status_path) || return 1
+  # (The door itself too, when it is missing: the teams cannot create it.)
+  lock=$(heavy_lock_path) || return 1
+  [ -e "$lock" ] || (umask 022 && : >> "$lock") || return 1
+  host=${1:-}
+  # (Bounded: a GitHub that hangs leaves a status that says « not free »,
+  # never an old one.)
+  [ -n "$host" ] || host=$(timeout -k 5 "${ORCH_HOST_STATE_TIMEOUT:-40}" "$ORCH_HOME/host-state.sh" 2> /dev/null) || host=
+  jq -e 'type == "object"' <<<"$host" > /dev/null 2>&1 || host='{}'
+  # Checks the rules have just started are not listed by GitHub for some
+  # seconds: for two minutes after it, the host is not free.
+  starting=false
+  [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2> /dev/null)" ] || starting=true
+  part=$(mktemp "$status.XXXXXX") || return 1
+  if jq -n --argjson host "$host" --argjson starting "$starting" --arg at "$(now_utc)" --argjson epoch "$(date +%s)" '{
+      written_at: $at, written_epoch: $epoch,
+      free: (($host.free_for_a_ci_run == true) and ($starting | not)),
+      checks_starting: $starting,
+      ci_running: ((($host.ci_runs_in_progress // []) | length) > 0),
+      deployment_settling: ($host.a_deployment_may_be_in_progress == true),
+      github_down: ($host.github_is_down != null),
+      host_read: ($host | has("free_for_a_ci_run"))}' > "$part" && chmod 0644 "$part" && mv -f "$part" "$status"; then
+    return 0
+  fi
+  rm -f "$part"
+  return 1
+}
 
 ledger() { node --no-warnings "$ORCH_HOME/lib/ledger.mjs" "$@"; }
 
@@ -533,12 +653,26 @@ open_queued_merges() {
 # as its public status page has it: nothing when all is well. Exit 2 when the
 # page cannot be read, which says nothing either way. A slowdown is not an
 # outage.
+# With CLEARED_GITHUB_DOWN_CACHE (set by the wake), the answer is kept in that
+# file and read again for a minute: the page is asked once a wake.
 github_down() {
-  local page
-  page=$(curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null) || return 2
-  jq -e '.components | type == "array"' <<<"$page" > /dev/null 2>&1 || return 2
-  jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
-      | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' <<<"$page"
+  local page out code=0 cache=${CLEARED_GITHUB_DOWN_CACHE:-}
+  if [ -n "$cache" ] && [ -f "$cache" ] && [ $(( $(date +%s) - $(stat -c %Y "$cache") )) -lt 60 ]; then
+    code=$(sed -n 1p "$cache")
+    [[ "$code" =~ ^[02]$ ]] || code=2
+    [ "$code" != 0 ] || sed -n '2p' "$cache"
+    return "$code"
+  fi
+  if page=$(curl -fsS --max-time 8 "${ORCH_GITHUB_STATUS:-https://www.githubstatus.com/api/v2/components.json}" 2> /dev/null) \
+    && jq -e '.components | type == "array"' <<<"$page" > /dev/null 2>&1; then
+    out=$(jq -r '[.components[] | select(.name == "Git Operations" or .name == "Pull Requests" or .name == "Actions" or .name == "API Requests")
+        | select(.status == "major_outage" or .status == "partial_outage") | .name] | join(", ")' <<<"$page")
+  else
+    code=2
+  fi
+  [ -z "$cache" ] || printf '%s\n%s\n' "$code" "$out" > "$cache" 2> /dev/null || true
+  [ "$code" != 0 ] || printf '%s\n' "$out"
+  return "$code"
 }
 
 # talk_open: is a discussion open in the lane of the lead? talk.sh writes

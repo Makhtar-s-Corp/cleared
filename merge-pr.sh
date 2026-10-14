@@ -237,6 +237,10 @@ if [ -n "$dry_run" ]; then
   exit 0
 fi
 
+# Under [security] agent_user the teams read the host from a status the wake
+# writes (lib/common.sh, host_status_write): a merge redeploys, so the host
+# is said busy to them before it starts, not up to a wake later.
+host_status_write '{"free_for_a_ci_run": false, "a_deployment_may_be_in_progress": true, "ci_runs_in_progress": []}' || true
 # The very commit that was checked, and nothing that arrived since.
 (cd "$ORCH_REPO" && gh pr merge "$pr" --merge --match-head-commit "$head") > /dev/null || die "GitHub did not merge #$pr"
 ledger event --kind merged_by_script --ticket "$ticket" --value "$pr" --detail "#$pr at ${head:0:8}, reviewed at ${reviewed:0:8}, $needs, agreement: ${agreed:-none needed}"

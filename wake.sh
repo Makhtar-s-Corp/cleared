@@ -35,6 +35,33 @@ esac
 wake_dir="$ORCH_STATE_DIR/wake"
 mkdir -p "$wake_dir"
 ledger init > /dev/null
+# A door of the heavy commands that cannot be used stops the checks and the
+# teams' heavy commands without a word: said here, once an hour, and in the
+# ledger; cleared status shows it as a problem meanwhile.
+heavy_problem=$(heavy_lock_problem)
+heavy_said="$wake_dir/heavy-lock-said"
+if [ -z "$heavy_problem" ]; then
+  rm -f "$heavy_said"
+elif [ -z "$handover$dry_run" ] && [ -z "$(find "$heavy_said" -mmin -60 2> /dev/null)" ]; then
+  echo "$(basename "$0"): $heavy_problem" >&2
+  ledger event --kind heavy_lock_invalid --detail "$heavy_problem" > /dev/null || true
+  : > "$heavy_said"
+fi
+# What GitHub's status page says is read once a wake (lib/common.sh,
+# github_down): by the host status below and by the wake itself further on.
+export CLEARED_GITHUB_DOWN_CACHE="$wake_dir/github-status.read"
+[ -n "${ORCH_SELF_UPDATED:-}" ] || rm -f "$CLEARED_GITHUB_DOWN_CACHE"
+# Under [security] agent_user the teams cannot ask the host whether it is free
+# (GitHub, the state): the door of the heavy commands reads what the service
+# writes for them next to it (lib/common.sh, host_status_write). First thing,
+# before the updates and the slow steps of a wake, and bounded in time; once
+# a wake (not again after a self-update). Nothing without agent_user. A wake
+# that systemd still runs keeps the next ones from starting: past
+# HOST_STATUS_STALE_MINUTES the teams' heavy commands find the status stale
+# and run nothing (exit 5) until a wake writes it again.
+if [ -z "$handover$dry_run" ] && [ -z "${ORCH_SELF_UPDATED:-}" ]; then
+  host_status_write || echo "$(basename "$0"): the host status for the teams' heavy commands could not be written" >&2
+fi
 
 # One wake at a time.
 # An ordinary wake that finds another one at work, or a session of the lead
