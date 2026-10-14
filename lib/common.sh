@@ -127,6 +127,90 @@ now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 expand_home() { case "$1" in "~/"*) printf '%s\n' "$HOME/${1#\~/}" ;; *) printf '%s\n' "$1" ;; esac; }
 
+# The door of the heavy commands (when-free.sh): one file that whoever runs
+# a heavy operation on the host holds with flock for as long as it runs. The
+# teams' heavy commands, the checks the rules start (flow-lanes.sh) and a host
+# Codex session all go through these functions, never through a path of
+# their own.
+# heavy_lock_path: [lanes] heavy_lock (an absolute path), else heavy.lock in
+# the state, as before. Under [security] agent_user the teams cannot open a
+# file of the state: the setting must then name a file outside it, in a
+# directory of the service that the agents' account may traverse but not
+# write (serve/install.sh checks it).
+heavy_lock_path() {
+  local path
+  path=$(conf_get lanes heavy_lock) || return 1
+  path=$(expand_home "$path")
+  if [ -z "$path" ]; then printf '%s\n' "$ORCH_STATE_DIR/heavy.lock"; return 0; fi
+  case "$path" in
+    /*) printf '%s\n' "$path" ;;
+    *) echo "$(basename "$0"): [lanes] heavy_lock must be an absolute path, not \"$path\"" >&2; return 1 ;;
+  esac
+}
+# heavy_lock_in_state <path>: whether that path lies in Cleared's state.
+heavy_lock_in_state() {
+  case "$(realpath -m -- "$1")/" in "$(realpath -m -- "$ORCH_STATE_DIR")"/*) return 0 ;; esac
+  return 1
+}
+# heavy_lock_open <path>: the door, opened READ-ONLY on a new descriptor, in
+# HEAVY_FD. flock takes an exclusive lock on a descriptor opened for reading
+# as well, so nobody needs the right to write the file: the agents' account
+# never gets it. A missing file is created by whoever may write its
+# directory (the service, never a team: theirs is not writable to them).
+# Closed with heavy_lock_close.
+heavy_lock_open() {
+  if [ ! -e "$1" ]; then (umask 022 && : >> "$1") 2> /dev/null || true; fi
+  [ -f "$1" ] || return 1
+  exec {HEAVY_FD}< "$1"
+}
+heavy_lock_close() {
+  [ -z "${HEAVY_FD:-}" ] || exec {HEAVY_FD}<&-
+  HEAVY_FD=
+}
+# The host status the teams read instead of asking the host (GitHub, the
+# state), which they cannot under agent_user: written by the service next to
+# the door, readable by everyone, booleans and times only. Written at every
+# wake and when the rules start checks; older than this many minutes, a team
+# takes it for unknown and runs nothing.
+HOST_STATUS_STALE_MINUTES=5
+host_status_path() {
+  local lock
+  lock=$(heavy_lock_path) || return 1
+  printf '%s\n' "${lock%.lock}.status.json"
+}
+# host_status_write [<host-state.sh JSON>]: writes it, from that answer or a
+# new one, when [security] agent_user and [lanes] heavy_lock are both set
+# (nothing otherwise: the teams then ask the host themselves). An answer that
+# cannot be read counts as a host that is not free.
+host_status_write() {
+  local status lock host starting part
+  [ -n "$(conf_get security agent_user)" ] && [ -n "$(conf_get lanes heavy_lock)" ] || return 0
+  status=$(host_status_path) || return 1
+  # (The door itself too, when it is missing: the teams cannot create it.)
+  lock=$(heavy_lock_path) || return 1
+  [ -e "$lock" ] || (umask 022 && : >> "$lock") || return 1
+  host=${1:-}
+  [ -n "$host" ] || host=$("$ORCH_HOME/host-state.sh" 2> /dev/null) || host=
+  jq -e 'type == "object"' <<<"$host" > /dev/null 2>&1 || host='{}'
+  # Checks the rules have just started are not listed by GitHub for some
+  # seconds: for two minutes after it, the host is not free.
+  starting=false
+  [ -z "$(find "$ORCH_STATE_DIR/checks-starting" -mmin -2 2> /dev/null)" ] || starting=true
+  part=$(mktemp "$status.XXXXXX") || return 1
+  if jq -n --argjson host "$host" --argjson starting "$starting" --arg at "$(now_utc)" --argjson epoch "$(date +%s)" '{
+      written_at: $at, written_epoch: $epoch,
+      free: (($host.free_for_a_ci_run == true) and ($starting | not)),
+      checks_starting: $starting,
+      ci_running: ((($host.ci_runs_in_progress // []) | length) > 0),
+      deployment_settling: ($host.a_deployment_may_be_in_progress == true),
+      github_down: ($host.github_is_down != null),
+      host_read: ($host | has("free_for_a_ci_run"))}' > "$part" && chmod 0644 "$part" && mv -f "$part" "$status"; then
+    return 0
+  fi
+  rm -f "$part"
+  return 1
+}
+
 ledger() { node --no-warnings "$ORCH_HOME/lib/ledger.mjs" "$@"; }
 
 # lane_worktree <name>: the worktree of that name, as git knows it. Fails when

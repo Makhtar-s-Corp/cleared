@@ -78,6 +78,11 @@ if [ -z "$handover$dry_run" ]; then node --no-warnings "$ORCH_HOME/lib/release.m
 # So do the go-lives that only waited for the host.
 [ -n "$handover" ] || open_queued_merges
 [ -n "$handover" ] || close_tickets_left_open
+# Under [security] agent_user the teams cannot ask the host whether it is free
+# (GitHub, the state): the door of the heavy commands reads what the service
+# writes for them next to it (lib/common.sh, host_status_write), every wake,
+# before anything below may stop this one. Nothing without agent_user.
+[ -n "$handover$dry_run" ] || host_status_write || echo "$(basename "$0"): the host status for the teams' heavy commands could not be written" >&2
 # The lanes move forward by rule, with no model: opened on the tickets the
 # user said « go » on, their checks started, their review asked for, opened
 # again when something asks for it. Only once the lead acts.
