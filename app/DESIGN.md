@@ -113,7 +113,9 @@ One white outlined block with hairline separators: In flight, Landed today, Firs
 
 **Awaiting, ready to land:** same white card, 3 px flat `awaiting` stripe on top, `elevation.awaiting`, a black "Ready to land" chip. If the ticket touches a screen, two small before/after tiles: before on `canvas` with the key figure in `danger` when it is a problem, after on `success-surface` with a `success` outline.
 
-**Awaiting, question:** `awaiting-surface` background, amber outline, an outlined "Question" chip in `awaiting-text`, the question as the title, one sentence with the concrete example and the squad's recommendation.
+**Awaiting, question:** `awaiting-surface` background, amber outline, an outlined "Question" chip in `awaiting-text`, the question's first sentence as the title (never cut), the rest of the question and the team's recommendation in at most three lines each, the number of choices, the ticket title in `text-muted`, and a footer with "Waiting since 16:05" in mono and "Read it all and answer" in `awaiting-text`.
+
+**Tracker only** (in the approval status of the tracker, no request from Cleared): listed apart under the waiting cards with a mono label, `surface-muted`, hairline outline, no stripe, no chip, no amber. Nothing to clear.
 
 **Queued** (waiting for a machine slot): `surface-muted`, 1 px dashed border `#D4D4D4`, no shadow, title in `text-secondary`, one sentence with the reason.
 
@@ -125,9 +127,12 @@ White outlined table at the bottom of the tower: time (mono), what shipped (plai
 
 ### Porthole
 Desktop: right panel. Phone: full page with a back button, the ticket id and the status chip in a white header.
-Order: a 3 px × 56 px flat amber bar above the title when it waits for the human, the title (`title`), a stat strip (flight, fuel, tests), Show me, Where we are, The squad, Black box.
-- Show me, screen ticket: before and after inside device frames (radius `device`, 5 px white bezel, outline), after with `elevation.device-after`.
-- Show me, non-screen ticket: one concrete before/after example, the tests with their state, one sentence on what it touches. The diff is only a link.
+Order: a 3 px × 56 px flat amber bar above the title when it waits for the human, the title (`title`) and "Waiting since 16:05 (1h35)" in mono, the question block (`awaiting-surface`, amber outline, the whole question at 16 px, the team's recommendation below a highlight hairline), What changed (so that the pull request line and the captures are seen without scrolling), a stat strip (flight, checks, share of the week only when measured), Where we are, The squad, Black box.
+- The action panel stays at the bottom: at most 36 % of the height on a computer (60 % on a phone), the free-text answer and its button on one row. While the porthole has more below, the panel casts a soft shadow upward over it (the one shadow besides the three levels of section 6): the panel never reads as the end.
+- What changed: the pull request link with a "draft" tag, one line of facts (files, +added −removed, checks in `success-text` or `danger`), then the captures, or one dashed box "No capture yet: …" with the reason.
+- Where we are: the team's report to the user, "Done" and "Still to do" as short lists, the time of the report in `text-faint`; "No report from the team yet." otherwise.
+- What changed, screen ticket: before and after inside device frames (radius `device`, 5 px white bezel, outline), after with `elevation.device-after`.
+- What changed, non-screen ticket: one concrete before/after example and the tests with their state. The diff is only a link.
 - The squad: one white outlined list, a row per role (harness square, role, harness and exact model in mono).
 - Black box: vertical timeline on a hairline, one dot per event in its stage color, time in mono, one plain sentence.
 - Actions: "Clear to land" is a solid ink button that carries the exact version ("Clear to land · a1b2c3d"); "Send back" is an outlined button. When the board shows a newer version than the one on screen, one ink button reads "New version, review again". A click asks for a passkey, then a **grace bar** appears: a 4 px flat track with an ink fill that empties over 60 seconds, "Clearing in 42 s" in mono and an ink "Undo" beside it. Never a gradient. After the write the card says "Cleared by you at 14:02, landing" in place of its status line until the next snapshot. A question's options are outlined buttons above a text field. Without a passkey (or a secure address) the buttons are disabled and say why. Nothing pretends to act.
@@ -141,7 +146,7 @@ Order: a 3 px × 56 px flat amber bar above the title when it waits for the huma
 
 ## 6. Depth
 
-Three levels: canvas, card (one-pixel shadow outline plus a 2 px soft shadow), awaiting card (amber outline plus an amber soft shadow). No other shadows. Borders are shadows or hairlines, never thick.
+Three levels: canvas, card (one-pixel shadow outline plus a 2 px soft shadow), awaiting card (amber outline plus an amber soft shadow). No other shadows, except the scroll cue of the porthole's action panel (section 4). Borders are shadows or hairlines, never thick.
 
 ## 7. Do's and don'ts
 

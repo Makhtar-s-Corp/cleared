@@ -495,12 +495,14 @@ one_lane() {
   # is the one that speaks to him. His answer on the ticket opens the lane
   # again by itself (below).
   if ! did "$record" "asked:$last"; then
+    # Its questions whole, up to four of the size the app shows (lib/board-report.mjs clip-asked:
+    # 6 000 characters, 40 lines, never cut inside a character).
     report="$ORCH_STATE_DIR/reports/$last-$role-a1.md"
     for candidate in "$ORCH_STATE_DIR/reports/$last-$role"-a*.md; do [ ! -f "$candidate" ] || report=$candidate; done
-    asked=$(sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions (pour|for)/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions (pour|for)[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question|none|nothing|no questions?)\b' | sed '/^## /d' | head -n 20 || true)
+    asked=$(sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions (pour|for)/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions (pour|for)[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question|none|nothing|no questions?)\b' | sed '/^## /d' | node --no-warnings "$ORCH_HOME/lib/board-report.mjs" clip-asked || true)
     if [ -n "$asked" ]; then
       say "$ticket: its session ends on a question for the user"
-      [ -n "$dry" ] || ledger event --kind lane_asks --ticket "$ticket" --detail "$(printf '%s' "$asked" | cut -c1-1500)"
+      [ -n "$dry" ] || ledger event --kind lane_asks --ticket "$ticket" --detail "$asked"
     fi
     mark "$record" "asked:$last"
   fi

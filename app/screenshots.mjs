@@ -7,11 +7,16 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appServer } from './server.mjs';
 import { demoSource } from './sources/demo.mjs';
+import { createActions } from './lib/actions.mjs';
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 const token = 'd'.repeat(64);
-const server = appServer({ source: demoSource(), token, ranges: ['127.0.0.0/8'], pollMs: 500, heartbeatMs: 2000 });
+// As `cleared app --demo` serves it: the answer form of a question is there (a gesture is written nowhere).
+const source = demoSource();
+let keys = [];
+const actions = createActions({ source, origin: '', owner: 'you', readPasskeys: () => keys, writePasskeys: (list) => { keys = list; }, run: async () => ({ ok: true }) });
+const server = appServer({ source, token, ranges: ['127.0.0.0/8'], pollMs: 500, heartbeatMs: 2000, actions });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
@@ -37,6 +42,13 @@ for (const width of [1440, 768, 390]) {
     await page.waitForSelector('.device img');
     await page.waitForTimeout(150);
     await page.screenshot({ path: join(out, `porthole-${theme}-${width}.png`) });
+    // A question: the whole of it, the team's recommendation, and the answer at hand.
+    await page.click('#ph-close');
+    await page.click('.card[data-id="EX-40"] button');
+    await page.waitForSelector('.ph-question');
+    await page.waitForSelector('#an-text');
+    await page.waitForTimeout(150);
+    await page.screenshot({ path: join(out, `porthole-question-${theme}-${width}.png`) });
     if (width === 1440 && theme === 'light') {
       await page.click('#ph-close');
       await page.click('.card[data-id="EX-34"] button');

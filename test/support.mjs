@@ -112,7 +112,7 @@ echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 if [ "$1 $2" = "pr list" ]; then [ -z "\${FAKE_GH_LIST_DOWN:-}" ] || exit 1
   head=; previous=; for arg in "$@"; do [ "$previous" != --head ] || head=$arg; previous=$arg; done
   if [ -n "$head" ]; then cat "${home}/pr-head-\${head//\\//-}.json" 2>/dev/null || echo '[]'; else cat "${join(home, 'pulls-now.json')}"; fi
-elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; echo "https://example.test/pull/41"
+elif [ "$1 $2" = "pr create" ]; then [ -z "\${FAKE_GH_DOWN:-}" ] || exit 1; printf '%s\\n' "$@" > "${join(home, 'pr-create-args')}"; previous=; for arg in "$@"; do [ "$previous" != --body-file ] || cp "$arg" "${join(home, 'pr-create-body.md')}"; previous=$arg; done; echo "https://example.test/pull/41"
 elif [ "$1 $2" = "pr ready" ]; then echo "$3 \${4:-}" >> "${join(home, 'pr-ready')}"
 elif [ "$1 $2" = "run view" ]; then case " $* " in *" --json jobs "*) cat "${join(home, 'run-jobs.json')}" 2>/dev/null || echo '{"jobs":[]}' ;; *) echo "$3" >> "${join(home, 'run-viewed')}"; cat "${join(home, 'run-log.txt')}" 2>/dev/null || true ;; esac
 elif [ "$1 $2" = "run rerun" ]; then [ -z "\${FAKE_GH_RERUN_DOWN:-}" ] || exit 1; [ -z "\${FAKE_GH_RERUN_FORBIDDEN:-}" ] || { echo 'HTTP 403: Resource not accessible by integration (https://api.github.com/repos/o/r/actions/runs/77/rerun-failed-jobs)' >&2; exit 1; }; echo "$3 $4" >> "${join(home, 'run-rerun')}"
@@ -169,7 +169,8 @@ export function laneWithRemote(branch, message = 'feat: the work of the lane') {
   const push = (target = path) => spawnSync(join(box.home, 'push-lane.sh'), [target], { env: box.env, encoding: 'utf8' });
   const onRemote = () => execFileSync('git', ['--git-dir', remote, 'for-each-ref', '--format=%(refname:short) %(objectname:short)', 'refs/heads'], { encoding: 'utf8' }).trim().split('\n');
   const created = () => { try { return readFileSync(join(box.home, 'pr-create-args'), 'utf8').trim().split('\n'); } catch { return null; } };
-  return { box, remote, path, push, onRemote, created };
+  const body = () => { try { return readFileSync(join(box.home, 'pr-create-body.md'), 'utf8'); } catch { return null; } };
+  return { box, remote, path, push, onRemote, created, body };
 }
 
 export function flowBox({ maxLanes = 1 } = {}) {
