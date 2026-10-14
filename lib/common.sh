@@ -836,7 +836,9 @@ takes_a_place() {
 # installation token for that one call (it never sits in the environment of
 # the script, so nothing it starts inherits it), and git finds the token
 # through the credential helper lib/forge.mjs names in GIT_CONFIG_* for
-# https://github.com (a remote written for SSH included). The commits the
+# https://github.com (a remote written for SSH included); the account's own
+# git configuration file, whose url rewrites could send a push to SSH around
+# the app, is not read. The commits the
 # dispatcher makes take the app's identity (GIT_AUTHOR_* and
 # GIT_COMMITTER_*). Configured and failing (a key missing, a wrong mode, the
 # app suspended, no network), gh stops with the reason and the setting to
@@ -894,7 +896,7 @@ forge_harness_unset() {
   local name
   FORGE_UNSET=()
   [ "${CLEARED_FORGE_MODE:-ambient}" != ambient ] || return 0
-  FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT
+  FORGE_UNSET=(-u GH_TOKEN -u GITHUB_TOKEN -u GIT_CONFIG_PARAMETERS -u GIT_TERMINAL_PROMPT -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_NOSYSTEM
     -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL)
   while IFS= read -r name; do FORGE_UNSET+=(-u "$name"); done < <(compgen -e | grep -E '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true)
 }

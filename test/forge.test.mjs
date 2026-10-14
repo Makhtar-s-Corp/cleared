@@ -218,6 +218,24 @@ test('a token that cannot be minted stops forge calls with the setting to look a
   assert.match(elsewhere.stdout, /password=AMBIENT-PASSWORD/);
 });
 
+test('the account\'s own git configuration cannot send a forge push to SSH: its insteadOf and pushInsteadOf are not read, its identity and other credentials are kept', () => {
+  for (const forge of [false, true]) {
+    const lane = forgeLane({ forge });
+    writeFileSync(join(lane.box.home, '.gitconfig'), `${readFileSync(join(lane.box.home, '.gitconfig'), 'utf8')}[user]\n\tname = Service Account\n[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n\tpushInsteadOf = https://github.com/\n`);
+    const clone = scratch('cleared-forge-urls-');
+    execFileSync(realGit, ['init', '-q', clone]);
+    execFileSync(realGit, ['-C', clone, 'remote', 'add', 'origin', 'https://github.com/example/project.git']);
+    execFileSync(realGit, ['-C', clone, 'remote', 'add', 'ssh', 'git@github.com:example/project.git']);
+    const urls = script(lane, `git -C '${clone}' remote get-url --push origin; git -C '${clone}' remote get-url origin; git -C '${clone}' remote get-url --push ssh; git -C '${clone}' config user.name`);
+    assert.equal(urls.status, 0, urls.stderr);
+    if (forge) assert.deepEqual(urls.stdout.trim().split('\n'), ['https://github.com/example/project.git', 'https://github.com/example/project.git',
+      'https://github.com/example/project.git', 'Service Account']);
+    // The control: without an app, the account's rules apply as they always did.
+    else assert.deepEqual(urls.stdout.trim().split('\n'), ['git@github.com:example/project.git', 'git@github.com:example/project.git',
+      'git@github.com:example/project.git', 'Service Account']);
+  }
+});
+
 test('a key file other accounts can read is refused before anything is asked of GitHub', () => {
   const lane = forgeLane({ keyMode: 0o640 });
   const listed = script(lane, 'gh pr list --state open');
