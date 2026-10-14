@@ -109,8 +109,8 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .card.ready { box-shadow: var(--e-awaiting); } .card.ready::before { content: ""; position: absolute; left: 0; top: 0; right: 0; height: 3px; background: var(--awaiting); }
 .chip { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 9px; border-radius: 999px; background: var(--ink); color: var(--on-ink); font-size: 12px; font-weight: 500; }
 .card .chip { margin-left: auto; } .chip.q { background: transparent; color: var(--awaiting-text); box-shadow: 0 0 0 1px rgba(171,87,10,.4); } .chip.stage { background: transparent; color: var(--text-secondary); box-shadow: var(--e-outline); }
-.tiles { display: flex; gap: 6px; margin-bottom: 12px; } .tile { flex: 1; height: 58px; border-radius: 8px; padding: 8px 10px; font-size: 10px; overflow: hidden; background: var(--canvas); box-shadow: var(--e-outline); }
-.tile.after { background: var(--success-surface); box-shadow: 0 0 0 1px rgba(22,163,74,.35); } .tile .t { color: var(--text-faint); } .tile img { display: block; width: 100%; height: 36px; object-fit: cover; object-position: top left; border-radius: 3px; margin-top: 2px; }
+.tiles { display: flex; gap: 6px; margin-bottom: 12px; } .tile { flex: 1; height: 64px; border-radius: 8px; padding: 6px 10px; font-size: 12px; overflow: hidden; background: var(--canvas); box-shadow: var(--e-outline); }
+.tile.after { background: var(--success-surface); box-shadow: 0 0 0 1px rgba(22,163,74,.35); } .tile .t { color: var(--text-faint); } .tile img { display: block; width: 100%; height: 34px; object-fit: cover; object-position: top left; border-radius: 3px; margin-top: 2px; }
 .card.question { background: var(--awaiting-surface); box-shadow: 0 0 0 1px rgba(245,166,35,.45); } .card.question h3 { margin-bottom: 8px; } .card.question .line { box-shadow: none; padding: 0; margin: 0; }
 .card.queued { background: var(--surface-muted); box-shadow: none; border: 1px dashed var(--dashed); } .card.queued h3 { color: var(--text-secondary); margin-bottom: 8px; } .card.queued .line { box-shadow: none; padding: 0; margin: 0; color: var(--text-muted); }
 

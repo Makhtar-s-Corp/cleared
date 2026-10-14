@@ -316,7 +316,7 @@ function porthole(d) {
       c.pr.url ? el('a', { href: c.pr.url, rel: 'noreferrer noopener', target: '_blank', textContent: t('app_pr_link', { n: c.pr.number }) }) : mono(t('app_pr_link', { n: c.pr.number })),
       c.draft ? el('span', { className: 'tag', textContent: t('app_pr_draft') }) : null),
     el('p', { className: 'pr-facts' }, mono(changeParts(c).join(' · ')), ' · ', el('span', { className: checksClass(c), textContent: checksText(c) }),
-      d.tests ? ` · ${t('app_srv_tests_green', { n: new Intl.NumberFormat(locale()).format(d.tests) })}` : null));
+      d.tests ? ` · ${t('app_srv_tests_green', { n: String(d.tests).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f') })}` : null));
   } else changed.push(el('p', { className: 'empty', textContent: t('app_no_pr') }));
   if (d.show.kind === 'screen') {
     if (d.show.before.length || d.show.after.length) changed.push(el('div', { className: 'devs' }, ...d.show.before.map((i) => device(i, false)), ...d.show.after.map((i) => device(i, true))));
