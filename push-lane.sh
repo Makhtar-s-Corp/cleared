@@ -20,7 +20,7 @@ set -euo pipefail
 worktree=$(cd "$1" && pwd)
 branch=$(git -C "$worktree" symbolic-ref --quiet --short HEAD) || die "$worktree is not on a branch"
 [[ "$branch" =~ ^([a-z][a-z-]*)/([A-Z]+-[0-9]+)(\.2)?$ ]] || die "\"$branch\" is not the branch of a lane (<role>/<ticket>, or <role>/<ticket>.2 for a second team)"
-role=${BASH_REMATCH[1]}
+role=${BASH_REMATCH[1]} lane_ticket=${BASH_REMATCH[2]}
 grep -qw -- "$role" <<<"$(conf_get lanes push_roles)" || die "lanes of the role \"$role\" are not pushed (see [lanes] push_roles)"
 base=$(conf_get lanes base)
 target=${base#origin/}
@@ -79,12 +79,25 @@ fi
 number=$(cd "$worktree" && gh pr list --head "$push_to" --state open --json number | jq -r '.[0].number // empty')
 if [ -z "$number" ]; then
   title=$(git -C "$worktree" log --reverse --format='%s' "$base..HEAD" | sed -n '1p')
-  {
-    echo "Opened by the dispatcher for ${BASH_REMATCH[2]} (lane \`$branch\`). Draft: the checks start when it is marked ready."
+  # The team's report to the user (Done, Remaining work, Questions for the
+  # user), as it wrote it: the report the dispatcher keeps for this run. No
+  # path of this machine nor token-shaped word goes with it (lib/pr-body.mjs),
+  # and the guard reads it below; refused, the body goes without it.
+  report=
+  if [[ "${ORCH_RUN_ID:-}" =~ ^[A-Za-z0-9._-]+$ ]] && [ -r "$ORCH_STATE_DIR/reports/$ORCH_RUN_ID.md" ]; then
+    report=$(node --no-warnings "$ORCH_HOME/lib/pr-body.mjs" "$ORCH_STATE_DIR/reports/$ORCH_RUN_ID.md" 2> /dev/null) || report=
+  fi
+  bare() {
+    echo "Opened by the dispatcher for $lane_ticket (lane \`$branch\`). Draft: the checks start when it is marked ready."
     echo
     echo "Commits:"
     git -C "$worktree" log --reverse --format='- %s' "$base..HEAD"
-  } > "$out/body.md"
+  }
+  { if [ -n "$report" ]; then printf '%s\n\n---\n\n' "$report"; fi; bare; } > "$out/body.md"
+  if [ -n "$report" ] && ! guard_text "$out/body.md" > /dev/null 2>&1; then
+    echo "$(basename "$0"): the team's report is left out of the pull request: the guard refused it" >&2
+    bare > "$out/body.md"
+  fi
   url=$(cd "$worktree" && gh pr create --draft --base "$target" --head "$branch" --title "$title" --body-file "$out/body.md")
   number=${url##*/}
 fi
