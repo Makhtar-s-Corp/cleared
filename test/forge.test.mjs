@@ -249,6 +249,20 @@ test('the account\'s own git configuration cannot send a forge push to SSH: its 
   }
 });
 
+test('[forge] adapter = github alone, or the example copied as it is, names no app: no node is started for it and nothing changes', () => {
+  const lane = forgeLane({ forge: false });
+  writeFileSync(join(lane.box.home, 'lib', 'forge.mjs'), `require('fs').writeFileSync(${JSON.stringify(join(lane.box.home, 'forge-ran'))}, 'ran');\n`);
+  for (const added of ['[forge]\nadapter = github\n', readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').match(/\[forge\]\n(?:#.*\n|\s*\n)*/)[0]]) {
+    writeFileSync(lane.confPath, `${readFileSync(lane.confPath, 'utf8')}\n${added}`);
+    const run = script(lane, 'echo "$CLEARED_FORGE_MODE"; gh pr list --state open > /dev/null');
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout.trim(), 'ambient');
+    assert.equal(existsSync(join(lane.box.home, 'forge-ran')), false);
+    assert.match(lane.read('gh-seen').trim().split('\n').at(-1), /^ambient-gh-token\|/);
+  }
+  assert.equal(forgeSettings(parseConf(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'))), null);
+});
+
 test('when lib/forge.mjs itself cannot run, git stops like gh instead of using the ambient credential', () => {
   const lane = forgeLane();
   writeFileSync(join(lane.box.home, 'lib', 'forge.mjs'), 'process.exit(3);\n');
@@ -301,7 +315,7 @@ cat > /dev/null
   writeFileSync(join(dir, 'claude'), `${dump}printf '%s\\n' '{"type":"result","is_error":false,"result":"Claude answer","modelUsage":{}}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'codex'), `${dump}previous=; for arg in "$@"; do [ "$previous" != --output-last-message ] || printf 'Codex answer\\n' > "$arg"; previous=$arg; done
 printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Codex answer"}}'\n`, { mode: 0o755 });
-  let conf = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace('[forge]\nadapter = github\n', `${forgeSection(lane.key)}`);
+  let conf = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace('[forge]\n', `${forgeSection(lane.key)}`);
   if (agentUser) {
     // The account of the agents through a sudo and a bubblewrap that only pass the command on.
     writeFileSync(join(dir, 'sudo'), `#!/usr/bin/env bash

@@ -843,6 +843,8 @@ takes_a_place() {
 # GIT_COMMITTER_*). Configured and failing (a key missing, a wrong mode, the
 # app suspended, no network), gh stops with the reason and the setting to
 # look at; it never falls back to the ambient credential.
+# forge_wanted: does the project name an app (its keys, or use_tracker_app)?
+# [forge] adapter alone names none, and starts no node.
 forge_wanted() {
   [ -f "$ORCH_CONF" ] || return 1
   awk '
@@ -853,7 +855,7 @@ forge_wanted() {
       key = substr($0, 1, i - 1); value = substr($0, i + 1)
       gsub(/^[ \t]+|[ \t]+$/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", value)
       if (seen[section, key]++ || value == "") next
-      if (section == "[forge]" && key ~ /^(adapter|app_id|installation_id|app_private_key_file)$/) forge = 1
+      if (section == "[forge]" && key ~ /^(app_id|installation_id|app_private_key_file)$/) forge = 1
       if (section == "[forge]" && key == "use_tracker_app" && value != "no") forge = 1
     }
     END { exit !forge }' "$ORCH_CONF"
