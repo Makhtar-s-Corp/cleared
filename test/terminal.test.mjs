@@ -290,6 +290,8 @@ printf '%s\\n' "$*" >> "${join(box.home, 'sudo-calls')}"
 shift 4
 # The agents' account says one of its processes is still in the group, whatever is done to it.
 if [ -n "\${FAKE_AGENT_HOLDS:-}" ] && [ "$1" = sh ]; then echo held; exit 0; fi
+# A sudo that hangs, whatever it is asked.
+[ -z "\${FAKE_SUDO_HANGS:-}" ] || exec sleep 60
 # A sudo that does not answer for the agents' account when it is asked what is left (it still signals).
 if [ -n "\${FAKE_AGENT_SILENT:-}" ] && [ "$1" = sh ]; then exit 1; fi
 exec "$@"
@@ -653,4 +655,25 @@ test('[terminal] adapter = none: the questions put to the agents\' account read 
   assert.ok(await until(() => box.group(leader.pid) === '', 5000));
   assert.equal(ask('none_agent_orphans', String(leader.pid), String(start), 'nobody'), 'free');
   assert.equal(ask('none_agent_holds', String(leader.pid), 'nobody'), 'free');
+});
+
+
+test('[terminal] adapter = none under [security] agent_user: a sudo that hangs is bounded (CLEARED_SUDO_WAIT) and counts as one that does not answer, never as a group found empty', async (t) => {
+  const box = agentBox(noneBox());
+  t.after(() => stopAll(box));
+  const { opened, handle } = openHeld(box, { FAKE_LEAVES: 'harness' });
+  assert.equal(opened.status, 0, opened.stderr);
+  const pid = Number(handle.split(':')[1]);
+  t.after(() => stopGroup(pid));
+  assert.ok(await until(() => box.harnesses().length === 1));
+  const env = { ...box.env, FAKE_SUDO_HANGS: '1', CLEARED_SUDO_WAIT: '1' };
+  const began = Date.now();
+  const closed = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; terminal close "$1"`, 'close', handle], { env, encoding: 'utf8', timeout: 60000 });
+  assert.equal(closed.status, 1, closed.stderr);
+  assert.match(closed.stderr, new RegExp(`the session ${handle} is not over: sudo -n -u nobody could not stop and check the processes of nobody in its group ${pid}`));
+  assert.ok(Date.now() - began < 30000, `bounded: ${Date.now() - began} ms`);
+  // A group left by its leader: asked of a sudo that hangs, no answer at all (the close then fails, said).
+  const asked = spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; terminal_adapter; none_agent_orphans "$1" 0 nobody`, 'ask', String(pid)], { env, encoding: 'utf8', timeout: 60000 });
+  assert.equal(asked.stdout, '');
+  assert.notEqual(asked.status, 0);
 });

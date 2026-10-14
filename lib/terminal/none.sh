@@ -155,18 +155,28 @@ none_agent() {
   [ -n "$agent" ] && [ "$agent" != "$(id -un)" ] && printf '%s\n' "$agent"
 }
 
+# none_sudo <agent account> <command>...: the command as the agents' account,
+# for CLEARED_SUDO_WAIT seconds at most (30): a sudo that hangs is one that
+# does not answer, never one that said all was well.
+none_sudo() {
+  local agent=$1 wait=${ORCH_SUDO_WAIT:-30}
+  shift
+  [[ "$wait" =~ ^[1-9][0-9]*$ ]] || wait=30
+  timeout -k 5 "$wait" sudo -n -u "$agent" -- "$@"
+}
+
 # none_signal <signal> <group> [<agent account>]: the group, from this
 # account and from the agents' one.
 none_signal() {
   kill -"$1" -- "-$2" 2> /dev/null || true
-  [ -z "${3:-}" ] || sudo -n -u "$3" -- kill -"$1" -- "-$2" > /dev/null 2>&1 || true
+  [ -z "${3:-}" ] || none_sudo "$3" kill -"$1" -- "-$2" > /dev/null 2>&1 || true
 }
 
 # none_agent_holds <group> <agent account>: what the agents' account says of
 # the group: "held" (a process of its own is still in it), "free", or nothing
 # when sudo could not ask it. (/proc may hide its processes from the service.)
 none_agent_holds() {
-  sudo -n -u "$2" -- sh -c 'if kill -0 "-$1" 2> /dev/null; then echo held; else echo free; fi' cleared-check "$1" 2> /dev/null
+  none_sudo "$2" sh -c 'if kill -0 "-$1" 2> /dev/null; then echo held; else echo free; fi' cleared-check "$1" 2> /dev/null
 }
 
 # none_agent_orphans <group> <start> <agent account>: the agents' account
@@ -179,7 +189,7 @@ none_agent_orphans() {
   # shellcheck disable=SC2016
   # (The list of /proc is expanded before globbing is turned off for the
   # split of each line: turned off first, the loop would see one literal word.)
-  sudo -n -u "$3" -- sh -c 'group=$1 start=$2 found=
+  none_sudo "$3" sh -c 'group=$1 start=$2 found=
 [ ! -e "/proc/$group" ] || { echo taken; exit 0; }
 for dir in /proc/[0-9]*; do
   { read -r line < "$dir/stat"; } 2> /dev/null || continue
