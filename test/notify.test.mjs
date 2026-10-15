@@ -299,6 +299,63 @@ test('a malicious ticket title or event detail cannot smuggle a secret path, tok
   assert.throws(() => render({ kind: 'anything', ticket: 'EX-1' }), /unknown notification kind/);
 });
 
+test('the host rule covers Unicode labels, the ideographic full stop, underscores and punycode; a file name is kept', () => {
+  const cases = {
+    '_evil.com': '[host]', 'x_evil.com': '[host]', 'svc_api.corp.net': '[host]', 'evil。com': '[host]',
+    'пример.рф': '[host]', 'bücher.de': '[host]', 'xn--e1afmkfd.xn--p1ai': '[host]', 'Ping evil.com now': 'Ping [host] now',
+    'Edit README.md and install.sh': 'Edit README.md and install.sh', 'Move to ntfy.sh': 'Move to [host]',
+  };
+  for (const [input, expected] of Object.entries(cases)) assert.equal(sanitize(input), expected, input);
+});
+
+test('IPv6 is masked whole, not as its tail; a time of day is not an address', () => {
+  assert.equal(sanitize('2001:db8::1'), '[address]');
+  assert.equal(sanitize('fe80::1 down'), '[address] down');
+  assert.equal(sanitize('2001:0db8:0000:0000:0000:ff00:0042:8329'), '[address]');
+  assert.equal(sanitize('Open 12:30 now'), 'Open 12:30 now');
+});
+
+test('French amounts, secrets written with a separator or none, hyphenated card and SSN numbers and 0x hex are masked', () => {
+  const cases = {
+    "5 millions d'euros": '[amount]', '5 millions de euros': '[amount]', '5 US$': '[amount]', '500 yen': '[amount]', '5usd': '[amount]',
+    'mdp=abc': '[secret]', 'mot de passe: abc': '[secret]', 'clé: abc': '[secret]', 'pw=x': '[secret]', 'password hunter2': '[secret]',
+    'password reset flow': 'password reset flow',
+    '4111-1111-1111-1111': '[number]', '123-45-6789': '[number]', '0xdeadBEEF': '[secret]', 'Release 2026-10-15': 'Release 2026-10-15',
+  };
+  for (const [input, expected] of Object.entries(cases)) assert.equal(sanitize(input), expected, input);
+});
+
+test('a title of many kilobytes is cut before the patterns run: it returns in time and never shows past 500 characters', () => {
+  const started = performance.now();
+  const out = sanitize('1 '.repeat(10000));
+  assert.ok(performance.now() - started < 500, 'bounded time');
+  assert.ok(out.length <= 80);
+  assert.equal(sanitize('w '.repeat(300) + 'TAILWORD', 2000).includes('TAILWORD'), false, 'past 500 characters is not read');
+});
+
+test('the deadline of the dispatcher is capped at 50 seconds, below the 60 that wake.sh allows', () => {
+  assert.equal(notifySettings({ sections: {} }, { CLEARED_NOTIFY_DEADLINE_SECONDS: '50' }).deadlineMs, 50000);
+  assert.throws(() => notifySettings({ sections: {} }, { CLEARED_NOTIFY_DEADLINE_SECONDS: '51' }), /DEADLINE_SECONDS/);
+});
+
+test('the dispatcher does not inherit the wake lock (fd 8): a child that outlives the kill cannot hold it', () => {
+  const wakeSh = readFileSync(join(ORCH_HOME, 'wake.sh'), 'utf8');
+  const dispatch = wakeSh.split('\n').filter((line) => line.includes('notify.mjs" dispatch'));
+  assert.equal(dispatch.length, 1, 'one dispatcher call');
+  assert.match(dispatch[0], /dispatch > \/dev\/null 8>&- \|\| true$/, 'fd 8 closed for the dispatcher, as talk.sh does');
+  // The same redirection, at run time: a child started that way has no fd 8 while the lock's fd is open.
+  const probe = spawnSync('bash', ['-c', 'exec 8>/dev/null; if [ -e /proc/$$/fd/8 ]; then timeout 5 sh -c \'if [ -e /proc/$$/fd/8 ]; then exit 1; fi\' 8>&-; echo "rc=$?"; fi'], { encoding: 'utf8' });
+  assert.equal(probe.stdout.trim(), 'rc=0', 'the child sees no fd 8');
+});
+
+test('serve/install.sh warns when CLEARED_NOTIFY_LINK_BASE is not set, and is silent when it is', () => {
+  const line = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8').split('\n').find((l) => l.includes('CLEARED_NOTIFY_LINK_BASE:-'));
+  assert.ok(line, 'the check is in the installer');
+  const run = (env) => spawnSync('bash', ['-c', line], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
+  assert.match(run({}).stderr, /WARNING: CLEARED_NOTIFY_LINK_BASE is not set/);
+  assert.equal(run({ CLEARED_NOTIFY_LINK_BASE: 'https://cockpit.example.ts.net' }).stderr, '');
+});
+
 test('each kind reads as a product sentence, in English and in French; health names a known code only', () => {
   const en = (o) => render(o, { language: 'en' }), fr = (o) => render(o, { language: 'fr' });
   assert.deepEqual([en({ kind: 'approval', ticket: 'EX-1', title: 'Rename' }).title, en({ kind: 'approval', ticket: 'EX-1', title: 'Rename' }).body], ['Ready to land', 'EX-1 · Rename waits for your agreement.']);

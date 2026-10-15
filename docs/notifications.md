@@ -14,7 +14,7 @@ The human is told on his phone as soon as something waits for him, with no outsi
 
 The language is `[owner] language`. A health notification names the problem by a fixed sentence for a known code, and "a health problem was detected" otherwise; the name of the team, path or service that a ledger detail may hold is never said.
 
-How long it takes: the wake runs the dispatcher last, after the board snapshot and the health are written. A card that appears is told at the next wake (a minute with the default timer). A rollback recorded by the release watch between two wakes is told at the next one. The dispatcher runs inside the wake's lock, so it is kept short: the adapters of one notification are called together, Web Push tells four browsers at a time (each call cut after 10 seconds), and after `CLEARED_NOTIFY_DEADLINE_SECONDS` (30) what is still on its way is given up and waits for the next wake, not counted as a try and not recorded as sent. `wake.sh` stops it after 60 seconds whatever happens.
+How long it takes: the wake runs the dispatcher last, after the board snapshot and the health are written. A card that appears is told at the next wake (a minute with the default timer). A rollback recorded by the release watch between two wakes is told at the next one. The dispatcher runs inside the wake's lock, so it is kept short: the adapters of one notification are called together, Web Push tells four browsers at a time (each call cut after 10 seconds), and after `CLEARED_NOTIFY_DEADLINE_SECONDS` (30 by default, 50 at most) what is still on its way is given up and waits for the next wake, not counted as a try and not recorded as sent. `wake.sh` stops it after 60 seconds whatever happens.
 
 What is held, and what is dropped:
 
@@ -27,9 +27,35 @@ What is held, and what is dropped:
 
 ## Settings
 
-All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.md#notify): the adapters, the kinds sent (each on or off), the quiet hours and their time zone, the coalescing window, the blocked threshold. Four service settings are not in that file: the address the link opens (`CLEARED_NOTIFY_LINK_BASE`, no link when unset), the extra push hosts (`CLEARED_NOTIFY_PUSH_HOSTS`), the mail program (`CLEARED_NOTIFY_SENDMAIL`) and how long one dispatch may send (`CLEARED_NOTIFY_DEADLINE_SECONDS`, 30 by default). They come from the service's environment, because a project's agent can write `agents.conf`. Secrets are never in that file.
+All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.md#notify): the adapters, the kinds sent (each on or off), the quiet hours and their time zone, the coalescing window, the blocked threshold. Four service settings are not in that file: the address the link opens (`CLEARED_NOTIFY_LINK_BASE`, no link when unset), the extra push hosts (`CLEARED_NOTIFY_PUSH_HOSTS`), the mail program (`CLEARED_NOTIFY_SENDMAIL`) and how long one dispatch may send (`CLEARED_NOTIFY_DEADLINE_SECONDS`, 30 by default, 50 at most). They come from the service's environment, because a project's agent can write `agents.conf`. Secrets are never in that file.
+
+### Service environment (systemd drop-in)
+
+A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.sh`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.sh` warns about it. Set the variables with a drop-in on each unit, as the service account, then reload:
+
+```sh
+mkdir -p ~/.config/systemd/user/cleared-wake.service.d ~/.config/systemd/user/cleared-app.service.d
+cat > ~/.config/systemd/user/cleared-wake.service.d/notify.conf <<'EOF'
+[Service]
+Environment=CLEARED_NOTIFY_LINK_BASE=https://<machine>.<tailnet>.ts.net
+# Only for a self-hosted push service (the four browsers' own services are known already).
+Environment=CLEARED_NOTIFY_PUSH_HOSTS=push.example.org
+# Optional: CLEARED_NOTIFY_SENDMAIL=/usr/sbin/sendmail, CLEARED_NOTIFY_DEADLINE_SECONDS=30 (50 at most)
+EOF
+cat > ~/.config/systemd/user/cleared-app.service.d/notify.conf <<'EOF'
+[Service]
+# The same host as the wake's, when it is self-hosted: the app accepts a subscription to it.
+Environment=CLEARED_NOTIFY_PUSH_HOSTS=push.example.org
+EOF
+systemctl --user daemon-reload
+systemctl --user restart cleared-app.service
+```
+
+The wake reads its drop-in at its next run (a minute with the default timer). `CLEARED_NOTIFY_PUSH_HOSTS` belongs in both units: the app checks a subscription's address, and the wake checks it again before it sends. Leave the `PUSH_HOSTS` lines out when the push services are the browsers' own. Check the result with `notify.mjs test` as the service account; with the link set, the test message opens the app.
 
 ## Setup
+
+Step 1 below needs the link, which is set in the drop-in above.
 
 ### Web Push, through the app (default)
 
@@ -88,6 +114,9 @@ install -m 0600 /dev/null ~/.config/cleared/notify/credentials.json   # then edi
 - **Secrets stay with the service.** The Web Push private key, the subscriptions (a push address is a capability) and the adapters' credentials live in `secrets_dir` only. They are never written to the ledger, a log, a notification or an error: a failed delivery is recorded as a short code (`ntfy refused (403)`, `telegram unreachable`, `push service refused`), never with its address, token or answer. The Telegram token travels in the address of each call, so that address is never said. Its API address can only be changed in the service's environment (`CLEARED_NOTIFY_TELEGRAM_API`, for a test double).
 - **What the carriers see.** Web Push messages are encrypted for the device: the push service sees neither title nor text. ntfy, Telegram and e-mail carry the text (the kind, the ticket's identifier and filtered title) through their servers; choose them knowing that.
 - **The link.** It is the app's address with `#ticket=<id>`: the part after `#` never reaches a server or its log, and it opens the porthole only after the usual sign-in. The service worker opens only an address of the app itself.
+- **Spam is not capped.** An agent can spam the human by creating many tickets or questions: the 10-minute coalescing is per ticket, with no global cap.
+- **The passkey prompt is thin.** The passkey prompt shows only the site, not what is confirmed.
+- **The first run.** If the first run has no snapshot, health events are not initialised.
 - **Limits.** Under one shared Unix account (`[security] allow_shared_uid`, no `agent_user`), an agent can read `secrets_dir` like any file of the service, and send what it likes with those keys: as for the rest of Cleared, the account boundary is the protection. Whoever holds an unlocked subscribed phone reads its notifications.
 
 ## The ledger: when you were told

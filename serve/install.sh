@@ -264,3 +264,5 @@ sleep 1
 echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
 echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."
 [ -n "$agent_user" ] || echo "release lock is not a security boundary: agents run as the service account"
+# The units do not read this shell: the link is set by a drop-in on cleared-wake.service (docs/notifications.md, Service environment).
+[ -n "${CLEARED_NOTIFY_LINK_BASE:-}" ] || echo "WARNING: CLEARED_NOTIFY_LINK_BASE is not set in this shell: notifications will have no link, and Web Push will report no_subject, until a drop-in sets it for cleared-wake.service (docs/notifications.md, Service environment)." >&2

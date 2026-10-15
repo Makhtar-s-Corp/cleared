@@ -553,14 +553,14 @@ Notifications to the human's phone when something waits for him or goes wrong: a
 | `secrets_dir` | Absolute path of a private directory (mode `0700`, owned by the service account, outside the project and the checkout, unreadable by the agents' account) holding `vapid.json`, `subscriptions.json` and `credentials.json`. | Optional; no default (`~/.config/cleared/notify` is used) |
 | `vapid_subject` | The contact the push services may use about this service (`mailto:` or `https:`), sent in every Web Push request. Apple requires one. | Optional; no default (the link address when it is https) |
 
-Four settings are read from the service's environment only, never from the project's `agents.conf` (a project's agent could change them):
+Four settings are read from the service's environment only, never from the project's `agents.conf` (a project's agent could change them). They are set in a systemd drop-in on the units, see [Service environment](notifications.md#service-environment-systemd-drop-in):
 
 | Environment variable | Purpose | Default |
 | --- | --- | --- |
 | `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole). | None: no link |
 | `CLEARED_NOTIFY_PUSH_HOSTS` | Extra Web Push service host names accepted for a subscription, separated by commas (a self-hosted service). The defaults are Google's, Mozilla's, Apple's and Microsoft's. | None |
 | `CLEARED_NOTIFY_SENDMAIL` | Absolute path of the mail program the `email` adapter runs. | The first of `/usr/sbin/sendmail`, `/usr/lib/sendmail`, `/sbin/sendmail`, `/usr/bin/sendmail` that is a file no one else can write |
-| `CLEARED_NOTIFY_DEADLINE_SECONDS` | How long one dispatch may send (1 to 300 seconds). It runs inside the wake's lock: what is still on its way then is given up and sent at the next wake. `wake.sh` stops the dispatcher after 60 seconds in any case. | 30 |
+| `CLEARED_NOTIFY_DEADLINE_SECONDS` | How long one dispatch may send (1 to 50 seconds). It runs inside the wake's lock: what is still on its way then is given up and sent at the next wake. `wake.sh` stops the dispatcher after 60 seconds in any case. | 30 |
 
 ## `[security]`
 
