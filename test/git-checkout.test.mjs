@@ -211,6 +211,19 @@ test('git that cannot run is named too, and a file that is simply untracked keep
 // What each planted setting would run, reached by a git command, with the read environment: nothing. The
 // commands include some Cleared never runs on a checkout (status, a patch diff, a fetch): the environment
 // holds for them too. textconv and filter drivers are not overridden by key: the commands leave them out.
+test('the read environment drops GIT_CONFIG_PARAMETERS, which git reads after the overrides and would let a caller\'s -c win', () => {
+  const dir = realpathSync(scratch('orch-params-'));
+  execFileSync(REAL_GIT, ['init', '-q', dir]);
+  const callers = { GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='touch marker'" };
+  // Control: the caller's setting beats the count-based override when the read environment is not used.
+  const beaten = execFileSync(REAL_GIT, ['-C', dir, 'config', '--get', 'core.fsmonitor'], { encoding: 'utf8',
+    env: { ...process.env, ...callers, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: 'false' } }).trim();
+  assert.equal(beaten, 'touch marker');
+  const env = checkoutReadEnv(dir, { ...process.env, ...callers });
+  assert.equal('GIT_CONFIG_PARAMETERS' in env, false);
+  assert.equal(execFileSync(REAL_GIT, ['-C', dir, 'config', '--get', 'core.fsmonitor'], { encoding: 'utf8', env }).trim(), 'false');
+});
+
 // cleared status: when the project configuration cannot be read, --json still prints one schema 1 object with the
 // reason (refused, or not a repository told apart), and exit 2; the text mode says the same on stderr.
 test('cleared status says why the project configuration cannot be read: one JSON object with the reason, or the text line', () => {
