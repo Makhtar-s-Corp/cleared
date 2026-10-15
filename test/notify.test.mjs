@@ -417,6 +417,16 @@ test('no snapshot yet: the first dispatch initialises nothing, so cards that alr
   assert.deepEqual(box.sent.map((m) => m.ticket), ['EX-2'], 'only the request that is new since the first dispatch');
 });
 
+test('a rollback with no valid ticket has its own group: it is not held behind a health problem of no ticket', async () => {
+  const box = setup();
+  await box.run(T0);
+  addEvent(box.db, { kind: 'rollback_pushed', ticket: null, at: iso(T0), detail: `${'c'.repeat(40)} reverted` });
+  addEvent(box.db, { kind: 'heartbeat_problem', at: iso(T0), detail: 'an_unknown_code' });
+  await box.run(T0 + minute);
+  assert.deepEqual(box.sent.map((m) => m.kind).sort(), ['health', 'rollback'], 'both are sent');
+  assert.deepEqual(box.sent.map((m) => m.group).sort(), ['health:other', 'rollback:none']);
+});
+
 test('at most one notification per ticket every ten minutes: a second event waits, then goes; two at once are folded into one', async () => {
   const box = setup();
   await box.run(T0);
