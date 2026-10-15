@@ -84,7 +84,8 @@ test('adversarial: a pull request that widens its own safe paths in .cleared/age
   assert.ok(judged.reasons.includes('protected'));
   // Even a main checkout that declared everything safe keeps Cleared's settings, CI, agent rules and git files apart.
   for (const file of ['.cleared/agents.conf', '.cleared/prompts/dev.md', '.github/workflows/ci.yml', '.Cleared/agents.conf', 'sub/.cleared/x', 'CLAUDE.md', 'docs/AGENTS.md',
-    '.gitattributes', 'docs/.gitmodules', '.husky/pre-commit', 'ops/cleared/merge-pr.sh', 'OPS/Cleared/merge-pr.sh', 'compose.yaml', 'Dockerfile', 'CODEOWNERS']) {
+    '.gitattributes', 'docs/.gitmodules', '.husky/pre-commit', 'ops/cleared/merge-pr.sh', 'OPS/Cleared/merge-pr.sh', 'compose.yaml', 'Dockerfile', 'CODEOWNERS',
+    'deploy/Dockerfile.web', 'deploy/docker-compose.prod.yml', 'deploy/compose.staging.yaml', 'web/app.dockerfile']) {
     const one = project();
     const changed = one.commit(({ write: w }) => w({ [file]: 'changed\n' }));
     assert.deepEqual(judge(one, changed, WIDE).reasons, ['protected'], file);
@@ -506,9 +507,13 @@ test('merge on the fast lane: judged again at the very commit, it waits for its 
   mkdirSync(join(forged.box.state, 'validations'), { recursive: true });
   writeFileSync(join(forged.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: forged.headOf() }] }));
   writeFileSync(join(forged.box.home, 'tracker-moved'), '0');
+  const kept = () => JSON.parse(readFileSync(join(forged.box.state, 'lanes', 'X-5.json'), 'utf8')).fast_lane.state;
   const waits = forged.merge(['-', '--dry-run'], other, 'Announcement.');
   assert.equal(waits.status, 3, waits.stderr);
-  assert.equal(JSON.parse(readFileSync(join(forged.box.state, 'lanes', 'X-5.json'), 'utf8')).fast_lane.state, 'full');
+  assert.equal(kept(), 'fast', 'a dry run writes nothing');
+  assert.equal(forged.merge(['-'], other, 'Announcement.').status, 3);
+  assert.equal(kept(), 'full', 'judged at the very commit, and sent back for good');
+  rmSync(join(forged.box.state, 'merge-queue'), { recursive: true, force: true });
   // Merged once the host is free, on the full circuit, with its time measured from Todo.
   const live = forged.merge(['-'], {}, '**Live**: see it on the settings screen.');
   assert.equal(live.status, 0, live.stderr);

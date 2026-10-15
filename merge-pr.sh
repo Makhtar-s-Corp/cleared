@@ -125,7 +125,8 @@ fi
 lane_kind=full
 lane_key=$ticket
 [ "$(jq -r --argjson pr "$pr" 'select(.pr == $pr) | .fast_lane.state // empty' "$(lane_record "$ticket")" 2> /dev/null)" = fast ] || lane_key=
-[ -z "$lane_key" ] || lane_kind=$(node_lib fast-lane.mjs decide "$lane_key" "$head" 2> /dev/null) || lane_kind=full
+# (A dry run judges it too, and writes nothing.)
+[ -z "$lane_key" ] || lane_kind=$(node_lib fast-lane.mjs "$([ -n "$dry_run" ] && echo check || echo decide)" "$lane_key" "$head" 2> /dev/null) || lane_kind=full
 [ "$lane_kind" = fast ] || lane_kind=full
 
 # 3. Reviewed, for this ticket, with the verdict asked for, at this version.
