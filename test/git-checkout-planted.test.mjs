@@ -117,6 +117,7 @@ test('the tracked-file check of the project config runs nothing the checkout pla
     { encoding: 'utf8', env: childEnv({ CLEARED_REPO: p.repo, ...OWNER }) });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), join(p.repo, '.cleared', 'agents.conf'), 'the committed config is read');
+  assert.equal(run.stderr, '', 'the read environment makes git say nothing: the human sees no warning on every command');
   assert.equal(p.ran(), '');
 });
 
