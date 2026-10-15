@@ -197,6 +197,27 @@ test('every adapter refuses a redirect: the request says so, and a redirect answ
   await assert.rejects(refused.send(MESSAGE), (error) => error.message === 'ntfy unreachable');
 });
 
+test('a long e-mail subject is folded into encoded words of 75 characters at most, each a whole UTF-8 text', async () => {
+  const calls = [];
+  const adapter = emailAdapter({ credentials: () => ({ to: 'owner@example.org' }), sendmail: '/usr/sbin/sendmail', run: (file, args, input) => calls.push(input) });
+  const title = 'Déployer la nouvelle façade « Réglages » sur le téléphone de l\'équipe, en français, avec des accents partout ✓🙂 '.repeat(4).trim();
+  await adapter.send({ kind: 'approval', title, body: 'x', url: null, urgent: false, group: 'EX-1' });
+  const lines = calls[0].split('\r\n');
+  const start = lines.findIndex((line) => line.startsWith('Subject: '));
+  const folded = [lines[start]];
+  for (let i = start + 1; lines[i].startsWith(' '); i += 1) folded.push(lines[i]);
+  assert.ok(folded.length > 1, 'a long subject is folded');
+  for (const line of folded) assert.ok(line.replace(/^(Subject: | )/, '').length <= 75 && line.length <= 81, line);
+  const words = folded.map((line) => line.replace(/^Subject: /, '').trim()).map((word) => /^=\?UTF-8\?B\?([A-Za-z0-9+/]+={0,2})\?=$/.exec(word));
+  assert.ok(words.every(Boolean), 'each word is one encoded word');
+  const decoded = words.map((m) => Buffer.from(m[1], 'base64'));
+  for (const bytes of decoded) assert.ok(!bytes.toString('utf8').includes('\uFFFD'), 'no character is cut in two');
+  assert.equal(Buffer.concat(decoded).toString('utf8'), title, 'the words, read back in order, are the subject');
+  const short = emailAdapter({ credentials: () => ({ to: 'owner@example.org' }), sendmail: '/usr/sbin/sendmail', run: (f, a, input) => calls.push(input) });
+  await short.send({ kind: 'test', title: 'Test', body: 'x', url: null, urgent: false, group: 'test' });
+  assert.match(calls.at(-1), /^Subject: =\?UTF-8\?B\?VGVzdA==\?=\r$/m, 'a short subject is one word, as before');
+});
+
 test('e-mail goes through sendmail with the recipient as an argument; a title cannot add a header or a recipient', async () => {
   const calls = [];
   const adapter = emailAdapter({ credentials: () => ({ to: 'owner@example.org', from: 'cleared@example.org' }), sendmail: '/usr/sbin/sendmail', run: (file, args, input) => calls.push({ file, args, input }) });
