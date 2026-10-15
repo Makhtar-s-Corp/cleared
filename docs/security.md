@@ -21,6 +21,10 @@ An automatic rollback is a direct, ordinary push of a revert commit to the confi
 
 When `auto_rollback = true`, application code can make a health probe fail and thereby cause Cleared to revert the release without another human decision. This is the intended emergency action after a previously approved merge. Keep the health endpoint and `[release]` settings under owner review; do not make the probe depend on untrusted scripts or remote responses. A different commit appearing on the base after the release prevents automatic rollback, even if the revert would apply cleanly.
 
+## Fast lane
+
+The [fast lane](fast-lane.md) spares waits for a tiny change, never a gate: green full checks on the exact commit, a review by another model and the human's agreement to that version still bind every merge. Its decision comes from rules over the real diff at one commit, with the settings of the main checkout; it is kept in service-owned state, recomputed by `merge-pr.sh` at the merged commit, and refused to any account but the state's owner. A pull request that touches `.cleared/`, CI, agent rules, dependencies, migrations or `[merge] guarded_paths` is never fast. Its targeted tests run the branch's code: under `[security] agent_user` they run as that account in the agents' sandbox, with an empty environment and no shell.
+
 ## Branch protection
 
 Cleared's merge lock only binds those who go through it. A person or a token with permission to push to the base branch, or to merge a pull request directly, bypasses every check described here. Enable branch protection (or a repository ruleset) on the base branch: require a pull request, and do not give the agents' accounts or any credential they can reach a bypass.
