@@ -416,10 +416,15 @@ fi
 if [ -n "$pushed_role" ]; then
   # What is known of the lane of this ticket, kept beyond its worktree.
   mkdir -p "$(dirname "$record")"
-  kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
-  [ -n "$kept" ] || kept='{}'
-  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
-    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  # Read and written under the record's lock (the one lane_write takes): a
+  # change another writer made since is kept, not overwritten.
+  (
+    flock -w 30 9
+    kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
+    [ -n "$kept" ] || kept='{}'
+    jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
+      '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  ) 9> "$record.lock"
   # Its lane at opening, kept once (what the ticket says later changes
   # nothing): the rules judge its diff against it after each session.
   if [ "$fast_role" = author ] && [ "$(jq -r '.fast_lane | type' "$record")" != object ]; then

