@@ -59,7 +59,8 @@ Reads are `GET` and `HEAD`. The only writes are the `POST` routes of the table b
 | `POST /api/actions/undo` | session, anti-forgery token (only the session that confirmed) |
 | `POST /api/actions/answer` | session, anti-forgery token (no passkey: an answer puts nothing live) |
 | `POST /api/passkeys/options`, `POST /api/passkeys/finish` | session, anti-forgery token, a one-time grant from the human's account |
-| `POST /api/notifications/subscribe`, `POST /api/notifications/unsubscribe` | session, anti-forgery token (a browser of the human asks to be notified, or no longer; see [Notifications](notifications.md)) |
+| `POST /api/notifications/challenge` | session, anti-forgery token (a passkey challenge for one subscription: notifications on or off for this device) |
+| `POST /api/notifications/subscribe`, `POST /api/notifications/unsubscribe` | session, anti-forgery token, passkey assertion on that challenge (a browser of the human asks to be notified, or no longer; see [Notifications](notifications.md)) |
 
 Besides the sign-in page, what makes the app installable is served without the token, with no data in it: `/manifest.webmanifest`, the service worker `/sw.js` and the three icons under `/icons/`. `GET /api/notifications` (the session only) says whether Web Push is offered and gives the service's public key.
 
@@ -110,7 +111,7 @@ The page shows "Connection lost, last update HH:MM" at the top when the stream b
 
 ## Installing it, and notifications
 
-The app can be added to a phone's Home Screen (a manifest, icons and a service worker that caches nothing), and its header offers **Turn on notifications** when `[notify] adapters` includes `webpush` and the app has an https `public_origin`. The app only keeps the browser's subscription; the wake's dispatcher sends the notifications. A notification opens `/#ticket=<id>`, the ticket's porthole (after the sign-in when the session is gone). On iPhone, web notifications need the app added to the Home Screen first. See [Notifications](notifications.md).
+The app can be added to a phone's Home Screen (a manifest, icons and a service worker that caches nothing), and its header offers **Turn on notifications** when `[notify] adapters` includes `webpush`, the app has an https `public_origin` and a passkey is registered: turning notifications on or off for a device is confirmed with the passkey, like Clear to land. The app only keeps the browser's subscription; the wake's dispatcher sends the notifications. A notification opens `/#ticket=<id>`, the ticket's porthole (after the sign-in when the session is gone). On iPhone, web notifications need the app added to the Home Screen first. See [Notifications](notifications.md).
 
 ## Limits of this version
 
