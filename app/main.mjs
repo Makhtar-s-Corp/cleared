@@ -97,11 +97,12 @@ if (demo) {
   actions = createActions({ source, origin, owner, record, run: (request) => runWriter(request),
     readPasskeys: () => readPasskeys(credentialsDir, { project }), writePasskeys: (list) => writePasskeys(credentialsDir, list, { project }) });
 }
-// A browser of the human may ask to be notified: its subscription is kept in the service's private
-// notification directory, made here if missing (lib/notify/store.mjs). Off in the demo.
+// A browser of the human may ask to be notified, confirmed with the human's passkey (the gestures' ceremony):
+// its subscription is kept in the service's private notification directory, made here if missing
+// (lib/notify/store.mjs). Off in the demo.
 let notifications = null;
 if (!demo) {
-  try { const notify = notifySettings(conf); notifications = createNotifications({ settings: notify, store: notifyStore(notify.secretsDir, { project, create: true }), origin, record }); }
+  try { const notify = notifySettings(conf); notifications = createNotifications({ settings: notify, store: notifyStore(notify.secretsDir, { project, create: true }), origin, record, confirm: actions }); }
   catch (error) { console.error(`cleared app: notifications off: ${error.message}`); }
 }
 const grants = !demo && grantPath ? grantServer({ path: grantPath, humanUid: humanUid(), mint: () => actions.mintGrant(), record }) : null;

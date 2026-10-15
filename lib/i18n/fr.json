@@ -412,6 +412,7 @@
   "app_notify_ios": "Notifications",
   "app_notify_ios_hint": "Sur iPhone, les notifications demandent l’app sur l’écran d’accueil : touchez Partager, puis Sur l’écran d’accueil, ouvrez Cleared depuis là, connectez-vous et activez-les.",
   "app_notify_failed": "Les notifications n’ont pas pu être activées. Réessayez.",
+  "app_notify_off_failed": "Les notifications n’ont pas pu être désactivées. Réessayez.",
   "app_notify_ready_title": "Notifications activées",
   "app_notify_ready_body": "Cet appareil sera prévenu quand quelque chose vous attend."
 }

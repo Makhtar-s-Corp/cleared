@@ -6,6 +6,15 @@ const bytes = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/
 const text64 = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const sameVersions = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
+// The passkey answers a challenge of the server (also used by notify.js).
+export async function passkey(challenge) {
+  if (!window.PublicKeyCredential || !navigator.credentials) throw Object.assign(new Error('x'), { code: 'insecure' });
+  const k = challenge.publicKey;
+  const got = await navigator.credentials.get({ publicKey: { challenge: bytes(k.challenge), rpId: k.rpId, timeout: k.timeout, userVerification: 'required',
+    allowCredentials: k.allowCredentials.map((c) => ({ type: c.type, id: bytes(c.id) })) } });
+  return { id: got.id, response: { clientDataJSON: text64(got.response.clientDataJSON), authenticatorData: text64(got.response.authenticatorData), signature: text64(got.response.signature) } };
+}
+
 export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   const box = $('ph-actions');
   let me = null;
@@ -26,13 +35,6 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
     return me;
   }
 
-  async function passkey(challenge) {
-    if (!window.PublicKeyCredential || !navigator.credentials) throw Object.assign(new Error('x'), { code: 'insecure' });
-    const k = challenge.publicKey;
-    const got = await navigator.credentials.get({ publicKey: { challenge: bytes(k.challenge), rpId: k.rpId, timeout: k.timeout, userVerification: 'required',
-      allowCredentials: k.allowCredentials.map((c) => ({ type: c.type, id: bytes(c.id) })) } });
-    return { id: got.id, response: { clientDataJSON: text64(got.response.clientDataJSON), authenticatorData: text64(got.response.authenticatorData), signature: text64(got.response.signature) } };
-  }
   // Asks, has the passkey confirm, and returns the server's answer to the confirmation.
   async function confirmed(gesture, card, extra = {}) {
     const asked = await api('/api/actions/challenge', { gesture, ticket: card.ref, versions: seen, ...extra });

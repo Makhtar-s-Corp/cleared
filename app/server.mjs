@@ -3,10 +3,12 @@
 // board snapshot and the ledger. Its only writes are the three gestures of the
 // human (clear to land, send back, answer), the sign-in and passkey routes
 // they need, and a browser's request to be notified; nothing starts or stops a
-// team, nothing talks to the release service, and nothing is sent from here. Every connection is checked first: peer address, Host header, then
-// the access token or session. A write needs more: the session cookie (never
-// the bearer token), the anti-forgery header, a same-origin request, and for
-// the gestures that change a ticket's course a passkey confirmation.
+// team, nothing talks to the release service, and nothing is sent from here.
+// Every connection is checked first: peer address, Host header, then the
+// access token or session. A write needs more: the session cookie (never the
+// bearer token), the anti-forgery header, a same-origin request, and for the
+// gestures that change a ticket's course or turn a device's notifications on
+// or off a passkey confirmation.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -53,7 +55,8 @@ export const ROUTES = ['GET /', 'GET /app.js', 'GET /actions.js', 'GET /notify.j
   'GET /manifest.webmanifest', 'GET /sw.js', 'GET /icons/:file', 'GET /api/snapshot', 'GET /api/me', 'GET /api/messages', 'GET /api/notifications', 'GET /api/tickets/:id', 'GET /media/:id', 'GET /events'];
 // Everything that writes. All need the session cookie and the anti-forgery header, except sign-in (the access token).
 export const WRITES = ['POST /session', 'POST /session/logout', 'POST /api/actions/challenge', 'POST /api/actions/confirm', 'POST /api/actions/undo',
-  'POST /api/actions/answer', 'POST /api/passkeys/options', 'POST /api/passkeys/finish', 'POST /api/notifications/subscribe', 'POST /api/notifications/unsubscribe'];
+  'POST /api/actions/answer', 'POST /api/passkeys/options', 'POST /api/passkeys/finish',
+  'POST /api/notifications/challenge', 'POST /api/notifications/subscribe', 'POST /api/notifications/unsubscribe'];
 
 const MESSAGE_KEYS = (language) => {
   const out = {};
@@ -170,11 +173,11 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
       if (request.headers.origin !== expectedOrigin(request) || (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin')) return error(403, 'origin');
       if (!String(request.headers['content-type'] || '').startsWith('application/json')) return error(415, 'type');
       if (path === '/session/logout') { sessions.revoke(cookieValue(request.headers.cookie, COOKIE)); return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); }
-      // Notifications: a browser of the human asks to be told (or no longer). Nothing is sent from here.
+      // Notifications: a browser of the human asks to be told (or no longer), confirmed with the passkey. Nothing is sent from here.
       if (path.startsWith('/api/notifications/')) {
         if (!notifications) return error(503, 'unavailable');
         const input = await body(request);
-        return json(response, 200, await notifications[path === '/api/notifications/subscribe' ? 'subscribe' : 'unsubscribe'](mine, input));
+        return json(response, 200, await notifications[path.slice('/api/notifications/'.length)](mine, input));
       }
       if (!actions) return error(503, 'unavailable');
       const input = await body(request);

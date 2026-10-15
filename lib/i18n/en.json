@@ -413,6 +413,7 @@
   "app_notify_ios": "Notifications",
   "app_notify_ios_hint": "On iPhone, notifications need the app on the Home Screen: tap Share, then Add to Home Screen, open Cleared from there, sign in and turn them on.",
   "app_notify_failed": "Notifications could not be turned on. Try again.",
+  "app_notify_off_failed": "Notifications could not be turned off. Try again.",
   "app_notify_ready_title": "Notifications are on",
   "app_notify_ready_body": "This device will be told when something waits for you."
 }

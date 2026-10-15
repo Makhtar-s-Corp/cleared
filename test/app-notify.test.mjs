@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { appServer, ROUTES, WRITES } from '../app/server.mjs';
 import { demoSource } from '../app/sources/demo.mjs';
 import { createNotifications } from '../app/lib/notifications.mjs';
+import { createActions } from '../app/lib/actions.mjs';
+import { Authenticator } from './app-authenticator.mjs';
 import { notifySettings } from '../lib/notify/contract.mjs';
 import { notifyStore } from '../lib/notify/store.mjs';
 
@@ -29,19 +31,41 @@ async function rig({ notify = {}, env = {}, withNotifications = true } = {}) {
   // The service's own settings come from its environment (here, the test's), never from agents.conf.
   const settings = notifySettings({ sections: { notify: { vapid_subject: 'mailto:ops@example.org', ...notify } } }, env);
   const store = notifyStore(dir, { create: true });
-  const notifications = withNotifications ? createNotifications({ settings, store, origin: base, record: (e) => records.push(e) }) : null;
-  const server = appServer({ source: demoSource(), token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, notifications, origin: base, owner: 'alice' });
+  const source = demoSource();
+  // The gestures' passkey ceremony, as the app wires it (app/main.mjs).
+  let passkeys = [];
+  const actions = createActions({ source, origin: base, owner: 'alice', readPasskeys: () => passkeys, writePasskeys: (list) => { passkeys = list; },
+    run: async () => ({ ok: true }), record: (e) => records.push(e) });
+  const notifications = withNotifications ? createNotifications({ settings, store, origin: base, record: (e) => records.push(e), confirm: actions }) : null;
+  const server = appServer({ source, token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, actions, notifications, origin: base, owner: 'alice' });
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
   const call = (path, init = {}) => fetch(base + path, { redirect: 'manual', ...init });
-  const signIn = async () => {
-    const signed = await call('/session', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'user-agent': 'Mozilla/5.0 (iPhone)' } });
+  const authenticator = new Authenticator({ origin: base, rpId: '127.0.0.1' });
+  // A session opened with the access token: what an agent holding the token gets too.
+  const signIn = async (agent = 'Mozilla/5.0 (iPhone)') => {
+    const signed = await call('/session', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'user-agent': agent } });
     const cookie = signed.headers.get('set-cookie').split(';')[0];
     const me = await (await call('/api/me', { headers: { cookie } })).json();
     const post = (path, body = {}, over = {}) => call(path, { method: 'POST', headers: { cookie, 'x-csrf-token': me.csrf, origin: base, 'content-type': 'application/json', ...over }, body: JSON.stringify(body) });
-    return { cookie, post };
+    const json = async (path, body, over) => { const r = await post(path, body, over); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+    return { cookie, post, json };
   };
-  return { base, dir, store, records, call, signIn, close: () => new Promise((r) => { server.close(r); }) };
+  // The human's passkey, registered the way the phone does after `cleared app passkey` (a grant only the human's Unix account gets).
+  const register = async (browser) => {
+    const { grant } = actions.mintGrant();
+    const options = await browser.json('/api/passkeys/options', { grant });
+    assert.equal(options.status, 200);
+    assert.equal((await browser.json('/api/passkeys/finish', { grant, credential: authenticator.create(options.body.publicKey) })).status, 200);
+  };
+  // Turn notifications on (or off) for a subscription, confirmed with a passkey (the human's by default).
+  const confirmed = async (browser, op, payload, authn = authenticator) => {
+    const asked = await browser.json('/api/notifications/challenge', { op, ...payload });
+    if (asked.status !== 200) return asked;
+    return browser.json(`/api/notifications/${op}`, { ...payload, challengeId: asked.body.challengeId, assertion: authn.get(asked.body.publicKey) });
+  };
+  return { base, dir, store, records, call, signIn, register, confirmed, authenticator, close: () => new Promise((r) => { server.close(r); }) };
 }
+const subscriptionFor = (n) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/dev-${n}`, keys: browserKeys() });
 
 test('the app is installable: manifest, service worker and icons are served without the token and carry no data', async () => {
   const r = await rig();
@@ -69,7 +93,7 @@ test('the app is installable: manifest, service worker and icons are served with
     assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest">/);
     assert.match(html, /<link rel="apple-touch-icon" href="\/icons\/apple-touch-icon\.png">/);
     assert.ok(ROUTES.includes('GET /manifest.webmanifest') && ROUTES.includes('GET /sw.js') && ROUTES.includes('GET /api/notifications'));
-    assert.ok(WRITES.includes('POST /api/notifications/subscribe') && WRITES.includes('POST /api/notifications/unsubscribe'));
+    assert.ok(WRITES.includes('POST /api/notifications/challenge') && WRITES.includes('POST /api/notifications/subscribe') && WRITES.includes('POST /api/notifications/unsubscribe'));
   } finally { await r.close(); }
 });
 
@@ -81,6 +105,8 @@ test('the service worker caches nothing and opens only an address of the app its
   const js = readFileSync(join(pub, 'notify.js'), 'utf8');
   assert.match(js, /userVisibleOnly: true/);
   assert.match(js, /'x-csrf-token'/);
+  assert.match(js, /import \{ passkey \} from '\/actions\.js'/, 'the page confirms with the passkey, like the gestures');
+  assert.match(js, /\/api\/notifications\/challenge/);
   assert.doesNotMatch(js, /innerHTML|insertAdjacentHTML/);
   const app = readFileSync(join(pub, 'app.js'), 'utf8');
   assert.match(app, /#ticket=\(\[A-Za-z0-9\._-\]\{1,40\}\)\$/, 'a notification opens one ticket identifier, nothing else from the address');
@@ -88,60 +114,121 @@ test('the service worker caches nothing and opens only an address of the app its
   assert.match(login, /ticket=\[A-Za-z0-9\._-\]\{1,40\}/, 'the sign-in page does not take a ticket address for a token');
 });
 
-test('subscribing needs the human\'s session: not the access token alone, not without the anti-forgery token, not from another site', async () => {
+test('subscribing needs the human\'s passkey: a session opened with the access token alone cannot subscribe or unsubscribe', async () => {
   const r = await rig();
   try {
     const body = JSON.stringify({ subscription: SUBSCRIPTION });
     const json = { 'content-type': 'application/json' };
     assert.equal((await r.call('/api/notifications', { headers: { authorization: `Bearer ${TOKEN}` } })).status, 401, 'the token reads the board, not the notification settings');
-    assert.equal((await r.call('/api/notifications/subscribe', { method: 'POST', body, headers: { ...json, authorization: `Bearer ${TOKEN}`, origin: r.base } })).status, 401, 'an agent holding the token cannot subscribe');
-    assert.equal((await r.call('/api/notifications/subscribe', { method: 'POST', body, headers: json })).status, 401);
-    const { cookie, post } = await r.signIn();
-    assert.equal((await post('/api/notifications/subscribe', { subscription: SUBSCRIPTION }, { 'x-csrf-token': 'wrong' })).status, 403);
-    assert.equal((await post('/api/notifications/subscribe', { subscription: SUBSCRIPTION }, { origin: 'http://evil.example' })).status, 403);
-    assert.equal((await post('/api/notifications/subscribe', { subscription: SUBSCRIPTION }, { 'sec-fetch-site': 'cross-site' })).status, 403);
+    assert.equal((await r.call('/api/notifications/subscribe', { method: 'POST', body, headers: { ...json, authorization: `Bearer ${TOKEN}`, origin: r.base } })).status, 401, 'the token is not a session');
+    // What an agent holding the token can do: open a session, read its anti-forgery token, and try.
+    const agent = await r.signIn('curl/8');
+    assert.deepEqual(await (await r.call('/api/notifications', { headers: { cookie: agent.cookie } })).json(), { available: false, reason: 'no_passkey', publicKey: null, devices: 0 }, 'no passkey registered: nothing to offer');
+    assert.deepEqual(await agent.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION }), { status: 409, body: { error: 'no_passkey' } });
+    assert.deepEqual(await agent.json('/api/notifications/challenge', { op: 'subscribe', subscription: SUBSCRIPTION }), { status: 409, body: { error: 'no_passkey' } });
+    assert.equal(r.store.subscriptions().length, 0);
+
+    const human = await r.signIn();
+    await r.register(human);
+    assert.equal((await human.post('/api/notifications/subscribe', { subscription: SUBSCRIPTION }, { 'x-csrf-token': 'wrong' })).status, 403);
+    assert.equal((await human.post('/api/notifications/challenge', { op: 'subscribe', subscription: SUBSCRIPTION }, { origin: 'http://evil.example' })).status, 403);
+    assert.equal((await human.post('/api/notifications/subscribe', { subscription: SUBSCRIPTION }, { 'sec-fetch-site': 'cross-site' })).status, 403);
+    // A passkey exists now; a session still writes nothing without its answer.
+    assert.deepEqual(await agent.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION }), { status: 403, body: { error: 'challenge' } }, 'no challenge answered');
+    assert.deepEqual(await r.confirmed(agent, 'subscribe', { subscription: SUBSCRIPTION }, new Authenticator({ origin: r.base, rpId: '127.0.0.1' })), { status: 403, body: { error: 'unknown_key' } }, 'a key of the agent\'s own is not the human\'s');
+    const asked = await human.json('/api/notifications/challenge', { op: 'subscribe', subscription: SUBSCRIPTION });
+    const assertion = r.authenticator.get(asked.body.publicKey);
+    assert.deepEqual(await agent.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, challengeId: asked.body.challengeId, assertion }), { status: 403, body: { error: 'challenge' } }, 'a challenge belongs to the session that asked for it, and is gone once tried');
     assert.equal(r.store.subscriptions().length, 0, 'nothing kept from a refused request');
-    const status = await (await r.call('/api/notifications', { headers: { cookie } })).json();
+
+    const status = await (await r.call('/api/notifications', { headers: { cookie: human.cookie } })).json();
     assert.equal(status.available, true);
     assert.equal(Buffer.from(status.publicKey, 'base64url').length, 65, 'the service key, made at first use');
-    const done = await post('/api/notifications/subscribe', { subscription: SUBSCRIPTION });
-    assert.equal(done.status, 200);
-    assert.deepEqual(await done.json(), { ok: true, devices: 1 });
-    assert.deepEqual(r.store.subscriptions().map((s) => [s.endpoint, s.device]), [[SUBSCRIPTION.endpoint, r.store.subscriptions()[0].device]]);
+    r.records.length = 0;
+    assert.deepEqual(await r.confirmed(human, 'subscribe', { subscription: SUBSCRIPTION }), { status: 200, body: { ok: true, devices: 1 } });
+    assert.deepEqual(r.store.subscriptions().map((s) => s.endpoint), [SUBSCRIPTION.endpoint]);
     assert.match(r.store.subscriptions()[0].device, /^iPhone · /);
-    assert.equal(r.records.length, 1);
-    assert.deepEqual(Object.keys(JSON.parse(r.records[0].detail)), ['gesture', 'result', 'device']);
-    assert.doesNotMatch(r.records[0].detail, /googleapis|dev-1|p256dh/, 'the ledger never gets the address or the keys');
-    assert.equal((await post('/api/notifications/unsubscribe', { endpoint: SUBSCRIPTION.endpoint })).status, 200);
-    assert.equal(r.store.subscriptions().length, 0);
+    const noted = r.records.map((e) => JSON.parse(e.detail)).filter((e) => e.gesture === 'notifications');
+    assert.deepEqual(noted.map((e) => e.result), ['subscribed']);
+    for (const e of r.records) assert.doesNotMatch(e.detail, /googleapis|dev-1|p256dh/, 'the ledger never gets the address or the keys');
+
+    // The agent cannot take the human's device off either.
+    assert.deepEqual(await agent.json('/api/notifications/unsubscribe', { endpoint: SUBSCRIPTION.endpoint }), { status: 403, body: { error: 'challenge' } });
+    assert.equal(r.store.subscriptions().length, 1);
+    assert.deepEqual(await r.confirmed(human, 'unsubscribe', { endpoint: SUBSCRIPTION.endpoint }), { status: 200, body: { ok: true, removed: true, devices: 0 } });
+  } finally { await r.close(); }
+});
+
+test('a confirmation is for one subscription and one purpose: another address, other keys or the other gesture are refused, and it is used once', async () => {
+  const r = await rig();
+  try {
+    const human = await r.signIn();
+    await r.register(human);
+    const other = subscriptionFor(2);
+    const answer = async (op, payload) => {
+      const asked = await human.json('/api/notifications/challenge', { op, ...payload });
+      assert.equal(asked.status, 200);
+      return { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey) };
+    };
+    assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: other, ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'changed' } }, 'another address');
+    assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: { ...SUBSCRIPTION, keys: browserKeys() }, ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'changed' } }, 'other keys');
+    assert.deepEqual(await human.json('/api/notifications/unsubscribe', { endpoint: SUBSCRIPTION.endpoint, ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'challenge' } }, 'the other gesture');
+    assert.deepEqual(await human.json('/api/actions/confirm', { ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'challenge' } }, 'never a ticket\'s gesture');
+    const once = await answer('subscribe', { subscription: SUBSCRIPTION });
+    assert.equal((await human.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, ...once })).status, 200);
+    assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, ...once }), { status: 403, body: { error: 'challenge' } }, 'replayed');
+    assert.equal(r.store.subscriptions().length, 1);
+    assert.deepEqual(await human.json('/api/notifications/challenge', { op: 'other' }), { status: 400, body: { error: 'gesture' } });
+  } finally { await r.close(); }
+});
+
+test('the device cap cannot be used by a token-only session to push the human\'s devices out', async () => {
+  const r = await rig();
+  try {
+    const human = await r.signIn();
+    await r.register(human);
+    for (let n = 1; n <= 10; n += 1) assert.equal((await r.confirmed(human, 'subscribe', { subscription: subscriptionFor(n) })).status, 200);
+    const before = r.store.subscriptions().map((s) => s.endpoint);
+    assert.equal(before.length, 10);
+    const agent = await r.signIn('curl/8');
+    const stranger = new Authenticator({ origin: r.base, rpId: '127.0.0.1' });
+    for (let n = 11; n <= 22; n += 1) {
+      assert.notEqual((await agent.json('/api/notifications/subscribe', { subscription: subscriptionFor(n) })).status, 200);
+      assert.notEqual((await r.confirmed(agent, 'subscribe', { subscription: subscriptionFor(n) }, stranger)).status, 200);
+    }
+    for (const endpoint of before) assert.notEqual((await agent.json('/api/notifications/unsubscribe', { endpoint })).status, 200);
+    assert.deepEqual(r.store.subscriptions().map((s) => s.endpoint), before, 'the human\'s ten devices are all still there');
   } finally { await r.close(); }
 });
 
 test('only a known push service is kept: an address of anyone\'s choosing is refused', async () => {
   const r = await rig();
   try {
-    const { post } = await r.signIn();
+    const human = await r.signIn();
+    await r.register(human);
     for (const endpoint of ['https://evil.example/collect', 'http://fcm.googleapis.com/x', 'https://127.0.0.1:8788/x', 'https://fcm.googleapis.com.evil.example/x']) {
-      const response = await post('/api/notifications/subscribe', { subscription: { ...SUBSCRIPTION, endpoint } });
-      assert.equal(response.status, 400, endpoint);
-      assert.deepEqual(await response.json(), { error: 'subscription' });
+      assert.deepEqual(await human.json('/api/notifications/challenge', { op: 'subscribe', subscription: { ...SUBSCRIPTION, endpoint } }), { status: 400, body: { error: 'subscription' } }, endpoint);
+      assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: { ...SUBSCRIPTION, endpoint } }), { status: 400, body: { error: 'subscription' } }, endpoint);
     }
-    assert.equal((await post('/api/notifications/subscribe', { subscription: { endpoint: SUBSCRIPTION.endpoint, keys: { p256dh: 'x', auth: 'y' } } })).status, 400);
+    assert.equal((await r.confirmed(human, 'subscribe', { subscription: { endpoint: SUBSCRIPTION.endpoint, keys: { p256dh: 'x', auth: 'y' } } })).status, 400);
     assert.equal(r.store.subscriptions().length, 0);
   } finally { await r.close(); }
   const own = await rig({ env: { CLEARED_NOTIFY_PUSH_HOSTS: 'push.example.org' } });
   try {
-    const { post } = await own.signIn();
-    assert.equal((await post('/api/notifications/subscribe', { subscription: { ...SUBSCRIPTION, endpoint: 'https://push.example.org/x' } })).status, 200, '[notify] push_hosts adds one');
+    const human = await own.signIn();
+    await own.register(human);
+    assert.equal((await own.confirmed(human, 'subscribe', { subscription: { ...SUBSCRIPTION, endpoint: 'https://push.example.org/x' } })).status, 200, 'CLEARED_NOTIFY_PUSH_HOSTS adds one');
   } finally { await own.close(); }
 });
 
 test('without Web Push in [notify] adapters, or without notifications at all, the app offers nothing and keeps nothing', async () => {
   const off = await rig({ notify: { adapters: 'ntfy' } });
   try {
-    const { cookie, post } = await off.signIn();
-    assert.deepEqual(await (await off.call('/api/notifications', { headers: { cookie } })).json(), { available: false, reason: 'off', publicKey: null, devices: 0 });
-    assert.equal((await post('/api/notifications/subscribe', { subscription: SUBSCRIPTION })).status, 409);
+    const human = await off.signIn();
+    await off.register(human);
+    assert.deepEqual(await (await off.call('/api/notifications', { headers: { cookie: human.cookie } })).json(), { available: false, reason: 'off', publicKey: null, devices: 0 });
+    assert.equal((await human.post('/api/notifications/challenge', { op: 'subscribe', subscription: SUBSCRIPTION })).status, 409);
+    assert.equal((await human.post('/api/notifications/subscribe', { subscription: SUBSCRIPTION })).status, 409);
   } finally { await off.close(); }
   const none = await rig({ withNotifications: false });
   try {
