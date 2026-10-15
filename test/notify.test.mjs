@@ -181,6 +181,22 @@ test('Telegram posts plain text to the bot; the bot token travels in the address
   }
 });
 
+test('every adapter refuses a redirect: the request says so, and a redirect answer is a failure with a code only', async () => {
+  const seen = [];
+  const redirected = async (url, init) => { seen.push(init.redirect); return { ok: false, status: 302, headers: new Map([['location', 'https://elsewhere.example/x']]) }; };
+  const subscriptions = [{ endpoint, keys: browser().keys }];
+  const adapters = [
+    [webpushAdapter({ store: memoryStore(subscriptions), subject: 'mailto:ops@example.org', transport: redirected }), /^push service refused$/],
+    [ntfyAdapter({ credentials: () => ({ server: 'https://ntfy.example.org', topic: 'cleared-x7Rk2' }), transport: redirected }), /^ntfy refused \(302\)$/],
+    [telegramAdapter({ credentials: () => ({ bot_token: '123456789:AAH-abcdefghijklmnopqrstuvwxyz_0123', chat_id: '42' }), transport: redirected }), /^telegram refused \(302\)$/],
+  ];
+  for (const [adapter, code] of adapters) await assert.rejects(adapter.send(MESSAGE), (error) => code.test(error.message) && !/elsewhere/.test(error.message), adapter.name);
+  assert.deepEqual(seen, ['error', 'error', 'error'], 'fetch is told to refuse a redirect, in each adapter');
+  // What fetch does with redirect: 'error' is to reject: the adapter says it is unreachable, not that it was sent.
+  const refused = ntfyAdapter({ credentials: () => ({ server: 'https://ntfy.example.org', topic: 'cleared-x7Rk2' }), transport: async (url, init) => { if (init.redirect === 'error') throw new TypeError('redirect mode is set to error'); return { ok: true, status: 200 }; } });
+  await assert.rejects(refused.send(MESSAGE), (error) => error.message === 'ntfy unreachable');
+});
+
 test('e-mail goes through sendmail with the recipient as an argument; a title cannot add a header or a recipient', async () => {
   const calls = [];
   const adapter = emailAdapter({ credentials: () => ({ to: 'owner@example.org', from: 'cleared@example.org' }), sendmail: '/usr/sbin/sendmail', run: (file, args, input) => calls.push({ file, args, input }) });
