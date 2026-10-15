@@ -230,6 +230,7 @@
   "app_srv_fast_reason_protected": "il touche le moteur, les vérifications ou la sécurité",
   "app_srv_fast_reason_dependency": "il change une dépendance",
   "app_srv_fast_reason_migration": "il touche une migration de base de données",
+  "app_srv_fast_reason_file_type": "un fichier d’un type que la voie rapide ne prend pas (code, configuration ou pas d’extension de texte simple)",
   "app_srv_fast_reason_outside_safe": "un fichier hors de la liste sûre",
   "app_srv_fast_reason_content": "un fichier reçoit du balisage, un chargement, un gabarit, un échappement ou un caractère caché",
   "app_srv_fast_reason_link": "un fichier reçoit un lien ou une adresse distante",

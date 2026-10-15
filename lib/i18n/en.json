@@ -231,6 +231,7 @@
   "app_srv_fast_reason_protected": "it touches the engine, the checks or security",
   "app_srv_fast_reason_dependency": "it changes a dependency",
   "app_srv_fast_reason_migration": "it touches a database migration",
+  "app_srv_fast_reason_file_type": "a file of a type the fast lane does not take (code, configuration, or no plain-text extension)",
   "app_srv_fast_reason_outside_safe": "a file outside the safe list",
   "app_srv_fast_reason_content": "a file gains markup, a load, a template, an escape or a hidden character",
   "app_srv_fast_reason_link": "a file gains a link or a remote address",

