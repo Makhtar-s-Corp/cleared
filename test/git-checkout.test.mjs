@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { dirname, join, relative } from 'node:path';
 import { CheckoutPathError, checkoutReadEnv, checkoutTopLevel, gitRefusal, READ_OVERRIDES } from '../lib/git-checkout.mjs';
 import { ORCH_HOME } from '../lib/conf.mjs';
-import { fixtureProject, scratch } from './support.mjs';
+import { foreignTest, fixtureProject, scratch } from './support.mjs';
 
 const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 
@@ -262,7 +262,7 @@ test('cleared status says why the project configuration cannot be read: one JSON
   assert.doesNotMatch(textNotRepo.stderr, /git refused/);
 });
 
-test('the read environment stops every planted setting a read can reach, on the commands Cleared runs and beyond', (t) => {
+foreignTest('the read environment stops every planted setting a read can reach, on the commands Cleared runs and beyond', (t) => {
   const root = realpathSync(scratch('orch-vectors-'));
   const repo = join(root, 'repo');
   const marker = join(root, 'ran.log');

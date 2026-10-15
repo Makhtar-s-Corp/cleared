@@ -11,7 +11,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, w
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
-import { scratch } from './support.mjs';
+import { foreignTest, scratch } from './support.mjs';
 
 const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const HOOKS = ['post-index-change', 'reference-transaction', 'post-checkout', 'post-merge', 'pre-auto-gc', 'post-rewrite', 'pre-commit', 'pre-push'];
@@ -97,10 +97,9 @@ async function asForeign(project, call) {
   finally { for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } }
 }
 
-test('control: git refuses the planted checkout as another user\'s, and with safe.directory alone its fsmonitor runs on ls-files', (t) => {
+foreignTest('control: git refuses the planted checkout as another user\'s, and with safe.directory alone its fsmonitor runs on ls-files', () => {
   const p = plantedRepo();
   const refused = spawnSync(REAL_GIT, ['-C', p.repo, 'ls-files', '--error-unmatch', '--', '.cleared/agents.conf'], { encoding: 'utf8', env: childEnv(OWNER) });
-  if (refused.status === 0) { t.skip('this git does not honour GIT_TEST_ASSUME_DIFFERENT_OWNER'); return; }
   assert.equal(refused.status, 128);
   assert.match(refused.stderr, /dubious ownership/);
   assert.equal(p.ran(), '', 'a refused repository runs nothing');
@@ -110,7 +109,7 @@ test('control: git refuses the planted checkout as another user\'s, and with saf
   assert.match(p.ran(), /^planted /m, 'the planted fsmonitor ran: the vector is real');
 });
 
-test('the tracked-file check of the project config runs nothing the checkout planted', () => {
+foreignTest('the tracked-file check of the project config runs nothing the checkout planted', () => {
   const p = plantedRepo();
   const run = spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e',
     `import { confPath } from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log(confPath());`],
@@ -121,7 +120,7 @@ test('the tracked-file check of the project config runs nothing the checkout pla
   assert.equal(p.ran(), '');
 });
 
-test('the tool\'s own checkout, found by git when no project is named, runs nothing it planted (and a subdirectory of it is declared by its top level)', () => {
+foreignTest('the tool\'s own checkout, found by git when no project is named, runs nothing it planted (and a subdirectory of it is declared by its top level)', () => {
   const p = plantedRepo();
   // The tool as a folder of the planted repository: lib/conf.mjs lists the worktrees of <repo>/tool.
   cpSync(join(ORCH_HOME, 'lib'), join(p.repo, 'tool', 'lib'), { recursive: true });
@@ -143,7 +142,7 @@ function seededLedger(p) {
   return state;
 }
 
-test('the preview of cleared rollback lists the files and runs nothing the checkout planted, from the top level or a subdirectory', () => {
+foreignTest('the preview of cleared rollback lists the files and runs nothing the checkout planted, from the top level or a subdirectory', () => {
   const p = plantedRepo();
   const state = seededLedger(p);
   for (const project of [p.repo, join(p.repo, '.cleared')]) {
@@ -157,7 +156,7 @@ test('the preview of cleared rollback lists the files and runs nothing the check
 
 // Checks that the call carries the read environment, not that a planted setting is neutralised: `git show <ref>:<path>`
 // and `symbolic-ref` run no program of the checkout, so no planted setting is reachable through them here.
-test('the guard reads the committed lists with the read environment (a call check: no planted program is reachable here)', () => {
+foreignTest('the guard reads the committed lists with the read environment (a call check: no planted program is reachable here)', () => {
   const p = plantedRepo();
   const input = join(scratch('orch-planted-input-'), 'input.txt');
   writeFileSync(input, 'an ordinary sentence\n');
@@ -171,7 +170,7 @@ test('the guard reads the committed lists with the read environment (a call chec
   assert.equal(p.ran(), '');
 });
 
-test('the status of the lanes reads the checkout (worktrees, the date of each lane) and runs nothing it planted', async () => {
+foreignTest('the status of the lanes reads the checkout (worktrees, the date of each lane) and runs nothing it planted', async () => {
   const p = plantedRepo();
   const { collectStatus } = await import('../lib/heartbeat.mjs');
   const state = scratch('orch-planted-state-');
@@ -185,7 +184,7 @@ test('the status of the lanes reads the checkout (worktrees, the date of each la
 });
 
 // A call check only: `git show HEAD:<path>` runs no program of the checkout, so nothing planted is reachable here.
-test('the memory index reads its committed files with the read environment (a call check: no planted program is reachable here)', async () => {
+foreignTest('the memory index reads its committed files with the read environment (a call check: no planted program is reachable here)', async () => {
   const p = plantedRepo();
   const { LocalMemory } = await import('../lib/memory/adapters/local.mjs');
   const db = openLedger(':memory:');
@@ -197,7 +196,7 @@ test('the memory index reads its committed files with the read environment (a ca
 });
 
 // A call check only: `config --list` and `remote get-url` run no program of the checkout, so nothing planted is reachable here.
-test('the forge environment reads the origin and the configuration with the read environment (a call check: no planted program is reachable here)', async () => {
+foreignTest('the forge environment reads the origin and the configuration with the read environment (a call check: no planted program is reachable here)', async () => {
   const p = plantedRepo();
   const { forgeEnv } = await import('../lib/forge.mjs');
   const conf = { sections: { forge: { app_id: '1', installation_id: '2', app_private_key_file: '/nonexistent/key.pem', app_login: 'cleared[bot]', app_user_id: '3' } } };
@@ -206,7 +205,7 @@ test('the forge environment reads the origin and the configuration with the read
   assert.equal(p.ran(), '');
 });
 
-test('the recovery of a pushed revert reads its message and runs nothing the checkout planted', async (t) => {
+foreignTest('the recovery of a pushed revert reads its message and runs nothing the checkout planted', async (t) => {
   const { activeRelease, rollbackRelease, resumeWatches } = await import('../lib/release.mjs');
   const root = realpathSync(scratch('orch-planted-release-'));
   const remote = join(root, 'remote.git');
@@ -275,7 +274,7 @@ test('a refused checkout is not recorded as an untracked config', () => {
   assert.equal(events, 0);
 });
 
-test('the scripts\' shared setup says git refused the checkout and records no untracked config', () => {
+foreignTest('the scripts\' shared setup says git refused the checkout and records no untracked config', () => {
   const p = plantedRepo();
   const run = spawnSync('bash', ['-c', `. ${JSON.stringify(join(ORCH_HOME, 'lib', 'common.sh'))}; echo "conf=$ORCH_CONF ignored=\${CLEARED_IGNORED_UNTRACKED_CONF:-}"`],
     { encoding: 'utf8', env: childEnv({ CLEARED_REPO: p.repo, ...OWNER }) });
@@ -286,7 +285,7 @@ test('the scripts\' shared setup says git refused the checkout and records no un
 });
 
 for (const command of [['status'], ['ticket', 'show', 'LOCAL-1'], ['rollback', 'LOCAL-1'], ['app', 'passkey'], ['app']]) {
-  test(`cleared ${command.join(' ')} says that git refused the checkout, not a missing setting`, () => {
+  foreignTest(`cleared ${command.join(' ')} says that git refused the checkout, not a missing setting`, () => {
     const p = plantedRepo();
     const run = spawnSync(process.execPath, [join(ORCH_HOME, 'cleared'), ...command], { encoding: 'utf8', input: 'no\n', timeout: 30_000,
       env: childEnv({ CLEARED_REPO: p.repo, CLEARED_STATE_DIR: scratch('orch-refused-state-'), PATH: `${refusingGit()}:${process.env.PATH}` }) });
