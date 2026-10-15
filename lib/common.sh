@@ -24,11 +24,24 @@ ORCH_REPO=${ORCH_REPO:-$(git -C "$ORCH_HOME" worktree list --porcelain 2> /dev/n
 # nothing is done « wherever this was started from ».
 [ -n "$ORCH_REPO" ] || { echo "$(basename "$0"): no project is named (ORCH_REPO, or the first line of $cleared_project_file)" >&2; exit 1; }
 # Its settings are the tracked .cleared/agents.conf in the project checkout.
+# git answers "not tracked" with exit code 1: that file is ignored, and
+# recorded as such. Any other failure (git refused the checkout, which it does
+# under another account than the checkout's owner, or could not run) is not
+# an answer: nothing is recorded as untracked, and git's first line is said.
+# No safe.directory is declared here: under the human's account git refuses
+# the service-owned checkout before reading its configuration (the Node
+# commands read it through lib/git-checkout.mjs).
 if [ -z "${ORCH_CONF:-}" ]; then
-  if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && git -C "$ORCH_REPO" ls-files --error-unmatch -- .cleared/agents.conf > /dev/null 2>&1; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
-  elif [ -f "$ORCH_REPO/.cleared/agents.conf" ]; then ORCH_CONF=$ORCH_REPO/.cleared/tracked-agents.conf-missing
+  if [ -f "$ORCH_REPO/.cleared/agents.conf" ]; then
+    cleared_tracked=0
+    cleared_git_said=$(git -C "$ORCH_REPO" ls-files --error-unmatch -- .cleared/agents.conf 2>&1 > /dev/null) || cleared_tracked=$?
+    if [ "$cleared_tracked" = 0 ]; then ORCH_CONF=$ORCH_REPO/.cleared/agents.conf
+    else
+      ORCH_CONF=$ORCH_REPO/.cleared/tracked-agents.conf-missing
+      if [ "$cleared_tracked" = 1 ]; then CLEARED_IGNORED_UNTRACKED_CONF=$ORCH_REPO/.cleared/agents.conf
+      else echo "cleared: git refused or could not read $ORCH_REPO: $(printf '%s\n' "$cleared_git_said" | sed -n '/[^[:space:]]/{s/^[[:space:]]*//;p;q;}')" >&2; fi
+    fi
   else ORCH_CONF=$ORCH_REPO/.cleared/agents.conf; fi
-  if [ -f "$ORCH_REPO/.cleared/agents.conf" ] && [ "$ORCH_CONF" != "$ORCH_REPO/.cleared/agents.conf" ]; then CLEARED_IGNORED_UNTRACKED_CONF=$ORCH_REPO/.cleared/agents.conf; fi
 fi
 # The state is kept on the machine, outside the repositories: one folder per
 # project, named after its checkout.

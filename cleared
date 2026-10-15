@@ -1,14 +1,29 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { openLedger } from './lib/ledger.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { loadConf, stateDir } from './lib/conf.mjs';
+import { loadConfForCommand, projectDir, stateDir } from './lib/conf.mjs';
 import { createTracker } from './lib/tracker/contract.mjs';
-import { checkoutGitEnv, gitRefusal } from './lib/git-checkout.mjs';
+import { checkoutReadEnv, gitRefusal } from './lib/git-checkout.mjs';
 
 const [area, action, ...args] = process.argv.slice(2);
+// Every command below reads the committed project settings (here, or in the
+// process it starts). When they cannot be read, the reason is said first,
+// whatever the command: a path Cleared does not expand (~), a checkout that
+// is not there, or git refusing the service-owned checkout (lib/conf.mjs).
+const demo = area === 'app' && [action, ...args].includes('--demo');
+if (['status', 'app', 'rollback', 'ticket'].includes(area) && !demo && !process.env.CLEARED_CONF && !process.env.ORCH_CONF) {
+  let problem = null;
+  try {
+    const project = projectDir();
+    if (project.startsWith('~')) problem = `the project path ${project} starts with "~", which Cleared does not expand: give the absolute path`;
+    else if (!existsSync(project)) problem = `the project checkout ${project} does not exist`;
+  } catch (error) { problem = error.message; }
+  if (problem) { console.error(`cleared: ${problem}`); process.exit(2); }
+  loadConfForCommand(); // says why and exits 2 when git cannot read it
+}
 if (area === 'status') {
   if ([action, ...args].filter(Boolean).some((flag) => !['--json', '--reap'].includes(flag))) {
     console.error('usage: cleared status [--json] [--reap]'); process.exit(64);
@@ -39,7 +54,8 @@ if (area === 'rollback') {
       if (!row) throw new Error(`No Cleared release recorded for ${ticket}`);
       const repo = process.env.CLEARED_REPO || process.env.ORCH_REPO || process.cwd();
       let files;
-      try { files = execFileSync('git', ['-C', repo, 'diff', '--name-only', `${row.merge_sha}^1`, row.merge_sha], { encoding: 'utf8', env: checkoutGitEnv(repo) }).trim(); }
+      // A read of the service-owned checkout: names only, no external diff, no textconv (lib/git-checkout.mjs).
+      try { files = execFileSync('git', ['-C', repo, 'diff', '--name-only', '--no-ext-diff', '--no-textconv', `${row.merge_sha}^1`, row.merge_sha], { encoding: 'utf8', env: checkoutReadEnv(repo) }).trim(); }
       catch (error) { throw new Error(gitRefusal(repo, error)); }
       console.log(`Ticket: ${ticket} — ${row.title}\nMerge to revert: ${row.merge_sha}\nFiles:\n${files}`);
       const prompt = createInterface({ input: process.stdin, output: process.stdout });
@@ -58,7 +74,7 @@ if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action)) {
   console.error('usage: cleared ticket new <title> [body file] | show <id> | comment <id> <body file> | move <id> <status> | rollback <ticket> [--yes]');
   process.exit(64);
 }
-const conf = loadConf();
+const conf = loadConfForCommand();
 if (conf.sections.tracker?.adapter !== 'local') {
   console.error('cleared ticket commands require [tracker] adapter = local');
   process.exit(2);
