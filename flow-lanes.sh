@@ -375,10 +375,72 @@ second_team() {
   return 0
 }
 
+# reviewed_at_head [<what the pull request is now>]: whether a reviewer read
+# the version of the pull request at hand ($head of one_lane, or a version it
+# only adds the base to): 0 read, with nothing blocking; 1 not yet (its review
+# is asked for here, once for that version, or still runs); 2 the reviewer
+# asked for corrections, and the lane is opened again for them. Works on the
+# variables of the lane being looked at (one_lane).
+reviewed_at_head() {
+  local run_id
+  verdict= reviewed_by=
+  while IFS= read -r run_id; do
+    [ -n "$run_id" ] || continue
+    # Read at this version, or at one this version only adds the base to.
+    only_base_merges "$(sed -n 's/^commit: //p' "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null | sed -n '1p')" "$head" || continue
+    reviewed_by=$run_id
+    if node --no-warnings "$ORCH_HOME/lib/merge.mjs" verdict "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null; then verdict=ok; else verdict=corrections; fi
+    break
+  done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket' order by started_at desc" | jq -r '.[].run_id')
+  if [ -z "$reviewed_by" ]; then
+    did "$record" "review:$head" && return 1
+    say "$ticket: #$pr ${1:-is green} at ${head:0:8}: its review is asked for"
+    [ -n "$dry" ] || { "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" > /dev/null 2>&1 && mark "$record" "review:$head"; } || true
+    return 1
+  fi
+  if [ "$verdict" = corrections ]; then
+    {
+      echo "An independent reviewer read branch version ${head:0:8} and requested fixes. Their findings:"
+      sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
+    } > "$work/why.md"
+    again "$record" "$ticket" "$role" "verdict:$reviewed_by" "$work/why.md"
+    return 2
+  fi
+  return 0
+}
+
+# fast_ready: on the fast lane (docs/fast-lane.md), once the version at hand
+# is reviewed with nothing blocking, the lead is told it may ask the user
+# now, without waiting for the full checks (they run meanwhile, and the merge
+# waits for them: merge-pr.sh): once for that version, when its targeted
+# tests passed on it (or on a version it only adds the base to) and the one
+# capture before and after is kept, for a project that sets them. What is
+# missing is looked at again at the next round.
+fast_ready() {
+  local tested kept shots
+  did "$record" "fastready:$head" && return 0
+  # A ticket given to two teams is asked for once, with both results: the
+  # rules for two teams say when (teams_ready), not this.
+  [ -z "$team" ] && [ ! -f "$(lane_record "$ticket.2")" ] || return 0
+  if [ -n "$(conf_get fast_lane tests_command)" ]; then
+    tested=$(jq -r '.fast_lane.tests | select(.exit == 0) | .head // empty' "$record" 2> /dev/null) || tested=
+    [ -n "$tested" ] && only_base_merges "$tested" "$head" || return 0
+  fi
+  if [ -n "$(conf_get fast_lane capture_screen)" ]; then
+    kept=$(expand_home "$(conf_get lanes kept_in)")
+    [ -n "$kept" ] || return 0
+    shots=$(find "$kept/$ticket" -maxdepth 2 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) 2> /dev/null | sed 's#.*/##') || shots=
+    grep -qiE 'before|avant' <<<"$shots" && grep -viE 'before|avant' <<<"$shots" | grep -q . || return 0
+  fi
+  say "$ticket: #$pr is on the fast lane, reviewed at ${head:0:8} with its targeted tests and capture: the request is the lead's, the full checks run meanwhile"
+  [ -n "$dry" ] || ledger event --kind fast_lane_ready --ticket "$ticket" --value "$pr" --detail "#$pr of $ticket is on the fast lane at ${head:0:8}: reviewed with nothing blocking$([ -z "$(conf_get fast_lane tests_command)" ] || echo ', its targeted tests passed')$([ -z "$(conf_get fast_lane capture_screen)" ] || echo ", its capture before and after is kept under $ticket"). Ask the user for his agreement now, once, without waiting for the full checks: they run meanwhile, and the merge waits for them to be green. Ask him no question on this ticket"
+  mark "$record" "fastready:$head"
+}
+
 # 1. The lanes that exist: one step each. What goes wrong with one is said
 # and looked at again at the next wake; it does not stop the others.
 one_lane() {
-  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken refused stopped
+  local record=$1 ticket role lane last code worktree state pr pull head branch checks ran verdict reviewed_by run_id asked report candidate ended run pid age own sent shown covered progress_state review_state validate_state go_state kept_from kept_in key more= capped= team other theirs two=unknown both waited rerun broken refused stopped fast=full step
   [ "$(jq -r '.closed // empty' "$record")" = "" ] || return 0
   ticket=$(jq -r '.ticket' "$record") role=$(jq -r '.role' "$record") lane=$(jq -r '.lane' "$record") team=$(jq -r '.team // empty' "$record")
   # What is said of the second team of a ticket names it (<ticket>.2): two
@@ -516,6 +578,12 @@ one_lane() {
     for candidate in "$ORCH_STATE_DIR/reports/$last-$role"-a*.md; do [ ! -f "$candidate" ] || report=$candidate; done
     asked=$(sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$report" 2> /dev/null | awk '{ line = $0 } !inside && tolower(line) ~ /^[#*[:space:]]*questions (pour|for)/ { inside = 1; sub(/^[#*[:space:]]*[Qq]uestions (pour|for)[^:]*:?[*[:space:]]*/, "", line); if (line != "") print line; next } inside { print line }' | grep -v '^[[:space:]]*$' | grep -viE '^[-*[:space:]]*(aucune|rien|néant|pas de question|none|nothing|no questions?)\b' | sed '/^## /d' | node --no-warnings "$ORCH_HOME/lib/board-report.mjs" clip-asked || true)
     if [ -n "$asked" ]; then
+      # On the fast lane a team asks nothing: one that still does found the
+      # ticket was not explicit, and it takes the full circuit, for good.
+      if [ "$(jq -r '.fast_lane.state // empty' "$record")" = fast ]; then
+        say "$ticket: a team on the fast lane asked a question: the ticket takes the full circuit"
+        [ -n "$dry" ] || node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" demote "${lane#*/}" asked || true
+      fi
       say "$ticket: its session ends on a question for the user"
       [ -n "$dry" ] || ledger event --kind lane_asks --ticket "$ticket" --detail "$asked"
     fi
@@ -630,6 +698,17 @@ one_lane() {
     fi
   fi
 
+  # The fast lane: the rules judge the pull request at this very head, with
+  # the settings of the main checkout; a head that moved is judged again, and
+  # a ticket they send back to the full circuit stays there (lib/fast-lane.mjs).
+  if [ "$(jq -r '.fast_lane.state // empty' "$record")" = fast ]; then
+    if [ -n "$dry" ]; then fast=fast
+    else
+      fast=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" decide "${lane#*/}" "$head" 2> /dev/null) || fast=full
+      [ "$fast" = fast ] || [ "$(jq -r '.fast_lane.state // empty' "$record")" != full ] || say "$ticket: the rules send #$pr to the full circuit at ${head:0:8}"
+    fi
+  fi
+
   # Out of draft: the ticket is where the agents check, and is put there
   # again when something else took it back to the status of the work.
   progress_state=$(conf_get tracker progress_state) review_state=$(conf_get tracker review_state)
@@ -640,6 +719,16 @@ one_lane() {
 
   checks=$(jq -c '[.statusCheckRollup[] | (.conclusion // .status // "") | ascii_upcase]' <<<"$pull")
   ran=$(jq 'map(select(. == "SUCCESS" or . == "FAILURE" or . == "TIMED_OUT" or . == "CANCELLED")) | length' <<<"$checks")
+  # On the fast lane the review is asked for at once, without waiting for the
+  # checks (a review only reads), and the request to the user is prepared as
+  # soon as it is there with the targeted tests and the capture. Red checks
+  # go the way of any lane, below.
+  if [ "$fast" = fast ] && [ "$(jq 'map(select(. == "FAILURE" or . == "TIMED_OUT")) | length' <<<"$checks")" = 0 ]; then
+    step=0
+    reviewed_at_head "is on the fast lane" || step=$?
+    [ "$step" != 2 ] || return 0
+    [ "$step" != 0 ] || fast_ready
+  fi
   if [ "$(jq 'map(select(. == "IN_PROGRESS" or . == "QUEUED" or . == "PENDING" or . == "WAITING")) | length' <<<"$checks")" != 0 ]; then
     return 0
   fi
@@ -749,29 +838,7 @@ one_lane() {
   [ "$(jq 'map(select(. != "SUCCESS" and . != "SKIPPED" and . != "NEUTRAL")) | length' <<<"$checks")" = 0 ] || return 0
 
   # Green: read by a reviewer, at this version?
-  verdict= reviewed_by=
-  while IFS= read -r run_id; do
-    [ -n "$run_id" ] || continue
-    # Read at this version, or at one this version only adds the base to.
-    only_base_merges "$(sed -n 's/^commit: //p' "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null | sed -n '1p')" "$head" || continue
-    reviewed_by=$run_id
-    if node --no-warnings "$ORCH_HOME/lib/merge.mjs" verdict "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null; then verdict=ok; else verdict=corrections; fi
-    break
-  done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket' order by started_at desc" | jq -r '.[].run_id')
-  if [ -z "$reviewed_by" ]; then
-    did "$record" "review:$head" && return 0
-    say "$ticket: #$pr is green at ${head:0:8}: its review is asked for"
-    [ -n "$dry" ] || { "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" > /dev/null 2>&1 && mark "$record" "review:$head"; } || true
-    return 0
-  fi
-  if [ "$verdict" = corrections ]; then
-    {
-      echo "An independent reviewer read branch version ${head:0:8} and requested fixes. Their findings:"
-      sed -n '/^## \(Report\|Compte rendu\)$/,/^## \(Changed files\|Fichiers modifiés\)$/p' "$ORCH_STATE_DIR/reports/$reviewed_by.md" | sed '1d;$d'
-    } > "$work/why.md"
-    again "$record" "$ticket" "$role" "verdict:$reviewed_by" "$work/why.md"
-    return 0
-  fi
+  reviewed_at_head || return 0
   # Reviewed, nothing blocking, green. Was the user asked for this version
   # already (or for one this version only adds the base to)? Then nothing
   # is asked again: his card waits for him, or he has agreed and the
@@ -905,6 +972,9 @@ while IFS=$'\t' read -r ticket updated; do
   case "$code" in
     0)
       say "$ticket: put in « $todo » by the user: its lane is opened"
+      # When he said « go », as the tracker dates it: where the time from
+      # Todo to Done starts (lib/fast-lane.mjs measure).
+      [ ! -f "$record" ] || { jq --arg at "$updated" '. + {todo_at: (.todo_at // $at)}' "$record" > "$record.part" && mv "$record.part" "$record"; } || true
       # Given to two teams on the same line of his: the second opens beside it.
       ! wants_two_teams "$work/cap-comments.json" || second_team "$record" "$ticket" dev
       ;;

@@ -19,7 +19,11 @@
 #      list of files short;
 #   5. the host is free for a merge: no CI, no deployment settling, no screen
 #      test, GitHub up. One go-live at a time, under one lock from the first
-#      read to the merge.
+#      read to the merge. A pull request the rules keep on the fast lane at
+#      this very head (lib/fast-lane.mjs, docs/fast-lane.md) waits for none
+#      of what is unrelated to it: not for the checks of other commits, nor
+#      for a screen test (it takes no heavy slot); it still waits for its own
+#      checks (1), for GitHub, and for a deployment settling.
 # Then it merges the very commit it checked, and, when the ticket was in the
 # status of agreement, says where to see the result and puts it in Done.
 #
@@ -115,6 +119,14 @@ if ! git -C "$ORCH_REPO" merge-base --is-ancestor "$base" "$head"; then
   git -C "$ORCH_REPO" diff --name-only --no-renames "$head...$base" | jq -R . | jq -sc . > "$work/lag.json"
   node_lib merge.mjs lag "$work/lag.json" || no "its branch lacks code that is on ${base#origin/}: the lane brings ${base#origin/} in first"
 fi
+# The fast lane, judged again here at the very commit that goes live: what
+# was decided at another commit, or written anywhere else, counts for
+# nothing. It only spares waits; every check of this script still holds.
+lane_kind=full
+lane_key=$ticket
+[ "$(jq -r --argjson pr "$pr" 'select(.pr == $pr) | .fast_lane.state // empty' "$(lane_record "$ticket")" 2> /dev/null)" = fast ] || lane_key=
+[ -z "$lane_key" ] || lane_kind=$(node_lib fast-lane.mjs decide "$lane_key" "$head" 2> /dev/null) || lane_kind=full
+[ "$lane_kind" = fast ] || lane_kind=full
 
 # 3. Reviewed, for this ticket, with the verdict asked for, at this version.
 reviewed=
@@ -229,11 +241,17 @@ fi
 
 # 5. The host.
 host=$("$ORCH_HOME/host-state.sh")
-[ "$(jq -r '.free_for_a_merge' <<<"$host")" = true ] || later "the host is not free for a merge (a CI, a deployment settling or a screen test)"
+if [ "$lane_kind" = fast ]; then
+  # Unrelated: a run whose commit is not this head. Its own checks are done (1).
+  [ "$(jq -r --arg head "$head" '.github_is_down == null and (.a_deployment_may_be_in_progress | not) and ([.ci_runs_in_progress[]? | select(.sha == $head)] | length == 0)' <<<"$host")" = true ] \
+    || later "the host is not free for a merge on the fast lane (a deployment settling, or a run of this very version)"
+else
+  [ "$(jq -r '.free_for_a_merge' <<<"$host")" = true ] || later "the host is not free for a merge (a CI, a deployment settling or a screen test)"
+fi
 
 if [ -n "$dry_run" ]; then
   jq -n --arg pr "$pr" --arg ticket "$ticket" --arg head "$head" --arg reviewed "$reviewed" --arg needs "$needs" --arg agreed "${agreed:-none needed}" \
-    '{would_merge: ($pr | tonumber), ticket: $ticket, head: $head, reviewed_commit: $reviewed, kind: $needs, agreement: $agreed}'
+    --arg lane "$lane_kind" '{would_merge: ($pr | tonumber), ticket: $ticket, head: $head, reviewed_commit: $reviewed, kind: $needs, agreement: $agreed} + (if $lane == "fast" then {lane: $lane} else {} end)'
   exit 0
 fi
 
@@ -243,8 +261,11 @@ fi
 host_status_write '{"free_for_a_ci_run": false, "a_deployment_may_be_in_progress": true, "ci_runs_in_progress": []}' || true
 # The very commit that was checked, and nothing that arrived since.
 (cd "$ORCH_REPO" && gh pr merge "$pr" --merge --match-head-commit "$head") > /dev/null || die "GitHub did not merge #$pr"
-ledger event --kind merged_by_script --ticket "$ticket" --value "$pr" --detail "#$pr at ${head:0:8}, reviewed at ${reviewed:0:8}, $needs, agreement: ${agreed:-none needed}"
-if ! node --no-warnings "$ORCH_HOME/lib/release.mjs" start "$ticket" "$pr" 9>&- 2> "$work/release-error"; then
+ledger event --kind merged_by_script --ticket "$ticket" --value "$pr" --detail "#$pr at ${head:0:8}, reviewed at ${reviewed:0:8}, $needs, agreement: ${agreed:-none needed}, $lane_kind lane"
+# Its time from Todo to Done, in working time, the human's wait and the
+# machine's (lib/fast-lane.mjs measure): never a reason not to go on.
+node_lib fast-lane.mjs measure "$ticket" "$pr" "$lane_kind" 9>&- > /dev/null 2>&1 || echo "$(basename "$0"): the time of $ticket could not be measured" >&2
+if ! node --no-warnings "$ORCH_HOME/lib/release.mjs" start "$ticket" "$pr" "$lane_kind" 9>&- 2> "$work/release-error"; then
   watch_reason=$(tail -n 1 "$work/release-error")
   ledger event --kind release_watch_failed --ticket "$ticket" --value "$pr" --detail "the merge succeeded but its release watch could not start: $watch_reason"
   user_message release_watch_failed "title=#$pr ($ticket)" "reason=$watch_reason" > "$work/release-watch-failed.md"
