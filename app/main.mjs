@@ -8,7 +8,7 @@
 // never sent to the server in a request line); --demo serves invented data.
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { loadConf, projectDir, section, expandHome } from '../lib/conf.mjs';
+import { loadConfForCommand, projectDir, section, expandHome } from '../lib/conf.mjs';
 import { appServer } from './server.mjs';
 import { checkRanges, ensureToken, TAILSCALE } from './lib/access.mjs';
 import { execFileSync } from 'node:child_process';
@@ -28,7 +28,7 @@ const known = ['--demo', '--port', '--bind', '--link'];
 if (!passkeyCommand && args.some((a, i) => a.startsWith('--') && !known.includes(a)) ) { console.error('usage: cleared app [--demo] [--port N] [--bind ADDRESS] [--link]'); process.exit(64); }
 
 const demo = flag('--demo');
-const conf = demo ? { sections: {} } : loadConf();
+const conf = demo ? { sections: {} } : loadConfForCommand();
 const settings = section(conf, 'app');
 const port = Number(value('--port') || settings.port || 8788);
 const publicHttps = /^https:\/\//.test(settings.public_origin || '');

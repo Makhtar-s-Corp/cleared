@@ -1,4 +1,4 @@
-import { after } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -39,6 +39,28 @@ export function fixtureProject() {
   fixtureProjectDir = dir;
   return dir;
 }
+// Whether the git in use refuses a repository as another user's under GIT_TEST_ASSUME_DIFFERENT_OWNER. Some
+// configurations do not: a global safe.directory (for instance '*', as some CI runners set) makes git accept the
+// repository, and then a test that needs the refusal would fail for an environmental reason. Probed once; the tests
+// that need the refusal are skipped with FOREIGN_SKIP when it does not refuse, and keep running where it does.
+export const FOREIGN_SKIP = 'git does not honour GIT_TEST_ASSUME_DIFFERENT_OWNER here';
+let foreignRefusal;
+export function refusesAsForeign() {
+  if (foreignRefusal === undefined) {
+    const env = { ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
+    for (const name of Object.keys(env)) if (name.startsWith('GIT_CONFIG_')) delete env[name];
+    const dir = mkdtempSync(join(tmpdir(), 'orch-foreign-probe-'));
+    try {
+      execFileSync('git', ['init', '-q', dir]);
+      const probe = spawnSync('git', ['-C', dir, 'ls-files'], { encoding: 'utf8', env });
+      foreignRefusal = probe.status === 128 && /dubious ownership/.test(probe.stderr);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+  return foreignRefusal;
+}
+// A test that needs the refusal: skipped, with the reason, where git does not refuse.
+export const foreignTest = (name, fn) => test(name, (t) => (refusesAsForeign() ? fn(t) : t.skip(FOREIGN_SKIP)));
+
 // These tests are about the files of this checkout and about nothing of the machine they run on: the guard is the
 // one of the working tree (not the one of the branch the tool follows), and no project is named for the machine.
 process.env.ORCH_GUARD_TOOL_REF = '';

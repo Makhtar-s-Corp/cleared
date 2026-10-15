@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import net from 'node:net';
 import { lstatSync, statSync } from 'node:fs';
-import { loadConf, stateDir } from './lib/conf.mjs';
+import { loadConfForCommand, stateDir } from './lib/conf.mjs';
 process.on('uncaughtException', (error) => { console.error(`release broker client failed: ${error.message}`); process.exit(69); });
 process.on('unhandledRejection', (error) => { console.error(`release broker client failed: ${error?.message || error}`); process.exit(69); });
 const [operation, ticket, pr, ...flags] = process.argv.slice(2);
 if (!['request_release', 'request_rollback', 'status'].includes(operation) || !ticket) {
   console.error('usage: release-request.mjs request_release TICKET PR | request_rollback TICKET [--force-with-migrations] | status TICKET'); process.exit(64);
 }
-const path = process.env.CLEARED_RELEASE_SOCKET || loadConf().sections.security?.socket_path || `${stateDir()}/release.sock`;
+const path = process.env.CLEARED_RELEASE_SOCKET || loadConfForCommand().sections.security?.socket_path || `${stateDir()}/release.sock`;
 try {
   const socket = lstatSync(path);
   if (!socket.isSocket() || socket.uid !== statSync(stateDir()).uid) throw new Error('socket is not owned by the service account');
