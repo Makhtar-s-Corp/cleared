@@ -103,7 +103,7 @@ if [ "$1" = identity ]; then cat "${join(home, 'tracker-identity')}" 2>/dev/null
 if [ "$1" = move ]; then [ -z "\${FAKE_TRACKER_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'tracker-moves')}"; echo "$3" > "${join(home, 'tracker-state')}"; exit; fi
 if [ "$1" = upload ]; then case "$2" in *.png) echo "https://uploads.example.test/$(basename "$2")" ;; *) echo "not an image" >&2; exit 1 ;; esac; exit; fi
 if [ "$1" = state ]; then cat "${home}/tracker-state-$2" 2>/dev/null || cat "${join(home, 'tracker-state')}" 2>/dev/null || echo "In Review"; exit; fi
-if [ "$1" = issue ]; then title=$(cat "${home}/tracker-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --rawfile description <(cat "${home}/tracker-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: [], description: $description}'; exit; fi
+if [ "$1" = issue ]; then title=$(cat "${home}/tracker-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --argjson labels "$(cat "${home}/tracker-labels-$2.json" 2>/dev/null || echo '[]')" --rawfile description <(cat "${home}/tracker-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: $labels, description: $description}'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'tracker-now.json'), '[]');
