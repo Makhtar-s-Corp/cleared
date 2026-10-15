@@ -155,7 +155,9 @@ test('the preview of cleared rollback lists the files and runs nothing the check
   }
 });
 
-test('the guard reads the committed lists of the checkout and runs nothing it planted', () => {
+// Checks that the call carries the read environment, not that a planted setting is neutralised: `git show <ref>:<path>`
+// and `symbolic-ref` run no program of the checkout, so no planted setting is reachable through them here.
+test('the guard reads the committed lists with the read environment (a call check: no planted program is reachable here)', () => {
   const p = plantedRepo();
   const input = join(scratch('orch-planted-input-'), 'input.txt');
   writeFileSync(input, 'an ordinary sentence\n');
@@ -182,7 +184,8 @@ test('the status of the lanes reads the checkout (worktrees, the date of each la
   assert.equal(p.ran(), '');
 });
 
-test('the memory index compares a file with its committed version and runs nothing the checkout planted', async () => {
+// A call check only: `git show HEAD:<path>` runs no program of the checkout, so nothing planted is reachable here.
+test('the memory index reads its committed files with the read environment (a call check: no planted program is reachable here)', async () => {
   const p = plantedRepo();
   const { LocalMemory } = await import('../lib/memory/adapters/local.mjs');
   const db = openLedger(':memory:');
@@ -193,7 +196,8 @@ test('the memory index compares a file with its committed version and runs nothi
   assert.equal(p.ran(), '');
 });
 
-test('the forge environment reads the checkout\'s origin and configuration and runs nothing it planted', async () => {
+// A call check only: `config --list` and `remote get-url` run no program of the checkout, so nothing planted is reachable here.
+test('the forge environment reads the origin and the configuration with the read environment (a call check: no planted program is reachable here)', async () => {
   const p = plantedRepo();
   const { forgeEnv } = await import('../lib/forge.mjs');
   const conf = { sections: { forge: { app_id: '1', installation_id: '2', app_private_key_file: '/nonexistent/key.pem', app_login: 'cleared[bot]', app_user_id: '3' } } };
