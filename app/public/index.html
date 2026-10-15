@@ -6,6 +6,11 @@
 <meta name="color-scheme" content="light dark">
 <title>Cleared Cockpit</title>
 <link rel="icon" href="data:,">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="theme-color" content="#FAFAFA">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cleared">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -26,11 +31,13 @@
     <div class="right">
       <div id="health" class="pill"></div>
       <time id="clock" class="mono faint"></time>
+      <button id="notify" class="plain small" type="button" hidden></button>
       <button id="theme" class="plain small" type="button" data-i="app_theme_dark">Dark</button>
       <span id="avatar" class="avatar" aria-hidden="true" hidden></span>
     </div>
   </div>
   <div id="conn" class="conn" role="status" aria-live="polite" hidden></div>
+  <p id="notify-hint" class="notify-hint" role="status" aria-live="polite" hidden></p>
 </header>
 
 <section class="band" aria-label="Today">

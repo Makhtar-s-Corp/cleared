@@ -404,5 +404,15 @@
   "notify_test_title": "Notifications are on",
   "notify_test_body": "This device will be told when something waits for you.",
   "app_srv_ev_notification_sent": "You were notified",
-  "app_srv_ev_notification_failed": "A notification could not be delivered"
+  "app_srv_ev_notification_failed": "A notification could not be delivered",
+  "app_notify_enable": "Turn on notifications",
+  "app_notify_on": "Notifications on",
+  "app_notify_off_hint": "Turn them off on this device",
+  "app_notify_blocked": "Notifications blocked",
+  "app_notify_blocked_hint": "This browser blocks the app's notifications: allow them in its settings.",
+  "app_notify_ios": "Notifications",
+  "app_notify_ios_hint": "On iPhone, notifications need the app on the Home Screen: tap Share, then Add to Home Screen, open Cleared from there, sign in and turn them on.",
+  "app_notify_failed": "Notifications could not be turned on. Try again.",
+  "app_notify_ready_title": "Notifications are on",
+  "app_notify_ready_body": "This device will be told when something waits for you."
 }

@@ -12,7 +12,7 @@ import { ntfyAdapter } from '../lib/notify/adapters/ntfy.mjs';
 import { telegramAdapter } from '../lib/notify/adapters/telegram.mjs';
 import { emailAdapter } from '../lib/notify/adapters/email.mjs';
 import { notifyStore } from '../lib/notify/store.mjs';
-import { dispatch, EXPIRE_MS } from '../lib/notify.mjs';
+import { dispatch, EXPIRE_MS, sendTest } from '../lib/notify.mjs';
 import { scratch } from './support.mjs';
 
 // Values a notification must never carry, whatever a ticket says.
@@ -407,7 +407,7 @@ test('no adapter ready: nothing waits to be sent later; a failing adapter is tri
 });
 
 test('an agent cannot trigger a notification: the command takes no text, and what a team writes never reaches the message', () => {
-  for (const args of [['dispatch', 'Your password is ...'], ['send', 'hello'], ['dispatch', '--title', 'x'], []]) {
+  for (const args of [['dispatch', 'Your password is ...'], ['send', 'hello'], ['dispatch', '--title', 'x'], ['test', 'Your password is ...'], []]) {
     const run = spawnSync(process.execPath, [join(ORCH_HOME, 'lib', 'notify.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, CLEARED_CONF: join(ORCH_HOME, 'agents.example.conf') } });
     assert.notEqual(run.status, 0, args.join(' '));
     assert.match(run.stderr, /usage: notify\.mjs dispatch/);
@@ -419,6 +419,19 @@ test('an agent cannot trigger a notification: the command takes no text, and wha
 });
 
 const iso = (ms) => new Date(ms).toISOString();
+
+test('notify.mjs test sends the fixed test message to each adapter and says, per adapter, sent, not ready or failed by a code', async () => {
+  const box = setup();
+  const got = [];
+  const lines = await sendTest({ db: box.db, settings: box.settings, now: T0, adapters: [
+    { name: 'webpush', ready: () => 'no_subscription', send: async () => assert.fail('not ready') },
+    { name: 'ntfy', ready: () => null, send: async (m) => got.push(m) },
+    { name: 'telegram', ready: () => null, send: async () => { throw new Error(`bot ${TOKEN} at ${SECRET_PATH}`); } },
+  ] });
+  assert.deepEqual(lines, ['webpush: not ready (no_subscription)', 'ntfy: sent', 'telegram: failed (failed)']);
+  assert.deepEqual(got, [{ kind: 'test', ticket: null, group: 'test', urgent: false, title: 'Notifications are on', body: 'This device will be told when something waits for you.', url: 'https://cockpit.example.ts.net/' }]);
+  assert.deepEqual(box.rows('notification_sent').map((r) => JSON.parse(r.detail)), [{ event: 'test', adapter: 'ntfy' }]);
+});
 
 test('a real wake dispatches: the first one takes note, the next one tells ntfy about a rollback, with no secret in it', async (t) => {
   const { sandbox } = await import('./support.mjs');
