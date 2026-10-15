@@ -135,12 +135,14 @@ The fast lane gives a tiny, explicit, risk-free change a short circuit; everythi
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `enabled` | `yes` turns the fast lane on for the tickets below. | Default: no |
-| `labels` | Comma-separated tracker labels that open a ticket on the fast lane. | Optional; no default |
-| `projects` | Comma-separated tracker projects that open a ticket on the fast lane. | Optional; no default |
+| `labels` | Comma-separated tracker labels that open a ticket on the fast lane, when the user set the label himself (the tracker's history says who; a label an agent set picks nothing). | Optional; no default |
+| `projects` | Comma-separated tracker projects that open a ticket on the fast lane, when the user put the ticket in it himself. | Optional; no default |
+| `trust_label_without_actor` | `yes` lets a fast label or project count when the tracker cannot say who set it. A mark the tracker says an agent set is refused all the same. | Default: no |
 | `author_model` | `[models]` alias of the light author, for the role `[review] author_role` names (`dev` without it). Empty: the usual routing. | Optional; no default |
 | `review_model` | `[models]` alias of the light reviewer; `[review] differs_from_author` still applies. Empty: the usual routing. | Optional; no default |
-| `safe_paths` | Comma-separated path patterns every changed file must match: `dir/` (all under it), `*` within a segment, `?` one character, `**` any number of segments, nothing else. Empty: nothing is fast. | Optional; no default |
-| `never_paths` | Patterns that are never fast, on top of the built-in list (Cleared's settings, CI, agent rules, git files, dependencies, migrations) and `[merge] guarded_paths`. | Optional; no default |
+| `safe_paths` | Comma-separated path patterns every changed file must match: `dir/` (all under it), `*` within a segment, `?` one character, `**` any number of segments, nothing else. `*` and `**` never match a name that starts with a dot (`docs/` holds no `docs/.env`); a pattern segment that starts with a dot matches one (`docs/.nojekyll`). Empty: nothing is fast. | Optional; no default |
+| `never_paths` | Patterns that are never fast, on top of the built-in list (Cleared's settings, CI, agent rules, git files, dependencies, migrations) and `[merge] guarded_paths`. List here every file whose words carry an obligation: legal, terms, privacy and consent texts and their translations, pricing and payment copy, consent banner styles. | Optional; no default |
+| `forbidden_text` | Comma-separated literal texts (at most 200 characters each, compared without case) that no line a fast change gains may hold, on top of the built-in content rule (markup, loads, templates, escapes, handlers, hidden characters). | Optional; no default |
 | `dependency_files` | Patterns of dependency files the built-in list does not know. | Optional; no default |
 | `max_lines` | Most changed lines (added plus removed) of a fast change. | Default: 40 |
 | `max_files` | Most changed files of a fast change. | Default: 10 |
