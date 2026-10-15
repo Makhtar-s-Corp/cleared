@@ -404,6 +404,19 @@ test('the first dispatch sends nothing (no backlog), then every kind of event is
   assert.equal(box.sent.length, 5, 'the same occurrence is never sent twice');
 });
 
+test('no snapshot yet: the first dispatch initialises nothing, so cards that already exist when it appears are noted, not sent as a backlog', async () => {
+  const box = setup({ snapshot: null });
+  await box.run(T0);
+  assert.equal(box.db.prepare("SELECT value FROM notify_state WHERE key = 'cursor'").get(), undefined, 'no cursor while the snapshot is missing');
+  assert.equal(box.db.prepare('SELECT COUNT(*) n FROM notify_queue').get().n, 0, 'no seen state either');
+  box.snapshot = { schema: 1, tickets: [ready('EX-1', 'Old request', iso(T0 - 60 * minute)), question('EX-3', 'Pick a colour', iso(T0 - 30 * minute))] };
+  await box.run(T0 + minute);
+  assert.equal(box.sent.length, 0, 'the cards that existed before the snapshot is read are not sent');
+  box.snapshot.tickets.push(ready('EX-2', 'Rename the save button', iso(T0 + 2 * minute)));
+  await box.run(T0 + 3 * minute);
+  assert.deepEqual(box.sent.map((m) => m.ticket), ['EX-2'], 'only the request that is new since the first dispatch');
+});
+
 test('at most one notification per ticket every ten minutes: a second event waits, then goes; two at once are folded into one', async () => {
   const box = setup();
   await box.run(T0);
