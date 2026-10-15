@@ -243,9 +243,13 @@ fi
 # 5. The host.
 host=$("$ORCH_HOME/host-state.sh")
 if [ "$lane_kind" = fast ]; then
-  # Unrelated: a run whose commit is not this head. Its own checks are done (1).
-  [ "$(jq -r --arg head "$head" '.github_is_down == null and (.a_deployment_may_be_in_progress | not) and ([.ci_runs_in_progress[]? | select(.sha == $head)] | length == 0)' <<<"$host")" = true ] \
-    || later "the host is not free for a merge on the fast lane (a deployment settling, or a run of this very version)"
+  # Unrelated: only a pull request's run of another commit, on a branch other
+  # than the base. Every other run holds the merge as on the full circuit: a
+  # run of this very version, any run on the base branch (a deployment of a
+  # previous merge still going), any run of a non-pull-request event. Its own
+  # checks are done (1).
+  [ "$(jq -r --arg head "$head" --arg base "${base#origin/}" '.github_is_down == null and (.a_deployment_may_be_in_progress | not) and ([.ci_runs_in_progress[]? | select((.event == "pull_request" and .sha != $head and .branch != $base) | not)] | length == 0)' <<<"$host")" = true ] \
+    || later "the host is not free for a merge on the fast lane (a deployment settling, a run of this very version, or a run on the base branch or of another event)"
 else
   [ "$(jq -r '.free_for_a_merge' <<<"$host")" = true ] || later "the host is not free for a merge (a CI, a deployment settling or a screen test)"
 fi
@@ -285,7 +289,7 @@ echo "merged: #$pr ($ticket) at ${head:0:8}"
 if [ -n "${other_lane:-}" ]; then
   # (With or without a pull request yet: a lane that is over opens none.)
   kept=$(lane_record "$other_lane")
-  [ ! -f "$kept" ] || { jq --arg at "$(now_utc)" '. + {closed: (.closed // $at), not_chosen: true}' "$kept" > "$kept.part" && mv "$kept.part" "$kept"; }
+  [ ! -f "$kept" ] || { lane_write "$kept" --arg at "$(now_utc)" '. + {closed: (.closed // $at), not_chosen: true}'; }
 fi
 if [ -n "$loser" ] && [ "$loser" != 0 ]; then
   if (cd "$ORCH_REPO" && gh pr close "$loser") > /dev/null 2>&1; then

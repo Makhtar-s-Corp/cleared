@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseConf } from '../lib/conf.mjs';
 import {
   RULE_REASONS, assertService, commandWords, decide, decideLane, fastSettings, globMatcher, judgeDiff, lanesMedian, measureTicket,
   median, openingLane, pathFormOk, targetedArgv,
 } from '../lib/fast-lane.mjs';
+import { fileURLToPath } from 'node:url';
 import { route } from '../lib/route.mjs';
 import { addEvent, openLedger } from '../lib/ledger.mjs';
 import { activeRelease } from '../lib/release.mjs';
@@ -19,8 +20,8 @@ import { flowBox, reviewedPull, scratch, task } from './support.mjs';
 const confOf = (fast, extra = '') => parseConf(`[lanes]\nbase = main\n[merge]\nguarded_paths = ops/cleared/, compose\n[release]\nmigration_paths = db/schema\n[fast_lane]\n${fast}\n${extra}`);
 // What the project declares safe: its texts, its translations, its styles.
 const CONF = confOf('enabled = yes\nlabels = Quick\nprojects = Wording\nsafe_paths = docs/, web/locales/*.json, **/*.css\nnever_paths = docs/security/\nmax_lines = 10\nmax_files = 5\ntests_command = node --test {files}');
-// Everything declared safe: only the rules no setting can widen are left.
-const WIDE = confOf('enabled = yes\nsafe_paths = **\nmax_lines = 400\nmax_files = 50');
+// Everything declared safe: only the rules no setting can widen are left (a dotfile at the root is named: "**" never takes one).
+const WIDE = confOf('enabled = yes\nsafe_paths = **, .*\nmax_lines = 400\nmax_files = 50');
 const write = (dir, files) => {
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
@@ -75,6 +76,34 @@ test('the rules: a small text change in the safe paths stays on the fast lane; a
   assert.deepEqual(judge(never, secured).reasons, ['protected']);
 });
 
+test('a dotfile or a dot directory is matched only by a pattern that names a dot: docs/.htaccess, docs/.env and docs/.eslintrc are not fast under docs/', () => {
+  const under = globMatcher('docs/');
+  for (const path of ['docs/.htaccess', 'docs/.env', 'docs/.eslintrc', 'docs/a/.env', 'docs/.well-known/x.txt']) assert.equal(under(path), false, path);
+  assert.equal(under('docs/guide.md'), true);
+  assert.equal(globMatcher('**')('.env'), false);
+  assert.equal(globMatcher('**/*.css')('web/.x/a.css'), false);
+  assert.equal(globMatcher('**/*.css')('web/a.css'), true);
+  assert.equal(globMatcher('*/.*')('docs/.env'), true, 'a pattern that names the dot takes it');
+  assert.equal(globMatcher('.well-known/*')('.well-known/x.txt'), true);
+  assert.equal(globMatcher('docs/*')('docs/.env'), false);
+  const p = project({ 'docs/guide.md': 'Hello\n', 'docs/.htaccess': 'deny\n' });
+  const head = p.commit(({ write: w }) => w({ 'docs/.htaccess': 'allow\n', 'docs/.env': 'K=1\n', 'docs/.eslintrc': '{}\n' }));
+  assert.deepEqual(judge(p, head).reasons, ['outside_safe']);
+  assert.equal(judge(p, head).offending.outside_safe, 'docs/.env', 'the first dotfile is named, never a line of it');
+});
+
+test('an unknown [fast_lane] key is refused, not ignored: the fast lane is off for the ticket, and the problem is named', () => {
+  const typo = confOf('enabled = yes\nsafe_paths = docs/\nnever_path = docs/security/');
+  assert.throws(() => fastSettings(typo), /\[fast_lane\] unknown key "never_path"/);
+  const p = project();
+  const head = p.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello, world\n' }));
+  const judged = judge(p, head, typo);
+  assert.equal(judged.state, 'full');
+  assert.deepEqual(judged.reasons, ['settings']);
+  assert.match(judged.problem, /unknown key "never_path"/);
+  assert.equal(judge(p, head, CONF).state, 'fast', 'the same change with the key spelled right is fast');
+});
+
 test('adversarial: a pull request that widens its own safe paths in .cleared/agents.conf is never fast, and the settings are those of the main checkout', () => {
   const p = project({ 'docs/guide.md': 'Hello\n', '.cleared/agents.conf': '[fast_lane]\nenabled = yes\nsafe_paths = docs/\n' });
   const head = p.commit(({ write: w }) => w({ '.cleared/agents.conf': '[fast_lane]\nenabled = yes\nsafe_paths = **\nmax_lines = 9999\n', 'docs/guide.md': 'Hi\n' }));
@@ -88,7 +117,7 @@ test('adversarial: a pull request that widens its own safe paths in .cleared/age
     'deploy/Dockerfile.web', 'deploy/docker-compose.prod.yml', 'deploy/compose.staging.yaml', 'web/app.dockerfile']) {
     const one = project();
     const changed = one.commit(({ write: w }) => w({ [file]: 'changed\n' }));
-    assert.deepEqual(judge(one, changed, WIDE).reasons, ['protected'], file);
+    assert.ok(judge(one, changed, WIDE).reasons.includes('protected'), file);
   }
 });
 
@@ -105,7 +134,7 @@ test('adversarial: path tricks (unicode, look-alikes, case, option-like and spac
   const upper = project();
   const shouted = upper.commit(({ write: w }) => w({ 'DOCS/guide.md': 'text\n' }));
   assert.deepEqual(judge(upper, shouted).reasons, ['outside_safe']);
-  for (const bad of ['', '/abs', 'a//b', './a', 'a/./b', 'a/../b', '..', 'a\\b', 'a\nb', '-x', 'a/-x']) assert.equal(pathFormOk(bad), false, JSON.stringify(bad));
+  for (const bad of ['', '/abs', 'a//b', './a', 'a/./b', 'a/../b', '..', 'a\\b', 'a\nb', '-x', 'a/-x', '@x.md', 'docs/@scope/a.md']) assert.equal(pathFormOk(bad), false, JSON.stringify(bad));
   assert.equal(pathFormOk('docs/.well-known/x.md'), true);
 });
 
@@ -224,7 +253,7 @@ test('the targeted tests run with no shell: {files} becomes one argument per cha
   for (const bad of ['npm test; curl x', 'npm test && rm -rf /', 'npm test | tee x', 'echo $(id) {files}', 'echo `id` {files}', 'cat < x {files}', 'npm test {files} {files}', 'npm test --files={files}', '{files}', 'npm test', 'npm "test {files}']) {
     assert.throws(() => commandWords(bad), /tests_command/, bad);
   }
-  for (const file of ['-rf', 'docs/$(id).md', 'docs/a b.md', 'docs/;rm.md', '../x', '']) assert.throws(() => targetedArgv('node --test {files}', [file]), /cannot be handed/, file);
+  for (const file of ['-rf', '@list.txt', 'docs/@list.txt', 'docs/$(id).md', 'docs/a b.md', 'docs/;rm.md', '../x', '']) assert.throws(() => targetedArgv('node --test {files}', [file]), /cannot be handed/, file);
   // Run for real: the words go to the program as they are, nothing is interpreted.
   const out = spawnSync(process.execPath, ['-e', 'console.log(JSON.stringify(process.argv.slice(1)))', ...targetedArgv('x {files}', ['docs/a.md']).slice(1)], { encoding: 'utf8' });
   assert.deepEqual(JSON.parse(out.stdout), ['docs/a.md']);
@@ -282,6 +311,8 @@ test('measurement: working time is the union of the sessions, the human waits fr
   for (const [lane, value, days] of [['fast', 14, 1], ['fast', 12, 2], ['fast', 30, 3], ['full', 329, 1], ['full', 100, 9]]) {
     addEvent(db, { kind: 'ticket_measured', ticket: 'X-1', value, at: new Date(now - days * 86400e3).toISOString(), detail: JSON.stringify({ lane }) });
   }
+  // 14:00 at +03:00 is 11:00 UTC, eight days back: outside the window, though its text sorts inside it.
+  addEvent(db, { kind: 'ticket_measured', ticket: 'X-2', value: 999, at: '2026-10-08T14:00:00+03:00', detail: JSON.stringify({ lane: 'full' }) });
   assert.deepEqual(lanesMedian(db, { now }), { days: 7, fast: { minutes: 14, count: 3 }, full: { minutes: 329, count: 1 } });
   db.close();
 });
@@ -370,10 +401,11 @@ test('the card: Ready to land appears while the full checks run and says so; a t
 
 // ---- The rules at work: flow-lanes.sh, lane-run.sh, merge-pr.sh ----
 
-function fastFlow(extra = '') {
+function fastFlow(extra = '', { tests = 'true {files}', capture = false } = {}) {
   const box = flowBox();
   const conf = join(box.box.home, 'agents.conf');
-  writeFileSync(conf, `${readFileSync(conf, 'utf8')}\n[fast_lane]\nenabled = yes\nlabels = Quick\nauthor_model = b\nreview_model = a\nsafe_paths = docs/\ntests_command = true {files}\n${extra}`);
+  if (capture) writeFileSync(conf, readFileSync(conf, 'utf8').replace('[lanes]\n', `[lanes]\nkept_from = .local/captures\nkept_in = ${join(box.box.home, 'kept')}\n`));
+  writeFileSync(conf, `${readFileSync(conf, 'utf8')}\n[fast_lane]\nenabled = yes\nlabels = Quick\nauthor_model = b\nreview_model = a\nsafe_paths = docs/\ntests_command = ${tests}\n${capture ? 'capture_screen = /settings\n' : ''}${extra}`);
   writeFileSync(join(box.box.home, 'tracker-labels-X-5.json'), '["Quick"]');
   const events = (kind) => { const db = openLedger(join(box.box.state, 'ledger.db')); const rows = db.prepare('SELECT kind, value, detail FROM events WHERE kind = ? ORDER BY event_id').all(kind); db.close(); return rows; };
   const runDirOf = (role) => join(box.box.state, 'runs', readdirSync(join(box.box.state, 'runs')).filter((name) => { try { return new RegExp(`ORCH_ROLE=${role}\\n`).test(readFileSync(join(box.box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
@@ -408,9 +440,13 @@ test('on the fast lane, end to end: a light author asks nothing, the review is a
   const busy = { FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request","sha":"0000000000000000000000000000000000000000"}]' };
   const first = f.flow(busy);
   assert.deepEqual(f.stuck(), [], 'no lane_asks: nothing is asked of the user');
-  // Still a draft (the host runs other checks): the review is asked for at once, by the light reviewer.
-  assert.match(first.stdout, /#41 is on the fast lane at [0-9a-f]{8}: its review is asked for/);
-  assert.doesNotMatch(first.stdout, /taken out of draft/);
+  // Still a draft: nothing is asked for it yet, not even the review (its checks have not started).
+  assert.doesNotMatch(first.stdout, /on the fast lane|review is asked/);
+  // Out of draft, the review is asked for at once, by the light reviewer.
+  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [] });
+  const second = f.flow(busy);
+  assert.match(second.stdout, /#41 is on the fast lane at [0-9a-f]{8}: its review is asked for/);
+  assert.doesNotMatch(second.stdout, /taken out of draft/);
   const reviewer = f.runDirOf('review');
   assert.equal(JSON.parse(readFileSync(join(reviewer, 'chain.json'), 'utf8'))[0].alias, 'a', 'the light reviewer, not the author');
   assert.match(readFileSync(join(reviewer, 'prompt.md'), 'utf8'), /## Fast lane[\s\S]*light review is still a review/);
@@ -432,6 +468,86 @@ test('on the fast lane, end to end: a light author asks nothing, the review is a
   assert.equal(f.record('X-5').runs.length, 2);
   assert.match(readFileSync(join(f.runDirOf('dev'), 'lane.env'), 'utf8'), /ORCH_FAST_LANE=fast/, 'reopened on the fast lane, with the light author');
   assert.equal(JSON.parse(readFileSync(join(f.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'b');
+});
+
+test('on the fast lane, a base-only merge after the user said go is not asked again; the request is not withdrawn', () => {
+  const f = fastFlow();
+  f.todo(['X-5']);
+  f.by('X-5', 0);
+  f.flow();
+  f.stage({ 'docs/settings.md': 'Settings\n' });
+  const done = f.session('X-5', { commit: 'docs: rename the settings title', answer: 'Done.\n\nQuestions for the user: None.' });
+  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [] });
+  f.flow();
+  f.review('Verdict : rien de bloquant.');
+  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  assert.match(f.flow().stdout, /is on the fast lane, reviewed at/);
+  assert.equal(f.events('fast_lane_ready').length, 1);
+  // He said go to this version; then the base moves on code that touches nothing of the branch, and the branch takes it in.
+  mkdirSync(join(f.box.state, 'validations'), { recursive: true });
+  writeFileSync(join(f.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: done.head }] }));
+  writeFileSync(join(f.box.home, 'tracker-state-X-5'), 'Go MEP\n');
+  mkdirSync(join(f.box.repo, 'api'), { recursive: true });
+  writeFileSync(join(f.box.repo, 'api', 'base.mjs'), 'export const base = 1;\n');
+  f.box.git('add', '.');
+  f.box.git('commit', '-q', '-m', 'feat: code on the base');
+  f.box.git('push', '-q', 'origin', 'main');
+  const other = scratch('fast-lane-base-');
+  const inOther = (...args) => execFileSync('git', ['-C', other, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  execFileSync('git', ['clone', '-q', '-b', 'dev/X-5', f.lane.remote, other]);
+  inOther('merge', '-q', '--no-edit', 'origin/main');
+  inOther('push', '-q', 'origin', 'HEAD:refs/heads/dev/X-5');
+  const brought = { head: inOther('rev-parse', 'HEAD').trim() };
+  assert.notEqual(brought.head, done.head);
+  f.pull({ headRefOid: brought.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  const said = f.flow().stdout;
+  assert.doesNotMatch(said, /is on the fast lane, reviewed at|asked for this version/, said);
+  assert.equal(f.events('fast_lane_ready').length, 1, 'no second request for the same agreement');
+  assert.equal(JSON.parse(readFileSync(join(f.box.state, 'validations', 'X-5.json'), 'utf8')).pulls[0].head, done.head, 'his agreement is still that version');
+});
+
+test('the targeted tests of a session with no agent account run with an empty home, never the service\'s', () => {
+  const f = fastFlow('', { tests: 'node -p process.env.HOME {files}' });
+  f.todo(['X-5']);
+  f.by('X-5', 0);
+  f.flow();
+  f.stage({ 'docs/settings.md': 'Settings\n' });
+  const done = f.session('X-5', { commit: 'docs: rename', answer: 'Done.\n\nQuestions for the user: None.' });
+  assert.equal(done.run.status, 0, done.run.stderr);
+  assert.match(done.run.stdout, /Fast lane: targeted tests at [0-9a-f]{8}: passed/);
+  const log = readFileSync(join(f.runDirOf('dev'), 'targeted-tests.log'), 'utf8').trim();
+  assert.ok(log.length > 0, 'the tests ran');
+  assert.equal(log.includes(f.box.home), false, `the service's home was not passed: ${log}`);
+});
+
+test('a capture counts only when this run made it: a link, or a file older than the run, is not one, and the request waits for the capture', () => {
+  const f = fastFlow('', { capture: true });
+  f.todo(['X-5']);
+  f.by('X-5', 0);
+  f.flow();
+  f.stage({ 'docs/settings.md': 'Settings\n' });
+  const done = f.session('X-5', { commit: 'docs: rename', answer: 'Done.\n\nQuestions for the user: None.' });
+  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
+  f.flow();
+  f.review('Verdict : rien de bloquant.');
+  const kept = join(f.box.home, 'kept', 'X-5');
+  mkdirSync(kept, { recursive: true });
+  // The before side is older than the run, and the after side is a link to a file elsewhere: neither is this run's capture.
+  writeFileSync(join(kept, 'before.png'), 'png');
+  utimesSync(join(kept, 'before.png'), new Date('2020-01-01'), new Date('2020-01-01'));
+  writeFileSync(join(f.box.home, 'elsewhere.png'), 'png');
+  symlinkSync(join(f.box.home, 'elsewhere.png'), join(kept, 'after.png'));
+  assert.doesNotMatch(f.flow().stdout, /is on the fast lane, reviewed at/);
+  assert.equal(f.events('fast_lane_ready').length, 0, 'not ready without this run\'s capture');
+  // A new before side, but the after side is still a link: still not ready.
+  rmSync(join(kept, 'before.png'));
+  writeFileSync(join(kept, 'before.png'), 'png');
+  assert.doesNotMatch(f.flow().stdout, /is on the fast lane, reviewed at/);
+  // Both sides made by this run, as files: ready, with the capture said.
+  rmSync(join(kept, 'after.png'));
+  writeFileSync(join(kept, 'after.png'), 'png');
+  assert.match(f.flow().stdout, /is on the fast lane, reviewed at [0-9a-f]{8} with its targeted tests and capture/);
+  assert.equal(f.events('fast_lane_ready').length, 1);
 });
 
 test('after the author\'s work, a diff outside the safe paths sends the ticket back to the full circuit, says so, and runs no targeted test; a team that asks a question does too, and its question is relayed', () => {
@@ -461,7 +577,7 @@ test('after the author\'s work, a diff outside the safe paths sends the ticket b
   assert.deepEqual(asks.stuck(), ['lane_asks X-5'], 'the question is relayed on the full circuit');
 });
 
-test('merge on the fast lane: judged again at the very commit, it waits for its own checks and not for unrelated CI or a screen test; a forged flag buys nothing', () => {
+test('merge on the fast lane: judged again at the very commit, it waits for its own checks, for the base branch and for a deployment, not for another pull request\'s CI or a screen test; a forged flag buys nothing', () => {
   const pull = reviewedPull(['docs/guide.md']);
   const conf = join(pull.box.home, 'agents.conf');
   writeFileSync(conf, `${readFileSync(conf, 'utf8')}\n[fast_lane]\nenabled = yes\nsafe_paths = docs/\n`);
@@ -470,17 +586,24 @@ test('merge on the fast lane: judged again at the very commit, it waits for its 
   mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
   writeFileSync(join(pull.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: pull.headOf() }] }));
   writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
-  const other = { FAKE_GH_RUNS: '[{"branch":"main","event":"push","sha":"1111111111111111111111111111111111111111"}]' };
+  // Another pull request's CI, on another commit.
+  const other = { FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request","sha":"1111111111111111111111111111111111111111"}]' };
+  // A deployment of a previous merge still going on the base branch, whatever commit it runs.
+  const deploy = { FAKE_GH_RUNS: '[{"branch":"main","event":"push","sha":"2222222222222222222222222222222222222222"}]' };
   const dry = (extra) => pull.merge(['-', '--dry-run'], extra, 'Announcement.');
   // The full circuit waits for a host with no CI at all.
   assert.equal(dry(other).status, 3);
-  // On the fast lane, the run of another commit is not its business.
+  // On the fast lane, a pull request's run of another commit is not its business.
   record();
   const fast = dry(other);
   assert.equal(fast.status, 0, fast.stderr);
   assert.equal(JSON.parse(fast.stdout).lane, 'fast');
   // A run of this very commit is: it waits.
   assert.equal(dry({ FAKE_GH_RUNS: JSON.stringify([{ branch: 'feat/w', event: 'pull_request', sha: pull.headOf() }]) }).status, 3);
+  // A long deployment on the base branch holds it as it holds the full circuit; so does any run of another event.
+  assert.equal(dry(deploy).status, 3);
+  assert.match(dry(deploy).stdout + dry(deploy).stderr, /not free for a merge on the fast lane/);
+  assert.equal(dry({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"workflow_dispatch","sha":"3333333333333333333333333333333333333333"}]' }).status, 3);
   // Its own checks still running: kept in the queue, never merged before they are green; red: refused.
   pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
   assert.equal(dry(other).status, 3);
@@ -525,9 +648,76 @@ test('merge on the fast lane: judged again at the very commit, it waits for its 
   rmSync(join(forged.box.state, 'lanes'), { recursive: true, force: true });
 });
 
+test('the lane record is written under its lock: a writer waits for a holder of it, and the shell writer takes the same lock', async () => {
+  const state = scratch('fast-lane-lock-');
+  mkdirSync(join(state, 'lanes'), { recursive: true });
+  const record = join(state, 'lanes', 'X-1.json');
+  writeFileSync(record, JSON.stringify({ ticket: 'X-1', fast_lane: { opening: 'fast', state: 'fast' } }));
+  const cli = fileURLToPath(new URL('../lib/fast-lane.mjs', import.meta.url));
+  const env = { ...process.env, ORCH_STATE_DIR: state, ORCH_LEDGER: join(state, 'ledger.db') };
+  const started = join(state, 'holder-started');
+  const holder = spawn('flock', ['-x', `${record}.lock`, '-c', `touch ${started}; sleep 1`]);
+  const exited = new Promise((resolve) => holder.on('exit', resolve));
+  while (!existsSync(started)) await new Promise((resolve) => setTimeout(resolve, 20));
+  const from = Date.now();
+  const commit = 'a'.repeat(40);
+  const run = spawnSync(process.execPath, [cli, 'tests-done', 'X-1', commit, '0'], { env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(Date.now() - from >= 300, 'the writer waited for the holder of the lock');
+  assert.equal(JSON.parse(readFileSync(record, 'utf8')).fast_lane.tests.head, commit);
+  await exited;
+  // A shell writer (lane_write in lib/common.sh) rewrites the record under the same lock.
+  const lockedWriter = readFileSync(join(import.meta.dirname, '..', 'lib', 'common.sh'), 'utf8').split('\n').find((line) => line.startsWith('lane_write() {'));
+  assert.ok(lockedWriter, 'lane_write is defined');
+  execFileSync('bash', ['-c', `${lockedWriter}\nlane_write "$1" --arg at 2026-01-02T10:00:00Z '. + {closed: $at}'`, 'bash', record]);
+  assert.equal(JSON.parse(readFileSync(record, 'utf8')).closed, '2026-01-02T10:00:00Z');
+  assert.equal(JSON.parse(readFileSync(record, 'utf8')).fast_lane.tests.head, commit, 'nothing else is lost');
+});
+
+test('the card says what is true: running checks as running, red and not started as such; targeted tests failed or skipped', async () => {
+  const b = await board();
+  try {
+    addEvent(b.db, { kind: 'fast_lane_opened', ticket: 'EX-7', detail: 'dev/EX-7: opened on the fast lane' });
+    const line = async (checks) => {
+      writeFileSync(join(b.dir, 'wake', 'state.json'), JSON.stringify({ pulls: { 314: { state: 'ready', checks, files: 1, additions: 1, deletions: 1 } } }));
+      return (await b.collect()).tickets[0].statusLine;
+    };
+    // The wake's words for the checks: pending is running, failure is red, none is not started.
+    assert.equal(await line('pending'), 'full checks running, landing when green');
+    assert.equal(await line('failure'), 'full checks failed: the ticket goes back to its team');
+    assert.equal(await line('none'), 'full checks not started yet, landing when green');
+    assert.notEqual(await line('success'), 'full checks running, landing when green', 'green: the lane has nothing to wait for');
+    addEvent(b.db, { kind: 'fast_lane_tests', ticket: 'EX-7', detail: JSON.stringify({ head: 'c'.repeat(40), exit: 1 }), value: 1 });
+    assert.equal(await line('pending'), 'targeted tests failed at its last commit: not ready to land');
+    addEvent(b.db, { kind: 'fast_lane_tests', ticket: 'EX-7', detail: JSON.stringify({ head: 'd'.repeat(40), skipped: true }), value: null });
+    assert.equal(await line('pending'), 'targeted tests skipped at its last commit: they could not run');
+    const { message } = await import('../lib/i18n.mjs');
+    for (const key of ['app_srv_fast_checks_red', 'app_srv_fast_checks_not_started', 'app_srv_fast_tests_failed', 'app_srv_fast_tests_skipped']) {
+      assert.notEqual(message(key, 'fr'), message(key, 'en'), key);
+    }
+  } finally { b.close(); }
+});
+
+test('the tests of a fast-lane commit can be recorded as skipped, and the record says so', () => {
+  const state = scratch('fast-lane-skip-');
+  mkdirSync(join(state, 'lanes'), { recursive: true });
+  writeFileSync(join(state, 'lanes', 'X-1.json'), JSON.stringify({ ticket: 'X-1', fast_lane: { opening: 'fast', state: 'fast' } }));
+  const env = { ...process.env, ORCH_STATE_DIR: state, ORCH_LEDGER: join(state, 'ledger.db') };
+  const cli = fileURLToPath(new URL('../lib/fast-lane.mjs', import.meta.url));
+  const commit = 'b'.repeat(40);
+  assert.equal(spawnSync(process.execPath, [cli, 'tests-done', 'X-1', commit, 'skipped'], { env, encoding: 'utf8' }).status, 0);
+  const tests = JSON.parse(readFileSync(join(state, 'lanes', 'X-1.json'), 'utf8')).fast_lane.tests;
+  assert.deepEqual([tests.head, tests.skipped], [commit, true]);
+  assert.notEqual(spawnSync(process.execPath, [cli, 'tests-done', 'X-1', commit, 'nope'], { env, encoding: 'utf8' }).status, 0);
+});
+
 test('the example settings and the docs say every fast-lane key, and nothing fast is on by default', () => {
   const example = readFileSync(join(import.meta.dirname, '..', 'agents.example.conf'), 'utf8');
   assert.match(example, /\[fast_lane\]\nenabled = no\n/);
+  assert.match(example, /tests_command = npx --no-install vitest related --run --passWithNoTests \{files\}/, 'a change no test relates to passes');
+  const prompt = readFileSync(join(import.meta.dirname, '..', 'prompts', 'fast-lane-review.md'), 'utf8');
+  assert.doesNotMatch(prompt, /moves the ticket to the full circuit/, 'the reviewer is told what the code does: corrections, same lane');
+  assert.match(prompt, /stays on the fast lane/);
   const docs = readFileSync(join(import.meta.dirname, '..', 'docs', 'fast-lane.md'), 'utf8');
   assert.match(docs, /## Threat model: can a risky ticket take the fast lane\?/);
   assert.match(docs, /## What never qualifies/);

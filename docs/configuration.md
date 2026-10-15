@@ -130,7 +130,7 @@ Automatic rollback requires a git credential that can push a normal commit to th
 
 ## `[fast_lane]`
 
-The fast lane gives a tiny, explicit, risk-free change a short circuit; everything else keeps the full one. It is off unless `enabled = yes`. Rules decide it, never a model: at opening from the ticket's label or project, and after the author's work from the real diff at one exact commit, which is authoritative. It spares waits and weight (a light author and reviewer, targeted tests, one capture, a request to the user before the full checks end, a merge that does not wait for unrelated CI) and never a gate: the full checks green, a review by another model and the user's agreement to the exact version still hold. What qualifies, what never does, and the threat model are in [the fast lane](fast-lane.md). These settings are read from the main checkout only; a pull request that changes them is never fast.
+The fast lane gives a tiny, explicit, risk-free change a short circuit; everything else keeps the full one. It is off unless `enabled = yes`. Rules decide it, never a model: at opening from the ticket's label or project, and after the author's work from the real diff at one exact commit, which is authoritative. A key of `[fast_lane]` that is not in this table (a typo such as `never_path`) is refused: the fast lane is off for every ticket, and the wake says which key. It spares waits and weight (a light author and reviewer, targeted tests, one capture, a request to the user before the full checks end, a merge that does not wait for unrelated CI) and never a gate: the full checks green, a review by another model and the user's agreement to the exact version still hold. What qualifies, what never does, and the threat model are in [the fast lane](fast-lane.md). These settings are read from the main checkout only; a pull request that changes them is never fast.
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
@@ -145,9 +145,9 @@ The fast lane gives a tiny, explicit, risk-free change a short circuit; everythi
 | `max_lines` | Most changed lines (added plus removed) of a fast change. | Default: 40 |
 | `max_files` | Most changed files of a fast change. | Default: 10 |
 | `max_file_bytes` | Largest size of a changed file. | Default: 100000 |
-| `tests_command` | Targeted tests, run with no shell after the author's session (under `[security] agent_user` when set); `{files}` must be one word and becomes the changed files. Empty: none, and the request does not wait for them. | Optional; no default |
+| `tests_command` | Targeted tests, run with no shell after the author's session (under `[security] agent_user` when set, else with an empty home); `{files}` must be one word and becomes the changed files. Use a runner that passes when no test relates to the files (`vitest related --run --passWithNoTests`). A run that fails or cannot run is said on the card (failed or skipped), and the ticket is not ready to land. Empty: none, and the request does not wait for them. | Optional; no default |
 | `tests_timeout_minutes` | Time limit of the targeted tests. | Default: 10 |
-| `capture_screen` | The screen the author captures once, before and after, unless the ticket names another; needs `[lanes] kept_from`, `kept_in` and the capture command in `heavy_commands`. Empty: no capture is waited for. | Optional; no default |
+| `capture_screen` | The screen the author captures once, before and after, unless the ticket names another; needs `[lanes] kept_from`, `kept_in` and the capture command in `heavy_commands`. Empty: no capture is waited for. Only a capture made by this run counts. | Optional; no default |
 
 ## `[heartbeat]`
 

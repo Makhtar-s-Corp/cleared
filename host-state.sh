@@ -18,7 +18,7 @@ if [ -n "$down" ]; then
 fi
 base=$(conf_get lanes base)
 target=${base#origin/}
-# Each with its commit: a merge on the fast lane waits only for the runs of its own (merge-pr.sh).
+# Each with its event, branch and commit: merge-pr.sh decides which of them holds a merge on the fast lane.
 runs=$(gh run list --limit 20 --json status,headBranch,event,headSha --jq '[.[] | select(.status != "completed") | {branch: .headBranch, event, sha: .headSha}]')
 pulls=$(gh pr list --state open --limit 60 --json number,title,headRefName,isDraft,statusCheckRollup --jq '[.[] | {number, title, branch: .headRefName, draft: .isDraft,
   checks: ([.statusCheckRollup[] | (.conclusion // .status // "") | ascii_upcase] | if any(. == "FAILURE") then "failure" elif any(. == "IN_PROGRESS" or . == "QUEUED" or . == "PENDING") then "pending" elif any(. == "SUCCESS") then "success" else "none" end)}]')

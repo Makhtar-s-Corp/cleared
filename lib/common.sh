@@ -932,6 +932,10 @@ owner_name_first() {
 # (its branch, the branch its work is sent to, its pull request, its runs).
 # It outlives the worktree: a lane the tidying closed is opened again from it.
 lane_record() { echo "$ORCH_STATE_DIR/lanes/$1.json"; }
+# lane_write <record> <jq arguments...>: rewrites a lane record with jq under
+# its lock: flock on <record>.lock, the one lib/fast-lane.mjs takes for its own
+# writes. A reader that needs the whole file reads it as it was before or after.
+lane_write() { ( flock -w 30 9 && jq "${@:2}" "$1" > "$1.part" && mv "$1.part" "$1" ) 9> "$1.lock"; }
 
 # teams_of <ticket>: the lanes at work on a ticket, one a line, as
 # « <team> <its pull request, or 0> »: the first (1), and the second when

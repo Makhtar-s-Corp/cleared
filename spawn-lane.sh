@@ -131,7 +131,7 @@ if [ -z "$team" ]; then
 fi
 if [ "$fast_role" = author ]; then
   lane_kind=$(jq -r '.fast_lane.state // empty' "$record" 2> /dev/null) || lane_kind=
-  [ -n "$lane_kind" ] || lane_kind=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" opening <<<"$issue" 2> /dev/null) || lane_kind=full
+  [ -n "$lane_kind" ] || lane_kind=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" opening <<<"$issue") || lane_kind=full
 elif [ "$fast_role" = review ] && [ -n "$pr" ]; then
   lane_kind=$(jq -r --argjson pr "$pr" 'select(.pr == $pr) | .fast_lane.state // empty' "$(lane_record "$ticket")" 2> /dev/null) || lane_kind=
 fi
@@ -418,7 +418,7 @@ if [ -n "$pushed_role" ]; then
   # Its lane at opening, kept once (what the ticket says later changes
   # nothing): the rules judge its diff against it after each session.
   if [ "$fast_role" = author ] && [ "$(jq -r '.fast_lane | type' "$record")" != object ]; then
-    jq --arg kind "$lane_kind" --arg at "$(now_utc)" '. + {fast_lane: {opening: $kind, state: $kind, at: $at}}' "$record" > "$record.part" && mv "$record.part" "$record"
+    lane_write "$record" --arg kind "$lane_kind" --arg at "$(now_utc)" '. + {fast_lane: {opening: $kind, state: $kind, at: $at}}'
     [ "$lane_kind" != fast ] || ledger event --kind fast_lane_opened --ticket "$ticket" --detail "$lane: opened on the fast lane ($rule)"
   fi
   # The ticket is at work: said where the user looks.
