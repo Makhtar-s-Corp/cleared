@@ -8,7 +8,7 @@
 // never sent to the server in a request line); --demo serves invented data.
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { loadConf, projectDir, section, expandHome } from '../lib/conf.mjs';
+import { configRefusal, loadConf, projectDir, section, expandHome } from '../lib/conf.mjs';
 import { appServer } from './server.mjs';
 import { checkRanges, ensureToken, TAILSCALE } from './lib/access.mjs';
 import { execFileSync } from 'node:child_process';
@@ -48,7 +48,8 @@ const project = demo ? undefined : projectDir();
 
 if (passkeyCommand) {
   // Only the human's account is given a grant; the app checks the caller's UID itself.
-  if (!grantPath) { console.error('cleared app passkey: set [app] grant_socket (and [app] public_origin) first, see docs/app.md'); process.exit(2); }
+  // A refused tracked-file check is named as such: the settings are there, the command could not read them.
+  if (!grantPath) { console.error(configRefusal() ?? 'cleared app passkey: set [app] grant_socket (and [app] public_origin) first, see docs/app.md'); process.exit(2); }
   try {
     const answer = await requestGrant(grantPath);
     if (!answer.ok) { console.error(`cleared app passkey: ${answer.reason}`); process.exit(1); }

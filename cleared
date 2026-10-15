@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { loadConf, stateDir } from './lib/conf.mjs';
 import { createTracker } from './lib/tracker/contract.mjs';
+import { checkoutGitEnv, gitRefusal } from './lib/git-checkout.mjs';
 
 const [area, action, ...args] = process.argv.slice(2);
 if (area === 'status') {
@@ -36,7 +37,10 @@ if (area === 'rollback') {
       db = openLedger(undefined, { readOnly: true });
       const row = db.prepare('SELECT merge_sha,title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket);
       if (!row) throw new Error(`No Cleared release recorded for ${ticket}`);
-      const files = execFileSync('git', ['-C', process.env.CLEARED_REPO || process.env.ORCH_REPO || process.cwd(), 'diff', '--name-only', `${row.merge_sha}^1`, row.merge_sha], { encoding: 'utf8' }).trim();
+      const repo = process.env.CLEARED_REPO || process.env.ORCH_REPO || process.cwd();
+      let files;
+      try { files = execFileSync('git', ['-C', repo, 'diff', '--name-only', `${row.merge_sha}^1`, row.merge_sha], { encoding: 'utf8', env: checkoutGitEnv(repo) }).trim(); }
+      catch (error) { throw new Error(gitRefusal(repo, error)); }
       console.log(`Ticket: ${ticket} — ${row.title}\nMerge to revert: ${row.merge_sha}\nFiles:\n${files}`);
       const prompt = createInterface({ input: process.stdin, output: process.stdout });
       let answer;
