@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDecipheriv, createECDH, createHmac, createPublicKey, randomBytes, verify } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { addEvent, openLedger, runStart } from '../lib/ledger.mjs';
@@ -368,6 +368,33 @@ test('the secrets directory is private: keys made once (0600), subscriptions cap
   assert.throws(() => notifyStore('relative/notify').vapid(), /absolute/);
 });
 
+test('subscriptions are changed under a lock (flock): the app and the dispatcher changing them at once lose nothing', async () => {
+  const dir = join(scratch('cleared-notify-lock-'), 'notify');
+  const store = notifyStore(dir, { create: true });
+  store.forget('none');
+  const lock = join(dir, 'subscriptions.lock');
+  assert.equal(statSync(lock).mode & 0o777, 0o600);
+  // Two processes adding four devices each, at the same time.
+  const child = (from) => new Promise((resolve) => {
+    const code = `const { notifyStore } = await import(${JSON.stringify(join(ORCH_HOME, 'lib', 'notify', 'store.mjs'))});
+      const { createECDH } = await import('node:crypto');
+      const s = notifyStore(${JSON.stringify(dir)});
+      for (let i = ${from}; i < ${from} + 4; i += 1) { const e = createECDH('prime256v1'); e.generateKeys();
+        s.subscribe({ endpoint: 'https://fcm.googleapis.com/fcm/send/p' + i, keys: { p256dh: e.getPublicKey().toString('base64url'), auth: Buffer.from('0123456789abcdef').toString('base64url') } }, 'dev'); }`;
+    spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: 'ignore' }).on('close', resolve);
+  });
+  assert.deepEqual(await Promise.all([child(0), child(100)]), [0, 0]);
+  assert.equal(store.subscriptions().length, 8, 'every device of both processes is kept');
+  // While another process holds the lock, a change waits for it.
+  const holder = spawn('flock', ['-x', lock, 'sleep', '0.6'], { stdio: 'ignore' });
+  while (spawnSync('flock', ['-n', lock, 'true']).status === 0) await new Promise((r) => { setTimeout(r, 10); });
+  const started = Date.now();
+  assert.equal(store.forget('https://fcm.googleapis.com/fcm/send/p0'), 1);
+  assert.ok(Date.now() - started >= 300, 'the change waited for the lock');
+  await new Promise((r) => { holder.on('close', r); });
+  assert.equal(store.subscriptions().length, 7);
+});
+
 // ---- the dispatcher ------------------------------------------------------------
 
 const T0 = Date.parse('2026-10-15T09:00:00Z');
@@ -529,6 +556,72 @@ test('no adapter ready: nothing waits to be sent later; a failing adapter is tri
   assert.equal(failures.length, 3);
   for (const row of failures) assert.deepEqual(JSON.parse(row.detail), { event: 'approval', adapter: 'ntfy', reason: 'failed' });
   assert.equal(box.rows('notification_sent').length, 0);
+});
+
+test('the dispatcher keeps to its deadline: a send that hangs is given up, waits for the next wake (not a try, not sent) and goes then', async () => {
+  const box = setup();
+  await box.run(T0);
+  box.snapshot.tickets = [ready('EX-7', 'Rename', iso(T0)), question('EX-8', 'Pick a colour', iso(T0))];
+  let calls = 0;
+  // A carrier that never answers and ignores the abort.
+  box.adapters = [{ name: 'webpush', ready: () => null, send: () => { calls += 1; return new Promise(() => {}); } }];
+  const started = Date.now();
+  const done = await box.run(T0 + minute, { deadlineMs: 100 });
+  assert.ok(Date.now() - started < 2000, 'the dispatch returns at its deadline');
+  assert.equal(calls, 1, 'nothing more is started once the deadline is past');
+  assert.deepEqual([done.sent.length, done.failed.length, done.held.length], [0, 0, 2]);
+  assert.deepEqual(box.db.prepare("SELECT state, attempts FROM notify_queue WHERE state != 'seen' ORDER BY key").all().map((r) => ({ ...r })), [{ state: 'pending', attempts: 0 }, { state: 'pending', attempts: 0 }]);
+  assert.equal(box.rows('notification_sent').length + box.rows('notification_failed').length, 0, 'neither sent nor failed');
+  box.adapters = [{ name: 'fake', ready: () => null, send: async (m) => box.sent.push(m) }];
+  await box.run(T0 + 2 * minute);
+  assert.deepEqual(box.sent.map((m) => m.ticket).sort(), ['EX-7', 'EX-8']);
+  // The service's environment sets it, never agents.conf.
+  assert.equal(notifySettings({ sections: {} }, {}).deadlineMs, 30000);
+  assert.equal(notifySettings({ sections: { notify: { deadline_seconds: '900' } } }, { CLEARED_NOTIFY_DEADLINE_SECONDS: '5' }).deadlineMs, 5000);
+  assert.throws(() => notifySettings({ sections: {} }, { CLEARED_NOTIFY_DEADLINE_SECONDS: '0' }), /DEADLINE_SECONDS/);
+  assert.throws(() => notifySettings({ sections: {} }, { CLEARED_NOTIFY_DEADLINE_SECONDS: 'soon' }), /DEADLINE_SECONDS/);
+});
+
+test('Web Push tells a few browsers at a time, and starts none once the deadline aborts', async () => {
+  const subscriptions = Array.from({ length: 9 }, (_, i) => ({ endpoint: `${endpoint}${i}`, keys: browser().keys }));
+  let open = 0, most = 0, calls = 0;
+  const quick = webpushAdapter({ store: memoryStore(subscriptions), subject: 'mailto:ops@example.org', transport: async () => {
+    calls += 1; open += 1; most = Math.max(most, open);
+    await new Promise((r) => { setTimeout(r, 20); });
+    open -= 1;
+    return { ok: true, status: 201 };
+  } });
+  assert.deepEqual(await quick.send(render({ kind: 'approval', ticket: 'EX-1', title: 'Rename' })), { delivered: 9 });
+  assert.equal(calls, 9);
+  assert.ok(most > 1 && most <= 4, `at most four at once (${most})`);
+  calls = 0;
+  const hanging = webpushAdapter({ store: memoryStore(subscriptions), subject: 'mailto:ops@example.org',
+    transport: (_url, init) => { calls += 1; return new Promise((_resolve, reject) => { init.signal.addEventListener('abort', () => reject(new Error('aborted'))); }); } });
+  const box = setup();
+  await box.run(T0);
+  box.snapshot.tickets = [ready('EX-9', 'Rename', iso(T0))];
+  box.adapters = [hanging];
+  const done = await box.run(T0 + minute, { deadlineMs: 100 });
+  assert.equal(calls, 4, 'the first four, then nothing new');
+  assert.equal(done.held.length, 1);
+});
+
+test('a notification delivered is not sent again when the ledger cannot record it: the failure is said on the log, by its kind only', async (t) => {
+  const box = setup();
+  await box.run(T0);
+  box.snapshot.tickets = [ready('EX-10', `Leak ${SECRET_PATH}`, iso(T0))];
+  // The ledger refuses the notification events (full, locked): the queue itself still works.
+  box.db.exec("CREATE TRIGGER refuse BEFORE INSERT ON events WHEN NEW.kind LIKE 'notification%' BEGIN SELECT RAISE(ABORT, 'ledger refuses'); END");
+  const said = [];
+  t.mock.method(console, 'error', (line) => said.push(String(line)));
+  const done = await box.run(T0 + minute);
+  assert.equal(done.sent.length, 1);
+  assert.deepEqual(done.failed, []);
+  assert.deepEqual(said, ['cleared: notifications: a notification_sent event could not be written to the ledger']);
+  box.db.exec('DROP TRIGGER refuse');
+  await box.run(T0 + 30 * minute);
+  assert.equal(box.sent.length, 1, 'sent once');
+  assert.equal(box.db.prepare("SELECT state FROM notify_queue WHERE key LIKE 'approval:EX-10:%'").get().state, 'sent');
 });
 
 test('an agent cannot trigger a notification: the command takes no text, and what a team writes never reaches the message', () => {

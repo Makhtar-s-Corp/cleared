@@ -91,8 +91,10 @@ wake_cleanup() {
     node --no-warnings "$ORCH_HOME/lib/heartbeat.mjs" wake-end "$result" > /dev/null || true
     # What waits for the human, and what went wrong, told on his phone
     # (lib/notify.mjs, [notify]): last, once the snapshot and the health are
-    # written. It never fails the wake.
-    node --no-warnings "$ORCH_HOME/lib/notify.mjs" dispatch > /dev/null || true
+    # written. It never fails the wake, and never holds the wake's lock for
+    # long: it gives up its own sends after CLEARED_NOTIFY_DEADLINE_SECONDS
+    # (30 by default) and is stopped here after 60 seconds whatever happens.
+    timeout -k 5 60 node --no-warnings "$ORCH_HOME/lib/notify.mjs" dispatch > /dev/null || true
   fi
   exit "$result"
 }
