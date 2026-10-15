@@ -20,13 +20,14 @@ const pub = join(import.meta.dirname, '..', 'app', 'public');
 const browserKeys = () => { const e = createECDH('prime256v1'); e.generateKeys(); return { p256dh: e.getPublicKey().toString('base64url'), auth: Buffer.from('fedcba9876543210').toString('base64url') }; };
 const SUBSCRIPTION = { endpoint: 'https://fcm.googleapis.com/fcm/send/dev-1', keys: browserKeys() };
 
-async function rig({ notify = {}, withNotifications = true } = {}) {
+async function rig({ notify = {}, env = {}, withNotifications = true } = {}) {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const dir = join(mkdtempSync(join(tmpdir(), 'cleared-app-notify-')), 'notify');
   dirs.push(dir.replace(/\/notify$/, ''));
   const records = [];
-  const settings = notifySettings({ sections: { notify: { vapid_subject: 'mailto:ops@example.org', ...notify } } });
+  // The service's own settings come from its environment (here, the test's), never from agents.conf.
+  const settings = notifySettings({ sections: { notify: { vapid_subject: 'mailto:ops@example.org', ...notify } } }, env);
   const store = notifyStore(dir, { create: true });
   const notifications = withNotifications ? createNotifications({ settings, store, origin: base, record: (e) => records.push(e) }) : null;
   const server = appServer({ source: demoSource(), token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, notifications, origin: base, owner: 'alice' });
@@ -128,7 +129,7 @@ test('only a known push service is kept: an address of anyone\'s choosing is ref
     assert.equal((await post('/api/notifications/subscribe', { subscription: { endpoint: SUBSCRIPTION.endpoint, keys: { p256dh: 'x', auth: 'y' } } })).status, 400);
     assert.equal(r.store.subscriptions().length, 0);
   } finally { await r.close(); }
-  const own = await rig({ notify: { push_hosts: 'push.example.org' } });
+  const own = await rig({ env: { CLEARED_NOTIFY_PUSH_HOSTS: 'push.example.org' } });
   try {
     const { post } = await own.signIn();
     assert.equal((await post('/api/notifications/subscribe', { subscription: { ...SUBSCRIPTION, endpoint: 'https://push.example.org/x' } })).status, 200, '[notify] push_hosts adds one');
