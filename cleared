@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { openLedger } from './lib/ledger.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { loadConfForCommand, projectDir, stateDir } from './lib/conf.mjs';
+import { checkoutProblem, loadConfForCommand, stateDir } from './lib/conf.mjs';
 import { createTracker } from './lib/tracker/contract.mjs';
 import { checkoutReadEnv, gitRefusal } from './lib/git-checkout.mjs';
 
@@ -14,13 +14,9 @@ const [area, action, ...args] = process.argv.slice(2);
 // whatever the command: a path Cleared does not expand (~), a checkout that
 // is not there, or git refusing the service-owned checkout (lib/conf.mjs).
 const demo = area === 'app' && [action, ...args].includes('--demo');
-if (['status', 'app', 'rollback', 'ticket'].includes(area) && !demo && !process.env.CLEARED_CONF && !process.env.ORCH_CONF) {
-  let problem = null;
-  try {
-    const project = projectDir();
-    if (project.startsWith('~')) problem = `the project path ${project} starts with "~", which Cleared does not expand: give the absolute path`;
-    else if (!existsSync(project)) problem = `the project checkout ${project} does not exist`;
-  } catch (error) { problem = error.message; }
+// (status checks this itself, so that --json keeps its document: lib/heartbeat.mjs)
+if (['app', 'rollback', 'ticket'].includes(area) && !demo && !process.env.CLEARED_CONF && !process.env.ORCH_CONF) {
+  const problem = checkoutProblem();
   if (problem) { console.error(`cleared: ${problem}`); process.exit(2); }
   loadConfForCommand(); // says why and exits 2 when git cannot read it
 }

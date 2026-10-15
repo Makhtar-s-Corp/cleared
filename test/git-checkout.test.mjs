@@ -211,6 +211,44 @@ test('git that cannot run is named too, and a file that is simply untracked keep
 // What each planted setting would run, reached by a git command, with the read environment: nothing. The
 // commands include some Cleared never runs on a checkout (status, a patch diff, a fetch): the environment
 // holds for them too. textconv and filter drivers are not overridden by key: the commands leave them out.
+// cleared status: when the project configuration cannot be read, --json still prints one schema 1 object with the
+// reason (refused, or not a repository told apart), and exit 2; the text mode says the same on stderr.
+test('cleared status says why the project configuration cannot be read: one JSON object with the reason, or the text line', () => {
+  const project = fixtureProject();
+  const plain = scratch('orch-not-a-repo-');
+  mkdirSync(join(plain, '.cleared'));
+  writeFileSync(join(plain, '.cleared', 'agents.conf'), '[lanes]\nbase = main\n');
+  const state = scratch('orch-status-state-');
+  const run = (repo, json, refuse) => spawnSync(process.execPath, [join(ORCH_HOME, 'cleared'), 'status', ...(json ? ['--json'] : [])],
+    { encoding: 'utf8', env: childEnv(fakeGit(), { CLEARED_REPO: repo, CLEARED_STATE_DIR: state, ...(refuse ? { FAKE_GIT_REFUSE_ALL: '1' } : {}) }) });
+
+  const refused = run(project, true, true);
+  assert.equal(refused.status, 2, refused.stderr);
+  const refusedDoc = JSON.parse(refused.stdout); // exactly one object: parsing the whole output fails otherwise
+  assert.equal(refusedDoc.schema, 1);
+  assert.equal(refusedDoc.ok, false);
+  assert.equal(refusedDoc.problems[0].code, 'status_error');
+  assert.match(refusedDoc.problems[0].message, new RegExp(`^git refused or could not read ${project.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: fatal: detected dubious ownership`));
+  assert.doesNotMatch(refusedDoc.problems[0].message, /not a git repository/);
+
+  const notRepo = run(plain, true, false);
+  assert.equal(notRepo.status, 2, notRepo.stderr);
+  const notRepoDoc = JSON.parse(notRepo.stdout);
+  assert.equal(notRepoDoc.problems[0].code, 'status_error');
+  assert.match(notRepoDoc.problems[0].message, new RegExp(`^${plain.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')} is not a git repository: fatal: not a git repository`));
+  assert.doesNotMatch(notRepoDoc.problems[0].message, /git refused/);
+
+  const textRefused = run(project, false, true);
+  assert.equal(textRefused.status, 2);
+  assert.equal(textRefused.stdout, '', 'the text mode prints no document');
+  assert.match(textRefused.stderr, /^cleared: git refused or could not read .*: fatal: detected dubious ownership/m);
+
+  const textNotRepo = run(plain, false, false);
+  assert.equal(textNotRepo.status, 2);
+  assert.match(textNotRepo.stderr, /^cleared: .* is not a git repository: fatal: not a git repository/m);
+  assert.doesNotMatch(textNotRepo.stderr, /git refused/);
+});
+
 test('the read environment stops every planted setting a read can reach, on the commands Cleared runs and beyond', (t) => {
   const root = realpathSync(scratch('orch-vectors-'));
   const repo = join(root, 'repo');
