@@ -875,7 +875,7 @@ test('label trust: a fast mark counts only when the user set it; a tracker that 
   assert.equal(openingLane(trusting, issue, { labels: { Quick: agents }, project: null }), 'full');
 });
 
-test('label trust: each tracker says who set a label: GitHub by its timeline (an app is never the user), Linear by its history (else the creator, and never a partial history)', () => {
+test('[Linear adapter] label trust: each tracker says who set a label: GitHub by its timeline (an app is never the user), Linear by its history (else the creator, and never a partial history)', () => {
   const issue = { number: 3, labels: [{ name: 'Quick' }, { name: 'Bug' }], user: { login: 'alice', type: 'User' } };
   const timeline = [
     { event: 'labeled', label: { name: 'Quick' }, actor: { login: 'alice', type: 'User' }, created_at: '2026-01-01T00:00:00Z' },
