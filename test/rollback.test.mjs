@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
 import { releaseSettings, canAutoRollback, shouldRollback, touchesMigrations,
-  activeRelease, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
+  activeRelease, holdsMerge, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
   reconcileNotifications, resumeWatches, retryFetch } from '../lib/release.mjs';
 
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
@@ -490,10 +490,23 @@ test('overlapping releases: an earlier release whose window overlaps is enough, 
   assert.equal((await watchFailing(y, alone)).reverts, 1);
 });
 
-test('a fast-lane release whose health is failing holds the next merge back', (t) => {
+test('a fast-lane release whose health is failing holds the next merge back, and a merge that went live meanwhile is still watched', (t) => {
   const x = releasedProject(t);
   x.db.prepare("UPDATE releases SET lane = 'fast' WHERE id = ?").run(x.row.id);
-  assert.equal(activeRelease(x.db), undefined, 'a healthy fast-lane watch holds nothing back');
+  assert.equal(holdsMerge(x.db), undefined, 'a healthy fast-lane watch holds nothing back');
   x.db.prepare('UPDATE releases SET failures = 1, first_failure_at = ? WHERE id = ?').run(new Date(x.clock).toISOString(), x.row.id);
-  assert.equal(activeRelease(x.db).id, x.row.id);
+  assert.equal(holdsMerge(x.db).id, x.row.id);
+  // A merge that passed the gate just before the failure is live: it gets its row and its watch all the same.
+  x.git('checkout', '-qb', 'raced');
+  writeFileSync(join(x.repo, 'raced.txt'), 'raced\n');
+  x.git('add', '.'); x.git('commit', '-qm', 'raced change');
+  x.git('checkout', '-q', 'main'); x.git('merge', '--no-ff', '-qm', 'Merge raced', 'raced');
+  x.git('push', '-q', 'origin', 'main');
+  const sha = x.git('rev-parse', 'HEAD');
+  addEvent(x.db, { kind: 'merged_by_script', ticket: 'LOCAL-2', value: 2 });
+  let scheduled = 0;
+  startRelease(x.conf, x.db, x.repo, 'LOCAL-2', 2, { lane: 'fast', schedule: () => { scheduled++; },
+    readPull: () => ({ mergeCommit: { oid: sha }, mergedAt: new Date().toISOString(), title: 'Raced' }) });
+  assert.equal(scheduled, 1);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE merge_sha = ?').get(sha).status, 'watching');
 });
