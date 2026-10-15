@@ -550,11 +550,16 @@ Notifications to the human's phone when something waits for him or goes wrong: a
 | `timezone` | IANA time zone of the quiet hours. | Optional; no default (`[dashboard] timezone`, else UTC) |
 | `coalesce_minutes` | At most one notification per ticket (per health problem when there is no ticket) in this many minutes; what comes meanwhile waits, and several at once are folded into the most pressing. `0` turns it off. | Default: 10 |
 | `blocked_minutes` | How long a team must have been unable to open (no place on the machine) or unable to move (the rules gave up) before it is notified as blocked. | Default: 30 |
-| `link_base` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole). | Optional; no default (`[app] public_origin`; no link without either) |
 | `secrets_dir` | Absolute path of a private directory (mode `0700`, owned by the service account, outside the project and the checkout, unreadable by the agents' account) holding `vapid.json`, `subscriptions.json` and `credentials.json`. | Optional; no default (`~/.config/cleared/notify` is used) |
-| `vapid_subject` | The contact the push services may use about this service (`mailto:` or `https:`), sent in every Web Push request. Apple requires one. | Optional; no default (`link_base` when it is https) |
-| `push_hosts` | Extra Web Push service host names accepted for a subscription (a self-hosted service). The defaults are Google's, Mozilla's, Apple's and Microsoft's. | Optional; no default |
-| `sendmail` | Absolute path of the mail program the `email` adapter runs. | Optional; no default (`/usr/sbin/sendmail` is used) |
+| `vapid_subject` | The contact the push services may use about this service (`mailto:` or `https:`), sent in every Web Push request. Apple requires one. | Optional; no default (the link address when it is https) |
+
+Three settings are read from the service's environment only, never from the project's `agents.conf` (a project's agent could change them):
+
+| Environment variable | Purpose | Default |
+| --- | --- | --- |
+| `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole). | None: no link |
+| `CLEARED_NOTIFY_PUSH_HOSTS` | Extra Web Push service host names accepted for a subscription, separated by commas (a self-hosted service). The defaults are Google's, Mozilla's, Apple's and Microsoft's. | None |
+| `CLEARED_NOTIFY_SENDMAIL` | Absolute path of the mail program the `email` adapter runs. | The first of `/usr/sbin/sendmail`, `/usr/lib/sendmail`, `/sbin/sendmail`, `/usr/bin/sendmail` that is a file no one else can write |
 
 ## `[security]`
 

@@ -27,7 +27,7 @@ What is held, and what is dropped:
 
 ## Settings
 
-All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.md#notify): the adapters, the kinds sent (each on or off), the quiet hours and their time zone, the coalescing window, the blocked threshold, the address the link opens (`link_base`, by default `[app] public_origin`). Secrets are never in that file.
+All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.md#notify): the adapters, the kinds sent (each on or off), the quiet hours and their time zone, the coalescing window, the blocked threshold. Three service settings are not in that file: the address the link opens (`CLEARED_NOTIFY_LINK_BASE`, no link when unset), the extra push hosts (`CLEARED_NOTIFY_PUSH_HOSTS`) and the mail program (`CLEARED_NOTIFY_SENDMAIL`). They come from the service's environment, because a project's agent can write `agents.conf`. Secrets are never in that file.
 
 ## Setup
 
@@ -35,7 +35,7 @@ All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.
 
 Nothing outside your machine to sign up for: the browser's own push service (Google for Chrome and Android, Mozilla for Firefox, Apple for Safari and iPhone, Microsoft for Edge) carries a message encrypted for your device (RFC 8291), signed by a key of your service (VAPID, RFC 8292). Cleared implements both with Node's own crypto: no dependency.
 
-1. Give the app an https address and set `[app] public_origin` to it, as for the gestures (`tailscale serve --bg 8788` gives `https://<machine>.<tailnet>.ts.net`). Push needs a secure address. The push services also want a contact: `[notify] vapid_subject` (a `mailto:` address or an https page); without it, the https `link_base` is used.
+1. Give the app an https address and set `CLEARED_NOTIFY_LINK_BASE` to it in the service's environment (for example `CLEARED_NOTIFY_LINK_BASE=https://<machine>.<tailnet>.ts.net`, from `tailscale serve --bg 8788`). Push needs a secure address. The push services also want a contact: `[notify] vapid_subject` (a `mailto:` address or an https page); without it, the https link address is used.
 2. Open the app on the phone or computer and sign in. Its header shows **Turn on notifications** when Web Push is offered. Tap it, allow notifications, and the device shows "Notifications are on" by itself. The button then reads **Notifications on**; tapping it again turns them off for that device. Up to ten devices can be subscribed.
 3. Check the whole path from the machine, as the service account: `CLEARED_REPO=/path/to/project node /path/to/cleared/lib/notify.mjs test`. It sends a fixed test message to every configured adapter and says, per adapter, `sent`, `not ready (reason)` or `failed (code)`.
 
@@ -49,7 +49,7 @@ The Web Push key pair is made the first time the app is opened with Web Push off
 
 ### E-mail
 
-Cleared hands the message to the machine's own mail program (`[notify] sendmail`, `/usr/sbin/sendmail` by default: Postfix, msmtp, OpenSMTPD…), which holds the mail account; Cleared holds no mail password. Put the recipient and the sender in `credentials.json` and add `email` to `[notify] adapters`. Check it with `notify.mjs test`.
+Cleared hands the message to the machine's own mail program (`CLEARED_NOTIFY_SENDMAIL`, else the first well-known one that is there: `/usr/sbin/sendmail`, Postfix, msmtp, OpenSMTPD…, a file no one else can write), which holds the mail account; Cleared holds no mail password. Put the recipient and the sender in `credentials.json` and add `email` to `[notify] adapters`. Check it with `notify.mjs test`.
 
 ### Telegram
 
@@ -82,7 +82,7 @@ install -m 0600 /dev/null ~/.config/cleared/notify/credentials.json   # then edi
 
 ## Security model
 
-- **Only the human subscribes.** `POST /api/notifications/subscribe` and `unsubscribe` are writes of the app like the gestures: the session cookie (never the access token alone), the anti-forgery token, the app's own origin. An agent that reaches the app by the network, even with the token, cannot subscribe a device. Only an https address of a known push service is kept (`[notify] push_hosts` adds a self-hosted one), so the service never posts to an address of someone's choosing. Each change is one `app_gesture` event (`{gesture: "notifications", result, device}`), without the address.
+- **Only the human subscribes.** `POST /api/notifications/subscribe` and `unsubscribe` are writes of the app like the gestures: the session cookie (never the access token alone), the anti-forgery token, the app's own origin. An agent that reaches the app by the network, even with the token, cannot subscribe a device. Only an https address of a known push service is kept (`CLEARED_NOTIFY_PUSH_HOSTS` adds a self-hosted one), so the service never posts to an address of someone's choosing. Each change is one `app_gesture` event (`{gesture: "notifications", result, device}`), without the address.
 - **No one chooses what is said.** The dispatcher takes no text: `notify.mjs` accepts `dispatch` (the wake) or `test` (a fixed message) and nothing else. An agent can cause an event (a team asks a question, a release request goes through the broker), never its words: a notification is built in `lib/notify/contract.mjs` from the kind, the ticket's identifier, a known health code, a number of minutes, the catalog's sentences and the ticket's title. A ledger detail, a team's question, a report or a ticket's body are never read for it.
 - **The title is filtered.** A ticket's title can be written by anyone who can write a ticket, an agent included. Before it is used it goes through `sanitize`: links, absolute, home, relative and Windows paths, environment variables, tokens and keys (known prefixes, JWTs, long base64 or hex), `password=…`-like pairs, e-mail and IP addresses, amounts with or without a currency, and numbers of five digits or more are replaced (`[path]`, `[secret]`, `[amount]`…), invisible and direction-changing characters removed, the result put on one line and cut to 80 characters; the whole message is filtered again. The tests try a title made to leak a credentials path and a token.
 - **Secrets stay with the service.** The Web Push private key, the subscriptions (a push address is a capability) and the adapters' credentials live in `secrets_dir` only. They are never written to the ledger, a log, a notification or an error: a failed delivery is recorded as a short code (`ntfy refused (403)`, `telegram unreachable`, `push service refused`), never with its address, token or answer. The Telegram token travels in the address of each call, so that address is never said. Its API address can only be changed in the service's environment (`CLEARED_NOTIFY_TELEGRAM_API`, for a test double).

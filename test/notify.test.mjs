@@ -10,7 +10,7 @@ import { createAdapters, isQuiet, KINDS, notifySettings, render, sanitize, URGEN
 import { encrypt, newVapidKeys, pushHostAllowed, validSubscription, vapidHeader, vapidKeysFrom, webpushAdapter } from '../lib/notify/adapters/webpush.mjs';
 import { ntfyAdapter } from '../lib/notify/adapters/ntfy.mjs';
 import { telegramAdapter } from '../lib/notify/adapters/telegram.mjs';
-import { emailAdapter } from '../lib/notify/adapters/email.mjs';
+import { emailAdapter, sendmailDefault } from '../lib/notify/adapters/email.mjs';
 import { notifyStore } from '../lib/notify/store.mjs';
 import { dispatch, EXPIRE_MS, sendTest } from '../lib/notify.mjs';
 import { scratch } from './support.mjs';
@@ -127,12 +127,14 @@ test('the Web Push adapter sends what the phone can read, drops a subscription t
 
 // ---- the other adapters, same contract ----------------------------------------------
 
+// The service's own settings come from its environment, never from agents.conf.
+const LINK_ENV = { CLEARED_NOTIFY_LINK_BASE: 'https://cockpit.example.ts.net' };
 const MESSAGE = render({ kind: 'rollback', ticket: 'EX-4', title: `Fix ${SECRET_PATH} with ${TOKEN}` }, { language: 'fr', linkBase: 'https://cockpit.example.ts.net' });
 
 test('every adapter has the same contract: a name, ready() with a reason when it cannot, send() of the rendered message', async () => {
   const transport = async () => ({ ok: true, status: 200 });
   const empty = memoryStore();
-  const settings = notifySettings({ sections: { notify: { adapters: 'webpush, ntfy, email, telegram' }, app: { public_origin: 'https://cockpit.example.ts.net' } } });
+  const settings = notifySettings({ sections: { notify: { adapters: 'webpush, ntfy, email, telegram' } } }, LINK_ENV);
   const adapters = createAdapters(settings, { store: empty, transport, run: () => {} });
   assert.deepEqual(adapters.map((a) => a.name), ['webpush', 'ntfy', 'email', 'telegram']);
   for (const adapter of adapters) {
@@ -263,6 +265,35 @@ test('quiet hours are read on the configured clock, across midnight, and a malfo
 
 // ---- the secrets ---------------------------------------------------------------
 
+test('the service settings a project must not choose (sendmail, push_hosts, link_base) come from the environment only', () => {
+  const hostile = { sections: { notify: { sendmail: '/tmp/evil-sendmail', push_hosts: 'push.evil.example', link_base: 'https://phish.example' }, app: { public_origin: 'https://phish.example' } } };
+  const settings = notifySettings(hostile, {});
+  assert.equal(settings.sendmail, sendmailDefault(), 'agents.conf names no mail program');
+  assert.deepEqual(settings.pushHosts, [], 'agents.conf adds no push host');
+  assert.equal(settings.linkBase, '', 'agents.conf sets no link, not even through [app] public_origin');
+  assert.equal(settings.subject, '', 'nor a contact');
+  const service = notifySettings(hostile, { CLEARED_NOTIFY_SENDMAIL: '/opt/msmtp/bin/sendmail', CLEARED_NOTIFY_PUSH_HOSTS: 'Push.Example.org, relay.example',
+    CLEARED_NOTIFY_LINK_BASE: 'https://cockpit.example.ts.net/' });
+  assert.equal(service.sendmail, '/opt/msmtp/bin/sendmail');
+  assert.deepEqual(service.pushHosts, ['push.example.org', 'relay.example']);
+  assert.equal(service.linkBase, 'https://cockpit.example.ts.net');
+  assert.equal(notifySettings({ sections: {} }, { ORCH_NOTIFY_LINK_BASE: 'https://old.example.ts.net' }).linkBase, 'https://old.example.ts.net', 'the ORCH_ name is read too, as the Telegram address');
+  assert.throws(() => notifySettings({ sections: {} }, { CLEARED_NOTIFY_SENDMAIL: 'sendmail' }), /CLEARED_NOTIFY_SENDMAIL must be an absolute path/);
+});
+
+test('the default mail program is the first well-known path that is a file no one else can write', () => {
+  const root = scratch('cleared-sendmail-');
+  const open = join(root, 'open-sendmail'), mine = join(root, 'sendmail'), absent = join(root, 'absent');
+  writeFileSync(open, '#!/bin/sh\n');
+  writeFileSync(mine, '#!/bin/sh\n');
+  chmodSync(open, 0o777);
+  chmodSync(mine, 0o755);
+  assert.equal(sendmailDefault([absent, open, mine]), mine, 'a world-writable file is skipped');
+  assert.equal(sendmailDefault([absent, root]), null, 'a directory or a missing file is not a mail program');
+  assert.equal(emailAdapter({ credentials: () => ({ to: 'owner@example.org' }), sendmail: null }).ready(), 'no_sendmail');
+  assert.equal(notifySettings({ sections: {} }, {}).sendmail, sendmailDefault(), 'the settings use the same default');
+});
+
 test('the secrets directory is private: keys made once (0600), subscriptions capped, anything looser or inside the project refused', () => {
   const root = scratch('cleared-notify-');
   const dir = join(root, 'notify');
@@ -295,7 +326,7 @@ const T0 = Date.parse('2026-10-15T09:00:00Z');
 const minute = 60000;
 function setup({ notify = {}, snapshot = { schema: 1, tickets: [] } } = {}) {
   const db = openLedger(':memory:');
-  const settings = notifySettings({ sections: { notify, owner: { language: 'en' }, app: { public_origin: 'https://cockpit.example.ts.net' } } });
+  const settings = notifySettings({ sections: { notify, owner: { language: 'en' } } }, LINK_ENV);
   const sent = [];
   const fake = { name: 'fake', ready: () => null, send: async (message) => { sent.push(message); } };
   const box = { db, settings, snapshot, sent, adapters: [fake] };
@@ -469,9 +500,9 @@ test('a real wake dispatches: the first one takes note, the next one tells ntfy 
   const secrets = join(scratch('cleared-notify-secrets-'), 'notify');
   mkdirSync(secrets, { mode: 0o700 });
   writeFileSync(join(secrets, 'credentials.json'), JSON.stringify({ ntfy: { server: `http://127.0.0.1:${server.address().port}`, topic: 'cleared-test', token: 'tk_abcdefgh12345' } }), { mode: 0o600 });
-  appendFileSync(join(box.home, 'agents.conf'), `\n[notify]\nadapters = ntfy\nsecrets_dir = ${secrets}\nlink_base = https://cockpit.example.ts.net\n`);
+  appendFileSync(join(box.home, 'agents.conf'), `\n[notify]\nadapters = ntfy\nsecrets_dir = ${secrets}\n`);
   const wake = () => new Promise((resolve) => {
-    const child = spawn(join(box.home, 'wake.sh'), [], { env: box.env });
+    const child = spawn(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...LINK_ENV } });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.stdout.resume();
