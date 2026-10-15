@@ -937,6 +937,19 @@ lane_record() { echo "$ORCH_STATE_DIR/lanes/$1.json"; }
 # writes. A reader that needs the whole file reads it as it was before or after.
 lane_write() { ( flock -w 30 9 && jq "${@:2}" "$1" > "$1.part" && mv "$1.part" "$1" ) 9> "$1.lock"; }
 
+# fast_demoted_at <record> [<pr>]: when a ticket that opened on the fast lane was
+# sent to the full circuit (lib/fast-lane.mjs), as an ISO time; nothing for
+# any other ticket. A review that began before it was the fast lane's light
+# one: it counts for nothing on the full circuit (merge-pr.sh, review-pr.sh,
+# flow-lanes.sh), and the full circuit's own review is asked for.
+fast_demoted_at() {
+  local at
+  at=$(jq -r --arg pr "${2:-}" 'select(type == "object" and .fast_lane.opening == "fast" and .fast_lane.state == "full" and ($pr == "" or (.pr | tostring) == $pr)) | .fast_lane.demoted_at // .fast_lane.at // "unknown"' "$1" 2> /dev/null) || at=
+  # A time that cannot be read is the latest one: no review before now counts.
+  [ -z "$at" ] || [[ "$at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] || at=$(now_utc)
+  printf '%s' "$at"
+}
+
 # teams_of <ticket>: the lanes at work on a ticket, one a line, as
 # « <team> <its pull request, or 0> »: the first (1), and the second when
 # the user gave the ticket to two teams (<ticket>.2). A lane that is over

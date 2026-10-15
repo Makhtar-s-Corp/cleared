@@ -382,8 +382,12 @@ second_team() {
 # asked for corrections, and the lane is opened again for them. Works on the
 # variables of the lane being looked at (one_lane).
 reviewed_at_head() {
-  local run_id
+  local run_id demoted asked_key="review:$head"
   verdict= reviewed_by=
+  # Sent from the fast lane to the full circuit: only a review begun since
+  # counts, and the full circuit's own is asked for, at this very head too.
+  demoted=$(fast_demoted_at "$record")
+  [ -z "$demoted" ] || asked_key="review:full:$head"
   while IFS= read -r run_id; do
     [ -n "$run_id" ] || continue
     # Read at this version, or at one this version only adds the base to.
@@ -391,11 +395,11 @@ reviewed_at_head() {
     reviewed_by=$run_id
     if node --no-warnings "$ORCH_HOME/lib/merge.mjs" verdict "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null; then verdict=ok; else verdict=corrections; fi
     break
-  done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket' order by started_at desc" | jq -r '.[].run_id')
+  done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket'${demoted:+ and julianday(started_at) >= julianday('$demoted')} order by started_at desc" | jq -r '.[].run_id')
   if [ -z "$reviewed_by" ]; then
-    did "$record" "review:$head" && return 1
+    did "$record" "$asked_key" && return 1
     say "$ticket: #$pr ${1:-is green} at ${head:0:8}: its review is asked for"
-    [ -n "$dry" ] || { "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" > /dev/null 2>&1 && mark "$record" "review:$head"; } || true
+    [ -n "$dry" ] || { "$ORCH_HOME/review-pr.sh" "$pr" "$ticket" > /dev/null 2>&1 && mark "$record" "$asked_key"; } || true
     return 1
   fi
   if [ "$verdict" = corrections ]; then

@@ -130,12 +130,15 @@ lane_key=$ticket
 [ "$lane_kind" = fast ] || lane_kind=full
 
 # 3. Reviewed, for this ticket, with the verdict asked for, at this version.
+# A ticket the rules sent from the fast lane to the full circuit needs a
+# review begun after that: the light one before it does not count.
+demoted=$(fast_demoted_at "$(lane_record "$ticket")" "$pr")
 reviewed=
 while IFS=$'\t' read -r run_id commit; do
   [ -n "$commit" ] || continue
   node_lib merge.mjs verdict "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null || continue
   if only_base_merges "$commit" "$head"; then reviewed=$commit; break; fi
-done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket' order by started_at desc" \
+done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket'${demoted:+ and julianday(started_at) >= julianday('$demoted')} order by started_at desc" \
   | jq -r '.[].run_id' | while IFS= read -r run_id; do printf '%s\t%s\n' "$run_id" "$(sed -n 's/^commit: //p' "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null | sed -n '1p')"; done)
 [ -n "$reviewed" ] || no "this version (${head:0:8}) has no review for $ticket that concludes « $(conf_get merge verdict) »: have it reviewed (review-pr.sh $pr $ticket)"
 

@@ -1,19 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseConf } from '../lib/conf.mjs';
 import {
   RULE_REASONS, assertService, commandWords, contentFinding, decide, decideLane, fastSettings, globMatcher, judgeDiff, lanesMedian, measureTicket,
-  median, openingLane, pathFormOk, targetedArgv,
+  median, openingDecision, openingLane, pathFormOk, targetedArgv,
 } from '../lib/fast-lane.mjs';
+import { GithubTracker } from '../lib/tracker/adapters/github.mjs';
+import { LocalTracker } from '../lib/tracker/adapters/local.mjs';
 import { fileURLToPath } from 'node:url';
 import { route } from '../lib/route.mjs';
 import { addEvent, openLedger } from '../lib/ledger.mjs';
 import { activeRelease } from '../lib/release.mjs';
 import { finishedReviews } from '../lib/reviews.mjs';
-import { flowBox, reviewedPull, scratch, task } from './support.mjs';
+import { flowBox, reviewedPull, sandbox, scratch, task } from './support.mjs';
 
 // ---- A project with a base and a branch, and the settings of its main checkout ----
 
@@ -269,8 +271,9 @@ test('the settings: unreadable patterns or numbers make nothing fast; empty safe
   assert.deepEqual(judge(p, head, confOf('enabled = yes')).reasons, ['outside_safe']);
   assert.deepEqual(judge(p, head, confOf('enabled = no\nsafe_paths = docs/')).reasons, ['disabled']);
   const settings = fastSettings(CONF);
-  assert.equal(openingLane(settings, { labels: ['Bug', 'Quick'], project: null }), 'fast');
-  assert.equal(openingLane(settings, { labels: [], project: 'Wording' }), 'fast');
+  const human = { kind: 'human', id: 'alice' };
+  assert.equal(openingLane(settings, { labels: ['Bug', 'Quick'], project: null }, { labels: { Bug: human, Quick: human }, project: null }), 'fast');
+  assert.equal(openingLane(settings, { labels: [], project: 'Wording' }, { labels: {}, project: human }), 'fast');
   assert.equal(openingLane(settings, { labels: ['quick'], project: 'Other' }), 'full', 'a label is matched as the project writes it');
   assert.equal(openingLane(fastSettings(confOf('enabled = no\nlabels = Quick')), { labels: ['Quick'] }), 'full');
   const glob = globMatcher('web/**/*.css');
@@ -407,6 +410,8 @@ function fastFlow(extra = '', { tests = 'true {files}', capture = false } = {}) 
   if (capture) writeFileSync(conf, readFileSync(conf, 'utf8').replace('[lanes]\n', `[lanes]\nkept_from = .local/captures\nkept_in = ${join(box.box.home, 'kept')}\n`));
   writeFileSync(conf, `${readFileSync(conf, 'utf8')}\n[fast_lane]\nenabled = yes\nlabels = Quick\nauthor_model = b\nreview_model = a\nsafe_paths = docs/\ntests_command = ${tests}\n${capture ? 'capture_screen = /settings\n' : ''}${extra}`);
   writeFileSync(join(box.box.home, 'tracker-labels-X-5.json'), '["Quick"]');
+  // The user himself put the label on the ticket, as the tracker's history says.
+  writeFileSync(join(box.box.home, 'tracker-label-actors-X-5.json'), JSON.stringify({ labels: { Quick: { kind: 'human', id: 'alice' } }, project: null }));
   const events = (kind) => { const db = openLedger(join(box.box.state, 'ledger.db')); const rows = db.prepare('SELECT kind, value, detail FROM events WHERE kind = ? ORDER BY event_id').all(kind); db.close(); return rows; };
   const runDirOf = (role) => join(box.box.state, 'runs', readdirSync(join(box.box.state, 'runs')).filter((name) => { try { return new RegExp(`ORCH_ROLE=${role}\\n`).test(readFileSync(join(box.box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
   const review = (answer) => {
@@ -634,9 +639,18 @@ test('merge on the fast lane: judged again at the very commit, it waits for its 
   const waits = forged.merge(['-', '--dry-run'], other, 'Announcement.');
   assert.equal(waits.status, 3, waits.stderr);
   assert.equal(kept(), 'fast', 'a dry run writes nothing');
-  assert.equal(forged.merge(['-'], other, 'Announcement.').status, 3);
+  // Judged at the very commit and sent back for good; on the full circuit, the review read on the fast lane counts for nothing, at this very head too.
+  const unreviewed = forged.merge(['-'], other, 'Announcement.');
+  assert.equal(unreviewed.status, 6, unreviewed.stderr);
+  assert.match(unreviewed.stderr, /has no review for X-5/);
   assert.equal(kept(), 'full', 'judged at the very commit, and sent back for good');
   rmSync(join(forged.box.state, 'merge-queue'), { recursive: true, force: true });
+  // The full circuit's own review may then read the same head, and does.
+  const env = { ...forged.box.env, HOME: forged.box.home, ORCH_PROC_DIR: join(forged.box.home, 'proc-none') };
+  const again = spawnSync(join(forged.box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' });
+  assert.equal(again.status, 0, again.stderr);
+  const opened = JSON.parse(again.stdout);
+  assert.equal(spawnSync(join(forged.box.home, 'lane-run.sh'), [opened.run_dir], { cwd: opened.worktree, env: { ...env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
   // Merged once the host is free, on the full circuit, with its time measured from Todo.
   const live = forged.merge(['-'], {}, '**Live**: see it on the settings screen.');
   assert.equal(live.status, 0, live.stderr);
@@ -837,4 +851,123 @@ test('adversarial: a safe file that carries behaviour (markup, a remote load, a 
   assert.equal(contentFinding(null), 'unread');
   assert.equal(contentFinding(['plain', null]), 'encoding');
   assert.equal(judgeDiff([{ path: 'docs/a.md', status: 'A', oldMode: '000000', newMode: '100644', added: 1, deleted: 0, size: 3 }], fastSettings(CONF)).reasons.includes('content'), true);
+});
+
+// ---- Who set the fast label ----
+
+test('label trust: a fast mark counts only when the user set it; a tracker that cannot say gives nothing unless the project opts in, and never against an agent it names', () => {
+  const settings = fastSettings(CONF);
+  const human = { kind: 'human', id: 'alice' };
+  const agents = { kind: 'agents', id: 'cleared[bot]' };
+  const issue = { identifier: 'X-1', labels: ['Quick'], project: 'Wording' };
+  assert.deepEqual(openingDecision(settings, { ...issue, project: null }, { labels: { Quick: human }, project: null }), { lane: 'fast', ignored: [] });
+  // Forged by an agent identity: the lead files follow-ups with [tracker] create_label and create_project.
+  const forged = openingDecision(settings, issue, { labels: { Quick: agents }, project: agents });
+  assert.equal(forged.lane, 'full');
+  assert.deepEqual(forged.ignored, ['label Quick (set by agents)', 'project Wording (set by agents)']);
+  assert.equal(openingLane(settings, issue, { labels: { Quick: { kind: 'other', id: 'bob' } }, project: { kind: 'other', id: 'bob' } }), 'full', 'another person is not the user');
+  assert.equal(openingLane(settings, issue, { labels: { Quick: agents }, project: human }), 'fast', 'the user put it in a fast project himself');
+  // The tracker cannot say who set it: nothing, unless the project opts in; even then, a mark it says an agent set is refused.
+  assert.equal(openingLane(settings, issue, null), 'full');
+  assert.match(openingDecision(settings, issue, null).ignored[0], /the tracker cannot say who set it/);
+  const trusting = fastSettings(confOf('enabled = yes\nlabels = Quick\nsafe_paths = docs/\ntrust_label_without_actor = yes'));
+  assert.equal(openingLane(trusting, issue, null), 'fast');
+  assert.equal(openingLane(trusting, issue, { labels: { Quick: agents }, project: null }), 'full');
+});
+
+test('label trust: each tracker says who set a label: GitHub by its timeline (an app is never the user), Linear by its history (else the creator, and never a partial history)', () => {
+  const issue = { number: 3, labels: [{ name: 'Quick' }, { name: 'Bug' }], user: { login: 'alice', type: 'User' } };
+  const timeline = [
+    { event: 'labeled', label: { name: 'Quick' }, actor: { login: 'alice', type: 'User' }, created_at: '2026-01-01T00:00:00Z' },
+    { event: 'labeled', label: { name: 'Quick' }, actor: { login: 'cleared', type: 'Bot' }, created_at: '2026-01-02T00:00:00Z' },
+    { event: 'labeled', label: { name: 'Bug' }, actor: { login: 'alice', type: 'User' }, performed_via_github_app: { slug: 'x' }, created_at: '2026-01-01T00:00:00Z' },
+  ];
+  const github = new GithubTracker({ conf: { sections: { tracker: { repository: 'o/r', owner_id: 'alice', app_login: 'cleared[bot]' } } },
+    api: (path) => (path.endsWith('/timeline?per_page=100') ? timeline : issue) });
+  assert.deepEqual(github.labelActors('GH-3'), { labels: { Quick: { kind: 'agents', id: 'cleared[bot]' }, Bug: { kind: 'other', id: 'alice' } }, project: { kind: 'human', id: 'alice' } });
+
+  const box = sandbox();
+  copyFileSync(join(import.meta.dirname, '..', 'tracker.sh'), join(box.home, 'tracker.sh'));
+  writeFileSync(box.env.ORCH_CONF, readFileSync(box.env.ORCH_CONF, 'utf8').replace('adapter = local', 'adapter = linear\nowner_id = alice'));
+  const answer = join(box.home, 'linear-answer.json');
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat '${answer}'\n`, { mode: 0o755 });
+  const node = (at, actor, app, labels, project = null) => ({ createdAt: at, actorId: actor, actor: actor ? { id: actor, app } : null, botActor: null, addedLabelIds: labels, toProjectId: project });
+  const linear = (history, { more = false, creator = { id: 'alice', app: false } } = {}) => {
+    writeFileSync(answer, JSON.stringify({ data: { viewer: { id: 'key-owner' }, issue: { createdAt: '2026-01-01T00:00:00Z', creator, botActor: null,
+      labels: { nodes: [{ id: 'L1', name: 'Quick' }, { id: 'L2', name: 'Bug' }] }, project: { id: 'P1', name: 'Wording' },
+      history: { pageInfo: { hasNextPage: more }, nodes: history } } } }));
+    const run = spawnSync(join(box.home, 'tracker.sh'), ['label-actors', 'X-5'], { env: { ...box.env, LINEAR_API_KEY: 'k' }, encoding: 'utf8' });
+    return run.status === 0 ? JSON.parse(run.stdout) : null;
+  };
+  // The user added it, then an agent removed and added it again: the agent's.
+  assert.deepEqual(linear([node('2026-01-03T00:00:00Z', 'bot', true, ['L1']), node('2026-01-02T00:00:00Z', 'alice', false, ['L1'], 'P1')]),
+    { labels: { Quick: { kind: 'agents', id: 'bot' }, Bug: { kind: 'human', id: 'alice' } }, project: { kind: 'human', id: 'alice' } });
+  // Set when an agent created the ticket: the creator's.
+  assert.deepEqual(linear([], { creator: { id: 'bot', app: true } }).labels.Quick, { kind: 'agents', id: 'bot' });
+  // A history longer than one page is not read in part.
+  assert.equal(linear([node('2026-01-02T00:00:00Z', 'alice', false, ['L1'])], { more: true }), null);
+
+  // The local tracker sets labels only at creation: its creator, as its signed history says (an unsigned "human" is nobody).
+  const db = openLedger(join(scratch('fast-lane-local-'), 'ledger.db'));
+  const conf = { sections: { tracker: { todo_state: 'Todo', owner_id: 'alice' } } };
+  const byAgent = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'agent' } }).createTicket({ title: 'Follow-up', labels: ['Quick'], project: 'Wording' });
+  const byHuman = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' } });
+  const reader = new LocalTracker({ conf, db, actor: { kind: 'shared', id: 'service' } });
+  assert.deepEqual(reader.labelActors(byAgent.identifier), { labels: { Quick: { kind: 'agents', id: 'agent' } }, project: { kind: 'agents', id: 'agent' } });
+  let unsigned;
+  try { unsigned = byHuman.createTicket({ title: 'Mine', labels: ['Quick'] }); } catch { unsigned = null; }
+  if (unsigned) assert.equal(reader.labelActors(unsigned.identifier).labels.Quick.kind, 'other', 'no signature that holds: not the user');
+  db.close();
+});
+
+test('label trust, end to end: a label an agent set opens the full circuit with the routing table\'s author, and is said in the ledger; the opt-in covers only a tracker that cannot say', () => {
+  const forged = fastFlow();
+  writeFileSync(join(forged.box.home, 'tracker-label-actors-X-5.json'), JSON.stringify({ labels: { Quick: { kind: 'agents', id: 'cleared[bot]' } }, project: null }));
+  forged.todo(['X-5']);
+  forged.by('X-5', 0);
+  forged.flow();
+  assert.deepEqual((({ opening, state }) => ({ opening, state }))(forged.record('X-5').fast_lane), { opening: 'full', state: 'full' });
+  assert.equal(forged.events('fast_lane_opened').length, 0);
+  assert.match(forged.events('fast_lane_mark_ignored')[0].detail, /label Quick \(set by agents\)/);
+  assert.equal(JSON.parse(readFileSync(join(forged.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a', 'the routing table\'s author, not the light one');
+  // A tracker that cannot say: the full circuit; opted in, the fast lane.
+  const unknown = fastFlow();
+  rmSync(join(unknown.box.home, 'tracker-label-actors-X-5.json'));
+  unknown.todo(['X-5']);
+  unknown.by('X-5', 0);
+  unknown.flow();
+  assert.equal(unknown.record('X-5').fast_lane.opening, 'full');
+  assert.match(unknown.events('fast_lane_mark_ignored')[0].detail, /cannot say/);
+  const trusting = fastFlow('trust_label_without_actor = yes\n');
+  rmSync(join(trusting.box.home, 'tracker-label-actors-X-5.json'));
+  trusting.todo(['X-5']);
+  trusting.by('X-5', 0);
+  trusting.flow();
+  assert.equal(trusting.record('X-5').fast_lane.opening, 'fast');
+});
+
+test('demotion: a ticket the rules send to the full circuit gets the full circuit\'s own review, even at the head the light reviewer read, and the routing table\'s author for further work', () => {
+  const f = fastFlow();
+  f.todo(['X-5']);
+  f.by('X-5', 0);
+  f.flow();
+  f.stage({ 'docs/settings.md': 'Settings\n' });
+  const done = f.session('X-5', { commit: 'docs: rename the settings title', answer: 'Done.\n\nQuestions for the user: None.' });
+  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [] });
+  assert.match(f.flow().stdout, /its review is asked for/);
+  f.review('Verdict : rien de bloquant.');
+  // Sent to the full circuit at the same head (here by hand, as a team that asked would be).
+  const demoted = spawnSync(process.execPath, [join(f.box.home, 'lib', 'fast-lane.mjs'), 'demote', 'X-5', 'asked'], { env: f.env, encoding: 'utf8' });
+  assert.equal(demoted.status, 0, demoted.stderr);
+  assert.match(f.record('X-5').fast_lane.demoted_at, /^\d{4}-\d\d-\d\dT/);
+  // Green checks: the light review does not count; the full circuit's is asked for, at this very head.
+  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+  assert.match(f.flow().stdout, /#41 is green at [0-9a-f]{8}: its review is asked for/);
+  const reviewer = f.runDirOf('review');
+  assert.doesNotMatch(readFileSync(join(reviewer, 'prompt.md'), 'utf8'), /## Fast lane/, 'the full circuit\'s reviewer, not the light one');
+  // Further work goes to the routing table's author.
+  f.review('Verdict : corrections demandées, le titre du menu doit changer aussi.');
+  assert.match(f.flow().stdout, /X-5: opened again \(verdict:/);
+  assert.equal(JSON.parse(readFileSync(join(f.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a');
+  assert.match(readFileSync(join(f.runDirOf('dev'), 'lane.env'), 'utf8'), /ORCH_FAST_LANE=full/);
 });

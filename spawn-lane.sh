@@ -123,7 +123,7 @@ fi
 # says at its opening (a label or a project the settings declare fast). A
 # review: what the record of the ticket says, when it is the pull request of
 # that record. A second team, and any other role, take the full circuit.
-lane_kind=full fast_role=
+lane_kind=full fast_role= opening_note=
 author_role_name=$(conf_get review author_role)
 if [ -z "$team" ]; then
   if [ "$role" = "${author_role_name:-dev}" ]; then fast_role=author
@@ -131,7 +131,12 @@ if [ -z "$team" ]; then
 fi
 if [ "$fast_role" = author ]; then
   lane_kind=$(jq -r '.fast_lane.state // empty' "$record" 2> /dev/null) || lane_kind=
-  [ -n "$lane_kind" ] || lane_kind=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" opening <<<"$issue") || lane_kind=full
+  # The ticket's fast label or project counts only when the user set it
+  # (the tracker's history says who): a mark an agent set is said, and picks nothing.
+  if [ -z "$lane_kind" ]; then
+    opening=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" opening <<<"$issue") || opening=full
+    lane_kind=$(sed -n 1p <<<"$opening") opening_note=$(sed -n 2p <<<"$opening")
+  fi
 elif [ "$fast_role" = review ] && [ -n "$pr" ]; then
   lane_kind=$(jq -r --argjson pr "$pr" 'select(.pr == $pr) | .fast_lane.state // empty' "$(lane_record "$ticket")" 2> /dev/null) || lane_kind=
 fi
@@ -420,6 +425,7 @@ if [ -n "$pushed_role" ]; then
   if [ "$fast_role" = author ] && [ "$(jq -r '.fast_lane | type' "$record")" != object ]; then
     lane_write "$record" --arg kind "$lane_kind" --arg at "$(now_utc)" '. + {fast_lane: {opening: $kind, state: $kind, at: $at}}'
     [ "$lane_kind" != fast ] || ledger event --kind fast_lane_opened --ticket "$ticket" --detail "$lane: opened on the fast lane ($rule)"
+    [ -z "$opening_note" ] || ledger event --kind fast_lane_mark_ignored --ticket "$ticket" --detail "$lane: $opening_note"
   fi
   # The ticket is at work: said where the user looks.
   progress=$(conf_get tracker progress_state)
