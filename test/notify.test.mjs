@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDecipheriv, createECDH, createHmac, createPublicKey, verify } from 'node:crypto';
+import { createDecipheriv, createECDH, createHmac, createPublicKey, randomBytes, verify } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { addEvent, openLedger, runStart } from '../lib/ledger.mjs';
 import { createAdapters, isQuiet, KINDS, notifySettings, render, sanitize, URGENT } from '../lib/notify/contract.mjs';
-import { encrypt, newVapidKeys, pushHostAllowed, validSubscription, vapidHeader, webpushAdapter } from '../lib/notify/adapters/webpush.mjs';
+import { encrypt, newVapidKeys, pushHostAllowed, validSubscription, vapidHeader, vapidKeysFrom, webpushAdapter } from '../lib/notify/adapters/webpush.mjs';
 import { ntfyAdapter } from '../lib/notify/adapters/ntfy.mjs';
 import { telegramAdapter } from '../lib/notify/adapters/telegram.mjs';
 import { emailAdapter } from '../lib/notify/adapters/email.mjs';
@@ -72,6 +72,22 @@ test('the VAPID header is an ES256 token for the push service, signed by the ser
   const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33)) }, format: 'jwk' });
   assert.equal(Buffer.from(signature, 'base64url').length, 64, 'r and s, not DER');
   assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url')));
+});
+
+test('a VAPID key whose private scalar starts with a zero byte is kept on 32 bytes and still signs', () => {
+  const ecdh = createECDH('prime256v1');
+  for (;;) { try { ecdh.setPrivateKey(Buffer.concat([Buffer.alloc(1), randomBytes(31)])); break; } catch { /* not a valid scalar, draw again */ } }
+  assert.equal(ecdh.getPrivateKey().length, 31, 'Node drops the leading zero: the case is exercised');
+  const keys = vapidKeysFrom(ecdh);
+  assert.equal(Buffer.from(keys.privateKey, 'base64url').length, 32);
+  const raw = Buffer.from(keys.publicKey, 'base64url');
+  const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33)) }, format: 'jwk' });
+  // Kept on 32 bytes, or kept short by an earlier version: both sign.
+  for (const privateKey of [keys.privateKey, b64u(ecdh.getPrivateKey())]) {
+    const [, token] = /^vapid t=([^,]+),/.exec(vapidHeader(endpoint, { ...keys, privateKey }, 'mailto:ops@example.org'));
+    const [head, claims, signature] = token.split('.');
+    assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url')));
+  }
 });
 
 test('only an https endpoint of a known push service, with the browser keys, is a subscription', () => {
@@ -205,6 +221,8 @@ test('the filter strips paths, links, tokens, keys, passwords, e-mails, addresse
   for (const [input, expected] of Object.entries(cases)) assert.equal(sanitize(input), expected, input);
   assert.equal(sanitize('A\u202Egnp.exe\u200B title\nnext'), 'Agnp.exe title next', 'no direction change, invisible character or line break');
   assert.ok(sanitize('x'.repeat(300)).length <= 80);
+  assert.equal(render({ kind: 'question', ticket: 'EX-12', title: 'Rotate the API token' }).body, 'EX-12 · Rotate the API token: open it to answer.', 'the catalog\'s colon is not a value');
+  assert.ok(notifySettings({ sections: { notify: { secrets_dir: '~/private/notify' } } }).secretsDir.startsWith('/'), 'a ~ path is the home of the service account');
 });
 
 test('a malicious ticket title or event detail cannot smuggle a secret path, token or amount into any notification', () => {
