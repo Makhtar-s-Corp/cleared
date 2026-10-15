@@ -89,6 +89,10 @@ wake_cleanup() {
       node --no-warnings "$ORCH_HOME/lib/board-collector.mjs" > /dev/null || result=1
     fi
     node --no-warnings "$ORCH_HOME/lib/heartbeat.mjs" wake-end "$result" > /dev/null || true
+    # What waits for the human, and what went wrong, told on his phone
+    # (lib/notify.mjs, [notify]): last, once the snapshot and the health are
+    # written. It never fails the wake.
+    node --no-warnings "$ORCH_HOME/lib/notify.mjs" dispatch > /dev/null || true
   fi
   exit "$result"
 }
