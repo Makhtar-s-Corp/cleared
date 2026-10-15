@@ -33,8 +33,8 @@ async function rig({ notify = {}, env = {}, withNotifications = true } = {}) {
   const store = notifyStore(dir, { create: true });
   const source = demoSource();
   // The gestures' passkey ceremony, as the app wires it (app/main.mjs).
-  let passkeys = [];
-  const actions = createActions({ source, origin: base, owner: 'alice', readPasskeys: () => passkeys, writePasskeys: (list) => { passkeys = list; },
+  let passkeys = [], shift = 0;
+  const actions = createActions({ source, origin: base, owner: 'alice', now: () => Date.now() + shift, readPasskeys: () => passkeys, writePasskeys: (list) => { passkeys = list; },
     run: async () => ({ ok: true }), record: (e) => records.push(e) });
   const notifications = withNotifications ? createNotifications({ settings, store, origin: base, record: (e) => records.push(e), confirm: actions }) : null;
   const server = appServer({ source, token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, actions, notifications, origin: base, owner: 'alice' });
@@ -63,7 +63,7 @@ async function rig({ notify = {}, env = {}, withNotifications = true } = {}) {
     if (asked.status !== 200) return asked;
     return browser.json(`/api/notifications/${op}`, { ...payload, challengeId: asked.body.challengeId, assertion: authn.get(asked.body.publicKey) });
   };
-  return { base, dir, store, records, call, signIn, register, confirmed, authenticator, close: () => new Promise((r) => { server.close(r); }) };
+  return { base, dir, store, records, call, signIn, register, confirmed, authenticator, later: (ms) => { shift += ms; }, close: () => new Promise((r) => { server.close(r); }) };
 }
 const subscriptionFor = (n) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/dev-${n}`, keys: browserKeys() });
 
@@ -121,7 +121,7 @@ test('subscribing needs the human\'s passkey: a session opened with the access t
     const json = { 'content-type': 'application/json' };
     assert.equal((await r.call('/api/notifications', { headers: { authorization: `Bearer ${TOKEN}` } })).status, 401, 'the token reads the board, not the notification settings');
     assert.equal((await r.call('/api/notifications/subscribe', { method: 'POST', body, headers: { ...json, authorization: `Bearer ${TOKEN}`, origin: r.base } })).status, 401, 'the token is not a session');
-    // What an agent holding the token can do: open a session, read its anti-forgery token, and try.
+    // What anyone holding the app link (cleared app --link: /login#<token>) or the token can do: open a session, read its anti-forgery token, and try.
     const agent = await r.signIn('curl/8');
     assert.deepEqual(await (await r.call('/api/notifications', { headers: { cookie: agent.cookie } })).json(), { available: false, reason: 'no_passkey', publicKey: null, devices: 0 }, 'no passkey registered: nothing to offer');
     assert.deepEqual(await agent.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION }), { status: 409, body: { error: 'no_passkey' } });
@@ -159,7 +159,7 @@ test('subscribing needs the human\'s passkey: a session opened with the access t
   } finally { await r.close(); }
 });
 
-test('a confirmation is for one subscription and one purpose: another address, other keys or the other gesture are refused, and it is used once', async () => {
+test('a confirmation is fresh and for one subscription and one purpose: stale, another address, other keys or the other gesture are refused, and it is used once', async () => {
   const r = await rig();
   try {
     const human = await r.signIn();
@@ -174,6 +174,10 @@ test('a confirmation is for one subscription and one purpose: another address, o
     assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: { ...SUBSCRIPTION, keys: browserKeys() }, ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'changed' } }, 'other keys');
     assert.deepEqual(await human.json('/api/notifications/unsubscribe', { endpoint: SUBSCRIPTION.endpoint, ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'challenge' } }, 'the other gesture');
     assert.deepEqual(await human.json('/api/actions/confirm', { ...(await answer('subscribe', { subscription: SUBSCRIPTION })) }), { status: 403, body: { error: 'challenge' } }, 'never a ticket\'s gesture');
+    // A stale confirmation: the challenge lives two minutes.
+    const stale = await answer('subscribe', { subscription: SUBSCRIPTION });
+    r.later(121000);
+    assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, ...stale }), { status: 403, body: { error: 'challenge' } }, 'stale');
     const once = await answer('subscribe', { subscription: SUBSCRIPTION });
     assert.equal((await human.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, ...once })).status, 200);
     assert.deepEqual(await human.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, ...once }), { status: 403, body: { error: 'challenge' } }, 'replayed');
