@@ -336,6 +336,11 @@ test('at most one notification per ticket every ten minutes: a second event wait
   addEvent(box.db, { kind: 'release_health_failing', ticket: 'EX-8', at: iso(T0 + 30 * minute) });
   await box.run(T0 + 31 * minute);
   assert.deepEqual(box.sent.slice(2).map((m) => m.kind), ['health'], 'three at once for one ticket: one notification, the most pressing');
+  box.snapshot.tickets = [ready('EX-9', 'B', iso(T0 + 40 * minute))];
+  await box.run(T0 + 41 * minute);
+  addEvent(box.db, { kind: 'rollback_pushed', ticket: 'EX-9', at: iso(T0 + 42 * minute) });
+  await box.run(T0 + 43 * minute);
+  assert.deepEqual(box.sent.slice(3).map((m) => `${m.kind} ${m.ticket}`), ['approval EX-9', 'rollback EX-9'], 'a rollback is not held behind a request told two minutes before');
   const configured = setup({ notify: { coalesce_minutes: '2' } });
   await configured.run(T0);
   configured.snapshot.tickets = [question('EX-3', 'Pick', iso(T0))];

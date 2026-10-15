@@ -18,7 +18,7 @@ How long it takes: the wake runs the dispatcher last, after the board snapshot a
 
 What is held, and what is dropped:
 
-- **Coalescing.** One ticket is told at most once every `[notify] coalesce_minutes` (10 by default); a ticket-less health problem is grouped by its code. What comes meanwhile waits and is sent once the window is over, if it is still true. Several things at once for one ticket make one notification, the most pressing (rollback, then health, approval, question, blocked).
+- **Coalescing.** One ticket is told at most once every `[notify] coalesce_minutes` (10 by default); a ticket-less health problem is grouped by its code. What comes meanwhile waits and is sent once the window is over, if it is still true. A rollback or a health problem waits only behind another one of those, never behind a request or a question. Several things at once for one ticket make one notification, the most pressing (rollback, then health, approval, question, blocked).
 - **Quiet hours.** During `[notify] quiet_hours` (for example `22:00-07:00`, on `[notify] timezone`), approval, question and blocked wait; at the end of the quiet hours, what still waits is sent. Rollback and health are never held.
 - **Gone.** A card that stops waiting before it is sent (you answered, you cleared it from another device, the team opened again) is not sent at all.
 - **Old.** Something that waited more than a day without being sent is dropped.
