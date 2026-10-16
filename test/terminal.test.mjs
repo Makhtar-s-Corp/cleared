@@ -145,6 +145,33 @@ test('[terminal] adapter = none asks systemd-run --user for a scope of its own w
 });
 
 
+// setsid forks, and its parent exits, when the process that runs it is a process-group leader (a background job of a
+// shell with job control, for one). Forced here: a shim makes its caller a group leader before the real setsid runs.
+// The handle must still name the session leader, the process the session runs in, not the process setsid forked from.
+test('[terminal] adapter = none: when setsid forks, the handle names the session leader itself, and that is the session', async (t) => {
+  const box = noneBox();
+  const realSetsid = spawnSync('bash', ['-c', 'command -v setsid'], { encoding: 'utf8' }).stdout.trim();
+  writeFileSync(join(box.home, 'bin', 'setsid'), `#!/usr/bin/perl
+setpgrp(0, 0) or die "setpgrp: $!\\n";
+exec '${realSetsid}', @ARGV or die "exec: $!\\n";
+`, { mode: 0o755 });
+  const { opened, runDir, handle } = openHeld(box);
+  assert.equal(opened.status, 0, opened.stderr);
+  const [kind, pid, start, boot] = handle.split(':');
+  t.after(() => stopGroup(Number(pid)));
+  assert.equal(kind, 'none');
+  assert.ok(alive(pid), 'the session the handle names is running');
+  assert.equal(stat(pid)[3], pid, 'its session is its own');
+  assert.equal(stat(pid)[2], pid, 'its process group is its own');
+  assert.equal(start, stat(pid)[19], 'the handle holds its start');
+  assert.equal(boot, bootId());
+  assert.equal(argv(pid)[1], join(box.home, 'lane-run.sh'), 'the process is the session, the command exec-ed in it');
+  assert.ok(await until(() => { try { return /── dev\/X-1 · dev · a \(first: m1\) ──/.test(readFileSync(join(runDir, 'terminal.log'), 'utf8')); } catch { return false; } }));
+  assert.equal(closeWith(box, handle).status, 0);
+  assert.ok(await until(() => !alive(pid), 10000), 'the session is stopped');
+});
+
+
 test('[terminal] adapter = none with no scope to be had: the session starts with setsid alone, and started by a unit it says it may end with it', (t) => {
   const box = noneBox();
   const unscoped = openHeld(box, { INVOCATION_ID: 'a-unit' });
