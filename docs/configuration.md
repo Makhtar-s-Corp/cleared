@@ -113,7 +113,7 @@ Classifies paths and sets the guarded shipping policy.
 
 ## `[release]`
 
-Cleared watches the application's health after a merge it performs. Either `health_url` or `health_command` enables the watch. With neither, it records one skipped-watch event per release. Only `HTTP 200` counts as a healthy URL response. A command is run by the Cleared service account in the project checkout; exit code 0 counts as healthy. The watch begins after the grace period and probes every 30 seconds until the watch window ends. While it is watching or rolling back, another Cleared merge is queued.
+Cleared watches the application's health after a merge it performs. Either `health_url` or `health_command` enables the watch. With neither, it records one skipped-watch event per release. Only `HTTP 200` counts as a healthy URL response. A command is run by the Cleared service account in the project checkout; exit code 0 counts as healthy. The watch begins after the grace period and probes every 30 seconds until the watch window ends. While it is watching or rolling back, another Cleared merge is queued, except while the release being watched went by the [fast lane](fast-lane.md): that watch goes on and its rollback stays ready, but it holds no merge back.
 
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
@@ -127,6 +127,31 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
 
 Automatic rollback requires a git credential that can push a normal commit to the base branch: with a GitHub App in [`[forge]`](#forge), the app's installation, which then needs Contents: write and, if a rule blocks direct pushes, to be allowed to bypass it. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET` from the configured human Unix account. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never the broker's peer-UID check. Tracker comments cannot authorize rollback.
+
+## `[fast_lane]`
+
+The fast lane gives a tiny, explicit, risk-free change a short circuit; everything else keeps the full one. It is off unless `enabled = yes`. Rules decide it, never a model: at opening from the ticket's label or project, and after the author's work from the real diff at one exact commit, which is authoritative. A key of `[fast_lane]` that is not in this table (a typo such as `never_path`) is refused: the fast lane is off for every ticket, and the wake says which key. It spares waits and weight (a light author and reviewer, targeted tests, one capture, a request to the user before the full checks end, a merge that does not wait for unrelated CI) and never a gate: the full checks green, a review by another model and the user's agreement to the exact version still hold. What qualifies, what never does, and the threat model are in [the fast lane](fast-lane.md). These settings are read from the main checkout only; a pull request that changes them is never fast.
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `enabled` | `yes` turns the fast lane on for the tickets below. | Default: no |
+| `labels` | Comma-separated tracker labels that open a ticket on the fast lane, when the user set the label himself (the tracker's history says who; a label an agent set picks nothing). | Optional; no default |
+| `projects` | Comma-separated tracker projects that open a ticket on the fast lane, when the user put the ticket in it himself. | Optional; no default |
+| `trust_label_without_actor` | `yes` lets a fast label or project count when the tracker cannot say who set it, including a tracker whose scripts act under the user's own key (`tracker.sh identity` is not `app` and `[merge] separate_identity` is not `no`), where an agent's label reads as the user's. A mark the tracker says an agent set is refused all the same. | Default: no |
+| `author_model` | `[models]` alias of the light author, for the role `[review] author_role` names (`dev` without it). Empty: the usual routing. | Optional; no default |
+| `review_model` | `[models]` alias of the light reviewer; `[review] differs_from_author` still applies. Empty: the usual routing. | Optional; no default |
+| `safe_paths` | Comma-separated path patterns every changed file must match: `dir/` (all under it), `*` within a segment, `?` one character, `**` any number of segments, nothing else. `*` and `**` never match a name that starts with a dot (`docs/` holds no `docs/.env`); a pattern segment that starts with a dot matches one (`web/.well-known/*.txt`); a file whose own name starts with a dot is never fast (`file_types`). Empty: nothing is fast. | Optional; no default |
+| `file_types` | Comma-separated file types (the name's last extension, compared exactly as written, lower case) a fast change may touch. It can only narrow the built-in list `md, markdown, txt, css, json, po`: a type outside it refuses the settings. A name with no extension, a dotfile, an upper-case extension, an inner part that runs (`notes.sh.md`) or a tool's configuration file (`tsconfig.json`, `vercel.json`, `robots.txt`…) is never fast. See [the fast lane](fast-lane.md#what-never-qualifies). | Default: the built-in list |
+| `extra_file_types` | **Dangerous.** Comma-separated types added to the list, at the project's own risk: the content rule was written for prose, style sheets and translations. A type that runs, is interpreted or configures something (`sh`, `js`, `ts`, `py`, `mdx`, `html`, `svg`, `xml`, `yaml`, `rst`, `toml`…) is refused, and so are the settings. | Optional; no default |
+| `never_paths` | Patterns that are never fast, on top of the built-in list (Cleared's settings, CI, agent rules, git files, dependencies, migrations) and `[merge] guarded_paths`. List here every file whose words carry an obligation: legal, terms, privacy and consent texts and their translations, pricing and payment copy, consent banner styles. | Optional; no default |
+| `forbidden_text` | Comma-separated literal texts (at most 200 characters each, compared without case) that no line a fast change gains may hold, on top of the built-in content rule (markup, loads, templates, includes, escapes, handlers, hidden characters). | Optional; no default |
+| `dependency_files` | Patterns of dependency files the built-in list does not know. | Optional; no default |
+| `max_lines` | Most changed lines (added plus removed) of a fast change. | Default: 40 |
+| `max_files` | Most changed files of a fast change. | Default: 10 |
+| `max_file_bytes` | Largest size of a changed file. | Default: 100000 |
+| `tests_command` | Targeted tests, run with no shell after the author's session (under `[security] agent_user` when set, else with an empty home); `{files}` must be one word and becomes the changed files. Use a runner that passes when no test relates to the files (`vitest related --run --passWithNoTests`). A run that fails or cannot run is said on the card (failed or skipped), and the ticket is not ready to land. Empty: none, and the request does not wait for them. | Optional; no default |
+| `tests_timeout_minutes` | Time limit of the targeted tests. | Default: 10 |
+| `capture_screen` | The screen the author captures once, before and after, unless the ticket names another; needs `[lanes] kept_from`, `kept_in` and the capture command in `heavy_commands`. Empty: no capture is waited for. Only a capture made by this run counts. | Optional; no default |
 
 ## `[heartbeat]`
 

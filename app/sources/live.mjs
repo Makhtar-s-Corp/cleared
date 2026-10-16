@@ -25,6 +25,11 @@ const validChange = (value) => optional(value, (c) => record(c) && record(c.pr) 
   && (c.pr.url === null || (string(c.pr.url) && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(c.pr.url)))
   && ['files', 'additions', 'deletions', 'lines'].every((k) => count(c[k]))
   && (c.checks === null || ['green', 'red', 'running', 'none'].includes(c.checks)) && (c.draft === null || typeof c.draft === 'boolean'));
+// The lane of a ticket (lib/fast-lane.mjs) and the medians of the last days, by lane.
+const validLane = (value) => optional(value, (lane) => lane === 'fast' || lane === 'full');
+const validMedian = (value) => record(value) && (value.minutes === null || (Number.isFinite(value.minutes) && value.minutes >= 0)) && Number.isSafeInteger(value.count) && value.count >= 0;
+const validLanes = (value) => value === undefined || (record(value) && validMedian(value.fast) && validMedian(value.full));
+const minutes = (value) => value === undefined || value === null || (Number.isSafeInteger(value) && value >= 0);
 const validReport = (value) => optional(value, (r) => record(r) && time(r.at) && ['done', 'remaining', 'other'].every((k) => strings(r[k], 10, 600)));
 const validDetail = (detail) => record(detail) && string(detail.id) && string(detail.title)
   && string(detail.column) && string(detail.kind) && typeof detail.waiting === 'boolean'
@@ -55,10 +60,11 @@ export function validBoard(value) {
     && ['en', 'fr'].includes(value.language) && time(value.generatedAt)
     && record(value.owner) && string(value.owner.name)
     && record(value.stats) && Number.isFinite(value.stats.inFlight)
-    && (value.stats.firstTimeClean === null || Number.isFinite(value.stats.firstTimeClean))
+    && (value.stats.firstTimeClean === null || Number.isFinite(value.stats.firstTimeClean)) && validLanes(value.stats.lanes)
     && Array.isArray(value.landed) && value.landed.every((row) => record(row) && time(row.at)
       && string(row.id) && string(row.title) && string(row.model) && string(row.harness)
-      && Number.isFinite(row.fixes) && (row.rolledBackAt === null || time(row.rolledBackAt)) && share(row.share))
+      && Number.isFinite(row.fixes) && (row.rolledBackAt === null || time(row.rolledBackAt)) && share(row.share)
+      && validLane(row.lane) && ['totalMin', 'workingMin', 'humanWaitMin', 'machineWaitMin'].every((k) => minutes(row[k])))
     && Array.isArray(value.fuel) && value.fuel.every((entry) => record(entry) && string(entry.adapter)
       && typeof entry.measured === 'boolean' && (!entry.measured || Number.isFinite(entry.left)))
     && Array.isArray(value.tickets) && record(value.details)
@@ -70,7 +76,7 @@ export function validBoard(value) {
       && string(ticket.kind) && string(ticket.model) && string(ticket.statusLine)
       && Number.isFinite(ticket.flightMinutes) && share(ticket.quotaShare)
       && optional(ticket.since, time) && validQuestions(ticket.questions) && validChange(ticket.change)
-      && validGesture(ticket)
+      && validGesture(ticket) && validLane(ticket.lane)
       && (ticket.captures === null || record(ticket.captures) && mediaUrl(ticket.captures.before) && mediaUrl(ticket.captures.after))
       && Object.hasOwn(value.details, ticket.id) && validDetail(value.details[ticket.id]))
     && Object.values(value.details).every(validDetail);

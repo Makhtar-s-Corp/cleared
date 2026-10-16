@@ -117,6 +117,31 @@ if [ -n "$pr" ]; then
     author=$(ledger sql "select model from runs where ticket = '$ticket' and role = '$author_role' and outcome = 'done' and source = 'dispatcher' order by started_at desc limit 1" | jq -r '.[0].model // empty')
   fi
 fi
+# 1b. The fast lane (lib/fast-lane.mjs, docs/fast-lane.md), decided by the
+# rules and never by a model. The author of a ticket: what its record says
+# (a ticket sent back to the full circuit stays there), else what the ticket
+# says at its opening (a label or a project the settings declare fast). A
+# review: what the record of the ticket says, when it is the pull request of
+# that record. A second team, and any other role, take the full circuit.
+lane_kind=full fast_role= opening_note=
+author_role_name=$(conf_get review author_role)
+if [ -z "$team" ]; then
+  if [ "$role" = "${author_role_name:-dev}" ]; then fast_role=author
+  elif [ "$role" = review ]; then fast_role=review; fi
+fi
+if [ "$fast_role" = author ]; then
+  lane_kind=$(jq -r '.fast_lane.state // empty' "$record" 2> /dev/null) || lane_kind=
+  # The ticket's fast label or project counts only when the user set it
+  # (the tracker's history says who): a mark an agent set is said, and picks nothing.
+  if [ -z "$lane_kind" ]; then
+    opening=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" opening <<<"$issue") || opening=full
+    lane_kind=$(sed -n 1p <<<"$opening") opening_note=$(sed -n 2p <<<"$opening")
+  fi
+elif [ "$fast_role" = review ] && [ -n "$pr" ]; then
+  lane_kind=$(jq -r --argjson pr "$pr" 'select(.pr == $pr) | .fast_lane.state // empty' "$(lane_record "$ticket")" 2> /dev/null) || lane_kind=
+fi
+[ "$lane_kind" = fast ] || lane_kind=full
+[ "$lane_kind" != fast ] || route_args+=(--lane fast)
 [ -n "$forced" ] && route_args+=(--model "$forced")
 [ -n "$author" ] && route_args+=(--author-model "$author")
 [ -n "$pr_lines" ] && route_args+=(--pr-lines "$pr_lines")
@@ -339,6 +364,14 @@ mv "$available" "$run_dir/chain.json"
     printf '\n\n'
   fi
   prompt_text "$prompt_file"
+  if [ "$lane_kind" = fast ]; then
+    # What the fast lane asks of this role: the project's own words first
+    # (.cleared/prompts/fast-lane-<author|review>.md), else the tool's.
+    printf '\n\n'
+    prompt_text "$(prompt_file "fast-lane-$fast_role")"
+    [ "$fast_role" != author ] || printf '\nFast-lane limits set by the project: change only files under %s; at most %s changed lines; no new dependency, no migration. The one screen to capture before and after, unless the ticket names another: %s.\n' \
+      "$(conf_get fast_lane safe_paths)" "$(conf_get fast_lane max_lines)" "$(conf_get fast_lane capture_screen | grep . || echo 'none set: no capture')"
+  fi
   printf '\n---\nTicket %s : %s\n%s\nTeam: %s (branch of the same name).\n' "$ticket" "$(jq -r '.title' <<<"$issue")" "$(jq -r '.url' <<<"$issue")" "$lane"
   [ -z "$team" ] || printf "This ticket has two independent teams; you are the second. Do not read or use the other team’s work. The user will choose between the two results.\n"
   [ -z "$pr" ] || printf 'PR #%s, branch %s, compared with %s.\n' "$pr" "$pr_head" "$(conf_get lanes base)"
@@ -375,6 +408,7 @@ fi
   printf 'ORCH_PR=%q\nORCH_PR_LINES=%q\nORCH_PUSH_BRANCH=%q\n' "$pr" "$pr_lines" "$push_branch"
   printf 'ORCH_BUDGET_USD=%q\nORCH_TEAM=%q\n' "$budget" "$team"
   printf 'ORCH_PROJECT=%q\nORCH_LABEL=%q\n' "$(jq -r '.project // ""' <<<"$issue")" "$(jq -r '.labels[0] // ""' <<<"$issue")"
+  printf 'ORCH_FAST_LANE=%q\n' "$([ "$fast_role" = author ] && echo "$lane_kind" || echo full)"
 } > "$run_dir/lane.env"
 
 # What is kept of the lane comes first: a terminal that never opens then
@@ -382,10 +416,22 @@ fi
 if [ -n "$pushed_role" ]; then
   # What is known of the lane of this ticket, kept beyond its worktree.
   mkdir -p "$(dirname "$record")"
-  kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
-  [ -n "$kept" ] || kept='{}'
-  jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
-    '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  # Read and written under the record's lock (the one lane_write takes): a
+  # change another writer made since is kept, not overwritten.
+  (
+    flock -w 30 9
+    kept=$(jq -c 'if type == "object" then . else {} end' "$record" 2> /dev/null) || kept=
+    [ -n "$kept" ] || kept='{}'
+    jq --arg ticket "$ticket" --arg role "$role" --arg lane "$lane" --arg worktree "$worktree" --arg push "$push_branch" --arg pr "$pr" --arg run "$run_base" --arg at "$(now_utc)" --arg team "$team" --arg forced "$forced" --arg why "$([ -n "$resume" ] && echo resumed || echo opened)" --slurpfile seen "$run_dir/seen.json" \
+      '. + {ticket: $ticket, role: $role, lane: $lane, worktree: $worktree} + (if $team != "" then {team: $team} + (if $forced != "" then {team_model: $forced} else {} end) else {} end) + (if $push != "" then {push_branch: $push} else {} end) + (if $pr != "" then {pr: ($pr | tonumber)} else {} end) + {opened_at: (.opened_at // $at), runs: ((.runs // []) + [{run: $run, at: $at, why: $why, seen: ($seen[0] // [])}])}' <<<"$kept" > "$record.part" && mv "$record.part" "$record"
+  ) 9> "$record.lock"
+  # Its lane at opening, kept once (what the ticket says later changes
+  # nothing): the rules judge its diff against it after each session.
+  if [ "$fast_role" = author ] && [ "$(jq -r '.fast_lane | type' "$record")" != object ]; then
+    lane_write "$record" --arg kind "$lane_kind" --arg at "$(now_utc)" '. + {fast_lane: {opening: $kind, state: $kind, at: $at}}'
+    [ "$lane_kind" != fast ] || ledger event --kind fast_lane_opened --ticket "$ticket" --detail "$lane: opened on the fast lane ($rule)"
+    [ -z "$opening_note" ] || ledger event --kind fast_lane_mark_ignored --ticket "$ticket" --detail "$lane: $opening_note"
+  fi
   # The ticket is at work: said where the user looks.
   progress=$(conf_get tracker progress_state)
   [ -z "$progress" ] || [ -n "$keep_status" ] || "$ORCH_HOME/tracker.sh" move "$ticket" "$progress" > /dev/null 2>&1 || true

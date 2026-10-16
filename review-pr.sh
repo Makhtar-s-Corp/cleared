@@ -77,7 +77,9 @@ pull=$(cd "$ORCH_REPO" && gh pr view "$pr" --json number,state,title,body,headRe
 head=$(jq -r '.headRefOid' <<<"$pull") branch=$(jq -r '.headRefName' <<<"$pull")
 
 # Already read at this commit: nothing to do. An earlier commit read: only what changed since.
-reviewed=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" heads "$pr")
+# A ticket the rules sent from the fast lane to the full circuit: what the
+# light reviewer read before that is not a review of the full circuit.
+reviewed=$(node --no-warnings "$ORCH_HOME/lib/reviews.mjs" heads "$pr" $(fast_demoted_at "$(lane_record "$ticket")" "$pr"))
 if jq -e --arg head "$head" 'index($head) != null' <<<"$reviewed" > /dev/null; then
   never "pull request #$pr was already reviewed at this commit (${head:0:8}): no second review of the same thing"
 fi

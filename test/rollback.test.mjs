@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
 import { releaseSettings, canAutoRollback, shouldRollback, touchesMigrations,
-  activeRelease, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
+  activeRelease, holdsMerge, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
   reconcileNotifications, resumeWatches, retryFetch } from '../lib/release.mjs';
 
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
@@ -412,4 +412,101 @@ test('a forged rollback trailer in an agent commit cannot satisfy recovery', (t)
   });
   assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'failed');
   assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_pushed'").get().n, 0);
+});
+
+// Two releases whose watches overlap: the health probe is the site's, and cannot say which one broke it.
+function secondRelease(x, { mergedAt, lane = 'fast' } = {}) {
+  x.git('checkout', '-qb', `second-${mergedAt}`);
+  writeFileSync(join(x.repo, `second-${mergedAt}.txt`), 'second\n');
+  x.git('add', '.'); x.git('commit', '-qm', 'second change');
+  x.git('checkout', '-q', 'main'); x.git('merge', '--no-ff', '-qm', 'Merge second', `second-${mergedAt}`);
+  x.git('push', '-q', 'origin', 'main');
+  const sha = x.git('rev-parse', 'HEAD');
+  x.db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status,lane) VALUES (?,?,?,?,?,?,?)')
+    .run('LOCAL-2', 2, sha, 'Innocent change', new Date(mergedAt).toISOString(), 'watching', lane);
+  return x.db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha);
+}
+async function watchFailing(x, row) {
+  let time = Date.parse(row.merged_at), reverts = 0;
+  const notices = [];
+  await watchRelease(x.conf, x.db, x.repo, row.id, {
+    currentTime: () => time, wait: async (ms) => { time += ms; },
+    check: async () => ({ ok: false, detail: 'HTTP 503' }),
+    performRollback: () => { reverts++; }, announce: (_conf, _ticket, body) => notices.push(body),
+  });
+  return { reverts, notices, status: x.db.prepare('SELECT status FROM releases WHERE id = ?').get(row.id).status,
+    events: x.db.prepare("SELECT detail FROM events WHERE kind = 'rollback_overlapping_release'").all() };
+}
+
+test('overlapping releases: the watch of a later release never reverts it automatically while an earlier one is still watched; the user is told, manual rollback stays', async (t) => {
+  const x = releasedProject(t);
+  x.db.prepare("UPDATE releases SET lane = 'fast', failures = 1, last_health = 'HTTP 503', first_failure_at = ? WHERE id = ?").run(new Date(x.clock + 10000).toISOString(), x.row.id);
+  // R1 (fast) broke the site; R2 merged while R1 was still watched.
+  const r2 = secondRelease(x, { mergedAt: x.clock + 30000 });
+  const watched = await watchFailing(x, r2);
+  assert.equal(watched.reverts, 0, 'the innocent change is not reverted');
+  assert.equal(watched.status, 'failed');
+  assert.equal(watched.events.length, 1);
+  assert.match(watched.events[0].detail, new RegExp(`health failing since ${new Date(x.clock + 10000).toISOString()}`), 'the failure was first seen before R2 went live');
+  assert.match(watched.notices[0], /another release, Test release/);
+  assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], r2.merge_sha, 'nothing was pushed');
+  // The direct automatic path refuses too; the manual one does not.
+  const fresh = x.db.prepare('SELECT * FROM releases WHERE id = ?').get(r2.id);
+  assert.throws(() => rollbackRelease(x.conf, x.db, x.repo, { ...fresh, status: 'watching' }, { automatic: true }), /overlaps this one/);
+  const sha = rollbackRelease(x.conf, x.db, x.repo, fresh, { trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {} });
+  assert.match(sha, /^[0-9a-f]{40}$/);
+});
+
+test('overlapping releases: an earlier release whose watch already failed before the later one merged keeps the later one from being reverted automatically, even after its window', async (t) => {
+  const x = releasedProject(t);
+  // R1's watch failed on bad health (say, an ambiguous base), and nobody has seen the site healthy since.
+  x.db.prepare("UPDATE releases SET lane = 'fast', status = 'failed', failures = 3, last_health = 'HTTP 503', first_failure_at = ?, ended_at = ? WHERE id = ?")
+    .run(new Date(x.clock + 60000).toISOString(), new Date(x.clock + 90000).toISOString(), x.row.id);
+  const r2 = secondRelease(x, { mergedAt: x.clock + 10 * 60000 });
+  const watched = await watchFailing(x, r2);
+  assert.equal(watched.reverts, 0);
+  assert.equal(watched.status, 'failed');
+  assert.match(watched.events[0].detail, /LOCAL-1, failing/);
+  // Once a release in between has completed its watch healthy, the old failure no longer counts.
+  const y = releasedProject(t);
+  y.db.prepare("UPDATE releases SET status = 'failed', failures = 3, last_health = 'HTTP 503', first_failure_at = ? WHERE id = ?").run(new Date(y.clock).toISOString(), y.row.id);
+  const between = secondRelease(y, { mergedAt: y.clock + 10 * 60000 });
+  y.db.prepare("UPDATE releases SET status = 'complete', last_health = 'exit 0' WHERE id = ?").run(between.id);
+  y.db.prepare("UPDATE releases SET ticket = 'LOCAL-3' WHERE id = ?").run(between.id);
+  const r3 = secondRelease(y, { mergedAt: y.clock + 20 * 60000 });
+  const later = await watchFailing(y, r3);
+  assert.equal(later.reverts, 1, 'a release with no earlier one in doubt is still reverted automatically');
+  assert.equal(later.events.length, 0);
+});
+
+test('overlapping releases: an earlier release whose window overlaps is enough, even once complete; with no overlap, the automatic rollback still runs', async (t) => {
+  const x = releasedProject(t);
+  x.db.prepare("UPDATE releases SET lane = 'fast', status = 'complete', last_health = 'exit 0' WHERE id = ?").run(x.row.id);
+  const r2 = secondRelease(x, { mergedAt: x.clock + 60000 });
+  assert.equal((await watchFailing(x, r2)).reverts, 0, 'R1 went live one minute before R2, in a window of two');
+  const y = releasedProject(t);
+  y.db.prepare("UPDATE releases SET status = 'complete', last_health = 'exit 0' WHERE id = ?").run(y.row.id);
+  const alone = secondRelease(y, { mergedAt: y.clock + 3 * 60000 });
+  assert.equal((await watchFailing(y, alone)).reverts, 1);
+});
+
+test('a fast-lane release whose health is failing holds the next merge back, and a merge that went live meanwhile is still watched', (t) => {
+  const x = releasedProject(t);
+  x.db.prepare("UPDATE releases SET lane = 'fast' WHERE id = ?").run(x.row.id);
+  assert.equal(holdsMerge(x.db), undefined, 'a healthy fast-lane watch holds nothing back');
+  x.db.prepare('UPDATE releases SET failures = 1, first_failure_at = ? WHERE id = ?').run(new Date(x.clock).toISOString(), x.row.id);
+  assert.equal(holdsMerge(x.db).id, x.row.id);
+  // A merge that passed the gate just before the failure is live: it gets its row and its watch all the same.
+  x.git('checkout', '-qb', 'raced');
+  writeFileSync(join(x.repo, 'raced.txt'), 'raced\n');
+  x.git('add', '.'); x.git('commit', '-qm', 'raced change');
+  x.git('checkout', '-q', 'main'); x.git('merge', '--no-ff', '-qm', 'Merge raced', 'raced');
+  x.git('push', '-q', 'origin', 'main');
+  const sha = x.git('rev-parse', 'HEAD');
+  addEvent(x.db, { kind: 'merged_by_script', ticket: 'LOCAL-2', value: 2 });
+  let scheduled = 0;
+  startRelease(x.conf, x.db, x.repo, 'LOCAL-2', 2, { lane: 'fast', schedule: () => { scheduled++; },
+    readPull: () => ({ mergeCommit: { oid: sha }, mergedAt: new Date().toISOString(), title: 'Raced' }) });
+  assert.equal(scheduled, 1);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE merge_sha = ?').get(sha).status, 'watching');
 });

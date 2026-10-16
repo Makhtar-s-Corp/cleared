@@ -9,6 +9,8 @@
   elif .kind == "review_done" and .outcome == "project_update_refused" then event_review_done_project_update_refused
   elif .kind == "review_done" and .outcome == "ticket_cost" then event_review_done_ticket_cost
   elif .kind == "review_done" and .outcome == "teams_ready" then event_review_done_teams_ready
+  elif .kind == "review_done" and .outcome == "fast_lane_ready" then event_review_done_fast_lane_ready
+  elif .kind == "review_done" and .outcome == "fast_lane_fallback" then event_review_done_fast_lane_fallback
   elif .kind == "review_done" and .outcome == "subscription_stop" then event_review_done_subscription_stop
   elif .kind == "review_done" and .outcome == "lane_stuck" then event_review_done_lane_stuck
   elif .kind == "review_done" and .outcome == "ticket_left_open" then event_review_done_ticket_left_open

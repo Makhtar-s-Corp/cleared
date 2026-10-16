@@ -99,11 +99,12 @@ if [ "$1" = waiting ]; then echo '[{"identifier":"X-7","title":"Un écran à val
 if [ "$1" = comments ]; then [ -z "\${FAKE_TRACKER_COMMENTS_DOWN:-}" ] || exit 1; cat "${join(home, 'tracker-comments.json')}" 2>/dev/null || echo '[{"id":"c1","createdAt":"2026-01-02T10:00:00Z","body":"Un commentaire du ticket de suivi."}]'; exit; fi
 if [ "$1" = moved-by-owner ]; then echo "$2 $3 \${4:-}" >> "${join(home, 'tracker-moved-asked')}"; exit "$(cat "${home}/tracker-moved-$2" 2>/dev/null || cat "${join(home, 'tracker-moved')}" 2>/dev/null || echo 5)"; fi
 if [ "$1" = list ]; then cat "${home}/tracker-list-$2.json" 2>/dev/null || echo '[]'; exit; fi
+if [ "$1" = label-actors ]; then cat "${home}/tracker-label-actors-$2.json" 2>/dev/null || exit 1; exit; fi
 if [ "$1" = identity ]; then cat "${join(home, 'tracker-identity')}" 2>/dev/null || echo app; exit; fi
 if [ "$1" = move ]; then [ -z "\${FAKE_TRACKER_MOVE_DOWN:-}" ] || exit 1; echo "$2 -> $3" >> "${join(home, 'tracker-moves')}"; echo "$3" > "${join(home, 'tracker-state')}"; exit; fi
 if [ "$1" = upload ]; then case "$2" in *.png) echo "https://uploads.example.test/$(basename "$2")" ;; *) echo "not an image" >&2; exit 1 ;; esac; exit; fi
 if [ "$1" = state ]; then cat "${home}/tracker-state-$2" 2>/dev/null || cat "${join(home, 'tracker-state')}" 2>/dev/null || echo "In Review"; exit; fi
-if [ "$1" = issue ]; then title=$(cat "${home}/tracker-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --rawfile description <(cat "${home}/tracker-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: [], description: $description}'; exit; fi
+if [ "$1" = issue ]; then title=$(cat "${home}/tracker-title-$2" 2>/dev/null || echo "Titre de $2"); jq -nc --arg id "$2" --arg title "$title" --argjson labels "$(cat "${home}/tracker-labels-$2.json" 2>/dev/null || echo '[]')" --rawfile description <(cat "${home}/tracker-description-$2" 2>/dev/null || true) '{identifier: $id, title: $title, url: "u", project: null, labels: $labels, description: $description}'; exit; fi
 echo '{"identifier":"X-1","title":"t","url":"u","project":null,"labels":[]}'
 `, { mode: 0o755 });
   writeFileSync(join(home, 'tracker-now.json'), '[]');
