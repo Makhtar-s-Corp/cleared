@@ -8,7 +8,7 @@
 // never sent to the server in a request line); --demo serves invented data.
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfForCommand, projectDir, section, expandHome } from '../lib/conf.mjs';
+import { loadConf, loadConfForCommand, projectDir, section, expandHome } from '../lib/conf.mjs';
 import { appServer } from './server.mjs';
 import { checkRanges, ensureToken, TAILSCALE } from './lib/access.mjs';
 import { execFileSync } from 'node:child_process';
@@ -66,8 +66,10 @@ catch (error) { console.error(`cleared app: ${error.message}`); process.exit(2);
 
 if (flag('--link')) { console.log(`http://${bind}:${port}/login#${token}`); process.exit(0); }
 
-const language = demo ? 'en' : (section(conf, 'owner').language || 'en');
-const source = demo ? demoSource() : liveSource({ conf });
+// The demonstration speaks the language the owner chose too ([owner] language), English by default.
+const ownerLanguage = () => { try { return section(demo ? loadConf() : conf, 'owner').language || 'en'; } catch { return 'en'; } };
+const language = ownerLanguage();
+const source = demo ? demoSource(language) : liveSource({ conf });
 // The human's Unix account, the same one the release broker trusts for a manual rollback.
 function humanUid() {
   const security = section(conf, 'security');

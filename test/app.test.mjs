@@ -13,8 +13,8 @@ import { checkRanges, ensureToken, hostAllowed, readToken, TAILSCALE } from '../
 import { spawnSync } from 'node:child_process';
 
 const TOKEN = 'a'.repeat(64);
-// Amber (token or value) may appear only in the rules of what waits for the human, the greeting highlight, the project dot and the token definitions.
-const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.ph-question|\.chip\.q|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
+// Amber (token or value) may appear only in the rules of what waits for the human, the banner of a state chosen on purpose, the project dot and the token definitions.
+const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.ph-question|\.ph-ask|\.chip\.q|\.chip\.wait|\.wait-line|\.mode-pill|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
 const AMBER = /var\(--(?:awaiting|e-awaiting)[^)]*\)|#F5A623|#AB570A|#FFFBF2|#FCE2B3|245,\s*166,\s*35|171,\s*87,\s*10/i;
 const amberViolations = (css) => css.split('\n').filter((line) => AMBER.test(line) && !ALLOWED_AMBER.test(line)).map((line) => line.trim().slice(0, 80));
 const dirs = [];
@@ -482,4 +482,71 @@ test('Landed today keeps the tracker title for a remote adapter', async () => {
     const snap = await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot();
     assert.equal(snap.landed[0].title, 'Screen before and after');
   } finally { f.close(); }
+});
+
+// ---- every text on screen goes through the message catalog ----------------------------------------------
+const publicFile = (name) => readFileSync(join(import.meta.dirname, '..', 'app', 'public', name), 'utf8');
+const catalogOf = (l) => JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', `${l}.json`), 'utf8'));
+// What a page shows on its own: text outside an element marked data-i, and a literal aria-label / title / placeholder / alt.
+const literalTexts = (html) => {
+  const found = [];
+  const body = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<svg[\s\S]*?<\/svg>/g, '');
+  for (const m of body.matchAll(/<([a-z0-9]+)\b([^>]*)>([^<]*)/g)) {
+    const [, tag, attributes, text] = m;
+    if (text.trim() && /[A-Za-z]{2,}/.test(text) && !/\sdata-i="app_[a-z_]+"/.test(attributes)) found.push(`<${tag}> ${text.trim().slice(0, 40)}`);
+    for (const a of attributes.matchAll(/\s(aria-label|title|placeholder|alt)="([^"]*[A-Za-z]{2,}[^"]*)"/g)) found.push(`${tag} ${a[1]}="${a[2].slice(0, 40)}"`);
+  }
+  return found;
+};
+// What a script puts on screen on its own: a literal with words given to textContent, title, placeholder, aria-label or alt.
+const literalScriptTexts = (code) => {
+  const found = [];
+  for (const m of code.matchAll(/(?:textContent|placeholder|title|ariaLabel|alt)\s*[:=]\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1|setAttribute\(\s*'(?:aria-label|title|placeholder)'\s*,\s*(['"`])((?:\\.|(?!\3)[^\\])*)\3/g)) {
+    const literal = (m[2] ?? m[4] ?? '').replace(/\$\{[^}]*\}/g, '');
+    if (/[A-Za-z]{3,}/.test(literal)) found.push(literal.slice(0, 50));
+  }
+  return found;
+};
+
+test('no text of the interface is written in a page or a script: it all comes from the message catalog', () => {
+  const en = catalogOf('en'), fr = catalogOf('fr');
+  for (const page of ['index.html', 'login.html', 'register.html']) {
+    const html = publicFile(page);
+    assert.deepEqual(literalTexts(html), [], `${page}: text outside the catalog`);
+    for (const key of [...html.matchAll(/data-i(?:-aria|-title|-placeholder)?="(app_[a-z_]+)"/g)].map((m) => m[1])) assert.ok(en[key] !== undefined && fr[key] !== undefined, `${page}: ${key} is missing from a catalog`);
+  }
+  for (const script of ['app.js', 'actions.js', 'notify.js', 'login.js', 'register.js']) assert.deepEqual(literalScriptTexts(publicFile(script)), [], `${script}: text outside the catalog`);
+  // the check can fail
+  assert.equal(literalTexts('<p>Hello there</p><button aria-label="Close it"></button>').length, 2);
+  assert.equal(literalScriptTexts("node.textContent = 'Hello there'; b.title = `Open ${x}`;").length, 2);
+  assert.equal(literalScriptTexts("node.textContent = t('app_close'); b.title = `${t('app_close')}`;").length, 0);
+});
+
+test('English is the default and French a complete translation: the pages and the demonstration follow the owner\'s language', async () => {
+  const en = catalogOf('en'), fr = catalogOf('fr');
+  const keys = (c) => Object.keys(c).filter((k) => k.startsWith('app_')).sort();
+  assert.deepEqual(keys(fr), keys(en));
+  for (const key of keys(en)) assert.ok(en[key].trim() && fr[key].trim(), key);
+  // the interface says nothing in English once French is chosen, and nothing in French by default
+  for (const [language, other] of [['en', 'fr'], ['fr', 'en']]) {
+    const s = await serve({ language });
+    try {
+      const html = await (await s.call('/login')).text();
+      assert.match(html, new RegExp(`<html lang="${language}">`));
+      assert.ok(html.includes(catalogOf(language).app_login_msg.replace(/&/g, '&amp;')), `${language}: the sign-in text`);
+      assert.ok(!html.includes(catalogOf(other).app_login_msg), `${language}: no ${other} text`);
+      const page = await (await s.call('/', { headers: auth })).text();
+      for (const key of ['app_skip', 'app_nav_tower', 'app_counters', 'app_landed_title']) assert.ok(page.includes(catalogOf(language)[key]), `${language}: ${key}`);
+      assert.ok(!/\sdata-i="[^"]*"[^>]*><\//.test(page), 'every marked element is filled by the server');
+    } finally { await s.close(); }
+  }
+  // the demonstration follows the language of the interface, and the mode and the problem it shows come from the catalog
+  for (const language of ['en', 'fr']) {
+    const snapshot = await demoSource(language).snapshot();
+    assert.equal(snapshot.language, language);
+    assert.equal(snapshot.mode.short, catalogOf(language).app_srv_mode_short);
+    assert.equal(snapshot.health.problems[0].message, catalogOf(language).app_srv_problem_wake_late.replace('{minutes}', '4'));
+  }
+  const titles = await Promise.all(['en', 'fr'].map(async (l) => (await demoSource(l).snapshot()).tickets[0].title));
+  assert.notEqual(titles[0], titles[1]);
 });

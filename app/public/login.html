@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">
-<title>Cleared Cockpit · sign in</title><link rel="icon" href="data:,"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-title" content="Cleared"><link rel="stylesheet" href="/style.css"></head>
+<title data-i="app_login_title"></title><link rel="icon" href="data:,"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-title" content="Cleared"><link rel="stylesheet" href="/style.css"></head>
 <body class="login"><main>
-<h1 class="brand"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z" class="logo"/></svg><span class="name">Cleared Cockpit</span></h1>
-<p id="msg">Open this page with your access token after the # sign, or paste it below. It is read here and sent in a header, never in an address.</p>
-<form id="f"><label for="t">Access token</label><input id="t" type="password" autocomplete="off" spellcheck="false"><button type="submit" class="ink">Open</button></form>
-<p id="err" class="danger" role="alert" hidden></p>
+<h1 class="brand"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z" class="logo"/></svg><span class="name" data-i="app_page_title"></span></h1>
+<p id="msg" data-i="app_login_msg"></p>
+<form id="f"><label for="t" data-i="app_login_token"></label><input id="t" type="password" autocomplete="off" spellcheck="false"><button type="submit" class="ink" data-i="app_login_open"></button></form>
+<p id="err" class="danger" role="alert" hidden data-i="app_login_refused"></p>
 </main><script src="/login.js" type="module"></script></body></html>

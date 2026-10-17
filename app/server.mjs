@@ -58,6 +58,18 @@ export const WRITES = ['POST /session', 'POST /session/logout', 'POST /api/actio
   'POST /api/actions/answer', 'POST /api/passkeys/options', 'POST /api/passkeys/finish',
   'POST /api/notifications/challenge', 'POST /api/notifications/subscribe', 'POST /api/notifications/unsubscribe'];
 
+// A page carries no text of its own: every element marked data-i takes its words from the catalog, in the language
+// the owner chose, and so do data-i-aria / data-i-title / data-i-placeholder for the attributes a screen reader or a tooltip shows.
+const escape = (value) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const ATTRIBUTES = { aria: 'aria-label', title: 'title', placeholder: 'placeholder' };
+export function page(html, language) {
+  const words = (key) => escape(message(key, language));
+  return html
+    .replace(/<html lang="[a-z-]+">/, `<html lang="${language === 'fr' ? 'fr' : 'en'}">`)
+    .replace(/(<([a-z0-9]+)\b[^>]*\sdata-i="(app_[a-z_]+)"[^>]*>)([^<]*)(<\/\2>)/g, (_, open, tag, key, old, close) => `${open}${words(key)}${close}`)
+    .replace(/\sdata-i-(aria|title|placeholder)="(app_[a-z_]+)"/g, (_, kind, key) => ` ${ATTRIBUTES[kind]}="${words(key)}"`);
+}
+
 const MESSAGE_KEYS = (language) => {
   const out = {};
   for (const name of ['en', 'fr']) {
@@ -73,7 +85,9 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     response.writeHead(status, { ...HEADERS, 'content-type': type, ...extra }).end(body);
   const json = (response, status, value) => text(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
   const send = async (response, request, [file, type]) => {
-    try { text(response, 200, request.method === 'HEAD' ? undefined : await readFile(join(PUBLIC, file)), type, type === 'font/woff2' ? { 'cache-control': 'public, max-age=86400' } : {}); }
+    try {
+      const body = await readFile(join(PUBLIC, file));
+      text(response, 200, request.method === 'HEAD' ? undefined : type.startsWith('text/html') ? page(body.toString('utf8'), language) : body, type, type === 'font/woff2' ? { 'cache-control': 'public, max-age=86400' } : {}); }
     catch { text(response, 503, message('http_unavailable', language)); }
   };
   const streams = new Set();
