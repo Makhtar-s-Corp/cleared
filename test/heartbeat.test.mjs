@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { appendFileSync, chmodSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLedger } from '../lib/ledger.mjs';
-import { collectStatus, diagnose, recordIncidents, sendHeartbeat, heartbeatSettings, matchesClearedCommand, statusJson,
+import { collectStatus, diagnose, initHeartbeat, recordIncidents, sendHeartbeat, heartbeatSettings, matchesClearedCommand, statusJson,
   canReap, localReapActor, reapOrphans } from '../lib/heartbeat.mjs';
 import { sandbox, scratch } from './support.mjs';
 
@@ -45,7 +45,7 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   });
   const healthy = await wake();
   assert.equal(healthy.code, 0, healthy.stderr);
-  assert.deepEqual(calls, ['/fail'], 'without agent_user the release lock remains a permanent problem');
+  assert.deepEqual(calls, ['/ping'], 'accepted shared-UID mode is a standing notice: the monitor stays green');
   const snapshot = JSON.parse(readFileSync(join(box.state, 'snapshot.json'), 'utf8'));
   assert.equal(snapshot.schema, 1);
   assert.ok(Array.isArray(snapshot.tickets) && snapshot.details);
@@ -55,14 +55,14 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   db.close();
   const late = await wake();
   assert.equal(late.code, 0, late.stderr);
-  assert.deepEqual(calls, ['/fail', '/fail'], 'a live but delayed wake reports the stall');
+  assert.deepEqual(calls, ['/ping', '/fail'], 'a live but delayed wake reports the stall');
   const failed = await wake({ FAKE_GH_LIST_DOWN: '1' });
   assert.notEqual(failed.code, 0);
-  assert.deepEqual(calls, ['/fail', '/fail', '/fail']);
+  assert.deepEqual(calls, ['/ping', '/fail', '/fail']);
   appendFileSync(join(box.home, 'agents.conf'), '\n[heartbeat]\ntimeout_secs = 0\n');
   const misconfigured = await wake();
   assert.equal(misconfigured.code, 0);
-  assert.deepEqual(calls, ['/fail', '/fail', '/fail', '/fail'], 'a bad timeout still calls the valid failure URL');
+  assert.deepEqual(calls, ['/ping', '/fail', '/fail', '/fail'], 'a bad timeout still calls the valid failure URL');
 });
 
 test('status JSON uses exit 2 and a stable error object when configuration is unreadable', () => {
@@ -156,7 +156,7 @@ test('all five silent stalls appear in status, trigger fail URL and log once per
   assert.ok(!urls[0][1].includes('dev/one'), 'external body does not expose lane or ticket text');
   const stable = statusJson({ project: 'example', problems, snapshot }, now);
   assert.deepEqual(Object.keys(stable), ['schema', 'project', 'checkedAt', 'ok', 'lastWake', 'lastLead',
-    'services', 'lanes', 'waiting', 'quota', 'watching', 'problems']);
+    'services', 'lanes', 'waiting', 'quota', 'watching', 'problems', 'notices']);
   db.close();
 });
 
@@ -245,11 +245,50 @@ test('an editor viewing a Cleared script is not identified as an orphan process'
   assert.equal(matchesClearedCommand(['/usr/bin/bash', script], 'wait'), true);
 });
 
-test('status permanently warns when agents share the service account', () => {
-  const box = sandbox();
+const sharedUidMessage = 'release lock is not a security boundary: agents run as the service account';
+
+test('accepted shared-UID mode is a standing notice: status stays ok, exit 0, the line is kept', () => {
+  const box = sandbox(); // agents.conf sets [security] allow_shared_uid = true
+  const db = openLedger(join(box.state, 'ledger.db'));
+  initHeartbeat(db);
+  db.prepare("INSERT OR REPLACE INTO heartbeat_state(key,value) VALUES ('last_wake_at', ?), ('last_wake_ok', 'true')")
+    .run(new Date().toISOString());
+  db.close();
   const result = spawnSync(process.execPath, [join(box.home, 'lib/heartbeat.mjs'), 'status', '--json'],
     { env: box.env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const status = JSON.parse(result.stdout);
+  assert.equal(status.ok, true);
+  const notice = status.notices.find((p) => p.message === sharedUidMessage);
+  assert.equal(notice?.level, 'notice');
+  assert.ok(status.problems.some((p) => p.code === 'release_lock_unseparated' && p.level === 'notice'));
+  const text = spawnSync(process.execPath, [join(box.home, 'lib/heartbeat.mjs'), 'status'], { env: box.env, encoding: 'utf8' });
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, new RegExp(`Notice {11}${sharedUidMessage}`));
+});
+
+test('shared-UID mode without the explicit opt-in still fails the status', () => {
+  const box = sandbox();
+  const confPath = join(box.home, 'agents.conf');
+  writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[security]\nallow_shared_uid = true\n', '[security]\n'));
+  const result = spawnSync(process.execPath, [join(box.home, 'lib/heartbeat.mjs'), 'status', '--json'],
+    { env: box.env, encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stderr);
   const status = JSON.parse(result.stdout);
   assert.equal(status.ok, false);
-  assert.ok(status.problems.some((p) => p.message === 'release lock is not a security boundary: agents run as the service account'));
+  assert.equal(status.problems.find((p) => p.code === 'release_lock_unseparated')?.level, 'problem');
+  assert.deepEqual(status.notices, []);
+});
+
+test('a notice keeps the monitor green; a failing problem still fails it, even in shared mode', async () => {
+  const db = openLedger(':memory:');
+  const urls = [];
+  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } });
+  const fetcher = async (url) => { urls.push(url); return { ok: true }; };
+  const notice = { code: 'release_lock_unseparated', id: 'release', message: sharedUidMessage, level: 'notice' };
+  const stall = { code: 'lane_idle', id: 'dev/one', message: 'idle', level: 'problem' };
+  await sendHeartbeat(db, settings, [notice], true, { fetcher, now });
+  await sendHeartbeat(db, settings, [notice, stall], true, { fetcher, now });
+  assert.deepEqual(urls, [settings.pingUrl, settings.failUrl]);
+  db.close();
 });
