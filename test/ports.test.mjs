@@ -351,8 +351,8 @@ test('a re-run accepts the port of public_origin when tailscaled holds it: named
 test('an unnameable holder of the port of public_origin is refused, with the sudo ss hint, unless tailscale serve status lists that port', () => {
   const held = listen('100.64.0.1:8443');
   for (const [what, serve, said] of [
-    ['no tailscale', null, /could not be read to show that it is tailscale serve: an unknown holder/],
-    ['tailscale refuses', false, /could not be read to show that it is tailscale serve: an unknown holder/],
+    ['no tailscale', null, /could not be read to show that it is tailscale serve .*: an unknown holder/],
+    ['tailscale refuses', false, /could not be read to show that it is tailscale serve \(.*'sudo tailscale set --operator=[^']+' allows it\): an unknown holder/],
     ['not JSON', 'https://box.tail1234.ts.net:8443 (tailnet only)\n', /an unknown holder/],
     ['TCP not an object', '{"TCP": [8443]}', /an unknown holder/],
     ['another port served', JSON.stringify({ TCP: { 10000: { HTTPS: true } } }), /'tailscale serve status' does not list port 8443, so it is not tailscale serve/],

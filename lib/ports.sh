@@ -197,7 +197,7 @@ ports_origin_held() {
         case "$served" in
           0) echo "note: $address:$3 is held by $who; 'tailscale serve status' lists port $3, so it is taken as tailscale serve, already publishing there." >&2; continue ;;
           1) reason="'tailscale serve status' does not list port $3, so it is not tailscale serve" ;;
-          *) reason="'tailscale serve status' could not be read to show that it is tailscale serve: an unknown holder" ;;
+          *) reason="'tailscale serve status' could not be read to show that it is tailscale serve (is tailscale installed, and may this account read it? 'sudo tailscale set --operator=$(id -un)' allows it): an unknown holder" ;;
         esac
       else
         reason="not a Tailscale address, so not tailscale serve"
