@@ -71,17 +71,19 @@ if [ "${CLEARED_INSTALL_FROM_WAKE:-}" != 1 ]; then
 fi
 # The ports, before the first write: the dashboard's and the app's, [app]
 # port, the port of [app] public_origin (the one tailscale serve publishes,
-# 443 when none is written) and of the notifications' link. 80 and 443 are
-# refused outright, a port held by anything but this installation's own unit
-# too, and so is a machine whose listening ports cannot be read.
+# 443 when none is written) and of the notifications' link (this shell's, and
+# the drop-ins' of cleared-wake.service and cleared-app.service). 80 and 443
+# are refused outright, a port held by anything but this installation's own
+# unit (or, for public_origin, tailscale serve) too, and so is a machine whose
+# listening ports cannot be read.
 . "$here/../lib/ports.sh"
 public_origin=$(conf_get app public_origin) || public_origin=
 app_conf_port=$(conf_get app port) || app_conf_port=
-ports_install_check "$port" "$app_port" "$app_conf_port" "$public_origin" "${CLEARED_NOTIFY_LINK_BASE:-}" "$bind" \
+ports_install_check "$port" "$app_port" "$app_conf_port" "$public_origin" "${CLEARED_NOTIFY_LINK_BASE:-}" "$bind" "$units" "${ORCH_NOTIFY_LINK_BASE:-}" \
   || die "a port check failed (above): nothing was written, no unit was touched"
 # Behind tailscale serve (an https public_origin) the app listens on [app] bind, this machine only by default (app/main.mjs).
 app_address=$bind
-case "$public_origin" in https://*) app_address=$(conf_get app bind) || app_address=; app_address=${app_address:-127.0.0.1} ;; esac
+if ports_https "$public_origin"; then app_address=$(conf_get app bind) || app_address=; app_address=${app_address:-127.0.0.1}; fi
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
 chmod go-w "$named"

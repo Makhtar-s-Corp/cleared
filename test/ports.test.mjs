@@ -4,7 +4,7 @@
 // bind 0.0.0.0:443: production was down for six hours.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
@@ -14,19 +14,35 @@ const uid = process.getuid();
 const cgroup = (unit, user = uid) => `0::/user.slice/user-${user}.slice/user@${user}.service/app.slice/${unit}\n`;
 
 // The helper, sourced as install.sh sources it, with the listeners and the kernel's tables of the test.
-function ports({ listeners = '', ssFails = false, noSs = false, proc = null } = {}) {
+// `serve` is what the fake `tailscale serve status --json` prints (null: no tailscale; false: it is refused).
+function ports({ listeners = '', ssFails = false, noSs = false, proc = null, serve = null } = {}) {
   const dir = scratch('orch-ports-');
   const ss = join(dir, 'ss');
   writeFileSync(join(dir, 'listeners'), listeners);
   writeFileSync(ss, ssFails ? '#!/bin/sh\necho "Cannot open netlink socket: Permission denied" >&2\nexit 1\n' : `#!/bin/sh\ncat '${join(dir, 'listeners')}'\n`, { mode: 0o755 });
+  const tailscale = join(dir, serve === null ? 'no-such-tailscale' : 'tailscale');
+  if (serve !== null) {
+    writeFileSync(join(dir, 'serve-status'), serve === false ? '' : serve);
+    writeFileSync(tailscale, serve === false ? '#!/bin/sh\necho "access denied: run as root or as the operator" >&2\nexit 1\n'
+      : `#!/bin/sh\n[ "$*" = "serve status --json" ] || exit 9\ncat '${join(dir, 'serve-status')}'\n`, { mode: 0o755 });
+  }
   const procDir = proc ?? join(dir, 'proc');
   mkdirSync(procDir, { recursive: true });
-  const call = (fn, ...args) => spawnSync('bash', ['-c', `set -euo pipefail; . "$1/lib/ports.sh"; ports_ss=$2; ports_proc=$3; shift 3; "$@"`, '_',
-    ORCH_HOME, noSs ? join(dir, 'no-such-ss') : ss, procDir, fn, ...args], { encoding: 'utf8' });
-  // dashboard port, app port, [app] port, [app] public_origin, link base, Tailscale address
-  const check = ({ dashboard = '8787', app = '8788', confPort = '8788', origin = '', link = '', bind = '100.64.0.1' } = {}) =>
-    call('ports_install_check', dashboard, app, confPort, origin, link, bind);
-  return { dir, procDir, call, check };
+  // The units directory, where the drop-ins of cleared-wake.service and cleared-app.service are read.
+  const units = join(dir, 'units');
+  mkdirSync(units);
+  const call = (fn, ...args) => spawnSync('bash', ['-c', `set -euo pipefail; . "$1/lib/ports.sh"; ports_ss=$2; ports_proc=$3; ports_tailscale=$4; shift 4; "$@"`, '_',
+    ORCH_HOME, noSs ? join(dir, 'no-such-ss') : ss, procDir, tailscale, fn, ...args], { encoding: 'utf8' });
+  // dashboard port, app port, [app] port, [app] public_origin, link base, Tailscale address, units directory, legacy link base
+  const check = ({ dashboard = '8787', app = '8788', confPort = '8788', origin = '', link = '', bind = '100.64.0.1', legacy = '' } = {}) =>
+    call('ports_install_check', dashboard, app, confPort, origin, link, bind, units, legacy);
+  // dropIn('cleared-wake.service', 'notify.conf', text): a drop-in of the test.
+  const dropIn = (unit, file, text) => {
+    mkdirSync(join(units, `${unit}.d`), { recursive: true });
+    writeFileSync(join(units, `${unit}.d`, file), text);
+    return join(units, `${unit}.d`, file);
+  };
+  return { dir, procDir, units, call, check, dropIn };
 }
 const listen = (address, extra = '') => `LISTEN 0      4096   ${address}   0.0.0.0:*   ${extra}\n`;
 
@@ -145,7 +161,7 @@ test('the tailscale serve command the installer prints publishes on the checked 
 });
 
 // The whole installer, on a machine of the test: a copy of the tool, a project, systemctl and tailscale stand-ins.
-function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '' } = {}) {
+function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '', serve = '{}' } = {}) {
   const home = scratch('orch-install-ports-');
   const tool = join(home, 'tool');
   const bin = join(home, 'bin');
@@ -158,7 +174,8 @@ function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '' } =
   writeFileSync(join(tool, 'lib', 'ports.sh'), readFileSync(join(tool, 'lib', 'ports.sh'), 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
   writeFileSync(join(tool, 'dashboard.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'tailscale'), '#!/usr/bin/env bash\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'tailscale'), `#!/usr/bin/env bash\ncase "$*" in 'serve status --json') cat '${join(home, 'serve-status')}' ;; *) echo 100.64.0.1 ;; esac\n`, { mode: 0o755 });
+  writeFileSync(join(home, 'serve-status'), serve);
   writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(home, 'listeners'), listeners);
   writeFileSync(join(bin, 'ss'), `#!/usr/bin/env bash\ncat '${join(home, 'listeners')}'\n`, { mode: 0o755 });
@@ -179,7 +196,12 @@ function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '' } =
     systemd: (existsSync(join(home, 'systemctl-calls')) ? readFileSync(join(home, 'systemctl-calls'), 'utf8') : '').match(/daemon-reload|enable --now|restart/g) ?? [],
   });
   const nothing = { config: [], state: [], units: [], systemd: [] };
-  return { install, written, nothing };
+  // A drop-in the human wrote before the run (docs/notifications.md), in the units directory of the installer.
+  const dropIn = (unit, file, text) => {
+    mkdirSync(join(home, '.config', 'systemd', 'user', `${unit}.d`), { recursive: true });
+    writeFileSync(join(home, '.config', 'systemd', 'user', `${unit}.d`, file), text);
+  };
+  return { install, written, nothing, dropIn };
 }
 
 test('the installer writes nothing when a port check fails: a held port, 443 as the app\'s port, an https public_origin without its port', () => {
@@ -279,4 +301,192 @@ test('the docs say to publish on 8443 or 10000, never on 443, and the installer 
   assert.match(app, /HTTPS port 8443 \(or 10000[^)]*\), never 443/);
   const run = ports().check({ origin: 'https://box.tail1234.ts.net' });
   assert.match(run.stderr, /Publish the app on HTTPS port 8443 \(or 10000\), never 443, for example: tailscale serve --bg --https=8443/);
+});
+
+// The port of [app] public_origin is the one tailscale serve is told to publish: it is checked as in use too, and a
+// re-run, where tailscaled holds it already, still passes. tailscaled runs as root: ss names it only to root.
+const SERVED_8443 = JSON.stringify({ TCP: { 8443: { HTTPS: true } }, Web: { 'box.tail1234.ts.net:8443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:8788' } } } } });
+const ORIGIN = 'https://box.tail1234.ts.net:8443';
+
+test('the port of public_origin held by another process is refused, named, with nothing to accept it', () => {
+  const box = ports({ listeners: listen('100.64.0.1:8443', 'users:(("caddy",pid=4545,fd=7))'), serve: SERVED_8443 });
+  const run = box.check({ origin: ORIGIN });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /the port of \[app\] public_origin \(https:\/\/box\.tail1234\.ts\.net:8443\) is 8443, the port tailscale serve is told to publish, and 100\.64\.0\.1:8443 is already held by caddy \(pid 4545\), which is not tailscaled/);
+  assert.match(run.stderr, /sudo ss -ltnp "sport = :8443"/);
+  assert.match(run.stderr, /choose another one for public_origin \(8443 or 10000\)/);
+  // A holder of another account off the tailnet is not tailscale serve, whatever its status says.
+  const wildcard = ports({ listeners: listen('0.0.0.0:8443'), serve: SERVED_8443 }).check({ origin: ORIGIN });
+  assert.equal(wildcard.status, 1);
+  assert.match(wildcard.stderr, /0\.0\.0\.0:8443 is already held by a process of another account, which this account cannot name without root; not a Tailscale address, so not tailscale serve/);
+  // Found by its socket, without ss: named by /proc/<pid>/comm.
+  const proc = ports({ noSs: true });
+  mkdirSync(join(proc.procDir, 'net'));
+  writeFileSync(join(proc.procDir, 'net', 'tcp'), '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n'
+    + `   0: 01004064:20FB 00000000:0000 0A 00000000:00000000 00:00000000 00000000  ${uid}        0 991 1 0 100 0 0 10 0\n`);
+  mkdirSync(join(proc.procDir, '4646', 'fd'), { recursive: true });
+  symlinkSync('socket:[991]', join(proc.procDir, '4646', 'fd', '3'));
+  writeFileSync(join(proc.procDir, '4646', 'comm'), 'nginx\n');
+  const named = proc.check({ origin: ORIGIN });
+  assert.equal(named.status, 1);
+  assert.match(named.stderr, /100\.64\.0\.1:8443 is already held by nginx \(pid 4646\), which is not tailscaled/);
+  // The command the installer prints is never reached then: the check above stops it first (see the installer test).
+  writeFileSync(join(proc.procDir, '4646', 'comm'), 'tailscaled\n');
+  assert.equal(proc.check({ origin: ORIGIN }).status, 0, 'the same socket, held by tailscaled, is accepted');
+});
+
+test('a re-run accepts the port of public_origin when tailscaled holds it: named by ss, or of another account on the tailnet and listed by tailscale serve status', () => {
+  const own = ports({ listeners: listen('100.64.0.1:8443', 'users:(("tailscaled",pid=951,fd=40))') }).check({ origin: ORIGIN });
+  assert.equal(own.status, 0, own.stderr);
+  assert.equal(own.stderr, '');
+  // As on a real machine: tailscaled is root's, ss names no process; serve status lists the port. v4 and v6 tailnet addresses.
+  const rootHeld = listen('100.64.0.1:8443') + listen('[fd7a:115c:a1e0::eb2c:b102]:8443');
+  const served = ports({ listeners: rootHeld, serve: SERVED_8443 }).check({ origin: ORIGIN });
+  assert.equal(served.status, 0, served.stderr);
+  assert.match(served.stderr, /note: 100\.64\.0\.1:8443 is held by a process of another account, which this account cannot name without root; 'tailscale serve status' lists port 8443, so it is taken as tailscale serve/);
+  assert.equal(ports({ listeners: rootHeld, serve: SERVED_8443 }).call('ports_serve_hint', 'HTTPS://box.tail1234.ts.net:8443', '127.0.0.1', '8788').stdout,
+    'tailscale serve --bg --https=8443 http://127.0.0.1:8788\n', 'the scheme is read in any case');
+});
+
+test('an unnameable holder of the port of public_origin is refused, with the sudo ss hint, unless tailscale serve status lists that port', () => {
+  const held = listen('100.64.0.1:8443');
+  for (const [what, serve, said] of [
+    ['no tailscale', null, /could not be read to show that it is tailscale serve: an unknown holder/],
+    ['tailscale refuses', false, /could not be read to show that it is tailscale serve: an unknown holder/],
+    ['not JSON', 'https://box.tail1234.ts.net:8443 (tailnet only)\n', /an unknown holder/],
+    ['TCP not an object', '{"TCP": [8443]}', /an unknown holder/],
+    ['another port served', JSON.stringify({ TCP: { 10000: { HTTPS: true } } }), /'tailscale serve status' does not list port 8443, so it is not tailscale serve/],
+    ['nothing served', '{}', /does not list port 8443/],
+  ]) {
+    const run = ports({ listeners: held, serve }).check({ origin: ORIGIN });
+    assert.equal(run.status, 1, what);
+    assert.match(run.stderr, /100\.64\.0\.1:8443 is already held by a process of another account, which this account cannot name without root/, what);
+    assert.match(run.stderr, said, what);
+    assert.match(run.stderr, /'sudo ss -ltnp "sport = :8443"' names it/, what);
+  }
+  // A key that only looks like the port, in the Web part, is not the port served.
+  const lookalike = ports({ listeners: held, serve: JSON.stringify({ Web: { 'box.tail1234.ts.net:8443': {} } }) }).check({ origin: ORIGIN });
+  assert.equal(lookalike.status, 1);
+});
+
+test('the notification link of the drop-ins of cleared-wake and cleared-app is checked: 80/443 and what is no http(s) address are refused', () => {
+  const service = (lines) => `[Service]\n${lines}\n`;
+  const refused = (box, said, what) => {
+    const run = box.check({ origin: ORIGIN });
+    assert.equal(run.status, 1, what);
+    assert.match(run.stderr, said, what);
+    return run;
+  };
+  let box = ports();
+  box.dropIn('cleared-wake.service', 'notify.conf', service('Environment=CLEARED_NOTIFY_LINK_BASE=HTTPS://box.tail1234.ts.net'));
+  const upper = refused(box, /the port of CLEARED_NOTIFY_LINK_BASE, set for cleared-wake\.service in .*cleared-wake\.service\.d \(HTTPS:\/\/box\.tail1234\.ts\.net\) is 443/, 'an uppercase scheme, implicit 443');
+  assert.match(upper.stderr, /Use the address of \[app\] public_origin, with its port/);
+  box = ports();
+  box.dropIn('cleared-wake.service', 'notify.conf', service('Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net:8443\nEnvironment=CLEARED_NOTIFY_PUSH_HOSTS=push.example.org'));
+  box.dropIn('cleared-app.service', 'notify.conf', service('Environment=CLEARED_NOTIFY_PUSH_HOSTS=push.example.org'));
+  assert.equal(box.check({ origin: ORIGIN }).status, 0, 'the drop-in of docs/notifications.md, on 8443');
+  // The legacy name, in the app's drop-in, and in this shell.
+  box = ports();
+  box.dropIn('cleared-app.service', 'old.conf', service('Environment="ORCH_NOTIFY_LINK_BASE=http://box.tail1234.ts.net"'));
+  refused(box, /the port of ORCH_NOTIFY_LINK_BASE, set for cleared-app\.service in .* is 80/, 'ORCH_ in a drop-in');
+  const shell = ports().check({ origin: ORIGIN, legacy: 'https://box.tail1234.ts.net' });
+  assert.equal(shell.status, 1);
+  assert.match(shell.stderr, /the port of ORCH_NOTIFY_LINK_BASE in this shell .* is 443/);
+  // Not an http(s) address with a host: refused, not ignored (it was a silent "no link", and an implicit 443 went by).
+  for (const value of ['ftp://box.tail1234.ts.net:8443', 'box.tail1234.ts.net:8443', 'https://', 'https://me@box.tail1234.ts.net:8443']) {
+    box = ports();
+    box.dropIn('cleared-wake.service', 'notify.conf', service(`Environment=CLEARED_NOTIFY_LINK_BASE=${value}`));
+    refused(box, /CLEARED_NOTIFY_LINK_BASE, set for cleared-wake\.service in .* is ".*", which is not an http\(s\) address with a host/, value);
+  }
+  assert.match(ports().check({ origin: ORIGIN, link: 'HTTPS://box.tail1234.ts.net' }).stderr, /CLEARED_NOTIFY_LINK_BASE in this shell .* is 443/);
+  assert.match(ports().check({ origin: ORIGIN, link: 'mailto:me@example.org' }).stderr, /not an http\(s\) address with a host/);
+});
+
+test('the drop-ins are read as systemd reads them, never evaluated: the last assignment wins, comments and other sections are skipped', () => {
+  const service = (lines) => `[Service]\n${lines}\n`;
+  // Files in the order of their names: 20- comes after 10-, whatever was written first.
+  let box = ports();
+  box.dropIn('cleared-wake.service', '20-port.conf', service('Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net:8443'));
+  box.dropIn('cleared-wake.service', '10-old.conf', service('Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net'));
+  assert.equal(box.check({ origin: ORIGIN }).status, 0, 'the later file wins');
+  box.dropIn('cleared-wake.service', '30-back.conf', service('Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net'));
+  assert.equal(box.check({ origin: ORIGIN }).status, 1, 'and a later one again');
+  // In one file, the last line; on one line, the last word; an empty Environment= clears what came before.
+  box = ports();
+  box.dropIn('cleared-wake.service', 'notify.conf', service([
+    'Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net',
+    'Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net:8443',
+    '# Environment=CLEARED_NOTIFY_LINK_BASE=https://commented.example',
+    '; Environment=ORCH_NOTIFY_LINK_BASE=https://commented.example',
+    'Environment=ORCH_NOTIFY_LINK_BASE=https://box.tail1234.ts.net ORCH_NOTIFY_LINK_BASE=https://box.tail1234.ts.net:10000',
+    '[Unit]',
+    'Environment=CLEARED_NOTIFY_LINK_BASE=https://not-a-service-key.example',
+  ].join('\n')));
+  box.dropIn('cleared-app.service', 'notify.conf', service('Environment=CLEARED_NOTIFY_LINK_BASE=http://box.tail1234.ts.net\nEnvironment=\nEnvironment="CLEARED_NOTIFY_PUSH_HOSTS=push.example.org"'));
+  const run = box.check({ origin: ORIGIN });
+  assert.equal(run.status, 0, run.stderr);
+  // Nothing in a drop-in is run: a command substitution is a value like any other, refused as no http(s) address.
+  box = ports();
+  const marker = join(box.dir, 'ran');
+  box.dropIn('cleared-wake.service', 'notify.conf', service(`Environment=CLEARED_NOTIFY_LINK_BASE=$(touch ${marker})`));
+  assert.equal(box.check({ origin: ORIGIN }).status, 1);
+  assert.equal(existsSync(marker), false);
+  // A drop-in masked by /dev/null sets nothing; a file that is no drop-in (not *.conf) is not read.
+  box = ports();
+  mkdirSync(join(box.units, 'cleared-wake.service.d'));
+  symlinkSync('/dev/null', join(box.units, 'cleared-wake.service.d', 'notify.conf'));
+  writeFileSync(join(box.units, 'cleared-wake.service.d', 'notes.txt'), service('Environment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net'));
+  assert.equal(box.check({ origin: ORIGIN }).status, 0);
+});
+
+test('a drop-in that cannot be read, or whose quotes do not close, refuses; a drop-in directory that cannot be read is no drop-in', { skip: uid === 0 && 'root reads every file' }, () => {
+  let box = ports();
+  const file = box.dropIn('cleared-wake.service', 'notify.conf', '[Service]\nEnvironment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net:8443\n');
+  chmodSync(file, 0);
+  let run = box.check({ origin: ORIGIN });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /cleared-wake\.service\.d\/notify\.conf cannot be read/);
+  assert.match(run.stderr, /the drop-ins of cleared-wake\.service \(.*\) could not be read, so the notification link they set cannot be checked/);
+  // A dangling link is a file systemd cannot read either.
+  box = ports();
+  mkdirSync(join(box.units, 'cleared-app.service.d'));
+  symlinkSync(join(box.dir, 'gone.conf'), join(box.units, 'cleared-app.service.d', 'notify.conf'));
+  assert.match(box.check({ origin: ORIGIN }).stderr, /cleared-app\.service\.d\/notify\.conf cannot be read/);
+  box = ports();
+  box.dropIn('cleared-wake.service', 'notify.conf', '[Service]\nEnvironment="CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net:8443\n');
+  run = box.check({ origin: ORIGIN });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /notify\.conf: a quote does not close/);
+  // The directory itself closed: nothing of it reaches this account, and nothing is refused for it.
+  box = ports();
+  box.dropIn('cleared-wake.service', 'notify.conf', '[Service]\nEnvironment=CLEARED_NOTIFY_LINK_BASE=https://box.tail1234.ts.net\n');
+  chmodSync(join(box.units, 'cleared-wake.service.d'), 0);
+  run = box.check({ origin: ORIGIN });
+  chmodSync(join(box.units, 'cleared-wake.service.d'), 0o755);
+  assert.equal(run.status, 0, run.stderr);
+});
+
+test('the installer refuses, writing nothing, when the port of public_origin is held by something else or a drop-in links to 443; a re-run behind tailscale serve goes on', () => {
+  const app = 'bind = 127.0.0.1\nport = 8788\npublic_origin = https://box.tail1234.ts.net:8443\n';
+  const taken = installer({ app, listeners: listen('0.0.0.0:8443') });
+  const run = taken.install({ CLEARED_NOTIFY_LINK_BASE: ORIGIN });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /public_origin .* is 8443, the port tailscale serve is told to publish, and 0\.0\.0\.0:8443 is already held/);
+  assert.match(run.stderr, /nothing was written, no unit was touched/);
+  assert.doesNotMatch(run.stdout, /tailscale serve --bg/, 'the serve command is never printed for a held port');
+  assert.deepEqual(taken.written(), taken.nothing);
+
+  const linked = installer({ app });
+  linked.dropIn('cleared-wake.service', 'notify.conf', '[Service]\nEnvironment=CLEARED_NOTIFY_LINK_BASE=HTTPS://box.tail1234.ts.net\n');
+  const before = linked.written();
+  const refused = linked.install();
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /the port of CLEARED_NOTIFY_LINK_BASE, set for cleared-wake\.service in .* is 443/);
+  assert.deepEqual(linked.written(), before, 'nothing more than the drop-in that was there');
+
+  const again = installer({ app, listeners: listen('100.64.0.1:8443') + listen('[fd7a:115c:a1e0::1]:8443'), serve: SERVED_8443 });
+  again.dropIn('cleared-wake.service', 'notify.conf', `[Service]\nEnvironment=CLEARED_NOTIFY_LINK_BASE=${ORIGIN}\n`);
+  const rerun = again.install({ CLEARED_NOTIFY_LINK_BASE: ORIGIN });
+  assert.equal(rerun.status, 0, rerun.stderr);
+  assert.match(rerun.stdout, /^ {2}tailscale serve --bg --https=8443 http:\/\/127\.0\.0\.1:8788$/m);
 });

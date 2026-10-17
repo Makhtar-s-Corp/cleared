@@ -19,6 +19,7 @@
 # sourcing this file.
 ports_proc=/proc
 ports_ss=ss
+ports_tailscale=tailscale
 
 # ports_listeners: one line per TCP socket that listens, "address port pid uid
 # inode" ("-" for what is not known). ss names the process only for this
@@ -99,17 +100,32 @@ ports_number() {
 }
 
 # ports_origin_port <url>: the port an http(s) address is reached on, the
-# scheme's own when none is written (https://host is 443).
+# scheme's own when none is written (https://host is 443). The scheme is read
+# in any case, as browsers read it (HTTPS://host is 443 too). Fails on what is
+# not http(s)://host[:port][/path]: another scheme, no host, a user name.
 ports_origin_port() {
-  local own=80 rest hostport
-  case "$1" in https://*) own=443 ;; http://*) ;; *) return 1 ;; esac
-  rest=${1#*://}; hostport=${rest%%[/?#]*}; hostport=${hostport##*@}
+  local own scheme hostport host port
+  case "$1" in *://*) ;; *) return 1 ;; esac
+  scheme=${1%%://*}; scheme=${scheme,,}
+  case "$scheme" in https) own=443 ;; http) own=80 ;; *) return 1 ;; esac
+  hostport=${1#*://}; hostport=${hostport%%[/?#]*}
   case "$hostport" in
-    \[*\]:*) printf '%s\n' "${hostport##*]:}" ;;
-    \[*\]) echo "$own" ;;
-    *:*) printf '%s\n' "${hostport##*:}" ;;
-    *) echo "$own" ;;
+    *@* | *[[:space:]]*) return 1 ;;
+    \[*\]:*) host=${hostport%]:*}; port=${hostport##*]:} ;;
+    \[*\]) host=$hostport; port=$own ;;
+    *:*:*) return 1 ;;
+    *:*) host=${hostport%%:*}; port=${hostport##*:} ;;
+    *) host=$hostport; port=$own ;;
   esac
+  case "$host" in '' | '[') return 1 ;; esac
+  printf '%s\n' "$port"
+}
+
+# ports_https <url>: whether the address is https, the scheme read in any case.
+ports_https() {
+  case "$1" in *://*) ;; *) return 1 ;; esac
+  local scheme=${1%%://*}
+  [ "${scheme,,}" = https ]
 }
 
 # ports_held <listeners> <what> <port> <own unit> <how to change it>: says who
@@ -134,6 +150,135 @@ ports_held() {
   [ "$held" = 0 ]
 }
 
+# ports_served <port>: whether tailscale serve publishes that port, as
+# `tailscale serve status --json` says it (a key of its "TCP" object), the JSON
+# read by node, never evaluated. 0: it does; 1: it does not; 2: it cannot be
+# told (no tailscale, a refusal, an answer that is no such JSON).
+ports_served() {
+  local said code=0
+  command -v "$ports_tailscale" > /dev/null 2>&1 || return 2
+  said=$("$ports_tailscale" serve status --json 2> /dev/null) || return 2
+  printf '%s' "$said" | node -e '
+    let text = "";
+    process.stdin.on("data", (d) => { text += d; }).on("end", () => {
+      let status;
+      try { status = JSON.parse(text); } catch { process.exit(2); }
+      if (!status || typeof status !== "object" || Array.isArray(status)) process.exit(2);
+      const tcp = status.TCP;
+      if (tcp === undefined || tcp === null) process.exit(1);
+      if (typeof tcp !== "object" || Array.isArray(tcp)) process.exit(2);
+      process.exit(Object.hasOwn(tcp, process.argv[1]) ? 0 : 1);
+    });' "$1" > /dev/null 2>&1 || code=$?
+  case "$code" in 0 | 1) return "$code" ;; esac
+  return 2
+}
+
+# ports_origin_held <listeners> <[app] public_origin> <its port> <Tailscale address>:
+# the port tailscale serve is told to publish is free, or tailscale serve's
+# already (a re-run). Accepted holders: a process named tailscaled (ss names
+# this account's own, /proc/<pid>/comm the one found by its socket); and, as
+# tailscaled runs as root and cannot be named without root, a holder of
+# another account on a Tailscale address when `tailscale serve status` lists
+# that port. Anything else is refused, named as far as this account can.
+ports_origin_held() {
+  local address port pid uid inode name who reason served= held=0
+  while read -r address port pid uid inode name; do
+    [ "$port" = "$3" ] || continue
+    [ "$pid" != - ] || [ "$inode" = - ] || pid=$(ports_pid_of_inode "$inode") || pid=-
+    if [ "$name" = - ] && [ "$pid" != - ]; then name=$(sed -n '1p' "$ports_proc/$pid/comm" 2> /dev/null) || true; name=${name:--}; fi
+    [ "$name" != tailscaled ] || continue
+    if [ "$pid" != - ]; then
+      who="${name/#-/a process} (pid $pid), which is not tailscaled"
+    else
+      if [ "$uid" != - ]; then who="a process of $(getent passwd "$uid" | cut -d: -f1 || true) (uid $uid)"; else who="a process of another account"; fi
+      who="$who, which this account cannot name without root"
+      if { [ "${address%%%*}" = "$4" ] || ports_tailnet "$address"; }; then
+        [ -n "$served" ] || { ports_served "$3" && served=0 || served=$?; }
+        case "$served" in
+          0) echo "note: $address:$3 is held by $who; 'tailscale serve status' lists port $3, so it is taken as tailscale serve, already publishing there." >&2; continue ;;
+          1) reason="'tailscale serve status' does not list port $3, so it is not tailscale serve" ;;
+          *) reason="'tailscale serve status' could not be read to show that it is tailscale serve: an unknown holder" ;;
+        esac
+      else
+        reason="not a Tailscale address, so not tailscale serve"
+      fi
+      who="$who; $reason"
+    fi
+    echo "the port of [app] public_origin ($2) is $3, the port tailscale serve is told to publish, and $address:$3 is already held by $who ('sudo ss -ltnp \"sport = :$3\"' names it). Free that port, or choose another one for public_origin (8443 or 10000) and its tailscale serve command (docs/app.md)." >&2
+    held=1
+  done <<< "$1"
+  [ "$held" = 0 ]
+}
+
+# ports_dropin_env <drop-in directory> <name>...: the values systemd gives these
+# variables from the Environment= lines of <directory>/*.conf, read as text and
+# never evaluated: files in the order of their names, [Service] only, comments
+# and other keys skipped, quotes and backslashes as systemd reads them, an empty
+# Environment= clearing what came before, the last assignment winning. Prints
+# "<name><TAB><value>" for each one set. A directory that cannot be read has no
+# drop-in for this account; a file in it that cannot be read, or a line whose
+# quotes do not close, fails: what the unit gets cannot be told then.
+ports_dropin_env() {
+  local dir=$1 file files=()
+  shift
+  [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || return 0
+  while IFS= read -r -d '' file; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    [ "$(readlink -f -- "$file")" != /dev/null ] || continue
+    [ -f "$file" ] && [ -r "$file" ] || { echo "$file cannot be read" >&2; return 1; }
+    files+=("$file")
+  done < <(printf '%s\0' "$dir"/*.conf | LC_ALL=C sort -z)
+  [ "${#files[@]}" -gt 0 ] || return 0
+  LC_ALL=C awk -v names="$*" '
+    function words(s,   i, c, q, cur, n, has) {
+      n = 0; cur = ""; q = ""; has = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (q == "" && (c == " " || c == "\t")) { if (has) { w[++n] = cur; cur = ""; has = 0 } continue }
+        has = 1
+        if (c == "\\" && q != "\047" && i < length(s)) { i++; cur = cur substr(s, i, 1); continue }
+        if (q == "" && (c == "\"" || c == "\047")) { q = c; continue }
+        if (q != "" && c == q) { q = ""; continue }
+        cur = cur c
+      }
+      if (q != "") return -1
+      if (has) w[++n] = cur
+      return n
+    }
+    BEGIN { split(names, list, " "); for (i in list) wanted[list[i]] = 1 }
+    FNR == 1 { section = ""; pending = "" }
+    {
+      line = $0; sub(/\r$/, "", line)
+      if (pending == "" && line ~ /^[ \t]*[#;]/) next
+      line = pending line; pending = ""
+      if (line ~ /\\$/) { pending = substr(line, 1, length(line) - 1) " "; next }
+      if (line ~ /^[ \t]*\[/) { section = line; gsub(/^[ \t]+|[ \t]+$/, "", section); next }
+      if (section != "[Service]" || line !~ /^[ \t]*Environment[ \t]*=/) next
+      value = line; sub(/^[ \t]*Environment[ \t]*=[ \t]*/, "", value); sub(/[ \t]+$/, "", value)
+      if (value == "") { split("", set); next }
+      n = words(value)
+      if (n < 0) { print FILENAME ": a quote does not close: " line > "/dev/stderr"; broken = 1; next }
+      for (i = 1; i <= n; i++) {
+        j = index(w[i], "="); if (j < 2) continue
+        name = substr(w[i], 1, j - 1); if (name in wanted) set[name] = substr(w[i], j + 1)
+      }
+    }
+    END { if (broken) exit 1; for (name in set) print name "\t" set[name] }' "${files[@]}"
+}
+
+# ports_link <what> <address>: a notification link names an address, never
+# 80 or 443: http(s)://host[:port], the scheme read in any case.
+ports_link() {
+  local link_port
+  if ! link_port=$(ports_origin_port "$2"); then
+    echo "$1 is \"$2\", which is not an http(s) address with a host (http(s)://host[:port])." >&2
+  elif ports_number "the port of $1 ($2)" "$link_port"; then
+    return 0
+  fi
+  echo "  Use the address of [app] public_origin, with its port, for example https://<machine>.<tailnet>.ts.net:8443 (docs/notifications.md)" >&2
+  return 1
+}
+
 # ports_tailnet <address>: whether an address of this machine is on the tailnet:
 # 100.64.0.0/10, or fd7a:115c:a1e0::/48 (as ss writes it, brackets and scope aside).
 ports_tailnet() {
@@ -145,11 +290,14 @@ ports_tailnet() {
   return 1
 }
 
-# ports_install_check <dashboard port> <app port> <[app] port> <[app] public_origin> <link base> <Tailscale address>:
+# ports_install_check <dashboard port> <app port> <[app] port> <[app] public_origin> <link base> <Tailscale address> [<units directory> [<legacy link base>]]:
 # every port the installation binds, and every port it tells to publish, before
-# anything is written. Says every problem, then returns 1 when there is one.
+# anything is written; and the notification link, from this shell (CLEARED_ and
+# the legacy ORCH_ name) and from the drop-ins of cleared-wake.service and
+# cleared-app.service in the units directory. Says every problem, then returns
+# 1 when there is one.
 ports_install_check() {
-  local listeners failed=0 origin_port link_port address port pid uid inode name
+  local listeners failed=0 origin_port address port pid uid inode name remedy unit assigned variable value
   listeners=$(ports_listeners) || { echo "the listening ports of this machine could not be read, so no port can be proved free" >&2; return 1; }
   ports_number "the dashboard port (CLEARED_DASHBOARD_PORT)" "$1" || failed=1
   ports_number "the app port (CLEARED_APP_PORT)" "$2" || failed=1
@@ -164,16 +312,25 @@ ports_install_check() {
       echo "[app] public_origin ($4) is not an http(s) address" >&2; failed=1
     elif ! ports_number "the port of [app] public_origin ($4)" "$origin_port"; then
       echo "  Publish the app on HTTPS port 8443 (or 10000), never 443, for example: tailscale serve --bg --https=8443 http://127.0.0.1:$2, and set [app] public_origin = https://<machine>.<tailnet>.ts.net:8443 (docs/app.md)" >&2; failed=1
-    elif [ "${4%%://*}" = https ] && { [ "$origin_port" = "$1" ] || [ "$origin_port" = "$2" ]; }; then
+    elif ports_https "$4" && { [ "$origin_port" = "$1" ] || [ "$origin_port" = "$2" ]; }; then
       # (an http origin is the app itself, on its own port: http://localhost:8788)
       echo "the port of [app] public_origin ($origin_port) is also the port of the dashboard or the app: tailscale serve publishes the app on a port of its own, for example 8443" >&2; failed=1
+    elif ports_https "$4" && ! ports_origin_held "$listeners" "$4" "$origin_port" "$6"; then
+      failed=1
     fi
   fi
-  if [ -n "$5" ]; then
-    if ! link_port=$(ports_origin_port "$5"); then :
-    elif ! ports_number "the port of CLEARED_NOTIFY_LINK_BASE ($5)" "$link_port"; then
-      echo "  Use the address of [app] public_origin, with its port, for example https://<machine>.<tailnet>.ts.net:8443 (docs/notifications.md)" >&2; failed=1
-    fi
+  [ -z "$5" ] || ports_link "CLEARED_NOTIFY_LINK_BASE in this shell" "$5" || failed=1
+  [ -z "${8:-}" ] || ports_link "ORCH_NOTIFY_LINK_BASE in this shell" "$8" || failed=1
+  if [ -n "${7:-}" ]; then
+    for unit in cleared-wake.service cleared-app.service; do
+      if ! assigned=$(ports_dropin_env "$7/$unit.d" CLEARED_NOTIFY_LINK_BASE ORCH_NOTIFY_LINK_BASE); then
+        echo "the drop-ins of $unit ($7/$unit.d) could not be read, so the notification link they set cannot be checked: make them readable by this account, or remove the broken one" >&2; failed=1; continue
+      fi
+      while IFS=$'\t' read -r variable value; do
+        [ -n "$value" ] || continue
+        ports_link "$variable, set for $unit in $7/$unit.d" "$value" || failed=1
+      done <<< "$assigned"
+    done
   fi
   # Not this installation's to undo, but the very state of 2026-10-17: said.
   while read -r address port pid uid inode name; do
@@ -190,7 +347,7 @@ ports_install_check() {
 # that publishes the app on the port of public_origin, already checked above.
 ports_serve_hint() {
   local origin_port
-  case "$1" in https://*) ;; *) return 0 ;; esac
+  ports_https "$1" || return 0
   origin_port=$(ports_origin_port "$1") || return 0
   printf 'tailscale serve --bg --https=%s http://%s:%s\n' "$origin_port" "$2" "$3"
 }
