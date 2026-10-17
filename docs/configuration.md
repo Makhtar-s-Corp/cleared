@@ -554,11 +554,11 @@ The Cleared app. It reads the board snapshot and the ledger the last wake record
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `bind` | Address the app listens on. Use the Tailscale address to reach it from a phone; the installer does this. | Default: 127.0.0.1 |
-| `port` | Port the app listens on. | Default: 8788 |
+| `port` | Port the app listens on when `cleared app` is started by hand; the installed service is given `CLEARED_APP_PORT` of `serve/install.sh` (default 8788) instead. Never 80 or 443: the installer refuses them, and any port something else listens on ([Decisions](concepts.md#decisions)). | Default: 8788 |
 | `ranges` | Peers allowed to connect, as CIDR ranges separated by spaces or commas. | Optional; no default (Tailscale ranges and this machine are used) |
 | `hosts` | Extra host names the browser may use, besides addresses, `localhost` and `*.ts.net`. | Optional; no default |
 | `token_file` | Private file (mode `0600`, owned by the service account, outside the project) holding the access token. Created on first start if missing. | Optional; no default (`~/.config/cleared/app-token` is used) |
-| `public_origin` | The address the browser opens the app at, for example `https://machine.tailnet.ts.net` (from `tailscale serve`). Passkeys need `https` (or `http://localhost`); its host is the passkey's relying party. When set, a write is refused unless it carries this origin. | Required for the gestures; no default |
+| `public_origin` | The address the browser opens the app at, port included, for example `https://machine.tailnet.ts.net:8443` (from `tailscale serve --bg --https=8443 http://127.0.0.1:8788`, see [the app](app.md#setup-for-the-gestures)). Never on port 80 or 443, which belong to the machine's public proxy: `serve/install.sh` refuses them, and `https://…` without a port is 443 ([Decisions](concepts.md#decisions)). Passkeys need `https` (or `http://localhost`); its host name is the passkey's relying party (the port is not part of it). When set, a write is refused unless it carries this origin, port included. | Required for the gestures; no default |
 | `human_credentials_dir` | Absolute path of a private directory (mode `0700`, owned by the app's account, outside the project and the checkout, unreadable by the agents' account) holding `credentials.json` (the human's user token, keyed by adapter name), `human-signing.key` (local tracker) and `passkeys.json`. | Optional; default `~/.config/cleared/human` |
 | `grant_socket` | Absolute path of the Unix socket `cleared app passkey` asks for a one-time registration grant. Its parent must be owned by the app's account, not writable by others, and traversable by the human. Only the human's UID is answered. | Required to register a passkey; no default |
 | `sent_back_state` | Tracker status a ticket is put in by *Send back*. Never the approval, agreement or done status. | Optional; default `[tracker] progress_state` |
@@ -582,7 +582,7 @@ Four settings are read from the service's environment only, never from the proje
 
 | Environment variable | Purpose | Default |
 | --- | --- | --- |
-| `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole). | None: no link |
+| `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole): the app's `[app] public_origin`, port included, for example `https://machine.tailnet.ts.net:8443`. Never on port 80 or 443 (`serve/install.sh` refuses it when it is set in its shell). | None: no link |
 | `CLEARED_NOTIFY_PUSH_HOSTS` | Extra Web Push service host names accepted for a subscription, separated by commas (a self-hosted service). The defaults are Google's, Mozilla's, Apple's and Microsoft's. | None |
 | `CLEARED_NOTIFY_SENDMAIL` | Absolute path of the mail program the `email` adapter runs. | The first of `/usr/sbin/sendmail`, `/usr/lib/sendmail`, `/sbin/sendmail`, `/usr/bin/sendmail` that is a file no one else can write |
 | `CLEARED_NOTIFY_DEADLINE_SECONDS` | How long one dispatch may send (1 to 50 seconds). It runs inside the wake's lock: what is still on its way then is given up and sent at the next wake. `wake.sh` stops the dispatcher after 60 seconds in any case. | 30 |
