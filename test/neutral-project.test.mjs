@@ -105,6 +105,7 @@ test('installer asks for a committed salt and leaves the project untouched', () 
   const bin = join(root, 'bin');
   mkdirSync(bin);
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   const before = execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' });
   const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], {
     env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
@@ -122,6 +123,7 @@ test('installer refuses an active Cleared wake before changing units or the proj
   mkdirSync(bin);
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in *'is-active --quiet cleared-wake.service'*) exit 0;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
   const before = execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' });
   const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
@@ -138,6 +140,7 @@ test('installer refuses an activating wake even when its timer is disabled', () 
   mkdirSync(bin);
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *'is-enabled cleared-wake.timer'*) exit 1;; *'show '*cleared-wake.service*) echo activating; exit 0;; *'is-active '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
   const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
@@ -152,6 +155,7 @@ test('installer allows its own wake to refresh units during self update', () => 
   mkdirSync(bin);
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *"is-enabled cleared-wake.timer"*) echo enabled; exit 0;; *"show "*cleared-wake.service*) echo activating; exit 0;; *"is-active "*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
   const result = spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', CLEARED_INSTALL_FROM_WAKE: '1', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.doesNotMatch(result.stderr, /wake.*active/i);

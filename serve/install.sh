@@ -10,6 +10,9 @@
 # request per model, on the subscription; CLEARED_SKIP_HARNESS_PROBE=1 skips
 # it on a host that cannot reach the providers). Then checks who can reach the dashboard. Run it again from another checkout
 # to move every unit there while the wake timer is stopped.
+# Before anything is written, every port it binds or tells to publish is
+# checked (lib/ports.sh): never 80 or 443, never a port something else
+# listens on. No setting turns that off (#112).
 #
 #   serve/install.sh
 set -euo pipefail
@@ -66,6 +69,19 @@ if [ "${CLEARED_INSTALL_FROM_WAKE:-}" != 1 ]; then
     *) die "a Cleared wake is already active ($wake_state); wait for cleared-wake.service to finish before installing" ;;
   esac
 fi
+# The ports, before the first write: the dashboard's and the app's, [app]
+# port, the port of [app] public_origin (the one tailscale serve publishes,
+# 443 when none is written) and of the notifications' link. 80 and 443 are
+# refused outright, a port held by anything but this installation's own unit
+# too, and so is a machine whose listening ports cannot be read.
+. "$here/../lib/ports.sh"
+public_origin=$(conf_get app public_origin) || public_origin=
+app_conf_port=$(conf_get app port) || app_conf_port=
+ports_install_check "$port" "$app_port" "$app_conf_port" "$public_origin" "${CLEARED_NOTIFY_LINK_BASE:-}" "$bind" \
+  || die "a port check failed (above): nothing was written, no unit was touched"
+# Behind tailscale serve (an https public_origin) the app listens on [app] bind, this machine only by default (app/main.mjs).
+app_address=$bind
+case "$public_origin" in https://*) app_address=$(conf_get app bind) || app_address=; app_address=${app_address:-127.0.0.1} ;; esac
 mkdir -p "$(dirname "$named")"
 printf '%s\n' "$project" > "$named"
 chmod go-w "$named"
@@ -261,7 +277,12 @@ fi
 "$ORCH_HOME/dashboard.sh" > /dev/null
 sleep 1
 "$here/check.sh"
-echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
+if [ -n "$(ports_serve_hint "$public_origin" "$app_address" "$app_port")" ]; then
+  echo "Cleared app: $public_origin/login, once it is published on the Tailscale network, if not done yet (never on 443: docs/app.md):"
+  echo "  $(ports_serve_hint "$public_origin" "$app_address" "$app_port")"
+else
+  echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
+fi
 echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."
 [ -n "$agent_user" ] || echo "release lock is not a security boundary: agents run as the service account"
 # The units do not read this shell: the link is set by a drop-in on cleared-wake.service (docs/notifications.md, Service environment).

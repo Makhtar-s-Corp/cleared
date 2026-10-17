@@ -327,6 +327,7 @@ function installer(conf, { security = '[security]\nagent_user =\n' } = {}) {
   const bin = join(box.dir, 'bin');
   mkdirSync(bin);
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${join(box.dir, 'systemctl-calls')}'\ncase "$*" in *'is-enabled '*|*'is-active '*) exit 1;; *'show '*) echo inactive;; esac\nexit 0\n`, { mode: 0o755 });
   const { CLEARED_CONF, CLEARED_STATE_DIR, ...env } = box.env;
   const install = (extra = {}) => spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { cwd: box.dir, encoding: 'utf8', timeout: 120000,

@@ -449,6 +449,7 @@ test('the installer of the services names one project for the machine and never 
   writeFileSync(join(tool, 'dashboard.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(bin, 'tailscale'), '#!/usr/bin/env bash\necho 100.64.0.1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> "${join(home, 'systemctl-calls')}"\nstate=$(cat "${join(home, 'cleared-wake-state')}" 2>/dev/null || echo absent)\ncase "$*" in\n  *is-enabled*cleared-wake.timer*) echo "$state"; case "$state" in enabled|static) exit 0 ;; *) exit 1 ;; esac ;;\n  *is-enabled*) echo static; exit 0 ;;\n  *is-active*) [ "$state" = enabled ] && exit 0 || exit 3 ;;\n  *show*-p*ActiveState*cleared-wake.service*) echo inactive; exit 0 ;;\nesac\nexit 0\n`, { mode: 0o755 });
   const project = fixtureProject();
