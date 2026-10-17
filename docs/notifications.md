@@ -31,13 +31,14 @@ All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.
 
 ### Service environment (systemd drop-in)
 
-A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.sh`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.sh` warns about it. Set the variables with a drop-in on each unit, as the service account, then reload:
+A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.sh`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.sh` warns about it, and refuses, before writing anything, a link in these drop-ins that is not `http(s)://host[:port]` or that is on port 80 or 443 (`https://host` with no port is 443). Set the variables with a drop-in on each unit, as the service account, then reload:
 
 ```sh
 mkdir -p ~/.config/systemd/user/cleared-wake.service.d ~/.config/systemd/user/cleared-app.service.d
 cat > ~/.config/systemd/user/cleared-wake.service.d/notify.conf <<'EOF'
 [Service]
-Environment=CLEARED_NOTIFY_LINK_BASE=https://<machine>.<tailnet>.ts.net
+# The app's [app] public_origin, port included: never 443 (docs/app.md, Setup for the gestures).
+Environment=CLEARED_NOTIFY_LINK_BASE=https://<machine>.<tailnet>.ts.net:8443
 # Only for a self-hosted push service (the four browsers' own services are known already).
 Environment=CLEARED_NOTIFY_PUSH_HOSTS=push.example.org
 # Optional: CLEARED_NOTIFY_SENDMAIL=/usr/sbin/sendmail, CLEARED_NOTIFY_DEADLINE_SECONDS=30 (50 at most)
@@ -61,7 +62,7 @@ Step 1 below needs the link, which is set in the drop-in above.
 
 Nothing outside your machine to sign up for: the browser's own push service (Google for Chrome and Android, Mozilla for Firefox, Apple for Safari and iPhone, Microsoft for Edge) carries a message encrypted for your device (RFC 8291), signed by a key of your service (VAPID, RFC 8292). Cleared implements both with Node's own crypto: no dependency.
 
-1. Give the app an https address and set `CLEARED_NOTIFY_LINK_BASE` to it in the service's environment (for example `CLEARED_NOTIFY_LINK_BASE=https://<machine>.<tailnet>.ts.net`, from `tailscale serve --bg 8788`). Push needs a secure address. The push services also want a contact: `[notify] vapid_subject` (a `mailto:` address or an https page); without it, the https link address is used.
+1. Give the app an https address and set `CLEARED_NOTIFY_LINK_BASE` to it in the service's environment (for example `CLEARED_NOTIFY_LINK_BASE=https://<machine>.<tailnet>.ts.net:8443`, from `tailscale serve --bg --https=8443 http://127.0.0.1:8788`): the same address as `[app] public_origin`, port included. Never `tailscale serve` on its default port 443, which belongs to the machine's public proxy ([the app](app.md#setup-for-the-gestures)). Push needs a secure address. An app moved to another port is another origin for the browsers: turn notifications on again on each device from the new address (on iPhone, add it to the Home Screen again). The push services also want a contact: `[notify] vapid_subject` (a `mailto:` address or an https page); without it, the https link address is used.
 2. Register a passkey first (`cleared app passkey`, see [the app](app.md)): turning notifications on or off is confirmed with it. Open the app on the phone or computer and sign in. Its header shows **Turn on notifications** when Web Push is offered. Tap it, allow notifications, confirm with the passkey (fingerprint, face or the device's code), and the device shows "Notifications are on" by itself. The button then reads **Notifications on**; tapping it again, and confirming, turns them off for that device. Up to ten devices can be subscribed; an eleventh pushes out the oldest.
 3. Check the whole path from the machine, as the service account: `CLEARED_REPO=/path/to/project node /path/to/cleared/lib/notify.mjs test`. It sends a fixed test message to every configured adapter and says, per adapter, `sent`, `not ready (reason)` or `failed (code)`.
 

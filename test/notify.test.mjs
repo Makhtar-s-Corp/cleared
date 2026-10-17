@@ -349,7 +349,7 @@ test('the dispatcher does not inherit the wake lock (fd 8): a child that outlive
 });
 
 test('serve/install.sh warns when CLEARED_NOTIFY_LINK_BASE is not set, and is silent when it is', () => {
-  const line = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8').split('\n').find((l) => l.includes('CLEARED_NOTIFY_LINK_BASE:-'));
+  const line = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8').split('\n').find((l) => l.includes('WARNING: CLEARED_NOTIFY_LINK_BASE is not set'));
   assert.ok(line, 'the check is in the installer');
   const run = (env) => spawnSync('bash', ['-c', line], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
   assert.match(run({}).stderr, /WARNING: CLEARED_NOTIFY_LINK_BASE is not set/);

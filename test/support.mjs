@@ -20,6 +20,18 @@ export const scratch = (prefix) => {
   scratchDirs.push(dir);
   return dir;
 };
+// A copy of this tool for the tests that run its installer: the listening ports are the test's own (its fake ss), not the
+// host's kernel tables, so the copy's lib/ports.sh reads an empty /proc (ports_proc, set where that file is sourced).
+export function toolCopy(home) {
+  const tool = join(home, 'copy-of-tool');
+  mkdirSync(tool, { recursive: true });
+  execFileSync('sh', ['-c', 'tar --exclude=.git --exclude=node_modules -cf - . | tar -xf - -C "$1"', '_', tool], { cwd: ORCH_HOME });
+  const proc = join(home, 'proc');
+  mkdirSync(proc, { recursive: true });
+  const ports = join(tool, 'lib', 'ports.sh');
+  writeFileSync(ports, readFileSync(ports, 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
+  return tool;
+}
 // (the dependencies a lane is handed are read-only: made writable again before they go)
 after(() => { for (const dir of scratchDirs) { try { execFileSync('chmod', ['-R', 'u+w', dir]); } catch { /* gone already */ } rmSync(dir, { recursive: true, force: true }); } });
 // A project for the tests that run the real scripts with the example settings: a repository that carries, where
