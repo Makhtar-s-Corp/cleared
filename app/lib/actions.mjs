@@ -5,6 +5,10 @@
 //   sendback  passkey, then a comment and the move back
 //   answer    session only, then a comment
 //
+// The same ceremony confirms what a device asks for itself (notifications on
+// or off for this device, app/lib/notifications.mjs): challengeFor and verifyFor,
+// bound to the session, the purpose and a hash of what is confirmed.
+//
 // Nothing in this module talks to the release service: giving an agreement is
 // all it does, the lock does the rest. Every attempt, refused or not, is one
 // `app_gesture` event in the ledger.
@@ -17,6 +21,8 @@ const REF = /^[A-Z][A-Z0-9]*-[0-9]+$/;
 const id = () => randomBytes(18).toString('base64url');
 const hash = (text) => createHash('sha256').update(String(text)).digest('hex');
 const fail = (status, code) => Object.assign(new Error(code), { status, code });
+// What a passkey confirms besides a ticket's course: a device's notifications.
+const DEVICE_GESTURES = ['notify_subscribe', 'notify_unsubscribe'];
 
 export function originInfo(origin) {
   try {
@@ -70,20 +76,23 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     if (!sameVersions(c.approval.versions, body.versions)) throw fail(409, 'new_version');
     if (gesture === 'sendback' && !validText(body.text)) throw fail(400, 'text');
     if (gesture === 'clear' && waiting(body.ticket)) throw fail(409, 'busy');
+    return ask(session, keys, { gesture, ticket: body.ticket, versions: c.approval.versions, at: c.approval.at, textHash: gesture === 'sendback' ? hash(body.text) : null });
+  }
+  function ask(session, keys, fields) {
     if ([...challenges.values()].filter((x) => x.session === session.id).length >= 20) throw fail(429, 'busy');
-    const entry = { id: id(), challenge: newChallenge(), session: session.id, gesture, ticket: body.ticket, versions: c.approval.versions, at: c.approval.at,
-      textHash: gesture === 'sendback' ? hash(body.text) : null, expires: now() + 120000 };
+    const entry = { id: id(), challenge: newChallenge(), session: session.id, ...fields, expires: now() + 120000 };
     challenges.set(entry.id, entry);
     return { challengeId: entry.id, publicKey: { challenge: entry.challenge, rpId: where.rpId, timeout: 60000, userVerification: 'required',
       allowCredentials: keys.map((k) => ({ type: 'public-key', id: k.id })) } };
   }
 
-  function check(session, body) {
+  // gestures: what the challenge may have been asked for (a challenge for a device never confirms a ticket's gesture, and the reverse).
+  function check(session, body, gestures = ['clear', 'sendback']) {
     sweep();
     const entry = challenges.get(body?.challengeId);
     // One try per challenge, whatever happens next.
     challenges.delete(body?.challengeId);
-    if (!entry || entry.session !== session.id) throw fail(403, 'challenge');
+    if (!entry || entry.session !== session.id || !gestures.includes(entry.gesture)) throw fail(403, 'challenge');
     const keys = stored();
     const key = keys.find((k) => k.id === body.assertion?.id);
     if (!key) throw fail(403, 'unknown_key');
@@ -93,6 +102,23 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
     key.signCount = result.signCount;
     writePasskeys(keys);
     return entry;
+  }
+
+  // ---- a device's own requests (notifications) ------------------------------------------
+  // Why a passkey cannot confirm here, or null.
+  const confirmable = () => (!where ? 'insecure' : stored().length ? null : 'no_passkey');
+  // subject: what is confirmed (a push subscription), kept only as a hash.
+  function challengeFor(session, purpose, subject) {
+    sweep();
+    if (!DEVICE_GESTURES.includes(purpose)) throw fail(400, 'gesture');
+    const why = confirmable();
+    if (why) throw fail(409, why);
+    return ask(session, stored(), { gesture: purpose, ticket: null, versions: null, subjectHash: hash(subject) });
+  }
+  function verifyFor(session, body, purpose, subject) {
+    const entry = check(session, body, [purpose]);
+    if (entry.subjectHash !== hash(subject)) throw fail(403, 'changed');
+    return true;
   }
 
   const log = (session, gesture, ticket, versions, result, extra = {}) => note({ ticket, detail: JSON.stringify({ gesture, result, device: session.device, version: versions ? versions.map((v) => `${v.pr}:${v.head.slice(0, 7)}`) : null, ...extra }) });
@@ -207,5 +233,5 @@ export function createActions({ source, origin, readPasskeys, writePasskeys, run
   }
 
   const stop = () => { for (const p of pending.values()) if (p.state === 'waiting') cancel(p.timer); };
-  return { status, begin, confirm, undo, answer, mintGrant, registerOptions, registerFinish, stop, pendingOf: (session) => [...pending.values()].map((p) => view(p, p.session === session.id)) };
+  return { status, begin, confirm, undo, answer, confirmable, challengeFor, verifyFor, mintGrant, registerOptions, registerFinish, stop, pendingOf: (session) => [...pending.values()].map((p) => view(p, p.session === session.id)) };
 }

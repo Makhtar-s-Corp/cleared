@@ -171,6 +171,15 @@ if [ -n "$agent_user" ]; then
       die "$agent_user can reach $secret: the human's accesses and the app token must be closed to it (mode 0700 / 0600, owned by this account)"
     fi
   done
+  # The notification secrets (Web Push keys, the browsers' subscriptions, the adapters' credentials: docs/notifications.md) too.
+  notify_dir=$(conf_get notify secrets_dir) || notify_dir=
+  notify_dir=${notify_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/cleared/notify}; notify_dir=${notify_dir/#\~/$HOME}
+  for secret in "$notify_dir" "$notify_dir/vapid.json" "$notify_dir/subscriptions.json" "$notify_dir/credentials.json"; do
+    [ -e "$secret" ] || continue
+    if sudo -n -u "$agent_user" -- test -r "$secret" 2>/dev/null || sudo -n -u "$agent_user" -- test -x "$secret" 2>/dev/null || sudo -n -u "$agent_user" -- test -w "$secret" 2>/dev/null; then
+      die "$agent_user can reach $secret: the notification secrets must be closed to it (mode 0700 / 0600, owned by this account)"
+    fi
+  done
   # The forge's app key and its installation token (docs/security.md, Identities and approval) are this account's alone too.
   while IFS= read -r secret; do
     [ -e "$secret" ] || continue
@@ -255,3 +264,5 @@ sleep 1
 echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
 echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."
 [ -n "$agent_user" ] || echo "release lock is not a security boundary: agents run as the service account"
+# The units do not read this shell: the link is set by a drop-in on cleared-wake.service (docs/notifications.md, Service environment).
+[ -n "${CLEARED_NOTIFY_LINK_BASE:-}" ] || echo "WARNING: CLEARED_NOTIFY_LINK_BASE is not set in this shell: notifications will have no link, and Web Push will report no_subject, until a drop-in sets it for cleared-wake.service (docs/notifications.md, Service environment)." >&2

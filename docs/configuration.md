@@ -563,6 +563,30 @@ The Cleared app. It reads the board snapshot and the ledger the last wake record
 | `grant_socket` | Absolute path of the Unix socket `cleared app passkey` asks for a one-time registration grant. Its parent must be owned by the app's account, not writable by others, and traversable by the human. Only the human's UID is answered. | Required to register a passkey; no default |
 | `sent_back_state` | Tracker status a ticket is put in by *Send back*. Never the approval, agreement or done status. | Optional; default `[tracker] progress_state` |
 
+## `[notify]`
+
+Notifications to the human's phone when something waits for him or goes wrong: a release waiting for his agreement, a team's question, a rollback, a health problem, a team blocked too long. The wake's dispatcher sends them; the app only lets a browser subscribe, confirmed with the human's passkey. Nothing here is a secret: the Web Push keys, the browsers' subscriptions and the credentials of ntfy, Telegram and e-mail live in `secrets_dir`. See [Notifications](notifications.md).
+
+| Key | Purpose | Requirement or default |
+| --- | --- | --- |
+| `adapters` | Where notifications go, separated by commas: `webpush` (through the installed app), `ntfy`, `email`, `telegram`; `none` turns them off. Each adapter that is not ready (no subscription, no credentials) is skipped. | Default: webpush |
+| `events` | The kinds that notify: `approval`, `question`, `rollback`, `health`, `blocked`. Leave one out to turn it off. | Default: approval, question, rollback, health, blocked |
+| `quiet_hours` | A range such as `22:00-07:00`, read on `timezone`. Approval, question and blocked wait for its end (sent then if still true); rollback and health are never held. | Optional; no default (no quiet hours) |
+| `timezone` | IANA time zone of the quiet hours. | Optional; no default (`[dashboard] timezone`, else UTC) |
+| `coalesce_minutes` | At most one notification per ticket (per health problem when there is no ticket) in this many minutes; what comes meanwhile waits, and several at once are folded into the most pressing. `0` turns it off. | Default: 10 |
+| `blocked_minutes` | How long a team must have been unable to open (no place on the machine) or unable to move (the rules gave up) before it is notified as blocked. | Default: 30 |
+| `secrets_dir` | Absolute path of a private directory (mode `0700`, owned by the service account, outside the project and the checkout, unreadable by the agents' account) holding `vapid.json`, `subscriptions.json` and `credentials.json`. | Optional; no default (`~/.config/cleared/notify` is used) |
+| `vapid_subject` | The contact the push services may use about this service (`mailto:` or `https:`), sent in every Web Push request. Apple requires one. | Optional; no default (the link address when it is https) |
+
+Four settings are read from the service's environment only, never from the project's `agents.conf` (a project's agent could change them). They are set in a systemd drop-in on the units, see [Service environment](notifications.md#service-environment-systemd-drop-in):
+
+| Environment variable | Purpose | Default |
+| --- | --- | --- |
+| `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole). | None: no link |
+| `CLEARED_NOTIFY_PUSH_HOSTS` | Extra Web Push service host names accepted for a subscription, separated by commas (a self-hosted service). The defaults are Google's, Mozilla's, Apple's and Microsoft's. | None |
+| `CLEARED_NOTIFY_SENDMAIL` | Absolute path of the mail program the `email` adapter runs. | The first of `/usr/sbin/sendmail`, `/usr/lib/sendmail`, `/sbin/sendmail`, `/usr/bin/sendmail` that is a file no one else can write |
+| `CLEARED_NOTIFY_DEADLINE_SECONDS` | How long one dispatch may send (1 to 50 seconds). It runs inside the wake's lock: what is still on its way then is given up and sent at the next wake. `wake.sh` stops the dispatcher after 60 seconds in any case. | 30 |
+
 ## `[security]`
 
 | Setting | Meaning | Requirement |

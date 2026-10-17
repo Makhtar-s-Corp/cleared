@@ -8,6 +8,8 @@ A local release broker checks tracker approval and the reviewed PR before mergin
 
 `cleared status` shows the last wake, service reachability and stalled work without starting a model. An optional push heartbeat lets an external service alert you when Cleared stops waking or gets stuck. See [Heartbeat and status](docs/heartbeat.md).
 
+When something waits for the human (a release to agree to, a team's question) or goes wrong (a rollback, a health problem, a team blocked), the wake tells him on his phone: through the app installed on the Home Screen (Web Push, no outside account), or ntfy, Telegram or e-mail. See [Notifications](docs/notifications.md).
+
 ```mermaid
 flowchart LR
   A[Ticket moves to Todo] --> B[Open team and worktree]
@@ -64,6 +66,7 @@ In the editor, set `[guard] salt` to the random value printed above and set `ter
 - [Concepts and ticket lifecycle](docs/concepts.md)
 - [Heartbeat and status](docs/heartbeat.md)
 - [The Cleared app](docs/app.md)
+- [Notifications](docs/notifications.md)
 - [Memory contract and briefing](docs/memory.md)
 - [Configuration reference](docs/configuration.md)
 - [Model adapters](docs/adapters.md)

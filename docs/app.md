@@ -1,6 +1,6 @@
 # The Cleared app (Cockpit)
 
-`cleared app` starts one interface for desktop and phone that shows the factory live, and lets the human do three things from it: **clear a ticket to land**, **send it back** and **answer a question**. It makes no outside call of its own to read: the wake collects the board into a versioned `snapshot.json` in the project state directory, and the app reads that file and the ledger only, so GitHub and Linear delays cannot block its pages. Its only writes are the three gestures below (and the sign-in and passkey routes they need). It never starts or stops a team and never talks to the release service: giving an agreement is all it does, the lock does the rest.
+`cleared app` starts one interface for desktop and phone that shows the factory live, and lets the human do three things from it: **clear a ticket to land**, **send it back** and **answer a question**. It makes no outside call of its own to read: the wake collects the board into a versioned `snapshot.json` in the project state directory, and the app reads that file and the ledger only, so GitHub and Linear delays cannot block its pages. Its only writes are the three gestures below (and the sign-in and passkey routes they need), and a browser's request to be [notified](notifications.md). It never starts or stops a team and never talks to the release service: giving an agreement is all it does, the lock does the rest.
 
 The principle: **the app has no privilege.** It writes into the ticket tracker exactly what the human would write by hand, under the human's own identity, and the normal circuit (the wake, the lock) does the rest. See [Gestures](#gestures) and [Setup for the gestures](#setup-for-the-gestures).
 
@@ -59,6 +59,10 @@ Reads are `GET` and `HEAD`. The only writes are the `POST` routes of the table b
 | `POST /api/actions/undo` | session, anti-forgery token (only the session that confirmed) |
 | `POST /api/actions/answer` | session, anti-forgery token (no passkey: an answer puts nothing live) |
 | `POST /api/passkeys/options`, `POST /api/passkeys/finish` | session, anti-forgery token, a one-time grant from the human's account |
+| `POST /api/notifications/challenge` | session, anti-forgery token (a passkey challenge for one subscription: notifications on or off for this device) |
+| `POST /api/notifications/subscribe`, `POST /api/notifications/unsubscribe` | session, anti-forgery token, passkey assertion on that challenge (a browser of the human asks to be notified, or no longer; see [Notifications](notifications.md)) |
+
+Besides the sign-in page, what makes the app installable is served without the token, with no data in it: `/manifest.webmanifest`, the service worker `/sw.js` and the three icons under `/icons/`. `GET /api/notifications` (the session only) says whether Web Push is offered and gives the service's public key.
 
 ## Gestures
 
@@ -104,6 +108,10 @@ The app writes through a short-lived child process (`app/human-write.mjs`) that 
 | `heartbeat` | `{}` every 15 s, so the page can tell silence from calm. |
 
 The page shows "Connection lost, last update HH:MM" at the top when the stream breaks or no frame arrives for 40 s. The names are dotted, `data` is plain JSON and there is no library dependency, so a later converter can map them to AG-UI: `snapshot` to `STATE_SNAPSHOT`, `*.updated` and `*.removed` to `STATE_DELTA`, `heartbeat` to a custom event.
+
+## Installing it, and notifications
+
+The app can be added to a phone's Home Screen (a manifest, icons and a service worker that caches nothing), and its header offers **Turn on notifications** when `[notify] adapters` includes `webpush`, the app has an https `public_origin` and a passkey is registered: turning notifications on or off for a device is confirmed with the passkey, like Clear to land. The app only keeps the browser's subscription; the wake's dispatcher sends the notifications. A notification opens `/#ticket=<id>`, the ticket's porthole (after the sign-in when the session is gone). On iPhone, web notifications need the app added to the Home Screen first. See [Notifications](notifications.md).
 
 ## Limits of this version
 

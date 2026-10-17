@@ -89,6 +89,13 @@ wake_cleanup() {
       node --no-warnings "$ORCH_HOME/lib/board-collector.mjs" > /dev/null || result=1
     fi
     node --no-warnings "$ORCH_HOME/lib/heartbeat.mjs" wake-end "$result" > /dev/null || true
+    # What waits for the human, and what went wrong, told on his phone
+    # (lib/notify.mjs, [notify]): last, once the snapshot and the health are
+    # written. It never fails the wake, and never holds the wake's lock for
+    # long: it gives up its own sends after CLEARED_NOTIFY_DEADLINE_SECONDS
+    # (30 by default, 50 at most) and is stopped here after 60 seconds whatever happens.
+    # The wake lock (fd 8) is closed for it: a sendmail child that outlives the kill must not hold the lock.
+    timeout -k 5 60 node --no-warnings "$ORCH_HOME/lib/notify.mjs" dispatch > /dev/null 8>&- || true
   fi
   exit "$result"
 }

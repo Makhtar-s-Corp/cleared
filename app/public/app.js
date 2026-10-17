@@ -1,6 +1,7 @@
 // The Cockpit page. Everything from the server is put on the page as text
 // (never as HTML), and nothing is fetched from another site.
 import { initActions } from '/actions.js';
+import { initNotify } from '/notify.js';
 let M = {};
 const t = (key, values = {}) => (M[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => values[k] ?? '');
 const $ = (id) => document.getElementById(id);
@@ -274,6 +275,14 @@ function closeTicket() {
   back?.focus(); state.opener = null;
 }
 $('ph-close').addEventListener('click', closeTicket);
+// The address a notification opens, /#ticket=EX-12: that ticket's porthole. The part after # never reaches the server.
+function openFromAddress() {
+  const match = /^#ticket=([A-Za-z0-9._-]{1,40})$/.exec(location.hash);
+  if (!match) return;
+  history.replaceState(null, '', location.pathname);
+  openTicket(match[1]);
+}
+addEventListener('hashchange', openFromAddress);
 // Something below the fold of the porthole: the action panel casts a shadow over it, so the panel never looks like the end.
 function scrollCue() {
   const body = $('ph-body');
@@ -412,4 +421,6 @@ function live() {
   state.last = s.generatedAt;
   render(s);
   live();
+  openFromAddress();
+  initNotify({ t, $ });
 })();

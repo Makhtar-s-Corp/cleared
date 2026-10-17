@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // The Cleared app server. Its reads are GET and HEAD: data and files from the
 // board snapshot and the ledger. Its only writes are the three gestures of the
-// human (clear to land, send back, answer) and the sign-in and passkey routes
-// they need; nothing starts or stops a team, and nothing talks to the release
-// service. Every connection is checked first: peer address, Host header, then
-// the access token or session. A write needs more: the session cookie (never
-// the bearer token), the anti-forgery header, a same-origin request, and for
-// the gestures that change a ticket's course a passkey confirmation.
+// human (clear to land, send back, answer), the sign-in and passkey routes
+// they need, and a browser's request to be notified; nothing starts or stops a
+// team, nothing talks to the release service, and nothing is sent from here.
+// Every connection is checked first: peer address, Host header, then the
+// access token or session. A write needs more: the session cookie (never the
+// bearer token), the anti-forgery header, a same-origin request, and for the
+// gestures that change a ticket's course or turn a device's notifications on
+// or off a passkey confirmation.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -27,6 +29,7 @@ const FILES = {
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/register': ['register.html', 'text/html; charset=utf-8'],
   '/register.js': ['register.js', 'text/javascript; charset=utf-8'],
+  '/notify.js': ['notify.js', 'text/javascript; charset=utf-8'],
 };
 // The only things served without the token: the sign-in page and its two files.
 const OPEN = {
@@ -36,16 +39,24 @@ const OPEN = {
   // The two typefaces, served by the app itself (nothing is loaded from another site). No data in them.
   '/fonts/Geist-Variable.woff2': ['fonts/Geist-Variable.woff2', 'font/woff2'],
   '/fonts/GeistMono-Variable.woff2': ['fonts/GeistMono-Variable.woff2', 'font/woff2'],
+  // What makes the app installable on a phone and shows its notifications. The browser fetches them
+  // without the token (the manifest without any credential); no data in them.
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
+  '/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
+  '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
+  '/icons/icon-512.png': ['icons/icon-512.png', 'image/png'],
+  '/icons/apple-touch-icon.png': ['icons/apple-touch-icon.png', 'image/png'],
 };
 const HEADERS = {
   'content-security-policy': "default-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin',
 };
-export const ROUTES = ['GET /', 'GET /app.js', 'GET /actions.js', 'GET /style.css', 'GET /register', 'GET /register.js', 'GET /fonts/:file', 'GET /login', 'GET /login.js', 'GET /api/snapshot',
-  'GET /api/me', 'GET /api/messages', 'GET /api/tickets/:id', 'GET /media/:id', 'GET /events'];
+export const ROUTES = ['GET /', 'GET /app.js', 'GET /actions.js', 'GET /notify.js', 'GET /style.css', 'GET /register', 'GET /register.js', 'GET /fonts/:file', 'GET /login', 'GET /login.js',
+  'GET /manifest.webmanifest', 'GET /sw.js', 'GET /icons/:file', 'GET /api/snapshot', 'GET /api/me', 'GET /api/messages', 'GET /api/notifications', 'GET /api/tickets/:id', 'GET /media/:id', 'GET /events'];
 // Everything that writes. All need the session cookie and the anti-forgery header, except sign-in (the access token).
 export const WRITES = ['POST /session', 'POST /session/logout', 'POST /api/actions/challenge', 'POST /api/actions/confirm', 'POST /api/actions/undo',
-  'POST /api/actions/answer', 'POST /api/passkeys/options', 'POST /api/passkeys/finish'];
+  'POST /api/actions/answer', 'POST /api/passkeys/options', 'POST /api/passkeys/finish',
+  'POST /api/notifications/challenge', 'POST /api/notifications/subscribe', 'POST /api/notifications/unsubscribe'];
 
 const MESSAGE_KEYS = (language) => {
   const out = {};
@@ -57,7 +68,7 @@ const MESSAGE_KEYS = (language) => {
   return out;
 };
 
-export function appServer({ source, token, ranges = TAILSCALE, language = 'en', hosts = [], pollMs = 2000, heartbeatMs = 15000, actions = null, origin = '', owner = '', now = () => Date.now() }) {
+export function appServer({ source, token, ranges = TAILSCALE, language = 'en', hosts = [], pollMs = 2000, heartbeatMs = 15000, actions = null, notifications = null, origin = '', owner = '', now = () => Date.now() }) {
   const text = (response, status, body, type = 'text/plain; charset=utf-8', extra = {}) =>
     response.writeHead(status, { ...HEADERS, 'content-type': type, ...extra }).end(body);
   const json = (response, status, value) => text(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
@@ -116,6 +127,10 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
         return json(response, 200, { csrf: mine.csrf, device: mine.device, owner, actions: actions ? actions.status(mine) : null });
       }
       if (path === '/api/messages') return json(response, 200, MESSAGE_KEYS(language));
+      if (path === '/api/notifications') {
+        if (!mine) return text(response, 401, 'Session required');
+        return json(response, 200, notifications ? notifications.status() : { available: false, reason: 'off', publicKey: null, devices: 0 });
+      }
       const ticket = /^\/api\/tickets\/([A-Za-z0-9._-]{1,40})$/.exec(path);
       if (ticket) {
         const detail = await source.ticket(ticket[1]);
@@ -158,6 +173,12 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
       if (request.headers.origin !== expectedOrigin(request) || (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin')) return error(403, 'origin');
       if (!String(request.headers['content-type'] || '').startsWith('application/json')) return error(415, 'type');
       if (path === '/session/logout') { sessions.revoke(cookieValue(request.headers.cookie, COOKIE)); return text(response, 204, undefined, undefined, { 'set-cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); }
+      // Notifications: a browser of the human asks to be told (or no longer), confirmed with the passkey. Nothing is sent from here.
+      if (path.startsWith('/api/notifications/')) {
+        if (!notifications) return error(503, 'unavailable');
+        const input = await body(request);
+        return json(response, 200, await notifications[path.slice('/api/notifications/'.length)](mine, input));
+      }
       if (!actions) return error(503, 'unavailable');
       const input = await body(request);
       const run = { '/api/actions/challenge': 'begin', '/api/actions/confirm': 'confirm', '/api/actions/undo': 'undo', '/api/actions/answer': 'answer',
