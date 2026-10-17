@@ -35,29 +35,38 @@ none_session() {
 }
 
 # The command runs in the worktree, its input empty, its output in
-# terminal.log. The process is the session's own leader: its number is the
-# one of its process group, which holds the harness it starts. The handle and
-# the worktree (its resolved path) are also kept in terminal.none, in the run
+# terminal.log. The process is the session's own leader, and the handle names
+# it: its number is the one of its process group, which holds the harness it
+# starts. The session writes its own number to a file of the run folder
+# before it runs the command (exec: the same process), and the launcher reads
+# it back. The launcher does not take the number of the background job: setsid
+# forks, and its parent exits, when it is a process-group leader, so that
+# number may be one that is no session leader at all. The handle and the
+# worktree (its resolved path) are also kept in terminal.none, in the run
 # folder: closing the terminals of a worktree finds them there, whichever
 # path names it. Nothing waits for the session.
 terminal_open() {
-  local worktree=$1 title=$2 command=$3 run_dir=$4 ticket=${5:-} log pid stat fields handle launch
+  local worktree=$1 title=$2 command=$3 run_dir=$4 ticket=${5:-} log pidfile pid stat fields handle launch
   log="$run_dir/terminal.log"
+  pidfile="$run_dir/terminal.pid"
   # Run by a shell of its own: the descriptors the caller holds (the lock of
   # the wakes among them) are not handed to the session, and its process
-  # number is printed once it is detached.
+  # number is printed once it is detached. The number is written to a
+  # temporary name and moved into place, so a read never sees part of it.
   # shellcheck disable=SC2016
   launch='cd "$1" || exit 1
 for fd in /proc/$$/fd/*; do fd=${fd##*/}; [ "$fd" -le 2 ] || eval "exec $fd>&-" 2> /dev/null; done
-setsid bash -c "exec $2" < /dev/null >> "$3" 2>&1 &
-echo "$!"'
+rm -f -- "$4"
+setsid bash -c "echo \$\$ > \"\$0.\$\$\" && mv -f -- \"\$0.\$\$\" \"\$0\" && exec $2" "$4" < /dev/null >> "$3" 2>&1 &
+for _ in $(seq 50); do [ -s "$4" ] && break; sleep 0.1; done
+cat -- "$4" 2> /dev/null'
   pid=
   if [ -d "$worktree" ] && [ -d "$run_dir" ] && command -v setsid > /dev/null; then
-    if ! pid=$(systemd-run --user --scope --collect --quiet --description="Cleared: $title" -- bash -c "$launch" cleared-session "$worktree" "$command" "$log" 2> /dev/null); then
+    if ! pid=$(systemd-run --user --scope --collect --quiet --description="Cleared: $title" -- bash -c "$launch" cleared-session "$worktree" "$command" "$log" "$pidfile" 2> /dev/null); then
       # Started by a systemd unit, and no scope: the session stays in the
       # unit and may end with it. Said where the session and its caller write.
       [ -z "${INVOCATION_ID:-}" ] || echo "$(basename "$0"): systemd-run --user gave the session of $title no scope of its own: it may end with the unit that started it" | tee -a "$log" >&2
-      pid=$(bash -c "$launch" cleared-session "$worktree" "$command" "$log" 2>> "$log") || pid=
+      pid=$(bash -c "$launch" cleared-session "$worktree" "$command" "$log" "$pidfile" 2>> "$log") || pid=
     fi
   fi
   if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
