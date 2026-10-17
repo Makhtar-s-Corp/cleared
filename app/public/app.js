@@ -19,9 +19,15 @@ const locale = () => (fr() ? 'fr-FR' : 'en-US');
 const clock = (iso) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
 const when = (iso) => new Intl.DateTimeFormat(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
 const cap = (text) => (text ? text[0].toUpperCase() + text.slice(1) : text);
-const dur = (m) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`);
-const pct = (n) => `${String(n).replace('.', fr() ? ',' : '.')}%`;
-const mono = (text, cls = '') => el('span', { className: `mono ${cls}`.trim(), textContent: text });
+const dur = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`);
+const pct = (n) => `${String(n).replace('.', fr() ? ',' : '.')}${fr() ? '\u202f' : ''}%`;
+const num = (text, cls = '') => el('span', { className: `num ${cls}`.trim(), textContent: text });
+// Geist Mono is for the identifiers of tickets and commits only.
+const code = (text, cls = '') => el('span', { className: `code ${cls}`.trim(), textContent: text });
+const plural = (key, n, values = {}) => t(`${key}_${n === 1 ? 'one' : 'other'}`, { n, ...values });
+// "claude-opus-5-5" is said "Opus"; a model without a known family keeps its own name.
+const MODELS = [[/opus/i, 'Opus'], [/sonnet/i, 'Sonnet'], [/haiku/i, 'Haiku'], [/fable/i, 'Fable']];
+const modelName = (model) => MODELS.find(([re]) => re.test(model ?? ''))?.[1] ?? model ?? '';
 const harnessClass = (h) => (['claude', 'codex'].includes(h) ? h : 'other');
 const WORDS = { en: ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'], fr: ['', 'Une', 'Deux', 'Trois', 'Quatre', 'Cinq', 'Six', 'Sept', 'Huit', 'Neuf', 'Dix'] };
 const word = (n) => (n >= 1 && n <= 10 ? WORDS[fr() ? 'fr' : 'en'][n] : String(n));
@@ -42,7 +48,9 @@ $('theme').addEventListener('click', () => {
   syncThemeButton();
 });
 
-// --- header, greeting band, stat strip --------------------------------------
+// --- header, welcome sentence, counters --------------------------------------
+// A state the owner chose on purpose is said plainly in amber, never as a fault in red.
+const CHOSEN = ['release_lock_unseparated'];
 function renderHeader(s) {
   const pr = $('project');
   const projects = s.projects ?? [];
@@ -51,9 +59,16 @@ function renderHeader(s) {
     sel.addEventListener('change', () => { state.project = sel.value; });
     pr.replaceChildren(sel);
   } else pr.textContent = s.project;
+  const problems = s.health.problems ?? [];
+  const chosen = problems.filter((p) => CHOSEN.includes(p.code));
+  const faults = problems.filter((p) => !CHOSEN.includes(p.code));
+  const mode = $('mode');
+  mode.hidden = !chosen.length;
+  mode.replaceChildren(el('i'), chosen.map((p) => t(`app_mode_${p.code}`)).join(' · '));
   const h = $('health');
-  h.className = `pill${s.health.ok ? '' : ' bad'}`;
-  h.replaceChildren(el('i'), s.health.ok ? t('app_health_ok') : s.health.problems.map((p) => p.message).join(' · '));
+  h.hidden = s.health.ok || (!faults.length && chosen.length > 0);
+  h.className = 'pill bad';
+  h.replaceChildren(el('i'), faults.map((p) => p.message).join(' · ') || t('app_health'));
   const name = s.owner?.name ?? '';
   $('avatar').hidden = !name;
   $('avatar').textContent = name ? [...name][0].toUpperCase() : '';
@@ -61,7 +76,6 @@ function renderHeader(s) {
   for (const n of document.querySelectorAll('.views [data-soon], .view-all')) n.replaceChildren(t(n.dataset.soon), el('span', { className: 'sr-only', textContent: ` ${t('app_soon')}` }));
 }
 function tickClock() {
-  $('clock').textContent = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   const at = state.snap?.generatedAt;
   $('health-age').textContent = at ? t('app_status_age', { age: ageText(at) }) : '';
 }
@@ -71,20 +85,21 @@ function ageText(iso) {
 }
 setInterval(tickClock, 5000);
 
+// "One thing is waiting for you." and under it, in grey, the fuel left and what is under way.
 function renderGreeting(s) {
-  const now = new Date();
-  const hour = now.getHours();
-  const greet = t(hour < 12 ? 'app_greet_morning' : hour < 18 ? 'app_greet_afternoon' : 'app_greet_evening');
-  const date = new Intl.DateTimeFormat(fr() ? 'fr-FR' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).format(now).replace(/[.,]/g, '');
-  $('dateline').textContent = `${date} · ${s.mode.short ?? ''}`;
   const waiting = s.tickets.filter((x) => x.waiting);
   const allReady = waiting.length > 0 && waiting.every((x) => x.kind === 'ready');
   const n = waiting.length;
-  const second = n === 0 ? [null, t('app_wait_none')]
-    : [t(`app_wait_${allReady ? 'ready' : 'need'}_${n === 1 ? 'one' : 'other'}_tone`, { n: word(n) }), t(`app_wait_${allReady ? 'ready' : 'need'}_key_${n === 1 ? 'one' : 'other'}`)];
-  const h1 = $('greeting');
-  h1.replaceChildren(`${greet}${s.owner?.name ? `, ${s.owner.name}` : ''}.`, el('br'),
-    second[0] ? el('span', { className: 'tone', textContent: second[0] }) : null, el('span', { className: n ? 'key' : 'tone', textContent: second[1] }));
+  const one = n === 1 ? 'one' : 'other';
+  $('greeting').textContent = n === 0 ? t('app_wait_none')
+    : t(`app_wait_${allReady ? 'ready' : 'need'}_${one}_tone`, { n: word(n) }) + t(`app_wait_${allReady ? 'ready' : 'need'}_key_${one}`);
+  const parts = s.fuel.filter((f) => f.measured).map((f) => t('app_sub_fuel', { name: cap(f.adapter), n: pct(f.left) }));
+  const teams = ['progress', 'checks', 'review'].map((c) => [c, s.tickets.filter((x) => x.kind === 'normal' && x.column === c).length]).filter(([, count]) => count);
+  parts.push(...(teams.length ? teams.map(([c, count]) => plural(`app_sub_${c}`, count)) : [t('app_sub_idle')]));
+  const landed = todayLanded(s).length;
+  parts.push(landed ? plural('app_sub_landed', landed) : t('app_sub_landed_none'));
+  if (s.mode?.short) parts.push(s.mode.short);
+  $('subline').textContent = parts.join(' · ');
 }
 
 const todayLanded = (s) => {
@@ -100,13 +115,13 @@ function renderStats(s) {
       bar.style.width = f.measured ? `${f.left}%` : '0';
       return el('div', { className: 'fuelrow' }, el('span', { className: 'n', textContent: f.adapter }),
         el('span', { className: 'bar6', role: 'img', ariaLabel: f.measured ? `${f.adapter} ${f.left}%` : `${f.adapter} ${t('app_not_measured')}` }, bar),
-        f.measured ? mono(`${f.left}%`, 'p') : el('span', { className: 'p faint', textContent: t('app_not_measured') }));
+        f.measured ? num(pct(f.left), 'p') : el('span', { className: 'p faint', textContent: t('app_not_measured') }));
     }));
   // One line: the median time from Todo to Done over the last seven days, by lane.
   const lanes = s.stats?.lanes;
   const median = (m) => (Number.isFinite(m) ? dur(Math.round(m)) : '–');
   const medianLine = lanes ? el('div', { className: 'stat median', role: 'listitem' }, el('div', { className: 'k', textContent: t('app_stat_median') }),
-    el('div', { className: 'lanes' }, `${t('app_lane_fast')} `, mono(median(lanes.fast?.minutes)), ` · ${t('app_lane_full')} `, mono(median(lanes.full?.minutes)))) : null;
+    el('div', { className: 'lanes' }, `${t('app_lane_fast')} `, num(median(lanes.fast?.minutes)), ` · ${t('app_lane_full')} `, num(median(lanes.full?.minutes)))) : null;
   $('stats').replaceChildren(stat(t('app_stat_flight'), String(s.stats?.inFlight ?? 0)), stat(t('app_stat_landed'), String(landed.length)),
     stat(t('app_stat_clean'), s.stats?.firstTimeClean == null ? '–' : String(s.stats.firstTimeClean), s.stats?.firstTimeClean == null ? null : el('small', { textContent: '%' })), ...(medianLine ? [medianLine] : []), fuel);
 }
@@ -130,17 +145,17 @@ function changeParts(c) {
 }
 const checksText = (c) => (c?.checks ? `${t('app_checks')} ${t(`app_checks_${c.checks}`)}` : `${t('app_checks')} ${t('app_not_measured')}`);
 const checksClass = (c) => (c?.checks === 'green' ? 'success' : c?.checks === 'red' ? 'danger' : c?.checks === 'running' ? '' : 'faint');
+const minutesSince = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+// A ticket card: what it asks of you or how it is doing, the title, then one line of state and its id.
 function card(ticket) {
   const col = COLUMNS.indexOf(ticket.column);
-  const top = el('div', { className: 'top-row' }, el('span', { className: 'id', textContent: ticket.id }));
-  if (ticket.kind === 'ready') top.append(el('span', { className: 'chip', textContent: t('app_chip_ready') }));
-  else if (ticket.kind === 'question') top.append(el('span', { className: 'chip q', textContent: t('app_chip_question') }));
-  else if (ticket.kind === 'tracker') top.append(el('span', { className: 'hint', textContent: t('app_tracker_hint') }));
-  else if (ticket.kind === 'queued') top.append(el('span', { className: 'hint', textContent: cap(t('app_queued_tag')) }));
-  else if (ticket.live) top.append(el('span', { className: 'hint progress' }, el('i', { className: 'live' }), t('app_hint_building')));
-  else if (ticket.column === 'checks' && ticket.tests) top.append(el('span', { className: 'hint checks', textContent: String(ticket.tests) }));
-  else if (ticket.round > 1) top.append(el('span', { className: 'hint round', textContent: t('app_hint_round', { n: ticket.round }) }));
-  const parts = [top];
+  const parts = [];
+  const asks = ticket.kind === 'ready' || ticket.kind === 'question';
+  if (asks) {
+    const what = t(ticket.kind === 'ready' ? 'app_card_ready' : 'app_chip_question');
+    parts.push(el('p', { className: 'wait-line', textContent: ticket.since ? `${what} · ${t('app_card_since', { d: dur(minutesSince(ticket.since)) })}` : what }));
+  } else if (ticket.kind === 'tracker') parts.push(el('p', { className: 'tag-line', textContent: t('app_tracker_hint') }));
+  else if (ticket.kind === 'queued') parts.push(el('p', { className: 'tag-line', textContent: cap(t('app_queued_tag')) }));
   const questions = ticket.kind === 'question' ? ticket.questions ?? [] : [];
   if (questions.length) {
     // The question in full as the title (at least its first sentence, never cut), then what goes with it.
@@ -152,48 +167,39 @@ function card(ticket) {
     // "The team recommends" only when the team's own words do not already say it ("I recommend…").
     if (first.recommendation) parts.push(el('p', { className: 'q-rec' }, SAYS_REC.test(first.recommendation) ? null : el('b', { textContent: `${t('app_q_rec')} · ` }), first.recommendation));
     const more = questions.length - 1;
-    if (first.options.length || more) parts.push(el('p', { className: 'q-meta', textContent: [first.options.length ? t('app_q_choices', { n: first.options.length }) : null, more ? t(more === 1 ? 'app_q_more_one' : 'app_q_more', { n: more }) : null].filter(Boolean).join(' · ') }));
+    if (more) parts.push(el('p', { className: 'q-meta', textContent: t(more === 1 ? 'app_q_more_one' : 'app_q_more', { n: more }) }));
     parts.push(el('p', { className: 'q-ticket', textContent: ticket.title }));
   } else parts.push(el('h3', { textContent: ticket.title }));
-  if (ticket.kind === 'ready' && ticket.captures) {
-    parts.push(el('div', { className: 'tiles' },
-      el('div', { className: 'tile' }, el('div', { className: 't', textContent: t('app_before') }), el('img', { src: ticket.captures.before, alt: '' })),
-      el('div', { className: 'tile after' }, el('div', { className: 't', textContent: t('app_after') }), el('img', { src: ticket.captures.after, alt: '' }))));
-  }
-  if (ticket.kind === 'ready' && ticket.change) {
-    parts.push(el('p', { className: 'change-line' }, mono(`PR #${ticket.change.pr.number}`), ` · ${changeParts(ticket.change).join(' · ')} · `, el('span', { className: checksClass(ticket.change), textContent: checksText(ticket.change) })));
-  }
   const showRail = ticket.kind === 'normal' && col >= 0 && col < 3;
   if (showRail) parts.push(el('div', { className: 'rail' }, ...['progress', 'checks', 'review', null].map((stage, i) => el('span', { className: i <= col && stage ? `s-${stage}` : '' }))));
-  if (!['question', 'queued', 'tracker'].includes(ticket.kind)) {
-    parts.push(el('div', { className: 'meta' }, el('span', { className: 'm' }, el('span', { className: `sq ${harnessClass(ticket.harness)}` }), ticket.model),
-      mono(dur(ticket.flightMinutes)),
-      ticket.quotaShare == null ? null : el('span', { className: 'share', title: t('app_share_label') }, pct(ticket.quotaShare), el('span', { className: 'sr-only', textContent: ` ${t('app_share_label')}` }))));
-  }
-  const sentence = actions.noteFor(ticket.id) ?? (ticket.kind === 'question' && questions.length ? null : cap(ticket.queued || ticket.kind === 'question' || ticket.kind === 'tracker' ? ticket.reason : ticket.statusLine));
-  if (sentence) parts.push(el('div', { className: 'line', textContent: sentence }));
-  if (ticket.waiting) {
-    parts.push(el('div', { className: 'foot' }, ticket.since ? el('span', { className: 'age' }, el('time', { dateTime: ticket.since, textContent: t('app_since', { time: since(ticket.since) }) })) : null,
-      ticket.kind === 'question' ? el('span', { className: 'open', textContent: t('app_q_open') }) : null));
-  }
+  // "Opus · 23 min · checks green" for a version to clear; for the others, the team's own sentence.
+  const readyLine = ticket.kind === 'ready' ? [modelName(ticket.model), dur(ticket.flightMinutes), ticket.change?.checks ? `${t('app_checks')} ${t(`app_checks_${ticket.change.checks}`)}` : null].filter(Boolean).join(' · ') : null;
+  const sentence = actions.noteFor(ticket.id) ?? readyLine
+    ?? (ticket.kind === 'question' && questions.length ? null : cap(ticket.queued || ticket.kind === 'question' || ticket.kind === 'tracker' ? ticket.reason : ticket.statusLine));
+  const status = ticket.kind === 'question' && questions.length ? el('span', {}, el('span', { className: 'open', textContent: t('app_q_open') }), questions[0].options.length ? ` · ${t('app_q_choices', { n: questions[0].options.length })}` : null) : sentence;
+  parts.push(el('div', { className: 'foot' },
+    status ? el('span', { className: 'status' }, ticket.live ? el('i', { className: 'live' }) : null, status) : null,
+    code(ticket.id, 'id')));
   const btn = el('button', { type: 'button' }, parts);
   btn.addEventListener('click', () => openTicket(ticket.id));
   return el('li', { className: `card ${ticket.kind}`, dataset: { id: ticket.id } }, btn);
 }
 function renderTower(s) {
-  // What waits for the human first, the longest waiting first; a ticket the tracker alone holds comes after, apart.
-  const rank = (x) => (x.waiting ? 0 : x.kind === 'tracker' ? 2 : 1);
-  const tickets = [...s.tickets].sort((a, b) => rank(a) - rank(b) || (a.waiting && b.waiting ? (a.since ?? '~').localeCompare(b.since ?? '~') : 0));
+  // What waits for the human first, the longest waiting first. Only a ticket with a Cleared team has a column;
+  // the tracker's other tickets are folded into one line under the board.
+  const tickets = [...s.tickets].sort((a, b) => (b.waiting ? 1 : 0) - (a.waiting ? 1 : 0) || (a.waiting && b.waiting ? (a.since ?? '~').localeCompare(b.since ?? '~') : 0));
+  const apart = tickets.filter((x) => x.kind === 'tracker');
+  const mine = tickets.filter((x) => x.kind !== 'tracker');
   $('tower').replaceChildren(...COLUMNS.map((c) => {
-    const mine = tickets.filter((x) => x.column === c);
-    const main = mine.filter((x) => x.kind !== 'tracker'), apart = mine.filter((x) => x.kind === 'tracker');
-    const shown = c === 'awaiting' ? mine.filter((x) => x.waiting).length : mine.length;
+    const here = mine.filter((x) => x.column === c);
+    const shown = c === 'awaiting' ? here.filter((x) => x.waiting).length : here.length;
     return el('section', { className: 'col', dataset: { col: c } },
-      el('div', { className: 'col-head' }, el('i', { className: `d-${c}` }), el('h2', { textContent: t(`app_col_${c}`) }), mono(String(shown), 'n')),
-      main.length ? el('ul', { className: 'cards' }, ...main.map(card)) : el('p', { className: 'empty', textContent: t('app_none') }),
-      apart.length ? el('h3', { className: 'apart', textContent: t('app_tracker_group') }) : null,
-      apart.length ? el('ul', { className: 'cards' }, ...apart.map(card)) : null);
+      el('div', { className: 'col-head' }, el('i', { className: `d-${c}` }), el('h2', { textContent: t(`app_col_${c}`) }), num(String(shown), 'n')),
+      here.length ? el('ul', { className: 'cards' }, ...here.map(card)) : el('p', { className: 'empty', textContent: t(`app_empty_${c}`) }));
   }));
+  $('fold').hidden = !apart.length;
+  $('fold-summary').textContent = apart.length ? plural('app_fold', apart.length) : '';
+  $('fold-list').replaceChildren(...apart.map(card));
 }
 function renderLanded(s) {
   const rows = todayLanded(s);
@@ -213,7 +219,7 @@ function renderLanded(s) {
     const minutes = (m) => (Number.isFinite(m) ? dur(m) : '–');
     const measured = r.lane ? el('small', { className: 'lane', textContent: `${t(r.lane === 'fast' ? 'app_lane_fast' : 'app_lane_full')} · ${t('app_landed_times', { w: minutes(r.workingMin), h: minutes(r.humanWaitMin), m: minutes(r.machineWaitMin) })}` }) : null;
     return el('div', { role: 'row' }, el('div', { className: 'time', role: 'cell' }, el('time', { dateTime: r.at, textContent: clock(r.at) })), el('div', { className: 'what', role: 'cell' }, r.title, ...(measured ? [el('br'), measured] : [])),
-      el('div', { className: 'model', role: 'cell', textContent: r.model }), el('div', { className: 'out', role: 'cell' }, el('span', { className: out[0] }, el('i'), out[1])));
+      el('div', { className: 'model', role: 'cell', textContent: modelName(r.model) }), el('div', { className: 'out', role: 'cell' }, el('span', { className: out[0] }, el('i'), out[1])));
   });
   $('landed-rows').replaceChildren(...(lines.length ? [el('div', { role: 'row' }, heads), ...lines] : [el('p', { className: 'empty', textContent: t('app_landed_empty') })]));
 }
@@ -222,11 +228,11 @@ function renderLanded(s) {
 let shown = { top: '', tower: '', landed: '' };
 function render(s) {
   state.snap = s;
-  const top = JSON.stringify([s.projects, s.fuel, s.health, s.mode, s.owner, s.stats, s.tickets.map((x) => [x.waiting, x.kind])]);
+  const top = JSON.stringify([s.projects, s.fuel, s.health, s.mode, s.owner, s.stats, s.tickets.map((x) => [x.waiting, x.kind, x.column])]);
   const tower = JSON.stringify([s.tickets, s.generatedAt]);
   const landed = JSON.stringify(s.landed);
   if (top !== shown.top) { shown.top = top; renderHeader(s); renderGreeting(s); renderStats(s); }
-  if (landed !== shown.landed) { shown.landed = landed; renderLanded(s); renderStats(s); }
+  if (landed !== shown.landed) { shown.landed = landed; renderLanded(s); renderGreeting(s); renderStats(s); }
   if (tower !== shown.tower) {
     shown.tower = tower;
     const focused = document.activeElement?.closest?.('.card')?.dataset.id;
@@ -241,7 +247,7 @@ function render(s) {
 // Where the panel covers the page (a phone, a narrow window), what is behind it leaves the keyboard and the screen reader.
 function setCovered(on) {
   const covers = matchMedia('(max-width: 767px)').matches; // only where the panel is a full page
-  for (const sel of ['.top', '.band', '.tower', '.landed']) document.querySelector(sel).inert = on && covers;
+  for (const sel of ['.top', '.page']) document.querySelector(sel).inert = on && covers;
 }
 async function openTicket(id) {
   const ph = $('porthole');
@@ -259,8 +265,8 @@ async function openTicket(id) {
     const d = await r.json();
     if (state.open !== id) return; // another ticket was opened meanwhile
     const chip = $('ph-chip');
-    chip.className = `chip${d.kind === 'question' ? ' q' : d.kind === 'ready' ? '' : ' stage'}`;
-    chip.textContent = d.kind === 'ready' ? t('app_chip_ready') : d.kind === 'question' ? t('app_chip_question') : d.kind === 'tracker' ? t('app_tracker_hint') : t(`app_col_${d.column}`);
+    chip.className = `chip${d.kind === 'question' || d.kind === 'ready' ? ' wait' : ' stage'}`;
+    chip.textContent = d.kind === 'ready' ? t('app_card_ready') : d.kind === 'question' ? t('app_chip_question') : d.kind === 'tracker' ? t('app_tracker_hint') : t(`app_col_${d.column}`);
     $('ph-body').replaceChildren(...porthole(d));
     await actions.load();
     if (state.open !== id) return;
@@ -301,60 +307,134 @@ addEventListener('keydown', (e) => {
 });
 $('zoom-close').addEventListener('click', closeZoom);
 
+// A capture in its device frame: a click enlarges it. A side with no capture says so, in the same frame.
 function device(img, after) {
+  const label = t(after ? 'app_after' : 'app_before');
+  if (!img) return el('figure', { className: after ? 'after' : 'before' }, el('div', { className: 'device blank' }, el('span', { textContent: t('app_no_shot') })), el('figcaption', { textContent: label }));
   const b = el('button', { type: 'button', className: 'device', ariaLabel: `${t('app_enlarge')}: ${img.caption}` }, el('img', { src: img.url, alt: img.caption }));
+  b.title = img.caption;
   b.addEventListener('click', () => { state.zoomer = b; $('zoom').querySelector('img').src = img.url; $('zoom').querySelector('img').alt = img.caption; $('zoom').hidden = false; $('zoom-close').focus(); });
-  return el('figure', { className: after ? 'after' : 'before' }, b, el('figcaption', { textContent: img.caption }));
+  return el('figure', { className: after ? 'after' : 'before' }, b, el('figcaption', { textContent: label }));
 }
 const section = (label, ...kids) => el('section', { className: 'sec' }, el('span', { className: 'label', textContent: label }), kids);
-const minutesSince = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
 
-// The porthole of one ticket: what is asked of the human first (the whole question, the
-// team's recommendation, or the version to clear), then what changed, then where the work stands.
+// The captures of a screen ticket, paired by position: before and after, side by side. A screen is named by its
+// caption without the words before / after; without a name it is "Screen 2".
+const sideWords = /\b(before|after|avant|apr[eè]s)\b/gi;
+const screenName = (pair, i, many = true) => [pair.before, pair.after].map((x) => x?.caption?.replace(sideWords, '').replace(/^[\s:·\-–—/|]+|[\s:·\-–—/|]+$/g, '').trim()).find(Boolean) || (many ? t('app_screen_n', { n: i + 1 }) : t('app_changed'));
+const distinct = (list) => new Set(list.map((p, i) => screenName(p, i))).size === list.length;
+function shots(show) {
+  const bare = (x) => x.caption.replace(sideWords, '').replace(/^[\s:·\-–—/|]+|[\s:·\-–—/|]+$/g, '').trim().toLowerCase();
+  const names = [...show.before, ...show.after].map(bare);
+  // By name when every capture names its screen and the names are unique on each side; otherwise by position.
+  const named = names.every(Boolean) && new Set(show.before.map(bare)).size === show.before.length && new Set(show.after.map(bare)).size === show.after.length;
+  const byName = named ? [...new Set(names)].map((n) => ({ before: show.before.find((x) => bare(x) === n) ?? null, after: show.after.find((x) => bare(x) === n) ?? null })) : null;
+  const pairs = byName?.every((p) => p.before && p.after)
+    ? byName
+    : Array.from({ length: Math.max(show.before.length, show.after.length) }, (_, i) => ({ before: show.before[i] ?? null, after: show.after[i] ?? null }));
+  // Two screens that would carry the same name are numbered instead.
+  const label = (i) => (pairs.length > 1 && !distinct(pairs) ? t('app_screen_n', { n: i + 1 }) : screenName(pairs[i], i, pairs.length > 1));
+  let at = 0, kind = 'phone';
+  const root = el('section', { className: 'shots', dataset: { device: kind } });
+  const name = el('span', { className: 'shots-name' });
+  const stage = el('div', { className: 'pair' });
+  const pick = (value, buttons, same) => { for (const b of buttons) b.setAttribute('aria-pressed', String(same(b, value))); };
+  const kinds = ['phone', 'desktop'].map((k) => {
+    const b = el('button', { type: 'button', textContent: t(`app_device_${k}`) });
+    b.addEventListener('click', () => { kind = k; draw(); });
+    b.dataset.kind = k;
+    return b;
+  });
+  const pills = pairs.map((pair, i) => {
+    const b = el('button', { type: 'button', textContent: label(i) });
+    b.addEventListener('click', () => { at = i; draw(); });
+    b.dataset.at = String(i);
+    return b;
+  });
+  function draw() {
+    root.dataset.device = kind;
+    name.textContent = label(at);
+    stage.replaceChildren(device(pairs[at].before, false), device(pairs[at].after, true));
+    pick(kind, kinds, (b, v) => b.dataset.kind === v);
+    pick(at, pills, (b, v) => Number(b.dataset.at) === v);
+  }
+  root.append(...[el('div', { className: 'shots-head' }, name, el('div', { className: 'seg', role: 'group', ariaLabel: t('app_device_label') }, kinds)), stage,
+    pairs.length > 1 ? el('div', { className: 'pills', role: 'group', ariaLabel: t('app_screens_label') }, pills, el('span', { className: 'count', textContent: plural('app_cap_screens', pairs.length) })) : null].filter(Boolean));
+  draw();
+  return root;
+}
+
+// The question for a version to clear: one sentence, then what changes for the user, from the team's report
+// (never its internal handover). Without a report, the page says so.
+const sentences = (text) => text.replace(/\s*\((?:PR|pull request)\s*#?\d+\)/gi, '').match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) ?? [];
+function impact(d) {
+  const first = d.report?.done?.[0];
+  if (!first) return null;
+  const out = [];
+  for (const sentence of sentences(first)) {
+    if (out.length && out.join(' ').length + sentence.length > 260) break;
+    out.push(sentence.trim());
+    if (out.length === 2) break;
+  }
+  return out.join(' ') || null;
+}
+function ask(d) {
+  const questions = d.kind === 'question' ? d.questions ?? [] : [];
+  if (questions.length) {
+    return el('section', { className: 'ph-question', ariaLabel: t(questions.length > 1 ? 'app_q_label_many' : 'app_q_label') },
+      ...questions.map((q, i) => el('div', { className: 'q' },
+        questions.length > 1 ? el('span', { className: 'q-n', textContent: t('app_q_number', { n: i + 1 }) }) : null,
+        el('p', { className: 'q-text', textContent: q.text }),
+        q.recommendation ? el('p', { className: 'q-rec' }, el('b', { textContent: t('app_q_rec') }), q.recommendation) : null,
+        q.options.length ? el('ul', { className: 'q-options' }, ...q.options.map((o) => el('li', { textContent: o }))) : null)));
+  }
+  if (d.kind === 'ready') {
+    const what = impact(d);
+    return el('section', { className: 'ph-ask' }, el('p', { className: 'ask-q', textContent: t('app_ask_ready') }), el('p', { className: `ask-a${what ? '' : ' faint'}`, textContent: what ?? t('app_ask_none') }));
+  }
+  if (d.kind === 'tracker') return el('p', { className: 'box-card tracker-note', textContent: t('app_tracker_explain') });
+  return null;
+}
+
+// Who wrote, who reviewed, how big the change is (with the link to the pull request), how long the team worked.
+function facts(d, c) {
+  const rows = [];
+  const who = (role) => d.squad.find((x) => x.role === role);
+  const team = [who('author') && t('app_wrote', { who: modelName(who('author').model) }), who('reviewer') && t('app_reviewed', { who: modelName(who('reviewer').model) })].filter(Boolean);
+  if (team.length) rows.push([t('app_facts_team'), team.join(' · ')]);
+  rows.push([t('app_facts_change'), c ? [`${changeParts(c).join(', ')} · `,
+    c.pr.url ? el('a', { href: c.pr.url, rel: 'noreferrer noopener', target: '_blank', textContent: `PR #${c.pr.number}` }) : `PR #${c.pr.number}`,
+    c.draft ? el('span', { className: 'tag', textContent: t('app_pr_draft') }) : null] : t('app_no_pr')]);
+  const checks = c?.checks ? [el('span', { className: checksClass(c), textContent: t(`app_checks_${c.checks}`) }), d.tests ? ` · ${t('app_srv_tests_green', { n: String(d.tests).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') })}` : null] : [t('app_not_measured')];
+  rows.push([t('app_checks'), checks]);
+  if (d.flightMinutes) rows.push([t('app_facts_work'), t('app_work_time', { d: dur(d.flightMinutes) })]);
+  if (d.quotaShare != null) rows.push([cap(t('app_share_label')), pct(d.quotaShare)]);
+  return el('dl', { className: 'facts' }, rows.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', {}, v)]));
+}
+
+// The porthole of one ticket, in this order: the title; the question asked of the human and what it changes for the
+// user; the before / after pair; a few facts. The team's report, its squad and the black box are folded below.
 function porthole(d) {
   const out = [];
   out.push(el('div', {}, d.waiting ? el('div', { className: 'amber-bar' }) : null, el('h2', { id: 'ph-title', textContent: d.title }),
     d.waiting && d.since ? el('p', { className: 'ph-since' }, el('time', { dateTime: d.since, textContent: `${t('app_since', { time: since(d.since) })} (${dur(minutesSince(d.since))})` })) : null));
-  const questions = d.kind === 'question' ? d.questions ?? [] : [];
-  if (questions.length) {
-    out.push(el('section', { className: 'ph-question', ariaLabel: t(questions.length > 1 ? 'app_q_label_many' : 'app_q_label') },
-      el('span', { className: 'label', textContent: t(questions.length > 1 ? 'app_q_label_many' : 'app_q_label') }),
-      ...questions.map((q, i) => el('div', { className: 'q' },
-        questions.length > 1 ? el('span', { className: 'q-n mono', textContent: t('app_q_number', { n: i + 1 }) }) : null,
-        el('p', { className: 'q-text', textContent: q.text }),
-        q.recommendation ? el('p', { className: 'q-rec' }, el('b', { textContent: t('app_q_rec') }), q.recommendation) : null,
-        q.options.length ? el('ul', { className: 'q-options' }, ...q.options.map((o) => el('li', { textContent: o }))) : null))));
-  }
-  if (d.kind === 'ready' && d.where.length) out.push(el('section', { className: 'box-card sec' }, el('span', { className: 'label', textContent: t('app_asked') }), el('p', { textContent: d.where.join(' ') })));
-  if (d.kind === 'tracker') out.push(el('p', { className: 'box-card tracker-note', textContent: t('app_tracker_explain') }));
-  // Stats that mean something, or that say plainly they are not measured.
-  const stats = [[t('app_stat_p_flight'), dur(d.flightMinutes), '']];
-  stats.push([t('app_stat_p_checks'), d.change?.checks ? t(`app_checks_${d.change.checks}`) : t('app_not_measured'), checksClass(d.change)]);
-  if (d.quotaShare != null) stats.push([t('app_stat_p_usage'), pct(d.quotaShare), '']);
-
-  // What changed: the pull request, its size and its checks; the captures of a screen; an example.
-  const changed = [];
+  const asked = ask(d);
+  if (asked) out.push(asked);
   const c = d.change ?? (d.pr ? { pr: d.pr, files: null, additions: null, deletions: null, lines: null, checks: null, draft: null } : null);
-  if (c) {
-    changed.push(el('div', { className: 'pr-row' },
-      c.pr.url ? el('a', { href: c.pr.url, rel: 'noreferrer noopener', target: '_blank', textContent: t('app_pr_link', { n: c.pr.number }) }) : mono(t('app_pr_link', { n: c.pr.number })),
-      c.draft ? el('span', { className: 'tag', textContent: t('app_pr_draft') }) : null),
-    el('p', { className: 'pr-facts' }, mono(changeParts(c).join(' · ')), ' · ', el('span', { className: checksClass(c), textContent: checksText(c) }),
-      d.tests ? ` · ${t('app_srv_tests_green', { n: String(d.tests).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f') })}` : null));
-  } else changed.push(el('p', { className: 'empty', textContent: t('app_no_pr') }));
+  // What changed: the captures of a screen, or one concrete example and the tests.
   if (d.show.kind === 'screen') {
-    if (d.show.before.length || d.show.after.length) changed.push(el('div', { className: 'devs' }, ...d.show.before.map((i) => device(i, false)), ...d.show.after.map((i) => device(i, true))));
-    else changed.push(el('p', { className: 'no-capture', textContent: t(`app_no_capture_${d.show.missing ?? 'none_kept'}`) }));
+    if (d.show.before.length || d.show.after.length) out.push(shots(d.show));
+    else out.push(el('p', { className: 'no-capture', textContent: t(`app_no_capture_${d.show.missing ?? 'none_kept'}`) }));
   }
+  const changed = [];
   const example = d.show.example;
-  if (example) changed.push(el('div', { className: 'example box-card' }, el('p', {}, el('b', { textContent: `${t('app_before')}: ` }), mono(example.before)), el('p', {}, el('b', { textContent: `${t('app_after')}: ` }), mono(example.after))));
-  if (d.show.kind === 'code' && d.show.tests.length) changed.push(el('ul', { className: 'tests box-card' }, ...d.show.tests.map((x) => el('li', {}, mono(x.name), ` · ${t(`app_test_${x.change}`)} · `, el('span', { className: x.state === 'pass' ? 'success' : x.state === 'fail' ? 'danger' : 'faint', textContent: t(`app_state_${x.state}`) })))));
+  if (example) changed.push(el('div', { className: 'example box-card' }, el('p', {}, el('b', { textContent: `${t('app_before')}: ` }), example.before), el('p', {}, el('b', { textContent: `${t('app_after')}: ` }), example.after)));
+  if (d.show.kind === 'code' && d.show.tests.length) changed.push(el('ul', { className: 'tests box-card' }, ...d.show.tests.map((x) => el('li', {}, x.name, ` · ${t(`app_test_${x.change}`)} · `, el('span', { className: x.state === 'pass' ? 'success' : x.state === 'fail' ? 'danger' : 'faint', textContent: t(`app_state_${x.state}`) })))));
   if (d.show.kind === 'code' && d.show.touches) changed.push(el('p', { textContent: d.show.touches }));
-  out.push(section(t('app_changed'), changed));
-  // The numbers after what changed: the pull request line and the captures are seen first.
-  out.push(el('div', { className: 'pstats' }, ...stats.map(([k, v, cls]) => el('div', {}, el('div', { className: 'k', textContent: k }), el('div', { className: `v ${cls}`.trim(), textContent: v })))));
+  if (changed.length) out.push(el('section', {}, el('h3', { className: 'sec-title', textContent: t('app_changed') }), changed));
+  out.push(facts(d, c));
 
-  // Where we are: the team's report to the user (Done, Still to do), never its internal handover.
+  // Folded: the team's report to the user (Done, Still to do), never its internal handover; the squad; the black box.
   const where = [];
   if (d.report) {
     where.push(el('p', { className: 'report-at faint', textContent: t('app_report_title', { time: since(d.report.at) }) }));
@@ -362,14 +442,14 @@ function porthole(d) {
     where.push(...list(t('app_report_done'), d.report.done), ...list(t('app_report_remaining'), d.report.remaining));
     if (d.report.other?.length) where.push(el('ul', { className: 'report' }, ...d.report.other.map((x) => el('li', { textContent: x }))));
   } else where.push(el('p', { className: 'empty', textContent: t('app_no_report') }));
-  out.push(el('section', { className: 'box-card sec' }, el('span', { className: 'label', textContent: t('app_where') }), where));
-
-  out.push(section(t('app_squad'), d.squad.length
-    ? el('ul', { className: 'squad' }, ...d.squad.map((s) => el('li', {}, el('span', { className: `sq ${harnessClass(s.harness)}` }), el('span', { className: 'role', textContent: t(`app_role_${s.role.replace(/ /g, '_')}`) }), mono(`${s.harness} · ${s.model}`, 'who'))))
-    : el('p', { className: 'empty', textContent: t('app_no_squad') })));
-  out.push(section(t('app_blackbox'), el('ol', { className: 'timeline' }, ...d.blackBox.map((e) =>
-    el('li', { className: `st-${e.stage ?? 'progress'}` }, el('time', { dateTime: e.at, textContent: clock(e.at) }),
-      el('details', {}, el('summary', { textContent: e.text }), el('pre', { textContent: JSON.stringify(e.raw, null, 2) })))))));
+  out.push(el('details', { className: 'more' }, el('summary', { textContent: t('app_more') }),
+    section(t('app_where'), where),
+    section(t('app_squad'), d.squad.length
+      ? el('ul', { className: 'squad' }, ...d.squad.map((x) => el('li', {}, el('span', { className: `sq ${harnessClass(x.harness)}` }), el('span', { className: 'role', textContent: t(`app_role_${x.role.replace(/ /g, '_')}`) }), el('span', { className: 'who', textContent: `${x.harness} · ${x.model}` }))))
+      : el('p', { className: 'empty', textContent: t('app_no_squad') })),
+    section(t('app_blackbox'), el('ol', { className: 'timeline' }, ...d.blackBox.map((e) =>
+      el('li', { className: `st-${e.stage ?? 'progress'}` }, el('time', { dateTime: e.at, textContent: clock(e.at) }),
+        el('details', {}, el('summary', { textContent: e.text }), el('pre', { textContent: JSON.stringify(e.raw, null, 2) }))))))));
   return out;
 }
 

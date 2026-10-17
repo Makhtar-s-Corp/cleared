@@ -54,7 +54,7 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
     mode = { name: 'grace', pending };
     const total = me.actions.graceMs;
     const fill = el('i');
-    const label = el('span', { className: 'grace-text mono' });
+    const label = el('span', { className: 'grace-text' });
     const undo = el('button', { type: 'button', className: 'undo', textContent: t('app_act_undo') });
     undo.addEventListener('click', async () => {
       undo.disabled = true;
@@ -86,7 +86,8 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   }
 
   function button(label, kind, onClick, disabled = false) {
-    const b = el('button', { type: 'button', className: `act ${kind}`, textContent: label, disabled });
+    const b = el('button', { type: 'button', className: `act ${kind}`, disabled });
+    if (typeof label === 'string') b.textContent = label; else b.append(...label);
     if (disabled) b.setAttribute('aria-disabled', 'true');
     b.addEventListener('click', onClick);
     return b;
@@ -165,17 +166,19 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
         button(t('app_act_new_version'), 'ink', () => { seen = card.approval.versions; reopen(card.id); }));
       return;
     }
-    const label = card.approval ? `${t('app_clear')} · ${card.approval.versions.map((v) => v.head.slice(0, 7)).join(' + ')}` : t('app_clear');
-    const row = el('div', { className: 'act-row' },
-      button(t('app_send_back'), 'ghost', () => sendBackForm(card), Boolean(why)),
-      button(label, 'ink', async (e) => {
+    // The button carries one commit, in small type under its label; every version it clears stays in its name and title.
+    const heads = card.approval ? card.approval.versions.map((v) => v.head.slice(0, 7)) : [];
+    const label = heads.length ? [el('span', { textContent: t('app_clear') }), el('span', { className: 'sha', textContent: heads[0] })] : t('app_clear');
+    const clear = button(label, 'ink', async (e) => {
         const b = e.currentTarget; b.disabled = true;
         const r = await confirmed('clear', card);
         if (r.ok && r.json.pendingId) { await load(); return grace(card, me.actions.pending.find((p) => p.id === r.json.pendingId) ?? { id: r.json.pendingId, leftMs: r.json.graceMs }); }
         b.disabled = false;
         if (r.json?.error === 'new_version') { await load(); redraw(); }
         mode = { name: 'error', text: failure(r.json) }; mount(card);
-      }, Boolean(why)));
+      }, Boolean(why));
+    if (heads.length) { clear.setAttribute('aria-label', `${t('app_clear')} · ${heads.join(' + ')}`); clear.title = t('app_commits', { heads: heads.join(' + ') }); }
+    const row = el('div', { className: 'act-row' }, button(t('app_send_back'), 'ghost', () => sendBackForm(card), Boolean(why)), clear);
     box.replaceChildren(...(mode.name === 'error' ? [el('p', { className: 'act-error danger', role: 'alert', textContent: mode.text })] : []), ...(why ? [el('p', { className: 'act-why', textContent: t(why) })] : []), row);
     if (mode.name === 'error') mode = { name: 'idle' };
   }
