@@ -487,5 +487,7 @@
   "app_reviewed": "{who} reviewed",
   "app_work_time": "{d} of work",
   "app_more": "Team report and history",
-  "app_commits": "Version: {heads}"
+  "app_commits": "Version: {heads}",
+  "app_ph_expand": "Enlarge the porthole",
+  "app_ph_shrink": "Shrink the porthole"
 }

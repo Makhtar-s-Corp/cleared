@@ -486,5 +486,7 @@
   "app_reviewed": "{who} a relu",
   "app_work_time": "{d} de travail",
   "app_more": "Rapport de l’équipe et historique",
-  "app_commits": "Version : {heads}"
+  "app_commits": "Version : {heads}",
+  "app_ph_expand": "Agrandir le hublot",
+  "app_ph_shrink": "Réduire le hublot"
 }

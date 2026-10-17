@@ -132,9 +132,9 @@ The detailed counters (in flight, landed today, first-time clean, median Todo to
 White outlined table at the bottom of the tower: time, what shipped (plain title), model, outcome with a small dot ("Clean first time" and "One review round" in `success`, "Rolled back 11:49" in `danger`). A "View all" link on the right of its header.
 
 ### Porthole
-Computer (1280 and above): right panel under the header (560 px, 640 from 1440), the board making room and showing two columns with what waits first. Tablet (1024 to 1279): the panel covers the board. Below 1024 px and on a phone: full page with a back button, the ticket id and the status chip in a white header.
+Computer (1280 and above): a **small porthole** (440 px) opens on the right under the header, the board making room for it. A button beside the ticket id makes it **large** (up to 1120 px, over the board): the question and the facts on the left, the before / after pair large on the right; the same button brings it back. Closing resets it to small. Tablet (1024 to 1279): the panel covers the board. Below 1024 px and on a phone: full page with a back button, the ticket id and the status chip in a white header.
 Order, always:
-1. The ticket title, large (`title`), under a 3 px × 56 px flat amber bar when it waits for the human, and "Waiting since 16:05 (1 h 35)".
+1. **The question put to the human first**, on `awaiting-surface` (see 2). Under it, the ticket title (`title`, 20 px, `text-secondary`) under a 3 px × 56 px flat amber bar when it waits for the human, and "Waiting since 16:05 (1 h 35)".
 2. **The question put to the human, in bold, in one sentence** ("Allow this change to go live?"), then **what changes for the user in one or two sentences**, taken from the team's report (never an internal agent note; the pull request number is dropped). With no report: "No summary provided by the team". For a question ticket, the whole question in bold on `awaiting-surface`, the team's recommendation below a highlight hairline.
 3. **One single large before / after pair**, side by side in device frames (radius `device`, 6 px white bezel, after with `elevation.device-after`). A Phone / Desktop switch above it (it changes the frame only), one pill per screen below it when there are several; the other captures are one click away, never a row of thumbnails. A click enlarges a capture. A ticket with no screen shows one concrete before / after example and its tests instead.
 4. A small block of facts: who wrote and who reviewed, the size of the change with the link to the pull request (and "draft"), the checks, the time worked, the share of the week's usage when measured.
@@ -144,8 +144,8 @@ Order, always:
 
 ## 5. Layout
 
-- Desktop: header, welcome sentence and grey line, four-column board (two columns while the porthole is open), the folded lines, Landed today. Side margins 32 px, column gap 20 px, card gap 12 px. Room to breathe: nothing touches.
-- Cards awaiting the human are always first in their column.
+- Desktop: header, welcome sentence and grey line, then **what waits for the human across the full width** in large cards (three across, two with the small porthole open, one on a phone), and below it the other stages in three quieter columns (outlined, transparent, smaller titles). Then the folded lines and Landed today. Side margins 32 px, column gap 20 px, card gap 12 px. Room to breathe: nothing touches.
+- Cards awaiting the human are always first, and in their own full-width row above the other stages.
 - Phone: one column. Awaiting cards first, then the rest by stage. The porthole is a page of its own with the buttons fixed at the bottom; the before / after pair stacks below 360 px; nothing overflows.
 - An empty column says in one `text-faint` sentence what to do to fill it. No illustrations, no decoration.
 

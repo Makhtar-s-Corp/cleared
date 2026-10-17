@@ -276,11 +276,19 @@ async function openTicket(id) {
 }
 function closeTicket() {
   actions.mount(null);
-  $('porthole').hidden = true; document.body.classList.remove('has-ph'); state.open = null; setCovered(false);
+  $('porthole').hidden = true; document.body.classList.remove('has-ph'); setBig(false); state.open = null; setCovered(false);
   const back = state.opener?.isConnected ? state.opener : document.querySelector('.card button');
   back?.focus(); state.opener = null;
 }
 $('ph-close').addEventListener('click', closeTicket);
+// The porthole opens small, beside the board; this button makes it large (the board stays behind it) and back.
+function setBig(on) {
+  $('porthole').classList.toggle('big', on);
+  document.body.classList.toggle('ph-big', on);
+  $('ph-expand').setAttribute('aria-pressed', String(on));
+  $('ph-expand').setAttribute('aria-label', t(on ? 'app_ph_shrink' : 'app_ph_expand'));
+}
+$('ph-expand').addEventListener('click', () => setBig(!$('porthole').classList.contains('big')));
 // The address a notification opens, /#ticket=EX-12: that ticket's porthole. The part after # never reaches the server.
 function openFromAddress() {
   const match = /^#ticket=([A-Za-z0-9._-]{1,40})$/.exec(location.hash);
@@ -497,6 +505,7 @@ function live() {
   for (const n of document.querySelectorAll('[data-i]')) n.textContent = t(n.dataset.i);
   $('zoom').setAttribute('aria-label', t('app_ph_close_zoom'));
   $('ph-close').setAttribute('aria-label', t('app_back'));
+  $('ph-expand').setAttribute('aria-label', t('app_ph_expand'));
   syncThemeButton();
   state.last = s.generatedAt;
   render(s);

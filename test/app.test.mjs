@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 const TOKEN = 'a'.repeat(64);
 // Amber (token or value) may appear only in the rules of what waits for the human, the banner of a state chosen on purpose, the project dot and the token definitions.
-const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.ph-question|\.chip\.q|\.chip\.wait|\.wait-line|\.mode-pill|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
+const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.ph-question|\.ph-ask|\.chip\.q|\.chip\.wait|\.wait-line|\.mode-pill|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
 const AMBER = /var\(--(?:awaiting|e-awaiting)[^)]*\)|#F5A623|#AB570A|#FFFBF2|#FCE2B3|245,\s*166,\s*35|171,\s*87,\s*10/i;
 const amberViolations = (css) => css.split('\n').filter((line) => AMBER.test(line) && !ALLOWED_AMBER.test(line)).map((line) => line.trim().slice(0, 80));
 const dirs = [];
