@@ -138,6 +138,47 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
   rm -f "$message"
 fi
 
+# The fast lane (docs/fast-lane.md): the rules judge what this session
+# leaves, at this very commit, before it leaves; still on the fast lane, the
+# targeted tests of the changed files run here, with no shell, under the
+# agents' account when the project has one (they run the branch's code), and
+# what they gave is kept with the commit they ran on. The full checks run on
+# the forge as for any lane. Never in the project's main checkout.
+fast_lane_session() {
+  local head kept key=${ORCH_LANE#*/} code=0 minutes agent_user agent_home prefix=() argv=()
+  head=$(git rev-parse --verify --quiet HEAD) || return 0
+  kept=$(node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" decide "$key" "$head" 2> /dev/null) || kept=full
+  if [ "$kept" != fast ]; then echo "Fast lane: the rules send $ORCH_TICKET to the full circuit at ${head:0:8}."; return 0; fi
+  node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" targeted "$key" "$head" > "$run_dir/targeted.argv" 2> /dev/null || { node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" tests-done "$key" "$head" skipped || true; echo "Fast lane: no targeted tests to run: skipped at ${head:0:8}."; return 0; }
+  mapfile -d '' -t argv < "$run_dir/targeted.argv"
+  [ "${#argv[@]}" -gt 0 ] || return 0
+  minutes=$(conf_get fast_lane tests_timeout_minutes)
+  [[ "$minutes" =~ ^[0-9]+$ ]] || minutes=10
+  agent_user=$(conf_get security agent_user)
+  if [ -n "$agent_user" ] && [ "$(id -un)" != "$agent_user" ]; then
+    agent_home=$(getent passwd "$agent_user" | cut -d: -f6)
+    agent_mount_args
+    prefix=("${AGENT_MOUNT_ARGS[@]}")
+    [ "${#prefix[@]}" = 0 ] || prefix+=(--)
+    sudo -n -u "$agent_user" -- env -i PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" HOME="$agent_home" LANG=C.UTF-8 CI=1 \
+      timeout -k 10 "$((minutes * 60))" "${prefix[@]}" "${argv[@]}" > "$run_dir/targeted-tests.log" 2>&1 < /dev/null || code=$?
+  else
+    # No credential of the service goes with them: an empty environment, and
+    # an empty home (the service's HOME holds its files and its keys).
+    local scratch_home
+    scratch_home=$(mktemp -d) || { node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" tests-done "$key" "$head" skipped || true; echo "Fast lane: targeted tests at ${head:0:8}: skipped (no empty home could be made)."; return 0; }
+    env -i PATH="$PATH" HOME="$scratch_home" LANG=C.UTF-8 CI=1 timeout -k 10 "$((minutes * 60))" "${argv[@]}" > "$run_dir/targeted-tests.log" 2>&1 < /dev/null || code=$?
+    rm -rf -- "$scratch_home"
+
+  fi
+  node --no-warnings "$ORCH_HOME/lib/fast-lane.mjs" tests-done "$key" "$head" "$code" || true
+  echo "Fast lane: targeted tests at ${head:0:8}: $([ "$code" = 0 ] && echo passed || echo "failed (exit $code)")."
+}
+if [ "${ORCH_FAST_LANE:-}" = fast ] && { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
+  && [ "$(realpath -m -- "$PWD")" != "$(realpath -m -- "$ORCH_REPO")" ]; then
+  fast_lane_session
+fi
+
 # What the user reads in tracker. The figures and the model come from the
 # scripts; only the wording of the report may come from the writing model.
 body=$(mktemp)
@@ -188,7 +229,7 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
       pushed_note="Pull request opened or updated: $pushed (draft)."
       # Kept with what is known of the lane of this ticket.
       kept_lane=$(lane_record "${ORCH_LANE#*/}")
-      [ ! -f "$kept_lane" ] || { jq --argjson pr "${pushed#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}' "$kept_lane" > "$kept_lane.part" && mv "$kept_lane.part" "$kept_lane"; } || true
+      [ ! -f "$kept_lane" ] || { lane_write "$kept_lane" --argjson pr "${pushed#\#}" --arg at "$(now_utc)" '. + {pr: $pr, pushed_at: $at}'; } || true
     elif [[ "$pushed" == "nothing to push"* ]]; then
       pushed_note="Nothing to push: the team has no commit."
     else

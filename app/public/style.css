@@ -77,6 +77,8 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .stat .k { font-size: 13px; color: var(--text-muted); } .stat .v { font-size: 28px; font-weight: 600; letter-spacing: -.03em; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .stat .v small { font-size: 16px; color: var(--text-faint); font-weight: 500; }
 .stat.fuel { min-width: 190px; } .stat.fuel .k { margin-bottom: 8px; }
+.stat.median .lanes { font-size: 14px; margin-top: 8px; color: var(--text-muted); } .stat.median .mono { color: var(--text); font-weight: 600; }
+.landed .what small.lane { color: var(--text-faint); font-size: 12px; }
 .fuelrow { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; } .fuelrow .n { width: 52px; color: var(--text-secondary); }
 .fuelrow .bar6 { flex: 1; height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; } .fuelrow .bar6 span { display: block; height: 100%; width: 0; }
 .fuelrow .p { font-family: var(--mono); min-width: 38px; text-align: right; }

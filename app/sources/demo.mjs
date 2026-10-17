@@ -110,10 +110,10 @@ export function demoSource() {
     cleared(id) { tickets.find((t) => t.id === id).column = 'review'; },
     async snapshot() {
       const today = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return new Date(Math.min(d.getTime(), Date.now() - 5 * 60000)).toISOString(); };
-      return structuredClone({ schema: 1, owner: { name: 'Alex' }, stats: { inFlight: 4, firstTimeClean: 78 },
-        landed: [{ at: today(7, 34), id: 'EX-12', title: 'Stale figures no longer survive two crossing reads', model: 'claude-opus-5-5', harness: 'claude', fixes: 0, rolledBackAt: null, share: 2.4 },
+      return structuredClone({ schema: 1, owner: { name: 'Alex' }, stats: { inFlight: 4, firstTimeClean: 78, lanes: { days: 7, fast: { minutes: 14, count: 3 }, full: { minutes: 212, count: 5 } } },
+        landed: [{ at: today(7, 34), id: 'EX-12', title: 'Stale figures no longer survive two crossing reads', model: 'claude-opus-5-5', harness: 'claude', fixes: 0, rolledBackAt: null, share: 2.4, lane: 'full', totalMin: 188, workingMin: 41, humanWaitMin: 12, machineWaitMin: 135 },
           { at: today(9, 22), id: 'EX-15', title: 'The envelope sheet shows its previous months', model: 'claude-sonnet-5-5', harness: 'claude', fixes: 1, rolledBackAt: null, share: 1.9 },
-          { at: today(11, 41), id: 'EX-21', title: 'Subscription logos', model: 'gpt-6-sol', harness: 'codex', fixes: 0, rolledBackAt: today(11, 49), share: 1.9 }],
+          { at: today(11, 41), id: 'EX-21', title: 'Subscription logos', model: 'gpt-6-sol', harness: 'codex', fixes: 0, rolledBackAt: today(11, 49), share: 1.9, lane: 'fast', totalMin: 13, workingMin: 6, humanWaitMin: 3, machineWaitMin: 4 }],
         project: state.project, projects: [{ id: 'sample-app', name: 'sample-app' }], language: 'en', generatedAt: new Date().toISOString(),
         health: { ...state.health, recordedAt: iso(40 / 60) }, mode: state.mode, fuel: state.fuel, tickets });
     },

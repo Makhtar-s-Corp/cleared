@@ -19,7 +19,7 @@ lanes=$(dispatcher_lanes)
 kept=$(lane_record "${lane#*/}")
 [ "$(jq -r '.lane // empty' "$kept" 2> /dev/null)" = "$lane" ] || kept=
 over() {
-  [ -z "$kept" ] || { jq --arg at "$(now_utc)" '. + {closed: (.closed // $at), given_up: true}' "$kept" > "$kept.part" && mv "$kept.part" "$kept"; }
+  [ -z "$kept" ] || { lane_write "$kept" --arg at "$(now_utc)" '. + {closed: (.closed // $at), given_up: true}'; }
 }
 if ! grep -qxF -- "$lane" <<<"$lanes"; then
   # No worktree: a lane that waits between two sessions, known by what is kept of it.

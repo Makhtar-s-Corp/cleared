@@ -11,6 +11,7 @@
 # most recent ones, `last: n` the n oldest (checked on a long ticket).
 #   linear.sh comments <ticket>                 its comments as JSON (id, createdAt, editedAt, body, byOwner)
 #   linear.sh create <project> <label> <title> <file>   opens a ticket, prints its identifier and URL
+#   linear.sh label-actors <ticket>             who set each label and the project, as JSON ({labels: {name: {kind, id}}, project})
 #
 # Nothing real goes to Linear, an outside service (decision of 2026-10-06):
 # a comment is checked by the guard of the repository first (private terms,
@@ -258,6 +259,26 @@ case "${1:-}" in
     owner=$(owner_id) || exit 1
     gql 'query($id: String!) { viewer { id } issue(id: $id) { state { name } createdAt creator { id app } history(first: 100) { nodes { createdAt actorId actor { id app } botActor { id } toState { name } } } } }' "$(jq -nc --arg id "$2" '{id: $id}')" \
       | jq -c --arg owner "$owner" '(if $owner != "" then $owner else .data.viewer.id end) as $owner | [.data.issue.history.nodes[] | select(.toState.name != null) | {status: .toState.name, by: {kind: (if .botActor != null or .actor.app == true then "agents" elif .actorId == $owner and .actorId != null then "human" else "other" end), id: (.actorId // .botActor.id // "unknown")}, at: .createdAt}] as $history | (if ($history | length) == 0 and .data.issue.creator != null then [{status: .data.issue.state.name, by: {kind: (if .data.issue.creator.app == true then "agents" elif .data.issue.creator.id == $owner then "human" else "other" end), id: .data.issue.creator.id}, at: .data.issue.createdAt}] else $history end) | sort_by(.at)'
+    ;;
+  label-actors)
+    # Who set each label of the ticket and its project: the author of the
+    # last change of the history that added it, else (set when it was
+    # created) its creator. An application or a bot is the agents; the user
+    # is [tracker] owner_id. A history longer than one page is not read in
+    # part: the command fails, and nothing is taken as the user's.
+    ticket_ok "$2"
+    owner=$(owner_id) || exit 1
+    answer=$(gql 'query($id: String!) { viewer { id } issue(id: $id) { createdAt creator { id app } botActor { id } labels { nodes { id name } } project { id name } history(first: 100) { pageInfo { hasNextPage } nodes { createdAt actorId actor { id app } botActor { id } addedLabelIds toProjectId } } } }' "$(jq -nc --arg id "$2" '{id: $id}')")
+    jq -ce --arg owner "$owner" '
+      def who($n; $o): {kind: (if $n.botActor != null or $n.actor.app == true then "agents" elif $n.actorId != null and $n.actorId == $o then "human" else "other" end), id: ($n.actorId // $n.botActor.id // "unknown")};
+      def creator($i; $o): {kind: (if $i.botActor != null or $i.creator.app == true then "agents" elif $i.creator.id != null and $i.creator.id == $o then "human" else "other" end), id: ($i.creator.id // $i.botActor.id // "unknown")};
+      (if $owner != "" then $owner else .data.viewer.id end) as $o
+      | .data.issue as $i
+      | if $i == null or $i.history.pageInfo.hasNextPage != false or $o == null then null
+        else ($i.history.nodes | sort_by(.createdAt)) as $h
+        | {labels: ([$i.labels.nodes[] | .id as $id | {key: .name, value: (([$h[] | select(any((.addedLabelIds // [])[]; . == $id))] | last) as $n | if $n then who($n; $o) else creator($i; $o) end)}] | from_entries),
+           project: (if $i.project == null then null else ($i.project.id as $p | ([$h[] | select(.toProjectId == $p)] | last) as $n | if $n then who($n; $o) else creator($i; $o) end) end)}
+        end' <<<"$answer" || die "who set the labels of $2 cannot be read"
     ;;
   edit-comment)
     ticket_ok "$2"

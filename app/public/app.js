@@ -102,8 +102,13 @@ function renderStats(s) {
         el('span', { className: 'bar6', role: 'img', ariaLabel: f.measured ? `${f.adapter} ${f.left}%` : `${f.adapter} ${t('app_not_measured')}` }, bar),
         f.measured ? mono(`${f.left}%`, 'p') : el('span', { className: 'p faint', textContent: t('app_not_measured') }));
     }));
+  // One line: the median time from Todo to Done over the last seven days, by lane.
+  const lanes = s.stats?.lanes;
+  const median = (m) => (Number.isFinite(m) ? dur(Math.round(m)) : '–');
+  const medianLine = lanes ? el('div', { className: 'stat median', role: 'listitem' }, el('div', { className: 'k', textContent: t('app_stat_median') }),
+    el('div', { className: 'lanes' }, `${t('app_lane_fast')} `, mono(median(lanes.fast?.minutes)), ` · ${t('app_lane_full')} `, mono(median(lanes.full?.minutes)))) : null;
   $('stats').replaceChildren(stat(t('app_stat_flight'), String(s.stats?.inFlight ?? 0)), stat(t('app_stat_landed'), String(landed.length)),
-    stat(t('app_stat_clean'), s.stats?.firstTimeClean == null ? '–' : String(s.stats.firstTimeClean), s.stats?.firstTimeClean == null ? null : el('small', { textContent: '%' })), fuel);
+    stat(t('app_stat_clean'), s.stats?.firstTimeClean == null ? '–' : String(s.stats.firstTimeClean), s.stats?.firstTimeClean == null ? null : el('small', { textContent: '%' })), ...(medianLine ? [medianLine] : []), fuel);
 }
 
 // --- tower -------------------------------------------------------------------
@@ -204,7 +209,10 @@ function renderLanded(s) {
   const lines = rows.map((r) => {
     const out = r.rolledBackAt ? ['danger', t('app_outcome_rolled', { time: clock(r.rolledBackAt) })]
       : r.fixes === 0 ? ['success', t('app_outcome_clean')] : ['success', r.fixes === 1 ? t('app_outcome_rounds_one') : t('app_outcome_rounds', { n: r.fixes })];
-    return el('div', { role: 'row' }, el('div', { className: 'time', role: 'cell' }, el('time', { dateTime: r.at, textContent: clock(r.at) })), el('div', { className: 'what', role: 'cell', textContent: r.title }),
+    // Its lane and where its time went, when the ledger measured it.
+    const minutes = (m) => (Number.isFinite(m) ? dur(m) : '–');
+    const measured = r.lane ? el('small', { className: 'lane', textContent: `${t(r.lane === 'fast' ? 'app_lane_fast' : 'app_lane_full')} · ${t('app_landed_times', { w: minutes(r.workingMin), h: minutes(r.humanWaitMin), m: minutes(r.machineWaitMin) })}` }) : null;
+    return el('div', { role: 'row' }, el('div', { className: 'time', role: 'cell' }, el('time', { dateTime: r.at, textContent: clock(r.at) })), el('div', { className: 'what', role: 'cell' }, r.title, ...(measured ? [el('br'), measured] : [])),
       el('div', { className: 'model', role: 'cell', textContent: r.model }), el('div', { className: 'out', role: 'cell' }, el('span', { className: out[0] }, el('i'), out[1])));
   });
   $('landed-rows').replaceChildren(...(lines.length ? [el('div', { role: 'row' }, heads), ...lines] : [el('p', { className: 'empty', textContent: t('app_landed_empty') })]));
