@@ -31,7 +31,7 @@ All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.
 
 ### Service environment (systemd drop-in)
 
-A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.sh`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.sh` warns about it. Set the variables with a drop-in on each unit, as the service account, then reload:
+A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.sh`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.sh` warns about it, and refuses, before writing anything, a link in these drop-ins that is not `http(s)://host[:port]` or that is on port 80 or 443 (`https://host` with no port is 443). Set the variables with a drop-in on each unit, as the service account, then reload:
 
 ```sh
 mkdir -p ~/.config/systemd/user/cleared-wake.service.d ~/.config/systemd/user/cleared-app.service.d

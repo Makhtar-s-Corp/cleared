@@ -582,7 +582,7 @@ Four settings are read from the service's environment only, never from the proje
 
 | Environment variable | Purpose | Default |
 | --- | --- | --- |
-| `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole): the app's `[app] public_origin`, port included, for example `https://machine.tailnet.ts.net:8443`. Never on port 80 or 443 (`serve/install.sh` refuses it when it is set in its shell). | None: no link |
+| `CLEARED_NOTIFY_LINK_BASE` | The address a notification opens, followed by `/#ticket=<id>` (the ticket's porthole): the app's `[app] public_origin`, port included, for example `https://machine.tailnet.ts.net:8443`. Never on port 80 or 443: `serve/install.sh` refuses such a value, or one that is not `http(s)://host[:port]`, in its shell and in the drop-ins of `cleared-wake.service` and `cleared-app.service` (the legacy `ORCH_NOTIFY_LINK_BASE` too). | None: no link |
 | `CLEARED_NOTIFY_PUSH_HOSTS` | Extra Web Push service host names accepted for a subscription, separated by commas (a self-hosted service). The defaults are Google's, Mozilla's, Apple's and Microsoft's. | None |
 | `CLEARED_NOTIFY_SENDMAIL` | Absolute path of the mail program the `email` adapter runs. | The first of `/usr/sbin/sendmail`, `/usr/lib/sendmail`, `/sbin/sendmail`, `/usr/bin/sendmail` that is a file no one else can write |
 | `CLEARED_NOTIFY_DEADLINE_SECONDS` | How long one dispatch may send (1 to 50 seconds). It runs inside the wake's lock: what is still on its way then is given up and sent at the next wake. `wake.sh` stops the dispatcher after 60 seconds in any case. | 30 |
