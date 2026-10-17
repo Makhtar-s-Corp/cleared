@@ -229,11 +229,9 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
   body.has-ph .page { margin-right: var(--ph-w); }
   body.has-ph .tower { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   body.has-ph .col[data-col="awaiting"] .cards { grid-template-columns: 1fr; }
-  body.ph-big .page { margin-right: 0; }
   .bar { flex-wrap: nowrap; padding: 0 28px; }
 }
 @media (min-width: 1500px) { body.has-ph .tower { grid-template-columns: repeat(3, minmax(0, 1fr)); } body.has-ph .col[data-col="awaiting"] .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1500px) { body.ph-big .tower { grid-template-columns: repeat(3, minmax(0, 1fr)); } body.ph-big .col[data-col="awaiting"] .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 /* tablet 768 to 1279: two columns, the porthole over the board. phone under 768: one column, awaiting first. */
 @media (max-width: 1279px) { .tower { grid-template-columns: repeat(2, minmax(0, 1fr)); } .col[data-col="awaiting"] .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .landed-rows { grid-template-columns: 80px 1fr 170px 170px; } }
 @media (max-width: 1023px) { .porthole { width: 100%; } }
@@ -298,15 +296,16 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 }
 .pr-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* the large porthole: over the board, the question and the facts on the left, the before / after pair large on the right */
+/* the large porthole: the whole width under the header, the board hidden behind it; the question and the facts on the left, the before / after pair large on the right */
 @media (min-width: 768px) {
-  .porthole.big { width: min(1120px, calc(100vw - 72px)); box-shadow: -1px 0 0 var(--outline), -32px 0 64px -24px rgba(0,0,0,.28); }
-  .porthole.big .ph-head { padding: 24px 40px 0; } .porthole.big .ph-actions { padding: 16px 40px 22px; }
-  .porthole.big .ph-body { display: grid; grid-template-columns: minmax(300px, 4fr) minmax(0, 7fr); gap: 24px 40px; align-content: start; padding: 20px 40px 32px; }
+  .porthole.big { width: 100%; box-shadow: none; }
+  .porthole.big .ph-head, .porthole.big .ph-actions { padding-inline: max(40px, calc((100% - 1240px) / 2)); }
+  .porthole.big .ph-head { padding-top: 24px; } .porthole.big .ph-actions { padding-bottom: 22px; }
+  .porthole.big .ph-body { display: grid; grid-template-columns: minmax(300px, 4fr) minmax(0, 7fr); gap: 24px 48px; align-content: start; padding: 24px max(40px, calc((100% - 1240px) / 2)) 40px; }
   .porthole.big .ph-body > * { grid-column: 1; }
   .porthole.big .ph-body > .shots, .porthole.big .ph-body > .no-capture { grid-column: 2; grid-row: 1 / span 4; }
   .porthole.big .ph-body > .more { grid-column: 1 / -1; }
-  .porthole.big .device img { height: clamp(300px, 50vh, 560px); } .porthole.big .device.blank span { height: clamp(300px, 50vh, 560px); }
+  .porthole.big .device img, .porthole.big .device.blank span { height: clamp(300px, 52vh, 600px); }
   .porthole.big .shots[data-device="desktop"] .device img { height: auto; }
 }
 @media (max-width: 767px) { .back.expand { display: none; } }

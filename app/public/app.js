@@ -283,6 +283,9 @@ function closeTicket() {
 $('ph-close').addEventListener('click', closeTicket);
 // The porthole opens small, beside the board; this button makes it large (the board stays behind it) and back.
 function setBig(on) {
+  // Behind the large porthole the board is hidden: it leaves the keyboard and the screen reader too.
+  document.querySelector('.page').inert = on;
+  document.querySelector('.top').inert = on && !matchMedia('(min-width: 1280px)').matches;
   $('porthole').classList.toggle('big', on);
   document.body.classList.toggle('ph-big', on);
   $('ph-expand').setAttribute('aria-pressed', String(on));
@@ -411,7 +414,7 @@ function facts(d, c) {
   const team = [who('author') && t('app_wrote', { who: modelName(who('author').model) }), who('reviewer') && t('app_reviewed', { who: modelName(who('reviewer').model) })].filter(Boolean);
   if (team.length) rows.push([t('app_facts_team'), team.join(' · ')]);
   rows.push([t('app_facts_change'), c ? [`${changeParts(c).join(', ')} · `,
-    c.pr.url ? el('a', { href: c.pr.url, rel: 'noreferrer noopener', target: '_blank', textContent: `PR #${c.pr.number}` }) : `PR #${c.pr.number}`,
+    c.pr.url ? el('a', { href: c.pr.url, rel: 'noreferrer noopener', target: '_blank', textContent: t('app_pr_short', { n: c.pr.number }) }) : t('app_pr_short', { n: c.pr.number }),
     c.draft ? el('span', { className: 'tag', textContent: t('app_pr_draft') }) : null] : t('app_no_pr')]);
   const checks = c?.checks ? [el('span', { className: checksClass(c), textContent: t(`app_checks_${c.checks}`) }), d.tests ? ` · ${t('app_srv_tests_green', { n: String(d.tests).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') })}` : null] : [t('app_not_measured')];
   rows.push([t('app_checks'), checks]);

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Cleared Cockpit</title>
+<title data-i="app_page_title"></title>
 <link rel="icon" href="data:,">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -14,26 +14,26 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<a class="skip" href="#tower" data-i="app_skip">Skip to the tower</a>
+<a class="skip" href="#tower" data-i="app_skip"></a>
 <header class="top">
   <div class="bar">
     <div class="brand">
       <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z" class="logo"/></svg>
-      <span class="name">Cleared</span><span class="slash" aria-hidden="true">/</span>
+      <span class="name" data-i="app_brand"></span><span class="slash" aria-hidden="true">/</span>
       <span id="project" class="project"></span>
     </div>
-    <nav class="views" aria-label="Views">
-      <a href="#tower" aria-current="page" data-i="app_nav_tower">Tower</a>
-      <span aria-disabled="true" data-soon="app_nav_landed" title="soon">Landed</span>
-      <span aria-disabled="true" data-soon="app_nav_fuel" title="soon">Fuel</span>
-      <span aria-disabled="true" data-soon="app_nav_rules" title="soon">Rules</span>
+    <nav class="views" data-i-aria="app_nav_label">
+      <a href="#tower" aria-current="page" data-i="app_nav_tower"></a>
+      <span aria-disabled="true" data-i="app_nav_landed" data-soon="app_nav_landed" data-i-title="app_soon"></span>
+      <span aria-disabled="true" data-i="app_nav_fuel" data-soon="app_nav_fuel" data-i-title="app_soon"></span>
+      <span aria-disabled="true" data-i="app_nav_rules" data-soon="app_nav_rules" data-i-title="app_soon"></span>
     </nav>
     <div class="right">
       <div id="mode" class="mode-pill" role="status" hidden></div>
       <div id="health" class="pill" role="status" hidden></div>
       <span id="health-age" class="age"></span>
       <button id="notify" class="plain small" type="button" hidden></button>
-      <button id="theme" class="plain small" type="button" data-i="app_theme_dark">Dark</button>
+      <button id="theme" class="plain small" type="button" data-i="app_theme_dark"></button>
       <span id="avatar" class="avatar" aria-hidden="true" hidden></span>
     </div>
   </div>
@@ -42,12 +42,12 @@
 </header>
 
 <div class="page">
-<section class="hello" aria-label="Today">
+<section class="hello" data-i-aria="app_today_label">
   <h1 id="greeting" class="hello-title"></h1>
   <p id="subline" class="subline"></p>
 </section>
 
-<main id="tower" class="tower" aria-label="Tower"></main>
+<main id="tower" class="tower" data-i-aria="app_tower_label"></main>
 
 <details id="fold" class="fold" hidden>
   <summary id="fold-summary"></summary>
@@ -55,27 +55,27 @@
 </details>
 
 <details id="counters" class="fold counters">
-  <summary data-i="app_counters">Detailed counters</summary>
+  <summary data-i="app_counters"></summary>
   <div id="stats" class="stats" role="list"></div>
 </details>
 
 <section id="landed" class="landed" aria-labelledby="landed-title">
-  <div class="landed-head"><h2 id="landed-title" data-i="app_landed_title">Landed today</h2><span id="landed-summary" class="muted"></span><span class="view-all faint" aria-disabled="true" data-soon="app_view_all">View all</span></div>
+  <div class="landed-head"><h2 id="landed-title" data-i="app_landed_title"></h2><span id="landed-summary" class="muted"></span><span class="view-all faint" aria-disabled="true" data-i="app_view_all" data-soon="app_view_all"></span></div>
   <div id="landed-rows" class="landed-rows" role="table" aria-labelledby="landed-title"></div>
 </section>
 </div>
 
 <aside id="porthole" class="porthole" role="dialog" aria-modal="false" aria-labelledby="ph-title" hidden>
   <header class="ph-head">
-    <button id="ph-close" class="back" type="button" aria-label="Back to the tower"><svg class="i-back" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><svg class="i-x" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    <button id="ph-close" class="back" type="button" data-i-aria="app_back"><svg class="i-back" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><svg class="i-x" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
     <span id="ph-id" class="code faint"></span>
-    <button id="ph-expand" class="back expand" type="button" aria-pressed="false" aria-label="Enlarge the porthole"><svg class="i-grow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg><svg class="i-shrink" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></button>
+    <button id="ph-expand" class="back expand" type="button" aria-pressed="false" data-i-aria="app_ph_expand"><svg class="i-grow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg><svg class="i-shrink" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></button>
     <span id="ph-chip" class="chip"></span>
   </header>
   <div id="ph-body" class="ph-body"></div>
   <div id="ph-actions" class="ph-actions" hidden></div>
 </aside>
-<div id="zoom" class="zoom" role="dialog" aria-modal="true" aria-label="Enlarged capture" hidden><button class="plain" type="button" id="zoom-close" data-i="app_close">Close</button><img alt=""></div>
+<div id="zoom" class="zoom" role="dialog" aria-modal="true" data-i-aria="app_ph_close_zoom" hidden><button class="plain" type="button" id="zoom-close" data-i="app_close"></button><img alt=""></div>
 <script src="/app.js" type="module"></script>
 </body>
 </html>
