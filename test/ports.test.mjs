@@ -152,6 +152,10 @@ function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '' } =
   const project = join(home, 'project');
   for (const made of [tool, bin, join(project, '.cleared')]) mkdirSync(made, { recursive: true });
   execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'serve'), tool]);
+  // The kernel's tables of this machine are not the test's: the copy reads an empty /proc (the fake ss is the listeners).
+  const proc = join(home, 'proc');
+  mkdirSync(proc);
+  writeFileSync(join(tool, 'lib', 'ports.sh'), readFileSync(join(tool, 'lib', 'ports.sh'), 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
   writeFileSync(join(tool, 'dashboard.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(bin, 'tailscale'), '#!/usr/bin/env bash\necho 100.64.0.1\n', { mode: 0o755 });
@@ -207,4 +211,72 @@ test('the installer goes on when its ports are free and prints the tailscale ser
   assert.match(run.stdout, /^ {2}tailscale serve --bg --https=8443 http:\/\/127\.0\.0\.1:8788$/m);
   assert.doesNotMatch(run.stdout + run.stderr, /--https=443|serve --bg 8788/);
   assert.ok(box.written().units.some((name) => name.endsWith('cleared-app.service')));
+});
+
+test('ss that prints nothing means nothing listens only when the kernel\'s tables agree; a line that is no listening socket fails closed', () => {
+  const header = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n';
+  const row = (state) => `   0: 0100007F:2254 00000000:0000 ${state} 00000000:00000000 00:00000000 00000000  1001        0 555 1 0 100 0 0 10 0\n`;
+  // ss says nothing, but this account's table of TCP sockets has a listener (0A): the list cannot be trusted.
+  const liar = ports({ listeners: '' });
+  mkdirSync(join(liar.procDir, 'net'));
+  writeFileSync(join(liar.procDir, 'net', 'tcp'), header + row('0A'));
+  const lied = liar.check();
+  assert.equal(lied.status, 1);
+  assert.match(lied.stderr, /ss printed nothing, but .*net\/tcp has listening sockets/);
+  assert.match(lied.stderr, /could not be read, so no port can be proved free/);
+  // ss says nothing and the tables have no listener (01 is a connection): nothing listens, and that is accepted.
+  const quiet = ports({ listeners: '' });
+  mkdirSync(join(quiet.procDir, 'net'));
+  writeFileSync(join(quiet.procDir, 'net', 'tcp'), header + row('01'));
+  const listed = quiet.call('ports_listeners');
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.equal(listed.stdout, '');
+  assert.equal(quiet.check().status, 0);
+  // A line that is no socket of the list (no port, not a port) is an error, the line is named; nothing is skipped.
+  for (const bad of ['LISTEN 0 4096 garbage 0.0.0.0:*\n', 'LISTEN 0 4096 0.0.0.0:http 0.0.0.0:*\n', 'LISTEN 0\n']) {
+    const run = ports({ listeners: listen('127.0.0.1:8790') + bad }).check();
+    assert.equal(run.status, 1, bad);
+    assert.match(run.stderr, /ss printed a line that is no listening socket: LISTEN/, bad);
+    assert.match(run.stderr, /could not be read, so no port can be proved free/, bad);
+  }
+});
+
+test('a holder whose cgroup names no user unit (a container, WSL) is refused, and the refusal says to stop that unit or pass a free port', () => {
+  const box = ports({ listeners: listen('127.0.0.1:8788', 'users:(("node",pid=4343,fd=21))') });
+  mkdirSync(join(box.procDir, '4343'));
+  writeFileSync(join(box.procDir, '4343', 'cgroup'), '0::/init.scope\n');
+  const run = box.check();
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /held by node \(pid 4343\)/);
+  assert.match(run.stderr, /In a container or WSL, where the cgroup names no user unit of this account/);
+  assert.match(run.stderr, /stop that unit first, or pass a free port/);
+});
+
+test('the warning about a tailscale serve on 80 or 443 names the right remedy for its port, and covers the IPv6 tailnet range as well as 100.64.0.0/10', () => {
+  const { call } = ports();
+  const warned = (listeners) => ports({ listeners }).check({ bind: '100.64.0.1' });
+  let run = warned(listen('100.64.0.1:80'));
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /WARNING: something listens on 100\.64\.0\.1:80, a Tailscale address .*'tailscale serve --http=80 off'/);
+  assert.doesNotMatch(run.stderr, /--https=80/);
+  run = warned(listen('[fd7a:115c:a1e0::1]:443'));
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /WARNING: something listens on \[fd7a:115c:a1e0::1\]:443, .*'tailscale serve --https=443 off'/);
+  run = warned(listen('100.100.1.1:443'));
+  assert.match(run.stderr, /WARNING: something listens on 100\.100\.1\.1:443/, 'the middle of 100.64.0.0/10 too');
+  // Not a tailnet address, and not 80 or 443: no warning.
+  run = warned(listen('192.168.1.5:443') + listen('[2001:db8::1]:80') + listen('[fd7a:115c:a1e0::1]:8443'));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stderr, '');
+  assert.equal(call('ports_tailnet', '[fd7a:115c:a1e0:0:1::1]').status, 0);
+  assert.equal(call('ports_tailnet', '100.128.0.1').status, 1, 'just outside 100.64.0.0/10');
+  assert.equal(call('ports_tailnet', '[fd7a:115c:a1e1::1]').status, 1);
+});
+
+test('the docs say to publish on 8443 or 10000, never on 443, and the installer says the same', () => {
+  const app = readFileSync(join(ORCH_HOME, 'docs', 'app.md'), 'utf8');
+  assert.doesNotMatch(app, /HTTPS port that is not 443/);
+  assert.match(app, /HTTPS port 8443 \(or 10000[^)]*\), never 443/);
+  const run = ports().check({ origin: 'https://box.tail1234.ts.net' });
+  assert.match(run.stderr, /Publish the app on HTTPS port 8443 \(or 10000\), never 443, for example: tailscale serve --bg --https=8443/);
 });

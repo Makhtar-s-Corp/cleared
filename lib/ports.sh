@@ -23,18 +23,35 @@ ports_ss=ss
 # ports_listeners: one line per TCP socket that listens, "address port pid uid
 # inode" ("-" for what is not known). ss names the process only for this
 # account's own sockets; /proc/net/tcp gives the account and the inode, not
-# the process. Returns 1, saying why, when neither can be read.
+# the process. Returns 1, saying why, when neither can be read, or when ss
+# prints a line that is no listening socket. Nothing printed by ss is "nothing
+# listens" only when the kernel's tables show no listener either.
 ports_listeners() {
-  local said
+  local said listed table
   if command -v "$ports_ss" > /dev/null 2>&1; then
     said=$("$ports_ss" -ltnHp 2>&1) || { echo "ss -ltnHp failed: $(printf '%s\n' "$said" | sed -n '1p')" >&2; return 1; }
-    printf '%s\n' "$said" | awk 'NF >= 4 {
-      local_address = $4; i = match(local_address, /:[^:]*$/); if (!i) next
-      address = substr(local_address, 1, i - 1); port = substr(local_address, i + 1)
-      if (port !~ /^[0-9]+$/) next
-      pid = "-"; name = "-"
-      if (match($0, /users:\(\("[^"]*",pid=[0-9]+/)) { users = substr($0, RSTART, RLENGTH); name = users; sub(/^users:\(\("/, "", name); sub(/".*$/, "", name); pid = users; sub(/^.*pid=/, "", pid) }
-      print address, port, pid, "-", "-", name }'
+    if [ -z "$said" ]; then
+      for table in "$ports_proc/net/tcp" "$ports_proc/net/tcp6"; do
+        [ -e "$table" ] || continue
+        [ -r "$table" ] || { echo "ss printed nothing, and $table cannot be read: the listening ports cannot be proved" >&2; return 1; }
+        if awk 'NR > 1 && $4 == "0A" { found = 1; exit } END { exit !found }' "$table"; then
+          echo "ss printed nothing, but $table has listening sockets: the list of listening ports cannot be read" >&2
+          return 1
+        fi
+      done
+      return 0
+    fi
+    listed=$(printf '%s\n' "$said" | awk 'NF == 0 { next }
+      NF < 4 { print "ss printed a line that is no listening socket: " $0 > "/dev/stderr"; exit 2 }
+      {
+        local_address = $4; i = match(local_address, /:[^:]*$/)
+        address = substr(local_address, 1, i - 1); port = substr(local_address, i + 1)
+        if (!i || port !~ /^[0-9]+$/) { print "ss printed a line that is no listening socket: " $0 > "/dev/stderr"; exit 2 }
+        pid = "-"; name = "-"
+        if (match($0, /users:\(\("[^"]*",pid=[0-9]+/)) { users = substr($0, RSTART, RLENGTH); name = users; sub(/^users:\(\("/, "", name); sub(/".*$/, "", name); pid = users; sub(/^.*pid=/, "", pid) }
+        print address, port, pid, "-", "-", name
+      }') || return 1
+    [ -z "$listed" ] || printf '%s\n' "$listed"
     return 0
   fi
   local table read=0
@@ -98,7 +115,7 @@ ports_origin_port() {
 # ports_held <listeners> <what> <port> <own unit> <how to change it>: says who
 # holds the port, unless it is only the unit named.
 ports_held() {
-  local address port pid uid inode name unit who held=0
+  local address port pid uid inode name unit who note held=0
   while read -r address port pid uid inode name; do
     [ "$port" = "$3" ] || continue
     [ "$pid" != - ] || [ "$inode" = - ] || pid=$(ports_pid_of_inode "$inode") || pid=-
@@ -108,10 +125,24 @@ ports_held() {
     if [ "$pid" != - ]; then who="${name/#-/a process} (pid $pid${unit:+, unit $unit})"
     elif [ "$uid" != - ]; then who="a process of $(getent passwd "$uid" | cut -d: -f1 || true) (uid $uid)"
     else who="a process of another account"; fi
-    echo "$2 is $3, and $address:$3 is already held by $who ('sudo ss -ltnp \"sport = :$3\"' names it). $5" >&2
+    # A container or WSL has no user unit in its cgroup: the unit of the running app cannot be recognised then.
+    note=
+    [ "$pid" = - ] || [ -n "$unit" ] || note=" In a container or WSL, where the cgroup names no user unit of this account, the unit that runs the app cannot be recognised: stop that unit first, or pass a free port."
+    echo "$2 is $3, and $address:$3 is already held by $who ('sudo ss -ltnp \"sport = :$3\"' names it). $5.$note" >&2
     held=1
   done <<< "$1"
   [ "$held" = 0 ]
+}
+
+# ports_tailnet <address>: whether an address of this machine is on the tailnet:
+# 100.64.0.0/10, or fd7a:115c:a1e0::/48 (as ss writes it, brackets and scope aside).
+ports_tailnet() {
+  local a=$1
+  a=${a#\[}; a=${a%\]}; a=${a%%%*}; a=${a,,}
+  case "$a" in
+    100.6[4-9].* | 100.[7-9][0-9].* | 100.1[01][0-9].* | 100.12[0-7].* | fd7a:115c:a1e0:*) return 0 ;;
+  esac
+  return 1
 }
 
 # ports_install_check <dashboard port> <app port> <[app] port> <[app] public_origin> <link base> <Tailscale address>:
@@ -132,7 +163,7 @@ ports_install_check() {
     if ! origin_port=$(ports_origin_port "$4"); then
       echo "[app] public_origin ($4) is not an http(s) address" >&2; failed=1
     elif ! ports_number "the port of [app] public_origin ($4)" "$origin_port"; then
-      echo "  Publish the app on another HTTPS port, for example: tailscale serve --bg --https=8443 http://127.0.0.1:$2, and set [app] public_origin = https://<machine>.<tailnet>.ts.net:8443 (docs/app.md)" >&2; failed=1
+      echo "  Publish the app on HTTPS port 8443 (or 10000), never 443, for example: tailscale serve --bg --https=8443 http://127.0.0.1:$2, and set [app] public_origin = https://<machine>.<tailnet>.ts.net:8443 (docs/app.md)" >&2; failed=1
     elif [ "${4%%://*}" = https ] && { [ "$origin_port" = "$1" ] || [ "$origin_port" = "$2" ]; }; then
       # (an http origin is the app itself, on its own port: http://localhost:8788)
       echo "the port of [app] public_origin ($origin_port) is also the port of the dashboard or the app: tailscale serve publishes the app on a port of its own, for example 8443" >&2; failed=1
@@ -147,8 +178,10 @@ ports_install_check() {
   # Not this installation's to undo, but the very state of 2026-10-17: said.
   while read -r address port pid uid inode name; do
     case "$port" in 80 | 443) ;; *) continue ;; esac
-    [ -n "$6" ] && [ "${address%%%*}" = "$6" ] || continue
-    echo "WARNING: something listens on $address:$port, the Tailscale address of this machine (tailscale serve on its default port?). It stops a public proxy from binding 0.0.0.0:$port after a reboot: see 'tailscale serve status', and 'tailscale serve --https=$port off'." >&2
+    { [ "${address%%%*}" = "$6" ] || ports_tailnet "$address"; } || continue
+    remedy="tailscale serve --https=$port off"
+    [ "$port" != 80 ] || remedy="tailscale serve --http=80 off"
+    echo "WARNING: something listens on $address:$port, a Tailscale address of this machine (tailscale serve on its default port?). It stops a public proxy from binding 0.0.0.0:$port after a reboot: see 'tailscale serve status', and '$remedy'." >&2
   done <<< "$listeners"
   [ "$failed" = 0 ]
 }

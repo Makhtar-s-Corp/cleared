@@ -304,8 +304,14 @@ test('the checkout the dispatcher runs from follows the base by itself: fast-for
   assert.equal(installed(), 0, 'the services did not change: not installed again');
   // What runs the services changed: they are installed again.
   live('ops/cleared/serve/unit.service', '[Unit]\n', 'feat: a unit');
-  assert.equal(update().status, 0);
+  // The installer refuses (its ports): its stdout stays quiet, its first lines reach the ledger, the copy still moves.
+  live('ops/cleared/serve/install.sh', `#!/usr/bin/env bash\necho installed >> "${join(home, 'installed')}"\necho "stdout is not said"\necho "the app port (CLEARED_APP_PORT) is 8788, and 0.0.0.0:8788 is already held" >&2\necho "a port check failed (above)" >&2\necho "third line" >&2\nexit 1\n`, 'feat: the installer refuses its ports');
+  const moved = update();
+  assert.equal(moved.status, 0, moved.stderr);
   assert.equal(installed(), 1);
+  const said = (() => { const db = openLedger(join(state, 'ledger.db')); const row = db.prepare("select detail from events where kind = 'self_updated' order by rowid desc limit 1").get(); db.close(); return row.detail; })();
+  assert.match(said, /but its services could not be installed again \(serve\/install\.sh\): to be run by hand\. It said: the app port \(CLEARED_APP_PORT\) is 8788, and 0\.0\.0\.0:8788 is already held a port check failed \(above\)$/);
+  assert.doesNotMatch(said, /stdout is not said|third line/);
   // A version whose scripts cannot even be read by the shell is not taken: this copy stays where it runs, said once.
   const good = head();
   const broken = live('ops/cleared/step.sh', '#!/usr/bin/env bash\nif then fi (\n', 'feat: broken');
@@ -445,6 +451,10 @@ test('the installer of the services names one project for the machine and never 
   const bin = join(home, 'bin');
   for (const made of [tool, bin]) mkdirSync(made, { recursive: true });
   execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'serve'), tool]);
+  // The kernel's tables of the host are not the test's: the copy reads an empty /proc (the fake ss below is the listeners).
+  const proc = join(home, 'proc');
+  mkdirSync(proc);
+  writeFileSync(join(tool, 'lib', 'ports.sh'), readFileSync(join(tool, 'lib', 'ports.sh'), 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
   writeFileSync(join(tool, 'agents.conf'), '[lanes]\nbase = main\n');
   writeFileSync(join(tool, 'dashboard.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });

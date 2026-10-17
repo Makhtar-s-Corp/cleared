@@ -72,7 +72,13 @@ rm -f "$mark"
 ledger init > /dev/null
 services=
 if [ -n "$(git -C "$top" diff --name-only "$old" "$new" -- "$tools/serve")" ] && [ -x "$ORCH_HOME/serve/install.sh" ]; then
-  if CLEARED_INSTALL_FROM_WAKE=1 "$ORCH_HOME/serve/install.sh" > /dev/null 2>&1; then services=", its services installed again"; else services=", but its services could not be installed again (serve/install.sh): to be run by hand"; fi
+  # Its stdout stays quiet; its first lines (the reason it refused, if it did) go to the message.
+  if reason=$(CLEARED_INSTALL_FROM_WAKE=1 "$ORCH_HOME/serve/install.sh" 2>&1 > /dev/null); then
+    services=", its services installed again"
+  else
+    reason=$(printf '%s\n' "$reason" | sed -n '1,2p' | paste -sd' ' -)
+    services=", but its services could not be installed again (serve/install.sh): to be run by hand${reason:+. It said: $reason}"
+  fi
 fi
 ledger event --kind self_updated --detail "the checkout the dispatcher runs from went from ${old:0:8} to ${new:0:8} of $branch$services"
 echo "updated: ${old:0:8} -> ${new:0:8}"

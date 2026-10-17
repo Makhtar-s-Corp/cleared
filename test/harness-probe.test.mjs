@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
-import { scratch } from './support.mjs';
+import { scratch, toolCopy } from './support.mjs';
 
 // A fake CLI that answers by the name of the model it is asked: "answers-*" says OK, "wrong-*" says something
 // else, "slow-*" never answers, "leak-*" fails with a key in its message, any other is unknown to it. Each call appends its arguments (one JSON array a
@@ -330,7 +330,8 @@ function installer(conf, { security = '[security]\nagent_user =\n' } = {}) {
   writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${join(box.dir, 'systemctl-calls')}'\ncase "$*" in *'is-enabled '*|*'is-active '*) exit 1;; *'show '*) echo inactive;; esac\nexit 0\n`, { mode: 0o755 });
   const { CLEARED_CONF, CLEARED_STATE_DIR, ...env } = box.env;
-  const install = (extra = {}) => spawnSync(join(ORCH_HOME, 'serve', 'install.sh'), [], { cwd: box.dir, encoding: 'utf8', timeout: 120000,
+  const tool = toolCopy(box.dir);
+  const install = (extra = {}) => spawnSync(join(tool, 'serve', 'install.sh'), [], { cwd: box.dir, encoding: 'utf8', timeout: 120000,
     env: { ...env, ...extra, PATH: `${bin}:${env.PATH}`, CLEARED_REPO: project, XDG_STATE_HOME: join(box.dir, 'state-home'), ORCH_GUARD_REF: 'HEAD' } });
   const units = join(box.dir, '.config', 'systemd', 'user');
   return { box, install, systemctl: () => box.read('systemctl-calls'), units: () => (existsSync(units) ? readdirSync(units) : []) };

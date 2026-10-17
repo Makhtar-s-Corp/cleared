@@ -30,7 +30,7 @@ CLI-reported cost is used when available. Otherwise `[prices]` and `[currency]` 
 
 ## Decisions
 
-- **2026-10-17: the installation never publishes on ports 80 and 443, nor on a port already in use, and checks it before writing anything** (issue #112). 80 and 443 belong to the machine's public reverse proxy: `tailscale serve` on its default port held 443 on the Tailscale address, and after a reboot the proxy could not bind `0.0.0.0:443`, which kept production offline for six hours.
+- **2026-10-17: the installation never publishes on ports 80 and 443, nor on a port already in use, and checks it before writing anything** (issue #112). 80 and 443 belong to the machine's public reverse proxy: `tailscale serve` on its default port held 443 on the Tailscale address, and after a reboot the proxy could not bind `0.0.0.0:443`, which kept production offline for six hours. In a container or WSL, where the cgroup has no `user@UID.service`, the installer cannot recognise the unit of the running app as its own: it refuses that port, so stop the unit first or pass a free port.
   `serve/install.sh` refuses those ports (also as the port of `[app] public_origin` or of the `tailscale serve` command it prints) and any port another process listens on, before its first write, and stops when it cannot read the listening ports; no setting turns this off.
 
 ## Commands in daily use
