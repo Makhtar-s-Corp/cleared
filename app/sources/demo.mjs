@@ -48,6 +48,8 @@ export function demoSource(language = 'en') {
       harness: 'codex', model: 'gpt-6-sol', flightMinutes: 42, quotaShare: 0.6, statusLine: L('writing the form and its tests', 'écriture du formulaire et de ses tests'), screen: true },
     { ...base, id: 'EX-38', title: L('Previous months on an envelope: three fixes', 'Mois précédents sur une enveloppe : trois corrections'), column: 'progress', queued: true, kind: 'queued',
       reason: M('app_srv_queued'), harness: 'codex', model: 'gpt-6-luna' },
+    // In progress in the tracker, but no team of Cleared was started on it: listed apart, not a team at work.
+    { ...base, id: 'EX-30', title: L('Weekly summary by email', 'Résumé hebdomadaire par e-mail'), column: 'progress', kind: 'tracker', reason: M('app_srv_no_team'), statusLine: M('app_srv_no_team'), quotaShare: null },
     // An older ticket that sits in the tracker's approval status without any request from Cleared: shown apart, nothing to clear.
     { ...base, id: 'EX-29', title: L('Export the year as a spreadsheet', 'Exporter l’année dans un tableur'), column: 'awaiting', kind: 'tracker',
       reason: M('app_srv_tracker_only'), harness: 'claude', model: 'claude-sonnet-5-5', flightMinutes: 51, quotaShare: null },
@@ -63,6 +65,7 @@ export function demoSource(language = 'en') {
   tickets[2].questions = [{ text: L('Should the Upcoming list also get its own heading, “Comings and goings”, above it? It has none today.', 'La liste « À venir » doit-elle aussi avoir son propre titre, « Départs et arrivées », au-dessus ? Elle n’en a pas aujourd’hui.'),
     recommendation: L('I recommend no: the page name, “Upcoming”, already says it, and a second heading would repeat it on a phone screen.', 'Je recommande non : le nom de la page, « À venir », le dit déjà, et un second titre le répéterait sur un écran de téléphone.'), options: [] }];
   tickets[7].ref = 'EX-29';
+  for (const t of tickets) { t.trackerUrl = `https://tracker.example/issue/${t.id}`; }
   const squad = (...rows) => rows.map(([role, harness, model]) => ({ role, harness, model }));
   const report = (minutesAgo, done, remaining = []) => ({ at: iso(minutesAgo), done, remaining, other: [] });
   const details = {
@@ -92,6 +95,7 @@ export function demoSource(language = 'en') {
       show: { kind: 'screen', before: [], after: [], missing: 'working', example: null }, blackBox: [[50, 'opened', L('Opened by the engine', 'Ouvert par le moteur'), 'progress'], [42, 'run', M('app_srv_team_started', { model: 'gpt-6-sol' }), 'progress']] },
     'EX-38': { where: [], report: null, squad: [], show: { kind: 'code', example: null, tests: [], touches: '' },
       blackBox: [[15, 'opened', L('Opened by the engine', 'Ouvert par le moteur'), 'progress'], [14, 'queued', M('app_srv_ev_lane_limit_reached'), 'awaiting']] },
+    'EX-30': { where: [], report: null, squad: [], show: { kind: 'code', example: null, tests: [], touches: '' }, blackBox: [[60 * 5, 'opened', L('Opened by the engine', 'Ouvert par le moteur'), 'progress']] },
     'EX-29': { where: [], report: null, squad: squad(['author', 'claude', 'claude-sonnet-5-5']), show: { kind: 'code', example: null, tests: [], touches: '' },
       blackBox: [[60 * 26, 'opened', L('Opened by the engine', 'Ouvert par le moteur'), 'progress']] },
   };
@@ -126,7 +130,7 @@ export function demoSource(language = 'en') {
       if (!ticket) return null;
       const d = details[id];
       return { id, title: ticket.title, pr: ticket.pr, column: ticket.column, kind: ticket.kind, waiting: ticket.waiting, since: ticket.since, flightMinutes: ticket.flightMinutes, quotaShare: ticket.quotaShare, tests: ticket.tests,
-        questions: ticket.questions, change: ticket.change, report: d.report, where: d.where, squad: d.squad, show: d.show,
+        questions: ticket.questions, change: ticket.change, report: d.report, where: d.where, squad: d.squad, show: d.show, trackerUrl: ticket.trackerUrl,
         blackBox: d.blackBox.map(([ago, kind, text, stage]) => ({ at: iso(ago), kind, text, stage, raw: { kind, ticket: id, at: iso(ago) } })) };
     },
     async media(id) { return media.get(id) ?? null; },

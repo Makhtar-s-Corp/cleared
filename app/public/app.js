@@ -93,37 +93,46 @@ function renderGreeting(s) {
   const one = n === 1 ? 'one' : 'other';
   $('greeting').textContent = n === 0 ? t('app_wait_none')
     : t(`app_wait_${allReady ? 'ready' : 'need'}_${one}_tone`, { n: word(n) }) + t(`app_wait_${allReady ? 'ready' : 'need'}_key_${one}`);
-  const parts = s.fuel.filter((f) => f.measured).map((f) => t('app_sub_fuel', { name: cap(f.adapter), n: pct(f.left) }));
-  const teams = ['progress', 'checks', 'review'].map((c) => [c, s.tickets.filter((x) => x.kind === 'normal' && x.column === c).length]).filter(([, count]) => count);
-  parts.push(...(teams.length ? teams.map(([c, count]) => plural(`app_sub_${c}`, count)) : [t('app_sub_idle')]));
-  const landed = todayLanded(s).length;
-  parts.push(landed ? plural('app_sub_landed', landed) : t('app_sub_landed_none'));
-  if (s.mode?.short) parts.push(s.mode.short);
-  $('subline').textContent = parts.join(' · ');
+  const tag = $('mode-tag');
+  tag.hidden = !s.mode?.short;
+  tag.textContent = s.mode?.short ?? '';
+  tag.title = s.mode?.label ?? '';
 }
 
 const todayLanded = (s) => {
   const start = new Date(); start.setHours(0, 0, 0, 0);
   return (s.landed ?? []).filter((r) => Date.parse(r.at) >= start.getTime());
 };
-function renderStats(s) {
+// The instruments under the welcome sentence: fuel left per subscription, the teams along the stages, and the day so far.
+const STAGES = [['progress', 'app_col_progress'], ['checks', 'app_col_checks'], ['review', 'app_col_review']];
+function renderGauges(s) {
+  const gauge = (title, ...kids) => el('div', { className: 'gauge', role: 'listitem' }, el('div', { className: 'k', textContent: title }), ...kids);
+  const fuel = gauge(t('app_gauge_fuel'), ...s.fuel.map((f) => {
+    const bar = el('span', { className: `h-${harnessClass(f.adapter)}` });
+    bar.style.width = f.measured ? `${f.left}%` : '0';
+    return el('div', { className: 'fuelrow' }, el('span', { className: 'n', textContent: f.adapter }),
+      el('span', { className: 'bar6', role: 'img', ariaLabel: f.measured ? `${f.adapter} ${f.left}%` : `${f.adapter} ${t('app_not_measured')}` }, bar),
+      f.measured ? num(pct(f.left), 'p') : el('span', { className: 'p faint', textContent: t('app_not_measured') }));
+  }));
+  // The teams: one segment per stage, as wide as the number of teams in it, and its count under it. The last stage is the human's.
+  const counts = [...STAGES.map(([c, label]) => [c, label, s.tickets.filter((x) => x.kind === 'normal' && x.column === c).length]),
+    ['awaiting', 'app_col_awaiting', s.tickets.filter((x) => x.waiting).length]];
+  const pipe = el('div', { className: 'pipe', role: 'img', ariaLabel: counts.map(([, label, n]) => `${t(label)} ${n}`).join(', ') },
+    ...counts.map(([c, , n]) => { const seg = el('span', { className: n ? `d-${c}` : '' }); seg.style.flexGrow = String(n || .25); return seg; }));
+  const legend = el('div', { className: 'legend' }, ...counts.map(([c, label, n]) => el('div', { className: `leg l-${c}` }, el('i', { className: `d-${c}` }), num(String(n), 'big'), el('span', { textContent: t(label) }))));
+  const teams = gauge(t('app_gauge_teams'), pipe, legend);
+  // The day: what landed, how many went through first time, and the median time from Todo to Done by lane.
   const landed = todayLanded(s);
-  const stat = (k, v, extra) => el('div', { className: 'stat', role: 'listitem' }, el('div', { className: 'k', textContent: k }), el('div', { className: 'v' }, v, extra ?? null));
-  const fuel = el('div', { className: 'stat fuel', role: 'listitem' }, el('div', { className: 'k', textContent: t('app_stat_fuel') }),
-    ...s.fuel.map((f) => {
-      const bar = el('span', { className: `h-${harnessClass(f.adapter)}` });
-      bar.style.width = f.measured ? `${f.left}%` : '0';
-      return el('div', { className: 'fuelrow' }, el('span', { className: 'n', textContent: f.adapter }),
-        el('span', { className: 'bar6', role: 'img', ariaLabel: f.measured ? `${f.adapter} ${f.left}%` : `${f.adapter} ${t('app_not_measured')}` }, bar),
-        f.measured ? num(pct(f.left), 'p') : el('span', { className: 'p faint', textContent: t('app_not_measured') }));
-    }));
-  // One line: the median time from Todo to Done over the last seven days, by lane.
+  const clean = s.stats?.firstTimeClean;
+  const cleanBar = el('span', { className: 'success-fill' });
+  cleanBar.style.width = clean == null ? '0' : `${clean}%`;
   const lanes = s.stats?.lanes;
   const median = (m) => (Number.isFinite(m) ? dur(Math.round(m)) : '–');
-  const medianLine = lanes ? el('div', { className: 'stat median', role: 'listitem' }, el('div', { className: 'k', textContent: t('app_stat_median') }),
-    el('div', { className: 'lanes' }, `${t('app_lane_fast')} `, num(median(lanes.fast?.minutes)), ` · ${t('app_lane_full')} `, num(median(lanes.full?.minutes)))) : null;
-  $('stats').replaceChildren(stat(t('app_stat_flight'), String(s.stats?.inFlight ?? 0)), stat(t('app_stat_landed'), String(landed.length)),
-    stat(t('app_stat_clean'), s.stats?.firstTimeClean == null ? '–' : String(s.stats.firstTimeClean), s.stats?.firstTimeClean == null ? null : el('small', { textContent: '%' })), ...(medianLine ? [medianLine] : []), fuel);
+  const today = gauge(t('app_gauge_today'),
+    el('div', { className: 'today-row' }, num(String(landed.length), 'big'), el('span', { textContent: t('app_stat_landed') })),
+    el('div', { className: 'fuelrow clean' }, el('span', { className: 'n', textContent: t('app_stat_clean') }), el('span', { className: 'bar6', role: 'img', ariaLabel: clean == null ? t('app_not_measured') : `${t('app_stat_clean')} ${clean}%` }, cleanBar), num(clean == null ? '–' : pct(clean), 'p')),
+    lanes ? el('div', { className: 'lanes' }, `${t('app_stat_median')}: ${t('app_lane_fast')} `, num(median(lanes.fast?.minutes)), ` · ${t('app_lane_full')} `, num(median(lanes.full?.minutes))) : null);
+  $('gauges').replaceChildren(fuel, teams, today);
 }
 
 // --- tower -------------------------------------------------------------------
@@ -231,8 +240,8 @@ function render(s) {
   const top = JSON.stringify([s.projects, s.fuel, s.health, s.mode, s.owner, s.stats, s.tickets.map((x) => [x.waiting, x.kind, x.column])]);
   const tower = JSON.stringify([s.tickets, s.generatedAt]);
   const landed = JSON.stringify(s.landed);
-  if (top !== shown.top) { shown.top = top; renderHeader(s); renderGreeting(s); renderStats(s); }
-  if (landed !== shown.landed) { shown.landed = landed; renderLanded(s); renderGreeting(s); renderStats(s); }
+  if (top !== shown.top) { shown.top = top; renderHeader(s); renderGreeting(s); renderGauges(s); }
+  if (landed !== shown.landed) { shown.landed = landed; renderLanded(s); renderGreeting(s); renderGauges(s); }
   if (tower !== shown.tower) {
     shown.tower = tower;
     const focused = document.activeElement?.closest?.('.card')?.dataset.id;
@@ -249,6 +258,18 @@ function setCovered(on) {
   const covers = matchMedia('(max-width: 767px)').matches; // only where the panel is a full page
   for (const sel of ['.top', '.page']) document.querySelector(sel).inert = on && covers;
 }
+// A link to the ticket in its tracker, named after the site of the address (an address on a tracker's site reads "Open in <Tracker>").
+function trackerLink(address) {
+  const link = $('ph-tracker');
+  let url = null;
+  try { url = typeof address === 'string' ? new URL(address) : null; } catch { url = null; }
+  if (url?.protocol !== 'https:') url = null;
+  link.hidden = !url;
+  if (!url) return;
+  link.href = url.href;
+  const site = url.hostname.split('.').at(-2) ?? '';
+  link.textContent = t('app_open_in', { tracker: site ? cap(site) : t('app_open_tracker_generic') });
+}
 async function openTicket(id) {
   const ph = $('porthole');
   state.opener = document.activeElement;
@@ -257,6 +278,7 @@ async function openTicket(id) {
   document.body.classList.add('has-ph');
   setCovered(true);
   $('ph-id').textContent = id;
+  $('ph-tracker').hidden = true;
   $('ph-chip').textContent = '';
   $('ph-body').replaceChildren(el('p', { textContent: '…' }));
   try {
@@ -267,6 +289,7 @@ async function openTicket(id) {
     const chip = $('ph-chip');
     chip.className = `chip${d.kind === 'question' || d.kind === 'ready' ? ' wait' : ' stage'}`;
     chip.textContent = d.kind === 'ready' ? t('app_card_ready') : d.kind === 'question' ? t('app_chip_question') : d.kind === 'tracker' ? t('app_tracker_hint') : t(`app_col_${d.column}`);
+    trackerLink(d.trackerUrl);
     $('ph-body').replaceChildren(...porthole(d));
     await actions.load();
     if (state.open !== id) return;
@@ -403,7 +426,7 @@ function ask(d) {
     const what = impact(d);
     return el('section', { className: 'ph-ask' }, el('p', { className: 'ask-q', textContent: t('app_ask_ready') }), el('p', { className: `ask-a${what ? '' : ' faint'}`, textContent: what ?? t('app_ask_none') }));
   }
-  if (d.kind === 'tracker') return el('p', { className: 'box-card tracker-note', textContent: t('app_tracker_explain') });
+  if (d.kind === 'tracker') return el('p', { className: 'box-card tracker-note', textContent: t(d.column === 'awaiting' ? 'app_tracker_explain' : 'app_tracker_no_team_explain') });
   return null;
 }
 

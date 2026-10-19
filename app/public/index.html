@@ -44,19 +44,16 @@
 <div class="page">
 <section class="hello" data-i-aria="app_today_label">
   <h1 id="greeting" class="hello-title"></h1>
-  <p id="subline" class="subline"></p>
+  <span id="mode-tag" class="mode-tag"></span>
 </section>
+
+<section id="gauges" class="gauges" role="list" data-i-aria="app_gauges_label"></section>
 
 <main id="tower" class="tower" data-i-aria="app_tower_label"></main>
 
 <details id="fold" class="fold" hidden>
   <summary id="fold-summary"></summary>
   <ul id="fold-list" class="cards"></ul>
-</details>
-
-<details id="counters" class="fold counters">
-  <summary data-i="app_counters"></summary>
-  <div id="stats" class="stats" role="list"></div>
 </details>
 
 <section id="landed" class="landed" aria-labelledby="landed-title">
@@ -69,6 +66,7 @@
   <header class="ph-head">
     <button id="ph-close" class="back" type="button" data-i-aria="app_back"><svg class="i-back" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><svg class="i-x" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
     <span id="ph-id" class="code faint"></span>
+    <a id="ph-tracker" class="tracker-link" href="#" target="_blank" rel="noreferrer noopener" hidden></a>
     <button id="ph-expand" class="back expand" type="button" aria-pressed="false" data-i-aria="app_ph_expand"><svg class="i-grow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg><svg class="i-shrink" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></button>
     <span id="ph-chip" class="chip"></span>
   </header>

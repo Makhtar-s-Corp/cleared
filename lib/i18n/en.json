@@ -467,7 +467,6 @@
   "app_empty_awaiting": "Nothing waits for you. An approval or a question will show up here.",
   "app_fold_one": "{n} tracker ticket without a Cleared team",
   "app_fold_other": "{n} tracker tickets without a Cleared team",
-  "app_counters": "Detailed counters",
   "app_card_ready": "To approve",
   "app_card_since": "for {d}",
   "app_ask_ready": "Allow this change to go live?",
@@ -507,5 +506,13 @@
   "app_nav_label": "Views",
   "app_today_label": "Today",
   "app_tower_label": "Tower",
-  "app_pr_short": "PR #{n}"
+  "app_pr_short": "PR #{n}",
+  "app_srv_no_team": "No Cleared team on this ticket yet",
+  "app_tracker_no_team_explain": "This ticket is in the tracker, but no Cleared team was started on it. It moves into the columns as soon as a team works on it.",
+  "app_open_in": "Open in {tracker}",
+  "app_open_tracker_generic": "the tracker",
+  "app_gauges_label": "Instruments",
+  "app_gauge_teams": "Teams by stage",
+  "app_gauge_today": "Today",
+  "app_gauge_fuel": "Fuel left"
 }

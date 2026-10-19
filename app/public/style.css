@@ -78,7 +78,7 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 /* welcome sentence, then one grey line: fuel left and what is under way */
 .hello { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 36px 32px 0; }
 .hello-title { font-size: 34px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; text-wrap: balance; }
-.subline { color: var(--text-muted); font-size: 14px; text-wrap: balance; }
+.mode-tag { color: var(--text-muted); font-size: 13px; }
 
 /* tower */
 .tower { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 20px; align-items: start; padding: 28px 32px 0; }
@@ -135,14 +135,8 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
 .fold > summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 200ms var(--ease); }
 .fold[open] > summary::before { transform: rotate(45deg); }
 .fold > .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 8px; }
-.stats { display: flex; flex-wrap: wrap; margin-top: 8px; background: var(--surface); border-radius: 12px; box-shadow: var(--e-card); }
-.stat { padding: 16px 22px; min-width: 110px; } .stat + .stat { box-shadow: inset 1px 0 0 var(--hairline); }
-.stat .k { font-size: 13px; color: var(--text-muted); } .stat .v { font-size: 26px; font-weight: 600; letter-spacing: -.03em; color: var(--text); }
-.stat .v small { font-size: 16px; color: var(--text-faint); font-weight: 500; }
-.stat.fuel { min-width: 200px; } .stat.fuel .k { margin-bottom: 8px; }
-.stat.median .lanes { font-size: 14px; margin-top: 8px; color: var(--text-muted); } .stat.median .num { color: var(--text); font-weight: 600; }
-.fuelrow { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; color: var(--text); } .fuelrow .n { width: 52px; color: var(--text-secondary); text-transform: capitalize; }
-.fuelrow .bar6 { flex: 1; height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; } .fuelrow .bar6 span { display: block; height: 100%; width: 0; }
+.fuelrow { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-top: 10px; color: var(--text); } .fuelrow .n { width: 64px; color: var(--text-secondary); text-transform: capitalize; }
+.fuelrow .bar6 { flex: 1; height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; } .fuelrow .bar6 span { display: block; height: 100%; width: 0; }
 .fuelrow .p { min-width: 38px; text-align: right; }
 
 /* landed today */
@@ -241,7 +235,6 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
   .col[data-col="awaiting"] .cards { grid-template-columns: 1fr; } .col[data-col="awaiting"] .card h3 { font-size: 17px; } .landed { margin: 32px 16px; } .landed-rows { grid-template-columns: 56px 1fr; } .landed-rows .model, .landed-rows .out { grid-column: 2; padding: 0 12px 0 0; box-shadow: none; } .landed-rows .time, .landed-rows .what { box-shadow: none !important; padding-bottom: 0; }
   .landed-rows .out { padding-bottom: 14px; box-shadow: 0 1px 0 var(--hairline); } .landed-rows .time { padding-left: 16px; }
   .fold { margin: 20px 16px 0; } .fold > .cards { grid-template-columns: 1fr; }
-  .stats .stat { flex: 1 1 40%; min-width: 0; padding: 14px 16px; } .stats .stat.fuel { flex-basis: 100%; box-shadow: inset 0 1px 0 var(--hairline); } .stat + .stat { box-shadow: none; } .stats { width: 100%; }
   .conn, .notify-hint { padding: 8px 16px; } .views { order: 5; width: 100%; overflow-x: auto; margin-left: 0; } .right { gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .mode-pill { order: 6; flex: 1 1 100%; margin-bottom: 8px; line-height: 1.35; } .right { display: contents; } .age { margin-left: auto; order: 1; } #notify, #theme { order: 2; } .avatar { order: 3; }
   /* the porthole is a page of its own: a white header, the work on the canvas, the buttons fixed below */
@@ -309,3 +302,24 @@ a { color: var(--link); } button { font: inherit; color: inherit; }
   .porthole.big .shots[data-device="desktop"] .device img { height: auto; }
 }
 @media (max-width: 767px) { .back.expand { display: none; } }
+
+.ph-head .tracker-link { font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; min-height: 32px; padding: 0 4px; } .ph-head .tracker-link:hover { text-decoration: underline; }
+
+/* the instruments: fuel left, the teams along the stages, the day so far */
+.gauges { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); margin: 24px 32px 0; background: var(--surface); border-radius: 12px; box-shadow: var(--e-card); }
+.gauge { padding: 18px 24px 20px; min-width: 0; } .gauge + .gauge { box-shadow: inset 1px 0 0 var(--hairline); }
+.gauge .k { font-size: 13px; color: var(--text-muted); }
+.gauge .fuelrow:first-of-type { margin-top: 14px; }
+.fuelrow.clean { flex-wrap: wrap; row-gap: 6px; } .fuelrow.clean .n { flex: 0 0 100%; width: auto; text-transform: none; color: var(--text-muted); }
+.success-fill { background: var(--success); }
+.today-row { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; color: var(--text-secondary); }
+.num.big { font-size: 26px; font-weight: 600; letter-spacing: -.03em; line-height: 1; color: var(--text); }
+.gauge .lanes { margin-top: 12px; font-size: 12px; color: var(--text-muted); } .gauge .lanes .num { color: var(--text); font-weight: 500; }
+.pipe { display: flex; gap: 3px; height: 10px; margin-top: 16px; } .pipe span { flex: 1 1 0; min-width: 6px; border-radius: 3px; background: var(--hairline); }
+.legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.leg { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; font-size: 12px; color: var(--text-muted); min-width: 0; }
+.leg i { width: 8px; height: 8px; border-radius: 50%; align-self: center; grid-row: 1; } .leg .num.big { grid-column: 2; } .leg > span:last-child { grid-column: 1 / -1; margin-top: 4px; overflow-wrap: anywhere; }
+.pipe .d-progress, .legend .d-progress { background: var(--stage-progress); } .pipe .d-checks, .legend .d-checks { background: var(--stage-checks); } .pipe .d-review, .legend .d-review { background: var(--stage-review); }
+.pipe .d-awaiting, .legend .d-awaiting { background: var(--awaiting); }
+@media (max-width: 1023px) { .gauges { grid-template-columns: 1fr 1fr; } .gauge:nth-child(3) { grid-column: 1 / -1; box-shadow: inset 0 1px 0 var(--hairline); } }
+@media (max-width: 767px) { .gauges { grid-template-columns: 1fr; margin: 20px 16px 0; } .gauge + .gauge, .gauge:nth-child(3) { box-shadow: inset 0 1px 0 var(--hairline); } .gauge { padding: 16px 18px 18px; } }

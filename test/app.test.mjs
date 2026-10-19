@@ -536,7 +536,7 @@ test('English is the default and French a complete translation: the pages and th
       assert.ok(html.includes(catalogOf(language).app_login_msg.replace(/&/g, '&amp;')), `${language}: the sign-in text`);
       assert.ok(!html.includes(catalogOf(other).app_login_msg), `${language}: no ${other} text`);
       const page = await (await s.call('/', { headers: auth })).text();
-      for (const key of ['app_skip', 'app_nav_tower', 'app_counters', 'app_landed_title']) assert.ok(page.includes(catalogOf(language)[key]), `${language}: ${key}`);
+      for (const key of ['app_skip', 'app_nav_tower', 'app_gauges_label', 'app_landed_title']) assert.ok(page.includes(catalogOf(language)[key]), `${language}: ${key}`);
       assert.ok(!/\sdata-i="[^"]*"[^>]*><\//.test(page), 'every marked element is filled by the server');
     } finally { await s.close(); }
   }
