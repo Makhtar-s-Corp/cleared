@@ -1,6 +1,7 @@
 // What the owner sees of a waiting item: the whole question and the team's
 // recommendation, the team's report (never its handover), what changed, the
 // captures or why there are none, and only the numbers that mean something.
+import { message } from '../lib/i18n.mjs';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -356,3 +357,32 @@ test('the pull request opens with the team report to the user, without a path of
 function spawnLane(lane, env) {
   return spawnSync(join(lane.box.home, 'push-lane.sh'), [lane.path], { env: { ...lane.box.env, ...env }, encoding: 'utf8' });
 }
+
+test('a ticket in progress that no run of Cleared works on is not a team at work: it is listed apart as tracker only', async () => {
+  const noTeam = await project();
+  try {
+    const snap = await noTeam.collect().snapshot();
+    assert.deepEqual([snap.tickets[0].kind, snap.tickets[0].waiting, snap.tickets[0].approval], ['tracker', false, null]);
+    assert.equal(snap.tickets[0].reason, message('app_srv_no_team', 'fr'));
+    assert.notEqual(snap.tickets[0].statusLine, message('app_srv_line_progress', 'fr'), 'it never says that a team works');
+  } finally { noTeam.close(); }
+  const team = await project();
+  try {
+    team.run('r1-dev-a1', { ended: null });
+    assert.equal((await team.collect().snapshot()).tickets[0].kind, 'normal', 'a run of Cleared makes it a team');
+  } finally { team.close(); }
+});
+
+test('the ticket carries the address it has in its tracker, an https address only', async () => {
+  const p = await project();
+  try {
+    p.ticket.url = 'https://tracker.example/issue/EX-7';
+    const snap = await p.collect().snapshot();
+    assert.equal(snap.tickets[0].trackerUrl, 'https://tracker.example/issue/EX-7');
+    assert.equal((await p.collect().snapshot()).details['EX-7'].trackerUrl, 'https://tracker.example/issue/EX-7');
+    for (const bad of ['local://ticket/EX-7', 'javascript:alert(1)', 'http://tracker.example/x', 'https://user:pw@tracker.example/x', undefined]) {
+      p.ticket.url = bad;
+      assert.equal((await p.collect().snapshot()).tickets[0].trackerUrl, null, String(bad));
+    }
+  } finally { p.close(); }
+});

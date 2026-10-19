@@ -102,11 +102,12 @@ Light is the primary theme; the computer is the primary screen, the phone second
 ### Header
 White, `elevation.header`. Left: logo (black triangle), product name, a slash, the project switcher (flat amber dot, project name, chevron). Centre-left: view tabs (Tower, Landed, Fuel, Rules), active tab on a 5% black fill. Right: the banner of a chosen state when there is one (`awaiting-pill`, amber dot, plain words), a danger pill only when something is really wrong (danger dot and the problem in plain words; nothing when all is well), the age of the snapshot in very small grey ("updated 8 s ago"), avatar (black circle, white initial). On a phone the banner takes its own full-width row under the tabs.
 
-### Welcome sentence
-One sentence instead of counters: "One thing is waiting for you.", "Two things are waiting for you.", "Nothing needs you." (`welcome`, 28 px), then one grey line (`text-muted`): the fuel left per subscription, what is under way, what landed today ("Claude 81% left · 1 team in review · nothing landed today"). No date line, no name.
-
-### Counters
-The detailed counters (in flight, landed today, first-time clean, median Todo to Done, one 6 px bar of fuel per subscription in its harness color) sit in a folded block under the board until the Fuel tab exists. Never a currency.
+### Welcome sentence and instruments
+One sentence ("One thing is waiting for you.", "Nothing needs you.", `welcome`, 28 px) with the service mode in small grey beside it. Under it, one white outlined strip of three **instruments**, flat, no text line:
+- **Fuel left**: one 8 px bar per subscription, in its harness color, with the percentage right of it (grey "not measured" when unknown).
+- **Teams by stage**: one 10 px segmented bar, a segment per stage (in progress, checks, review, awaiting you) as wide as the number of teams in it (an empty stage is a hairline stub), and under it the count of each stage in figures with its name. Only teams count: a ticket the tracker holds without a Cleared team is not one.
+- **Today**: how many landed, a green 8 px bar of "first time clean", and the median Todo to Done by lane in small grey.
+The three stack to one column on a phone. Never a currency.
 
 ### Ticket card
 - White, radius `card`, `elevation.card`, padding 18.
@@ -114,7 +115,7 @@ The detailed counters (in flight, landed today, first-time clean, median Todo to
 - A rail of four 4 px segments for a ticket in progress, filled in the stage color.
 - One line at the bottom: a plain sentence on the left ("Sonnet reviews, round 2"; the blue live dot only for a team really running), the ticket id on the right in mono, small and grey.
 - A ticket that waits for the human starts with one amber line ("To approve · for 53 min", "Question · for 12 min"). No harness square, no usage share, no meta row.
-- Only a ticket with a Cleared team has a card in a column. The tracker's other tickets are folded into one line under the board ("5 tracker tickets without a Cleared team"), expandable.
+- Only a ticket with a Cleared team has a card in a column: one that a run of Cleared works on, or waits for you. A ticket the tracker holds in progress, in review or in approval with no such run is folded into one line under the board ("5 tracker tickets without a Cleared team"), expandable, and never says that a team works on it.
 - An empty column says in one grey sentence, in a dashed box, what to do to fill it.
 
 **Awaiting, ready to land:** same white card, 3 px flat `awaiting` stripe on top, `elevation.awaiting`, a black "Ready to land" chip. The line at the bottom reads "Opus · 1 h 24 · Checks green". No thumbnails on the card: the captures are in the porthole.
@@ -134,6 +135,7 @@ White outlined table at the bottom of the tower: time, what shipped (plain title
 ### Porthole
 Computer (1280 and above): a **small porthole** (440 px) opens on the right under the header, the board making room for it. A button beside the ticket id makes it **large** (up to 1120 px, over the board): the question and the facts on the left, the before / after pair large on the right; the same button brings it back. Closing resets it to small. Tablet (1024 to 1279): the panel covers the board. Below 1024 px and on a phone: full page with a back button, the ticket id and the status chip in a white header.
 Order, always:
+0. A link "Open in Linear" (or in the tracker the service uses) beside the ticket id in the header, when the tracker gives an https address for the ticket.
 1. **The question put to the human first**, on `awaiting-surface` (see 2). Under it, the ticket title (`title`, 20 px, `text-secondary`) under a 3 px × 56 px flat amber bar when it waits for the human, and "Waiting since 16:05 (1 h 35)".
 2. **The question put to the human, in bold, in one sentence** ("Allow this change to go live?"), then **what changes for the user in one or two sentences**, taken from the team's report (never an internal agent note; the pull request number is dropped). With no report: "No summary provided by the team". For a question ticket, the whole question in bold on `awaiting-surface`, the team's recommendation below a highlight hairline.
 3. **One single large before / after pair**, side by side in device frames (radius `device`, 6 px white bezel, after with `elevation.device-after`). A Phone / Desktop switch above it (it changes the frame only), one pill per screen below it when there are several; the other captures are one click away, never a row of thumbnails. A click enlarges a capture. A ticket with no screen shows one concrete before / after example and its tests instead.

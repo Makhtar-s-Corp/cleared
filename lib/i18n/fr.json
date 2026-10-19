@@ -466,7 +466,6 @@
   "app_empty_awaiting": "Rien ne vous attend. Une demande d’accord ou une question apparaîtra ici.",
   "app_fold_one": "{n} ticket du suivi sans équipe Cleared",
   "app_fold_other": "{n} tickets du suivi sans équipe Cleared",
-  "app_counters": "Compteurs détaillés",
   "app_card_ready": "À autoriser",
   "app_card_since": "depuis {d}",
   "app_ask_ready": "Autoriser la mise en ligne de ce changement ?",
@@ -506,5 +505,13 @@
   "app_nav_label": "Vues",
   "app_today_label": "Aujourd’hui",
   "app_tower_label": "Tour",
-  "app_pr_short": "PR n° {n}"
+  "app_pr_short": "PR n° {n}",
+  "app_srv_no_team": "Pas d’équipe Cleared sur ce ticket pour l’instant",
+  "app_tracker_no_team_explain": "Ce ticket est dans le suivi, mais aucune équipe Cleared n’a été lancée dessus. Il passera dans les colonnes dès qu’une équipe y travaille.",
+  "app_open_in": "Ouvrir dans {tracker}",
+  "app_open_tracker_generic": "le suivi",
+  "app_gauges_label": "Instruments",
+  "app_gauge_teams": "Équipes par étape",
+  "app_gauge_today": "Aujourd’hui",
+  "app_gauge_fuel": "Carburant restant"
 }
