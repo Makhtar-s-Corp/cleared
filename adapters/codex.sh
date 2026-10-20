@@ -114,7 +114,9 @@ codex_command() {
     # named again, or its heavy commands would wait on their own door.
     CODEX_COMMAND+=(sudo -n -u "$agent_user" -- env PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" TMPDIR="$codex_tmp" ${CLEARED_HEAVY_SLOT:+CLEARED_HEAVY_SLOT="$CLEARED_HEAVY_SLOT"} "${CLI_LIMIT[@]}" "${agent_prefix[@]}" codex)
   else
-    CODEX_COMMAND+=("${CLI_LIMIT[@]}" codex)
+    # A git identity of a lane when it has none (lib/common.sh, harness_identity).
+    harness_identity "${CODEX_COMMAND[@]}"
+    CODEX_COMMAND+=("${HARNESS_IDENTITY[@]}" "${CLI_LIMIT[@]}" codex)
   fi
 }
 

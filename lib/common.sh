@@ -1128,4 +1128,31 @@ forge_harness_unset() {
     -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL)
   while IFS= read -r name; do FORGE_UNSET+=(-u "$name"); done < <(compgen -e | grep -E '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true)
 }
+# harness_identity <the env command the harness is started with>: in
+# HARNESS_IDENTITY, the NAME=value arguments that give a lane's model an
+# author and a committer when git, started as the harness is (by that same
+# env command, FORGE_UNSET included), would find none of its own (#116: a
+# light model left its work staged and stopped). Strings, not credentials:
+# push-lane.sh checks the branch, the role, the messages and the changes,
+# never who authored a commit. Never the dispatcher's identity: under
+# [forge] that is the app's, which forge_harness_unset keeps from the
+# harness so that a commit a model makes does not pass for one the
+# dispatcher made; this one says it is a lane's, at an address that can be
+# nobody's (.invalid). A model with an identity of its own keeps it. Only in
+# the worktree of a lane, never in the project's main checkout, and not
+# under [security] agent_user through sudo, where Git's control files are
+# read-only to the model: there the dispatcher commits after the session
+# (lane-run.sh), as it does for what any session leaves uncommitted.
+harness_identity() {
+  local agent_user name email=lane@cleared.invalid
+  HARNESS_IDENTITY=()
+  [ -n "${ORCH_LANE:-}" ] && [ -z "${ORCH_TEXT_ONLY:-}" ] || return 0
+  agent_user=$(conf_get security agent_user) || agent_user=
+  [ -z "$agent_user" ] || [ "$(id -un)" = "$agent_user" ] || return 0
+  [ "$(git rev-parse --is-inside-work-tree 2> /dev/null)" = true ] || return 0
+  [ "$(realpath -m -- "$(git rev-parse --show-toplevel)")" != "$(realpath -m -- "${ORCH_REPO:-/}")" ] || return 0
+  if "$@" git var GIT_AUTHOR_IDENT > /dev/null 2>&1 && "$@" git var GIT_COMMITTER_IDENT > /dev/null 2>&1; then return 0; fi
+  name="Cleared lane ${ORCH_LANE//[^A-Za-z0-9._\/-]/}"
+  HARNESS_IDENTITY=(GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email")
+}
 forge_setup

@@ -31,7 +31,10 @@ cli() {
     sudo -n -u "$agent_user" -- env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" \
       PATH="$agent_home/.local/bin:/usr/local/bin:/usr/bin:/bin" ORCH_REPO="$ORCH_REPO" ORCH_STATE_DIR="$ORCH_STATE_DIR" ORCH_CONF="$ORCH_CONF" "${CLI_LIMIT[@]}" "${agent_prefix[@]}" claude "$@"
   else
-    env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}" "${CLI_LIMIT[@]}" claude "$@"
+    # A git identity of a lane when it has none (lib/common.sh, harness_identity).
+    local started=(env -u ANTHROPIC_API_KEY -u GH_TOKEN -u GITHUB_TOKEN "${FORGE_UNSET[@]}" "${tracker_unset[@]}")
+    harness_identity "${started[@]}"
+    "${started[@]}" "${HARNESS_IDENTITY[@]}" "${CLI_LIMIT[@]}" claude "$@"
   fi
 }
 

@@ -526,6 +526,24 @@ test('the targeted tests of a session with no agent account run with an empty ho
   assert.equal(log.includes(f.box.home), false, `the service's home was not passed: ${log}`);
 });
 
+test('#116: a light author that stages its change and does not commit (no git identity, shared uid) is committed for before the rules judge the head: it stays on the fast lane, never « empty »', () => {
+  const f = fastFlow();
+  f.todo(['X-5']);
+  f.by('X-5', 0);
+  f.flow();
+  const base = execFileSync('git', ['-C', f.record('X-5').worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  f.stage({ 'docs/glossary.md': 'Glossary\n' });
+  const done = f.session('X-5', { commit: null, answer: 'Done.\n\nQuestions for the user: None.' });
+  assert.equal(done.run.status, 0, done.run.stderr);
+  assert.notEqual(done.head, base, 'the dispatcher committed what was staged');
+  assert.equal(execFileSync('git', ['-C', f.box.repo, 'log', '-1', '--format=%an <%ae>', done.head], { encoding: 'utf8' }).trim(), 'dispatcher <dispatcher@localhost>');
+  assert.doesNotMatch(done.run.stdout, /the rules send X-5 to the full circuit/);
+  assert.match(done.run.stdout, /Fast lane: targeted tests at [0-9a-f]{8}: passed/);
+  assert.equal(f.events('fast_lane_fallback').length, 0, 'no fallback, « empty » or other');
+  assert.equal(f.record('X-5').fast_lane.state, 'fast');
+  assert.equal(f.record('X-5').fast_lane.tests.head, done.head, 'the rules judged the commit the dispatcher made');
+});
+
 test('a capture counts only when this run made it: a link, or a file older than the run, is not one, and the request waits for the capture', () => {
   const f = fastFlow('', { capture: true });
   f.todo(['X-5']);

@@ -111,29 +111,46 @@ lane_run_id=$run_id
 lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lane_adapter=$adapter lane_model=$model lane_fallback=$fallback_note
 capture_handover
 
-# What a backend that cannot commit brought back ([adapter.<name>] commits =
-# no: its work comes back as changes applied to the worktree) is committed
-# here, by the rules, under the message it wrote (.commit-message, which is
-# not part of its work). Without this the work would wait for another model
-# to commit it. A backend that commits by itself is left alone: what it did
-# not commit is its to sort out.
-# Never in the project's main checkout, where the acting lead runs under
-# [security] agent_user (wake.sh): that checkout is the service's.
+# What a session leaves uncommitted in its lane is committed here, by the
+# rules, whatever the mode (#116): a backend that cannot commit ([security]
+# agent_user, where Git's control files are read-only to it, or [adapter.<name>]
+# commits = no in a container) brings its work back as changes to the
+# worktree, and a harness of this account with no git identity of its own
+# can leave its work staged and stop. Without this the work would be lost to
+# the push, and the fast lane would judge an empty head. It goes under the
+# message the model wrote (.commit-message, which is not part of its work),
+# with the dispatcher's identity (the app's under [forge], else the local
+# one), hooks off. A backend that committed by itself keeps its commits as it
+# made them: nothing is amended, and a clean worktree gets nothing.
+# Never in the project's main checkout, where the acting lead runs: that
+# checkout is the service's.
 if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
   && [ "$(realpath -m -- "$PWD")" != "$(realpath -m -- "$ORCH_REPO")" ] \
-  && { [ -n "$(conf_get security agent_user)" ] || { [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
-       && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ]; }; } \
   && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   message=$(mktemp)
   # A real file that says something: a blank one, or anything else by that
   # name, leaves the default subject.
   if [ -f .commit-message ] && [ ! -L .commit-message ] && grep -q '[^[:space:]]' .commit-message; then head -c 4000 .commit-message > "$message"; fi
   rm -rf .commit-message
-  if [ -n "$(git status --porcelain 2> /dev/null)" ]; then
-    [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
-    git -c core.hooksPath=/dev/null add -A
-    git -c core.hooksPath=/dev/null -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
-      || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
+  # Every git call of this step, in shared-uid mode the model has the service's
+  # uid and can write the shared .git/config (linked worktrees read it): each
+  # setting that runs a program is switched off on the command line.
+  commit_git=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.editor=false -c diff.external=
+    -c core.sshCommand= -c credential.helper= -c commit.gpgSign=false -c gpg.program=false)
+  if [ -n "$(GIT_OPTIONAL_LOCKS=0 "${commit_git[@]}" status --porcelain 2> /dev/null)" ]; then
+    # A rebase or a merge in progress, or a detached HEAD: the work stays in
+    # the worktree for the team to finish, said as it is.
+    git_dir=$("${commit_git[@]}" rev-parse --git-dir 2> /dev/null)
+    if [ -n "$git_dir" ] && { [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/MERGE_HEAD" ]; }; then
+      echo "!! The work of $lane_alias was not committed: a rebase or a merge is in progress in the worktree; it remains there."
+    elif ! "${commit_git[@]}" symbolic-ref -q HEAD > /dev/null 2>&1; then
+      echo "!! The work of $lane_alias was not committed: HEAD is detached; it remains in the worktree."
+    else
+      [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
+      "${commit_git[@]}" add -A
+      "${commit_git[@]}" -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
+        || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
+    fi
   fi
   rm -f "$message"
 fi
