@@ -111,18 +111,21 @@ lane_run_id=$run_id
 lane_code=$code lane_report=$report lane_usage=$usage_file lane_alias=$alias lane_adapter=$adapter lane_model=$model lane_fallback=$fallback_note
 capture_handover
 
-# What a backend that cannot commit brought back ([adapter.<name>] commits =
-# no: its work comes back as changes applied to the worktree) is committed
-# here, by the rules, under the message it wrote (.commit-message, which is
-# not part of its work). Without this the work would wait for another model
-# to commit it. A backend that commits by itself is left alone: what it did
-# not commit is its to sort out.
-# Never in the project's main checkout, where the acting lead runs under
-# [security] agent_user (wake.sh): that checkout is the service's.
+# What a session leaves uncommitted in its lane is committed here, by the
+# rules, whatever the mode (#116): a backend that cannot commit ([security]
+# agent_user, where Git's control files are read-only to it, or [adapter.<name>]
+# commits = no in a container) brings its work back as changes to the
+# worktree, and a harness of this account with no git identity of its own
+# can leave its work staged and stop. Without this the work would be lost to
+# the push, and the fast lane would judge an empty head. It goes under the
+# message the model wrote (.commit-message, which is not part of its work),
+# with the dispatcher's identity (the app's under [forge], else the local
+# one), hooks off. A backend that committed by itself keeps its commits as it
+# made them: nothing is amended, and a clean worktree gets nothing.
+# Never in the project's main checkout, where the acting lead runs: that
+# checkout is the service's.
 if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
   && [ "$(realpath -m -- "$PWD")" != "$(realpath -m -- "$ORCH_REPO")" ] \
-  && { [ -n "$(conf_get security agent_user)" ] || { [ "$(conf_get "adapter.$lane_adapter" commits)" = no ] \
-       && [ "$(conf_get "adapter.$lane_adapter" runner)" != host ]; }; } \
   && grep -qw -- "$ORCH_ROLE" <<<"$(conf_get lanes push_roles)"; then
   message=$(mktemp)
   # A real file that says something: a blank one, or anything else by that

@@ -368,7 +368,7 @@ test('the Codex adapter gives the work of a lane its tools through the door of t
 });
 
 
-test('what a backend that cannot commit brings back is committed by the rules, under the message it wrote, and sent like any work; a backend that commits by itself is left alone', () => {
+test('what a backend that cannot commit brings back is committed by the rules, under the message it wrote, and sent like any work; a backend that commits by itself keeps its commits', () => {
   const { flow, todo, by, record, box, env, stuck, pull } = flowBox();
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[adapter.first]\ncommits = no\n`);
@@ -398,13 +398,15 @@ test('what a backend that cannot commit brings back is committed by the rules, u
   assert.equal(blank.status, 0, blank.stderr);
   assert.match(remote('log', '-1', '--format=%s', 'dev/X-5'), /^chore: the work of a on X-5$/);
   assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 2;');
-  // A backend that commits by itself is left alone: what it did not commit stays its own to sort out.
+  // A backend that commits by itself keeps its commit as it made it; what it left uncommitted is committed after it,
+  // on top of its own, in every mode (#116).
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[adapter.first]\ncommits = no\n', ''));
   assert.equal(next().status, 0);
-  const own = run(`echo 'export const note = 3;' > server/note.mjs`);
+  const own = run(`echo 'export const note = 3;' > server/note.mjs; git add -A; git -c user.name=Model -c user.email=model@example.invalid commit -qm 'feat(notes): its own commit'; echo 'export const note = 4;' > server/note.mjs`);
   assert.equal(own.status, 0, own.stderr);
-  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 2;', 'nothing was committed for it');
-  assert.match(execFileSync('git', ['-C', record('X-5').worktree, 'status', '--porcelain'], { encoding: 'utf8' }), /server\/note\.mjs/);
+  assert.equal(remote('log', '-2', '--format=%s|%an <%ae>', 'dev/X-5'), 'chore: the work of a on X-5|dispatcher <dispatcher@localhost>\nfeat(notes): its own commit|Model <model@example.invalid>');
+  assert.equal(remote('show', 'dev/X-5:server/note.mjs'), 'export const note = 4;');
+  assert.equal(execFileSync('git', ['-C', record('X-5').worktree, 'status', '--porcelain'], { encoding: 'utf8' }), '');
 });
 
 

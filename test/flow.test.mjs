@@ -1083,10 +1083,16 @@ test('what a first real round showed: a session that ended without its push is s
   const reopened = flow();
   assert.match(reopened.stdout, /X-5: opened again \(unsent:/);
   assert.doesNotMatch(reopened.stdout, /could not be opened/, reopened.stdout);
+  // What a session leaves is committed by the dispatcher after it (#116); when git refuses that commit (here a lock
+  // left in the lane's git directory), the files stay, and the lane is not opened again for them a second time.
+  const lock = join(git('rev-parse', '--absolute-git-dir').trim(), 'index.lock');
+  writeFileSync(lock, '');
   const tidied = session('X-5', { commit: null });
   assert.match(tidied.prompt, /\| Your previous session left uncommitted files/);
+  assert.match(tidied.run.stdout, /The work of a could not be committed \(git commit refused\); it remains in the worktree/);
   assert.match(flow().stdout, /X-5: opened again for this already and nothing changed \(unsent:/);
   assert.deepEqual(stuck(), ['lane_stuck X-5']);
+  rmSync(lock);
   git('add', 'left.txt');
   const done = session('X-5', { commit: 'fix: what was left' });
   // A rehearsal takes one pull request out of draft a round, like the real one, and does not do it.

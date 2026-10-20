@@ -501,7 +501,7 @@ Codex CLI on the host by default, or a project-owned container task script.
 | `runner` | `host` or `container`. | Default: host |
 | `task_script` | Executable in the project called with `<worktree> <prompt-file> <model> [--tools]` in container mode. | Required for container mode |
 | `task_tools` | Whether container sessions receive tools through the task script. | Optional; no default; ignored on host |
-| `commits` | Whether the container adapter commits its own work. | Optional; no default; ignored on host |
+| `commits` | Whether the container adapter commits its own work. Informational: in every mode the dispatcher commits what a session leaves uncommitted. | Optional; no default; ignored on host |
 
 ## `[dashboard]`
 

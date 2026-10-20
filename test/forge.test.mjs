@@ -405,8 +405,10 @@ test('a key file other accounts can read is refused before anything is asked of 
 });
 
 // The harness of each adapter, started as the dispatcher starts it, writes down its whole environment and arguments.
-function harnessRun(adapter, { agentUser = false } = {}) {
-  const lane = forgeLane();
+// inLane: started in the worktree of a lane (dev/X-1) for its work, as lane-run.sh starts it, instead of for a text
+// only; the fake CLI then tries to commit, as a model would.
+function harnessRun(adapter, { agentUser = false, inLane = false, forge = true, prepare = null } = {}) {
+  const lane = forgeLane({ forge });
   const dir = scratch('cleared-forge-harness-');
   const cache = join(lane.box.state, 'forge');
   mkdirSync(cache, { recursive: true, mode: 0o700 });
@@ -416,11 +418,13 @@ function harnessRun(adapter, { agentUser = false } = {}) {
 env > "${join(dir, 'env')}"
 printf '%s\\n' "$@" > "${join(dir, 'args')}"
 cat > /dev/null
+[ -z "\${FAKE_COMMIT:-}" ] || { git commit -q --allow-empty -m 'docs: what the model did' 2> "${join(dir, 'commit-err')}" && git log -1 --format='%an <%ae>|%cn <%ce>' > "${join(dir, 'committed')}"; }
 `;
   writeFileSync(join(dir, 'claude'), `${dump}printf '%s\\n' '{"type":"result","is_error":false,"result":"Claude answer","modelUsage":{}}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'codex'), `${dump}previous=; for arg in "$@"; do [ "$previous" != --output-last-message ] || printf 'Codex answer\\n' > "$arg"; previous=$arg; done
 printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Codex answer"}}'\n`, { mode: 0o755 });
-  let conf = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace('[forge]\n', `${forgeSection(lane.key)}`);
+  let conf = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8');
+  if (forge) conf = conf.replace('[forge]\n', `${forgeSection(lane.key)}`);
   if (agentUser) {
     // The account of the agents through a sudo and a bubblewrap that only pass the command on.
     writeFileSync(join(dir, 'sudo'), `#!/usr/bin/env bash
@@ -438,11 +442,13 @@ exec "${join(dir, 'claude')}" "$@"
   const empty = scratch('cleared-forge-empty-');
   const prompt = join(dir, 'prompt.md');
   writeFileSync(prompt, 'Say hello.\n');
+  if (prepare) prepare(lane);
   const run = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env writing; adapter_env "$2"; gh pr list > /dev/null; exec "$1/adapters/$2.sh" run --model m --prompt-file "$3" --report "$4" --usage "$5"',
-    '_', ORCH_HOME, adapter, prompt, join(dir, 'report.md'), join(dir, 'usage.json')], { cwd: empty, encoding: 'utf8',
+    '_', ORCH_HOME, adapter, prompt, join(dir, 'report.md'), join(dir, 'usage.json')], { cwd: inLane ? lane.path : empty, encoding: 'utf8',
     env: { ...lane.env, PATH: `${dir}:${lane.env.PATH}`, CLEARED_REPO: lane.box.repo, CLEARED_CONF: join(dir, 'agents.conf'),
-      CLEARED_STATE_DIR: lane.box.state, ORCH_TEXT_ONLY: '1' } });
-  return { run, lane, env: readFileSync(join(dir, 'env'), 'utf8'), args: readFileSync(join(dir, 'args'), 'utf8') };
+      CLEARED_STATE_DIR: lane.box.state, ...(inLane ? { ORCH_LANE: 'dev/X-1', FAKE_COMMIT: '1' } : { ORCH_TEXT_ONLY: '1' }) } });
+  const read = (name) => { try { return readFileSync(join(dir, name), 'utf8'); } catch { return ''; } };
+  return { run, lane, env: read('env'), args: read('args'), committed: read('committed').trim(), commitErr: read('commit-err') };
 }
 
 for (const [adapter, options] of [['claude', {}], ['claude', { agentUser: true }], ['codex', {}]]) {
@@ -461,6 +467,61 @@ for (const [adapter, options] of [['claude', {}], ['claude', { agentUser: true }
     assert.ok(!args.includes(TOKEN));
   });
 }
+
+// #116: a lane's model with no git identity of its own is handed one, which is never the app's: identity strings,
+// no credential. One that has its own keeps it. (The dispatcher commits what is left in any case: lane-run.sh.)
+const LANE_IDENTITY = 'Cleared lane dev/X-1 <lane@cleared.invalid>';
+const noIdentity = (lane) => execFileSync(realGit, ['-C', lane.path, 'config', 'user.useConfigOnly', 'true']);
+for (const forge of [true, false]) {
+  test(`in its lane, a claude harness with no git identity${forge ? ' under [forge]' : ''} is given the lane's, not the app's, and can commit; the token still nowhere`, () => {
+    const { run, lane, env, args, committed, commitErr } = harnessRun('claude', { inLane: true, forge, prepare: noIdentity });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(env, /^GIT_AUTHOR_NAME=Cleared lane dev\/X-1$/m);
+    assert.match(env, /^GIT_AUTHOR_EMAIL=lane@cleared\.invalid$/m);
+    assert.match(env, /^GIT_COMMITTER_NAME=Cleared lane dev\/X-1$/m);
+    assert.match(env, /^GIT_COMMITTER_EMAIL=lane@cleared\.invalid$/m);
+    assert.ok(!env.includes(BOT) && !env.includes(BOT_EMAIL), 'never the identity of the app');
+    assert.equal(committed, `${LANE_IDENTITY}|${LANE_IDENTITY}`, commitErr);
+    assert.ok(!env.includes(TOKEN) && !args.includes(TOKEN));
+    assert.doesNotMatch(env, /^(GH_TOKEN|GITHUB_TOKEN)=/m);
+    if (forge) assert.doesNotMatch(env, /forge\.mjs|credential\.https/);
+    // The dispatcher's own environment is left as it was: its commits are still the app's (or the local identity).
+    assert.equal(lane.read('git-push-env').includes('lane@cleared.invalid'), false);
+  });
+}
+
+test('in its lane, a claude harness that has a git identity of its own keeps it: nothing is handed to it', () => {
+  const own = (lane) => {
+    execFileSync(realGit, ['-C', lane.path, 'config', 'user.name', 'Own Model']);
+    execFileSync(realGit, ['-C', lane.path, 'config', 'user.email', 'own@example.invalid']);
+  };
+  const { run, env, committed, commitErr } = harnessRun('claude', { inLane: true, prepare: own });
+  assert.equal(run.status, 0, run.stderr);
+  const names = env.split('\n').map((line) => line.split('=')[0]);
+  for (const name of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) assert.ok(!names.includes(name), `${name} reached the harness`);
+  assert.equal(committed, 'Own Model <own@example.invalid>|Own Model <own@example.invalid>', commitErr);
+});
+
+test('harness_identity: only in the worktree of a lane, as the harness is started (its git settings included), and never under agent_user through sudo nor in the main checkout', () => {
+  const lane = forgeLane({ forge: false });
+  noIdentity(lane);
+  const identity = (cwd, extra = {}, prefix = 'env') => spawnSync('bash', ['-c', `. "${join(lane.box.home, 'lib', 'common.sh')}"; harness_identity ${prefix}; printf '%s\\n' "\${HARNESS_IDENTITY[@]}"`],
+    { cwd, env: { ...lane.env, ORCH_LANE: 'dev/X-1', ...extra }, encoding: 'utf8' }).stdout.trim();
+  assert.equal(identity(lane.path), 'GIT_AUTHOR_NAME=Cleared lane dev/X-1\nGIT_AUTHOR_EMAIL=lane@cleared.invalid\nGIT_COMMITTER_NAME=Cleared lane dev/X-1\nGIT_COMMITTER_EMAIL=lane@cleared.invalid');
+  assert.equal(identity(lane.box.repo), '', 'the main checkout: nothing');
+  assert.equal(identity(lane.path, { ORCH_LANE: '' }), '', 'not a lane: nothing');
+  assert.equal(identity(lane.path, { ORCH_TEXT_ONLY: '1' }), '', 'a text only: nothing');
+  // An identity in the account's own git settings: the harness has one, unless it is started without them (Codex).
+  execFileSync(realGit, ['-C', lane.path, 'config', '--unset', 'user.useConfigOnly']);
+  writeFileSync(join(lane.box.home, '.gitconfig'), '[user]\n\tname = Service\n\temail = service@example.invalid\n');
+  assert.equal(identity(lane.path), '');
+  assert.match(identity(lane.path, {}, 'env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 HOME=/nonexistent'), /^GIT_AUTHOR_NAME=Cleared lane dev\/X-1$/m);
+  // Under agent_user (a harness started through sudo): Git's control files are read-only to it; nothing.
+  writeFileSync(join(lane.box.home, '.gitconfig'), '');
+  noIdentity(lane);
+  writeFileSync(lane.confPath, readFileSync(lane.confPath, 'utf8').replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nagent_user = nobody\n'));
+  assert.equal(identity(lane.path), '');
+});
 
 test('cleared status says which identity the forge calls use, and reports a configured app that cannot give a token', () => {
   const status = (lane) => {
