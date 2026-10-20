@@ -3,7 +3,7 @@
 // role whose work is not pushed, and what a model committed by itself keeps its authorship.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { laneWithRemote, scratch } from './support.mjs';
@@ -113,4 +113,57 @@ test('what is swept into the dispatcher\'s commit is the same in both modes: nev
     assert.ok(!files.includes('HANDOVER.md'));
     assert.ok(!files.includes('.commit-message'));
   }
+});
+
+test('the commit step runs no program the shared .git/config names: its git calls run no core.fsmonitor, and no hook', () => {
+  const l = lane();
+  const dir = scratch('cleared-lane-commit-marker-');
+  const fsmonitorLog = join(dir, 'fsmonitor.log');
+  const hookLog = join(dir, 'hook.log');
+  // Writes the command line of the process that started the git which started it: lane-run.sh for the dispatcher's
+  // own git calls, the harness's script for the model's, the test for the control.
+  const fsmonitor = join(dir, 'fsmonitor.sh');
+  writeFileSync(fsmonitor, `#!/bin/sh\ngp=$(awk '{print $4}' /proc/$PPID/stat)\ntr '\\0' ' ' < /proc/$gp/cmdline >> '${fsmonitorLog}'\necho >> '${fsmonitorLog}'\n`, { mode: 0o755 });
+  const commonDir = l.git(l.path, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+  writeFileSync(join(commonDir, 'hooks', 'pre-commit'), `#!/bin/sh\necho hook >> '${hookLog}'\n`, { mode: 0o755 });
+  execFileSync('git', ['-C', l.path, 'config', 'core.fsmonitor', fsmonitor]);
+  // The control: a plain git status in this checkout runs the fsmonitor the config names, so the log below means something.
+  execFileSync('git', ['-C', l.path, 'status', '--porcelain']);
+  assert.ok(existsSync(fsmonitorLog), 'the control: git status runs the fsmonitor the config names');
+  rmSync(fsmonitorLog);
+  const run = l.session('echo "Glossary" > glossary.md');
+  assert.equal(run.status, 0, run.stderr);
+  assert.notEqual(l.git(l.path, 'rev-parse', 'HEAD'), l.base, 'the work was committed');
+  const ran = existsSync(fsmonitorLog) ? readFileSync(fsmonitorLog, 'utf8') : '';
+  assert.doesNotMatch(ran, /lane-run\.sh/, 'the dispatcher\'s git ran the fsmonitor of the shared config');
+  assert.equal(existsSync(hookLog), false, 'the commit ran a hook of the shared config');
+});
+
+for (const [what, make] of [
+  ['a rebase in progress', (gitDir) => mkdirSync(join(gitDir, 'rebase-merge'))],
+  ['an am or rebase-apply in progress', (gitDir) => mkdirSync(join(gitDir, 'rebase-apply'))],
+  ['a merge in progress', (gitDir, head) => writeFileSync(join(gitDir, 'MERGE_HEAD'), `${head}\n`)],
+]) {
+  test(`${what} in the lane's worktree: the work is not committed, said as it is, and stays in the worktree`, () => {
+    const l = lane();
+    // The real git directory of a linked worktree (.git/worktrees/<name>), where git keeps these states.
+    const gitDir = l.git(l.path, 'rev-parse', '--path-format=absolute', '--git-dir');
+    make(gitDir, l.base);
+    const run = l.session('echo "Glossary" > glossary.md');
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /The work of a was not committed: a rebase or a merge is in progress in the worktree; it remains there\./);
+    assert.equal(l.git(l.path, 'rev-parse', 'HEAD'), l.base);
+    assert.match(readFileSync(join(l.path, 'glossary.md'), 'utf8'), /Glossary/);
+    assert.match(l.git(l.path, 'status', '--porcelain'), /\?\? glossary\.md/);
+  });
+}
+
+test('a detached HEAD: the work is not committed, said as it is, and stays in the worktree', () => {
+  const l = lane();
+  l.git(l.path, 'checkout', '-q', '--detach');
+  const run = l.session('echo "Glossary" > glossary.md');
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /The work of a was not committed: HEAD is detached; it remains in the worktree\./);
+  assert.equal(l.git(l.path, 'rev-parse', 'HEAD'), l.base);
+  assert.match(l.git(l.path, 'status', '--porcelain'), /\?\? glossary\.md/);
 });

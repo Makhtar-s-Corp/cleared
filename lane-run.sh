@@ -132,11 +132,25 @@ if { [ "$lane_code" = 0 ] || [ "$lane_code" = 5 ]; } \
   # name, leaves the default subject.
   if [ -f .commit-message ] && [ ! -L .commit-message ] && grep -q '[^[:space:]]' .commit-message; then head -c 4000 .commit-message > "$message"; fi
   rm -rf .commit-message
-  if [ -n "$(git status --porcelain 2> /dev/null)" ]; then
-    [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
-    git -c core.hooksPath=/dev/null add -A
-    git -c core.hooksPath=/dev/null -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
-      || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
+  # Every git call of this step, in shared-uid mode the model has the service's
+  # uid and can write the shared .git/config (linked worktrees read it): each
+  # setting that runs a program is switched off on the command line.
+  commit_git=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.editor=false -c diff.external=
+    -c core.sshCommand= -c credential.helper= -c commit.gpgSign=false -c gpg.program=false)
+  if [ -n "$(GIT_OPTIONAL_LOCKS=0 "${commit_git[@]}" status --porcelain 2> /dev/null)" ]; then
+    # A rebase or a merge in progress, or a detached HEAD: the work stays in
+    # the worktree for the team to finish, said as it is.
+    git_dir=$("${commit_git[@]}" rev-parse --git-dir 2> /dev/null)
+    if [ -n "$git_dir" ] && { [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/MERGE_HEAD" ]; }; then
+      echo "!! The work of $lane_alias was not committed: a rebase or a merge is in progress in the worktree; it remains there."
+    elif ! "${commit_git[@]}" symbolic-ref -q HEAD > /dev/null 2>&1; then
+      echo "!! The work of $lane_alias was not committed: HEAD is detached; it remains in the worktree."
+    else
+      [ -s "$message" ] || printf 'chore: the work of %s on %s\n\nSession %s; it wrote no commit message.\n' "$lane_alias" "$ORCH_TICKET" "$lane_run_id" > "$message"
+      "${commit_git[@]}" add -A
+      "${commit_git[@]}" -c user.name="$(git config user.name || echo dispatcher)" -c user.email="$(git config user.email || echo dispatcher@localhost)" commit --quiet -F "$message" \
+        || echo "!! The work of $lane_alias could not be committed (git commit refused); it remains in the worktree."
+    fi
   fi
   rm -f "$message"
 fi
