@@ -1,0 +1,182 @@
+// A fake `docker` CLI for the container tests: it keeps containers, networks
+// and volumes in memory, honours `--filter label=...` the way the CLI does,
+// and records every argument list it receives. No test here needs Docker.
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import type { DockerResult, DockerRunner, DockerSpawner, RunOptions } from '../../src/container/docker.ts';
+
+export type FakeObject = {
+  readonly id: string;
+  readonly name: string;
+  readonly labels: Record<string, string>;
+  state?: string;
+  readonly args?: readonly string[];
+};
+
+export type Call = { readonly args: readonly string[]; readonly options: RunOptions; readonly result: DockerResult };
+
+// Flags of `docker create` that take a value, as docker.ts writes them.
+const CREATE_VALUE_FLAGS = new Set([
+  '--name', '--label', '--network', '--user', '--tmpfs', '--mount', '--env', '--memory', '--memory-swap',
+  '--cpus', '--pids-limit', '--workdir', '--cap-drop', '--security-opt',
+]);
+
+const ok = (stdout = ''): DockerResult => ({ code: 0, stdout, stderr: '' });
+const fail = (stderr: string, code = 1): DockerResult => ({ code, stdout: '', stderr });
+
+function labelsOf(args: readonly string[]): Record<string, string> {
+  const labels: Record<string, string> = {};
+  args.forEach((arg, index) => {
+    if (arg !== '--label') return;
+    const pair = args[index + 1] ?? '';
+    const at = pair.indexOf('=');
+    labels[at < 0 ? pair : pair.slice(0, at)] = at < 0 ? '' : pair.slice(at + 1);
+  });
+  return labels;
+}
+
+function matches(object: FakeObject, args: readonly string[]): boolean {
+  return args.every((arg, index) => {
+    if (arg !== '--filter') return true;
+    const filter = args[index + 1] ?? '';
+    if (!filter.startsWith('label=')) throw new Error(`fake docker: unsupported filter ${filter}`);
+    const pair = filter.slice('label='.length);
+    const at = pair.indexOf('=');
+    const key = at < 0 ? pair : pair.slice(0, at);
+    return at < 0 ? key in object.labels : object.labels[key] === pair.slice(at + 1);
+  });
+}
+
+const labelText = (labels: Record<string, string>): string => Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(',');
+
+// The positional arguments after `--`.
+function targets(args: readonly string[]): string[] {
+  const at = args.indexOf('--');
+  return at < 0 ? [] : args.slice(at + 1);
+}
+
+export class FakeDocker {
+  readonly containers: FakeObject[] = [];
+  readonly networks: FakeObject[] = [];
+  readonly volumes: FakeObject[] = [];
+  readonly calls: Call[] = [];
+  // Return a result to replace the normal answer, for failure injection.
+  intercept: (args: readonly string[]) => DockerResult | undefined = () => undefined;
+  // Answer of `exec`, by command.
+  execAnswer: (command: readonly string[]) => DockerResult = () => ok();
+  // When false, the fake ignores label filters on lists, as a broken CLI would.
+  honourFilters = true;
+  private next = 1;
+
+  readonly runner: DockerRunner = async (args, options) => {
+    const result = this.intercept(args) ?? this.answer(args);
+    this.calls.push({ args: [...args], options, result });
+    return result;
+  };
+
+  // `docker start --attach --interactive` is recorded and answered by a
+  // process stand-in that never emits anything.
+  readonly spawner: DockerSpawner = (args) => {
+    const result = this.answer(args);
+    this.calls.push({ args: [...args], options: {}, result });
+    return new EventEmitter() as unknown as ChildProcessWithoutNullStreams;
+  };
+
+  private id(): string {
+    return (this.next++).toString(16).padStart(64, '0');
+  }
+
+  all(): FakeObject[] {
+    return [...this.containers, ...this.networks, ...this.volumes];
+  }
+
+  withLabel(key: string, value: string): FakeObject[] {
+    return this.all().filter((object) => object.labels[key] === value);
+  }
+
+  private list(objects: FakeObject[], args: readonly string[], row: (object: FakeObject) => object): DockerResult {
+    const kept = this.honourFilters ? objects.filter((object) => matches(object, args)) : objects;
+    return ok(kept.map((object) => JSON.stringify(row(object)) + '\n').join(''));
+  }
+
+  private remove(objects: FakeObject[], ids: readonly string[], key: 'id' | 'name'): DockerResult {
+    for (const ref of ids) {
+      const at = objects.findIndex((object) => object[key] === ref);
+      if (at < 0) return fail(`Error: No such object: ${ref}`);
+      objects.splice(at, 1);
+    }
+    return ok(ids.join('\n') + '\n');
+  }
+
+  private answer(args: readonly string[]): DockerResult {
+    const [first, second] = args;
+    const verb = first === 'network' || first === 'volume' ? `${first} ${second}` : first;
+    switch (verb) {
+      case 'version':
+        return ok('{"Client":{"Version":"29.8.1"},"Server":{"Version":"29.8.1"}}\n');
+      case 'build':
+        return ok('');
+      case 'network create': {
+        const name = args[args.length - 1] ?? '';
+        if (this.networks.some((n) => n.name === name)) return fail(`Error: network with name ${name} already exists`);
+        const network: FakeObject = { id: this.id(), name, labels: labelsOf(args), args: [...args] };
+        this.networks.push(network);
+        return ok(network.id + '\n');
+      }
+      case 'volume create': {
+        const name = args[args.length - 1] ?? '';
+        this.volumes.push({ id: name, name, labels: labelsOf(args), args: [...args] });
+        return ok(name + '\n');
+      }
+      case 'create': {
+        let at = 1;
+        let name = '';
+        while (at < args.length && (args[at] ?? '').startsWith('-')) {
+          const flag = args[at] ?? '';
+          if (CREATE_VALUE_FLAGS.has(flag)) {
+            if (flag === '--name') name = args[at + 1] ?? '';
+            at += 2;
+          } else at += 1;
+        }
+        if (this.containers.some((c) => c.name === name)) return fail(`Error: Conflict. The container name "/${name}" is already in use`);
+        const container: FakeObject = { id: this.id(), name, labels: labelsOf(args), state: 'created', args: [...args] };
+        this.containers.push(container);
+        return ok(container.id + '\n');
+      }
+      case 'ps':
+        return this.list(this.containers, args, (c) => ({ ID: c.id, Names: c.name, State: c.state, Labels: labelText(c.labels) }));
+      case 'network ls':
+        return this.list(this.networks, args, (n) => ({ ID: n.id, Name: n.name, Labels: labelText(n.labels) }));
+      case 'volume ls':
+        return this.list(this.volumes, args, (v) => ({ Name: v.name, Labels: labelText(v.labels) }));
+      case 'start':
+      case 'stop':
+        for (const id of targets(args)) {
+          const container = this.containers.find((c) => c.id === id);
+          if (!container) return fail(`Error: No such container: ${id}`);
+          container.state = verb === 'start' ? 'running' : 'exited';
+        }
+        return ok(targets(args).join('\n') + '\n');
+      case 'rm':
+        return this.remove(this.containers, targets(args), 'id');
+      case 'network rm':
+        return this.remove(this.networks, targets(args), 'id');
+      case 'volume rm':
+        return this.remove(this.volumes, targets(args), 'name');
+      case 'exec':
+        return this.execAnswer(targets(args).slice(1));
+      case 'inspect': {
+        const container = this.containers.find((c) => c.id === targets(args)[0]);
+        return container ? ok(JSON.stringify([{ Id: container.id, Name: `/${container.name}`, Config: { Labels: container.labels } }])) : fail('Error: No such object');
+      }
+      case 'network inspect': {
+        const network = this.networks.find((n) => n.id === targets(args)[0]);
+        return network ? ok(JSON.stringify([{ Id: network.id, Name: network.name, IPAM: { Config: [{ Gateway: '172.30.0.1' }] } }])) : fail('Error: No such network');
+      }
+      case 'logs':
+        return ok('{"at":"2026-10-21T00:00:00.000Z","listening":"172.30.0.2:3128"}\n');
+      default:
+        return fail(`fake docker: unknown command ${args.join(' ')}`, 125);
+    }
+  }
+}

@@ -284,6 +284,36 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - If partial messages come later, live display needs another path, for example a preview that is never stored. That is not designed here.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
 
+## 2026-10-21: the session's Docker runtime (lane 2)
+
+**Decision.** The runtime follows decisions 3 and 4 of the [milestone 1 plan](milestone-1-plan.md), with these choices made by the lane:
+
+1. **The session network has no address on the host.** The internal network is created with `--opt com.docker.network.bridge.gateway_mode_ipv4=isolated`. Reason: on the first doctor run, with `--internal` alone, the network's gateway address was on the host's bridge. From the session, a TCP connect to that address reached a host service listening on all addresses. Every host service listening on all addresses would have been reachable the same way. With the isolated mode the network has no gateway, and the bridge holds no IPv4 address (`ip addr show` lists none besides link-local).
+2. **The egress container has its own labelled bridge network**, `cleared-v2-<id>-out`, instead of Docker's default bridge. The plan names one internal network per session. Reason: the default bridge is an object without the label, and the rule is never to run docker against one. Also, egress containers of different sessions would otherwise share a network.
+3. **Stop and remove act only on ids a labelled list just returned.** `docker stop`, `rm`, `exec`, `network rm` and `volume rm` take no `--filter`. So `docker.ts` lists with `--filter label=cleared.dev=v2 --filter label=cleared.session=<id>` in the same call, and names only those ids, after `--`. It holds no list of ids in memory, so a restarted service can still stop a session. A listed row without the label is refused, even if the CLI ignored the filter.
+4. **The egress proxy:**
+   - It accepts `CONNECT` only, to a host name on the allow list, on the listed port. A literal IP address is refused.
+   - It refuses a name when any address it resolves to is private, loopback, link-local, shared (Tailscale's 100.64.0.0/10), multicast or reserved, or is one of the host's own addresses. It then dials the address it checked, not the name.
+   - The allow list file sits in a folder mounted read only. Reason: the service replaces the file with a rename, which a single-file bind mount would not follow.
+   - The proxy listens on the address its `egress` alias has on the session network. That is an address inside the container's network namespace, and nothing is published on the host.
+5. **Test services come from a table of known images**, `postgres:16` only in milestone 1. The setting is `[session] services = [alias=]image:tag, ...`, for lane 3's example config. Reason: an image's `VOLUME` would create an anonymous volume without the label. The table makes each such path a tmpfs, and the doctor checks that the Postgres container has no volume mount. Postgres uses trust authentication: a disposable database on a network only the session reaches, so no password exists.
+6. **The session container:**
+   - It runs as the service's uid and gid, with a read-only root and `HOME=/tmp`.
+   - It has no capability and `no-new-privileges`. Its default limits are 4 GB (swap equal), 2 CPUs and 1024 processes.
+   - The image creates the config volume's folder with mode 1777, so the volume is writable whatever uid the service has.
+7. **The devcontainer reading also takes `build.context`**, which the specification resolves like `build.dockerfile`. Without it, a Dockerfile that copies files from the repository root could not be built. Both paths must stay inside the checkout, symbolic links followed. An `image` the file names is pulled as it is, from any registry, with no check of who published it: the project chooses it, and the README says so.
+8. **The image runs Claude Code's postinstall by name** (`npm install --allow-scripts=@anthropic-ai/claude-code`). The npm of `node:24` skips install scripts not allowed by name, and the package's postinstall puts the native binary in place. The SDK's peer dependencies resolved in the image to `@anthropic-ai/sdk` 1.0.0, `@modelcontextprotocol/sdk` 1.32.1 and `zod` 4.6.7. Only the SDK itself is pinned.
+
+**Consequences.**
+- The plan's unknowns for lane 2, as the doctor run measured them:
+  - Names outside the session network do not resolve on an internal network, so the proxy resolves them.
+  - npm and Claude Code 2.1.306 honour `HTTPS_PROXY`.
+  - With `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (set in the image), a `claude -p` run with an invalid key asked only for `api.anthropic.com:443`. Without it, it also asked for `http-intake.logs.us5.datadoghq.com:443`, which was refused.
+  - The default allow list stays `api.anthropic.com` and `registry.npmjs.org`. Hosts a logged-in session needs are unknown until lane 4's run.
+- A project whose devcontainer names another image needs Node 24, Claude Code and the SDK in that image for lane 4's runner.
+- `docker.ts` gives lane 4 `Docker.attach` (`docker start --attach --interactive`) for the runner's standard streams, and `startSession` with `interactive: true` creates the session container without starting it.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-container`.
+
 ## 2026-10-21: the app signs people in from ledger.db
 
 **Decision.** The users table belongs to the users module (`v2/src/modules/users.ts`), in `ledger.db`. The app process (`v2/app`) opens the same file to check a password, because the service's API (`v2/src/api/types.ts`) has no sign-in route and changing that file is a lane of its own. The app keeps its sign-in sessions in the same file, in its own table `app_sessions`. That table holds the SHA-256 of the session id, never the id, with the session's anti-forgery token and its expiry. The cookie is `cleared_v2_session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, 30 days.

@@ -1,0 +1,411 @@
+// The only way v2 talks to Docker: the `docker` CLI, spawned as a child
+// process (milestone 1 plan, decision 3). The label rule lives here:
+//   - every object it creates carries `--label cleared.dev=v2`, and every
+//     network, volume and container also `cleared.session=<id>`;
+//   - every list carries `--filter label=cleared.dev=v2`, and a listed row
+//     without that label is refused even if the CLI ignored the filter;
+//   - `docker stop`, `rm`, `exec` and the other commands that act on an
+//     object take no filter, so they only ever name ids that a labelled list
+//     returned in the same call, after `--`.
+// assertLabelRule checks each command line before it runs; nothing reaches
+// the runner without passing it.
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { isAbsolute } from 'node:path';
+
+export const LABEL = 'cleared.dev=v2';
+export const SESSION_LABEL = 'cleared.session';
+export const ROLE_LABEL = 'cleared.role';
+
+const LABEL_FILTER = `label=${LABEL}`;
+const [LABEL_KEY, LABEL_VALUE] = LABEL.split('=') as [string, string];
+
+export type DockerResult = { readonly code: number; readonly stdout: string; readonly stderr: string };
+export type RunOptions = { readonly input?: string; readonly timeoutMs?: number };
+export type DockerRunner = (args: readonly string[], options: RunOptions) => Promise<DockerResult>;
+// Starts a long-lived docker process whose standard streams the caller keeps.
+export type DockerSpawner = (args: readonly string[]) => ChildProcessWithoutNullStreams;
+
+export class DockerError extends Error {
+  override name = 'DockerError';
+}
+
+export class LabelRuleError extends Error {
+  override name = 'LabelRuleError';
+}
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+// Runs a command (the real CLI: cliRunner). Output is kept in memory: the commands this module
+// builds print ids, JSON rows or a probe's short output.
+export const commandRunner = (command: string): DockerRunner => (args, options) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    // Its own timer rather than spawn's `timeout`, which stayed armed after a
+    // failed spawn and kept the process alive until it fired.
+    const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve({
+        code: code ?? (signal ? 128 : 1),
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8') + (signal ? `\nkilled by ${signal}` : ''),
+      });
+    });
+    // A command that exits without reading its input (or never starts)
+    // makes the write fail with EPIPE: its exit code or spawn error says what
+    // happened, so the write error is not thrown on its own.
+    child.stdin.on('error', () => undefined);
+    child.stdin.end(options.input ?? '');
+  });
+
+export const cliRunner: DockerRunner = commandRunner('docker');
+
+export const cliSpawner: DockerSpawner = (args) => spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+
+const CREATES = new Set(['create', 'build', 'network create', 'volume create']);
+const SESSION_CREATES = new Set(['create', 'network create', 'volume create']);
+const LISTS = new Set(['ps', 'network ls', 'volume ls']);
+// Commands that act on objects, with how many of the words after `--` are
+// targets: all of them, or only the first (exec: the rest is the command).
+const TARGETED = new Map<string, 'all' | 'first'>([
+  ['start', 'all'], ['stop', 'all'], ['rm', 'all'], ['inspect', 'all'], ['logs', 'all'], ['exec', 'first'],
+  ['network rm', 'all'], ['network inspect', 'all'], ['volume rm', 'all'],
+]);
+const META = new Set(['version']);
+
+function verbOf(args: readonly string[]): string {
+  const [first = '', second = ''] = args;
+  return first === 'network' || first === 'volume' ? `${first} ${second}` : first;
+}
+
+const hasPair = (args: readonly string[], flag: string, value: string): boolean =>
+  args.some((arg, index) => arg === flag && args[index + 1] === value);
+
+// Throws unless the command line follows the label rule. `owned` holds the
+// ids the previous labelled list returned; a targeted command may name only those.
+export function assertLabelRule(args: readonly string[], owned: ReadonlySet<string>): void {
+  const verb = verbOf(args);
+  const shown = args.join(' ');
+  if (CREATES.has(verb)) {
+    if (!hasPair(args, '--label', LABEL)) throw new LabelRuleError(`docker ${verb} without --label ${LABEL}: ${shown}`);
+    if (SESSION_CREATES.has(verb) && !args.some((arg, i) => arg === '--label' && args[i + 1]?.startsWith(`${SESSION_LABEL}=`)))
+      throw new LabelRuleError(`docker ${verb} without --label ${SESSION_LABEL}=<id>: ${shown}`);
+    return;
+  }
+  if (LISTS.has(verb)) {
+    if (!hasPair(args, '--filter', LABEL_FILTER)) throw new LabelRuleError(`docker ${verb} without --filter ${LABEL_FILTER}: ${shown}`);
+    return;
+  }
+  const scope = TARGETED.get(verb);
+  if (scope) {
+    const at = args.indexOf('--');
+    const after = at < 0 ? [] : args.slice(at + 1);
+    const targets = scope === 'first' ? after.slice(0, 1) : after;
+    if (targets.length === 0) throw new LabelRuleError(`docker ${verb} without a target after "--": ${shown}`);
+    for (const target of targets) {
+      if (!owned.has(target)) throw new LabelRuleError(`docker ${verb} on ${target}, which no labelled list returned: ${shown}`);
+    }
+    return;
+  }
+  if (META.has(verb)) return;
+  throw new LabelRuleError(`docker ${verb || '(nothing)'} is not a command this wrapper runs: ${shown}`);
+}
+
+// A session id is what Cleared chose (a UUID): lowercase, so it can never be
+// read as an option, a filter pattern or a path.
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function assertSessionId(session: string): void {
+  if (!SESSION_ID.test(session)) throw new DockerError(`not a session id: ${JSON.stringify(session)}`);
+}
+
+// Values that go into flags: never empty, never an option, never a separator
+// of the comma-separated --mount and --network forms.
+const NAME = /^[a-z0-9][a-z0-9_.-]{0,127}$/;
+const IMAGE = /^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[a-f0-9]{64})?$/;
+const LIMIT = /^[0-9]+(\.[0-9]+)?[a-z]?$/;
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const USER = /^[0-9]+:[0-9]+$|^[a-z_][a-z0-9_-]*$/;
+
+function check(ok: boolean, what: string, value: unknown): void {
+  if (!ok) throw new DockerError(`invalid ${what}: ${JSON.stringify(value)}`);
+}
+
+const absolute = (path: string): boolean => isAbsolute(path) && !/[,\n\0]/.test(path);
+
+export type Mount = {
+  readonly type: 'bind' | 'volume';
+  readonly source: string;
+  readonly target: string;
+  readonly readonly?: boolean;
+};
+
+export type NetworkAttachment = { readonly name: string; readonly aliases?: readonly string[] };
+
+export type Limits = { readonly memory: string; readonly cpus: string; readonly pids: number };
+
+export type ContainerSpec = {
+  readonly name: string;
+  readonly session: string;
+  readonly role: string;
+  readonly image: string;
+  readonly networks: readonly NetworkAttachment[];
+  readonly command?: readonly string[];
+  readonly user?: string;
+  readonly readOnly?: boolean;
+  readonly tmpfs?: readonly string[];
+  readonly dropAllCapabilities?: boolean;
+  readonly noNewPrivileges?: boolean;
+  readonly limits?: Limits;
+  readonly mounts?: readonly Mount[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly workdir?: string;
+  readonly interactive?: boolean;
+};
+
+export type ContainerRow = { readonly id: string; readonly name: string; readonly state: string; readonly labels: Readonly<Record<string, string>> };
+export type NetworkRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>> };
+export type VolumeRow = { readonly name: string; readonly labels: Readonly<Record<string, string>> };
+
+// `docker ... --format '{{json .}}'` prints labels as "k=v,k=v".
+function parseLabels(text: unknown): Record<string, string> {
+  const labels: Record<string, string> = {};
+  if (typeof text !== 'string') return labels;
+  for (const pair of text.split(',')) {
+    if (!pair) continue;
+    const at = pair.indexOf('=');
+    labels[at < 0 ? pair : pair.slice(0, at)] = at < 0 ? '' : pair.slice(at + 1);
+  }
+  return labels;
+}
+
+function jsonLines(stdout: string): Record<string, unknown>[] {
+  return stdout.split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function labelled<T extends { readonly labels: Readonly<Record<string, string>> }>(rows: T[], what: string, describe: (row: T) => string): T[] {
+  for (const row of rows) {
+    if (row.labels[LABEL_KEY] !== LABEL_VALUE) throw new LabelRuleError(`docker listed ${what} ${describe(row)} without ${LABEL}: refused`);
+  }
+  return rows;
+}
+
+const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
+
+export class Docker {
+  private readonly runner: DockerRunner;
+  private readonly spawner: DockerSpawner;
+
+  constructor(runner: DockerRunner = cliRunner, spawner: DockerSpawner = cliSpawner) {
+    this.runner = runner;
+    this.spawner = spawner;
+  }
+
+  // Every command goes through here.
+  private async call(args: readonly string[], owned: ReadonlySet<string> = new Set(), options: RunOptions = {}): Promise<DockerResult> {
+    assertLabelRule(args, owned);
+    return this.runner(args, options);
+  }
+
+  private async must(args: readonly string[], owned?: ReadonlySet<string>, options?: RunOptions): Promise<string> {
+    const result = await this.call(args, owned, options);
+    if (result.code !== 0) throw new DockerError(`docker ${verbOf(args)} failed (${result.code}): ${firstLine(result.stderr)}`);
+    return result.stdout;
+  }
+
+  private filters(session?: string): string[] {
+    if (session !== undefined) assertSessionId(session);
+    return ['--filter', LABEL_FILTER, ...(session === undefined ? [] : ['--filter', `label=${SESSION_LABEL}=${session}`])];
+  }
+
+  async version(): Promise<string> {
+    const out = await this.must(['version', '--format', '{{json .}}']);
+    const parsed = JSON.parse(out) as { Server?: { Version?: string } };
+    return parsed.Server?.Version ?? 'unknown';
+  }
+
+  // Builds an image from a context folder; the image carries the label.
+  async build(spec: { readonly context: string; readonly dockerfile?: string; readonly tag: string; readonly timeoutMs?: number }): Promise<void> {
+    check(absolute(spec.context), 'build context', spec.context);
+    check(spec.dockerfile === undefined || absolute(spec.dockerfile), 'Dockerfile', spec.dockerfile);
+    check(IMAGE.test(spec.tag), 'image tag', spec.tag);
+    const file = spec.dockerfile === undefined ? [] : ['--file', spec.dockerfile];
+    await this.must(['build', '--label', LABEL, '--tag', spec.tag, ...file, '--', spec.context], undefined, { timeoutMs: spec.timeoutMs ?? 1_800_000 });
+  }
+
+  async createNetwork(spec: { readonly name: string; readonly session: string; readonly internal: boolean }): Promise<string> {
+    assertSessionId(spec.session);
+    check(NAME.test(spec.name), 'network name', spec.name);
+    // An internal network still gives its bridge a gateway address on the
+    // host, and every host service listening on 0.0.0.0 answers there. The
+    // isolated gateway mode (checked with Docker 29.8.1) assigns it none.
+    const internal = spec.internal ? ['--internal', '--opt', 'com.docker.network.bridge.gateway_mode_ipv4=isolated'] : [];
+    const out = await this.must(['network', 'create', '--driver', 'bridge', ...internal,
+      '--label', LABEL, '--label', `${SESSION_LABEL}=${spec.session}`, spec.name]);
+    return out.trim();
+  }
+
+  async createVolume(spec: { readonly name: string; readonly session: string }): Promise<string> {
+    assertSessionId(spec.session);
+    check(NAME.test(spec.name), 'volume name', spec.name);
+    const out = await this.must(['volume', 'create', '--label', LABEL, '--label', `${SESSION_LABEL}=${spec.session}`, spec.name]);
+    return out.trim();
+  }
+
+  async createContainer(spec: ContainerSpec): Promise<string> {
+    assertSessionId(spec.session);
+    check(NAME.test(spec.name), 'container name', spec.name);
+    check(NAME.test(spec.role), 'role', spec.role);
+    check(IMAGE.test(spec.image), 'image', spec.image);
+    const args = ['create', '--name', spec.name, '--label', LABEL, '--label', `${SESSION_LABEL}=${spec.session}`, '--label', `${ROLE_LABEL}=${spec.role}`];
+    for (const network of spec.networks) {
+      check(NAME.test(network.name), 'network', network.name);
+      for (const alias of network.aliases ?? []) check(NAME.test(alias), 'network alias', alias);
+      args.push('--network', [`name=${network.name}`, ...(network.aliases ?? []).map((alias) => `alias=${alias}`)].join(','));
+    }
+    if (spec.user !== undefined) {
+      check(USER.test(spec.user), 'user', spec.user);
+      args.push('--user', spec.user);
+    }
+    if (spec.readOnly) args.push('--read-only');
+    for (const path of spec.tmpfs ?? []) {
+      check(absolute(path) && !path.includes(':'), 'tmpfs path', path);
+      args.push('--tmpfs', path);
+    }
+    if (spec.dropAllCapabilities) args.push('--cap-drop', 'ALL');
+    if (spec.noNewPrivileges) args.push('--security-opt', 'no-new-privileges');
+    if (spec.limits) {
+      check(LIMIT.test(spec.limits.memory), 'memory limit', spec.limits.memory);
+      check(LIMIT.test(spec.limits.cpus), 'cpu limit', spec.limits.cpus);
+      check(Number.isInteger(spec.limits.pids) && spec.limits.pids > 0, 'pids limit', spec.limits.pids);
+      // Memory and swap equal: no swap on top of the limit.
+      args.push('--memory', spec.limits.memory, '--memory-swap', spec.limits.memory, '--cpus', spec.limits.cpus, '--pids-limit', String(spec.limits.pids));
+    }
+    for (const mount of spec.mounts ?? []) {
+      check(mount.type === 'volume' ? NAME.test(mount.source) : absolute(mount.source), 'mount source', mount.source);
+      check(absolute(mount.target), 'mount target', mount.target);
+      args.push('--mount', `type=${mount.type},source=${mount.source},target=${mount.target}${mount.readonly ? ',readonly' : ''}`);
+    }
+    for (const [key, value] of Object.entries(spec.env ?? {})) {
+      check(ENV_KEY.test(key) && !value.includes('\0'), 'environment variable', key);
+      args.push('--env', `${key}=${value}`);
+    }
+    if (spec.workdir !== undefined) {
+      check(absolute(spec.workdir), 'workdir', spec.workdir);
+      args.push('--workdir', spec.workdir);
+    }
+    if (spec.interactive) args.push('--interactive');
+    args.push('--', spec.image, ...(spec.command ?? []));
+    const out = await this.must(args);
+    return out.trim();
+  }
+
+  async containers(session?: string): Promise<ContainerRow[]> {
+    const out = await this.must(['ps', '--all', '--no-trunc', ...this.filters(session), '--format', '{{json .}}']);
+    const rows = jsonLines(out).map((row) => ({ id: String(row.ID), name: String(row.Names), state: String(row.State), labels: parseLabels(row.Labels) }));
+    return labelled(rows, 'container', (row) => row.name);
+  }
+
+  async networks(session?: string): Promise<NetworkRow[]> {
+    const out = await this.must(['network', 'ls', '--no-trunc', ...this.filters(session), '--format', '{{json .}}']);
+    const rows = jsonLines(out).map((row) => ({ id: String(row.ID), name: String(row.Name), labels: parseLabels(row.Labels) }));
+    return labelled(rows, 'network', (row) => row.name);
+  }
+
+  async volumes(session?: string): Promise<VolumeRow[]> {
+    const out = await this.must(['volume', 'ls', ...this.filters(session), '--format', '{{json .}}']);
+    const rows = jsonLines(out).map((row) => ({ name: String(row.Name), labels: parseLabels(row.Labels) }));
+    return labelled(rows, 'volume', (row) => row.name);
+  }
+
+  // The id of the session's container with this name, from a labelled list.
+  private async owned(session: string, name: string): Promise<{ id: string; owned: ReadonlySet<string> }> {
+    const row = (await this.containers(session)).find((c) => c.name === name || c.name === `/${name}`);
+    if (!row) throw new DockerError(`no container named ${name} with ${LABEL} in session ${session}`);
+    return { id: row.id, owned: new Set([row.id]) };
+  }
+
+  async start(session: string, name: string): Promise<void> {
+    const { id, owned } = await this.owned(session, name);
+    await this.must(['start', '--', id], owned);
+  }
+
+  // Runs a command in a running container and returns its result, whatever
+  // its exit code: the caller decides what a failure means.
+  async exec(session: string, name: string, command: readonly string[], options: { readonly input?: string; readonly env?: Readonly<Record<string, string>>; readonly timeoutMs?: number } = {}): Promise<DockerResult> {
+    check(command.length > 0, 'command', command);
+    const { id, owned } = await this.owned(session, name);
+    const env: string[] = [];
+    for (const [key, value] of Object.entries(options.env ?? {})) {
+      check(ENV_KEY.test(key), 'environment variable', key);
+      env.push('--env', `${key}=${value}`);
+    }
+    return this.call(['exec', ...(options.input === undefined ? [] : ['--interactive']), ...env, '--', id, ...command], owned, options);
+  }
+
+  async inspect(session: string, name: string): Promise<Record<string, unknown>> {
+    const { id, owned } = await this.owned(session, name);
+    const [first] = JSON.parse(await this.must(['inspect', '--type', 'container', '--', id], owned)) as Record<string, unknown>[];
+    return first ?? {};
+  }
+
+  async inspectNetwork(session: string, name: string): Promise<Record<string, unknown>> {
+    const row = (await this.networks(session)).find((n) => n.name === name);
+    if (!row) throw new DockerError(`no network named ${name} with ${LABEL} in session ${session}`);
+    const [first] = JSON.parse(await this.must(['network', 'inspect', '--', row.id], new Set([row.id]))) as Record<string, unknown>[];
+    return first ?? {};
+  }
+
+  // Starts a container created with `interactive` and returns the docker
+  // process attached to its standard streams: the session adapter writes
+  // to the runner's stdin and reads its stdout through it.
+  async attach(session: string, name: string): Promise<ChildProcessWithoutNullStreams> {
+    const { id, owned } = await this.owned(session, name);
+    const args = ['start', '--attach', '--interactive', '--', id];
+    assertLabelRule(args, owned);
+    return this.spawner(args);
+  }
+
+  // What the container printed, both streams.
+  async logs(session: string, name: string): Promise<string> {
+    const { id, owned } = await this.owned(session, name);
+    const result = await this.call(['logs', '--', id], owned);
+    if (result.code !== 0) throw new DockerError(`docker logs failed (${result.code}): ${firstLine(result.stderr)}`);
+    return result.stdout + result.stderr;
+  }
+
+  // Stops and removes the session's containers, then its networks; with
+  // `only`, just the ones named there. Each removal names only what the
+  // labelled list just returned.
+  async removeSession(
+    session: string,
+    options: { readonly stopTimeoutSeconds?: number; readonly only?: { readonly containers: readonly string[]; readonly networks: readonly string[] } } = {},
+  ): Promise<{ containers: number; networks: number }> {
+    assertSessionId(session);
+    const { stopTimeoutSeconds = 5, only } = options;
+    const named = (name: string, list: readonly string[] | undefined): boolean => list === undefined || list.includes(name.replace(/^\//, ''));
+    const containers = (await this.containers(session)).filter((row) => named(row.name, only?.containers)).map((row) => row.id);
+    if (containers.length > 0) {
+      const owned = new Set(containers);
+      await this.must(['stop', '--time', String(stopTimeoutSeconds), '--', ...containers], owned);
+      await this.must(['rm', '--force', '--volumes', '--', ...containers], owned);
+    }
+    const networks = (await this.networks(session)).filter((row) => named(row.name, only?.networks)).map((row) => row.id);
+    if (networks.length > 0) await this.must(['network', 'rm', '--', ...networks], new Set(networks));
+    return { containers: containers.length, networks: networks.length };
+  }
+
+  async removeVolumes(session: string): Promise<number> {
+    assertSessionId(session);
+    const volumes = (await this.volumes(session)).map((row) => row.name);
+    if (volumes.length > 0) await this.must(['volume', 'rm', '--', ...volumes], new Set(volumes));
+    return volumes.length;
+  }
+}
