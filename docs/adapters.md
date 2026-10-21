@@ -205,6 +205,79 @@ Why: it is the only Codex mode with several turns in one process, approval reque
 
 Not tested and needed before the adapter ships: either mode inside a Docker container labeled `cleared.dev=v2`, container login (`CLAUDE_CODE_OAUTH_TOKEN` or a mounted `CLAUDE_CONFIG_DIR`; Codex `CODEX_HOME`), an allow decision, interrupt, and `thread/resume` on the app server.
 
+### Claude Code verified in a container (2026-10-21)
+
+Run on this server on 2026-10-21 by lane `v2-j1-claude-adapter` with `node v2/scripts/doctor.ts claude-code`, through the adapter itself (`v2/src/session/adapters/claude-code.ts`) and the runner in the session image (`v2/images/session/runner/main.ts`): Claude Code 2.1.306, `@anthropic-ai/claude-agent-sdk` 0.3.306, `claude-haiku-5-5`, Docker 29.8.1, objects labelled `cleared.dev=v2` only. Nothing ran against the host's own Claude Code configuration directory: the session's config directory is the session's volume. The login was the service account's existing Claude Code login, its credentials file named by `CLEARED_CLAUDE_CREDENTIALS` and bind mounted read only at `/run/cleared/claude.token` (owner decision of 2026-10-21, [decisions log](v2/decisions-log.md)). The doctor checks that file's owner and mode and never reads it; the runner reads it inside the container and gives the CLI only its access token, as `CLAUDE_CODE_OAUTH_TOKEN`. The session's reported `total_cost_usd` was 0.0054 USD before the resume and 0.0056 USD after it.
+
+What the run established, beyond the earlier proofs on the host:
+
+- **Login in a container.** `CLAUDE_CODE_OAUTH_TOKEN` set from the access token of an existing subscription login works in the container: `system/init` reports `apiKeySource: "none"` and every turn answered. A `claude setup-token` token was not tried (it needs the owner's browser); the runner accepts either form.
+- **Hosts.** A logged-in session asked the egress proxy for `api.anthropic.com:443` only (`allowed api.anthropic.com:443 x3` over the whole session, image variable `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`).
+- **Allow round trip.** `touch allowed.txt` raised `canUseTool`; the policy's `default` rule sent it to the inbox; `allow_once` returned `{ behavior: 'allow', updatedInput }` and the file existed afterwards. `rm -r olddir` raised `canUseTool`, the policy said `delete.outside_ticket`, `reject_once` stopped it, and the folder stayed.
+- **Reads never ask.** In `default` mode a `Read` of a planted `.env` ran with no `canUseTool` call (seen in a first probe, where the model then quoted the planted value). The runner therefore sends a `tool_check` from a `PreToolUse` hook before every tool call; the host evaluates the policy and only a deny stops the call. With it, the read was denied (`secret.read`) and the planted value reached neither the model's answer nor the events.
+- **Briefing.** With `settingSources: []`, `CLAUDE.md` is not loaded (the SDK's `settingSources` reference: "Must include 'project' to load CLAUDE.md files"). The runner appends the workdir's `CLAUDE.md` to the `claude_code` system prompt preset; the session answered the codeword it holds (`MAPLE`).
+- **A message sent mid turn** while `sleep 15` ran was taken into account before the turn ended: the turn's reply followed it (`SECOND` instead of `FIRST`) and its `result` lists both user message uuids in `user_message_uuids`. So `send` during a run only pushes the message; no interrupt is needed for step 4 of the proof. In a first run, where the doctor sent the message after the turn had already ended, it was simply the next turn.
+- **Interrupt** during `sleep 60`: `interrupt()` ended the turn with a `result` of `subtype: "error_during_execution"`, `is_error: true`, `terminal_reason: "aborted_tools"`; the adapter maps it to `RUN_FINISHED` with outcome and stop reason `cancelled`.
+- **Question.** `AskUserQuestion` reaches `canUseTool` like any tool, with `input.questions` in the shape of `sdk-tools.d.ts` `AskUserQuestionInput`. The answer goes back as `{ behavior: 'allow', updatedInput: { questions, answers: { <question text>: <label> } } }`; the model replied with the chosen option (`Oldest`).
+- **Subagents.** A foreground `Agent` call's own tool calls arrive as `assistant` frames whose `parent_tool_use_id` is the `Agent` call's id; the app can group on it. In an earlier run the model started the subagent in the background, and its frames were not part of the turn.
+- **Resume after the container is recreated.** `stop` removed the containers and networks and kept the config volume; `resume` started a new container with `resume: <session id>` and the session remembered the word of its first turn (`PLUM`). On resume the CLI first prints a `system/init` without `user_message_uuids` and a `result` with `num_turns: 0` before the first real turn; the mapper ignores both.
+- **Cost.** `total_cost_usd` and `modelUsage` in a `result` are totals for the session so far; `usage` is the turn's. `RUN_FINISHED` carries `total_cost_usd` as the SDK reports it.
+- **Still unknown:** a `claude setup-token` token in a container; what a session does when the access token it was given expires (the runner reads the login file once, when the container starts, so a session started before the host refreshes its login keeps the older token); partial messages.
+
+Raw lines, edited as in the proofs below: ids are `<id>` or `<session>`, the host's paths `<scratch>` and `<login file>`, and a long line is cut around `...`. The `docker create` of the session container (one line, split here at each `--mount`), then the check lines, then the runner lines the doctor prints for each turn (`<<`).
+
+```console
+$ CLEARED_CLAUDE_CREDENTIALS=<login file> node scripts/doctor.ts claude-code --no-build
+$ docker create --name cleared-v2-<id>-session --label cleared.dev=v2 --label cleared.session=<id> --label cleared.role=session --network name=cleared-v2-<id> --user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 4g --memory-swap 4g --cpus 2 --pids-limit 1024
+    --mount type=bind,source=<scratch>/work,target=/workspace
+    --mount type=bind,source=<login file>,target=/run/cleared/claude.token,readonly
+    --mount type=volume,source=cleared-v2-<id>-config,target=/var/lib/cleared/claude-config --env HTTPS_PROXY=http://egress:3128 --env HTTP_PROXY=http://egress:3128 --env https_proxy=http://egress:3128 --env http_proxy=http://egress:3128 --env NO_PROXY=localhost,127.0.0.1 --env no_proxy=localhost,127.0.0.1 --env HOME=/tmp --env CLAUDE_CONFIG_DIR=/var/lib/cleared/claude-config --workdir /workspace --interactive -- cleared-v2-session:2.1.306 node /opt/cleared/runner/main.ts
+PASS the login file (the Claude Code credentials file named by CLEARED_CLAUDE_CREDENTIALS) is a file of the service's account that only it can read: mode 600
+PASS the login file is mounted read only at /run/cleared/claude.token (docker inspect): [{"Type":"bind","Destination":"/workspace","RW":true},{"Type":"bind","Destination":"/run/cleared/claude.token","RW":false},{"Type":"volume","Destination":"/var/lib/cleared/claude-config","RW":true}]
+PASS the touch was escalated by the policy (rule default) and allowed from the inbox
+PASS after allow_once the file exists in the workdir
+PASS the session runs Claude Code 2.1.306 with claude-haiku-5-5, logged in without an API key: {"version":"2.1.306","model":"claude-haiku-5-5","apiKeySource":"none"}
+PASS the rm -r was escalated (rule delete.outside_ticket) and reject_once stopped it
+PASS the second turn ended: RUN_FINISHED
+PASS the read of .env was denied by the policy (secret.read) before it ran
+PASS the planted value reached neither the model's answer nor the events
+PASS the briefing (CLAUDE.md, appended to the system prompt) reached the session: What is the project codeword given in your instructions? Reply with that one word. / MAPLE
+OBSERVED mid-turn message: taken into account before the running turn ended; a result listing both user message uuids: yes; runs started after the send: 1; replies: Use the Bash tool to run exactly: sleep 15 . Then reply with the single word FIRST. / Change of plan for this reply only: reply with the single word SECOND instead of FIRST. / SECOND
+PASS the message sent mid turn was taken into account
+PASS interrupt ended the turn as cancelled: {"type":"RUN_FINISHED","threadId":"<session>","runId":"<id>","outcome":{"type":"cancelled"},"usage":[{"model":"claude-haiku-5-5","inputTokens":2,"outputTokens":81,"cachedInputTokens":19553,"cacheWriteInputTokens":88}],"result":{"stopReason":"cancelled","total_cost_usd":0.00264977}}
+PASS the question reached the inbox as cleared.question and its answer reached the model: Use the AskUserQuestion tool to ask me one question: should the guestbook show the newest or the oldest entry first, with the two options Newest and Oldest. Then reply with the option I chose, one word. / Oldest
+OBSERVED subagent: its frames carry parent_tool_use_id (the parent Agent call id)
+PASS after stop: no container and no network with the session label, the config volume kept: 0 containers, 0 networks, 1 volumes
+PASS the resumed session in a new container remembers the word from the first turn: Which word did I ask you to remember at the very start of this session? Reply with that one word. / PLUM
+PASS ticket done: nothing with the session label remains (containers, networks, volumes): 0, 0, 0
+PASS no new listening socket on the host from this run: none (0 new from other processes)
+doctor: all checks passed
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< {"type":"permission_request","requestId":"<id>","toolName":"Bash","toolUseId":"<id>","input":{"command":"touch allowed.txt","description":"Create empty file allowed.txt in working directory"}}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"OK","user_message_uuids":["<id>"],"num_turns":2,"total_cost_usd":0.0005493799999999999}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< {"type":"permission_request","requestId":"<id>","toolName":"Bash","toolUseId":"<id>","input":{"command":"rm -r olddir","description":"Recursively remove olddir directory"}}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"DENIED","user_message_uuids":["<id>"],"num_turns":2,"total_cost_usd":0.00110651}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"DENIED\n\nThe read was blocked by a PreToolUse hook that says secrets and credential files are never read in a session. I didn't retry.","user_message_uuids":["<id>"],"num_turns":2,"total_cost_usd":0.00166259}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"MAPLE","user_message_uuids":["<id>"],"num_turns":1,"total_cost_usd":0.00189668}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"SECOND","user_message_uuids":["<id>","<id>"],"num_turns":2,"total_cost_usd":0.00239594}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< result {"subtype":"error_during_execution","is_error":true,"stop_reason":"tool_use","terminal_reason":"aborted_tools","user_message_uuids":["<id>"],"num_turns":3,"total_cost_usd":0.00264977}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< {"type":"question","requestId":"<id>","toolUseId":"<id>","questions":[{"question":"Should the guestbook show the newest or the oldest entry first?","header":"Sort order","options":[{"label":"Newest","description":"Show the...book entry first"},{"label":"Oldest","description":"Show the earliest guestbook entry first"}],"multiSelect":false}]}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"Oldest","user_message_uuids":["<id>"],"num_turns":2,"total_cost_usd":0.00324339}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< assistant with parent_tool_use_id [{"type":"tool_use","id":"<id>","name":"Bash","input":{"command":"pwd","description":"Print current working directory"},"caller":{"type":"direct"}}]
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"/workspace","user_message_uuids":["<id>"],"num_turns":2,"total_cost_usd":0.005360605000000001}
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","cwd":"/workspace","permissionMode":"default","apiKeySource":"none","user_message_uuids":["<id>"]}
+<< result {"subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"PLUM","user_message_uuids":["<id>"],"num_turns":1,"total_cost_usd":0.0056004850000000005}
+```
+
+The whole output (274 lines, every docker command line and every stored event) is in the lane's pull request.
+
 ### Proof
 
 Commands as run on 2026-10-21 (the resume step of proof 3, and proofs 8, 9 and 10, were run again the same day for review round 1, to save raw output). `$T` is a temporary directory under the session scratchpad. JSON lines are raw output with these edits only: UUIDs, tool IDs and message IDs are replaced with `<id>`, the scratchpad path is shown as `$T` and the home directory as `~`, and long parts are cut, shown as `...`; the text on each side of a `...` is copied unchanged. Lines starting with `>>` (sent) and `<<` (received) are printed by the probe scripts; the script for proofs 9 and 10 is inlined there, and the scripts and their output files stayed in the scratchpad.
