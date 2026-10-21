@@ -1,0 +1,10 @@
+{
+  // The app's type check (tsc --noEmit -p app): the server, the tests and
+  // the browser code under public/, which the server serves with its types
+  // stripped. The browser code needs the DOM types; the rest of v2 does not.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2024", "dom", "dom.iterable"]
+  },
+  "include": ["."]
+}
