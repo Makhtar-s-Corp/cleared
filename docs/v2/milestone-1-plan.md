@@ -19,7 +19,7 @@ The milestone is proven when the owner does the following in the app, with no co
 | 7 | Sees the release in the inbox and approves it (password session) | waiting for approval |
 | 8 | The change goes live through the existing lock, health watch and rollback | merge to first healthy probe |
 
-The demo runs on a small example web app with tests and a test database under `examples/`, then, with the owner's agreement, on one real low-risk GetSeetu ticket (brief, section 6). This plan covers the example only; the GetSeetu run is a milestone proof step for the orchestrator, after the owner's go.
+The demo runs on a small example web app with tests and a test database under `examples/`, then, with the owner's agreement, on one real low-risk the first piloted project ticket (brief, section 6). This plan covers the example only; the the first piloted project run is a milestone proof step for the orchestrator, after the owner's go.
 
 The durations come from `STEP_STARTED` and `STEP_FINISHED` events (section 4) with these step names: `workspace`, `author`, `waiting_human`, `review`, `approval`, `release`, `watch`. The session screen shows them in its Checks card, the inbox release card shows "Opus wrote it in N min, Sonnet reviewed it, one round", and the tower shows them under Landed today.
 
@@ -345,7 +345,7 @@ At most three lanes run at once, and lanes in one wave never edit the same file.
 | 3 | 7 flow, 8 approval-lock, 9 session-screen | `v2/src/{flow,inbox,api handlers}`, `modules/{sessions,flow,inbox}.ts`; `v2/src/{tickets/local-store.ts,approval,cli}`, `modules/{tickets,approval}.ts`; `v2/app/public/screens/session.*`, its messages and fixture | wave 2 merged, and the example repository on GitHub (section 11) for lane 8's real proof |
 | 4 | 10 inbox-screen | `v2/app/public/screens/inbox.*`, its messages and fixture | wave 3 merged |
 
-A wave starts when the whole previous wave is merged, as the table says; a slot freed early (lane 3 is the shortest of wave 1) stays empty until then. The milestone proof (section 1) runs after wave 4, by the orchestrator, on the example repository, with Haiku fix lanes for what it finds; then, after the owner's go, on one GetSeetu ticket.
+A wave starts when the whole previous wave is merged, as the table says; a slot freed early (lane 3 is the shortest of wave 1) stays empty until then. The milestone proof (section 1) runs after wave 4, by the orchestrator, on the example repository, with Haiku fix lanes for what it finds; then, after the owner's go, on one ticket of the first piloted project.
 
 Files that two lanes touch are only touched across waves: `v2/images/session/Dockerfile` and `v2/scripts/doctor.ts` (lane 2, then lane 4), `v2/images/session/runner/hooks.ts` (lane 2's empty set, then lane 5), the module stubs and `adapters/index.ts` (lane 1, then one later lane each). `v2/package.json` is edited by one lane per wave: lane 1 (the `doctor` script entry and the `@ag-ui/core` dev dependency), lane 6 (the app scripts), lane 8 (the setup command); the other lanes of a wave add no script and no dependency.
 
@@ -367,7 +367,7 @@ Grouped as the brief asks, with a recommendation. The orchestrator sends them in
 
 ## 12. Out of scope for milestone 1
 
-The project lead session and the goal mode, the plans screen and `lead-and-plan.png`, web notifications, Codex and the handover (the button is present and disabled), "Open in terminal" and "Give back to Cleared", Linear and GitHub Issues mirrors, the installer and `cleared doctor` as a product command (the doctor script exists for the lanes), the removal of v1 files, the conversion of kept JavaScript that no lane touches, partial message streaming, the full devcontainer specification, the fast lane in the demo, and the GetSeetu run before the owner's go.
+The project lead session and the goal mode, the plans screen and `lead-and-plan.png`, web notifications, Codex and the handover (the button is present and disabled), "Open in terminal" and "Give back to Cleared", Linear and GitHub Issues mirrors, the installer and `cleared doctor` as a product command (the doctor script exists for the lanes), the removal of v1 files, the conversion of kept JavaScript that no lane touches, partial message streaming, the full devcontainer specification, the fast lane in the demo, and the the first piloted project run before the owner's go.
 
 ## 13. Unknowns, and who closes them
 
