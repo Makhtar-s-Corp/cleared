@@ -564,3 +564,85 @@ The choices the lane makes:
 - A `cleared.permission_answered` that follows a refused tool call has no tool id; adding one (or the message) to the event would let the refusal sit on its tool row. Not done here: `events.ts` is lane 1's.
 - Captures of the visual loop are `/tmp/cleared-captures/j1/session-<width>-<theme>.png`, not committed. The reference was rendered from `/tmp/cleared-reference/session.html` in headless Chromium; the page loads Google Fonts, so the render shows Geist only if that request succeeded.
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `v2-j1-session-screen`. The plan assigned this lane to Opus 5.5; the session that ran it was Sonnet 5.5.
+
+## 2026-10-21: the inbox screen of milestone 1, against inbox.png (lane 10)
+
+**Decision.** The inbox follows `inbox.png` for layout, sizes and colours. Its content and gestures follow the plan, lane 7's API and lane 8's routes. Every gesture goes through lane 6's forwarding with the signed-in user. The lane's choices:
+
+1. **The grace is the service's, as lane 8 holds it (its choice 3).**
+   - "Approve the release" calls `POST /api/tickets/:id/approve` at once, with `requestedAt` and `heads` exactly as the release item shows them.
+   - The screen counts down to the `dueAt` of the 202 answer, or 60 seconds when the answer has none. It shows a 4 px ink bar and Undo, which calls `POST /api/tickets/:id/approve/undo`.
+   - The plan's acceptance for this lane reads as if the app held the grace. Its test is therefore run against a fixture service that holds the approval as lane 8's does:
+     - an Undo within the grace leaves no write;
+     - the write after the grace carries the versions shown and the signed-in user;
+     - an Undo after the write is refused, and the screen says it came too late.
+   - The Undo route is not in `src/api/types.ts`, so its answer is typed in `inbox.ts`. Lane 8 named that follow-up.
+   - The grace and its outcome are kept in the tab's `sessionStorage`, so a reload during the grace still shows the bar.
+   - After `dueAt` the screen says "Approved by you at HH:MM, landing." until the release leaves the list. It cannot tell whether the service's last checks refused the write (lane 8's `refused` event), because no route says so.
+2. **"Send back" moves the ticket to Todo** (`POST /api/tickets/:id/move`, lane 7's choice 2), after one confirmation line, because it starts a new author session. The state name is `Todo`, the ticket store's default, and a test keeps the two equal. A project that renames its Todo state needs the name from the service, and no route gives it in milestone 1.
+3. **Issue 145, item 4.**
+   - A refusal by the policy never waited for the human. Lane 7's inbox does not list it, and the session screen shows it as a row of its own (lane 9).
+   - So the inbox reads no session event. One event stream per session would also run into the browser's limit of six connections per origin.
+   - What the inbox handles is a request settled without the person while it is on screen: an interrupt, the session's end, an answer from the session screen, or a restart. The answer route then answers 404, or 409 for a stopped session.
+   - The screen then says "This request was settled without you", shows no button, refreshes, and keeps the link to the session, where the refusals are.
+   - The live run below reproduced it.
+4. **What the API does not carry is left out, not invented.**
+   - A handled item has no outcome and no author: the item has a `state` only. "Handled today" therefore says "no longer waits for you".
+   - The capture's rolled back card has no carrier in milestone 1. Its plan card belongs to milestone 2.
+   - A release carries no file counts, so the change line is the pull request link and the checks.
+   - A release carries no screen name, so the heading reads "What changes on screen".
+   - Captures are null in milestone 1, so each frame says "No picture of this screen yet." A capture is shown only from a same-origin path, since the page runs under `default-src 'self'`.
+5. **A permission** shows:
+   - the command in the mono chip of the session screen (lane 9's choice 3; issue 149 is open on it);
+   - its description;
+   - the policy's reason, with its first letter capitalised and otherwise in the service's English;
+   - the session's role and model, and how long it has been paused.
+   Deny takes an optional reason. Without one, it sends the catalog's default, since `reject_once` needs a message.
+6. **A question**:
+   - Its choices are toggle buttons, one or several when `multiSelect`, plus a free answer.
+   - The answers are keyed by the question's text. A free answer wins over the choices, and several choices are joined with ", ". That format was not checked against Claude Code: no multiple choice question was run live.
+   - A label that ends in "(Recommended)" shows as the team's recommendation and goes back to the harness as written.
+   - The question sits on `awaiting-surface`, with the ticket under the 3 × 56 px amber bar (DESIGN.md, section 4).
+   - "Send the answer" stays disabled until every question has an answer.
+7. **The list and the address.**
+   - Releases come first, then permissions, then questions, each oldest first.
+   - The address's hash names the item shown, as the tower links to `/inbox#<id>`. Below 1024 px the hash opens the detail as a page of its own, with a back link; Escape goes back to the list.
+   - On a phone the captures start in their phone frame.
+   - The page polls `/api/inbox` every 10 seconds and reloads after each gesture.
+8. **The fixture** is `fixtures/inbox.ts`, with `inboxSource` standing in for the service routes, as `fixtures/session.ts` does. It is not wired into lane 6's `fixtures/source.ts`. So `CLEARED_V2_APP_SOURCE=fixtures` shows the tower fixture's two items on this screen, and that source refuses their gestures with a 404, which the screen reports as a refusal. Its captures are SVG drawings served by the stand-in.
+
+**Consequences.**
+- **Captures.**
+  - The visual loop is in `/tmp/cleared-captures/j1/inbox-<width>-<theme>.png`, with the permission, question, grace and detail views as extras. None is committed.
+  - The reference was rendered from `/tmp/cleared-reference/inbox.html` in headless Chromium as `inbox-reference.png`.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session. Taken:
+  - the phone detail as a full page;
+  - safe-area padding;
+  - 44 px targets for the frame switch and the session link;
+  - the question on `awaiting-surface`;
+  - readable field edges in both themes;
+  - "Send the answer" disabled until answered;
+  - the grace bar on its own row on a phone;
+  - Allow once first when the buttons stack;
+  - a hairline above the facts.
+  Not taken:
+  - "Clearing in 42 s": the screen's verb is "Approve", as the capture's button says.
+  - The upward shadow shown only when more is below: the shadow was removed instead.
+- `env(safe-area-inset-bottom)` stays 0 until the page's viewport meta says `viewport-fit=cover`. That meta is in lane 6's `server.ts`.
+- **Live run, 2026-10-21 from 23:51 to 23:54 (Europe/Paris).**
+  - **Setup.** This worktree's service ran on `127.0.0.1:8795` and its app on `8796`. `ss -ltn` was checked before and after. The orchestrator's proof service on 8791 was not called or changed; the value of `CLEARED_CLAUDE_CREDENTIALS` (a path) was taken from its process environment.
+  - **What could not leave the server.** The run had its own state directory. The example repository, cloned bare on the server, was the only remote. `gh` was a stub that refuses, and there was no broker socket. So nothing could reach GitHub or the lock.
+  - **Models and login.** `claude-haiku-5-5` for both roles, and the login named by `CLEARED_CLAUDE_CREDENTIALS`. The file's content was never read or printed.
+  - **Ticket LOCAL-1.**
+    - The author asked to run `npm install date-fns 2>&1; echo "exit=$?"` (rule `shell.compound`), and the inbox showed the request.
+    - The turn was interrupted through the API, then "Allow once" was clicked. The answer route answered 404, and the screen said the request was settled without the person.
+    - After a message, the new request was denied from the inbox with a typed reason: 200.
+    - Lane 8's approve and Undo routes answered 409 through the forwarding: "the ticket is not waiting for the owner (it is in “In Progress”)" and "nothing is held for this ticket".
+  - **Ticket LOCAL-2** checked the fixes the run led to: the list shows an answered request as handled at once, and the shell's count follows.
+  - **Found, for lane 7 or lane 2.** Stopping the service with SIGTERM leaves a live session's containers, networks and config volume in place. The run removed them, two sessions, by their labels (`cleared.dev=v2` and the session id), and the config volume of the first session too.
+- **Not run live.**
+  - A release item. Publish was blocked on purpose: a release needs a pull request on the forge and the lock's request.
+  - A question, and "Always in this project".
+  These run against the fixture service only.
+- This entry is the only change outside the lane's files.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-inbox-screen`.
