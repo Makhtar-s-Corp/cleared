@@ -66,6 +66,7 @@ type Step = { name: SessionState['steps'][number]['name']; startedAt: string; fi
 
 export type SessionModel = {
   lastSeq: number;
+  lastAt: string | undefined;                       // the time of the last event seen
   state: SessionState | undefined;
   readonly rows: Exclude<Row, ReadRow>[];
   pending: string[];                                // request ids (permissions and questions) that wait for the human
@@ -77,7 +78,7 @@ export type SessionModel = {
 };
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, state: undefined, rows: [], pending: [], steps: new Map(), tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map() };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: new Map(), tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map() };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -125,6 +126,7 @@ function patch(document: Record<string, unknown>, operation: JsonPatchOperation)
 export function applyEvent(model: SessionModel, stored: SessionEvent): boolean {
   if (stored.seq <= model.lastSeq) return false;
   model.lastSeq = stored.seq;
+  model.lastAt = stored.at;
   const { at } = stored;
   const event: AgUiEvent = stored.event;
   switch (event.type) {
@@ -314,6 +316,7 @@ export type SessionView = {
   readonly me: string;                                    // the signed-in user's id
   readonly language: 'en' | 'fr';
   readonly now: Date;
+  readonly busy?: ReadonlySet<string>;                    // request ids whose answer is on its way
 };
 
 const ENDED: ReadonlySet<SessionPhase> = new Set(['done', 'stopped', 'failed']);
@@ -362,11 +365,11 @@ function phrase(view: SessionView, t: Translate): string {
 
 export function renderStatus(view: SessionView, t: Translate): string {
   const ended = ENDED.has(phaseOf(view));
-  const end = ended ? Date.parse(view.summary.updatedAt) : view.now.getTime();
+  const end = ended ? Date.parse(view.model.lastAt ?? view.summary.updatedAt) : view.now.getTime();
   const time = duration(end - Date.parse(view.summary.startedAt), t);
   const usage = view.model.state?.usage ?? {};
   const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-  const meta = tokens > 0 ? t('elapsed_tokens', { time, tokens: tokens.toLocaleString(view.language) }) : t('elapsed_only', { time });
+  const meta = tokens > 0 ? t('elapsed_usage', { time, tokens: tokens.toLocaleString(view.language) }) : t('elapsed_only', { time });
   return `<span class="dot ${statusTone(view)}" aria-hidden="true"></span><h2 class="phrase-title">${esc(phrase(view, t))}</h2><span class="meta">${esc(meta)}</span>`;
 }
 
@@ -417,13 +420,14 @@ function requestCard(row: ToolRow, request: RequestState, view: SessionView, t: 
   const lead = known(t, key, { tool: row.name }) ?? t('wants_other', { tool: row.name });
   const description = input?.kind === 'execute' && input.description ? input.description : '';
   const reason = request.suggestion.decision === 'ask' ? request.suggestion.reason : '';
+  const off = view.busy?.has(request.requestId) ? ' disabled' : '';
   const why = [description, reason].filter(Boolean).map((part) => `<span>${esc(part)}</span>`).join('');
   return `<div class="request" data-row="request" data-request-id="${esc(request.requestId)}" role="group" aria-label="${esc(t('request_group'))}">
 <p class="request-title">${esc(lead)} ${code(target(input))}</p>${why ? `\n<p class="request-why">${why}</p>` : ''}
 <div class="request-actions">
-<button type="button" class="btn primary" data-answer="allow_once">${esc(t('allow_once'))}</button>
-<button type="button" class="btn" data-answer="allow_always">${esc(t('allow_always'))}</button>
-<button type="button" class="btn" data-answer="reject_once">${esc(t('deny'))}</button>
+<button type="button" class="btn primary" data-answer="allow_once"${off}>${esc(t('allow_once'))}</button>
+<button type="button" class="btn" data-answer="allow_always"${off}>${esc(t('allow_always'))}</button>
+<button type="button" class="btn" data-answer="reject_once"${off}>${esc(t('deny'))}</button>
 </div></div>`;
 }
 
@@ -436,7 +440,7 @@ function toolRow(row: ToolRow, view: SessionView, t: Translate): string {
   const subs: string[] = [];
   if (input?.kind === 'edit') subs.push(counts(input.added, input.removed));
   if (summary) {
-    const text = summary.key === 'passed' || summary.key === 'failed' ? t(`result_${summary.key}`, { n: summary.n ?? 0 }) : t(`result_${summary.key}`);
+    const text = summary.key === 'passed' || summary.key === 'failed' ? t(summary.key === 'passed' ? 'result_count_ok' : 'result_failed', { n: summary.n ?? 0 }) : t(`result_${summary.key}`);
     subs.push(`<span class="${summary.tone === 'ok' ? 'ok' : 'bad'}">${esc(text)}</span>`);
   }
   if (request) subs.push(`<span class="decided">${esc(answerLine(request, view, t))}</span>`);
@@ -470,7 +474,7 @@ function rowHtml(row: Row, view: SessionView, t: Translate): string {
       return `<div class="request question" data-row="question" data-request-id="${esc(row.requestId)}"><p class="request-title">${esc(first?.question ?? '')}</p>${rest}${options ? `<ul class="options">${options}</ul>` : ''}${footer}</div>`;
     }
     case 'denied': {
-      const key = `rule_${row.rule.replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`;
+      const key = `rule_${row.rule.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace('secret_read', 'read_private')}`;
       const named = row.rule ? known(t, key) : undefined;
       const text = named !== undefined ? t('refused', { rule: named }) : row.rule ? t('refused_rule', { rule: row.rule }) : t('refused_plain');
       return rowFrame('denied', row.at, '⊘', `<div>${esc(text)}</div>`, ' refused');
@@ -480,7 +484,7 @@ function rowHtml(row: Row, view: SessionView, t: Translate): string {
     case 'error':
       return rowFrame('error', row.at, '!', `<div class="bad">${esc(row.message)}</div>`, ' refused');
     case 'verdict':
-      return rowFrame('verdict', row.at, '✓', `<div>${esc(t(row.verdict === 'changes_requested' ? 'verdict_changes' : 'verdict_pass', { round: row.round }))}</div>`);
+      return rowFrame('verdict', row.at, '✓', `<div>${esc(t(row.verdict === 'changes_requested' ? 'verdict_changes' : 'verdict_ok', { round: row.round }))}</div>`);
   }
 }
 
@@ -707,10 +711,11 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
     const interrupt = $<HTMLButtonElement>('#interrupt');
     let first = true;
 
+    const busy = new Set<string>();                  // answers on their way: their buttons stay disabled across redraws
     const say = (text: string) => { note.textContent = text; };
     const draw = () => {
       if (stopped) return;
-      view = { ...view, now: context.now() };
+      view = { ...view, now: context.now(), busy };
       const wasAtEnd = first || timelineEl.scrollHeight - timelineEl.scrollTop - timelineEl.clientHeight < 80;
       timelineEl.innerHTML = renderTimeline(view, t);
       if (wasAtEnd) timelineEl.scrollTop = timelineEl.scrollHeight;
@@ -774,10 +779,12 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       const decision: Decision = kind === 'allow_once' ? { kind: 'allow_once' }
         : kind === 'allow_always' ? { kind: 'allow_always', scope: 'project' }
         : { kind: 'reject_once', message: t('deny_message') };
-      for (const other of card.querySelectorAll<HTMLButtonElement>('[data-answer]')) other.disabled = true;
       const requestId = card.dataset.requestId ?? '';
+      if (busy.has(requestId)) return;
+      busy.add(requestId);
+      draw();
       if (await post(`/requests/${encodeURIComponent(requestId)}/answer`, { decision }, 'answer_failed')) context.inboxChanged();
-      else for (const other of card.querySelectorAll<HTMLButtonElement>('[data-answer]')) other.disabled = false;
+      else { busy.delete(requestId); draw(); }
     });
 
     // The reviewer's session appears once it starts; the clock moves on.

@@ -94,6 +94,9 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .index { padding: 20px 28px 40px; display: flex; flex-direction: column; gap: 16px; }
 .index h1 { font-size: 26px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; }
 
+@media (max-width: 1439px) {
+  .panel { height: auto; max-height: calc(100vh - 132px); }
+}
 @media (max-width: 1100px) {
   .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
   .btn, .composer .btn { min-height: 44px; }
@@ -107,7 +110,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
   .tabs { margin-left: 0; width: 100%; }
   .tab { flex: 1; justify-content: center; min-height: 44px; }
   .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 0 16px 28px; }
-  .panel { height: auto; min-height: 0; }
+  .panel { max-height: none; min-height: 0; }
   .timeline { overflow: visible; padding: 8px 12px; }
   .row { grid-template-columns: 40px 16px minmax(0, 1fr); gap: 6px; }
   .bubble.assistant, .request { margin-left: 0; }

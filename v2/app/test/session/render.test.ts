@@ -169,3 +169,22 @@ test('the sessions index lists the sessions with their ticket title, and says wh
   assert.ok(visibleText(renderIndex({ sessions: [], tickets: [], now: FIXTURE_NOW }, en)).includes('No session yet. Move a ticket to Todo and one starts.'));
   assert.equal(USER.length > 0, true);
 });
+
+test('a request whose answer is on its way keeps its buttons disabled across redraws', () => {
+  const free = renderSession(viewOf(), en);
+  assert.doesNotMatch(free, /data-answer="[a-z_]+"[^>]*disabled/);
+  const busy = renderSession(viewOf({ busy: new Set(['request-161']) }), en);
+  assert.equal(count(busy, /data-answer="[a-z_]+" disabled/g), 3);
+  const other = renderSession(viewOf({ busy: new Set(['some-other-request']) }), en);
+  assert.doesNotMatch(other, /data-answer="[a-z_]+"[^>]*disabled/);
+});
+
+test('an ended session shows its duration up to its last event, not the stale summary', () => {
+  const fixture = sessionFixture(FIXTURE_NOW);
+  // the summary was loaded long before the end: updatedAt is 09:24
+  const summary = { ...(fixture.sessions[0] as SessionSummary), phase: 'done' as const, startedAt: new Date(2026, 9, 21, 8, 50, 0).toISOString(), updatedAt: new Date(2026, 9, 21, 9, 24, 0).toISOString() };
+  // the last event is stored at 09:00:01 local
+  const model = modelOf([{ type: 'STATE_SNAPSHOT', snapshot: { status: 'Done', phase: 'done', steps: [], files: [], checks: [], usage: {} } }]);
+  const text = visibleText(renderSession(viewOf({ model, summary }), en));
+  assert.ok(text.includes('10 min'), 'from 08:50 to the last event, 10 min');
+});
