@@ -33,7 +33,7 @@ docker run -d --name cleared-v2-guestbook-test --label cleared.dev=v2 --label cl
   -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:55432:5432 postgres:16
 DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres npm test
 npm run typecheck
-docker rm -f $(docker ps -aq --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook --filter name=cleared-v2-guestbook-test)
+docker ps -aq --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook --filter name=cleared-v2-guestbook-test | xargs -r docker rm -f
 ```
 
 The CI workflow, `.github/workflows/checks.yml`, does the same with a Postgres service container. GitHub runs it once this directory is the root of a repository.
@@ -49,19 +49,21 @@ node deploy/watch.ts --repo /path/to/clone [--remote origin] [--branch main] [--
 - The app container publishes `127.0.0.1:8793` only. Inside the container the app listens on `0.0.0.0`, which the published port needs.
 - The database is a `postgres:16` container on a network of their own, with a named volume. It publishes no port, and it is not recreated on a deploy.
 - Every object the watcher creates carries the labels `cleared.dev=v2` and `cleared.example=guestbook`. It only stops, starts or removes an id that a listing filtered on both labels returned.
-- A build that fails leaves the running app as it is. A failed build or start is not retried until the head moves again.
+- A build that fails leaves the running app as it is. A start that fails comes after the old app container was removed, so no app runs until the head moves again: `/health` then fails, and the release watch rolls the merge back. A failed build or start is not retried until the head moves.
+- From a merge to the new version answering: at most one poll (30 seconds by default), then the build and the start, measured at 4 seconds at most on the demo machine with the base image in Docker's build cache.
 - Each tick prints one JSON line: `deployed`, `unchanged`, `build-failed`, `run-failed`, `skipped-failed` or `port-busy`, with the commit.
 - Stopping the watcher leaves the app running. To remove everything it created:
 
 ```sh
-docker rm -f $(docker ps -aq --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook)
-docker network rm $(docker network ls -q --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook)
-docker volume rm $(docker volume ls -q --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook)
+docker ps -aq --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook | xargs -r docker rm -f
+docker network ls -q --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook | xargs -r docker network rm
+docker volume ls -q --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook | xargs -r docker volume rm
+docker image ls -q --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook | sort -u | xargs -r docker image rm
 ```
 
 ## The Cleared settings: `.cleared/agents.conf`
 
-The local tracker with its six states. The release watch probes `http://127.0.0.1:8793/health` for 3 minutes after a merge, and reverts the merge after two failed probes in a row. `[security] allow_shared_uid = true` follows decision 7 of the plan. The `[session]` section is read by the v2 service only: the session image, the `postgres:16` test service, `DATABASE_URL` for the session, the commands a session may run without asking, and the hosts the egress proxy lets through. The tracker's identity keys (`agents_uid`, `owner_id`, `human_public_key`) are written at setup, on the machine that runs the demo.
+The local tracker with its six states. The release watch probes `http://127.0.0.1:8793/health` every 30 seconds from minute 2 to minute 5 after a merge, and reverts the merge after two failed probes in a row. `[security] allow_shared_uid = true` follows decision 7 of the plan. The `[session]` section is read by the v2 service only: the session image, the `postgres:16` test service, `DATABASE_URL` for the session, the commands a session may run without asking, and the hosts the egress proxy lets through. The tracker's identity keys (`agents_uid`, `owner_id`, `human_public_key`) are written at setup, on the machine that runs the demo.
 
 ## The demo ticket
 
