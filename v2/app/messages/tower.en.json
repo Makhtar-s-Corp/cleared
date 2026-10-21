@@ -8,7 +8,7 @@
   "later_lead": "The lead comes in milestone 2. For now, write a ticket title and choose New ticket.",
   "ticket_needs_title": "Write the ticket's title first.",
   "ticket_created": "{id} created, in {status}.",
-  "ticket_red": "The ticket was not created. Try again.",
+  "ticket_failed": "The ticket was not created. Try again.",
   "needs_0": "Nothing needs you.",
   "needs_1": "One thing needs you.",
   "needs_2": "Two things need you.",

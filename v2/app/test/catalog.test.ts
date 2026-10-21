@@ -42,3 +42,14 @@ test('a catalog falls back to English for a missing key, and a translator refuse
   assert.throws(() => t('unknown'), /unknown message key: unknown/);
   assert.equal(format('{n} min, {n} again, {missing}', { n: 3 }), '3 min, 3 again, ');
 });
+
+test('every message key a screen names in its code is in its catalog or the shell\'s', () => {
+  const shell = read('shell.en.json');
+  for (const screen of SCREENS.filter((s) => s !== 'shell')) {
+    const own = read(`${screen}.en.json`);
+    const code = readFileSync(join(MESSAGES_DIR, '..', 'public', 'screens', `${screen}.ts`), 'utf8');
+    for (const [, key] of code.matchAll(/\bt\('([a-z0-9_]+)'/g)) {
+      assert.ok(Object.hasOwn(own, key as string) || Object.hasOwn(shell, key as string), `${screen}.ts names ${key}, which no catalog has`);
+    }
+  }
+});

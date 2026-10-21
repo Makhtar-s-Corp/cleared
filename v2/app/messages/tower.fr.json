@@ -8,7 +8,7 @@
   "later_lead": "Le lead arrive au jalon 2. Pour l'instant, écrivez un titre de ticket et choisissez Nouveau ticket.",
   "ticket_needs_title": "Écrivez d'abord le titre du ticket.",
   "ticket_created": "{id} créé, dans {status}.",
-  "ticket_red": "Le ticket n'a pas été créé. Réessayez.",
+  "ticket_failed": "Le ticket n'a pas été créé. Réessayez.",
   "needs_0": "Rien ne vous attend.",
   "needs_1": "Une chose vous attend.",
   "needs_2": "Deux choses vous attendent.",
