@@ -162,3 +162,75 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - To run this agent on Haiku, change line 5 of that file to `model: haiku`. This is not tested: the lane did not spawn the agent after the change, so whether the next spawn uses Haiku is unknown.
 - The `Agent` tool also takes a `model` argument per call. The spawns in the global CLAUDE.md do not pass one, so the frontmatter decides.
 - Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j1-ci-housekeeping`.
+
+## 2026-10-21: the policy gets the inputs its rules need
+
+**Decision.** Lane 1 adds three fields to the `Policy` type of the milestone 1 plan (section 5), and one optional evaluation input:
+- `workdir`: the workdir as the harness sees it, its mount point in the container. `read.workdir`, `edit.workdir` and the path checks of `run.safe` need it, and the tool inputs name container paths, not the host path of `StartInput.workdir`.
+- `scripts`: the script names of `package.json` on the base branch, read by the service. `npm run <script>` is allowed only for these, as the plan's `run.safe` row says.
+- `credentialFile`: the harness's credential file as mounted, for `secret.read`.
+- `PolicyContext.readFile`: the current text of a workdir file. The service passes it so the evaluator can tell what an edit of `package.json` changes.
+
+**Consequences.**
+- `StartInput.policy` carries the three fields. The service fills them (lane 7).
+- An edit of `package.json` is applied to the current text and both versions are compared. A changed `scripts` block asks as `scripts.change`. Changed dependencies ask as `install.package`. An edit the service cannot read or apply also asks as `scripts.change`, with a reason that says so.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: the policy refuses to read what it cannot parse
+
+**Decision.** Lane 1's evaluator goes beyond the rows of the plan's table where a row's intent needs it:
+- The shell-word parser understands quotes and backslashes only. Besides the plan's list (`;`, `&&`, `||`, `|`, `$(`, a backtick, a redirection, a newline), it refuses any unquoted `$`, `*`, `?` or `[`, a `~` or `#` at the start of a word, and brace expansion. These ask as `shell.compound`. Without this, `cat /run/cle*/claude.token` or `cat $HOME/x` would name a secret the deny rules cannot see.
+- `cat`, `head`, `tail`, `ls`, `grep` and `find` are safe only when every path they name resolves under the workdir. `cat /proc/self/environ` asks.
+- git's global options are folded for the deny rules, as the plan says. For an allow, only `-C` is folded. `-c`, `--git-dir`, `--work-tree` and the like make a git command ask, because `-c core.pager=...` runs a program.
+- `push.base` also denies refspecs `HEAD:main`, `+main` and `refs/heads/main`, and `--mirror` and `--all`.
+- `find -fls` asks, like `-fprint`: it writes a file.
+- An edit under `.git/` asks. The service pushes the branch from the host (decision 12 of the plan), and a hook written in the workdir would run there.
+- `docker` and `sudo` are denied where they run as a program: the first word of a command, after a wrapper such as `env`, `xargs` or `sh -c`, or after `find -exec`. Named as text, as in `git commit -m "docker notes"`, they are not denied.
+- Every `npx` asks as `install.package`. The plan's "npx <name not in the project's scripts>" is not checkable from script names alone, and an `npx` that is in them would still ask under `default`.
+
+**Consequences.**
+- `ls *.ts` asks. A session writes `ls` or `find . -name '*.ts'` instead, which are allowed.
+- The deny rules read every simple command of the raw text, with quotes dropped, so `ls; docker ps` and `echo $(git push origin main)` are denied.
+- Each case has a row in `v2/test/session/policy.test.ts`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: the cleaner copies the guard's patterns
+
+**Decision.** `v2/src/session/clean.ts` copies the patterns of `lib/guard/codex-guard.mjs` (its `always`, `envAssignments` and `directOnly` lists) instead of importing them. It replaces each match with `[removed: <category>]`. A test reads `codex-guard.mjs` and fails if a copied pattern is not in it word for word. The private-term check uses the guard's fingerprinting (`sha256(salt + term)` over runs of one to four normalised words).
+
+**Consequences.**
+- `codex-guard.mjs` cannot be imported: it parses its arguments and exits when loaded. `private-terms.mjs` runs `git` when loaded.
+- A change to the guard's patterns fails the v2 test until `clean.ts` is updated.
+- The guard only finds a key's first line. The cleaner removes the whole block up to its end line, or to the end of the text when the end was cut off.
+- A private term replaces the whole value with `[removed: private term]`, because a fingerprint says that a term is present, not where.
+- Command output is cut to `COMMAND_OUTPUT_LIMIT`, 4096 characters: the first 1024 and the last 3072, with a line saying how many were cut. The end of a test run carries its summary. Commands, descriptions and errors are cut the same way.
+- The cleaner remembers each tool call's kind and path from its `TOOL_CALL_ARGS`. A read's result keeps its path and size only. A result whose call it never saw keeps no content.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: typed tool input and output inside AG-UI's string fields
+
+**Decision.** AG-UI's `TOOL_CALL_ARGS.delta` and `TOOL_CALL_RESULT.content` are strings. Cleared puts the JSON of a typed value in them (`ToolInput` and `ToolOutput` in `v2/src/session/events.ts`), with Cleared's `kind` inside. `RUN_FINISHED` carries the stop reason and `total_cost_usd` in AG-UI's `result` field, and the tokens in its `usage` list with AG-UI's `TokenUsage` names.
+
+**Consequences.**
+- A stored event is valid AG-UI as it is, and the app reads it back typed with `readToolInput` and `readToolOutput`.
+- Each argument list is sent whole in one `TOOL_CALL_ARGS`, as the plan has no partial messages in milestone 1.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: modules receive the store; main.ts is final
+
+**Decision.** A module's `provide` is a function of `{ store }`, not the plain object of the plan's section 10. `main.ts` does the following:
+- it opens `ledger.db`;
+- it creates every module's tables;
+- it assembles the registry;
+- it serves the modules' routes through a dispatcher in `v2/src/modules/registry.ts`, which leaves `/health` and unknown paths to `server.ts`.
+
+**Consequences.**
+- Lane 8's ticket store and lane 6's users need the database handle, which a plain object cannot get without opening the ledger at import.
+- Lanes 6, 7 and 8 fill their module and never edit `main.ts` or `server.ts`.
+- Two modules filling one slot, or declaring one route, stop the service at start with a message naming both.
+- A table statement that is not `CREATE TABLE IF NOT EXISTS` (or `CREATE INDEX IF NOT EXISTS`) is refused, so opening the store never changes a table another component owns.
+- A failing handler answers 500 `{"error":"internal error"}`. The service log names the route and the error's class only, because an error message may carry what the cleaner removes.
+- The service finds `ledger.db` as v1 does (`ORCH_LEDGER`, then `CLEARED_STATE_DIR` or `ORCH_STATE_DIR`, then `<state home>/cleared/<project name>`), except v1's last resort of asking git. Without a state directory or a project name, it stops with exit code 64. `v2/test/main.test.ts` gives every service it starts a temporary state directory.
+- The `sessionAdapters` slot defaults to no adapter. The fake adapter is never registered: tests and fixtures create it.
+- `TicketStore.move` refuses the go state. Only the approval writer records it (decision 6 of the plan).
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
