@@ -117,9 +117,11 @@ test('an open pull request for the branch is reused after the push', async () =>
 test('a report the guard flags is left out of the body, the pull request still opens', async () => {
   const { workdir, input, gh } = await setup();
   commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
-  await publish({ ...input, report: `## Done\nUsed ${plantedKey} to test.\n` });
+  // lib/pr-body.mjs keeps an address, the guard refuses it.
+  const address = ['someone', 'gmail.com'].join('@');
+  await publish({ ...input, report: `## Done\nAsked ${address} for the copy.\n` });
   const body = gh.calls()[1]?.body ?? '';
-  assert.ok(!body.includes(plantedKey));
+  assert.ok(!body.includes('Asked'), 'the report is left out');
   assert.ok(body.includes('- Newest first'));
 });
 
@@ -150,4 +152,28 @@ test('a checkout whose git folder points elsewhere is refused', async () => {
   writeFileSync(join(workdir, '.git'), `gitdir: ${elsewhere}\n`);
   await assert.rejects(publish(input), (error: unknown) => error instanceof PublishRefused && error.code === 'unsafe');
   assert.deepEqual(gh.calls(), []);
+});
+
+test('without environments given, publish takes them from lib/forge.mjs: the ambient one when no app is configured', async () => {
+  const { workdir, input, gh, remoteHead } = await setup();
+  const head = commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
+  // Nothing of a v1 shell may point the child at a real configuration or ledger.
+  for (const name of ['CLEARED_CONF', 'ORCH_CONF', 'ORCH_LEDGER', 'CLEARED_STATE_DIR', 'ORCH_STATE_DIR']) delete process.env[name];
+  const path = process.env.PATH;
+  process.env.PATH = gh.env.PATH;
+  try {
+    const { gitEnv: _git, ghEnv: _gh, ...rest } = input;
+    assert.deepEqual(await publish(rest), { url: PR_URL, number: 7, head, created: true });
+  } finally {
+    process.env.PATH = path;
+  }
+  assert.equal(remoteHead(), head);
+  assert.deepEqual(gh.calls().map((c) => c.args[1]), ['list', 'create']);
+});
+
+test('a refused branch leaves no ref of it in the project checkout', async () => {
+  const { workdir, input } = await setup();
+  commit(workdir, { 'config/settings.ts': `export const apiKey = "${plantedKey}";\n` }, 'Add settings');
+  await assert.rejects(publish(input), PublishRefused);
+  assert.equal(gitIn(input.project, ['for-each-ref', 'refs/cleared/']), '');
 });

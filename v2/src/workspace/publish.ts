@@ -210,41 +210,48 @@ export async function publish(input: PublishInput): Promise<Published> {
 
   const work = mkdtempSync(join(tmpdir(), 'cleared-v2-publish-'));
   try {
-    // 2. What leaves with the push and the pull request, checked first.
-    const messages = join(work, 'messages.txt');
-    const changes = join(work, 'changes.diff');
-    writeFileSync(messages, await git(input.project, ['log', '--format=%B', range]));
-    writeFileSync(changes, addedLines(await git(input.project, ['diff', '--unified=0', '--no-ext-diff', '--no-textconv', '--no-color', `${base}...${ref}`])));
-    const refused = await runGuard(input.project, base, [messages, changes]);
-    if (refused !== undefined)
-      throw new PublishRefused('guard', `${input.branch} not published: the guard refuses it (input no. 1 is the commit messages, no. 2 the changes)\n${refused}`);
-
-    const forge = input.gitEnv && input.ghEnv ? { git: input.gitEnv, gh: input.ghEnv } : await forgeEnvironments(input.project);
-    const gitEnv = input.gitEnv ?? forge.git;
-    const ghEnv = input.ghEnv ?? forge.gh;
-
-    // 3. The branch to the branch of the same name, and only that, never forced.
-    await git(input.project, ['push', '--quiet', 'origin', `${ref}:refs/heads/${input.branch}`], gitEnv);
-
-    // 4. The pull request.
-    const gh = (args: readonly string[]) => command('gh', args, { cwd: input.project, env: ghEnv });
-    const open = JSON.parse(await gh(['pr', 'list', '--repo', input.repo, '--head', input.branch, '--state', 'open', '--json', 'number,url'])) as { number?: unknown; url?: unknown }[];
-    const existing = open[0];
-    if (existing && typeof existing.number === 'number' && typeof existing.url === 'string')
-      return { url: existing.url, number: existing.number, head, created: false };
-
-    const subjects = (await git(input.project, ['log', '--reverse', '--format=%s', range])).split('\n').filter(Boolean);
-    const bare = `Opened by Cleared for ${input.ticket} (branch \`${input.branch}\`).\n\nCommits:\n${subjects.map((s) => `- ${s}`).join('\n')}\n`;
-    const report = await cleanReport(input.report ?? '', join(work, 'report.md'), input.project);
-    const body = join(work, 'body.md');
-    writeFileSync(body, report ? `${report}\n\n---\n\n${bare}` : bare);
-    if (report && (await runGuard(input.project, base, [body])) !== undefined) writeFileSync(body, bare);
-
-    const url = (await gh(['pr', 'create', '--repo', input.repo, '--base', input.base, '--head', input.branch, '--title', subjects[0] ?? input.branch, '--body-file', body])).trim();
-    const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1]);
-    if (!Number.isSafeInteger(number)) throw new PublishError(`${input.branch} is pushed, but gh gave no pull request address`);
-    return { url, number, head, created: true };
+    return await guardPushOpen(input, { base, ref, range, head, work });
   } finally {
     rmSync(work, { recursive: true, force: true });
+    // The private ref goes, so a refused branch is not kept reachable here.
+    await git(input.project, ['update-ref', '-d', ref]).catch(() => undefined);
   }
+}
+
+async function guardPushOpen(input: PublishInput, at: { base: string; ref: string; range: string; head: string; work: string }): Promise<Published> {
+  const { base, ref, range, head, work } = at;
+  // 2. What leaves with the push and the pull request, checked first.
+  const messages = join(work, 'messages.txt');
+  const changes = join(work, 'changes.diff');
+  writeFileSync(messages, await git(input.project, ['log', '--format=%B', range]));
+  writeFileSync(changes, addedLines(await git(input.project, ['diff', '--unified=0', '--no-ext-diff', '--no-textconv', '--no-color', `${base}...${ref}`])));
+  const refused = await runGuard(input.project, base, [messages, changes]);
+  if (refused !== undefined)
+    throw new PublishRefused('guard', `${input.branch} not published: the guard refuses it (input no. 1 is the commit messages, no. 2 the changes)\n${refused}`);
+
+  const forge = input.gitEnv && input.ghEnv ? { git: input.gitEnv, gh: input.ghEnv } : await forgeEnvironments(input.project);
+  const gitEnv = input.gitEnv ?? forge.git;
+  const ghEnv = input.ghEnv ?? forge.gh;
+
+  // 3. The branch to the branch of the same name, and only that, never forced.
+  await git(input.project, ['push', '--quiet', 'origin', `${ref}:refs/heads/${input.branch}`], gitEnv);
+
+  // 4. The pull request.
+  const gh = (args: readonly string[]) => command('gh', args, { cwd: input.project, env: ghEnv });
+  const open = JSON.parse(await gh(['pr', 'list', '--repo', input.repo, '--head', input.branch, '--state', 'open', '--json', 'number,url'])) as { number?: unknown; url?: unknown }[];
+  const existing = open[0];
+  if (existing && typeof existing.number === 'number' && typeof existing.url === 'string')
+    return { url: existing.url, number: existing.number, head, created: false };
+
+  const subjects = (await git(input.project, ['log', '--reverse', '--format=%s', range])).split('\n').filter(Boolean);
+  const bare = `Opened by Cleared for ${input.ticket} (branch \`${input.branch}\`).\n\nCommits:\n${subjects.map((s) => `- ${s}`).join('\n')}\n`;
+  const report = await cleanReport(input.report ?? '', join(work, 'report.md'), input.project);
+  const body = join(work, 'body.md');
+  writeFileSync(body, report ? `${report}\n\n---\n\n${bare}` : bare);
+  if (report && (await runGuard(input.project, base, [body])) !== undefined) writeFileSync(body, bare);
+
+  const url = (await gh(['pr', 'create', '--repo', input.repo, '--base', input.base, '--head', input.branch, '--title', subjects[0] ?? input.branch, '--body-file', body])).trim();
+  const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1]);
+  if (!Number.isSafeInteger(number)) throw new PublishError(`${input.branch} is pushed, but gh gave no pull request address`);
+  return { url, number, head, created: true };
 }

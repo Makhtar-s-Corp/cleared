@@ -12,7 +12,7 @@ import { lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HANDOVER_HEADINGS } from '../../images/session/runner/hooks.ts';
 import type { Briefing, Role } from '../session/contract.ts';
-import { BASE_REF, CheckoutError, ensureExcluded, git } from './checkout.ts';
+import { CheckoutError, ensureExcluded, git } from './checkout.ts';
 
 export class BriefingError extends Error {
   override name = 'BriefingError';
@@ -129,15 +129,23 @@ export function renderBriefing(briefing: Briefing): string {
 
 // CLAUDE.md at the root of the ticket checkout, written beside it then
 // renamed over it: a link left there is replaced, its target never written.
-// A project that commits its own CLAUDE.md is refused: that file is the
-// project's, and an excluded path does not hide a tracked one.
-export async function writeBriefing(workdir: string, briefing: Briefing): Promise<string> {
+// A project that commits its own CLAUDE.md at the base is refused: that file
+// is the project's, and an excluded path does not hide a tracked one. The
+// base is read in the service's project checkout: no git command runs in
+// the ticket checkout, which a session may have written.
+export type BriefingTarget = {
+  readonly project: string;               // the service's project checkout
+  readonly base: string;                  // the project's base branch
+  readonly workdir: string;               // the ticket checkout
+};
+
+export async function writeBriefing(target: BriefingTarget, briefing: Briefing): Promise<string> {
+  const { project, base, workdir } = target;
   let tracked: string;
   try {
-    await git(workdir, ['rev-parse', '--verify', '--quiet', `${BASE_REF}^{commit}`]);
-    tracked = (await git(workdir, ['ls-tree', '--name-only', BASE_REF, '--', 'CLAUDE.md'])).trim();
+    tracked = (await git(project, ['ls-tree', '--name-only', `refs/remotes/origin/${base}`, '--', 'CLAUDE.md'])).trim();
   } catch (error) {
-    throw new BriefingError(`${workdir} is not a ticket checkout: ${error instanceof CheckoutError ? error.message : String(error)}`);
+    throw new BriefingError(`the base ${base} cannot be read in ${project}: ${error instanceof CheckoutError ? error.message : String(error)}`);
   }
   if (tracked) throw new BriefingError('the project commits its own CLAUDE.md: Cleared does not overwrite it (not supported in milestone 1)');
   const path = join(workdir, 'CLAUDE.md');

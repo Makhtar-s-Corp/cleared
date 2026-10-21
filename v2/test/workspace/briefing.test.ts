@@ -60,8 +60,8 @@ test('memory entries are grouped into the five fields', () => {
 });
 
 test('CLAUDE.md is written at the root of the ticket checkout, excluded from git', async () => {
-  const { workdir: dir } = await workdir();
-  const path = await writeBriefing(dir, BRIEFING);
+  const { project, workdir: dir } = await workdir();
+  const path = await writeBriefing({ project, base: 'main', workdir: dir }, BRIEFING);
   assert.equal(path, join(dir, 'CLAUDE.md'));
   const text = readFileSync(path, 'utf8');
   assert.ok(text.includes(REFERENCE_LINE));
@@ -71,19 +71,19 @@ test('CLAUDE.md is written at the root of the ticket checkout, excluded from git
 });
 
 test('a CLAUDE.md link planted in the checkout is replaced, its target never written', async () => {
-  const { root, workdir: dir } = await workdir();
+  const { root, project, workdir: dir } = await workdir();
   const target = join(root, 'outside.txt');
   writeFileSync(target, 'keep me\n');
   symlinkSync(target, join(dir, 'CLAUDE.md'));
-  await writeBriefing(dir, BRIEFING);
+  await writeBriefing({ project, base: 'main', workdir: dir }, BRIEFING);
   assert.equal(readFileSync(target, 'utf8'), 'keep me\n');
   assert.ok(lstatSync(join(dir, 'CLAUDE.md')).isFile());
   assert.throws(() => readlinkSync(join(dir, 'CLAUDE.md')));
 });
 
 test('a project that commits its own CLAUDE.md is refused, its file left as it is', async () => {
-  const { workdir: dir } = await workdir({ 'CLAUDE.md': '# Ours\n' });
-  await assert.rejects(writeBriefing(dir, BRIEFING), BriefingError);
+  const { project, workdir: dir } = await workdir({ 'CLAUDE.md': '# Ours\n' });
+  await assert.rejects(writeBriefing({ project, base: 'main', workdir: dir }, BRIEFING), BriefingError);
   assert.equal(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), '# Ours\n');
 });
 
@@ -115,7 +115,7 @@ test('the briefing comes from lib/memory: project page, approved decision, gloss
   assert.deepEqual(briefing.lessons, ['Run the tests before you commit.\n']);
   assert.equal(briefing.lastHandover, HANDOVER);
 
-  const text = readFileSync(await writeBriefing(dir, briefing), 'utf8');
+  const text = readFileSync(await writeBriefing({ project, base: 'main', workdir: dir }, briefing), 'utf8');
   for (const piece of ['lists and adds entries', 'newest first', 'One message of a visitor.', 'Run the tests before you commit.', 'The list query sorts by date.'])
     assert.ok(text.includes(piece), piece);
   assert.ok(!text.includes('One serif font'),'a decision the ticket does not name is left out');

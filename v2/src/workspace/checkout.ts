@@ -175,9 +175,11 @@ export async function ticketCheckout(input: TicketCheckoutInput): Promise<Ticket
   const base = `refs/remotes/origin/${input.base}`;
   await git(input.project, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
   mkdirSync(dirname(input.workdir), { recursive: true });
-  // Cloned from the local project checkout: no network, no credential, and
-  // --no-hardlinks so the session can never write into its objects.
-  await git(dirname(input.workdir), ['clone', '--quiet', '--no-hardlinks', '--no-checkout', '--origin', 'origin', '--no-recurse-submodules', '--', input.project, input.workdir]);
+  // Cloned from the local project checkout: no network, no credential.
+  // --no-local copies only what its branches reach, through git's own
+  // transport: no hard link the session could write through, and no object
+  // another ref holds there (a refused publish) reaches the session.
+  await git(dirname(input.workdir), ['clone', '--quiet', '--no-local', '--no-checkout', '--origin', 'origin', '--no-recurse-submodules', '--', input.project, input.workdir]);
   // The clone's origin/<base> is the project checkout's local branch; the
   // base is what the project checkout last fetched from the forge.
   await git(input.workdir, ['fetch', '--quiet', '--no-tags', input.project, `+${base}:${base}`]);
