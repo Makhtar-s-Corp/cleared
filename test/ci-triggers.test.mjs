@@ -36,3 +36,12 @@ test('checks workflow runs on pushes to main and to v2, and on every pull reques
   assert.deepEqual(pushBranches(block), ['main', 'v2']);
   assert.ok(block.some((line) => /^ {2}pull_request:/.test(line)), 'pull_request trigger kept');
 });
+
+// The guard step checks the lines a change brings since a base. On a push there is no base_ref (GitHub sets it on
+// pull requests only), so the push base is the commit before the push. An empty base made `origin/` the range.
+test('v2 guard step takes its base from the event: the pull request base, or the commit before a push', () => {
+  const workflow = readFileSync(join(ORCH_HOME, '.github', 'workflows', 'v2.yml'), 'utf8');
+  assert.match(workflow, /github\.event_name == 'push' && github\.event\.before/);
+  assert.match(workflow, /format\('origin\/\{0\}', github\.base_ref\)/);
+  assert.match(workflow, /npm run guard -- --base "\$GUARD_BASE"/);
+});

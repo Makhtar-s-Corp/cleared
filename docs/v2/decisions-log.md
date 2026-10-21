@@ -148,6 +148,7 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - `.github/workflows/v2.yml` gets `push: branches: [v2]`. Its `pull_request` trigger stays on `branches: [v2]`.
 - `.github/workflows/checks.yml` (the v1 verify job) had `push: branches: [main]`. It is now `[main, v2]`. Its `pull_request` trigger has no branch filter and is unchanged.
 - A push to `v2` now starts both workflows. Their jobs have timeouts of 10 and 15 minutes.
+- The guard step of `v2.yml` used `github.base_ref`, which GitHub leaves empty on a push. It now takes `github.event.before` on a push, so the guard checks the commits the push brings. The base is all zeros only when a branch is first created, and the guard step fails. Checked locally: `--base origin/` exits 1, and a real commit as base passes. That does not apply to `v2`, which exists. Not tested on a real push: the push path runs only after merge.
 - `test/ci-triggers.test.mjs` reads both `on:` blocks and fails if a trigger is removed.
 - Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j1-ci-housekeeping`.
 

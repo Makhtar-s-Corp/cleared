@@ -39,6 +39,7 @@ jobs:
       - name: Types
         run: npx tsc --noEmit
       - name: Private terms and secrets guard
+        # github.base_ref is empty on a push, so a push checks from the commit before it.
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: npm run guard -- --base "origin/$BASE_REF"
+          GUARD_BASE: ${{ github.event_name == 'push' && github.event.before || format('origin/{0}', github.base_ref) }}
+        run: npm run guard -- --base "$GUARD_BASE"
