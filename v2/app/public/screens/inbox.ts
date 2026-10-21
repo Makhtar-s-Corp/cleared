@@ -77,6 +77,15 @@ export function chosen(view: InboxView): InboxItem | undefined {
   return waiting[0] ?? handled[0];
 }
 
+// The detail is redrawn only when what it shows changed, so a reason or a
+// free answer being typed is not lost to a refresh. A release's checks are
+// part of what it shows: the owner waits for them to turn green.
+export function detailKey(v: InboxView): string {
+  const item = chosen(v);
+  const checks = item?.kind === 'release' ? item.pr.checks : undefined;
+  return JSON.stringify([v.items.length === 0, item?.id, item?.state, checks, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
+}
+
 export function itemFromHash(hash: string): string | undefined {
   const raw = hash.replace(/^#/, '');
   if (!raw) return undefined;
@@ -451,7 +460,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   let data: Pick<InboxView, 'items' | 'tickets' | 'sessions'> | undefined;
   // On a phone the captures start in their phone frame; the switch changes the frame only.
   let frame: InboxView['frame'] = window.matchMedia('(max-width: 767px)').matches ? 'phone' : 'desktop';
-  let detailKey = '';
+  let drawnKey = '';
 
   const view = (): InboxView => {
     const selected = itemFromHash(location.hash);
@@ -463,26 +472,20 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   const $ = <E extends HTMLElement>(selector: string) => root.querySelector<E>(selector);
   const say = (key: string) => { const note = $('#d-note'); if (note) note.textContent = key ? t(key) : ''; };
 
-  // The detail is redrawn only when what it shows changed, so a reason or a
-  // free answer being typed is not lost to a refresh.
-  const keyOf = (v: InboxView) => {
-    const item = chosen(v);
-    return JSON.stringify([v.items.length === 0, item?.id, item?.state, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
-  };
   const draw = (force = false) => {
     if (stopped || !data) return;
     const v = view();
     const inbox = $('.inbox');
-    const key = keyOf(v);
+    const key = detailKey(v);
     if (!inbox || !$('#inbox-list') || force || (v.items.length === 0) !== inbox.classList.contains('empty-inbox')) {
       root.innerHTML = renderInbox(v, t);
-      detailKey = key;
+      drawnKey = key;
     } else {
       inbox.dataset.open = String(v.open);
       ($('#inbox-list') as HTMLElement).innerHTML = renderList(v, t);
-      if (key !== detailKey) {
+      if (key !== drawnKey) {
         ($('#detail') as HTMLElement).innerHTML = renderDetail(v, t);
-        detailKey = key;
+        drawnKey = key;
       }
     }
     ready();

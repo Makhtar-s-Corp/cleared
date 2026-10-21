@@ -148,7 +148,7 @@ async function waitAnswering(done: () => Promise<boolean>, timeout: number): Pro
     }
     if (Date.now() - loaded > 30_000) {
       await page.reload();
-      await page.locator('#timeline').waitFor();
+      await page.locator('#screen > *').first().waitFor();
       loaded = Date.now();
     }
     await page.waitForTimeout(3_000);
