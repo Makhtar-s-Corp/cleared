@@ -249,13 +249,32 @@ function strings(value: unknown): string[] {
 
 // ---------------------------------------------------------------- deny
 
+// The plan's `id_*`, narrowed to the names ssh-keygen gives keys, so that
+// src/id_generator.ts stays readable.
+const SSH_KEY = /^id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?(?:\.pub)?$/;
+
+// The fields of a request that name files or places. What a tool writes
+// (an edit's text, a description, a prompt) is never read for names: code
+// says event.key and a README says .env.example. A tool this list does not
+// know is read whole.
+function namedPaths(request: ToolRequest): string[] {
+  const { input } = request;
+  const fields: Record<string, readonly string[]> = {
+    Bash: ['command'], WebFetch: ['url'], WebSearch: [], Read: ['file_path'], Glob: ['path', 'pattern'], Grep: ['path', 'glob'],
+    Edit: ['file_path'], Write: ['file_path'], MultiEdit: ['file_path'], NotebookEdit: ['notebook_path'],
+  };
+  const names = fields[request.tool];
+  if (!names) return strings(input);
+  return names.map((name) => input[name]).filter((value): value is string => typeof value === 'string');
+}
+
 function secretNamed(text: string, policy: Policy): boolean {
   const credential = policy.credentialFile;
   const credentialName = basename(credential);
   for (const token of text.split(/[\s"'`=,;:|&<>()$]+/).filter(Boolean)) {
     if (token.includes('.ssh/') || token.includes('/run/cleared/') || (credential !== '' && token.includes(credential))) return true;
     for (const part of token.split('/')) {
-      if (part === '.ssh' || part.startsWith('.env') || part.endsWith('.pem') || part.endsWith('.key') || part.startsWith('id_')) return true;
+      if (part === '.ssh' || part.startsWith('.env') || part.endsWith('.pem') || part.endsWith('.key') || SSH_KEY.test(part)) return true;
       if (credentialName !== '' && part === credentialName) return true;
     }
   }
@@ -301,7 +320,7 @@ function denied(request: ToolRequest, policy: Policy): Verdict | undefined {
   const url = request.tool === 'WebFetch' && typeof request.input.url === 'string' ? request.input.url : undefined;
   const production = command !== undefined ? namesHost(command, policy.forbiddenHosts) : url !== undefined ? namesHost(urlHost(url) ?? url, policy.forbiddenHosts) : undefined;
   if (production) return deny('net.production', `${production} is a production host: a session never reaches it`);
-  if (strings(request.input).some((text) => secretNamed(text, policy))) return deny('secret.read', 'secrets, keys and credential files are never read in a session');
+  if (namedPaths(request).some((text) => secretNamed(text, policy))) return deny('secret.read', 'secrets, keys and credential files are never read in a session');
   if (policy.role === 'reviewer') {
     if (EDIT_TOOLS.has(request.tool)) return deny('reviewer.edit', 'a reviewer reads and runs the checks; it does not edit');
     for (const words of commands) {

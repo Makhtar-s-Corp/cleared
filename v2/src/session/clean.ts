@@ -128,7 +128,8 @@ export type Cleaner = {
 
 // One cleaner per session: it remembers each tool call's kind and path from
 // its ARGS, so that a result is cleaned by what the call was, whatever the
-// result carries. A result whose call it never saw keeps no content.
+// result carries. A result whose call it never saw keeps its kind, and for
+// a read its path and size, but no output and no error.
 export function createCleaner(options: CleanOptions = {}): Cleaner {
   const calls = new Map<string, ToolInput>();
   const text = (value: unknown): string => (typeof value === 'string' ? cleanText(value, options) : '');
@@ -167,14 +168,14 @@ export function createCleaner(options: CleanOptions = {}): Cleaner {
       return { kind: 'read', path, bytes: own ? count(own.bytes) : parsed ? 0 : Buffer.byteLength(content) };
     }
     if (kind === 'execute') {
-      // Without a call, a raw string is never kept: it could be anything.
-      const raw = own ? own.output : call && !parsed ? content : '';
+      // Without the call's ARGS, no output is kept: it could be anything.
+      const raw = !call ? '' : own ? own.output : parsed ? '' : content;
       const kept = cut(text(raw));
       return { kind: 'execute', output: kept.text, cut: count(own?.cut) + kept.cut, isError: own?.isError === true };
     }
     const other = (['edit', 'delete', 'move', 'search', 'think', 'fetch', 'switch_mode'] as const).find((k) => k === kind) ?? 'other';
     const ok = typeof own?.ok === 'boolean' ? own.ok : true;
-    return typeof own?.error === 'string' ? { kind: other, ok, error: short(own.error) } : { kind: other, ok };
+    return call && typeof own?.error === 'string' ? { kind: other, ok, error: short(own.error) } : { kind: other, ok };
   }
 
   function clean(event: AgUiEvent): AgUiEvent | null {
