@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { networkInterfaces, tmpdir } from 'node:os';
+import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Docker, cliRunner, type DockerResult } from '../src/container/docker.ts';
@@ -27,8 +27,9 @@ import { createHealthServer } from '../src/server.ts';
 const V2 = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SERVICE_PORT = 8791;
 
-// Values replaced in everything printed.
-const replacements: [string, string][] = [];
+// Values replaced in everything printed: the checkout and the home folder
+// first (the build contexts are absolute paths), then what the run adds.
+const replacements: [string, string][] = [[V2, '<v2>'], [homedir(), '~']];
 const redact = (text: string): string =>
   replacements.reduce((out, [value, label]) => out.split(value).join(label), text).replace(/\b[0-9a-f]{64}\b/g, '<id>');
 
@@ -139,11 +140,12 @@ async function dockerSection(build: boolean): Promise<void> {
   let started = false;
   try {
     const startedAt = Date.now();
-    await startSession(docker, {
+    const spec = {
       session, workdir, tokenFile, allowDir: join(scratch, 'egress'), allowHosts: [], hostAddresses,
       services: parseServices('postgres:16'), user: `${uid}:${gid}`, command: ['sleep', 'infinity'],
       limits: { memory: '2g', cpus: '1', pids: 512 },
-    });
+    };
+    await startSession(docker, spec);
     started = true;
     say(`session started in ${Date.now() - startedAt} ms`);
     const run = (command: string[], env?: Record<string, string>, timeoutMs = 60_000): Promise<DockerResult> =>
@@ -267,6 +269,16 @@ async function dockerSection(build: boolean): Promise<void> {
     const ps = await docker.containers(session);
     say('    containers of the session (docker ps --filter label=cleared.dev=v2 --filter label=cleared.session=<session>):');
     for (const row of ps) say(`      ${row.name} ${row.state} ${JSON.stringify(row.labels)}`);
+
+    // Resume: stop, then start the same session again. The config volume,
+    // where the harness keeps its session history, must come back as it was.
+    const stopped = await stopSession(docker, session);
+    say(`stop before the resume: removed ${stopped.containers} containers and ${stopped.networks} networks`);
+    const restartedAt = Date.now();
+    await startSession(docker, spec);
+    say(`session started again in ${Date.now() - restartedAt} ms`);
+    const kept = await run(['sh', '-c', `ls ${CONFIG_MOUNT}/doctor-was-here ${WORKDIR_MOUNT}/doctor-was-here`]);
+    check('after stop and a new start, the config volume and the workdir keep what the session wrote', kept.code === 0, shown(kept));
   } finally {
     if (started || (await docker.containers(session)).length > 0 || (await docker.networks(session)).length > 0) {
       const removed = await stopSession(docker, session);
