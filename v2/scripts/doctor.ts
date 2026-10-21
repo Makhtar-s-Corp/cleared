@@ -225,7 +225,8 @@ async function dockerSection(build: boolean): Promise<void> {
       const port = Number(address.split(':').at(-1));
       if (tailscale !== undefined && (await hostConnect(tailscale, port)) === 'connected') {
         tailscalePort = port;
-        replacements.push([`:${port}`, ':<port>']);
+        // The port is hidden too, in the address:port and the argument forms.
+        replacements.push([`${tailscale}:${port}`, `${tailscale}:<port>`], [`${tailscale} ${port}`, `${tailscale} <port>`]);
         break;
       }
     }
