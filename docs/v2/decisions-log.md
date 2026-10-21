@@ -148,7 +148,7 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - `.github/workflows/v2.yml` gets `push: branches: [v2]`. Its `pull_request` trigger stays on `branches: [v2]`.
 - `.github/workflows/checks.yml` (the v1 verify job) had `push: branches: [main]`. It is now `[main, v2]`. Its `pull_request` trigger has no branch filter and is unchanged.
 - A push to `v2` now starts both workflows. Their jobs have timeouts of 10 and 15 minutes.
-- The guard step of `v2.yml` used `github.base_ref`, which GitHub leaves empty on a push. It now takes `github.event.before` on a push, so the guard checks the commits the push brings. The base is all zeros only when a branch is first created, and the guard step fails. Checked locally: `--base origin/` exits 1, and a real commit as base passes. That does not apply to `v2`, which exists. Not tested on a real push: the push path runs only after merge.
+- The guard step of `v2.yml` used `github.base_ref`, which GitHub leaves empty on a push. It now takes `github.event.before` on a push, so the guard checks the commits the push brings. When `before` is all zeros (a new branch), it uses `HEAD~1`. The checkout has `fetch-depth: 0`, so `before` is present in the history. Checked locally: `--base origin/` exits 1, and a real commit as base passes. Not tested on a real push: the push path runs only after merge.
 - `test/ci-triggers.test.mjs` reads both `on:` blocks and fails if a trigger is removed.
 - Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j1-ci-housekeeping`.
 
@@ -157,7 +157,7 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 **Decision.** The `dashboard-builder` agent is not defined in this repository. Its definition is `~/.claude/agents/dashboard-builder.md`, in the user's agents directory. Its frontmatter says `model: opus`. This lane does not change that file.
 
 **Consequences.**
-- The repository has no `.claude/agents/` directory, and no tracked file names `dashboard-builder`. Checked with `grep -rn dashboard-builder` over the tracked Markdown, YAML and JSON files.
+- The repository has no `.claude/agents/` directory, and no tracked file other than this log names `dashboard-builder`. Checked with `git grep -n dashboard-builder` on the branch, excluding this log.
 - The file is per user, so a change to it applies to every project on that machine, not to this repository.
 - To run this agent on Haiku, change line 5 of that file to `model: haiku`. This is not tested: the lane did not spawn the agent after the change, so whether the next spawn uses Haiku is unknown.
 - The `Agent` tool also takes a `model` argument per call. The spawns in the global CLAUDE.md do not pass one, so the frontmatter decides.
