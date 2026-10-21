@@ -1,0 +1,182 @@
+// The events a session produces: a fixed subset of AG-UI 1.0, with Cleared's
+// own items as CUSTOM events (docs/v2/milestone-1-plan.md, section 4). Field
+// names are AG-UI's, as @ag-ui/core 1.0.3 declares them; where AG-UI carries
+// a string (TOOL_CALL_ARGS delta, TOOL_CALL_RESULT content), Cleared puts
+// the JSON of a typed value in it, read back with readToolInput and
+// readToolOutput. Nothing here depends on @ag-ui/core at run time; a test
+// checks every type name against its EventType.
+import type { Decision, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
+import type { Verdict } from './policy.ts';
+
+export const EVENT_TYPES = [
+  'RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR',
+  'STEP_STARTED', 'STEP_FINISHED',
+  'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END',
+  'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END', 'TOOL_CALL_RESULT',
+  'REASONING_START', 'REASONING_END',
+  'STATE_SNAPSHOT', 'STATE_DELTA',
+  'CUSTOM',
+] as const;
+export type EventTypeName = (typeof EVENT_TYPES)[number];
+
+const SUBSET: ReadonlySet<string> = new Set(EVENT_TYPES);
+export function isSubsetType(type: string): type is EventTypeName {
+  return SUBSET.has(type);
+}
+
+// The measured steps of the proof (section 1).
+export const STEP_NAMES = ['workspace', 'author', 'waiting_human', 'review', 'approval', 'release', 'watch'] as const;
+export type StepName = (typeof STEP_NAMES)[number];
+
+export const CUSTOM_NAMES = [
+  'cleared.permission_request',
+  'cleared.permission_answered',
+  'cleared.question',
+  'cleared.answered',
+  'cleared.review_verdict',
+  'cleared.handover_captured',
+] as const;
+export type CustomName = (typeof CUSTOM_NAMES)[number];
+
+// A tool call's input after cleaning: what the session screen shows, and no
+// more. A read is its path, an edit its path and counts, a command its text.
+export type ToolInput =
+  | { readonly kind: 'read'; readonly path: string }
+  | { readonly kind: 'edit'; readonly path: string; readonly added: number; readonly removed: number }
+  | { readonly kind: 'delete' | 'move'; readonly path: string }
+  | { readonly kind: 'execute'; readonly command: string; readonly description?: string }
+  | { readonly kind: 'search'; readonly pattern: string; readonly path?: string }
+  | { readonly kind: 'fetch'; readonly target: string }  // a URL, or a search query
+  | { readonly kind: 'think' | 'switch_mode' | 'other' };
+
+// A tool call's result after cleaning. A read never keeps the content of the
+// file; a command keeps its output, cut to COMMAND_OUTPUT_LIMIT (clean.ts),
+// `cut` saying how many characters went.
+export type ToolOutput =
+  | { readonly kind: 'read'; readonly path: string; readonly bytes: number }
+  | { readonly kind: 'execute'; readonly output: string; readonly cut: number; readonly isError: boolean }
+  | { readonly kind: Exclude<ToolKind, 'read' | 'execute'>; readonly ok: boolean; readonly error?: string };
+
+// AG-UI's TokenUsage fields that the SDK's result gives.
+export type Usage = {
+  readonly model?: string;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cachedInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+};
+
+export type SessionPhase = 'starting' | 'working' | 'waiting_human' | 'reviewing' | 'done' | 'stopped' | 'failed';
+
+// The STATE_SNAPSHOT of a session: what the session screen shows above its timeline.
+export type SessionState = {
+  readonly status: string;                                 // the status phrase, for example 'Running the tests'
+  readonly phase: SessionPhase;
+  readonly steps: readonly { readonly name: StepName; readonly startedAt: string; readonly finishedAt: string | null }[];
+  readonly files: readonly { readonly path: string; readonly added: number; readonly removed: number }[];
+  readonly checks: readonly { readonly name: string; readonly state: 'pending' | 'passed' | 'failed' }[];
+  readonly usage: Usage;
+};
+
+// RFC 6902, as AG-UI's STATE_DELTA carries it.
+export type JsonPatchOperation =
+  | { readonly op: 'add' | 'replace' | 'test'; readonly path: string; readonly value: unknown }
+  | { readonly op: 'remove'; readonly path: string }
+  | { readonly op: 'move' | 'copy'; readonly path: string; readonly from: string };
+
+// A question as the harness asks it.
+export type Question = {
+  readonly question: string;
+  readonly header?: string;
+  readonly options?: readonly { readonly label: string; readonly description?: string }[];
+  readonly multiSelect?: boolean;
+};
+
+export type CustomValue = {
+  'cleared.permission_request': { readonly requestId: string; readonly toolCallId: string; readonly tool: string; readonly input: ToolInput; readonly suggestion: Verdict };
+  'cleared.permission_answered': { readonly requestId: string; readonly decision: Decision['kind']; readonly by: UserId | 'policy'; readonly rule?: string };
+  'cleared.question': { readonly requestId: string; readonly questions: readonly Question[] };
+  'cleared.answered': { readonly requestId: string; readonly by: UserId };
+  'cleared.review_verdict': { readonly session: SessionId; readonly verdict: 'pass' | 'changes_requested'; readonly round: number };
+  'cleared.handover_captured': { readonly path: string };
+};
+
+type Base = { readonly timestamp?: number };
+type Custom = { [N in CustomName]: Base & { readonly type: 'CUSTOM'; readonly name: N; readonly value: CustomValue[N] } }[CustomName];
+
+export type AgUiEvent =
+  | Base & { readonly type: 'RUN_STARTED'; readonly threadId: SessionId; readonly runId: string }
+  | Base & {
+    readonly type: 'RUN_FINISHED';
+    readonly threadId: SessionId;
+    readonly runId: string;
+    readonly outcome: { readonly type: 'success' } | { readonly type: 'cancelled' };
+    readonly usage: readonly Usage[];
+    readonly result: { readonly stopReason: StopReason; readonly total_cost_usd: number | null };
+  }
+  | Base & { readonly type: 'RUN_ERROR'; readonly message: string; readonly code?: string }
+  | Base & { readonly type: 'STEP_STARTED' | 'STEP_FINISHED'; readonly stepName: StepName }
+  | Base & { readonly type: 'TEXT_MESSAGE_START'; readonly messageId: string; readonly role: 'assistant' | 'user'; readonly name?: UserId }
+  | Base & { readonly type: 'TEXT_MESSAGE_CONTENT'; readonly messageId: string; readonly delta: string }
+  | Base & { readonly type: 'TEXT_MESSAGE_END'; readonly messageId: string }
+  | Base & { readonly type: 'TOOL_CALL_START'; readonly toolCallId: string; readonly toolCallName: string; readonly parentMessageId?: string }
+  | Base & { readonly type: 'TOOL_CALL_ARGS'; readonly toolCallId: string; readonly delta: string }
+  | Base & { readonly type: 'TOOL_CALL_END'; readonly toolCallId: string }
+  | Base & { readonly type: 'TOOL_CALL_RESULT'; readonly messageId: string; readonly toolCallId: string; readonly content: string; readonly role: 'tool' }
+  | Base & { readonly type: 'REASONING_START' | 'REASONING_END'; readonly messageId: string }
+  | Base & { readonly type: 'STATE_SNAPSHOT'; readonly snapshot: SessionState }
+  | Base & { readonly type: 'STATE_DELTA'; readonly delta: readonly JsonPatchOperation[] }
+  | Custom;
+
+export type ToolArgsEvent = Extract<AgUiEvent, { type: 'TOOL_CALL_ARGS' }>;
+export type ToolResultEvent = Extract<AgUiEvent, { type: 'TOOL_CALL_RESULT' }>;
+
+// The envelope of every stored event. seq counts from 1 per session; the app
+// sends the last one it has back to resume a stream.
+export type SessionEvent = {
+  readonly seq: number;
+  readonly at: string;
+  readonly sessionId: SessionId;
+  readonly ticket: string;
+  readonly project: string;
+  readonly event: AgUiEvent;
+};
+
+// Where events are kept (store/db.ts keeps them in ledger.db).
+export interface EventLog {
+  append(entry: Omit<SessionEvent, 'seq'>): SessionEvent;
+  after(sessionId: SessionId, seq?: number): SessionEvent[];
+}
+
+export function toolArgs(toolCallId: string, input: ToolInput): ToolArgsEvent {
+  return { type: 'TOOL_CALL_ARGS', toolCallId, delta: JSON.stringify(input) };
+}
+
+export function toolResult(messageId: string, toolCallId: string, output: ToolOutput): ToolResultEvent {
+  return { type: 'TOOL_CALL_RESULT', messageId, toolCallId, content: JSON.stringify(output), role: 'tool' };
+}
+
+const KINDS: ReadonlySet<string> = new Set<ToolKind>(['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other']);
+
+// The JSON object a string carries with a known `kind`, or undefined.
+function kindObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(text);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    return typeof record.kind === 'string' && KINDS.has(record.kind) ? record : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// What the ARGS of a tool call say, when they say it in Cleared's form.
+export function readToolInput(event: ToolArgsEvent): ToolInput | undefined {
+  return kindObject(event.delta) as ToolInput | undefined;
+}
+
+// The typed result. The cleaner writes every stored result in this form, so
+// for a stored event it never falls back.
+export function readToolOutput(event: ToolResultEvent): ToolOutput {
+  return (kindObject(event.content) as ToolOutput | undefined) ?? { kind: 'other', ok: true };
+}

@@ -45,13 +45,16 @@ test('a module provides slots, tables and routes; two modules never claim the sa
   assert.equal(app.registry.ticketStore, store);
   assert.deepEqual(app.tables, ['CREATE TABLE IF NOT EXISTS t (x)']);
   assert.equal(app.routes.length, 1);
-  assert.throws(() => assemble({ ...stubs, tickets: filled, approval: { ...filled, tables: [] } }, deps), /ticketStore is provided by both tickets and approval/);
+  assert.throws(() => assemble({ ...stubs, tickets: filled, approval: { ...filled, tables: [], routes: [] } }, deps), /ticketStore is provided by both tickets and approval/);
   assert.throws(() => assemble({ ...stubs, tickets: filled, flow: { tables: [], routes: [route('GET', '/api/tickets', 'again')], provide: () => ({}) } }, deps), /GET \/api\/tickets is declared by both tickets and flow/);
 });
 
 test('routes match whole segments and name their parameters', () => {
   const routes = [route('GET', '/api/sessions/:id/events', 'events'), route('POST', '/api/sessions/:id/messages', 'send')];
-  assert.deepEqual(matchRoute(routes, 'GET', '/api/sessions/s%201/events')?.params, { id: 's 1' });
+  const found = matchRoute(routes, 'GET', '/api/sessions/s%201/events');
+  assert.ok(found && 'params' in found);
+  assert.deepEqual(found.params, { id: 's 1' });
+  assert.equal(matchRoute(routes, 'GET', '/api/sessions/%E0%A4/events'), undefined, 'a segment that does not decode matches nothing');
   assert.equal(matchRoute(routes, 'GET', '/api/sessions/s1/events/x'), undefined);
   assert.equal(matchRoute(routes, 'GET', '/api/sessions//events'), undefined);
   assert.deepEqual(matchRoute(routes, 'POST', '/api/sessions/s1/events'), { allow: ['GET'] });

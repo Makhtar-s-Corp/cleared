@@ -8,7 +8,8 @@ import { readToolOutput, toolArgs, toolResult, type AgUiEvent, type ToolOutput }
 // Secret-shaped values are assembled at run time: written whole, they would
 // make the repository guard refuse this file, which is what it is for.
 const apiKey = ['sk', 'ant', 'api03', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4'].join('-');
-const privateKey = ['-----BEGIN', 'OPENSSH', 'PRIVATE', 'KEY-----'].join(' ');
+const keyHeader = ['-----BEGIN', 'OPENSSH', 'PRIVATE', 'KEY-----'].join(' ');
+const privateKey = [keyHeader, 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmU', ['-----END', 'OPENSSH', 'PRIVATE', 'KEY-----'].join(' ')].join('\n');
 const envLine = 'GITHUB_' + 'TOKEN' + '=' + 'ghp' + '_' + 'Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2';
 const forgeValue = 'f0rge' + '-value-' + '7c41d9e2b8';
 const servicePath = '/home/someone/.local/state/cleared/demo';
@@ -43,6 +44,9 @@ test('a token, a key, an environment variable and the service path are removed f
   assert.match(clean, /\[removed: service path\]\/ledger\.db/);
   assert.match(clean, /\[removed: email address\]/);
   assert.equal(cleanText('npm test passed: 12 tests', {}), 'npm test passed: 12 tests', 'plain text is unchanged');
+  assert.ok(!clean.includes('b3BlbnNzaC1rZXktdjEAAAAABG5vbmU'), 'the whole key block goes');
+  // A key whose end line was cut off takes the rest of the text with it.
+  assert.equal(cleanText(`before\n${keyHeader}\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmU\nafter`, {}), 'before\n[removed: private key]');
 });
 
 test('the secret values of the environment are the ones named like secrets, long enough to be one', () => {
