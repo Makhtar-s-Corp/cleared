@@ -20,7 +20,7 @@
 // the ticket). `workspace` is written after the adapter has started the
 // session, with the time it began, because the session's id does not exist
 // before.
-import type { PermissionItem, SessionDetail, SessionSummary } from '../api/types.ts';
+import type { PermissionItem, ReleaseItem, SessionDetail, SessionSummary } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
@@ -45,6 +45,7 @@ export type FlowEffects = {
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
   publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string }): Promise<Published>;
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<void>;   // the lock's `--ask` request
+  prChecks(pr: number): Promise<ReleaseItem['pr']['checks']>;      // the pull request's checks on the forge now
 };
 
 export type FlowDeps = {
@@ -157,7 +158,13 @@ export class FlowEngine {
     }
     for (const release of this.inbox.waitingReleases()) {
       const ticket = await this.registry.ticketStore.get(release.ticket);
-      if (ticket && ticket.status === this.registry.ticketStore.states.validate) continue;
+      if (ticket && ticket.status === this.registry.ticketStore.states.validate) {
+        // The card says whether the checks are green: the lock queues a
+        // release whose checks still run, so the owner waits for them.
+        const checks = await this.#effects.prChecks(release.pr.number).catch(() => undefined);
+        if (checks && checks !== release.pr.checks) this.inbox.setReleaseChecks(release.id, checks);
+        continue;
+      }
       const history = ticket ? await this.registry.ticketStore.history(ticket.id) : [];
       const by = history.at(-1)?.by;
       this.#settleRelease(release.id, release.ticket, release.project, by?.kind === 'human' ? by.id : 'system');

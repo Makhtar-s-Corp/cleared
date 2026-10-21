@@ -86,6 +86,10 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.equal(release.title, 'Newest entry first');
   assert.deepEqual(release.sessions.map((s) => [s.role, s.model]), [['author', 'claude-opus-5-5'], ['reviewer', 'claude-sonnet-5-5']]);
   assert.equal(release.sessions[1]?.rounds, 1);
+  // The card follows the pull request's checks: a tick reads them from the forge.
+  assert.equal(release.pr.checks, 'pending');
+  await engine.tick();
+  assert.equal(t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.pr.checks, 'passed');
   const verdictEvent = events(t).find((e) => e.event.type === 'CUSTOM' && e.event.name === 'cleared.review_verdict');
   assert.ok(verdictEvent);
   assert.equal(verdictEvent.sessionId, reviewer.id);

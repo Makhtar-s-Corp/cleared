@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { realEffects } from '../../src/flow/effects.ts';
+import { checksOf, realEffects } from '../../src/flow/effects.ts';
 import { CONFIG } from './support.ts';
 import { remote, tempDir } from '../workspace/git.ts';
 
@@ -78,4 +78,12 @@ test('settings clones the project itself: the first ticket of a fresh service ha
   assert.equal(existsSync(config.projectDir), false);
   assert.equal((await flow.settings()).verdict, 'no blocking issues');
   assert.equal(existsSync(config.projectDir), true);
+});
+
+test('the checks of a pull request, as the release card says them, from the buckets gh pr checks gives', () => {
+  assert.equal(checksOf([]), 'pending', 'no check reported yet');
+  assert.equal(checksOf([{ bucket: 'pass' }, { bucket: 'skipping' }]), 'passed');
+  assert.equal(checksOf([{ bucket: 'pass' }, { bucket: 'pending' }]), 'pending');
+  assert.equal(checksOf([{ bucket: 'pending' }, { bucket: 'fail' }]), 'failed');
+  assert.equal(checksOf([{ bucket: 'cancel' }]), 'failed');
 });

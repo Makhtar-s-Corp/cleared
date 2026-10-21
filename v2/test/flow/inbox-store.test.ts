@@ -41,6 +41,10 @@ test('a question item keeps its questions; a release item keeps the pull request
   });
   assert.equal(release.kind, 'release');
   assert.deepEqual(release.heads, [{ pr: 7, head: 'abc123' }]);
+  // Its checks follow the pull request; nothing else of it changes.
+  inbox.setReleaseChecks(release.id, 'passed');
+  const after = inbox.list().find((i) => i.kind === 'release') as typeof release;
+  assert.deepEqual(after, { ...release, pr: { ...release.pr, checks: 'passed' } });
   assert.equal(inbox.list().length, 2);
 });
 

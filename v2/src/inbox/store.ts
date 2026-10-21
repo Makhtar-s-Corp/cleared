@@ -94,6 +94,11 @@ export class InboxStore {
     return row ? String(row.request_id) || undefined : undefined;
   }
 
+  // A release's checks, as the forge reports them now.
+  setReleaseChecks(id: string, checks: ReleaseItem['pr']['checks']): void {
+    this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.pr.checks', ?) WHERE id = ? AND kind = 'release'").run(checks, id);
+  }
+
   waitingReleases(): ReleaseItem[] {
     return (this.#db.prepare("SELECT * FROM flow_inbox WHERE kind = 'release' AND state = 'waiting' ORDER BY since, id").all() as Row[]).map((row) => this.#item(row) as ReleaseItem);
   }
