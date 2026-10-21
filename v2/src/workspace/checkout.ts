@@ -10,8 +10,9 @@
 // what the host does in it afterwards is limited to reading files without
 // git (see readHead) and to the safe write of ensureExcluded.
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, writeSync, constants } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, rmSync, writeSync, constants } from 'node:fs';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -175,17 +176,26 @@ export async function ticketCheckout(input: TicketCheckoutInput): Promise<Ticket
   const base = `refs/remotes/origin/${input.base}`;
   await git(input.project, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
   mkdirSync(dirname(input.workdir), { recursive: true });
-  // Cloned from the local project checkout: no network, no credential.
-  // --no-local copies only what its branches reach, through git's own
-  // transport: no hard link the session could write through, and no object
-  // another ref holds there (a refused publish) reaches the session.
-  await git(dirname(input.workdir), ['clone', '--quiet', '--no-local', '--no-checkout', '--origin', 'origin', '--no-recurse-submodules', '--', input.project, input.workdir]);
-  // The clone's origin/<base> is the project checkout's local branch; the
-  // base is what the project checkout last fetched from the forge.
-  await git(input.workdir, ['fetch', '--quiet', '--no-tags', input.project, `+${base}:${base}`]);
-  await git(input.workdir, ['update-ref', BASE_REF, base]);
-  await git(input.workdir, ['checkout', '--quiet', '--no-track', '-b', input.branch, base]);
-  await git(input.workdir, ['remote', 'set-url', 'origin', url]);
-  ensureExcluded(input.workdir);
+  // Made in a sibling folder, then renamed: a checkout that fails half way
+  // is removed, never left where the next call would take it for one to reuse.
+  const partial = join(dirname(input.workdir), `.${basename(input.workdir)}.partial-${randomUUID()}`);
+  try {
+    // Cloned from the local project checkout: no network, no credential.
+    // --no-local copies only what its branches reach, through git's own
+    // transport: no hard link the session could write through, and no object
+    // another ref holds there (a refused publish) reaches the session.
+    await git(dirname(input.workdir), ['clone', '--quiet', '--no-local', '--no-checkout', '--origin', 'origin', '--no-recurse-submodules', '--', input.project, partial]);
+    // The clone's origin/<base> is the project checkout's local branch; the
+    // base is what the project checkout last fetched from the forge.
+    await git(partial, ['fetch', '--quiet', '--no-tags', input.project, `+${base}:${base}`]);
+    await git(partial, ['update-ref', BASE_REF, base]);
+    await git(partial, ['checkout', '--quiet', '--no-track', '-b', input.branch, base]);
+    await git(partial, ['remote', 'set-url', 'origin', url]);
+    ensureExcluded(partial);
+    renameSync(partial, input.workdir);
+  } catch (error) {
+    rmSync(partial, { recursive: true, force: true });
+    throw error instanceof CheckoutError ? error : new CheckoutError(`the ticket checkout ${input.workdir} could not be made: ${(error as Error).message}`);
+  }
   return { workdir: input.workdir, branch: input.branch, reused: false };
 }

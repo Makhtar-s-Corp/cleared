@@ -11,9 +11,9 @@
 //      with no commit of its own, and a branch whose history carries
 //      HANDOVER.md or CLAUDE.md;
 //   2. run lib/guard/codex-guard.mjs (--strict) on the commit messages and
-//      on the added lines, with the private-term lists the project commits
-//      at the base ([guard] terms and allowed); nothing leaves when it
-//      refuses or when the project names no list;
+//      on the lines each commit adds, with the private-term lists the
+//      project commits at the base ([guard] terms and allowed); nothing
+//      leaves when it refuses or when the project names no list;
 //   3. push the branch to the branch of the same name, never forced;
 //   4. reuse the open pull request of the branch, or open one with gh:
 //      not a draft (merge-pr.sh refuses a draft), its body the session's
@@ -196,10 +196,14 @@ export async function publish(input: PublishInput): Promise<Published> {
   const base = `refs/remotes/origin/${input.base}`;
   const ref = `refs/cleared/publish/${input.branch}`;
   try {
-    await git(input.project, ['-c', 'protocol.file.allow=always', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head',
+    // The session wrote these objects: each one is checked as it comes in.
+    await git(input.project, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
+      'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head',
       join(input.workdir, '.git'), `+refs/heads/${input.branch}:${ref}`]);
   } catch (error) {
-    throw new PublishRefused('empty', `the branch ${input.branch} cannot be read from the ticket checkout: ${(error as Error).message}`);
+    const message = (error as Error).message;
+    if (/fsck/.test(message)) throw new PublishRefused('unsafe', `the branch ${input.branch} carries an object git's checks refuse: ${message}`);
+    throw new PublishRefused('empty', `the branch ${input.branch} cannot be read from the ticket checkout: ${message}`);
   }
   const head = (await git(input.project, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
   const range = `${base}..${ref}`;
@@ -224,7 +228,10 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   const messages = join(work, 'messages.txt');
   const changes = join(work, 'changes.diff');
   writeFileSync(messages, await git(input.project, ['log', '--format=%B', range]));
-  writeFileSync(changes, addedLines(await git(input.project, ['diff', '--unified=0', '--no-ext-diff', '--no-textconv', '--no-color', `${base}...${ref}`])));
+  // Every commit's own diff, not the branch's net one: a secret one commit
+  // adds and a later one removes is still in the history that is pushed. A
+  // merge is read against its first parent.
+  writeFileSync(changes, addedLines(await git(input.project, ['log', '--patch', '--unified=0', '--no-ext-diff', '--no-textconv', '--no-color', '--format=', '--diff-merges=first-parent', range])));
   const refused = await runGuard(input.project, base, [messages, changes]);
   if (refused !== undefined)
     throw new PublishRefused('guard', `${input.branch} not published: the guard refuses it (input no. 1 is the commit messages, no. 2 the changes)\n${refused}`);

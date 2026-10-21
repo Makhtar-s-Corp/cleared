@@ -5,11 +5,11 @@
 //      host when the session is done (decision 12), and the base branch only
 //      changes through the release lock.
 //   2. The guard before anything leaves: a `gh pr create` is denied when the
-//      guard's patterns find something in the branch's diff, its commit
-//      messages or the command itself. The service's publish step runs the
-//      repository's whole guard again on the host, private terms included
-//      (src/workspace/publish.ts); this is the early check, inside the
-//      container, where only this file is copied.
+//      guard's patterns find something in the lines a commit of the branch
+//      adds, its commit messages or the command itself. The service's
+//      publish step runs the repository's whole guard again on the host,
+//      private terms included (src/workspace/publish.ts); this is the early
+//      check, inside the container, where only this file is copied.
 //   3. HANDOVER.md at the end: a turn that ends without it is sent back
 //      once with the five headings lib/memory expects.
 // Lane 4's runner (main.ts) spreads `hooks` into the `hooks` option of
@@ -191,7 +191,8 @@ export function createHooks(run: Run = runCommand): Hooks {
     let findings: string[];
     try {
       const where = typeof cwd === 'string' ? cwd : process.cwd();
-      const diff = await run('git', [...GIT_SAFE, 'diff', '-U0', '--no-ext-diff', '--no-textconv', '--no-color', `${BASE_REF}...HEAD`], where);
+      // Every commit's own diff: a secret added then removed is still in the history.
+      const diff = await run('git', [...GIT_SAFE, 'log', '--patch', '-U0', '--no-ext-diff', '--no-textconv', '--no-color', '--format=', '--diff-merges=first-parent', `${BASE_REF}..HEAD`], where);
       const messages = await run('git', [...GIT_SAFE, 'log', '--format=%B', `${BASE_REF}..HEAD`], where);
       findings = guardFindings([{ name: 'diff', text: diff, diff: true }, { name: 'commit messages', text: messages }, { name: 'the command', text: command }]);
     } catch {
