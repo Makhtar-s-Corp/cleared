@@ -1,6 +1,7 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
+import { connect, type AddressInfo } from 'node:net';
+import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { createApp, MAX_BODY_BYTES } from '../src/server.ts';
 import { createStore } from '../src/store.ts';
@@ -73,6 +74,49 @@ test('an empty or too long field is 400 with the page and its error, and nothing
     assert.match(await response.text(), /role="alert"/);
   }
   assert.equal((await db.store.list()).length, before);
+});
+
+// Writes a POST with a body of `size` bytes in 64 KiB chunks, waiting for
+// the socket to drain as an uploading client does, then returns everything
+// the server answered and how long the whole exchange took.
+async function rawPost(size: number): Promise<{ answer: string; ms: number }> {
+  const started = Date.now();
+  const socket = connect(Number(new URL(base).port), '127.0.0.1');
+  await once(socket, 'connect');
+  socket.on('error', () => {}); // a write after the answer may fail: the answer is what counts
+  let answer = '';
+  socket.setEncoding('utf8');
+  socket.on('data', (chunk: string) => { answer += chunk; });
+  const ended = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+  // Exactly `size` bytes of body, as Content-Length says: a form field, then filler.
+  const field = 'name=n&message=';
+  socket.write(`POST /entries HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${size}\r\n\r\n${field}`);
+  const chunk = 'z'.repeat(64 * 1024);
+  for (let sent = field.length; sent < size && !socket.destroyed; sent += chunk.length) {
+    if (!socket.write(chunk.slice(0, size - sent))) await Promise.race([once(socket, 'drain'), ended]);
+  }
+  socket.end();
+  await ended;
+  return { answer, ms: Date.now() - started };
+}
+
+// The server reads the rest of the body before it answers: a server that
+// stops reading leaves an uploading client stalled until a timeout closes
+// the connection, and one that closes early can reset it before the answer.
+test('a body over the limit is answered 413, every time, and the upload never stalls', async () => {
+  for (let round = 0; round < 5; round++) {
+    const big = await fetch(`${base}/entries`, form({ name: 'n', message: 'z'.repeat(4 * 1024 * 1024) }));
+    assert.equal(big.status, 413, `fetch, round ${round}`);
+    assert.match(await big.text(), /larger than 16384 bytes/);
+  }
+  for (let round = 0; round < 5; round++) {
+    const { answer, ms } = await rawPost(4 * 1024 * 1024);
+    assert.match(answer, /^HTTP\/1\.1 413 Payload Too Large\r\n/, `raw socket, round ${round}: ${JSON.stringify(answer.slice(0, 80))}`);
+    assert.match(answer, /larger than 16384 bytes/);
+    assert.ok(ms < 2000, `raw socket, round ${round}: the exchange took ${ms} ms`);
+  }
+  // The server still answers afterwards.
+  assert.equal((await fetch(`${base}/health`)).status, 200);
 });
 
 test('a body that is not a form is 415; a body over the limit is 413', async () => {
