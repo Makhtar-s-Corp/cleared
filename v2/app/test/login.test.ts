@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after } from 'node:test';
+import { request as httpRequest } from 'node:http';
 import { LoginThrottle, THROTTLE } from '../src/users.ts';
 import { COOKIE_NAME, MAX_AGE_SECONDS } from '../src/session-cookie.ts';
 import { PASSWORD, cookieOf, login, openLedger, signedIn, startApp } from './support.ts';
@@ -60,9 +61,60 @@ test('a wrong password is refused, and after five failures even the right one is
 
 test('failures are counted per name too, whatever the peer says it is', async () => {
   const throttle = new LoginThrottle();
-  for (let i = 0; i < THROTTLE.failures; i++) throttle.failed(`peer-${i}`, 'alex');
-  assert.equal(throttle.blocked('another-peer', 'alex') > 0, true);
-  assert.equal(throttle.blocked('another-peer', 'sam'), 0);
+  for (let i = 0; i < THROTTLE.failures; i++) assert.equal(throttle.start(`peer-${i}`, 'alex').wait, 0);
+  assert.ok(throttle.start('another-peer', 'alex').wait > 0);
+  assert.equal(throttle.start('another-peer', 'sam').wait, 0);
+});
+
+test('an attempt counts from its start, and only a success takes it back', () => {
+  const throttle = new LoginThrottle();
+  const attempts = Array.from({ length: THROTTLE.failures }, () => throttle.start('peer', 'alex'));
+  assert.ok(attempts.every((a) => a.wait === 0), 'five attempts under way at once');
+  assert.ok(throttle.start('peer', 'alex').wait > 0, 'a sixth waits, before any of the five is answered');
+  attempts[0]?.succeeded?.();
+  assert.equal(throttle.start('peer', 'alex').wait, 0, 'a success frees its place');
+});
+
+// One sign-in on a socket of its own, so a burst really arrives at once.
+function rawLogin(base: string, name: string, password: string): Promise<number> {
+  const url = new URL(base);
+  const body = new URLSearchParams({ name, password }).toString();
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      host: url.hostname, port: url.port, path: '/login', method: 'POST', agent: false,
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(body), origin: base, 'sec-fetch-site': 'same-origin' },
+    }, (response) => { response.resume(); resolve(response.statusCode ?? 0); });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+test('a burst of sign-ins sent at once is throttled as if they came one by one', async () => {
+  // Every password check waits at a gate, so the whole burst is under way
+  // before any check answers: the throttle must count attempts as they start.
+  let reached = 0;
+  const gate = new Promise<void>((resolve) => setTimeout(resolve, 100));
+  const app = await startApp({ extra: { users: { verify: async () => { reached++; await gate; return undefined; }, get: async () => undefined } } });
+  try {
+    const statuses = (await Promise.all(Array.from({ length: 20 }, () => rawLogin(app.base, 'alex', 'not it')))).sort();
+    assert.deepEqual(statuses, [...Array(THROTTLE.failures).fill(401), ...Array(20 - THROTTLE.failures).fill(429)]);
+    assert.equal(reached, THROTTLE.failures, 'only five passwords were checked');
+  } finally {
+    await app.close();
+  }
+});
+
+test('a right password is not counted as a failure', async () => {
+  const app = await startApp();
+  try {
+    await app.directory.add('alex', PASSWORD);
+    for (let i = 1; i < THROTTLE.failures; i++) assert.equal((await login(app, 'alex', 'not it')).status, 401);
+    assert.equal((await login(app, 'alex', PASSWORD)).status, 303);
+    assert.equal((await login(app, 'alex', 'not it')).status, 401, 'the fifth failure, not the sixth attempt, starts the block');
+    assert.equal((await login(app, 'alex', 'not it')).status, 429);
+  } finally {
+    await app.close();
+  }
 });
 
 test('a sign-in from another origin is refused before the password is checked', async () => {
@@ -85,6 +137,8 @@ test('a write without the anti-forgery header, or with another one, or from anot
     });
     assert.equal((await post({})).status, 403);
     assert.equal((await post({ 'x-csrf-token': 'A'.repeat(43) })).status, 403);
+    assert.equal((await post({ 'x-csrf-token': 'short' })).status, 403, 'a token of another length is refused, not an error');
+    assert.equal((await post({ 'x-csrf-token': `${csrf}é` })).status, 403);
     assert.equal((await post({ 'x-csrf-token': csrf, origin: 'http://evil.example' })).status, 403);
     assert.equal((await post({ 'x-csrf-token': csrf, 'sec-fetch-site': 'cross-site' })).status, 403);
     assert.equal((await post({ 'x-csrf-token': csrf })).status, 599, 'with all three it reaches the data source');

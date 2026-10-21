@@ -40,9 +40,12 @@ test('user add refuses two passwords that differ, an empty one, and a name alrea
   const empty = run(['add', 'sam'], '\n\n');
   assert.equal(empty.status, 1);
   assert.match(empty.stderr, /the password is empty/);
-  const taken = run(['add', 'alex'], 'x passphrase\nx passphrase\n');
+  const taken = run(['add', 'alex'], 'another long passphrase\nanother long passphrase\n');
   assert.equal(taken.status, 1);
   assert.match(taken.stderr, /a user named alex already exists/);
+  const short = run(['add', 'sam'], 'too short\ntoo short\n');
+  assert.equal(short.status, 1);
+  assert.match(short.stderr, /at least 15 characters/);
   assert.deepEqual(rows().map((row) => row.name), ['alex']);
 });
 

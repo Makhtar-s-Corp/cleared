@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import users, {
-  PASSWORD_DEFAULTS, PROOF_FILE, ProofError, SqliteUsers, UserError,
+  PASSWORD_DEFAULTS, PASSWORD_LENGTH, PROOF_FILE, ProofError, SqliteUsers, UserError,
   hashPassword, proofPath, readOrCreateProof, sameProof, verifyPassword, type PasswordParams,
 } from '../../src/modules/users.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
@@ -42,7 +42,7 @@ test('a user is added once by name, then verified by name and password', async (
   const alex = await directory_.add('alex', 'a long passphrase');
   assert.match(alex.id, /^[0-9a-f-]{36}$/);
   assert.equal(alex.name, 'alex');
-  await assert.rejects(directory_.add('alex', 'another one'), UserError);
+  await assert.rejects(directory_.add('alex', 'another long passphrase'), /a user named alex already exists/);
   assert.deepEqual(await directory_.verify('alex', 'a long passphrase'), alex);
   assert.equal(await directory_.verify('alex', 'wrong'), undefined);
   assert.equal(await directory_.verify('nobody', 'a long passphrase'), undefined);
@@ -55,6 +55,17 @@ test('a user name is short and plain, and a password is not empty', async () => 
   for (const name of ['', ' alex', 'a b', 'x'.repeat(33), 'al\nex', '../alex']) await assert.rejects(directory_.add(name, 'a long passphrase'), UserError, JSON.stringify(name));
   await assert.rejects(directory_.add('alex', ''), UserError);
   assert.deepEqual(await directory_.list(), []);
+});
+
+test('a password is 15 to 1024 characters, as NIST SP 800-63B-4 asks of a single-factor password', async () => {
+  assert.deepEqual(PASSWORD_LENGTH, { min: 15, max: 1024 });
+  const directory_ = directory();
+  await assert.rejects(directory_.add('short', 'x'.repeat(14)), /at least 15 characters/);
+  await assert.rejects(directory_.add('long', 'x'.repeat(1025)), /at most 1024 characters/);
+  await assert.rejects(directory_.add('accents', 'é'.repeat(14)), /at least 15 characters/, 'characters are counted, not bytes');
+  await directory_.add('shortest', 'x'.repeat(15));
+  await directory_.add('longest', 'x'.repeat(1024));
+  assert.deepEqual((await directory_.list()).map((u) => u.name).sort(), ['longest', 'shortest']);
 });
 
 test('the module creates its table in the ledger and fills the users slot', async () => {
