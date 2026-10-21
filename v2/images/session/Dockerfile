@@ -18,7 +18,8 @@ RUN npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/clau
  && claude --version \
  && npm cache clean --force
 
-# The runner's dependencies. Lane 4 copies the runner (main.ts) next to hooks.ts.
+# The runner and its dependencies: main.ts (lane 4) next to hooks.ts (lane 5).
+# The service starts it as node /opt/cleared/runner/main.ts.
 WORKDIR /opt/cleared/runner
 RUN npm init --yes > /dev/null \
  && npm pkg set type=module \
@@ -26,6 +27,7 @@ RUN npm init --yes > /dev/null \
  && npm ls --all --depth=1 \
  && npm cache clean --force
 COPY runner/hooks.ts ./hooks.ts
+COPY runner/main.ts ./main.ts
 
 # The config volume is created from this folder: writable whatever uid the
 # service runs the session as.

@@ -144,8 +144,8 @@ test('the example script plays a whole author turn the app can render', withStor
   }
 }));
 
-test('lane 1 registers no real harness adapter', () => {
-  assert.deepEqual(Object.keys(adapterFactories), []);
+test('the fake adapter is never registered: only claude-code is (lane 4)', () => {
+  assert.deepEqual(Object.keys(adapterFactories), ['claude-code']);
 });
 
 test('an interrupt with no message left in the script ends the session and its readers (review round 2, finding 5)', withStore(async (store) => {
