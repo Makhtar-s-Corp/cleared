@@ -4,6 +4,8 @@
   "bar_new_ticket": "New ticket",
   "bar_new_goal": "New goal",
   "bar_ask_lead": "Ask the lead",
+  "bar_body_placeholder": "Description and acceptance criteria (optional)",
+  "bar_body_label": "The ticket's description and its acceptance criteria",
   "later_goal": "Goals come in milestone 2. For now, write a ticket title and choose New ticket.",
   "later_lead": "The lead comes in milestone 2. For now, write a ticket title and choose New ticket.",
   "ticket_needs_title": "Write the ticket's title first.",

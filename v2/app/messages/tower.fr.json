@@ -4,6 +4,8 @@
   "bar_new_ticket": "Nouveau ticket",
   "bar_new_goal": "Nouvel objectif",
   "bar_ask_lead": "Demander au lead",
+  "bar_body_placeholder": "Description et critères d'acceptation (facultatif)",
+  "bar_body_label": "La description du ticket et ses critères d'acceptation",
   "later_goal": "Les objectifs arrivent au jalon 2. Pour l'instant, écrivez un titre de ticket et choisissez Nouveau ticket.",
   "later_lead": "Le lead arrive au jalon 2. Pour l'instant, écrivez un titre de ticket et choisissez Nouveau ticket.",
   "ticket_needs_title": "Écrivez d'abord le titre du ticket.",

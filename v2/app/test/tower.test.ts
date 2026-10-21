@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { FIXTURE_NOW, towerFixture } from '../fixtures/tower.ts';
 import { loadCatalog } from '../src/catalog.ts';
 import { translator, type Translate } from '../public/i18n.ts';
-import { formatModel, renderTower, towerModel, type TowerData } from '../public/screens/tower.ts';
+import { formatModel, newTicket, renderBar, renderTower, towerModel, type TowerData } from '../public/screens/tower.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
 
@@ -105,4 +105,12 @@ test('a model name reads as the capture writes it', () => {
   assert.equal(formatModel('claude-code', 'claude-opus-5-5'), 'claude · opus-5.5');
   assert.equal(formatModel('claude-code', 'claude-sonnet-5-5'), 'claude · sonnet-5.5');
   assert.equal(formatModel('codex', 'gpt-6-sol'), 'codex · gpt-6-sol');
+});
+
+test('the bar takes an optional description, sent as the ticket\'s body only when written', () => {
+  const html = renderBar(sentinel);
+  assert.match(html, /<textarea id="ask-body" name="body" maxlength="20000"[^>]*aria-label="«bar_body_label»"/);
+  assert.ok(html.indexOf('id="ask-body"') > html.indexOf('<form') && html.indexOf('id="ask-body"') < html.indexOf('</form>'), 'inside the form');
+  assert.deepEqual(newTicket('  Newest first ', '  Show the newest at the top.\n', 'guestbook'), { title: 'Newest first', project: 'guestbook', body: 'Show the newest at the top.' });
+  assert.deepEqual(newTicket('Newest first', '  \n ', 'guestbook'), { title: 'Newest first', project: 'guestbook' });
 });
