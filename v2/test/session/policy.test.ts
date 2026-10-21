@@ -228,6 +228,42 @@ test('safe commands match the whole word list, and their unsafe words go to ask'
   ]);
 });
 
+test('a safe git command never reads a file outside the workdir (review round 1, finding 1)', () => {
+  check([
+    { name: 'git diff --no-index', request: bash('git diff --no-index /proc/self/environ /dev/null'), decision: 'ask', rule: 'default' },
+    { name: 'git diff with a path outside, which git reads without --no-index', request: bash('git diff /proc/self/environ /dev/null'), decision: 'ask', rule: 'default' },
+    { name: 'git diff with ..', request: bash('git diff ../../etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git log of a path outside', request: bash('git log -- /etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git add of a path outside', request: bash('git add /etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git commit -F', request: bash('git commit -F /etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git commit -F inside the workdir', request: bash('git commit -F msg.txt'), decision: 'ask', rule: 'default' },
+    { name: 'git commit --file=', request: bash('git commit --file=/etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git commit -aF', request: bash('git commit -aF /etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git commit --template', request: bash('git commit --template /etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git commit -t', request: bash('git commit -t /etc/passwd'), decision: 'ask', rule: 'default' },
+    { name: 'git commit -C', request: bash('git commit -C HEAD'), decision: 'ask', rule: 'default' },
+    { name: 'git commit -c', request: bash('git commit -c HEAD'), decision: 'ask', rule: 'default' },
+    { name: 'git diff of revisions', request: bash('git diff main..HEAD'), decision: 'allow', rule: 'run.safe' },
+    { name: 'git diff of a file in the workdir', request: bash('git diff HEAD~1 -- src/app.ts'), decision: 'allow', rule: 'run.safe' },
+    { name: 'git status --porcelain', request: bash('git status --porcelain'), decision: 'allow', rule: 'run.safe' },
+    { name: 'a commit message that starts with a slash', request: bash("git commit -m '/health answers 200'"), decision: 'allow', rule: 'run.safe' },
+    { name: 'git commit -am', request: bash("git commit -am 'feat: newest first'"), decision: 'allow', rule: 'run.safe' },
+  ]);
+});
+
+test('a commit message or an echo that names a secret file is no read of it (review round 1, finding 5)', () => {
+  check([
+    { name: 'git commit -m', request: bash('git commit -m "document .env.example"'), decision: 'allow', rule: 'run.safe' },
+    { name: 'git commit --message=', request: bash('git commit --message=".env notes"'), decision: 'allow', rule: 'run.safe' },
+    { name: 'git commit -m with a pem name', request: bash("git commit -m 'drop the .pem fixtures'"), decision: 'allow', rule: 'run.safe' },
+    { name: 'echo', request: bash('echo id_rsa'), decision: 'ask', rule: 'default' },
+    { name: 'a pathspec stays a read', request: bash('git commit -m x .env'), decision: 'deny', rule: 'secret.read' },
+    { name: 'git commit -F of a secret', request: bash('git commit -F .env'), decision: 'deny', rule: 'secret.read' },
+    { name: 'a compound command is read whole', request: bash('npm test; git commit -m ".env"'), decision: 'deny', rule: 'secret.read' },
+    { name: 'echo inside a substitution', request: bash('cat $(echo .env)'), decision: 'deny', rule: 'secret.read' },
+  ]);
+});
+
 test('anything the parser cannot read word for word goes to ask', () => {
   for (const command of ['cat $HOME/x', 'ls ~', 'ls *.ts', 'cat a?', 'echo {a,b}', 'npm test &', 'npm test # note', 'echo "$(id)"', 'echo "`id`"', 'ls\nid', 'echo "open', 'echo a\\', 'cat <in', 'npm test 2>err', 'npm test &>out', '(ls)', '']) {
     const verdict = evaluate(bash(command), base, context);

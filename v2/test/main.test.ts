@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer, type AddressInfo } from 'node:net';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after } from 'node:test';
@@ -111,4 +111,15 @@ test('a ledger the service cannot place stops it before it listens', () => {
   assert.equal(run.status, 64);
   assert.match(run.stderr, /^cleared-v2: .*CLEARED_STATE_DIR/m);
   assert.doesNotMatch(run.stdout, /listening/);
+});
+
+test('a ledger that cannot be opened stops the service with exit 64 and says where (review round 1, finding 7)', () => {
+  const file = join(state, 'not-a-directory');
+  writeFileSync(file, 'x');
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: file, CLEARED_V2_PORT: '1' };
+  delete env.ORCH_LEDGER;
+  const run = spawnSync(process.execPath, [main], { env, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(run.status, 64);
+  assert.match(run.stderr, /^cleared-v2: cannot open the ledger at .*not-a-directory\/ledger\.db: /m);
+  assert.doesNotMatch(run.stderr, /\n\s+at /, 'no stack trace');
 });

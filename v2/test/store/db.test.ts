@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { LedgerPathError, applyTables, ledgerPath, openStore } from '../../src/store/db.ts';
+import { LedgerPathError, StoreError, applyTables, ledgerPath, openStore } from '../../src/store/db.ts';
 
 function withDir(run: (dir: string) => void): () => void {
   return () => {
@@ -25,6 +25,25 @@ test('the ledger is the one v1 uses: ORCH_LEDGER, then the state directory, then
   writeFileSync(join(config, 'cleared', 'project'), '/srv/named\nignored\n');
   assert.equal(ledgerPath({ XDG_STATE_HOME: '/state', XDG_CONFIG_HOME: config }), '/state/cleared/named/ledger.db');
   assert.throws(() => ledgerPath({ XDG_STATE_HOME: '/state', XDG_CONFIG_HOME: join(dir, 'none') }), LedgerPathError);
+}));
+
+test('the ledger is opened as lib/ledger.mjs opens it: WAL journal, 5 second busy timeout (review round 1, finding 7)', withDir((dir) => {
+  const store = openStore(join(dir, 'ledger.db'));
+  try {
+    assert.deepEqual({ ...(store.db.prepare('PRAGMA journal_mode').get() as object) }, { journal_mode: 'wal' });
+    assert.deepEqual({ ...(store.db.prepare('PRAGMA busy_timeout').get() as object) }, { timeout: 5000 });
+  } finally {
+    store.close();
+  }
+  const ledger = readFileSync(new URL('../../../lib/ledger.mjs', import.meta.url), 'utf8');
+  assert.match(ledger, /PRAGMA journal_mode = WAL/);
+  assert.match(ledger, /PRAGMA busy_timeout = 5000/);
+}));
+
+test('a ledger that cannot be opened is a StoreError naming its path', withDir((dir) => {
+  const file = join(dir, 'a-file');
+  writeFileSync(file, 'not a directory');
+  assert.throws(() => openStore(join(file, 'ledger.db')), (error: unknown) => error instanceof StoreError && error.message.startsWith(`cannot open the ledger at ${join(file, 'ledger.db')}: `));
 }));
 
 test('session events get a per-session seq from 1, and are read back after a seq', withDir((dir) => {
