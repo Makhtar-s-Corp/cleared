@@ -138,8 +138,16 @@ export function renderBar(t: Translate): string {
 <button class="chip-button" type="button" data-later="lead" aria-disabled="true" aria-describedby="ask-note">${esc(t('bar_ask_lead'))}</button>
 <button class="chip-button primary" type="submit">${esc(t('bar_new_ticket'))}</button>
 </div>
+<textarea id="ask-body" name="body" maxlength="20000" rows="5" placeholder="${esc(t('bar_body_placeholder'))}" aria-label="${esc(t('bar_body_label'))}"></textarea>
 </form>
 <p class="ask-note" id="ask-note" role="status"></p>`;
+}
+
+// What the bar sends to create a ticket: the title, and the description
+// only when one was written.
+export function newTicket(title: string, body: string, project: string): { title: string; project: string; body?: string } {
+  const text = body.trim();
+  return { title: title.trim(), project, ...(text ? { body: text } : {}) };
 }
 
 function needCard(card: NeedCard, t: Translate): string {
@@ -213,6 +221,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   const body = root.querySelector<HTMLElement>('#tower-body')!;
   const form = root.querySelector<HTMLFormElement>('#ask')!;
   const input = root.querySelector<HTMLInputElement>('#ask-input')!;
+  const description = root.querySelector<HTMLTextAreaElement>('#ask-body')!;
   const note = root.querySelector<HTMLElement>('#ask-note')!;
   let stopped = false;
 
@@ -248,8 +257,9 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       return;
     }
     try {
-      const ticket = await context.api<Ticket>('/tickets', { method: 'POST', body: { title, project: context.me.project } });
+      const ticket = await context.api<Ticket>('/tickets', { method: 'POST', body: newTicket(title, description.value, context.me.project) });
       input.value = '';
+      description.value = '';
       say(t('ticket_created', { id: ticket.id, status: ticket.status }), 'ok');
       void refresh();
     } catch {

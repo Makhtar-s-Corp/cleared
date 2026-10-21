@@ -120,7 +120,7 @@ The allow list is `api.anthropic.com` and `registry.npmjs.org`, plus the hosts t
 
 ### Test services
 
-A project declares its services in its configuration as `[session] services = postgres:16` (a comma-separated list of `[alias=]image:tag`). Milestone 1 knows one image, `postgres:16`. Its data folder is a tmpfs, so Docker creates no unlabelled anonymous volume. It uses trust authentication, and the session gets `DATABASE_URL=postgres://postgres@postgres:5432/postgres`. The session starts once `pg_isready` answers. Any other image is refused until its writable paths are added to the table in `src/container/services.ts`.
+A project declares its services in its configuration as `[session] services = postgres:16` (a comma-separated list of `[alias=]image:tag`, each optionally followed by `NAME=value` words that restate the image's fixed environment, as the guestbook's `postgres:16 POSTGRES_HOST_AUTH_METHOD=trust` does). The service reads the setting at the base branch and starts the services beside every session of the project. Milestone 1 knows one image, `postgres:16`. Its data folder is a tmpfs, so Docker creates no unlabelled anonymous volume. It uses trust authentication, and the session gets `DATABASE_URL=postgres://postgres@postgres:5432/postgres`. The session starts once `pg_isready` answers. Any other image is refused until its writable paths are added to the table in `src/container/services.ts`.
 
 ### The session image
 

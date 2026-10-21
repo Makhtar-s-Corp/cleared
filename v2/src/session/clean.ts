@@ -78,6 +78,12 @@ function hasPrivateTerm(text: string, terms: PrivateTerms): boolean {
 // Text with every secret, service path and guard match replaced by a
 // [removed: <what>] marker. A private term replaces the whole text: the
 // fingerprints say that a term is there, not where.
+// The identifiers Cleared, the SDK and the API generate: a UUID, or a
+// prefix and an underscore before letters and digits (toolu_..., msg_...).
+const GENERATED_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z]{2,10}_[A-Za-z0-9]{8,64})$/;
+// The keys of a CUSTOM value or a state that hold an identifier.
+const ID_KEYS: ReadonlySet<string> = new Set(['requestId', 'toolCallId', 'sessionId', 'session', 'messageId', 'runId', 'threadId']);
+
 export function cleanText(text: string, options: CleanOptions): string {
   let out = text;
   const longestFirst = (values: readonly string[]) => [...values].sort((a, b) => b.length - a.length);
@@ -154,13 +160,17 @@ export function createCleaner(options: CleanOptions = {}): Cleaner {
   const calls = new Map<string, ToolInput>();
   const messages = new Map<string, string[]>();
   const text = (value: unknown): string => (typeof value === 'string' ? cleanText(value, options) : '');
+  // An identifier of the generated shape passes whole: the patterns would
+  // read the digits of a UUID as a phone number, and an answer names its
+  // request by that id. Anything else in an id's place is cleaned as text.
+  const id = (value: unknown): string => (typeof value === 'string' && GENERATED_ID.test(value) ? value : text(value));
   const short = (value: unknown): string => cut(text(value)).text;
-  const deep = (value: unknown): unknown => {
-    if (typeof value === 'string') return cleanText(value, options);
-    if (Array.isArray(value)) return value.map(deep);
+  const deep = (value: unknown, key = ''): unknown => {
+    if (typeof value === 'string') return ID_KEYS.has(key) ? id(value) : cleanText(value, options);
+    if (Array.isArray(value)) return value.map((item) => deep(item));
     const object = record(value);
     if (!object) return value;
-    return Object.fromEntries(Object.entries(object).filter(([key]) => key !== 'rawEvent').map(([key, item]) => [key, deep(item)]));
+    return Object.fromEntries(Object.entries(object).filter(([name]) => name !== 'rawEvent').map(([name, item]) => [name, deep(item, name)]));
   };
 
   function shapeInput(raw: Record<string, unknown> | undefined): ToolInput {
@@ -215,7 +225,7 @@ export function createCleaner(options: CleanOptions = {}): Cleaner {
     const stamp = typeof e.timestamp === 'number' ? { timestamp: e.timestamp } : {};
     switch (event.type) {
       case 'RUN_STARTED':
-        return [{ type: event.type, threadId: text(event.threadId), runId: text(event.runId), ...stamp }];
+        return [{ type: event.type, threadId: id(event.threadId), runId: id(event.runId), ...stamp }];
       case 'RUN_FINISHED': {
         const result = record(e.result);
         const stopReason = STOP_REASONS.find((reason) => reason === result?.stopReason) ?? 'error';
@@ -223,7 +233,7 @@ export function createCleaner(options: CleanOptions = {}): Cleaner {
         const usage = (Array.isArray(e.usage) ? e.usage : []).map(record).filter((u) => u !== undefined)
           .map((u) => Object.fromEntries(Object.entries(u).filter(([k, v]) => (k === 'model' ? typeof v === 'string' : isCount(v)))));
         return [...closeAll(), {
-          type: event.type, threadId: text(e.threadId), runId: text(e.runId),
+          type: event.type, threadId: id(e.threadId), runId: id(e.runId),
           outcome: cancelled ? { type: 'cancelled' } : { type: 'success' },
           usage,
           result: { stopReason, total_cost_usd: typeof result?.total_cost_usd === 'number' ? result.total_cost_usd : null },
@@ -235,38 +245,38 @@ export function createCleaner(options: CleanOptions = {}): Cleaner {
       case 'STEP_STARTED': case 'STEP_FINISHED':
         return (STEP_NAMES as readonly string[]).includes(event.stepName) ? [{ type: event.type, stepName: event.stepName, ...stamp }] : [];
       case 'TEXT_MESSAGE_START': {
-        const messageId = text(event.messageId);
+        const messageId = id(event.messageId);
         messages.set(messageId, []);
         return [{ type: event.type, messageId, role: event.role === 'user' ? 'user' : 'assistant', ...(typeof event.name === 'string' ? { name: text(event.name) } : {}), ...stamp }];
       }
       case 'TEXT_MESSAGE_CONTENT': {
-        const messageId = text(event.messageId);
+        const messageId = id(event.messageId);
         const parts = messages.get(messageId) ?? [];
         if (typeof event.delta === 'string') parts.push(event.delta);
         messages.set(messageId, parts);
         return [];
       }
       case 'TEXT_MESSAGE_END': {
-        const messageId = text(event.messageId);
+        const messageId = id(event.messageId);
         return [...flush(messageId), { type: event.type, messageId, ...stamp }];
       }
       case 'TOOL_CALL_START':
-        return [{ type: event.type, toolCallId: text(event.toolCallId), toolCallName: text(event.toolCallName), ...(typeof event.parentMessageId === 'string' ? { parentMessageId: text(event.parentMessageId) } : {}), ...stamp }];
+        return [{ type: event.type, toolCallId: id(event.toolCallId), toolCallName: text(event.toolCallName), ...(typeof event.parentMessageId === 'string' ? { parentMessageId: id(event.parentMessageId) } : {}), ...stamp }];
       case 'TOOL_CALL_ARGS': {
-        const toolCallId = text(event.toolCallId);
+        const toolCallId = id(event.toolCallId);
         const input = shapeInput(typeof event.delta === 'string' ? parseObject(event.delta) : undefined);
         calls.set(toolCallId, input);
         return [{ ...toolArgs(toolCallId, input), ...stamp }];
       }
       case 'TOOL_CALL_END':
-        return [{ type: event.type, toolCallId: text(event.toolCallId), ...stamp }];
+        return [{ type: event.type, toolCallId: id(event.toolCallId), ...stamp }];
       case 'TOOL_CALL_RESULT': {
-        const toolCallId = text(event.toolCallId);
+        const toolCallId = id(event.toolCallId);
         const content = typeof event.content === 'string' ? event.content : '';
-        return [{ ...toolResult(text(event.messageId), toolCallId, shapeOutput(calls.get(toolCallId), content)), ...stamp }];
+        return [{ ...toolResult(id(event.messageId), toolCallId, shapeOutput(calls.get(toolCallId), content)), ...stamp }];
       }
       case 'REASONING_START': case 'REASONING_END':
-        return [{ type: event.type, messageId: text(event.messageId), ...stamp }];
+        return [{ type: event.type, messageId: id(event.messageId), ...stamp }];
       case 'STATE_SNAPSHOT':
         return [{ type: event.type, snapshot: deep(event.snapshot) as typeof event.snapshot, ...stamp }];
       case 'STATE_DELTA':

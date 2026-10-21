@@ -20,7 +20,7 @@
 // the ticket). `workspace` is written after the adapter has started the
 // session, with the time it began, because the session's id does not exist
 // before.
-import type { PermissionItem, SessionDetail, SessionSummary } from '../api/types.ts';
+import type { PermissionItem, ReleaseItem, SessionDetail, SessionSummary } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
@@ -44,7 +44,9 @@ export type FlowEffects = {
   prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
   publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string }): Promise<Published>;
-  requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<void>;   // the lock's `--ask` request
+  // The lock's `--ask` request; the request time the lock recorded, when it says one.
+  requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
+  prChecks(pr: number): Promise<ReleaseItem['pr']['checks']>;      // the pull request's checks on the forge now
 };
 
 export type FlowDeps = {
@@ -157,7 +159,13 @@ export class FlowEngine {
     }
     for (const release of this.inbox.waitingReleases()) {
       const ticket = await this.registry.ticketStore.get(release.ticket);
-      if (ticket && ticket.status === this.registry.ticketStore.states.validate) continue;
+      if (ticket && ticket.status === this.registry.ticketStore.states.validate) {
+        // The card says whether the checks are green: the lock queues a
+        // release whose checks still run, so the owner waits for them.
+        const checks = await this.#effects.prChecks(release.pr.number).catch(() => undefined);
+        if (checks && checks !== release.pr.checks) this.inbox.setReleaseChecks(release.id, checks);
+        continue;
+      }
       const history = ticket ? await this.registry.ticketStore.history(ticket.id) : [];
       const by = history.at(-1)?.by;
       this.#settleRelease(release.id, release.ticket, release.project, by?.kind === 'human' ? by.id : 'system');
@@ -336,7 +344,7 @@ export class FlowEngine {
   async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string): Promise<Live> {
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness: HARNESS, model, workdir, briefing,
-      policy: this.#policy(role, settings), prompt,
+      policy: this.#policy(role, settings), prompt, services: settings.services,
     };
     const handle = await adapter.start(input);
     const at = this.#now().toISOString();
@@ -630,11 +638,12 @@ export class FlowEngine {
     let requestedAt: string;
     try {
       await this.registry.reviewRecorder.record({ ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt });
-      await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
+      const asked = await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
       // The real lock moves the card itself when it asks; a store it did not move gets the move here.
       if ((await tickets.history(id)).at(-1)?.status !== tickets.states.validate) await tickets.move(id, tickets.states.validate, SERVICE);
-      // The approval is bound to the request time: the time the ticket store holds for the move.
-      requestedAt = (await tickets.history(id)).at(-1)?.at ?? this.#now().toISOString();
+      // The approval is bound to the request time the lock recorded (the approval route
+      // compares with it); without one, the time the ticket store holds for the move.
+      requestedAt = asked.requestedAt ?? (await tickets.history(id)).at(-1)?.at ?? this.#now().toISOString();
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
       await this.#putBack(id, `The release could not be requested: ${name(error)}`);

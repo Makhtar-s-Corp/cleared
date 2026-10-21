@@ -64,13 +64,18 @@ export type Row =
 
 type Step = { name: SessionState['steps'][number]['name']; startedAt: string; finishedAt: string | null };
 
+// A step as the Checks card shows it: every span of that step added up. The
+// author works again after a review, and the wait for the human comes back
+// at each request, so a step can happen several times in one session.
+export type StepTotal = { readonly name: Step['name']; readonly startedAt: string; readonly ms: number; readonly count: number; readonly open: boolean };
+
 export type SessionModel = {
   lastSeq: number;
   lastAt: string | undefined;                       // the time of the last event seen
   state: SessionState | undefined;
   readonly rows: Exclude<Row, ReadRow>[];
   pending: string[];                                // request ids (permissions and questions) that wait for the human
-  readonly steps: Map<string, Step>;                // from STEP_STARTED and STEP_FINISHED
+  readonly steps: Step[];                           // from STEP_STARTED and STEP_FINISHED, each span
   readonly tools: Map<string, ToolRow>;
   readonly texts: Map<string, MessageRow>;
   readonly requests: Map<string, ToolRow>;
@@ -78,7 +83,7 @@ export type SessionModel = {
 };
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: new Map(), tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map() };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map() };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -166,12 +171,12 @@ export function applyEvent(model: SessionModel, stored: SessionEvent): boolean {
       if (model.state) for (const operation of event.delta) patch(model.state as unknown as Record<string, unknown>, operation);
       break;
     case 'STEP_STARTED':
-      model.steps.set(event.stepName, { name: event.stepName, startedAt: at, finishedAt: null });
+      model.steps.push({ name: event.stepName, startedAt: at, finishedAt: null });
       break;
     case 'STEP_FINISHED': {
-      const step = model.steps.get(event.stepName);
+      const step = model.steps.findLast((s) => s.name === event.stepName && s.finishedAt === null);
       if (step) step.finishedAt = at;
-      else model.steps.set(event.stepName, { name: event.stepName, startedAt: at, finishedAt: at });
+      else model.steps.push({ name: event.stepName, startedAt: at, finishedAt: at });
       break;
     }
     case 'RUN_FINISHED':
@@ -295,15 +300,23 @@ export function parseCriteria(body: string): { readonly description: string[]; r
   return { description: rest.join('\n').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean), criteria };
 }
 
-// The steps the screen shows: the state's, and the ones only STEP_* events told.
-export function stepsOf(model: SessionModel): readonly Step[] {
-  const merged = new Map<string, Step>();
-  for (const step of model.steps.values()) merged.set(step.name, step);
-  for (const step of model.state?.steps ?? []) {
-    const seen = merged.get(step.name);
-    merged.set(step.name, seen && step.finishedAt === null && seen.finishedAt !== null ? { ...step, finishedAt: seen.finishedAt } : { ...step });
+// The steps the screen shows, each the sum of its spans: the spans the STEP_*
+// events told, then those only the state has. A span both know is the
+// events', which are newer than a snapshot taken while it ran.
+export function stepsOf(model: SessionModel, now: number): readonly StepTotal[] {
+  const spans = new Map<string, Step>();
+  for (const step of model.steps) spans.set(`${step.name} ${step.startedAt}`, step);
+  for (const step of model.state?.steps ?? []) if (!spans.has(`${step.name} ${step.startedAt}`)) spans.set(`${step.name} ${step.startedAt}`, step);
+  const totals = new Map<string, { name: Step['name']; startedAt: string; ms: number; count: number; open: boolean }>();
+  for (const span of [...spans.values()].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))) {
+    const end = span.finishedAt === null ? now : Date.parse(span.finishedAt);
+    const total = totals.get(span.name) ?? { name: span.name, startedAt: span.startedAt, ms: 0, count: 0, open: false };
+    total.ms += Math.max(0, end - Date.parse(span.startedAt));
+    total.count += 1;
+    total.open ||= span.finishedAt === null;
+    totals.set(span.name, total);
   }
-  return [...merged.values()].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  return [...totals.values()];
 }
 
 // ------------------------------------------------------------------ render
@@ -512,15 +525,14 @@ export function renderRight(view: SessionView, t: Translate): string {
   const state = view.model.state;
   const files = state?.files ?? [];
   const checks = state?.checks ?? [];
-  const steps = stepsOf(view.model);
+  const steps = stepsOf(view.model, view.now.getTime());
   const changes = files.length === 0
     ? `<p class="faint small">${esc(t('changes_none'))}</p>`
     : `<ul class="changes">${files.map((f) => `<li><span class="path">${esc(f.path)}</span><span>${counts(f.added, f.removed)}</span></li>`).join('')}</ul>`;
   const checkList = checks.length === 0 ? '' : `<ul class="checks">${checks.map((c) => `<li><span class="light ${esc(c.state)}" aria-hidden="true"></span><span>${esc(c.name)}</span><span class="state">· ${esc(t(`check_${c.state}`))}</span></li>`).join('')}</ul>`;
   const stepList = steps.length === 0 ? '' : `<h4 class="card-label sub-label">${esc(t('steps_title'))}</h4><ul class="steps">${steps.map((step) => {
-    const open = step.finishedAt === null;
-    const end = open ? view.now.getTime() : Date.parse(step.finishedAt as string);
-    return `<li><span>${esc(t(`step_${step.name}`))}</span><span class="faint">${esc(duration(end - Date.parse(step.startedAt), t))}${open ? ` · ${esc(t('step_running'))}` : ''}</span></li>`;
+    const times = step.count > 1 ? ` · ${esc(t('step_times', { n: step.count }))}` : '';
+    return `<li><span>${esc(t(`step_${step.name}`))}</span><span class="faint">${esc(duration(step.ms, t))}${times}${step.open ? ` · ${esc(t('step_running'))}` : ''}</span></li>`;
   }).join('')}</ul>`;
   return `<section class="card" aria-labelledby="changes-title"><h3 id="changes-title" class="card-label">${esc(t('changes_title'))}</h3>${changes}</section>
 <section class="card" aria-labelledby="checks-title"><h3 id="checks-title" class="card-label">${esc(t('checks_title'))}</h3>${checkList || `<p class="faint small">${esc(t('checks_none'))}</p>`}${stepList}</section>

@@ -11,7 +11,8 @@ import { translator } from '../../public/i18n.ts';
 import { ApiError } from '../../public/screen.ts';
 import { DEFAULT_STATES } from '../../../src/tickets/contract.ts';
 import {
-  TODO_STATE, answerRequest, answersFor, approve, approveBody, decisionFor, elapsed, failure, itemFromHash, ordered, sameOrigin, sendBack, undoApproval,
+  TODO_STATE, answerRequest, answersFor, approve, approveBody, decisionFor, detailKey, elapsed, failure, itemFromHash, ordered, sameOrigin, sendBack, undoApproval,
+  type InboxView,
 } from '../../public/screens/inbox.ts';
 
 const en = translator(loadCatalog('inbox', 'en'));
@@ -116,4 +117,15 @@ test('a refusal of the service reads as a sentence, and an answer to a request n
   assert.deepEqual(failure(new TypeError('network'), 'approve'), { key: 'approve_failed', settled: false });
   for (const key of ['answer_settled', 'answer_failed', 'approve_owner', 'approve_conflict', 'approve_setup', 'approve_failed', 'undo_late', 'undo_failed', 'send_back_conflict', 'send_back_failed'])
     assert.ok(en(key).length > 0, key);
+});
+
+test('the detail is drawn again when the shown release\'s checks change, and not for a change it does not show', () => {
+  const view = (items: readonly InboxItem[]): InboxView => ({
+    items, tickets: fixture.tickets, sessions: fixture.sessions, selected: release.id, open: true,
+    me: { id: 'user-demo', name: 'demo' }, now: FIXTURE_NOW, local: new Map(), frame: 'desktop',
+  });
+  const running = { ...release, pr: { ...release.pr, checks: 'pending' as const } };
+  const green = { ...release, pr: { ...release.pr, checks: 'passed' as const } };
+  assert.notEqual(detailKey(view([running, permission])), detailKey(view([green, permission])), 'the owner waits for green before approving');
+  assert.equal(detailKey(view([green, permission])), detailKey(view([green, { ...permission, since: 'later' }])));
 });

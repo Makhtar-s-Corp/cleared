@@ -26,6 +26,8 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.equal(author.input.workdir, `/work/${ticket.id}`);
   assert.equal(author.input.policy.role, 'author');
   assert.deepEqual(author.input.policy.scripts, ['test', 'typecheck']);
+  // The project's test services start beside the session.
+  assert.deepEqual(author.input.services?.map((s) => s.image), ['postgres:16']);
   assert.match(author.input.prompt, /Newest entry first/);
   assert.equal(t.store.sessions.get(author.id)?.role, 'author');
 
@@ -84,6 +86,10 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.equal(release.title, 'Newest entry first');
   assert.deepEqual(release.sessions.map((s) => [s.role, s.model]), [['author', 'claude-opus-5-5'], ['reviewer', 'claude-sonnet-5-5']]);
   assert.equal(release.sessions[1]?.rounds, 1);
+  // The card follows the pull request's checks: a tick reads them from the forge.
+  assert.equal(release.pr.checks, 'pending');
+  await engine.tick();
+  assert.equal(t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.pr.checks, 'passed');
   const verdictEvent = events(t).find((e) => e.event.type === 'CUSTOM' && e.event.name === 'cleared.review_verdict');
   assert.ok(verdictEvent);
   assert.equal(verdictEvent.sessionId, reviewer.id);
@@ -369,9 +375,9 @@ test('the release waits for approval without holding the ticket: a person can se
   assert.deepEqual(stepLines(t.store.events.after(t.startedSessions[2]!.id)).includes('-approval'), false);
 });
 
-test('the release item carries the time the ticket store holds for the move to Needs Approval, whoever made the move', async () => {
-  // A lock that does not move the card: the flow does, and the item has that time.
-  const slow = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease() { slowClock.now += 5000; } } });
+test('the release item carries the request time the lock recorded, else the time the ticket store holds for the move to Needs Approval', async () => {
+  // A lock that does not move the card nor say its time: the flow moves it, and the item has that time.
+  const slow = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease() { slowClock.now += 5000; return {}; } } });
   const slowClock = slow.clock;
   await slow.engine.start(slow.ticket.id, 'u1');
   await until(() => kinds(slow).includes('release:waiting'));
@@ -384,12 +390,21 @@ test('the release item carries the time the ticket store holds for the move to N
 
   // A lock that moves the card itself, as ask-validation.sh does: no second move.
   let own: Setup | undefined;
-  own = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease({ ticket }) { own!.clock.now += 7000; await own!.tickets.move(ticket, 'Needs Approval', { kind: 'agents', id: 'lock' }); own!.clock.now += 3000; } } });
+  own = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease({ ticket }) { own!.clock.now += 7000; await own!.tickets.move(ticket, 'Needs Approval', { kind: 'agents', id: 'lock' }); own!.clock.now += 3000; return {}; } } });
   await own.engine.start(own.ticket.id, 'u1');
   await until(() => kinds(own!).includes('release:waiting'));
   const lockMoves = (await own.tickets.history(own.ticket.id)).filter((h) => h.status === 'Needs Approval');
   assert.equal(lockMoves.length, 1, 'the flow does not move a card the lock moved');
   assert.equal(own.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.requestedAt, '2026-10-21T10:00:07.000Z');
+
+  // The real lock (ask-validation.sh) records its own time, in nanoseconds, a
+  // little after its move: the approval route compares with that record, so
+  // the item carries it.
+  let real: Setup | undefined;
+  real = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease({ ticket }) { await real!.tickets.move(ticket, 'Needs Approval', { kind: 'agents', id: 'lock' }); return { requestedAt: '2026-10-21T10:00:00.022293461Z' }; } } });
+  await real.engine.start(real.ticket.id, 'u1');
+  await until(() => kinds(real!).includes('release:waiting'));
+  assert.equal(real.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.requestedAt, '2026-10-21T10:00:00.022293461Z');
 });
 
 test('a new engine closes the requests the last process left waiting, and keeps the releases', async () => {

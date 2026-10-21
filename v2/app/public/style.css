@@ -93,6 +93,11 @@ button, input { font: inherit; color: inherit; }
 .ask input::placeholder { color: var(--placeholder); }
 .ask:focus-within { box-shadow: 0 0 0 2px var(--link); }
 .ask-actions { display: flex; gap: 6px; flex: none; }
+/* The description shows once a title is written: the bar stays one line until then. */
+.ask { flex-wrap: wrap; }
+.ask textarea { display: none; flex-basis: 100%; min-height: 96px; resize: vertical; padding: 8px 0 2px; border: 0; border-top: 1px solid var(--hairline); background: transparent; color: inherit; font: inherit; outline: none; }
+.ask textarea::placeholder { color: var(--placeholder); }
+.ask:has(#ask-input:not(:placeholder-shown)) textarea, .ask textarea:not(:placeholder-shown) { display: block; }
 .chip-button { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; box-shadow: var(--e-control); font-size: 12px; cursor: pointer; white-space: nowrap; }
 .chip-button:hover { background: var(--tab-fill); }
 .chip-button[aria-disabled="true"] { color: var(--text-muted); }
@@ -185,6 +190,7 @@ button, input { font: inherit; color: inherit; }
   .ask-wrap, .screen > .ask { margin: 16px 16px 0; }
   .ask { flex-wrap: wrap; padding: 8px; }
   .ask input { flex-basis: 100%; height: 40px; padding: 0 6px; }
+  .ask textarea { padding: 8px 6px 2px; }
   .ask-actions { width: 100%; flex-wrap: wrap; }
   .chip-button { min-height: 44px; padding: 0 14px; }
   .chip-button.primary { margin-left: auto; }

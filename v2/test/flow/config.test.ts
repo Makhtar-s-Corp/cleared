@@ -27,6 +27,13 @@ test('projectSettings gives the verdict phrase, the safe commands and the hosts 
   assert.deepEqual(settings.hosts, ['registry.npmjs.org', 'example.org']);
 });
 
+test('projectSettings gives the declared test services, in the form the guestbook commits, and none by default', () => {
+  const settings = projectSettings(parseConf('[merge]\nverdict = no blocking issues\n[session]\nservices = postgres:16 POSTGRES_HOST_AUTH_METHOD=trust\n'));
+  assert.deepEqual(settings.services.map((s) => [s.alias, s.image, s.sessionEnv.DATABASE_URL]), [['postgres', 'postgres:16', 'postgres://postgres@postgres:5432/postgres']]);
+  assert.deepEqual(projectSettings(parseConf('[merge]\nverdict = no blocking issues\n')).services, []);
+  assert.throws(() => projectSettings(parseConf('[merge]\nverdict = no blocking issues\n[session]\nservices = redis:7\n')), (error: unknown) => error instanceof FlowConfigError && /redis/.test(error.message));
+});
+
 test('without a verdict phrase the project cannot pass a review', () => {
   assert.throws(() => projectSettings(parseConf('[merge]\ntooling_paths = x\n')), FlowConfigError);
 });

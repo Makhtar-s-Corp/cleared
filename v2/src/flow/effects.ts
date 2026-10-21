@@ -1,9 +1,11 @@
 // The flow's effects for real: what leaves the process. Each one is a
 // thin call to the workspace modules of lane 5 or to the lock's own client;
 // the flow's tests replace all of them (FlowEffects in engine.ts).
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readApprovalRecord } from '../approval/record.ts';
+import { stateDirectory } from '../approval/service.ts';
 import { readBriefing, writeBriefing } from '../workspace/briefing.ts';
 import { git, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { captureHandover } from '../workspace/handover.ts';
@@ -13,6 +15,15 @@ import type { FlowEffects } from './engine.ts';
 
 // The repository's root, which holds release-request.mjs, the lock's client.
 const CLEARED = fileURLToPath(new URL('../../../', import.meta.url));
+
+// What the release card says of a pull request's checks, from the buckets of
+// `gh pr checks --json bucket`: one failed or cancelled check fails them,
+// one still running (or none reported yet) keeps them pending.
+export function checksOf(checks: readonly { readonly bucket: string }[]): 'pending' | 'passed' | 'failed' {
+  if (checks.some((c) => c.bucket === 'fail' || c.bucket === 'cancel')) return 'failed';
+  if (checks.length === 0 || checks.some((c) => c.bucket === 'pending')) return 'pending';
+  return 'passed';
+}
 
 export type EffectsOptions = {
   readonly env?: NodeJS.ProcessEnv;
@@ -68,11 +79,23 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       });
     },
 
+    // gh exits 8 while a check is pending, and prints the list all the same.
+    async prChecks(pr) {
+      const { gh } = await forge();
+      const stdout = await new Promise<string>((resolve, reject) => {
+        execFile('gh', ['pr', 'checks', String(pr), '--repo', config.repo, '--json', 'bucket'], { cwd: config.projectDir, env: gh, timeout: 15_000, encoding: 'utf8' },
+          (error, out) => (error && (error as { code?: unknown }).code !== 8 ? reject(error) : resolve(out)));
+      });
+      return checksOf(JSON.parse(stdout) as { bucket: string }[]);
+    },
+
     // `release-request.mjs request_release <ticket> <pr> --ask`, the
     // announcement on its stdin: the lock asks the human, at these heads.
-    requestRelease(input) {
+    // Then the request time the lock recorded for these versions
+    // (<state>/validations/<ticket>.json, which ask-validation.sh writes).
+    async requestRelease(input) {
       const script = options.releaseRequest ?? join(CLEARED, 'release-request.mjs');
-      return new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const child = spawn(process.execPath, ['--no-warnings', script, 'request_release', input.ticket, String(input.pr), '--ask'], {
           env: { ...env, CLEARED_REPO: config.projectDir }, stdio: ['pipe', 'ignore', 'pipe'],
         });
@@ -91,6 +114,8 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
         child.stdin.on('error', () => undefined);
         child.stdin.end(input.announcement);
       });
+      const record = readApprovalRecord(stateDirectory(env), input.ticket);
+      return record && record.versions.some((v) => v.pr === input.pr) ? { requestedAt: record.at } : {};
     },
   };
 }

@@ -187,7 +187,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     const { id, input } = session;
     await startSession(docker, {
       session: id, workdir: input.workdir, tokenFile: runtime.loginFile, allowDir: join(runtime.stateDir, 'egress', id),
-      allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: runtime.services ?? [],
+      allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: input.services ?? runtime.services ?? [],
       user: runtime.user, command: RUNNER_COMMAND, interactive: true,
       ...(runtime.image === undefined ? {} : { image: runtime.image }),
       ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),

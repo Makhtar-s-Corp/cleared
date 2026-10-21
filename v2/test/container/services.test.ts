@@ -23,6 +23,19 @@ test('an alias can be given, and several services are separated by commas', () =
   assert.deepEqual(parseServices('  '), []);
 });
 
+test('the guestbook\'s form, the image then words that restate its environment, is read as the image alone', () => {
+  const [postgres, ...rest] = parseServices('postgres:16 POSTGRES_HOST_AUTH_METHOD=trust');
+  assert.deepEqual(rest, []);
+  assert.deepEqual(postgres, parseServices('postgres:16')[0]);
+  assert.deepEqual(parseServices('db=postgres:16  POSTGRES_HOST_AUTH_METHOD=trust, postgres:16').map((s) => s.alias), ['db', 'postgres']);
+});
+
+test('an environment word that changes the image\'s fixed environment, or is not NAME=value, is refused', () => {
+  assert.throws(() => parseServices('postgres:16 POSTGRES_HOST_AUTH_METHOD=md5'), (error: unknown) => error instanceof ServiceError && /POSTGRES_HOST_AUTH_METHOD/.test(error.message));
+  assert.throws(() => parseServices('postgres:16 POSTGRES_PASSWORD=secret'), ServiceError);
+  assert.throws(() => parseServices('postgres:16 trust'), ServiceError);
+});
+
 test('an image without a known table of writable paths is refused, so that no unlabelled volume is created', () => {
   assert.throws(() => parseServices('redis:7'), (error: unknown) => error instanceof ServiceError && /postgres/.test(error.message));
   assert.throws(() => parseServices('library/mysql:8'), ServiceError);
