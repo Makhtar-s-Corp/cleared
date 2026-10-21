@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { Docker, LABEL, SESSION_LABEL } from '../../../src/container/docker.ts';
+import { parseServices } from '../../../src/container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../../../src/container/session-runtime.ts';
 import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../../../src/session/adapters/claude-code.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
@@ -132,6 +133,19 @@ test('start creates the labelled session, attaches the runner and sends start, t
     assert.deepEqual(types(t.log.all), ['STATE_SNAPSHOT', 'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END']);
     assert.deepEqual(t.log.all.map((e) => e.seq), [1, 2, 3, 4]);
     assert.ok(t.log.all.every((e) => e.ticket === 'LOCAL-1' && e.project === 'guestbook' && e.sessionId === SESSION));
+    await handle.stop();
+  } finally { t.cleanup(); }
+});
+
+test('the test services of the start input run beside the session, which gets their address', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start({ ...input(t.workdir), services: parseServices('postgres:16') });
+    const service = t.fake.calls.find((c) => c.args[0] === 'create' && c.args.includes('cleared.role=service'));
+    assert.ok(service, 'a service container was created');
+    assert.equal(service.args[service.args.indexOf('--') + 1], 'postgres:16');
+    const session = t.fake.calls.find((c) => c.args[0] === 'create' && c.args.includes('cleared.role=session'));
+    assert.ok(session?.args.includes('DATABASE_URL=postgres://postgres@postgres:5432/postgres'));
     await handle.stop();
   } finally { t.cleanup(); }
 });

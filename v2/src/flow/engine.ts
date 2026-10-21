@@ -336,7 +336,7 @@ export class FlowEngine {
   async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string): Promise<Live> {
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness: HARNESS, model, workdir, briefing,
-      policy: this.#policy(role, settings), prompt,
+      policy: this.#policy(role, settings), prompt, services: settings.services,
     };
     const handle = await adapter.start(input);
     const at = this.#now().toISOString();

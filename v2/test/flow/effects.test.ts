@@ -32,7 +32,7 @@ test('settings reads the verdict phrase, the lists and the package scripts at th
   const { flow } = await effects();
   await flow.refreshProject();
   assert.deepEqual(await flow.settings(), {
-    verdict: 'no blocking issues', safeCommands: ['npm ci', 'npm test'], hosts: ['registry.npmjs.org'], scripts: ['test', 'typecheck'],
+    verdict: 'no blocking issues', safeCommands: ['npm ci', 'npm test'], hosts: ['registry.npmjs.org'], services: [], scripts: ['test', 'typecheck'],
   });
 });
 

@@ -1,6 +1,9 @@
 // The test services a project declares for its sessions, read from the
 // `[session] services` setting of its configuration: a comma-separated list
-// of `[alias=]image:tag`, for example `services = postgres:16`. Each service
+// of `[alias=]image:tag`, for example `services = postgres:16`. An image may
+// be followed by `NAME=value` words that restate its fixed environment (the
+// guestbook commits `postgres:16 POSTGRES_HOST_AUTH_METHOD=trust`); a word
+// that would change it is refused. Each service
 // runs as a sibling container on the session's internal network, reachable
 // under its alias (by default the image's name).
 //
@@ -59,7 +62,7 @@ export function parseServices(setting: string): ServiceSpec[] {
   if (setting.trim() === '') return [];
   const services: ServiceSpec[] = [];
   for (const raw of setting.split(',')) {
-    const item = raw.trim();
+    const [item = '', ...words] = raw.trim().split(/\s+/);
     const at = item.indexOf('=');
     const image = at < 0 ? item : item.slice(at + 1);
     const colon = image.indexOf(':');
@@ -70,6 +73,11 @@ export function parseServices(setting: string): ServiceSpec[] {
     if (!known) throw new ServiceError(`service "${item}": only these images are supported in milestone 1: ${Object.keys(KNOWN).map((n) => `${n}:<tag>`).join(', ')}`);
     if (!KNOWN_TAGS[name]?.test(tag)) throw new ServiceError(`service "${item}": give an explicit supported tag, for example ${name}:16`);
     if (!ALIAS.test(alias) || RESERVED.has(alias)) throw new ServiceError(`service "${item}": the alias must be lowercase letters, digits and dashes, and not ${[...RESERVED].join(', ')}`);
+    for (const word of words) {
+      const eq = word.indexOf('=');
+      const key = word.slice(0, eq);
+      if (eq < 1 || known.env[key] !== word.slice(eq + 1)) throw new ServiceError(`service "${raw.trim()}": "${word}" is not part of its fixed environment (${Object.entries(known.env).map(([k, v]) => `${k}=${v}`).join(' ')}): milestone 1 does not change a service's environment`);
+    }
     if (services.some((s) => s.alias === alias)) throw new ServiceError(`service "${item}": the alias ${alias} is used twice`);
     services.push({ alias, image: `${name}:${tag}`, env: known.env, tmpfs: known.tmpfs, ready: known.ready, sessionEnv: known.sessionEnv(alias) });
   }

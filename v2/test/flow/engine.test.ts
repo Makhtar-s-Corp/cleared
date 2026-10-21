@@ -26,6 +26,8 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.equal(author.input.workdir, `/work/${ticket.id}`);
   assert.equal(author.input.policy.role, 'author');
   assert.deepEqual(author.input.policy.scripts, ['test', 'typecheck']);
+  // The project's test services start beside the session.
+  assert.deepEqual(author.input.services?.map((s) => s.image), ['postgres:16']);
   assert.match(author.input.prompt, /Newest entry first/);
   assert.equal(t.store.sessions.get(author.id)?.role, 'author');
 

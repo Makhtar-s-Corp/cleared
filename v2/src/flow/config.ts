@@ -6,6 +6,7 @@
 // hosts (docs/v2/milestone-1-plan.md, sections 5 and 8, lane 7).
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
 
 export class FlowConfigError extends Error {
   override name = 'FlowConfigError';
@@ -53,6 +54,7 @@ export type ProjectSettings = {
   readonly verdict: string;                 // [merge] verdict: the phrase a passing review ends with
   readonly safeCommands: readonly string[]; // [session] safe_commands, added to Cleared's defaults
   readonly hosts: readonly string[];        // [session] hosts, added to the model API
+  readonly services: readonly ServiceSpec[]; // [session] services, started beside each session
   readonly scripts: readonly string[];      // the scripts of package.json on the base branch
 };
 
@@ -63,7 +65,14 @@ const list = (value: string | undefined): string[] => (value ?? '').split(',').m
 export function projectSettings(sections: Sections, scripts: readonly string[] = []): ProjectSettings {
   const verdict = sections.merge?.verdict?.trim();
   if (!verdict) throw new FlowConfigError('the project names no [merge] verdict phrase in .cleared/agents.conf: a review cannot pass without it');
-  return { verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), scripts };
+  let services: ServiceSpec[];
+  try {
+    services = parseServices(sections.session?.services ?? '');
+  } catch (error) {
+    if (error instanceof ServiceError) throw new FlowConfigError(`[session] services: ${error.message}`);
+    throw error;
+  }
+  return { verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts };
 }
 
 function positive(value: string | undefined, name: string, integer: boolean): number | undefined {

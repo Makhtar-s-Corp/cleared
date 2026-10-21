@@ -4,6 +4,7 @@
 // Docker or the broker.
 import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import type { FlowConfig } from '../../src/flow/config.ts';
+import { parseServices } from '../../src/container/services.ts';
 import { InboxStore, INBOX_TABLE } from '../../src/inbox/store.ts';
 import { MemoryApprovalWriter, MemoryReviewRecorder, MemoryUsers } from '../../src/modules/registry.ts';
 import { createFakeAdapter, type FakeStep } from '../../src/session/adapters/fake.ts';
@@ -76,7 +77,7 @@ export type Calls = string[];
 
 export function fakeEffects(calls: Calls, overrides: Partial<FlowEffects> = {}): FlowEffects {
   return {
-    async settings() { return { verdict: 'no blocking issues', safeCommands: ['npm ci'], hosts: ['registry.npmjs.org'], scripts: ['test', 'typecheck'] }; },
+    async settings() { return { verdict: 'no blocking issues', safeCommands: ['npm ci'], hosts: ['registry.npmjs.org'], services: parseServices('postgres:16'), scripts: ['test', 'typecheck'] }; },
     async refreshProject() { calls.push('refreshProject'); },
     async prepareWorkdir({ ticket, role }) {
       calls.push(`prepareWorkdir:${role}`);
