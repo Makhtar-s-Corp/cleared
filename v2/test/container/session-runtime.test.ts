@@ -56,7 +56,7 @@ test('a session gets an internal network, an egress network, a config volume, it
   assert.ok(byName(fake.networks, names.network).args?.includes('--internal'), 'the session network has no route out');
   // Without it, the bridge holds a gateway address on the host, and the
   // session reaches every host service listening on 0.0.0.0 (seen in the
-  // first doctor run: sshd on the gateway address answered).
+  // first doctor run: a host service answered on the gateway address).
   assert.ok(hasPair(byName(fake.networks, names.network).args, '--opt', 'com.docker.network.bridge.gateway_mode_ipv4=isolated'), 'the session network has no address on the host');
   assert.ok(!byName(fake.networks, names.outNetwork).args?.includes('--opt'));
   assert.ok(!byName(fake.networks, names.outNetwork).args?.includes('--internal'));

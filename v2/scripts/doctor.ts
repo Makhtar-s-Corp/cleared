@@ -211,7 +211,7 @@ async function dockerSection(build: boolean): Promise<void> {
     // The host, from the session: each target with the host's own control.
     // The session network: no gateway, and its bridge holds no address on
     // the host, so no host service listening on 0.0.0.0 answers on it (the
-    // first run of this doctor reached sshd on the gateway address).
+    // first run of this doctor reached a host service on the gateway address).
     const network = await docker.inspectNetwork(session, names.network) as { Id?: string; IPAM?: { Config?: { Gateway?: string; Subnet?: string }[] } };
     say(`    session network IPAM: ${JSON.stringify(network.IPAM?.Config ?? [])}`);
     const bridge = `br-${(network.Id ?? '').slice(0, 12)}`;

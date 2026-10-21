@@ -104,7 +104,7 @@ docker build --label cleared.dev=v2 --tag cleared-v2-egress:1 v2/images/egress
 - name resolution, the proxy (allowed, refused and bypassed), npm and Claude Code through the proxy;
 - the host's addresses, each with a control connection from the host.
 
-It then inspects the limits and mounts, stops the session, starts it again to check what the config volume kept, stops it, and shows that nothing with the session label remains. It prints every docker command line as it runs, with the session id, the scratch folder, container ids and the host's public and Tailscale addresses replaced. `--no-build` skips the builds. It listens on `127.0.0.1:8791` for the run (the v2 health server) when that port is free, so the probe from the session is measured against a real listener.
+It then inspects the limits and mounts, stops the session, starts it again to check what the config volume kept, stops it, and shows that nothing with the session label remains. It prints every docker command line as it runs, with the session id, the scratch folder, the checkout path and container ids replaced, and every address that is not loopback replaced by its interface name or `<ipv4>` / `<ipv6>`. It prints the number of listening sockets before and after, and the new ones, not the host's list. `--no-build` skips the builds. It listens on `127.0.0.1:8791` for the run (the v2 health server) when that port is free, so the probe from the session is measured against a real listener.
 
 What the run on this server established on 2026-10-21:
 
@@ -112,4 +112,4 @@ What the run on this server established on 2026-10-21:
 - npm and Claude Code honour the proxy variables (`npm view left-pad version` printed `1.3.0`; `claude -p` with an invalid key got `Invalid API key`, an answer from the API).
 - With `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, Claude Code 2.1.306 asked the proxy for `api.anthropic.com:443` only. With that variable and `DISABLE_AUTOUPDATER` emptied, it also asked for `http-intake.logs.us5.datadoghq.com:443`, which was refused. This covers a failed login only. Hosts a real session needs beyond these are unknown until lane 4's run.
 - After `stop`, a new start of the same session id finds what the session wrote in the config volume and the workdir: `docker volume create` on the kept volume succeeds and reuses it. Whether Claude Code itself resumes from it is lane 4's run.
-- Without the isolated gateway mode, the internal network's gateway address is on the host, and the host's sshd (listening on `0.0.0.0:22`) answered there from the session.
+- Without the isolated gateway mode, the internal network's gateway address is on the host, and a host service listening on all addresses answered there from the session.
