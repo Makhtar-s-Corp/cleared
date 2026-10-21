@@ -420,6 +420,15 @@ The fixture uses neutral names. The project is the example guestbook, and ticket
 - The fonts are byte for byte the v1 files (`app/public/fonts/`, SIL Open Font License).
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
 
+## 2026-10-21: the example's repository and the sessions' login (plan questions 1 and 2)
+
+**Decision.**
+1. Question 1, answer (a): the demo project lives in its own public repository, `cleared-example-guestbook`, in the organisation this repository lives in, Apache-2.0, seeded from `examples/guestbook/` on `v2` and kept in sync by hand. No other organisation setting was changed. The lock's pull requests and merges for the demo happen there, never in this repository.
+2. Question 2: for the real session runs, the owner chose on 2026-10-21 at 21:35 (Europe/Paris) to reuse, read only, the Claude Code login that already exists for the owner's account on the server, instead of a `claude setup-token` token. It is bind mounted read only into session containers labelled `cleared.dev=v2` and nowhere else; its content is never read, printed, copied, logged or committed, and never leaves the server. Its host path is set by an environment variable and is not written in this repository. No API key. This is a third option, outside the plan's (a) and (b); it closes question 2. It supersedes, for lane 4's runner and doctor and every later real session run, the plan's rule (section 11) that real runs never touch the host's Claude Code directory, and the setup-token mechanism of section 6 as the default (`/run/cleared/claude.token`, `CLAUDE_CODE_OAUTH_TOKEN`), which stays the documented fallback. The owner accepts, for this self-hosted use of the owner's own subscription, the open policy question on claude.ai login in third-party products. A read-only mount blocks token refresh; lane 4 measures whether long runs survive it and records the result.
+
+**Consequences.** Lane 8's real proof (wave 3) runs against that repository. A change to `examples/guestbook/` is copied there by hand until milestone 4.
+- Decided by the owner on 2026-10-21: question 1 at 21:33, question 2 at 21:35 (Europe/Paris); written by the orchestrator.
+
 ## 2026-10-21: the session login is the service account's existing Claude Code login (plan question 2)
 
 **Decision.** By the owner, 2026-10-21 21:35, for milestone 1's real runs, in place of a `claude setup-token` token (which needs the owner's browser): the session containers use the existing Claude Code login of the account the service runs under, read only. The service names that login's credentials file with the `CLEARED_CLAUDE_CREDENTIALS` environment variable; no path to it is committed. Without the variable, the service uses `claude.token` in its state folder, where a `setup-token` token would go. The file is bind mounted read only at `/run/cleared/claude.token`, and only into session containers labelled `cleared.dev=v2`. Its content is never read, printed, copied or logged by the service, the doctor or the lane, and never leaves the server. This applies the default of the plan's question 2, option (a), the subscription.
