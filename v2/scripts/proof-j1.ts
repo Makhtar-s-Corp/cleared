@@ -17,6 +17,8 @@
 //   PROOF_PLAYWRIGHT      the folder of an installed playwright-core (not a dependency of v2)
 //   PROOF_CHROME          the Chromium executable
 //   PROOF_TIMEOUT_MINUTES how long the whole run may take (default 90)
+//   PROOF_DEMO            newest (default): the README's demo ticket; count: a
+//                         second one-file ticket, once newest first is live
 //   PROOF_AUTHOR_URL      an author session already running: steps 2 to 4 are
 //                         taken as done by an earlier run, and the run goes on there
 // No trace and no video are recorded: a trace keeps what is typed, the password included.
@@ -36,14 +38,41 @@ if (!passwordFile || !env.PROOF_PLAYWRIGHT) {
   process.exit(64);
 }
 
-// The demo ticket, as the guestbook's README gives it.
-const TITLE = 'The guestbook shows the newest entry first';
-const DESCRIPTION = `The page lists the entries oldest first, so a new entry lands at the bottom, out of sight once the list is long. Show the newest entry at the top.
+// The demo ticket: the guestbook README's, or a second one of the same size
+// for a run after the first went live. `live` reads the deployed page.
+type Demo = { readonly title: string; readonly description: string; readonly live: (text: string, names: readonly string[]) => boolean; readonly seen: string };
+const DEMOS: Record<string, Demo> = {
+  newest: {
+    title: 'The guestbook shows the newest entry first',
+    description: `The page lists the entries oldest first, so a new entry lands at the bottom, out of sight once the list is long. Show the newest entry at the top.
 
 Acceptance criteria (a checklist, which the session screen reads as such):
 - [ ] The page lists the entries from the newest to the oldest.
 - [ ] A test adds three entries one after the other and checks that the list gives them back newest first.
-- [ ] \`npm test\` and \`npm run typecheck\` pass.`;
+- [ ] \`npm test\` and \`npm run typecheck\` pass.`,
+    // Added a then b: b comes first.
+    live: (text, [a, b]) => text.includes(a as string) && text.includes(b as string) && text.indexOf(b as string) < text.indexOf(a as string),
+    seen: 'the guestbook lists the newest entry first',
+  },
+  count: {
+    title: 'The guestbook heading counts the entries',
+    description: `A visitor cannot tell how many entries the guestbook holds without counting them. Show the count in the page's heading.
+
+Acceptance criteria (a checklist, which the session screen reads as such):
+- [ ] The heading reads "Guestbook (N entries)", with "1 entry" for one entry and "0 entries" for none.
+- [ ] A test renders the page with zero, one and three entries and checks the heading.
+- [ ] \`npm test\` and \`npm run typecheck\` pass.`,
+    live: (text) => /Guestbook \((\d+) entr(y|ies)\)/.test(text),
+    seen: 'the guestbook heading counts the entries',
+  },
+};
+const DEMO = DEMOS[env.PROOF_DEMO ?? 'newest'];
+if (!DEMO) {
+  console.error(`proof: PROOF_DEMO is one of ${Object.keys(DEMOS).join(', ')}`);
+  process.exit(64);
+}
+const TITLE = DEMO.title;
+const DESCRIPTION = DEMO.description;
 // The message sent mid run. It asks for one command the policy sends to the
 // human (rule delete.outside_ticket): the request reaching the inbox is what
 // shows the session took the message into account.
@@ -270,7 +299,13 @@ if (sent) {
     let found = false;
     for (const item of await items.all()) {
       await item.click();
-      if (await page.locator('#detail').getByText(SCRATCH).count() > 0) { found = true; break; }
+      // The detail is drawn after the click: wait for this ticket's, then read it.
+      await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
+      try {
+        await page.locator('#detail').getByText(SCRATCH).first().waitFor({ timeout: 3_000 });
+        found = true;
+        break;
+      } catch { /* another request of this ticket */ }
     }
     if (!found) throw new Error('no inbox item shows the command the message asked for');
     await capture(6, 'permission-inbox-open');
@@ -377,7 +412,7 @@ if (reviewed) {
 // ---- 9. The change is live --------------------------------------------------
 if (approved) {
   await step(9, 'live', async () => {
-    // Two entries, one after the other: newest first once the change is live.
+    // Two entries, one after the other, then the page as a visitor sees it.
     const guest = await context.newPage();
     const stamp = Date.now().toString(36);
     const names = [`proof-a-${stamp}`, `proof-b-${stamp}`];
@@ -389,17 +424,14 @@ if (approved) {
     }
     for (;;) {
       await guest.goto(`${GUESTBOOK}/`);
-      const text = await guest.locator('body').innerText();
-      const a = text.indexOf(names[0] as string);
-      const b = text.indexOf(names[1] as string);
-      if (a >= 0 && b >= 0 && b < a) break;
-      if (Date.now() > DEADLINE) throw new Error('the guestbook still lists the oldest entry first');
+      if (DEMO.live(await guest.locator('body').innerText(), names)) break;
+      if (Date.now() > DEADLINE) throw new Error(`not live: ${DEMO.seen} is not what the guestbook shows`);
       await guest.waitForTimeout(15_000);
     }
     timeline.live_seen_at = new Date().toISOString();
     await capture(9, 'guestbook-live', guest);
     await guest.close();
-    return 'the guestbook lists the newest entry first';
+    return DEMO.seen;
   });
 } else {
   skip(9, 'live', 'no approval');
