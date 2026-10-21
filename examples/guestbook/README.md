@@ -1,6 +1,6 @@
 # Guestbook, the demo project of Cleared v2
 
-A web page that lists guestbook entries and adds one, on Postgres. Cleared v2's milestone 1 takes one ticket on this project from Todo to live, entirely in sessions ([milestone 1 plan](../../docs/v2/milestone-1-plan.md), lane 3). The project is meant to live in a repository of its own, seeded from this directory; until that repository exists, it lives here.
+A web page that lists guestbook entries and adds one, on Postgres. Cleared v2's milestone 1 takes one ticket on this project from Todo to live, entirely in sessions (`docs/v2/milestone-1-plan.md` in the Cleared repository, lane 3). The project is meant to live in a repository of its own, seeded from this directory; until that repository exists, it lives here.
 
 - `node:http`, no framework. The `pg` package is the only runtime dependency: Node has no Postgres client. `typescript`, `@types/node` and `@types/pg` are needed only for `npm run typecheck`.
 - TypeScript run by Node's type stripping (Node 24), with no build step and erasable syntax only.
