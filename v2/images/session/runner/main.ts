@@ -3,10 +3,18 @@
 // streaming input mode, and relays JSON lines:
 //   stdin  (from the host side of the adapter): RunnerInput, `start` first
 //   stdout (to it): RunnerOutput, every SDK message as it comes, the
-//          permission requests and questions canUseTool receives, `exit` last
+//          permission requests and questions canUseTool receives, a
+//          tool_check before every tool call, `exit` last
 // Anything else the runner or the CLI prints goes to stderr. The runner holds
 // no policy and no cleaning: the host side (src/session/adapters/claude-code.ts)
 // decides every request and cleans every event.
+//
+// In the `default` permission mode Claude Code runs a read without asking
+// (canUseTool never sees it), so the policy's deny rules would not apply to
+// it. A PreToolUse hook of the runner's own therefore sends a tool_check for
+// every tool call and waits for the host's verdict: a deny stops the call,
+// anything else lets Claude Code's own permission flow go on. It runs before
+// lane 5's hooks (hooks.ts).
 //
 // The SDK is installed in the image only, so it is loaded at run time and
 // its types are mirrored here, as hooks.ts does: query() is injected, and the
@@ -15,8 +23,13 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Decision } from '../../../src/session/contract.ts';
-import { hooks as clearedHooks, type Hooks } from './hooks.ts';
+import { hooks as clearedHooks, type HookCallback, type Hooks } from './hooks.ts';
 
+// The login, mounted read only by the service: a `claude setup-token` token,
+// or the credentials file of an existing Claude Code login (decisions log,
+// 2026-10-21). Of the second, only the access token is given to the CLI: the
+// refresh token stays in the file, so the session never refreshes, and so
+// never rotates, the login it was given.
 export const LOGIN_FILE = '/run/cleared/claude.token';
 export const CLAUDE_BIN = '/usr/local/bin/claude';
 export const WORKDIR = '/workspace';
@@ -34,6 +47,7 @@ export type RunnerInput =
   | RunnerStart
   | { readonly type: 'user'; readonly uuid: string; readonly text: string }
   | { readonly type: 'answer'; readonly requestId: string; readonly decision: Decision }
+  | { readonly type: 'tool_verdict'; readonly requestId: string; readonly deny?: string }
   | { readonly type: 'interrupt' }
   | { readonly type: 'stop' };
 
@@ -41,6 +55,7 @@ export type RunnerOutput =
   | { readonly type: 'sdk'; readonly message: unknown }
   | { readonly type: 'permission_request'; readonly requestId: string; readonly toolName: string; readonly toolUseId: string; readonly input: Record<string, unknown>; readonly agentId?: string; readonly decisionReason?: string }
   | { readonly type: 'question'; readonly requestId: string; readonly toolUseId: string; readonly questions: unknown }
+  | { readonly type: 'tool_check'; readonly requestId: string; readonly toolName: string; readonly toolUseId: string; readonly input: unknown }
   | { readonly type: 'request_cancelled'; readonly requestId: string }
   | { readonly type: 'error'; readonly message: string }
   | { readonly type: 'exit'; readonly code: number };
@@ -105,6 +120,18 @@ function permissionResult(decision: Decision, input: Record<string, unknown>): P
   }
 }
 
+// The token in the login file, or undefined. Nothing of the file is printed.
+function loginToken(text: string | undefined): string | undefined {
+  const trimmed = text?.trim() ?? '';
+  if (!trimmed.startsWith('{')) return trimmed || undefined;
+  try {
+    const oauth = (JSON.parse(trimmed) as { claudeAiOauth?: { accessToken?: unknown } }).claudeAiOauth;
+    return typeof oauth?.accessToken === 'string' && oauth.accessToken ? oauth.accessToken : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const parse = (line: string): RunnerInput | undefined => {
   try {
     const value: unknown = JSON.parse(line);
@@ -129,10 +156,28 @@ export async function run(deps: RunnerDeps): Promise<number> {
   const first = await lines.next();
   const start = first.done ? undefined : parse(first.value);
   if (start?.type !== 'start') return finish(2, 'the first line must be start');
-  const token = deps.readFile(LOGIN_FILE)?.trim();
-  if (!token) return finish(3, `no token in ${LOGIN_FILE}`);
+  const token = loginToken(deps.readFile(LOGIN_FILE));
+  if (!token) return finish(3, `no token in ${LOGIN_FILE}: neither a token nor a credentials file with an access token`);
 
   const turns = turnQueue();
+  const checks = new Map<string, (deny: string | undefined) => void>();
+  const denied = (reason: string) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
+  const toolCheck: HookCallback = (raw, toolUseId, { signal }) =>
+    new Promise((resolve) => {
+      const input = (typeof raw === 'object' && raw !== null ? raw : {}) as { tool_name?: unknown; tool_input?: unknown; tool_use_id?: unknown };
+      const requestId = newId();
+      const settle = (deny: string | undefined) => {
+        checks.delete(requestId);
+        resolve(deny === undefined ? {} : denied(deny));
+      };
+      checks.set(requestId, settle);
+      // An aborted check fails closed: the call does not run.
+      signal.addEventListener('abort', () => { if (checks.has(requestId)) settle('The policy check was cancelled.'); }, { once: true });
+      out({
+        type: 'tool_check', requestId, toolName: typeof input.tool_name === 'string' ? input.tool_name : 'unknown',
+        toolUseId: typeof input.tool_use_id === 'string' ? input.tool_use_id : toolUseId ?? '', input: input.tool_input,
+      });
+    });
   const pending = new Map<string, { input: Record<string, unknown>; resolve: (result: PermissionResult) => void }>();
   const canUseTool: CanUseTool = (toolName, input, options) =>
     new Promise((resolve) => {
@@ -168,7 +213,10 @@ export async function run(deps: RunnerDeps): Promise<number> {
     settingSources: [],
     permissionMode: 'default',
     canUseTool,
-    hooks: { ...(deps.hooks ?? clearedHooks) },
+    hooks: (() => {
+      const lane5 = deps.hooks ?? clearedHooks;
+      return { ...lane5, PreToolUse: [{ hooks: [toolCheck] }, ...(lane5.PreToolUse ?? [])] };
+    })(),
     persistSession: true,
     includePartialMessages: false,
     pathToClaudeCodeExecutable: CLAUDE_BIN,
@@ -198,6 +246,7 @@ export async function run(deps: RunnerDeps): Promise<number> {
       if (!line) { out({ type: 'error', message: 'unreadable input line' }); continue; }
       if (line.type === 'user') turns.push({ type: 'user', message: { role: 'user', content: line.text }, parent_tool_use_id: null, uuid: line.uuid, origin: { kind: 'human' } });
       else if (line.type === 'answer') pending.get(line.requestId)?.resolve(permissionResult(line.decision, pending.get(line.requestId)?.input ?? {}));
+      else if (line.type === 'tool_verdict') checks.get(line.requestId)?.(typeof line.deny === 'string' ? line.deny : undefined);
       else if (line.type === 'interrupt') await query.interrupt().catch((error: Error) => out({ type: 'error', message: `interrupt failed: ${error.message}` }));
       else if (line.type === 'stop') { query.close(); stopped(); return; }
     }

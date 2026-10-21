@@ -8,7 +8,9 @@
 // runner (test/session/claude-code/fixtures):
 //   command_lifecycle  state 'started' for each user message a turn takes,
 //                      with the message's uuid as command_uuid
-//   system/init        at the start of every turn
+//   system/init        at the start of every turn, with the user message
+//                      uuids it takes; after a resume, once without any,
+//                      followed by a result of no turn (num_turns 0)
 //   assistant          one content block per frame: text, thinking, tool_use
 //   user               tool_result blocks, with the tool's own output in
 //                      tool_use_result (a read's file, a command's stdout)
@@ -312,13 +314,19 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
     switch (frame.type) {
       case 'command_lifecycle':
         return frame.state === 'started' ? begin(str(frame.command_uuid)) : [];
-      case 'system':
-        return frame.subtype === 'init' ? begin(Array.isArray(frame.user_message_uuids) ? str(frame.user_message_uuids.at(-1)) : undefined) : [];
+      case 'system': {
+        // An init without user messages is the CLI starting on a resumed
+        // session, not a turn.
+        const uuids = Array.isArray(frame.user_message_uuids) ? frame.user_message_uuids : [];
+        return frame.subtype === 'init' && uuids.length > 0 ? begin(str(uuids.at(-1))) : [];
+      }
       case 'assistant':
         return [...begin(undefined), ...assistant(frame)];
       case 'user':
         return [...begin(undefined), ...toolResults(frame)];
       case 'result':
+        // The result of no turn, printed after a resume: nothing ran.
+        if (run === undefined && frame.num_turns === 0) return [];
         return [...begin(undefined), ...result(frame)];
       default:
         return [];
@@ -335,7 +343,7 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
   return {
     start(name) {
       model = name;
-      state = { ...state, usage: { model } };
+      state = { ...state, status: 'Starting', phase: 'starting', usage: { ...state.usage, model } };
       return [{ type: 'STATE_SNAPSHOT', snapshot: state }];
     },
     userMessage(messageId, text, by) {

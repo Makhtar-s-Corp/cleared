@@ -94,7 +94,7 @@ async function setup() {
   let n = 0;
   const adapter = createClaudeCodeAdapter({
     log, cleaner: () => createCleaner({ secrets: [['sk', 'ant', 'oat01', 'TOKENVALUEFORTESTS'].join('-')] }), docker,
-    runtime: { stateDir: join(dir, 'state'), tokenFile: join(dir, 'claude.token'), hostAddresses: ['192.0.2.10'], user: '1000:1000', maxBudgetUsd: 1, stopTimeoutMs: 200 },
+    runtime: { stateDir: join(dir, 'state'), loginFile: join(dir, 'claude.token'), hostAddresses: ['192.0.2.10'], user: '1000:1000', maxBudgetUsd: 1, stopTimeoutMs: 200 },
     newId: () => (n++ === 0 ? SESSION : `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`),
     now: () => new Date('2026-10-21T20:00:00.000Z'),
   });
@@ -294,7 +294,29 @@ test('handover is milestone 3; another harness is refused; the adapter is regist
     assert.equal(adapterFactories['claude-code']?.({ log: memoryLog(), cleaner: () => createCleaner() }).harness, 'claude-code');
     const runtime = claudeCodeRuntime({ HOME: '/home/svc' });
     assert.equal(runtime.stateDir, '/home/svc/.local/state/cleared-v2');
-    assert.equal(runtime.tokenFile, '/home/svc/.local/state/cleared-v2/claude.token');
-    assert.equal(claudeCodeRuntime({ HOME: '/h', CLEARED_V2_STATE_DIR: '/srv/state' }).tokenFile, '/srv/state/claude.token');
+    assert.equal(runtime.loginFile, '/home/svc/.local/state/cleared-v2/claude.token');
+    assert.equal(claudeCodeRuntime({ HOME: '/h', CLEARED_V2_STATE_DIR: '/srv/state' }).loginFile, '/srv/state/claude.token');
+    // The service account's existing Claude Code login, named by the environment only.
+    assert.equal(claudeCodeRuntime({ HOME: '/h', CLEARED_CLAUDE_CREDENTIALS: '/srv/login/credentials.json' }).loginFile, '/srv/login/credentials.json');
+  } finally { t.cleanup(); }
+});
+
+test('a tool check is denied by the policy before the tool runs, and only a deny is reported', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    runner.say({ type: 'tool_check', requestId: 'c-env', toolName: 'Read', toolUseId: 'toolu_1', input: { file_path: '/workspace/.env' } });
+    runner.say({ type: 'tool_check', requestId: 'c-notes', toolName: 'Read', toolUseId: 'toolu_2', input: { file_path: '/workspace/notes.txt' } });
+    runner.say({ type: 'tool_check', requestId: 'c-touch', toolName: 'Bash', toolUseId: 'toolu_3', input: { command: 'touch x' } });
+    const env = await runner.waitFor((l) => l.requestId === 'c-env');
+    assert.equal(env.type, 'tool_verdict');
+    assert.match(String(env.deny), /\S/);
+    assert.deepEqual(await runner.waitFor((l) => l.requestId === 'c-notes'), { type: 'tool_verdict', requestId: 'c-notes' });
+    // An ask is for canUseTool to raise; the check lets it through to it.
+    assert.deepEqual(await runner.waitFor((l) => l.requestId === 'c-touch'), { type: 'tool_verdict', requestId: 'c-touch' });
+    assert.deepEqual(custom(t.log, 'cleared.permission_answered'), [{ requestId: 'c-env', decision: 'reject_once', by: 'policy', rule: 'secret.read' }]);
+    assert.deepEqual(custom(t.log, 'cleared.permission_request'), []);
+    await handle.stop();
   } finally { t.cleanup(); }
 });

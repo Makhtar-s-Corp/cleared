@@ -1,7 +1,7 @@
 // Checks this server can run v2 sessions, with real objects, labelled
 // cleared.dev=v2 only. One section per lane that needs a real run
 // (milestone 1 plan, section 10); `cleared doctor` will run it in milestone 5.
-//   node scripts/doctor.ts [docker] [--no-build]
+//   node scripts/doctor.ts [docker] [claude-code] [--no-build] [--model <id>]
 //
 // docker (lane 2): builds the two images, starts a session with a postgres:16
 // service, proves from inside the session container what it can and cannot
@@ -10,19 +10,29 @@
 // session id, the scratch folder, container ids and the host's public and
 // Tailscale addresses are replaced in the output; the token file is a dummy
 // written for the run and its content is never printed.
+//
+// claude-code (lane 4): a real Claude Code session through the adapter, with
+// the service's login file (CLEARED_CLAUDE_CREDENTIALS, or the token file in
+// the state folder). It spends model usage, so it runs only when named.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { connect, isIP } from 'node:net';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { Docker, cliRunner, type DockerResult } from '../src/container/docker.ts';
+import { Docker, cliRunner, cliSpawner, type DockerResult } from '../src/container/docker.ts';
 import { parseServices } from '../src/container/services.ts';
 import {
-  CONFIG_MOUNT, LOGIN_FILE_MOUNT, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, startSession, stopSession,
+  CONFIG_MOUNT, LOGIN_FILE_MOUNT, SESSION_IMAGE, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, startSession, stopSession,
 } from '../src/container/session-runtime.ts';
 import { createHealthServer } from '../src/server.ts';
+import { claudeCodeRuntime, createClaudeCodeAdapter } from '../src/session/adapters/claude-code.ts';
+import { createCleaner } from '../src/session/clean.ts';
+import type { Answer, SessionHandle, StartInput } from '../src/session/contract.ts';
+import type { SessionEvent } from '../src/session/events.ts';
+import { DEFAULT_SAFE_COMMANDS, type Policy } from '../src/session/policy.ts';
 
 const V2 = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SERVICE_PORT = 8791;
@@ -41,8 +51,14 @@ const hideAddresses = (text: string): string =>
     .replace(/(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])/g, (a) => (isIP(a) === 4 && !kept(a) ? addressLabels.get(a) ?? '<ipv4>' : a))
     .replace(/(?<![\w.:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])/g, (a) => (isIP(a) === 6 && !kept(a) ? addressLabels.get(a) ?? '<ipv6>' : a));
 
+// Container ids, UUIDs and the API's tool, message and request ids.
 const redact = (text: string): string =>
-  hideAddresses(replacements.reduce((out, [value, label]) => out.split(value).join(label), text)).replace(/\b[0-9a-f]{64}\b/g, '<id>');
+  hideAddresses(replacements.reduce((out, [value, label]) => out.split(value).join(label), text))
+    .replace(/\b[0-9a-f]{64}\b/g, '<id>')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<id>')
+    .replace(/\b(?:toolu|msg|req)_[0-9A-Za-z]{12,}/g, '<id>');
+// A long line, cut: its start and its end around "...".
+const short = (text: string, limit = 400): string => (text.length > limit ? `${text.slice(0, limit - 120)}...${text.slice(-117)}` : text);
 
 const say = (line: string): void => console.log(redact(line));
 const rawLines = (text: string): void => {
@@ -328,14 +344,246 @@ async function dockerSection(build: boolean): Promise<void> {
   check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
 }
 
+// claude-code (lane 4): a real session through the Claude Code adapter
+// (src/session/adapters/claude-code.ts), in a labelled session container,
+// logged in with the service's login file, which is mounted read only and
+// never read or printed by the doctor. Every docker command line, every event the adapter stores
+// (cleaned) and the runner lines that show what the CLI did are printed.
+// Turns: remember a word and a `touch` the policy escalates (allowed from
+// the "inbox"), a `rm -r` the inbox denies, a read of a planted .env the
+// policy denies before it runs, the briefing (CLAUDE.md), a message sent mid
+// turn, an interrupt, a question, then stop, resume in a new container and
+// the word from the first turn. Model usage is real: run it by name only.
+// The login is CLEARED_CLAUDE_CREDENTIALS when set (the service account's
+// own Claude Code credentials file), else <state>/claude.token; the doctor
+// checks its owner and mode and never reads it.
+async function claudeCodeSection(build: boolean, model: string): Promise<void> {
+  say('== claude-code (lane 4)');
+  const before = listening();
+  say(`ss -ltn before: ${before.length} listening sockets`);
+  const runtime = { ...claudeCodeRuntime(), maxBudgetUsd: 1, stopTimeoutMs: 20_000 };
+  // The login file's path is the host's: it is replaced in everything
+  // printed. Its content is never read here; the runner reads it in the
+  // container, and the cleaner's patterns remove any token that shows.
+  const login = process.env.CLEARED_CLAUDE_CREDENTIALS ? 'the Claude Code credentials file named by CLEARED_CLAUDE_CREDENTIALS' : 'the token file in the state folder';
+  // First, before the home folder they are in.
+  replacements.unshift([runtime.loginFile, '<login file>'], [runtime.stateDir, '<state>']);
+  for (const address of runtime.hostAddresses) addressLabels.set(address, '<host address>');
+  try {
+    const stat = statSync(runtime.loginFile);
+    check(`the login file (${login}) is a file of the service's account that only it can read`, stat.isFile() && stat.uid === process.getuid?.() && (stat.mode & 0o077) === 0 && stat.size > 0, `mode ${(stat.mode & 0o777).toString(8)}`);
+  } catch (error) {
+    check(`the login file (${login}) exists`, false, `${(error as NodeJS.ErrnoException).code ?? (error as Error).message}: set CLEARED_CLAUDE_CREDENTIALS, or write a setup-token token to <state>/claude.token (docs/adapters.md)`);
+    return;
+  }
+
+  const print = (args: readonly string[]) => say(`$ docker ${args.map((arg) => (/[\s'"{}]/.test(arg) ? `'${arg}'` : arg)).join(' ')}`);
+  // What the runner printed, for the lines that show what the CLI did.
+  const raw: Record<string, unknown>[] = [];
+  const docker = new Docker(async (args, options) => { print(args); return cliRunner(args, options); }, (args) => {
+    print(args);
+    const child = cliSpawner(args);
+    createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => {
+      try { raw.push(JSON.parse(line) as Record<string, unknown>); } catch { /* not a runner line */ }
+    });
+    return child;
+  });
+  if (build) await docker.build({ context: join(V2, 'images', 'session'), tag: SESSION_IMAGE });
+
+  const scratch = mkdtempSync(join(tmpdir(), 'cleared-doctor-cc-'));
+  replacements.push([scratch, '<scratch>']);
+  const workdir = join(scratch, 'work');
+  mkdirSync(join(workdir, 'olddir'), { recursive: true });
+  writeFileSync(join(workdir, 'olddir', 'keep.txt'), 'kept\n');
+  writeFileSync(join(workdir, 'notes.txt'), 'The old word.\n');
+  const planted = 'planted-by-the-doctor';
+  writeFileSync(join(workdir, '.env'), `DUMMY_SETTING=${planted}\n`);
+  writeFileSync(join(workdir, 'CLAUDE.md'), '# Briefing\n\nThe project codeword is MAPLE.\n');
+
+  const all: SessionEvent[] = [];
+  const log = {
+    append(entry: Omit<SessionEvent, 'seq'>): SessionEvent {
+      const event = { ...entry, seq: all.length + 1 };
+      all.push(event);
+      say(`event ${event.seq} ${event.event.type === 'CUSTOM' ? event.event.name : event.event.type} ${short(JSON.stringify(event.event))}`);
+      return event;
+    },
+    after: (sessionId: string, seq = 0) => all.filter((event) => event.sessionId === sessionId && event.seq > seq),
+  };
+  const adapter = createClaudeCodeAdapter({
+    log, docker, runtime,
+    cleaner: () => createCleaner({ servicePaths: [runtime.stateDir, homedir()] }),
+  });
+  const policy: Policy = {
+    role: 'author', base: 'main', workdir: WORKDIR_MOUNT, scripts: [], credentialFile: LOGIN_FILE_MOUNT,
+    safeCommands: DEFAULT_SAFE_COMMANDS, allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [],
+  };
+  const input: StartInput = {
+    project: 'doctor', ticket: 'DOCTOR-1', role: 'author', harness: 'claude-code', model, workdir,
+    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null }, policy,
+    prompt: 'Remember the word PLUM. Then use the Bash tool to run exactly: touch allowed.txt . Then reply OK.',
+  };
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const custom = (from: number, name: string) => all.slice(from).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === name ? [e.event.value as Record<string, unknown>] : []));
+  const texts = (from: number) => all.slice(from).flatMap((e) => (e.event.type === 'TEXT_MESSAGE_CONTENT' ? [e.event.delta] : []));
+  const ends = (from: number) => all.slice(from).filter((e) => e.event.type === 'RUN_FINISHED' || e.event.type === 'RUN_ERROR');
+  const rawShown = (from: number) => {
+    for (const line of raw.slice(from)) {
+      const message = line.type === 'sdk' ? line.message as Record<string, unknown> : undefined;
+      if (!message) { if (line.type !== 'tool_check' || 'deny' in line) say(`<< ${short(JSON.stringify(line))}`); continue; }
+      if (message.type === 'system' && message.subtype === 'init')
+        say(`<< system/init ${JSON.stringify({ claude_code_version: message.claude_code_version, model: message.model, cwd: message.cwd, permissionMode: message.permissionMode, apiKeySource: message.apiKeySource, user_message_uuids: message.user_message_uuids })}`);
+      else if (message.type === 'result')
+        say(`<< result ${JSON.stringify({ subtype: message.subtype, is_error: message.is_error, stop_reason: message.stop_reason, terminal_reason: message.terminal_reason, result: message.result, user_message_uuids: message.user_message_uuids, num_turns: message.num_turns, total_cost_usd: message.total_cost_usd })}`);
+      else if (message.type === 'assistant' && message.parent_tool_use_id) say(`<< assistant with parent_tool_use_id ${short(JSON.stringify((message.message as { content?: unknown })?.content))}`);
+    }
+  };
+
+  // Plays one turn: answers what waits with `decide`, runs `during` once the
+  // turn's Bash command has started, and waits for the turn's end.
+  type Waiting = { name: string; value: Record<string, unknown> };
+  async function turn(handle: SessionHandle, label: string, text: string | undefined, decide: (waiting: Waiting) => Answer, during?: (from: number) => Promise<void>, timeoutMs = 180_000): Promise<number> {
+    const from = all.length;
+    const rawFrom = raw.length;
+    say(`-- turn: ${label}`);
+    if (text !== undefined) await handle.send({ text, by: 'doctor' });
+    const answered = new Set<string>();
+    let started = false;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && ends(from).length === 0) {
+      for (const name of ['cleared.permission_request', 'cleared.question']) {
+        for (const value of custom(from, name)) {
+          const requestId = String(value.requestId);
+          if (answered.has(requestId)) continue;
+          answered.add(requestId);
+          await handle.answer(requestId, decide({ name, value }));
+        }
+      }
+      // `during` runs once the turn's command runs, whether the policy asked about it or not.
+      if (during && !started && all.slice(from).some((e) => e.event.type === 'TOOL_CALL_START' && e.event.toolCallName === 'Bash')) {
+        started = true;
+        await during(from);
+      }
+      await sleep(200);
+    }
+    rawShown(rawFrom);
+    if (ends(from).length === 0) say(`    the turn did not end within ${timeoutMs} ms`);
+    return from;
+  }
+  const allow = (): Answer => ({ decision: { kind: 'allow_once' }, by: 'doctor' });
+  const rule = (from: number) => custom(from, 'cleared.permission_request').map((v) => (v.suggestion as { rule?: string })?.rule);
+
+  const session = { id: '' };
+  try {
+    const startedAt = Date.now();
+    let handle = await adapter.start(input);
+    session.id = handle.id;
+    replacements.push([handle.id, '<session>']);
+    say(`session started in ${Date.now() - startedAt} ms`);
+    const mounts = ((await docker.inspect(handle.id, sessionNames(handle.id).container)) as { Mounts?: { Type?: string; Destination?: string; RW?: boolean }[] }).Mounts ?? [];
+    const loginMount = mounts.find((m) => m.Destination === LOGIN_FILE_MOUNT);
+    check(`the login file is mounted read only at ${LOGIN_FILE_MOUNT} (docker inspect)`, loginMount?.Type === 'bind' && loginMount.RW === false, JSON.stringify(mounts.map((m) => ({ Type: m.Type, Destination: m.Destination, RW: m.RW }))));
+
+    let from = await turn(handle, 'two turns: the prompt, with a touch the policy escalates and the inbox allows', undefined, allow);
+    check('the touch was escalated by the policy (rule default) and allowed from the inbox', rule(from).includes('default') && custom(from, 'cleared.permission_answered').some((v) => v.by === 'doctor' && v.decision === 'allow_once'));
+    check('after allow_once the file exists in the workdir', existsSync(join(workdir, 'allowed.txt')));
+    const init = raw.find((line) => (line.message as { subtype?: string } | undefined)?.subtype === 'init')?.message as Record<string, unknown> | undefined;
+    check(`the session runs Claude Code 2.1.306 with ${model}, logged in without an API key`, init?.claude_code_version === '2.1.306' && init?.model === model && init?.apiKeySource === 'none', JSON.stringify({ version: init?.claude_code_version, model: init?.model, apiKeySource: init?.apiKeySource }));
+
+    from = await turn(handle, 'a rm -r the inbox denies', 'Use the Bash tool to run exactly: rm -r olddir . If it is denied, do not retry and reply DENIED.', (): Answer => ({ decision: { kind: 'reject_once', message: 'Denied from the doctor inbox.' }, by: 'doctor' }));
+    check('the rm -r was escalated (rule delete.outside_ticket) and reject_once stopped it', rule(from).includes('delete.outside_ticket') && existsSync(join(workdir, 'olddir', 'keep.txt')));
+    check('the second turn ended', ends(from).length === 1, ends(from).map((e) => e.event.type).join(','));
+
+    from = await turn(handle, 'a read of a planted .env', 'Use the Read tool on the file .env in the current directory and reply with the value after the equals sign. If the read is denied, do not retry and reply DENIED.', allow);
+    check('the read of .env was denied by the policy (secret.read) before it ran', custom(from, 'cleared.permission_answered').some((v) => v.rule === 'secret.read' && v.decision === 'reject_once'));
+    check('the planted value reached neither the model\'s answer nor the events', !all.some((e) => JSON.stringify(e.event).includes(planted)));
+
+    from = await turn(handle, 'the briefing', 'What is the project codeword given in your instructions? Reply with that one word.', allow);
+    check('the briefing (CLAUDE.md, appended to the system prompt) reached the session', texts(from).some((t) => /MAPLE/.test(t)), short(texts(from).join(' / ')));
+
+    let midUuid = '';
+    from = await turn(handle, 'a message sent mid turn', 'Use the Bash tool to run exactly: sleep 15 . Then reply with the single word FIRST.', allow, async (turnFrom) => {
+      await sleep(3000);
+      await handle.send({ text: 'Change of plan for this reply only: reply with the single word SECOND instead of FIRST.', by: 'doctor' });
+      const sent = all.slice(turnFrom).filter((e) => e.event.type === 'TEXT_MESSAGE_START' && e.event.role === 'user').at(-1);
+      midUuid = sent?.event.type === 'TEXT_MESSAGE_START' ? sent.event.messageId : '';
+      say(`    sent mid turn at ${new Date().toISOString()}, while the sleep ran`);
+    });
+    // The message may also be taken as a turn of its own after this one.
+    for (let i = 0; i < 300 && !all.slice(from).some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && /SECOND/.test(e.event.delta)); i++) await sleep(200);
+    await sleep(2000);
+    rawShown(raw.length - 12 < 0 ? 0 : raw.length - 12);
+    const after = all.slice(from);
+    const firstEnd = after.findIndex((e) => e.event.type === 'RUN_FINISHED' || e.event.type === 'RUN_ERROR');
+    const second = after.findIndex((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && e.event.messageId !== midUuid && /SECOND/.test(e.event.delta));
+    const results = raw.filter((line) => (line.message as { type?: string } | undefined)?.type === 'result').map((line) => line.message as { user_message_uuids?: string[] });
+    const folded = results.some((r) => r.user_message_uuids?.includes(midUuid) && (r.user_message_uuids?.length ?? 0) > 1);
+    say(`OBSERVED mid-turn message: ${second >= 0 && second < firstEnd ? 'taken into account before the running turn ended' : 'taken into account only in a turn of its own, after the running turn ended'}; a result listing both user message uuids: ${folded ? 'yes' : 'no'}; runs started after the send: ${after.filter((e) => e.event.type === 'RUN_STARTED').length}; replies: ${short(texts(from).join(' / '))}`);
+    check('the message sent mid turn was taken into account', texts(from).some((t) => /SECOND/.test(t)));
+
+    from = await turn(handle, 'an interrupt', 'Use the Bash tool to run exactly: sleep 60 . Then reply DONE.', allow, async (turnFrom) => {
+      await sleep(4000);
+      say(`    interrupt at ${new Date().toISOString()}`);
+      await handle.interrupt();
+    }, 90_000);
+    const finished = ends(from)[0]?.event;
+    check('interrupt ended the turn as cancelled', finished?.type === 'RUN_FINISHED' && finished.outcome.type === 'cancelled' && finished.result.stopReason === 'cancelled', short(JSON.stringify(finished)));
+
+    from = await turn(handle, 'a question', 'Use the AskUserQuestion tool to ask me one question: should the guestbook show the newest or the oldest entry first, with the two options Newest and Oldest. Then reply with the option I chose, one word.', (waiting): Answer => {
+      if (waiting.name !== 'cleared.question') return allow();
+      const [first] = (waiting.value.questions as { question: string }[]) ?? [];
+      return { decision: { kind: 'answer', answers: { [first?.question ?? '']: 'Oldest' } }, by: 'doctor' };
+    });
+    check('the question reached the inbox as cleared.question and its answer reached the model', custom(from, 'cleared.question').length === 1 && custom(from, 'cleared.answered').length === 1 && texts(from).some((t) => /Oldest/i.test(t)), short(texts(from).join(' / ')));
+
+    from = await turn(handle, 'a subagent', 'Use the Agent tool, in the foreground (not in the background), to start one subagent that runs exactly `pwd` with its Bash tool and reports the output. Then reply with that output.', allow);
+    const sub = raw.some((line) => Boolean((line.message as { parent_tool_use_id?: unknown } | undefined)?.parent_tool_use_id));
+    say(`OBSERVED subagent: ${sub ? 'its frames carry parent_tool_use_id (the parent Agent call id)' : 'no frame with a parent_tool_use_id was seen'}`);
+
+    const egress = (await docker.logs(handle.id, sessionNames(handle.id).egress));
+    say('    proxy decisions during the session:');
+    for (const line of egressSummary(egress)) say(`      ${line}`);
+
+    const stopAt = Date.now();
+    await handle.stop();
+    say(`stop in ${Date.now() - stopAt} ms`);
+    const leftAfterStop = [(await docker.containers(handle.id)).length, (await docker.networks(handle.id)).length, (await docker.volumes(handle.id)).length];
+    check('after stop: no container and no network with the session label, the config volume kept', leftAfterStop[0] === 0 && leftAfterStop[1] === 0 && leftAfterStop[2] === 1, `${leftAfterStop[0]} containers, ${leftAfterStop[1]} networks, ${leftAfterStop[2]} volumes`);
+
+    const resumedAt = Date.now();
+    handle = await adapter.resume(handle.id);
+    say(`resumed in a new container in ${Date.now() - resumedAt} ms`);
+    from = await turn(handle, 'resume', 'Which word did I ask you to remember at the very start of this session? Reply with that one word.', allow);
+    check('the resumed session in a new container remembers the word from the first turn', texts(from).some((t) => /PLUM/.test(t)), short(texts(from).join(' / ')));
+    await handle.stop();
+  } finally {
+    if (session.id) {
+      if ((await docker.containers(session.id)).length + (await docker.networks(session.id)).length > 0) await stopSession(docker, session.id);
+      await removeSessionVolume(docker, session.id);
+      const left = [(await docker.containers(session.id)).length, (await docker.networks(session.id)).length, (await docker.volumes(session.id)).length];
+      check('ticket done: nothing with the session label remains (containers, networks, volumes)', left.every((n) => n === 0), left.join(', '));
+    }
+    rmSync(scratch, { recursive: true, force: true });
+    rmSync(join(runtime.stateDir, 'egress', session.id || 'none'), { recursive: true, force: true });
+  }
+  const afterMap = sockets();
+  const added = [...afterMap.keys()].filter((address) => !before.includes(address));
+  const ours = added.filter((address) => (afterMap.get(address) ?? '').includes(`pid=${process.pid},`));
+  check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
+}
+
 const args = process.argv.slice(2);
-const sections = args.filter((arg) => !arg.startsWith('--'));
-const known = ['docker'];
+const modelAt = args.indexOf('--model');
+const model = modelAt >= 0 ? args[modelAt + 1] ?? '' : 'claude-haiku-5-5';
+const sections = args.filter((arg, index) => !arg.startsWith('--') && (modelAt < 0 || index !== modelAt + 1));
+const known = ['docker', 'claude-code'];
 const unknown = sections.filter((section) => !known.includes(section));
 if (unknown.length > 0) {
-  console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build]; unknown: ${unknown.join(', ')}`);
+  console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build] [--model <id>]; unknown: ${unknown.join(', ')}`);
   process.exit(64);
 }
 if (sections.length === 0 || sections.includes('docker')) await dockerSection(!args.includes('--no-build'));
+if (sections.includes('claude-code')) await claudeCodeSection(!args.includes('--no-build'), model);
 say(failures === 0 ? 'doctor: all checks passed' : `doctor: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

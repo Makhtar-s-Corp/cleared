@@ -5,15 +5,18 @@
 // --interactive` and speaks the runner's JSON lines:
 //   - every runner line goes through the mapper (claude-code/map.ts), then
 //     the session's cleaner, then the event log, as the fake adapter does;
-//   - a permission request is evaluated by the policy (section 5): an allow
+//   - a tool_check, sent before every tool call, is evaluated by the policy
+//     (section 5), and only a deny stops the call: that is how a read, which
+//     Claude Code never asks about, meets the deny rules;
+//   - a permission request is evaluated by the policy: an allow
 //     or a deny is answered at once, an ask waits for answer() from the inbox;
 //     a question (AskUserQuestion) always waits;
 //   - interrupt() cancels what waits and asks the runner to interrupt the turn;
 //   - stop() asks the runner to stop, then removes the containers and the
 //     networks; the config volume stays, so resume() can start a new
 //     container on the same Claude Code session.
-// The token never appears on a docker command line: the runner reads it from
-// the read-only mount.
+// The login never appears on a docker command line: the runner reads it from
+// the read-only mount, inside the container.
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -35,7 +38,9 @@ export const RUNNER_COMMAND: readonly string[] = ['node', '/opt/cleared/runner/m
 // What every session of this service shares.
 export type ClaudeCodeRuntime = {
   readonly stateDir: string;                      // the allow lists live under <stateDir>/egress/<session>
-  readonly tokenFile: string;                     // host path, service owned, mode 0600
+  // Host path of the login, mounted read only: a setup-token token file, or
+  // the credentials file of the service account's Claude Code login.
+  readonly loginFile: string;
   readonly hostAddresses: readonly string[];      // refused by the egress proxy
   readonly user: string;                          // uid:gid the session runs as
   readonly services?: readonly ServiceSpec[];
@@ -46,13 +51,16 @@ export type ClaudeCodeRuntime = {
 };
 
 // The default runtime: the service's state folder (CLEARED_V2_STATE_DIR, or
-// <XDG_STATE_HOME or ~/.local/state>/cleared-v2), the token file in it, the
-// host's own addresses and the service's uid.
+// <XDG_STATE_HOME or ~/.local/state>/cleared-v2); the login named by
+// CLEARED_CLAUDE_CREDENTIALS (an existing Claude Code credentials file),
+// else the token file claude.token in the state folder; the host's own
+// addresses and the service's uid.
 export function claudeCodeRuntime(env: NodeJS.ProcessEnv = process.env): ClaudeCodeRuntime {
   const stateDir = env.CLEARED_V2_STATE_DIR || join(env.XDG_STATE_HOME || join(env.HOME || homedir(), '.local', 'state'), 'cleared-v2');
   const hostAddresses = Object.values(networkInterfaces()).flatMap((entries) => entries ?? [])
     .filter((entry) => !entry.internal && !entry.address.startsWith('fe80:')).map((entry) => entry.address);
-  return { stateDir, tokenFile: join(stateDir, 'claude.token'), hostAddresses, user: `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}` };
+  const loginFile = env.CLEARED_CLAUDE_CREDENTIALS || join(stateDir, 'claude.token');
+  return { stateDir, loginFile, hostAddresses, user: `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}` };
 }
 
 export type ClaudeCodeOptions = {
@@ -150,6 +158,19 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       emit(session, session.mapper.answered(line.requestId, answer));
       return;
     }
+    if (line.type === 'tool_check') {
+      // Before any tool runs, a read included: only a deny of the policy
+      // stops it here; an ask is raised by Claude Code's canUseTool.
+      const input = typeof line.input === 'object' && line.input !== null && !Array.isArray(line.input) ? (line.input as Record<string, unknown>) : {};
+      const verdict = evaluate({ tool: line.toolName, input }, policyOf(session.input), { readFile: workdirReader(session.input.workdir) });
+      if (verdict.decision !== 'deny') {
+        write(session, { type: 'tool_verdict', requestId: line.requestId });
+        return;
+      }
+      write(session, { type: 'tool_verdict', requestId: line.requestId, deny: verdict.message });
+      emit(session, session.mapper.answered(line.requestId, { decision: { kind: 'reject_once', message: verdict.message }, by: 'policy', rule: verdict.rule }));
+      return;
+    }
     if (line.type === 'question') {
       session.pending.set(line.requestId, { kind: 'question' });
       emit(session, session.mapper.question(line));
@@ -165,7 +186,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
   async function launch(session: Session, resume: boolean): Promise<void> {
     const { id, input } = session;
     await startSession(docker, {
-      session: id, workdir: input.workdir, tokenFile: runtime.tokenFile, allowDir: join(runtime.stateDir, 'egress', id),
+      session: id, workdir: input.workdir, tokenFile: runtime.loginFile, allowDir: join(runtime.stateDir, 'egress', id),
       allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: runtime.services ?? [],
       user: runtime.user, command: RUNNER_COMMAND, interactive: true,
       ...(runtime.image === undefined ? {} : { image: runtime.image }),

@@ -210,3 +210,18 @@ test('a token in a command output and an edit outside the workdir are cleaned', 
   assert.ok(JSON.stringify(events).includes('[removed: secret]'));
   assert.deepEqual(toolInput('Write', { file_path: '/etc/passwd', content: 'x' }), { kind: 'edit', path: '/etc/passwd', added: 1, removed: 0 });
 });
+
+test('a resumed session: the empty result the CLI prints before the first turn is no turn, and the state starts again', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  mapper.start('claude-haiku-5-5');
+  mapper.line({ type: 'exit', code: 0 });
+  // As Claude Code 2.1.306 printed them after a resume in a new container
+  // (doctor run of 2026-10-21): an init without user message uuids, then a
+  // result of no turn, before the message sent after the resume.
+  assert.deepEqual(mapper.start('claude-haiku-5-5'), [
+    { type: 'STATE_SNAPSHOT', snapshot: { status: 'Starting', phase: 'starting', steps: [], files: [], checks: [], usage: { model: 'claude-haiku-5-5' } } },
+  ]);
+  assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'system', subtype: 'init', model: 'claude-haiku-5-5' } }), []);
+  assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'result', subtype: 'success', is_error: false, stop_reason: null, result: '', num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 }, modelUsage: {}, total_cost_usd: 0.0054 } }), []);
+  assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'command_lifecycle', state: 'started', command_uuid: id(50) } }).map((e) => e.type), ['RUN_STARTED', 'STATE_DELTA']);
+});

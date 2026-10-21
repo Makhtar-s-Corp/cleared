@@ -101,7 +101,11 @@ test('the runner starts query() with the plan options, the token in the child en
   assert.equal(options.maxBudgetUsd, 0.5);
   assert.equal(options.pathToClaudeCodeExecutable, CLAUDE_BIN);
   assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code' });
-  assert.deepEqual(options.hooks, { ...hooks });
+  // The runner's own policy check runs first, then lane 5's hooks.
+  const set = options.hooks as Record<string, { hooks: unknown[] }[]>;
+  assert.deepEqual(Object.keys(set).sort(), [...new Set(['PreToolUse', ...Object.keys(hooks)])].sort());
+  assert.equal(set.PreToolUse?.length, 1 + (hooks.PreToolUse?.length ?? 0));
+  for (const [event, matchers] of Object.entries(hooks)) assert.deepEqual(set[event]?.slice(event === 'PreToolUse' ? 1 : 0), matchers);
   assert.equal(typeof options.canUseTool, 'function');
   const env = options.env as Record<string, string | undefined>;
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, token);
@@ -241,4 +245,67 @@ test('a query that fails is reported as an error line and exit 1; unreadable lin
     'the CLI exited with code 1',
   ]);
   assert.deepEqual(out.at(-1), { type: 'exit', code: 1 });
+});
+
+test('every tool call is checked with the host before it runs: a deny stops it, anything else goes on', async () => {
+  type Hook = (input: unknown, toolUseId: string | undefined, options: { signal: AbortSignal }) => Promise<Record<string, unknown>>;
+  const outcomes: Record<string, unknown>[] = [];
+  const abort = new AbortController();
+  const { query } = fakeQuery(async function* (_message, options) {
+    const hook = (options.hooks as Record<string, { hooks: Hook[] }[]>).PreToolUse?.[0]?.hooks[0] as Hook;
+    const call = (tool: string, input: unknown, signal = new AbortController().signal) =>
+      hook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, tool_use_id: `id-${tool}`, session_id: 's', transcript_path: '/t', cwd: '/workspace' }, `id-${tool}`, { signal });
+    outcomes.push(await call('Read', { file_path: '/workspace/.env' }));
+    outcomes.push(await call('Read', { file_path: '/workspace/notes.txt' }));
+    const pending = call('Bash', { command: 'sleep 9' }, abort.signal);
+    yield { type: 'assistant', marker: 'checking' };
+    outcomes.push(await pending);
+    yield result('done');
+  });
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(query, source.lines, out));
+  source.send(start);
+  source.send({ type: 'user', uuid: 'u-1', text: 'Go.' });
+  await until(() => out.length === 1);
+  assert.deepEqual(out[0], { type: 'tool_check', requestId: 'request-1', toolName: 'Read', toolUseId: 'id-Read', input: { file_path: '/workspace/.env' } });
+  source.send({ type: 'tool_verdict', requestId: 'request-1', deny: 'a secret file' });
+  await until(() => out.length === 2);
+  source.send({ type: 'tool_verdict', requestId: 'request-2' });
+  await until(() => out.some((line) => line.type === 'sdk'));
+  abort.abort();
+  await until(() => outcomes.length === 3);
+  source.end();
+  assert.equal(await done, 0);
+  assert.deepEqual(outcomes, [
+    { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'a secret file' } },
+    {},
+    { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'The policy check was cancelled.' } },
+  ]);
+});
+
+test('the login file may be a Claude Code credentials file: only its access token reaches the CLI', async () => {
+  const refresh = ['sk', 'ant', 'ort01', 'Zq8Wm3Xk1Lp7Vb2Nc6Hj9Td4Ry0Gs5'].join('-');
+  const credentials = JSON.stringify({ claudeAiOauth: { accessToken: token, refreshToken: refresh, expiresAt: 1, scopes: ['user:inference'] } });
+  const { query, seen } = fakeQuery(async function* () {});
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(query, source.lines, out, { readFile: (path) => (path === LOGIN_FILE ? credentials : undefined) }));
+  source.send(start);
+  source.end();
+  assert.equal(await done, 0);
+  const env = (seen.options as Options).env as Record<string, string | undefined>;
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, token);
+  assert.ok(!JSON.stringify(seen.options).includes(refresh), 'the refresh token never reaches the CLI');
+  assert.ok(!JSON.stringify(out).includes(refresh) && !JSON.stringify(out).includes(token));
+
+  for (const broken of ['{"claudeAiOauth":{}}', '{not json', '{"other":1}']) {
+    const source2 = lineSource();
+    const out2: RunnerOutput[] = [];
+    const done2 = run(deps(query, source2.lines, out2, { readFile: (path) => (path === LOGIN_FILE ? broken : undefined) }));
+    source2.send(start);
+    source2.end();
+    assert.equal(await done2, 3, broken);
+    assert.ok(!JSON.stringify(out2).includes(broken), 'the login file content is never printed');
+  }
 });
