@@ -10,8 +10,10 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit",
+    "app": "node app/main.ts",
+    "user": "node src/cli/user.ts",
+    "test": "node --test \"test/**/*.test.ts\" \"app/test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p app",
     "guard": "node scripts/guard.ts",
     "doctor": "node scripts/doctor.ts"
   },

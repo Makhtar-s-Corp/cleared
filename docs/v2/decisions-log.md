@@ -347,6 +347,79 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - **Publish takes the forge's environments from `lib/forge.mjs`** (`forgeEnv` for git, `forgeGhEnv` for gh) in a child process, unless the caller passes them. A test runs that path with no app configured, so the environment is the ambient one. The GitHub App path was not run in this lane.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-workspace-memory`.
 
+## 2026-10-21: the app signs people in from ledger.db
+
+**Decision.** The users table belongs to the users module (`v2/src/modules/users.ts`), in `ledger.db`. The app process (`v2/app`) opens the same file to check a password, because the service's API (`v2/src/api/types.ts`) has no sign-in route and changing that file is a lane of its own. The app keeps its sign-in sessions in the same file, in its own table `app_sessions`. That table holds the SHA-256 of the session id, never the id, with the session's anti-forgery token and its expiry. The cookie is `cleared_v2_session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, 30 days.
+
+**Consequences.**
+- A restart of the app signs nobody out. A copy of the ledger does not give a usable cookie.
+- `cleared-v2 user add <name>` is `npm run user -- add <name>` (`v2/src/cli/user.ts`) until the installer of milestone 5 installs a `cleared-v2` command. It asks for the password twice without echo, or reads two lines from a pipe.
+- The service gets `SqliteUsers` in the `users` slot of the registry, so lanes 7 and 8 can resolve the user id the app forwards.
+- `v2/test/modules/registry.test.ts` no longer expects the users module to be a stub. That test is lane 1's file, and this is the one line it had to change.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
+
+## 2026-10-21: the app's proof to the service
+
+**Decision.** The shared secret of section 7 of the milestone 1 plan is the file `v2-app-proof` beside `ledger.db`: 64 hexadecimal characters, mode 0600. Whichever process starts first creates it, with an exclusive create, so two processes starting at once agree. `readOrCreateProof` refuses a file that is a link, belongs to another account, can be read by others, or is not 64 hexadecimal characters. It leaves that file as it is. The app sends the proof in `x-cleared-proof` and the user id in `x-cleared-user` on every request it forwards. Its request carries only `accept`, `content-type`, `content-length` and `last-event-id` from the browser, never the cookie, the anti-forgery token, `Authorization` or the browser's own `x-cleared-*` headers. Only `content-type`, `content-length`, `cache-control`, `allow` and `retry-after` of the answer reach the browser, so the service cannot set a cookie on the app.
+
+**Consequences.**
+- Lanes 7 and 8 check the header with `sameProof(given, proof)` from `v2/src/modules/users.ts`, which compares in constant time, and find the file with `proofPath(ledgerPath())`.
+- In the plan (decision 6 and section 7), a session container mounts neither the ledger nor this secret, so nothing in a session can send the proof. Lane 2's runtime is where that holds.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
+
+## 2026-10-21: Argon2id parameters, and a throttle that refuses the right password too
+
+**Decision.** Passwords are hashed with `crypto.argon2` of Node 24 (`argon2id`, no dependency) with the second recommended option of RFC 9106, section 4: "t=3 iterations, p=4 lanes, m=2^(16) (64 MiB of RAM), 128-bit salt, and 256-bit tag size". The first option needs 2 GiB per sign-in. One hash took about 100 ms on this server on 2026-10-21. The stored value is the PHC string (`$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`), so the parameters can change later without breaking stored hashes. An unknown name costs a hash too.
+
+Failures are counted per peer address and per user name over 15 minutes. After five of either, the sign-in answers 429 with `Retry-After` until the window has passed, even for the right password, so a lucky guess during a lockout tells nothing. This differs from v1, where a right token always gets in. An attempt is counted when it starts, before its password is checked, and a right password takes its own attempt back. Counting only after the check let a burst of parallel requests all pass the count while it was still zero (review round 1, blocking 1).
+
+A password is 15 to 1024 characters. NIST SP 800-63B-4 ("Password Verifiers") requires at least 15 characters for a password used as a single factor and asks verifiers to permit at least 64. The maximum is the sign-in form's `maxlength`, so any password the command accepts can be typed at sign-in.
+
+**Consequences.**
+- The counts live in memory: a restart of the app clears them, which only an account on this machine can cause.
+- The peer is the TCP peer address. Behind a proxy on this machine (`CLEARED_V2_APP_ORIGIN`), every browser arrives as `127.0.0.1`, so five wrong passwords from anyone block every sign-in through the proxy for 15 minutes. The name key also lets anyone who knows a user name block that user for 15 minutes. Both are accepted for a tool with one owner on a private network: the cost is a 15 minute wait, never a way in. A forwarded address header is not trusted instead, since any client can send one (review round 1, followup 2).
+- A sign-in form posted from another origin, or with `Sec-Fetch-Site` other than `same-origin`, is refused before any password is checked.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
+
+## 2026-10-21: the browser runs the app's TypeScript with its types stripped
+
+**Decision.** The page's code is TypeScript under `v2/app/public/`. The app serves each `.ts` file as JavaScript through `stripTypeScriptTypes` of `node:module`, so there is no build step and no dependency. A screen exports pure functions (data and a translator in, escaped HTML out) and a `mount(root, context)` for the browser. The tests call the pure functions under Node, without a DOM library. The pages run under `Content-Security-Policy: default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`, with no inline script and no inline style. Browser code imports from `v2/src` with `import type` only, which stripping erases.
+
+**Consequences.**
+- `stripTypeScriptTypes` is marked experimental in Node 24.21.0 and prints one `ExperimentalWarning` the first time the app serves a `.ts` file. Whether it stays in later Node versions is unknown.
+- `Referrer-Policy` is `same-origin`, not `no-referrer`. With `no-referrer`, Chromium sends `Origin: null` on a form POST, and the origin check refused the sign-in. The headless run of 2026-10-21 showed it.
+- The app's tests live under `v2/app/test/` (lanes 9 and 10 add theirs there), and `npm test` runs them. The app has its own `v2/app/tsconfig.json` with the DOM types. CI runs `npx tsc --noEmit` on the root configuration only, and that step is not this lane's file to change. So `v2/app/test/static.test.ts` runs `tsc -p app`, and the app's type check runs in CI through `npm test`.
+- The text of every screen comes from `v2/app/messages/<screen>.<language>.json`. `CLEARED_V2_APP_LANGUAGE` (`en` or `fr`) chooses the language, and a test requires every French file to have every English key with the same placeholders.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
+
+## 2026-10-21: the tower of milestone 1, against tower.png
+
+**Decision.** The tower follows `tower.png` for layout, sizes and colours, and the plan for content. Where the capture shows what milestone 1 does not have, the plan wins:
+- The tabs are Tower, Inbox with its count, Sessions and Tickets. Plans, Fuel and Rules are left out. Tickets is shown dimmed with a tooltip, because no lane of milestone 1 builds a tickets screen; tickets are created from the tower's bar.
+- There is no "Lead · always on" pill and no "Claude 76 % left" in the grey line. Usage per subscription is an unknown that lane 9 closes.
+- The lead card and the plans card say they come in milestone 2.
+- The capture's plan card is left out, since a plan is not an inbox item in milestone 1, so the fixture's heading reads "Two things need you.".
+- New ticket is the black primary button, because it is the bar's only action that works. New goal and Ask the lead are marked `aria-disabled` and say, when clicked, that they come in milestone 2.
+- Landed today adds the time from creation to done after each title, because the plan asks for durations.
+- A session that waits for the human shows a still amber dot, not the blue live one. DESIGN.md keeps the live dot for a session actually running.
+- When the app runs on fixtures, the header shows "Sample data, not the service" in the style DESIGN.md gives a state chosen on purpose.
+
+The fixture uses neutral names. The project is the example guestbook, and ticket ids are `LOCAL-<n>`, as the local tracker names them. The signed-in user of the captures is `demo`. Titles and status phrases are the capture's.
+
+**Consequences.**
+- The fixture is made by playing lane 1's fake adapter into an in-memory store. Each fixture session has stored events, and `CLEARED_V2_APP_SOURCE=fixtures` serves them as the service would, with ticket creation into an in-memory store. Against the live service, creating a ticket depends on lane 7's `POST /api/tickets`.
+- Two art director passes by Sonnet 5.5 judged the captures against `app/DESIGN.md`. Most of their items asked for v1's tower: stage columns, the instruments strip, the porthole chips, a full-width Landed table. Those were not taken, because `tower.png` and the plan are this lane's reference. The items taken are in the pull request.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
+
+## 2026-10-21: the guard leaves out the app's two web fonts
+
+**Decision.** `v2/scripts/guard.ts` checks every v2 file as a tree, and the guard's tree mode refuses any non-text file (`lib/guard/codex-guard.mjs` expects a snapshot pruned of non-text files beforehand). The plan copies the Geist fonts into `v2/app/public/fonts/`. The guard now leaves out exactly the files matching `^v2/app/public/fonts/[A-Za-z0-9-]+\.woff2$`, and says how many it left out. Every other binary under `v2/` is still refused, and the fonts' `LICENSE.txt` is still checked.
+
+**Consequences.**
+- A fake secret in a text file, a `.png` and a `.woff2` outside that folder, all planted for the check on 2026-10-21, were refused.
+- The fonts are byte for byte the v1 files (`app/public/fonts/`, SIL Open Font License).
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
+
 ## 2026-10-21: the example's repository and the sessions' login (plan questions 1 and 2)
 
 **Decision.**

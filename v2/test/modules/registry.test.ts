@@ -7,15 +7,16 @@ import flow from '../../src/modules/flow.ts';
 import inbox from '../../src/modules/inbox.ts';
 import sessions from '../../src/modules/sessions.ts';
 import tickets from '../../src/modules/tickets.ts';
-import users from '../../src/modules/users.ts';
-import { MODULE_NAMES, assemble, dispatch, matchRoute, type Module, type Route } from '../../src/modules/registry.ts';
+import { MODULE_NAMES, assemble, dispatch, emptyModule, matchRoute, type Module, type Route } from '../../src/modules/registry.ts';
 import { handle as health } from '../../src/server.ts';
 import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 
-const stubs = { sessions, users, tickets, flow, approval, inbox };
+// The users module is filled by lane 6 (test/modules/users.test.ts) and
+// needs the store; the other five are still stubs.
+const stubs = { sessions, users: emptyModule, tickets, flow, approval, inbox };
 const deps = { store: undefined as never };
 
-test('the six module stubs are empty and assemble into the in-memory defaults', async () => {
+test('the module stubs are empty and assemble into the in-memory defaults', async () => {
   assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox']);
   for (const [name, module] of Object.entries(stubs)) {
     assert.deepEqual([module.tables, module.routes, module.provide(deps)], [[], [], {}], name);
