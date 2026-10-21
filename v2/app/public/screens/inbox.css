@@ -8,6 +8,7 @@
 .inbox { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 20px; align-items: start; padding: 20px 28px 28px; }
 .inbox.empty-inbox { grid-template-columns: minmax(0, 560px); }
 .inbox-loading { min-height: 60vh; }
+.inbox .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .inbox-error { padding: 20px 28px; max-width: 560px; }
 
 /* the list */

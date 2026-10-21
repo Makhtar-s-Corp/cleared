@@ -433,7 +433,8 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   let stopped = false;
   const local = restore();
   let data: Pick<InboxView, 'items' | 'tickets' | 'sessions'> | undefined;
-  let frame: InboxView['frame'] = 'desktop';
+  // On a phone the captures start in their phone frame; the switch changes the frame only.
+  let frame: InboxView['frame'] = window.matchMedia('(max-width: 767px)').matches ? 'phone' : 'desktop';
   let detailKey = '';
 
   const view = (): InboxView => {
