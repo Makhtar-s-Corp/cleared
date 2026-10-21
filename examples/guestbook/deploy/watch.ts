@@ -84,7 +84,9 @@ export function createWatcher(options: WatchOptions): { tick(): Promise<Outcome>
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error(`the head of ${remote}/${branch} is not a commit id: ${commit}`);
 
       const apps = await containers('app');
-      if (apps.some(([, state, label]) => label === commit && state === 'running')) return { kind: 'unchanged', commit };
+      // An app of this commit that crash-loops (restarting) is deployed too:
+      // rebuilding the same commit would not help, /health tells the release watch.
+      if (apps.some(([, state, label]) => label === commit && (state === 'running' || state === 'restarting'))) return { kind: 'unchanged', commit };
       if (commit === failed) return { kind: 'skipped-failed', commit };
       if (apps.length === 0 && !(await options.portFree(port))) return { kind: 'port-busy', commit };
 
@@ -167,6 +169,9 @@ export const runCommand: Run = (command, args, input) =>
       if (code === 0) resolve(Buffer.concat(chunks));
       else reject(new Error(`${command} ${args[0] === '-C' ? args[2] : args[0]} exited with ${code}`));
     });
+    // A command that exits before reading all of its input (docker build on a
+    // bad Dockerfile) makes the write fail: its exit code reports the failure.
+    child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
 

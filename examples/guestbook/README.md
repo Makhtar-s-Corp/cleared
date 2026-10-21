@@ -49,7 +49,7 @@ node deploy/watch.ts --repo /path/to/clone [--remote origin] [--branch main] [--
 - The app container publishes `127.0.0.1:8793` only. Inside the container the app listens on `0.0.0.0`, which the published port needs.
 - The database is a `postgres:16` container on a network of their own, with a named volume. It publishes no port, and it is not recreated on a deploy.
 - Every object the watcher creates carries the labels `cleared.dev=v2` and `cleared.example=guestbook`. It only stops, starts or removes an id that a listing filtered on both labels returned.
-- A build that fails leaves the running app as it is. A start that fails comes after the old app container was removed, so no app runs until the head moves again: `/health` then fails, and the release watch rolls the merge back. A failed build or start is not retried until the head moves.
+- A build that fails leaves the running app as it is. A start that fails comes after the old app container was removed, so no app runs until the head moves again: `/health` then fails, and the release watch rolls the merge back. A failed build or start is not retried until the head moves, and neither is an app of the head that crash-loops (Docker shows it `restarting`).
 - From a merge to the new version answering: at most one poll (30 seconds by default), then the build and the start, measured at 4 seconds at most on the demo machine with the base image in Docker's build cache.
 - Each tick prints one JSON line: `deployed`, `unchanged`, `build-failed`, `run-failed`, `skipped-failed` or `port-busy`, with the commit.
 - Stopping the watcher leaves the app running. To remove everything it created:
