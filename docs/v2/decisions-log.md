@@ -318,7 +318,7 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 
 **Decision.**
 1. Question 1, answer (a): the demo project lives in its own public repository, [Makhtar-s-Corp/cleared-example-guestbook](https://github.com/Makhtar-s-Corp/cleared-example-guestbook), Apache-2.0, seeded from `examples/guestbook/` on `v2` and kept in sync by hand. No other organisation setting was changed. The lock's pull requests and merges for the demo happen there, never in this repository.
-2. Question 2, answer (a), the default: sessions log in with a `claude setup-token` token held by the service, written once by the owner into the service-owned token file. No API key.
+2. Question 2: for the real session runs, the owner chose on 2026-10-21 at 21:35 (Europe/Paris) to reuse, read only, the Claude Code login that already exists for the owner's account on the server, instead of a `claude setup-token` token. It is bind mounted read only into session containers labelled `cleared.dev=v2` and nowhere else; its content is never read, printed, copied, logged or committed, and never leaves the server. Its host path is set by an environment variable and is not written in this repository. No API key. The setup-token file stays the documented alternative.
 
 **Consequences.** Lane 8's real proof (wave 3) runs against that repository. A change to `examples/guestbook/` is copied there by hand until milestone 4.
 - Decided by the owner on 2026-10-21 at 21:33 (Europe/Paris); written by the orchestrator.
