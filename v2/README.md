@@ -65,7 +65,7 @@ Every object v2 creates carries `cleared.dev=v2`, and every session object also 
 
 The session container runs as the service's uid and gid with a read-only root file system. Only `/tmp` (tmpfs, also `HOME`), `/workspace` (the ticket checkout) and the config volume are writable. It has no capability, `no-new-privileges`, no published port and no Docker socket. The token file is mounted read only at `/run/cleared/claude.token`. Default limits are 4 GB of memory (no swap on top), 2 CPUs and 1024 processes. A service gets 1 GB, 1 CPU and 512 processes; the egress container gets 256 MB, half a CPU and 128 processes.
 
-`stop` stops and removes the session's containers, then its networks. A failed start does the same.
+`stop` stops and removes the session's containers, then its networks. A start refuses a session that still has containers or networks, and touches nothing of it. A failed start removes only what that call created; if that cleanup fails too, the error says so and names what may be left behind.
 
 ### Egress
 

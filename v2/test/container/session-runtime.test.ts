@@ -176,6 +176,51 @@ test('the base images are built with the label, and a devcontainer Dockerfile be
   await assert.rejects(sessionImage(docker, { kind: 'dockerfile', dockerfile: '/w/D', context: '/w', ignored: [] }, 'Bad Name'));
 });
 
+test('a second start of a running session is refused and leaves the running session as it was', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await startSession(docker, runtimeSpec());
+  const running = fake.withLabel('cleared.session', SESSION).map((o) => `${o.name} ${o.state ?? ''}`).sort();
+  const callsBefore = fake.calls.length;
+
+  await assert.rejects(startSession(docker, runtimeSpec()), /already has 3 containers and 2 networks: stop it first/);
+
+  assert.deepEqual(fake.withLabel('cleared.session', SESSION).map((o) => `${o.name} ${o.state ?? ''}`).sort(), running);
+  const second = fake.calls.slice(callsBefore).map((call) => call.args[0] === 'network' || call.args[0] === 'volume' ? `${call.args[0]} ${call.args[1]}` : call.args[0]);
+  assert.deepEqual(second, ['ps', 'network ls'], 'the refusal only lists');
+});
+
+test('a failed start removes only what that call created', async () => {
+  const fake = new FakeDocker();
+  const names = sessionNames(SESSION);
+  // Another start of the same session wins a race after the check: its
+  // container must survive the cleanup of this one.
+  fake.intercept = (args) => {
+    if (args[0] !== 'create' || !args.includes('cleared.role=egress')) return undefined;
+    fake.containers.push({ id: 'c'.repeat(64), name: `${names.container}-other`, labels: { 'cleared.dev': 'v2', 'cleared.session': SESSION }, state: 'running' });
+    return { code: 125, stdout: '', stderr: 'Error: boom' };
+  };
+  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec()), /boom/);
+  assert.deepEqual(onlyVolume(fake).sort(), [`${names.container}-other`, names.volume].sort());
+});
+
+test('a cleanup that fails after a failed start is reported with the first error', async () => {
+  const fake = new FakeDocker();
+  fake.intercept = (args) => {
+    if (args[0] === 'create' && args.includes('cleared.role=egress')) return { code: 125, stdout: '', stderr: 'Error: boom' };
+    if (args[0] === 'rm') return { code: 1, stdout: '', stderr: 'Error: cannot remove' };
+    return undefined;
+  };
+  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /boom/);
+    assert.match(error.message, /cleanup failed: docker rm failed \(1\): Error: cannot remove/);
+    assert.match(error.message, /left behind: cleared-v2-.*-svc-postgres/);
+    assert.match(String((error as Error & { cause?: unknown }).cause), /boom/);
+    return true;
+  });
+});
+
 test('stop removes the containers and the networks and keeps the config volume until the ticket is done', async () => {
   const fake = new FakeDocker();
   const docker = new Docker(fake.runner);

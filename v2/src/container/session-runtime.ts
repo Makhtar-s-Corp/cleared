@@ -16,7 +16,7 @@ import { isIP } from 'node:net';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseAllowList } from '../../images/egress/proxy.ts';
-import { assertSessionId, type Docker, type Limits } from './docker.ts';
+import { assertSessionId, type ContainerSpec, type Docker, type Limits } from './docker.ts';
 import type { ImageChoice } from './devcontainer.ts';
 import type { ServiceSpec } from './services.ts';
 
@@ -141,13 +141,31 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
   const names = sessionNames(session);
   const timeoutMs = spec.readyTimeoutMs ?? 60_000;
   const pollMs = spec.readyPollMs ?? 500;
+
+  // A session that still has containers or networks is running, or was not
+  // stopped: starting it again would collide with it, so it is refused, and
+  // nothing of it is touched.
+  const existing = { containers: (await docker.containers(session)).length, networks: (await docker.networks(session)).length };
+  if (existing.containers + existing.networks > 0)
+    throw new RuntimeError(`session ${session} already has ${existing.containers} containers and ${existing.networks} networks: stop it first`);
+
+  // What this call creates, the only objects its cleanup removes.
+  const created = { containers: [] as string[], networks: [] as string[] };
+  const network = async (name: string, internal: boolean): Promise<void> => {
+    await docker.createNetwork({ name, session, internal });
+    created.networks.push(name);
+  };
+  const container = async (containerSpec: ContainerSpec): Promise<void> => {
+    await docker.createContainer(containerSpec);
+    created.containers.push(containerSpec.name);
+  };
   try {
-    await docker.createNetwork({ name: names.network, session, internal: true });
-    await docker.createNetwork({ name: names.outNetwork, session, internal: false });
+    await network(names.network, true);
+    await network(names.outNetwork, false);
     await docker.createVolume({ name: names.volume, session });
 
     for (const service of spec.services) {
-      await docker.createContainer({
+      await container({
         name: names.service(service.alias), session, role: 'service', image: service.image,
         networks: [{ name: names.network, aliases: [service.alias] }],
         tmpfs: service.tmpfs, env: service.env, limits: SERVICE_LIMITS,
@@ -156,7 +174,7 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     }
 
     writeAllowList(spec.allowDir, spec.allowHosts);
-    await docker.createContainer({
+    await container({
       name: names.egress, session, role: 'egress', image: spec.egressImage ?? EGRESS_IMAGE,
       networks: [{ name: names.outNetwork }, { name: names.network, aliases: [EGRESS_ALIAS] }],
       readOnly: true, dropAllCapabilities: true, noNewPrivileges: true, limits: EGRESS_LIMITS,
@@ -176,7 +194,7 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     await waitFor('the egress proxy', async () => (await docker.logs(session, names.egress)).includes('"listening"'), timeoutMs, pollMs);
 
     const noProxy = ['localhost', '127.0.0.1', ...spec.services.map((service) => service.alias)].join(',');
-    await docker.createContainer({
+    await container({
       name: names.container, session, role: 'session', image: spec.image ?? SESSION_IMAGE,
       networks: [{ name: names.network }],
       user: spec.user, readOnly: true, tmpfs: ['/tmp'], dropAllCapabilities: true, noNewPrivileges: true,
@@ -200,8 +218,15 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     });
     if (!spec.interactive) await docker.start(session, names.container);
   } catch (error) {
-    // Leave nothing half started; the config volume stays, as after a stop.
-    await docker.removeSession(session).catch(() => undefined);
+    // Leave nothing half started of what this call created; the config
+    // volume stays, as after a stop. A cleanup that fails is reported with
+    // the first error, and what may be left behind.
+    try {
+      await docker.removeSession(session, { only: created });
+    } catch (cleanup) {
+      const left = [...created.containers, ...created.networks].join(', ');
+      throw new RuntimeError(`${(error as Error).message}; cleanup failed: ${(cleanup as Error).message}; possibly left behind: ${left}`, { cause: error });
+    }
     throw error;
   }
   return {

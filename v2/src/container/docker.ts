@@ -381,17 +381,23 @@ export class Docker {
     return result.stdout + result.stderr;
   }
 
-  // Stops and removes the session's containers, then its networks. Each
-  // removal names only what the labelled list just returned.
-  async removeSession(session: string, stopTimeoutSeconds = 5): Promise<{ containers: number; networks: number }> {
+  // Stops and removes the session's containers, then its networks; with
+  // `only`, just the ones named there. Each removal names only what the
+  // labelled list just returned.
+  async removeSession(
+    session: string,
+    options: { readonly stopTimeoutSeconds?: number; readonly only?: { readonly containers: readonly string[]; readonly networks: readonly string[] } } = {},
+  ): Promise<{ containers: number; networks: number }> {
     assertSessionId(session);
-    const containers = (await this.containers(session)).map((row) => row.id);
+    const { stopTimeoutSeconds = 5, only } = options;
+    const named = (name: string, list: readonly string[] | undefined): boolean => list === undefined || list.includes(name.replace(/^\//, ''));
+    const containers = (await this.containers(session)).filter((row) => named(row.name, only?.containers)).map((row) => row.id);
     if (containers.length > 0) {
       const owned = new Set(containers);
       await this.must(['stop', '--time', String(stopTimeoutSeconds), '--', ...containers], owned);
       await this.must(['rm', '--force', '--volumes', '--', ...containers], owned);
     }
-    const networks = (await this.networks(session)).map((row) => row.id);
+    const networks = (await this.networks(session)).filter((row) => named(row.name, only?.networks)).map((row) => row.id);
     if (networks.length > 0) await this.must(['network', 'rm', '--', ...networks], new Set(networks));
     return { containers: containers.length, networks: networks.length };
   }
