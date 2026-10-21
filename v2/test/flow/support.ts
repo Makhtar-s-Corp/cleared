@@ -85,7 +85,7 @@ export function fakeEffects(calls: Calls, overrides: Partial<FlowEffects> = {}):
     },
     async captureHandover(input) { calls.push(`captureHandover:${input.role}`); return 'entry-1'; },
     async publish(input) { calls.push(`publish:${input.ticket}`); return { url: 'https://example.invalid/pull/7', number: 7, head: 'abc123', created: true }; },
-    async requestRelease(input) { calls.push(`requestRelease:${input.ticket}:${input.pr}`); },
+    async requestRelease(input) { calls.push(`requestRelease:${input.ticket}:${input.pr}`); return {}; },
     async prChecks() { return 'passed'; },
     ...overrides,
   };

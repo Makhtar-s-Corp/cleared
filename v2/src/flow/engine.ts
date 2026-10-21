@@ -44,7 +44,8 @@ export type FlowEffects = {
   prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
   publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string }): Promise<Published>;
-  requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<void>;   // the lock's `--ask` request
+  // The lock's `--ask` request; the request time the lock recorded, when it says one.
+  requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
   prChecks(pr: number): Promise<ReleaseItem['pr']['checks']>;      // the pull request's checks on the forge now
 };
 
@@ -637,11 +638,12 @@ export class FlowEngine {
     let requestedAt: string;
     try {
       await this.registry.reviewRecorder.record({ ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt });
-      await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
+      const asked = await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
       // The real lock moves the card itself when it asks; a store it did not move gets the move here.
       if ((await tickets.history(id)).at(-1)?.status !== tickets.states.validate) await tickets.move(id, tickets.states.validate, SERVICE);
-      // The approval is bound to the request time: the time the ticket store holds for the move.
-      requestedAt = (await tickets.history(id)).at(-1)?.at ?? this.#now().toISOString();
+      // The approval is bound to the request time the lock recorded (the approval route
+      // compares with it); without one, the time the ticket store holds for the move.
+      requestedAt = asked.requestedAt ?? (await tickets.history(id)).at(-1)?.at ?? this.#now().toISOString();
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
       await this.#putBack(id, `The release could not be requested: ${name(error)}`);

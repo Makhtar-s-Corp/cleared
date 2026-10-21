@@ -4,6 +4,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readApprovalRecord } from '../approval/record.ts';
+import { stateDirectory } from '../approval/service.ts';
 import { readBriefing, writeBriefing } from '../workspace/briefing.ts';
 import { git, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { captureHandover } from '../workspace/handover.ts';
@@ -89,9 +91,11 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
 
     // `release-request.mjs request_release <ticket> <pr> --ask`, the
     // announcement on its stdin: the lock asks the human, at these heads.
-    requestRelease(input) {
+    // Then the request time the lock recorded for these versions
+    // (<state>/validations/<ticket>.json, which ask-validation.sh writes).
+    async requestRelease(input) {
       const script = options.releaseRequest ?? join(CLEARED, 'release-request.mjs');
-      return new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const child = spawn(process.execPath, ['--no-warnings', script, 'request_release', input.ticket, String(input.pr), '--ask'], {
           env: { ...env, CLEARED_REPO: config.projectDir }, stdio: ['pipe', 'ignore', 'pipe'],
         });
@@ -110,6 +114,8 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
         child.stdin.on('error', () => undefined);
         child.stdin.end(input.announcement);
       });
+      const record = readApprovalRecord(stateDirectory(env), input.ticket);
+      return record && record.versions.some((v) => v.pr === input.pr) ? { requestedAt: record.at } : {};
     },
   };
 }

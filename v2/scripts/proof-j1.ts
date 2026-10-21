@@ -330,8 +330,9 @@ if (reviewed) {
   approved = await step(8, 'approve', async () => {
     await page.goto(`${APP}/inbox`);
     const approve = page.locator('#detail [data-act="approve"]');
-    // This ticket's release: another ticket's may wait beside it.
-    const item = page.locator('a.item:not(.handled)').filter({ hasText: ticketOf() }).filter({ hasText: 'Release' }).first();
+    // The list names a release by its title; the detail by its ticket, which
+    // is checked after the click: another ticket's release may wait beside it.
+    const item = page.locator('a.item:not(.handled)').filter({ hasText: 'Release' }).filter({ hasText: TITLE }).last();
     try {
       // The release waits until the branch is published and the lock asked.
       await waitAnswering(async () => {
@@ -341,6 +342,7 @@ if (reviewed) {
       }, Math.min(left(), 15 * 60_000));
       await item.click();
       await approve.waitFor({ timeout: 60_000 });
+      if (await page.locator('#detail').getByText(ticketOf()).count() === 0) throw new Error('not this ticket');
     } catch {
       throw new Error('the inbox shows no release to approve for this ticket (the inbox screen is a stub before lane 10)');
     }
