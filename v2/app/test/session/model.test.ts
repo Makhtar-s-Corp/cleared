@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { AUTHOR_ID, ANSWER_TEXT, QUESTION_TEXT, REQUEST_ID, USER, detailOf, sessionFixture } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { applyAll, applyEvent, emptyModel, EVENT_NAMES, parseCriteria, resultSummary, timeline, type Row } from '../../public/screens/session.ts';
+import { applyAll, applyEvent, emptyModel, EVENT_NAMES, parseCriteria, resultSummary, stepsOf, timeline, type Row } from '../../public/screens/session.ts';
 import { EVENT_TYPES, type AgUiEvent } from '../../../src/session/events.ts';
 import { createMapper, toolRequest } from '../../../src/session/adapters/claude-code/map.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
@@ -190,4 +190,26 @@ test('a session recorded with the real CLI, through the real mapper, reads as ro
   assert.equal(model.state?.phase, 'stopped', 'the recording ends with the runner\'s exit');
   assert.deepEqual(model.state?.files, [{ path: 'notes.txt', added: 1, removed: 1 }]);
   assert.ok(!rows.some((row) => row.kind === 'denied'), 'the policy allows are quiet');
+});
+
+test('a step that happens more than once counts the sum of its spans, whatever order the snapshot and the step events came in', () => {
+  const at = (seq: number) => new Date(2026, 9, 21, 9, 0, seq).toISOString();
+  const step = (type: 'STEP_STARTED' | 'STEP_FINISHED', stepName: string) => ({ type, stepName }) as AgUiEvent;
+  const snapshot = (steps: [string, number, number | null][]) => ({ type: 'STATE_SNAPSHOT', snapshot: { status: 'Working', phase: 'working', files: [], checks: [], usage: {}, steps: steps.map(([name, from, to]) => ({ name, startedAt: at(from), finishedAt: to === null ? null : at(to) })) } }) as AgUiEvent;
+  const model = modelOf([
+    step('STEP_STARTED', 'author'), step('STEP_STARTED', 'waiting_human'), step('STEP_FINISHED', 'waiting_human'), step('STEP_FINISHED', 'author'),
+    snapshot([['author', 1, 4], ['waiting_human', 2, 3]]),
+    // The author reopened after a review: a second round, with its own wait.
+    step('STEP_STARTED', 'author'), step('STEP_STARTED', 'waiting_human'), step('STEP_FINISHED', 'waiting_human'),
+    // A snapshot taken before the round ended still has it open.
+    snapshot([['author', 1, 4], ['waiting_human', 2, 3], ['author', 6, null], ['waiting_human', 7, 8]]),
+    step('STEP_FINISHED', 'author'),
+    step('STEP_STARTED', 'review'),
+  ]);
+  const totals = stepsOf(model, Date.parse(at(21)));
+  assert.deepEqual(totals.map((s) => [s.name, s.ms / 1000, s.count, s.open]), [
+    ['author', 3 + 4, 2, false],
+    ['waiting_human', 1 + 1, 2, false],
+    ['review', 10, 1, true],
+  ]);
 });

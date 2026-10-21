@@ -102,6 +102,7 @@
   "step_release": "Mise en ligne",
   "step_watch": "Surveillance de la mise en ligne",
   "step_running": "en cours",
+  "step_times": "{n} fois",
   "screen_title": "L'écran jusqu'ici",
   "screen_empty": "Pas encore d'image. Elle s'affiche ici quand l'application d'exemple tourne dans le conteneur de la session.",
   "role_author": "Auteur",

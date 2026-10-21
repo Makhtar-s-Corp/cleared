@@ -102,6 +102,7 @@
   "step_release": "Release",
   "step_watch": "Release watch",
   "step_running": "running",
+  "step_times": "{n} times",
   "screen_title": "Screen so far",
   "screen_empty": "No picture yet. It shows here once the example app runs in the session's container.",
   "role_author": "Author",
