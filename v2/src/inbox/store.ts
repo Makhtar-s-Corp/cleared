@@ -105,6 +105,12 @@ export class InboxStore {
     return Number(result.changes) > 0;
   }
 
+  // After a restart no session is live: what a session asked and nobody answered cannot be answered.
+  handleRequests(by: 'system'): void {
+    this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ? WHERE kind != 'release' AND state = 'waiting'")
+      .run(this.#now().toISOString(), by);
+  }
+
   // A session that ends leaves nothing waiting on its behalf.
   handleSession(sessionId: SessionId, by: 'policy' | 'system'): void {
     this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ? WHERE session_id = ? AND state = 'waiting'")

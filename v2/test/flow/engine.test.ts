@@ -391,3 +391,58 @@ test('the release item carries the time the ticket store holds for the move to N
   assert.equal(lockMoves.length, 1, 'the flow does not move a card the lock moved');
   assert.equal(own.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.requestedAt, '2026-10-21T10:00:07.000Z');
 });
+
+test('a new engine closes the requests the last process left waiting, and keeps the releases', async () => {
+  const t = await setup();
+  t.inbox.addPermission({ ticket: 'LOCAL-1', project: 'guestbook', sessionId: 'old', requestId: 'r', tool: 'Bash', input: { kind: 'execute', command: 'x' }, suggestion: { decision: 'ask', rule: 'default', reason: 'x' } });
+  t.inbox.addQuestion({ ticket: 'LOCAL-1', project: 'guestbook', sessionId: 'old', requestId: 'q', questions: [{ question: 'Which?' }] });
+  t.inbox.addRelease({ ticket: 'LOCAL-1', project: 'guestbook', title: 't', announcement: 'a', requestedAt: 'x', pr: { number: 1, url: 'u', checks: 'pending' }, heads: [], captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } }, sessions: [] });
+  new (t.engine.constructor as new (deps: unknown) => unknown)(t.deps);
+  assert.deepEqual(t.inbox.list().map((i) => `${i.kind}:${i.state}`).sort(), ['permission:handled', 'question:handled', 'release:waiting']);
+});
+
+test('a decision of the wrong kind for the item is refused: an answer to a permission, allow to a question', async () => {
+  const t = await setup();
+  await t.engine.start(t.ticket.id, 'u1');
+  const id = t.startedSessions[0]!.id;
+  await until(() => t.inbox.waitingFor(id) === 1);
+  await assert.rejects(t.engine.answer(id, 'request-1', { kind: 'answer', answers: { a: 'b' } }, 'u1'), /allow or reject/);
+  assert.equal(t.inbox.list()[0]?.state, 'waiting');
+  const q = await setup({ scripts: { author: [started, { emit: { type: 'CUSTOM', name: 'cleared.question', value: { requestId: 'q1', questions: [{ question: 'Which?' }] } } }, { awaitMessage: true }] } });
+  await q.engine.start(q.ticket.id, 'u1');
+  await until(() => q.inbox.list().length === 1);
+  await assert.rejects(q.engine.answer(q.startedSessions[0]!.id, 'q1', { kind: 'allow_once' }, 'u1'), /answered with an answer/);
+});
+
+test('a reopen whose message cannot be sent stops the resumed session and falls back to a new author', async () => {
+  const stops: string[] = [];
+  const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), reviewerScript(REPORT_PASS)], reopen: 'send_fails', stops } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => kinds(t).includes('release:waiting'), 'the release item', 5000);
+  const authorId = t.startedSessions[0]!.id;
+  assert.deepEqual(stops, [authorId]);
+  assert.equal(t.startedSessions.filter((s) => s.input.role === 'author').length, 2);
+});
+
+test('reject_always is not a decision the API takes, and a store error on create is a 409, not a crash', async () => {
+  const { createApiRoutes } = await import('../../src/api/routes.ts');
+  const t = await setup();
+  t.tickets.create = async () => { throw new TicketError('the store refuses this ticket'); };
+  const routes = createApiRoutes({ engine: () => t.engine, proof: () => 'p'.repeat(64) });
+  const call = async (path: string, body: unknown) => {
+    const { createServer } = await import('node:http');
+    const { dispatch } = await import('../../src/modules/registry.ts');
+    const { handle } = await import('../../src/server.ts');
+    const server = createServer((req, res) => dispatch({ registry: t.engine.registry, tables: [], routes }, req, res, handle));
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    try {
+      const res = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}${path}`, { method: 'POST', headers: { 'x-cleared-proof': 'p'.repeat(64), 'x-cleared-user': 'u1', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return res.status;
+    } finally { server.closeAllConnections(); server.close(); }
+  };
+  await t.engine.start(t.ticket.id, 'u1');
+  const id = t.startedSessions[0]!.id;
+  await until(() => t.inbox.waitingFor(id) === 1);
+  assert.equal(await call(`/api/sessions/${id}/requests/request-1/answer`, { decision: { kind: 'reject_always', message: 'no' } }), 400);
+  assert.equal(await call('/api/tickets', { title: 'x', project: 'guestbook' }), 409);
+});

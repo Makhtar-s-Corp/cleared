@@ -511,3 +511,5 @@ The fixture uses neutral names. The project is the example guestbook, and ticket
 - **Captures of the release item are empty** until the example's screens are captured, which is not part of this lane.
 - **`test/modules/registry.test.ts` needed one edit outside the lane's files**: it asserted that the sessions, flow and inbox modules are empty, which they no longer are.
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `v2-j1-flow`; the plan names Opus 5.5 for this lane.
+
+**Review round 1 of PR 150.** `settings()` now fetches the project first (a fresh service has no checkout, and the base is read as it is now). A new engine closes the permission and question items a dead process left waiting. An answer's kind must match the item's (answer for a question, allow or reject for a permission). A reopen whose message fails stops the resumed session. A store error on a route is a 409. `reject_always` is not accepted from the API, since no deny rule is recorded. Left open: the extra reviewer turn wording (confirm against the real adapter in lane 11), the author field of the plan.

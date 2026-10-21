@@ -39,7 +39,8 @@ export type Scripts = {
   readonly author?: readonly FakeStep[];
   readonly authors?: readonly (readonly FakeStep[])[];       // one per author session started, then `author`
   readonly reviewers?: readonly (readonly FakeStep[])[];     // one per review round
-  readonly reopen?: readonly FakeStep[] | 'throw';
+  readonly reopen?: readonly FakeStep[] | 'throw' | 'send_fails';
+  readonly stops?: SessionId[];                                // filled with the ids of resumed handles that were stopped
 };
 
 export type Started = { readonly input: StartInput; readonly id: SessionId };
@@ -64,7 +65,9 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
     async resume(id): Promise<SessionHandle> {
       const input = inputs.get(id);
       if (!input || scripts.reopen === 'throw') throw new Error(`cannot resume ${id}`);
-      return createFakeAdapter({ log: store.events, script: scripts.reopen ?? reopenScript, newId: () => id }).start(input);
+      const handle = await createFakeAdapter({ log: store.events, script: scripts.reopen === 'send_fails' || scripts.reopen === undefined ? reopenScript : scripts.reopen, newId: () => id }).start(input);
+      if (scripts.reopen !== 'send_fails') return handle;
+      return { ...handle, send: async () => { throw new Error('the container is gone'); }, stop: async () => { scripts.stops?.push(id); await handle.stop(); } };
     },
   };
 }
@@ -110,12 +113,13 @@ export async function setup(options: { scripts?: Scripts; config?: Partial<FlowC
     sessionAdapters: options.adapterless ? {} : { 'claude-code': scriptedAdapter(store, options.scripts ?? {}, startedSessions) },
     ticketStore: tickets, reviewRecorder: recorder, approvalWriter: approvals, users,
   };
-  const engine = new FlowEngine({
+  const deps = {
     store, inbox, registry, config: { ...CONFIG, ...options.config }, effects: fakeEffects(calls, options.effects),
     now: () => new Date(clock.now),
-  });
+  };
+  const engine = new FlowEngine(deps);
   const ticket: Ticket = await tickets.create({ title: 'Newest entry first', body: 'The guestbook lists entries newest first.', project: 'guestbook' }, { kind: 'human', id: 'u1' });
-  return { store, clock, tickets, users, recorder, approvals, calls, startedSessions, inbox, registry, engine, ticket };
+  return { deps, store, clock, tickets, users, recorder, approvals, calls, startedSessions, inbox, registry, engine, ticket };
 }
 
 // Waits, in short real turns, until a condition holds.

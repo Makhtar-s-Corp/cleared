@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { realEffects } from '../../src/flow/effects.ts';
 import { CONFIG } from './support.ts';
@@ -71,4 +71,11 @@ test('requestRelease gives up when the client does not answer', async () => {
   writeFileSync(stub, 'setTimeout(() => {}, 60000);');
   const { flow } = await effects(undefined, { releaseRequest: stub, requestTimeoutMs: 200 });
   await assert.rejects(flow.requestRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' }), /did not answer the release request within 0 seconds/);
+});
+
+test('settings clones the project itself: the first ticket of a fresh service has no checkout yet', async () => {
+  const { config, flow } = await effects();
+  assert.equal(existsSync(config.projectDir), false);
+  assert.equal((await flow.settings()).verdict, 'no blocking issues');
+  assert.equal(existsSync(config.projectDir), true);
 });

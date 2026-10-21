@@ -124,6 +124,8 @@ export class FlowEngine {
     this.#effects = deps.effects;
     this.#now = deps.now ?? (() => new Date());
     this.#clean = deps.clean ?? ((text) => text);
+    // A new engine has no live session: requests left by the last process are closed.
+    this.inbox.handleRequests('system');
   }
 
   // ---- the periodic work -------------------------------------------------
@@ -580,6 +582,8 @@ export class FlowEngine {
         } catch {
           live.closed = true;
           this.#live.delete(live.id);
+          await handle.stop().catch(() => undefined);
+          this.#setPhase(live, 'done');
         }
       }
     }
@@ -681,6 +685,8 @@ export class FlowEngine {
     const live = this.#liveSession(id);
     const item = this.inbox.find(id, requestId);
     if (!item || item.state !== 'waiting') throw new FlowError('not_found', `no request ${requestId} is waiting in session ${id}`);
+    const asks = item.kind === 'question';
+    if (asks !== (decision.kind === 'answer')) throw new FlowError('invalid', asks ? 'a question is answered with an answer' : 'a permission request is answered with allow or reject');
     const answer: Answer = { decision, by };
     await live.handle.answer(requestId, answer);
     this.inbox.handle(item.id, by);

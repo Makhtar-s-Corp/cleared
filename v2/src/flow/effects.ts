@@ -27,8 +27,11 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   const refresh = async () => projectCheckout({ url: config.repoUrl, dir: config.projectDir, base: config.base, env: (await forge()).git });
 
   return {
-    // The project's settings as committed at the base branch, as of the last refresh.
+    // The project's settings as committed at the base branch, after a fetch.
     async settings() {
+      // Fetched first: on a fresh service the project is not cloned yet, and
+      // a changed verdict phrase or host on the base is read as it is now.
+      await refresh();
       const conf = await git(config.projectDir, ['show', `${baseRef}:.cleared/agents.conf`]);
       let scripts: string[] = [];
       try {

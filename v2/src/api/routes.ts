@@ -73,8 +73,7 @@ function decision(value: unknown): Decision {
       if (d.scope !== 'project') throw new HttpError(400, 'allow_always has the scope "project"');
       return { kind: 'allow_always', scope: 'project' };
     case 'reject_once':
-    case 'reject_always':
-      return { kind: d.kind, message: text(d.message, 'a rejection\'s message', 2000) as string };
+      return { kind: 'reject_once', message: text(d.message, 'a rejection\'s message', 2000) as string };
     case 'answer': {
       const answers = d.answers;
       if (typeof answers !== 'object' || answers === null || Array.isArray(answers) || Object.values(answers).some((v) => typeof v !== 'string' || v.length > 2000))
@@ -104,6 +103,7 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
       } catch (error) {
         if (error instanceof HttpError) send(response, error.status, { error: error.message });
         else if (error instanceof FlowError) send(response, STATUS[error.kind], { error: error.message });
+        else if (error instanceof TicketError) send(response, 409, { error: error.message });
         else throw error;
       }
     };
