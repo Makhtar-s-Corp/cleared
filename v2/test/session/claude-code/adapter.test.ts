@@ -309,13 +309,17 @@ test('a tool check is denied by the policy before the tool runs, and only a deny
     runner.say({ type: 'tool_check', requestId: 'c-env', toolName: 'Read', toolUseId: 'toolu_1', input: { file_path: '/workspace/.env' } });
     runner.say({ type: 'tool_check', requestId: 'c-notes', toolName: 'Read', toolUseId: 'toolu_2', input: { file_path: '/workspace/notes.txt' } });
     runner.say({ type: 'tool_check', requestId: 'c-touch', toolName: 'Bash', toolUseId: 'toolu_3', input: { command: 'touch x' } });
+    // The claude process's environment holds the login (review round 1 of PR 143).
+    runner.say({ type: 'tool_check', requestId: 'c-environ', toolName: 'Bash', toolUseId: 'toolu_4', input: { command: 'cat /proc/1/environ' } });
+    runner.say({ type: 'tool_check', requestId: 'c-printenv', toolName: 'Bash', toolUseId: 'toolu_5', input: { command: 'printenv' } });
     const env = await runner.waitFor((l) => l.requestId === 'c-env');
     assert.equal(env.type, 'tool_verdict');
     assert.match(String(env.deny), /\S/);
     assert.deepEqual(await runner.waitFor((l) => l.requestId === 'c-notes'), { type: 'tool_verdict', requestId: 'c-notes' });
     // An ask is for canUseTool to raise; the check lets it through to it.
     assert.deepEqual(await runner.waitFor((l) => l.requestId === 'c-touch'), { type: 'tool_verdict', requestId: 'c-touch' });
-    assert.deepEqual(custom(t.log, 'cleared.permission_answered'), [{ requestId: 'c-env', decision: 'reject_once', by: 'policy', rule: 'secret.read' }]);
+    for (const requestId of ['c-environ', 'c-printenv']) assert.match(String((await runner.waitFor((l) => l.requestId === requestId)).deny), /\S/);
+    assert.deepEqual(custom(t.log, 'cleared.permission_answered'), ['c-env', 'c-environ', 'c-printenv'].map((requestId) => ({ requestId, decision: 'reject_once', by: 'policy', rule: 'secret.read' })));
     assert.deepEqual(custom(t.log, 'cleared.permission_request'), []);
     await handle.stop();
   } finally { t.cleanup(); }
