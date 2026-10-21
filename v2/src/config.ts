@@ -7,8 +7,7 @@ export const DEFAULT_PORT = 8791;
 
 // Ports the service refuses even when asked for them. 80 and 443 belong to
 // the machine's public proxy (docs/concepts.md#decisions, issue #112); 8787
-// and 8788 are the v1 dashboard and app defaults; 8790 is kept free on the
-// owner's host.
+// and 8788 are the v1 dashboard and app defaults; 8790 is reserved.
 export const RESERVED_PORTS: ReadonlySet<number> = new Set([80, 443, 8787, 8788, 8790]);
 
 export type Config = {

@@ -11,7 +11,7 @@
 // names a project (and ORCH_GUARD_REF, if needed, its ref), the private-term
 // check has no list and only the secret patterns apply. It says so.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, type Stats } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -50,7 +50,12 @@ if (args.length !== (baseAt >= 0 ? 2 : 0) || (baseAt >= 0 && !base)) {
 
 const root = git(process.cwd(), ['rev-parse', '--show-toplevel']).trim();
 const files = new Set(nulList(git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...SCOPE])));
-const present = [...files].filter((file) => existsSync(join(root, file)) && !lstatSync(join(root, file)).isDirectory()).sort();
+// Never follows a symbolic link (a link to a dangling target included).
+const entry = (file: string): Stats | undefined => {
+  try { return lstatSync(join(root, file)); }
+  catch { return undefined; }
+};
+const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory(); }).sort();
 if (present.length === 0) {
   console.error('guard: no file to check');
   process.exit(1);
@@ -99,7 +104,10 @@ try {
   const snapshot = join(work, 'files');
   for (const file of present) {
     mkdirSync(dirname(join(snapshot, file)), { recursive: true });
-    copyFileSync(join(root, file), join(snapshot, file));
+    // A link is never followed, so what it points to never enters the
+    // snapshot: it stays a link there, to nothing, and the guard refuses it.
+    if (entry(file)?.isSymbolicLink()) symlinkSync('link-not-followed', join(snapshot, file));
+    else copyFileSync(join(root, file), join(snapshot, file));
   }
   const guard = (what: string, guardArgs: string[]): boolean => {
     try {

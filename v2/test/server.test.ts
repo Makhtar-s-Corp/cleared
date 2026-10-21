@@ -1,7 +1,8 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
-import { createHealthServer } from '../src/server.ts';
+import { connect, type AddressInfo } from 'node:net';
+import { once } from 'node:events';
+import { createHealthServer, formatAddress, requestPath } from '../src/server.ts';
 
 // Port 0: the system picks a free port, so the tests never use the default
 // nor a port already in use.
@@ -46,4 +47,29 @@ test('any other path is 404', async () => {
     assert.equal(response.status, 404, path);
     assert.deepEqual(await response.json(), { error: 'not found' });
   }
+});
+
+// The status line of the answer to a request written as it is on the socket.
+async function raw(request: string): Promise<string> {
+  const socket = connect(Number(new URL(base).port), '127.0.0.1');
+  await once(socket, 'connect');
+  socket.end(request);
+  let answer = '';
+  socket.setEncoding('utf8');
+  for await (const chunk of socket) answer += chunk;
+  return answer.split('\r\n')[0] ?? '';
+}
+
+test('a request target the URL parser refuses is 400, and the server keeps answering', async () => {
+  assert.equal(requestPath('//['), undefined);
+  assert.equal(await raw('GET //[ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'), 'HTTP/1.1 400 Bad Request');
+  const response = await fetch(`${base}/health`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'ok' });
+});
+
+test('an address is written as in a URL: IPv6 in brackets', () => {
+  assert.equal(formatAddress('127.0.0.1', 8791), '127.0.0.1:8791');
+  assert.equal(formatAddress('::1', 8791), '[::1]:8791');
+  assert.equal(formatAddress('localhost', 9100), 'localhost:9100');
 });
