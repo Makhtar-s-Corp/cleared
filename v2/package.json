@@ -10,11 +10,16 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit",
-    "guard": "node scripts/guard.ts"
+    "app": "node app/main.ts",
+    "user": "node src/cli/user.ts",
+    "setup": "node src/cli/setup.ts",
+    "test": "node --test \"test/**/*.test.ts\" \"app/test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p app",
+    "guard": "node scripts/guard.ts",
+    "doctor": "node scripts/doctor.ts"
   },
   "devDependencies": {
+    "@ag-ui/core": "1.0.3",
     "@types/node": "24.19.2",
     "typescript": "7.0.2"
   }

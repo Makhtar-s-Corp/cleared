@@ -55,7 +55,14 @@ const entry = (file: string): Stats | undefined => {
   try { return lstatSync(join(root, file)); }
   catch { return undefined; }
 };
-const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory(); }).sort();
+// The app's web fonts are binary, and the guard's tree mode reads text only
+// (lib/guard/codex-guard.mjs expects a snapshot pruned of non-text files).
+// Only these are left out, by exact place and name; any other binary under
+// v2/ is still refused.
+const FONT = /^v2\/app\/public\/fonts\/[A-Za-z0-9-]+\.woff2$/;
+const fonts = [...files].filter((file) => FONT.test(file) && entry(file)?.isFile());
+const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory() && !fonts.includes(file); }).sort();
+if (fonts.length > 0) console.log(`guard: ${fonts.length} font files of v2/app/public/fonts left out (binary)`);
 if (present.length === 0) {
   console.error('guard: no file to check');
   process.exit(1);

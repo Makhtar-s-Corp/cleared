@@ -1,0 +1,117 @@
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SERVICE_PROOF_HEADER } from '../../src/api/types.ts';
+import { FlowConfigError } from '../../src/flow/config.ts';
+import { createRuntime } from '../../src/flow/runtime.ts';
+import approval from '../../src/modules/approval.ts';
+import flow from '../../src/modules/flow.ts';
+import inbox from '../../src/modules/inbox.ts';
+import { MODULE_NAMES, assemble, defaultRegistry, emptyModule } from '../../src/modules/registry.ts';
+import sessions from '../../src/modules/sessions.ts';
+import tickets from '../../src/modules/tickets.ts';
+import { applyTables, openStore } from '../../src/store/db.ts';
+import { fakeEffects } from './support.ts';
+
+const routeKeys = (m: { routes: readonly { method: string; path: string }[] }) => m.routes.map((r) => `${r.method} ${r.path}`).sort();
+
+test('the three modules of lane 7 declare the routes of the API that are theirs, and the inbox its table', () => {
+  assert.deepEqual(routeKeys(sessions), [
+    'GET /api/sessions', 'GET /api/sessions/:id', 'GET /api/sessions/:id/events',
+    'POST /api/sessions/:id/interrupt', 'POST /api/sessions/:id/messages', 'POST /api/sessions/:id/requests/:requestId/answer',
+  ]);
+  assert.deepEqual(routeKeys(flow), ['GET /api/tickets', 'GET /api/tickets/:id', 'POST /api/tickets', 'POST /api/tickets/:id/move']);
+  assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
+  assert.equal(inbox.tables.length, 1);
+  assert.match(inbox.tables[0] as string, /CREATE TABLE IF NOT EXISTS flow_inbox/);
+  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox']);
+});
+
+test('the modules assemble with the other lanes\' stubs: no route declared twice, the adapters provided', () => {
+  const store = openStore(':memory:');
+  applyTables(store.db, [...sessions.tables, ...inbox.tables]);
+  const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox }, { store });
+  assert.equal(app.routes.length, 11);
+  assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code']);
+  assert.ok(!app.routes.some((r) => r.path.endsWith('/approve')), 'the approval route is lane 8\'s');
+});
+
+test('a runtime without CLEARED_V2_PROJECT has no engine; a badly set up project is an error', () => {
+  const store = openStore(':memory:');
+  const bare = createRuntime({ env: {} });
+  bare.attach({ store });
+  assert.equal(bare.engine(defaultRegistry()), undefined);
+  const wrong = createRuntime({ env: { CLEARED_V2_PROJECT: 'guestbook' } });
+  assert.throws(() => wrong.attach({ store }), FlowConfigError);
+});
+
+test('a configured runtime builds one engine over the registry of the request, with its inbox and the adapters', async () => {
+  const store = openStore(':memory:');
+  applyTables(store.db, inbox.tables);
+  const env = {
+    CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO_URL: 'https://example.invalid/guestbook.git',
+    CLEARED_V2_REPO: 'example-org/cleared-example-guestbook', CLEARED_V2_STATE_DIR: '/state', CLEARED_V2_BUDGET_USD: '5',
+  };
+  const runtime = createRuntime({ env, effects: () => fakeEffects([]) });
+  runtime.attach({ store });
+  const registry = defaultRegistry();
+  const engine = runtime.engine(registry);
+  assert.ok(engine);
+  assert.equal(runtime.engine(registry), engine, 'one engine per process');
+  assert.equal(engine.config.budgetUsd, 5);
+  assert.equal(engine.registry, registry);
+  assert.deepEqual(Object.keys(runtime.adapters()), ['claude-code']);
+  await engine.close();
+});
+
+// The real service, as the app reaches it: the API refuses a request without the proof, and answers "not configured" to one that has it.
+const main = new URL('../../src/main.ts', import.meta.url).pathname;
+const state = mkdtempSync(join(tmpdir(), 'cleared-v2-flow-main-'));
+after(() => rmSync(state, { recursive: true, force: true }));
+
+// A port the system says is free right now, on this machine only.
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const { port } = probe.address() as { port: number };
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return port;
+}
+
+test('the started service guards /api with the proof, and says the flow is not configured when it is not', async () => {
+  const port = await freePort();
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: state, CLEARED_V2_PORT: String(port) };
+  delete env.ORCH_LEDGER;
+  delete env.CLEARED_V2_PROJECT;
+  const child = spawn(process.execPath, [main], { env });
+  try {
+    await once(child.stdout, 'data');
+    const url = `http://127.0.0.1:${port}`;
+    const unsigned = await fetch(`${url}/api/sessions`);
+    assert.equal(unsigned.status, 401);
+    const proof = readFileSync(join(state, 'v2-app-proof'), 'utf8').trim();
+    const signed = await fetch(`${url}/api/sessions`, { headers: { [SERVICE_PROOF_HEADER]: proof } });
+    assert.equal(signed.status, 503);
+    assert.match(((await signed.json()) as { error: string }).error, /not configured/);
+    assert.equal((await fetch(`${url}/health`)).status, 200);
+  } finally {
+    child.kill('SIGTERM');
+    await once(child, 'exit');
+  }
+});
+
+test('a badly set up project stops the service with exit code 64 and a message', async () => {
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: state, CLEARED_V2_PORT: String(await freePort()), CLEARED_V2_PROJECT: 'guestbook' };
+  delete env.ORCH_LEDGER;
+  const child = spawn(process.execPath, [main], { env });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 64);
+  assert.match(stderr, /CLEARED_V2_PROJECT_DIR is not set/);
+});

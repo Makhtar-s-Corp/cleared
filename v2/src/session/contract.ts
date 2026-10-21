@@ -1,0 +1,88 @@
+// The session contract: the only thing the core sees of a harness
+// (docs/v2/milestone-1-plan.md, section 3). It is aligned on ACP: every
+// method, decision kind, tool kind and stop reason is an ACP name or maps to
+// one in a line. Erasable syntax only: no enum.
+//
+// SessionEvent is defined in events.ts; Policy in policy.ts, which imports
+// Role from here. Both imports are type-only, so the cycle has no runtime
+// effect under type stripping.
+import type { ServiceSpec } from '../container/services.ts';
+import type { SessionEvent } from './events.ts';
+import type { Policy } from './policy.ts';
+
+export type Harness = 'claude-code' | 'codex';            // codex: milestone 3
+export type Role = 'author' | 'reviewer' | 'lead';         // lead: milestone 2
+export type SessionId = string;                            // UUID chosen by Cleared; given to the harness when it accepts one
+export type UserId = string;                               // a row of the users table (lane 6)
+
+export type Briefing = {
+  readonly projectPage: string;
+  readonly decisions: readonly string[];                   // approved decisions linked to the ticket
+  readonly glossary: readonly string[];
+  readonly lessons: readonly string[];                     // for this role
+  readonly lastHandover: string | null;
+};
+
+export type StartInput = {
+  readonly project: string;
+  readonly ticket: string;
+  readonly role: Role;
+  readonly harness: Harness;
+  readonly model: string;                                  // explicit, for example 'claude-opus-5-5'
+  readonly workdir: string;                                // host path of the ticket checkout, mounted in the container
+  readonly briefing: Briefing;
+  readonly policy: Policy;                                 // section 5
+  readonly prompt: string;                                 // the first user turn: the ticket and its criteria
+  readonly services?: readonly ServiceSpec[];              // the project's test services, run beside the session
+};
+
+export type UserMessage = {
+  readonly text: string;
+  readonly by: UserId;                                     // every message is attached to a user (brief 5.9)
+};
+
+// What answers a permission request or a question. The first four are ACP's
+// PermissionOptionKind values; 'answer' serves a question; 'cancelled' is the
+// outcome ACP requires when the turn was interrupted while a request waited.
+export type Decision =
+  | { readonly kind: 'allow_once' }
+  | { readonly kind: 'allow_always'; readonly scope: 'project' }
+  | { readonly kind: 'reject_once'; readonly message: string }
+  | { readonly kind: 'reject_always'; readonly message: string }
+  | { readonly kind: 'answer'; readonly answers: Readonly<Record<string, string>> }
+  | { readonly kind: 'cancelled' };
+
+export type Answer = {
+  readonly decision: Decision;
+  readonly by: UserId | 'policy';                          // who decided: a user, or a policy rule
+  readonly rule?: string;                                  // the rule id when the policy decided
+};
+
+// ACP StopReason values, plus 'error' for a harness process that died.
+export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled' | 'error';
+
+export interface SessionAdapter {
+  readonly harness: Harness;
+  start(input: StartInput): Promise<SessionHandle>;        // ACP: initialize, then session/new
+  resume(id: SessionId): Promise<SessionHandle>;           // ACP: session/resume (sessionCapabilities.resume) or session/load
+}
+
+export interface SessionHandle {
+  readonly id: SessionId;
+  send(message: UserMessage): Promise<void>;               // ACP: session/prompt
+  events(afterSeq?: number): AsyncIterable<SessionEvent>;  // ACP: session/update notifications; section 4
+  answer(requestId: string, answer: Answer): Promise<void>; // ACP: the response to session/request_permission
+  interrupt(): Promise<void>;                              // ACP: session/cancel
+  stop(): Promise<void>;                                   // ACP: session/close; here: stop and remove the container
+  handover(to: { readonly harness: Harness; readonly model: string }): Promise<never>; // milestone 3: rejects with NotImplemented
+}
+
+// ACP ToolKind and ToolCallStatus values, used to classify every tool call
+// whatever the harness calls the tool.
+export type ToolKind = 'read' | 'edit' | 'delete' | 'move' | 'search' | 'execute' | 'think' | 'fetch' | 'switch_mode' | 'other';
+export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+// What a later milestone brings, asked for too early.
+export class NotImplemented extends Error {
+  override name = 'NotImplemented';
+}
