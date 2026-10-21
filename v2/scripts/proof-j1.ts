@@ -155,6 +155,11 @@ async function waitAnswering(done: () => Promise<boolean>, timeout: number): Pro
   }
 }
 
+// The tower's live card of this run's ticket: another ticket's may be listed beside it.
+function ownSession(): any {
+  return page.locator('li.session-card').filter({ has: page.locator('.id', { hasText: new RegExp(`^${ticketOf()}$`) }) }).locator('a.open').first();
+}
+
 // The ticket this run created, or the one of the session it resumed.
 function ticketOf(): string {
   if (ticketId) return ticketId;
@@ -208,7 +213,7 @@ if (created) {
   await step(3, 'todo', async () => {
     // A ticket the app creates lands in Todo and starts at once (lane 7,
     // decision 1): there is no separate move. The tower shows it live.
-    await page.locator(`a.open[href^="/sessions/"]`).first().waitFor({ timeout: 120_000 });
+    await ownSession().waitFor({ timeout: 120_000 });
     return `created in ${timeline.ticket_created_status}: creating starts it, there is no separate move to Todo`;
   });
 }
@@ -217,7 +222,7 @@ if (created) {
 let live = false;
 if (created) {
   live = await step(4, 'live-session', async () => {
-    await page.locator('a.open[href^="/sessions/"]').first().click();
+    await ownSession().click();
     await page.waitForURL(/\/sessions\/[A-Za-z0-9_-]+$/);
     authorUrl = page.url();
     await page.locator('#timeline [data-row]').first().waitFor({ timeout: 300_000 });
