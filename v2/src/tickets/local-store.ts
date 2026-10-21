@@ -7,10 +7,15 @@
 // Two kinds of writer, as in v1. The service acting for the agents writes
 // 'agents' rows, unsigned. A signed-in person's writes are 'human' rows signed
 // with the service's key (src/approval/signer.ts), under the name in
-// [tracker] owner_id, which is what the lock reads as the human. The move to
-// the go state is the approval itself: only recordApproval writes it.
+// [tracker] owner_id, which is what the lock reads as the human, and only for
+// the signed-in user whose name is owner_id: any other user's write is a
+// 'human' row without a proof, which the lock reads as someone else (a
+// comment of a guest never counts as the owner's line, a ticket of a guest
+// never as the owner's mark). The move to the go state is the approval
+// itself: only recordApproval writes it.
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
+import type { UserDirectory } from '../modules/registry.ts';
 import { ApprovalError } from '../approval/errors.ts';
 import { approvalContext, byPr, readApprovalRecord, sameVersions, type Version } from '../approval/record.ts';
 import { approvalPayload, commentPayload, type ApprovalSigner } from '../approval/signer.ts';
@@ -50,6 +55,7 @@ export type LocalStoreOptions = {
   readonly ownerId?: string;                       // [tracker] owner_id: the name a human's rows carry
   readonly publicKey?: string;                     // [tracker] human_public_key: base64 of the PEM
   readonly signer?: ApprovalSigner;
+  readonly users?: UserDirectory;                  // who is the owner: a human write is signed for that user only
   readonly now?: () => string;
 };
 
@@ -63,6 +69,7 @@ export class LocalTicketStore implements TicketStore {
   readonly #ownerId: string | undefined;
   readonly #publicKey: string | undefined;
   readonly #signer: ApprovalSigner | undefined;
+  readonly #users: UserDirectory | undefined;
   readonly #now: () => string;
   readonly #ticket: StatementSync;
   readonly #tickets: StatementSync;
@@ -76,6 +83,7 @@ export class LocalTicketStore implements TicketStore {
     this.#ownerId = options.ownerId;
     this.#publicKey = options.publicKey;
     this.#signer = options.signer;
+    this.#users = options.users;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#ticket = db.prepare('SELECT * FROM tracker_tickets WHERE id = ?');
     this.#tickets = db.prepare('SELECT * FROM tracker_tickets ORDER BY id');
@@ -108,17 +116,22 @@ export class LocalTicketStore implements TicketStore {
     };
   }
 
-  // The row's author and whether the key signed for it.
-  #human(): { id: string; sign: (payload: string) => string } {
-    if (!this.#signer || !this.#ownerId) throw new TicketError('a human write needs the signing key and [tracker] owner_id: run npm run setup');
-    const signer = this.#signer;
-    return { id: this.#ownerId, sign: (payload) => signer.sign(payload) };
+  // The user must exist; the owner is the one whose name is [tracker] owner_id.
+  async #user(id: string): Promise<{ id: string; name: string }> {
+    const user = await this.#users?.get(id);
+    if (!user) throw new TicketError(`unknown user ${id}`);
+    return user;
   }
 
-  #who(by: Actor): { kind: 'human' | 'agents'; id: string; sign: ((payload: string) => string) | null } {
+  // Who writes and whether the key signs for them. The owner's rows carry
+  // owner_id and a proof; another user's rows carry their id and none.
+  async #who(by: Actor): Promise<{ kind: 'human' | 'agents'; id: string; sign: ((payload: string) => string) | null }> {
     if (by.kind === 'agents') return { kind: 'agents', id: by.id, sign: null };
-    const human = this.#human();
-    return { kind: 'human', id: human.id, sign: human.sign };
+    const user = await this.#user(by.id);
+    if (!this.#signer || !this.#ownerId) throw new TicketError('a human write needs the signing key and [tracker] owner_id: run npm run setup');
+    if (user.name !== this.#ownerId) return { kind: 'human', id: user.id, sign: null };
+    const signer = this.#signer;
+    return { kind: 'human', id: this.#ownerId, sign: (payload) => signer.sign(payload) };
   }
 
   #transaction<T>(run: () => T): T {
@@ -147,7 +160,7 @@ export class LocalTicketStore implements TicketStore {
 
   async create(ticket: NewTicket, by: Actor): Promise<Ticket> {
     if (!ticket.title?.trim()) throw new TicketError('a ticket needs a title');
-    const who = this.#who(by);
+    const who = await this.#who(by);
     const at = this.#now();
     const number = this.#transaction(() => {
       const result = this.#db.prepare('INSERT INTO tracker_tickets(title, body, labels, project, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -174,7 +187,7 @@ export class LocalTicketStore implements TicketStore {
     const row = this.#row(id);
     if (status === this.states.go) throw new TicketError(`${status} is written by the approval writer only, after the human's approval`);
     if (!Object.values(this.states).includes(status)) throw new TicketError(`unknown state ${status}`);
-    const who = this.#who(by);
+    const who = await this.#who(by);
     const number = Number(row.id);
     const at = this.#now();
     this.#transaction(() => {
@@ -206,7 +219,7 @@ export class LocalTicketStore implements TicketStore {
 
   async comment(id: TicketId, body: string, by: Actor): Promise<Comment> {
     const number = Number(this.#row(id).id);
-    const who = this.#who(by);
+    const who = await this.#who(by);
     const at = this.#now();
     const images = '[]';
     const proof = who.sign ? who.sign(commentPayload(number, body, images, at, who.id)) : null;
@@ -254,10 +267,14 @@ export class LocalTicketStore implements TicketStore {
   // The human's move to the go state, signed, bound to the request time and
   // the shown heads (approval_context). The checks are made again here, under
   // the write lock, on the record as it is now.
-  async recordApproval(id: TicketId, request: { readonly requestedAt: string; readonly heads: readonly Version[] }): Promise<Ticket> {
+  async recordApproval(id: TicketId, request: { readonly by: string; readonly requestedAt: string; readonly heads: readonly Version[] }): Promise<Ticket> {
+    // Only the owner approves, whoever calls: the signature is the owner's.
+    const user = await this.#users?.get(request.by);
+    if (!user) throw new ApprovalError('user', 'unknown user');
+    if (user.name !== this.#ownerId) throw new ApprovalError('owner', 'only the owner approves');
     return this.#transaction(() => {
       const { ticket, at: requested, versions } = this.checkApproval(id, request);
-      const human = this.#human();
+      const human = { id: this.#ownerId as string, sign: (payload: string) => (this.#signer as ApprovalSigner).sign(payload) };
       const number = Number(ticket.id.slice('LOCAL-'.length));
       const at = this.#now();
       this.#db.prepare('UPDATE tracker_tickets SET status = ?, updated_at = ? WHERE id = ?').run(this.states.go, at, number);

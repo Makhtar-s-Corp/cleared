@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { ApprovalSigner } from '../../src/approval/signer.ts';
 import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.ts';
 import { DEFAULT_STATES, TicketError } from '../../src/tickets/contract.ts';
+import { MemoryUsers } from '../../src/modules/registry.ts';
 import { applyTables } from '../../src/store/db.ts';
 import { OWNER, lockBox, scratch } from './harness.ts';
 
@@ -19,7 +20,10 @@ function open(options: { signed?: boolean } = {}) {
   const db = new DatabaseSync(path);
   applyTables(db, TICKET_TABLES);
   const signer = options.signed === false ? undefined : ApprovalSigner.load(box.keyFile);
-  const store = new LocalTicketStore(db, { stateDir: box.state, ownerId: OWNER, ...(signer ? { signer } : {}), publicKey: box.keys.publicKey });
+  const users = new MemoryUsers();
+  users.users.set('user-uuid-1', { id: 'user-uuid-1', name: OWNER });
+  users.users.set('user-uuid-2', { id: 'user-uuid-2', name: 'guest' });
+  const store = new LocalTicketStore(db, { stateDir: box.state, ownerId: OWNER, users, ...(signer ? { signer } : {}), publicKey: box.keys.publicKey });
   const v1 = (command: string, ticket: string) => JSON.parse(execFileSync(process.execPath, [oracle, path, box.confFile, command, ticket], { encoding: 'utf8', env: { ...process.env, ORCH_STATE_DIR: box.state } }));
   return { box, db, store, v1 };
 }
@@ -77,9 +81,29 @@ test('a human write is signed, and v1 verifies it as the human; an altered row i
   assert.equal(v1('history', 'LOCAL-1')[0].by.kind, 'other', 'the creation binds the ticket\'s content');
 });
 
+test('only the owner\'s writes are signed as the owner: another user\'s ticket, move and comment never count as his', async () => {
+  const { store, v1, db } = open();
+  const guest = { kind: 'human' as const, id: 'user-uuid-2' };
+  await store.create({ title: 'By a guest', project: 'guestbook' }, guest);
+  await store.move('LOCAL-1', 'In Progress', guest);
+  await store.comment('LOCAL-1', 'Team 1, please', guest);
+  await store.comment('LOCAL-1', 'Team 2, please', { kind: 'human', id: 'user-uuid-1' });
+  const history = v1('history', 'LOCAL-1') as { by: { kind: string; id: string } }[];
+  assert.deepEqual(history.map((h) => h.by.kind), ['other', 'other'], 'v1 cannot verify a guest\'s row: it is not the human');
+  assert.ok(history.every((h) => h.by.id !== OWNER));
+  assert.deepEqual((await store.history('LOCAL-1')).map((h) => h.by.kind), ['other', 'other']);
+  const comments = v1('comments', 'LOCAL-1') as { body: string; byOwner: boolean }[];
+  assert.deepEqual(comments.map((c) => [c.body, c.byOwner]).sort(), [['Team 1, please', false], ['Team 2, please', true]], 'only the owner\'s line counts as his');
+  assert.deepEqual((await store.comments('LOCAL-1')).map((c) => [c.body, c.by.kind]), [['Team 1, please', 'other'], ['Team 2, please', 'human']]);
+  await assert.rejects(store.create({ title: 'x', project: 'p' }, { kind: 'human', id: 'nobody' }), /unknown user/);
+  await assert.rejects(store.recordApproval('LOCAL-1', { by: 'user-uuid-2', requestedAt: 'x', heads: [] }), (error: Error & { code?: string }) => error.code === 'owner');
+  await assert.rejects(store.recordApproval('LOCAL-1', { by: 'nobody', requestedAt: 'x', heads: [] }), (error: Error & { code?: string }) => error.code === 'user');
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM tracker_history WHERE status = ?').get('Ready to Ship') as { n: number }).n, 0);
+});
+
 test('without a signing key a human write is refused, nothing is written', async () => {
   const { store, db } = open({ signed: false });
-  await assert.rejects(store.create({ title: 'x', project: 'guestbook' }, { kind: 'human', id: 'u1' }), /signing key/);
+  await assert.rejects(store.create({ title: 'x', project: 'guestbook' }, { kind: 'human', id: 'user-uuid-1' }), /signing key/);
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM tracker_tickets').get() as { n: number }).n, 0);
 });
 
@@ -88,5 +112,5 @@ test('the store works with no owner set up for agents writes, and refuses humans
   applyTables(db, TICKET_TABLES);
   const store = new LocalTicketStore(db, { stateDir: scratch('cleared-v2-nostate-') });
   assert.equal((await store.create({ title: 'x', project: 'p' }, service)).id, 'LOCAL-1');
-  await assert.rejects(store.create({ title: 'y', project: 'p' }, { kind: 'human', id: 'u' }), /signing key/);
+  await assert.rejects(store.create({ title: 'y', project: 'p' }, { kind: 'human', id: 'u' }), /unknown user/);
 });

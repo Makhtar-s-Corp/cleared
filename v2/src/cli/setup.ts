@@ -78,4 +78,6 @@ human_private_key = ${key}
 human_user = ${account}
 allow_shared_uid = true
 
-owner_id is the app user who approves (cleared-v2 user add ${owner}). human_user is this account, so the broker accepts the service's requests. allow_shared_uid is the milestone 1 setting of the plan (decision 7): agents run in containers.`);
+owner_id is the app user who approves (cleared-v2 user add ${owner}). human_user is this account, so the broker accepts the service's requests. allow_shared_uid is the milestone 1 setting of the plan (decision 7): agents run in containers. Leave out a line the project's file already has: a repeated key is reported as a duplicate.
+
+v1 also requires [tracker] team, [lanes] root, base, push_roles, busy_states, closed_states and archives, and [lead] report_on, which the example's file does not carry yet: add them to the same machine file.`);

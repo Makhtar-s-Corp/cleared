@@ -44,7 +44,7 @@ export type ApprovalOptions = {
 export function createApproval(options: ApprovalOptions) {
   const now = options.now ?? (() => new Date());
   const ticketStore = new LocalTicketStore(options.db, {
-    stateDir: options.stateDir, now: () => now().toISOString(),
+    stateDir: options.stateDir, users: options.users, now: () => now().toISOString(),
     ...(options.states ? { states: options.states } : {}), ...(options.ownerId ? { ownerId: options.ownerId } : {}),
     ...(options.publicKey ? { publicKey: options.publicKey } : {}), ...(options.signer ? { signer: options.signer } : {}),
   });
