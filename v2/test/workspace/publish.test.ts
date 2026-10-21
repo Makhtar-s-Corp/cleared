@@ -129,12 +129,11 @@ test('nothing the session wrote in its git folder runs on the host: no hook, no 
   const script = join(root, 'planted.sh');
   writeFileSync(script, `#!/bin/sh\ntouch ${marker}\n`);
   chmodSync(script, 0o755);
-  for (const hook of ['pre-push', 'post-checkout', 'reference-transaction', 'pre-commit', 'post-index-change']) {
+  const head = commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
+  for (const hook of ['pre-push', 'post-checkout', 'reference-transaction', 'pre-commit', 'post-index-change', 'pre-receive', 'update', 'post-update']) {
     writeFileSync(join(workdir, '.git', 'hooks', hook), `#!/bin/sh\ntouch ${marker}\n`);
     chmodSync(join(workdir, '.git', 'hooks', hook), 0o755);
   }
-  const head = commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
-  if (existsSync(marker)) throw new Error('the test commit itself ran a hook');
   gitIn(workdir, ['config', 'core.fsmonitor', script]);
   gitIn(workdir, ['config', 'core.hooksPath', join(workdir, '.git', 'hooks')]);
   await publish(input);
