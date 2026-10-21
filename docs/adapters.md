@@ -12,6 +12,13 @@ Every statement below comes from the installed CLI's own help or behavior, from 
 
 Checked on 2026-10-21 on this server (Linux 6.12). All runs happened in a temporary directory under the session scratchpad, never in a repository. No port was opened, no Docker command ran, and no container was involved. Nothing in this section was tested inside a container. Both CLIs were already logged in: Claude Code with a claude.ai subscription (`claude auth status`: `"authMethod": "claude.ai"`), Codex with ChatGPT (`codex login status`: `Logged in using ChatGPT`).
 
+The runs used the host account's real logins and left state outside the scratchpad:
+
+- `~/.claude/projects/<encoded scratchpad path>/`: one persisted session transcript from proof 3 (`--session-id`, then `--resume`), plus an empty `memory/` directory. The other Claude runs used `--no-session-persistence` or `persistSession: false`.
+- `~/.codex/sessions/2026/10/21/rollout-...jsonl`: one rollout file per non-ephemeral `codex exec` thread (proof 8, run twice), and matching rows in `~/.codex/state_5.sqlite` and `~/.codex/thread_history_1.sqlite` (both modified at 18:15, the first proof 8 run). The other Codex runs used `--ephemeral` or `ephemeral: true` and created no rollout file, but Codex still writes its log database: `~/.codex/logs_2.sqlite-wal` was modified at 18:32, during the app server runs for this review.
+- The npm cache under `~/.npm` from installing the two SDKs into the scratchpad.
+- Usage on both subscriptions: each run is a real model request. The saved Claude `-p` outputs report `total_cost_usd` of at most 0.0013 per run.
+
 | Component | Version on 2026-10-21 | Source |
 | --- | --- | --- |
 | Claude Code CLI | `2.1.306 (Claude Code)` | `claude --version` |
@@ -107,7 +114,22 @@ The official Claude Code docs have no mention of ACP or the Agent Client Protoco
 
 ### Codex
 
-Official docs (the `developers.openai.com/codex/*` URLs redirect with 308 to these): [CLI commands](https://learn.chatgpt.com/docs/developer-commands), [Non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode), [App Server](https://learn.chatgpt.com/docs/app-server), [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk), [TypeScript SDK README](https://github.com/openai/codex/tree/main/sdk/typescript), [Hooks](https://learn.chatgpt.com/docs/hooks), [MCP](https://learn.chatgpt.com/docs/extend/mcp), [Sandboxing](https://learn.chatgpt.com/docs/sandboxing), [Approvals and security](https://learn.chatgpt.com/docs/agent-approvals-security), [Config reference](https://learn.chatgpt.com/docs/config-file/config-reference), [Authentication](https://learn.chatgpt.com/docs/auth).
+Official docs, plus the [TypeScript SDK README](https://github.com/openai/codex/tree/main/sdk/typescript). On 2026-10-21 each `developers.openai.com/codex/...` URL below answered `308` with the `learn.chatgpt.com` location shown (checked with `curl -s -o /dev/null -w '%{http_code} %{redirect_url}'`). The text was read on the `learn.chatgpt.com` pages. Use the right-hand column if the redirect changes.
+
+| Page | developers.openai.com | Redirect target read |
+| --- | --- | --- |
+| CLI commands | https://developers.openai.com/codex/cli/reference | https://learn.chatgpt.com/docs/developer-commands?surface=cli |
+| Non-interactive mode | https://developers.openai.com/codex/noninteractive | https://learn.chatgpt.com/docs/non-interactive-mode |
+| App Server | https://developers.openai.com/codex/app-server | https://learn.chatgpt.com/docs/app-server |
+| Codex SDK | https://developers.openai.com/codex/sdk | https://learn.chatgpt.com/docs/codex-sdk |
+| Hooks | https://developers.openai.com/codex/hooks | https://learn.chatgpt.com/docs/hooks |
+| MCP | https://developers.openai.com/codex/mcp | https://learn.chatgpt.com/docs/extend/mcp?surface=cli |
+| Sandboxing | https://developers.openai.com/codex/sandboxing | https://learn.chatgpt.com/docs/sandboxing |
+| Approvals and security | https://developers.openai.com/codex/agent-approvals-security | https://learn.chatgpt.com/docs/agent-approvals-security |
+| Config reference | https://developers.openai.com/codex/config-reference | https://learn.chatgpt.com/docs/config-file/config-reference |
+| Authentication | https://developers.openai.com/codex/auth | https://learn.chatgpt.com/docs/auth |
+
+Which of these `developers.openai.com` paths OpenAI treats as canonical is unknown: every path tried under `/codex/`, including guessed ones such as `/codex/sandbox`, answered `308`, so a redirect does not prove that a page existed at that address.
 
 #### Interactive TUI
 
@@ -177,13 +199,15 @@ Open question for the owner before building: the SDK overview's sentence on clau
 
 **Codex: the app server over stdio.** One `codex app-server --listen stdio://` process per session container, driven by JSON-RPC: `initialize`, `model/list`, `thread/start` with explicit `model`, `cwd`, `sandbox` and `approvalPolicy`, then `turn/start` per user turn, `turn/steer` and `turn/interrupt` from Cleared, approval requests answered from Cleared's queue, `thread/resume` after a restart. Generate the TypeScript types with `codex app-server generate-ts` at the pinned version and commit them with the adapter.
 
-Why: it is the only Codex mode with several turns in one process, approval requests the driver can answer, steering and interrupt. `codex exec` and the TypeScript SDK (which spawns `exec` per turn) cannot answer approvals. `codex-acp` uses the app server itself. Costs: it is labeled experimental and "not supported for production workloads", so pin the CLI version in the image, run a contract test (two turns, one declined approval, one interrupt) before each upgrade, and keep `codex exec --json` plus `exec resume` (stable) as the fallback for roles that need no approvals. Before relying on approvals, settle which `approvalPolicy` routes every write to the client: `untrusted` produced the request here but the docs call it unsupported, and `on-request` let the sandbox decide.
+Why: it is the only Codex mode with several turns in one process, approval requests the driver can answer, steering and interrupt. `codex exec` and the TypeScript SDK (which spawns `exec` per turn) cannot answer approvals. `codex-acp` uses the app server itself. Costs: it is labeled experimental and "not supported for production workloads", so pin the CLI version in the image, run a contract test (two turns, one declined approval, one interrupt) before each upgrade, and keep `codex exec --json` plus `exec resume` (stable) as the fallback for roles that need no approvals. The same App Server page says "If you are automating jobs or running Codex in CI, use the Codex SDK instead"; Cleared v2 sessions are interactive and need approvals, which the TypeScript SDK cannot answer, so this advice does not fit them.
+
+**Decision gate (blocks adopting the app server for any role that needs approvals):** do not build approval handling on the app server until a test on the pinned version shows which `approvalPolicy` (with which `sandbox`) sends every command and file write to the client as a server request. Evidence so far: `untrusted` produced the request (proof 10) but the config reference calls it unsupported; `on-request` with `read-only` produced no request and the sandbox refused the write. Until the gate passes, Codex sessions run only roles that need no approvals (`approvalPolicy: "never"` with a `read-only` or `workspace-write` sandbox), and approval-dependent roles go to Claude Code. Owner: the v2 adapter author. Close it by recording the result here.
 
 Not tested and needed before the adapter ships: either mode inside a Docker container labeled `cleared.dev=v2`, container login (`CLAUDE_CODE_OAUTH_TOKEN` or a mounted `CLAUDE_CONFIG_DIR`; Codex `CODEX_HOME`), an allow decision, interrupt, and `thread/resume` on the app server.
 
 ### Proof
 
-Commands as run on 2026-10-21; `$T` is a temporary directory under the session scratchpad. JSON lines are copied from the saved output, cut to about 220 characters (a cut is shown as `...`); session and thread IDs are replaced with `<id>`. Where a line says "fields selected with jq", only those fields were kept. Lines starting with `>>` (sent) and `<<` (received) are printed by the Node probe scripts, which lived in the scratchpad and are not part of this repository; `# params:` lines are comments added here.
+Commands as run on 2026-10-21 (the resume step of proof 3, and proofs 8, 9 and 10, were run again the same day for review round 1, to save raw output). `$T` is a temporary directory under the session scratchpad. JSON lines are raw output with these edits only: UUIDs, tool IDs and message IDs are replaced with `<id>`, the scratchpad path is shown as `$T` and the home directory as `~`, and long parts are cut, shown as `...`; the text on each side of a `...` is copied unchanged. Lines starting with `>>` (sent) and `<<` (received) are printed by the probe scripts; the script for proofs 9 and 10 is inlined there, and the scripts and their output files stayed in the scratchpad.
 
 **1. Versions and login**
 
@@ -192,7 +216,7 @@ $ claude --version
 2.1.306 (Claude Code)
 $ codex --version
 codex-cli 0.163.0
-$ claude auth status   # trimmed to two fields
+$ claude auth status   # two of its fields
   "loggedIn": true,
   "authMethod": "claude.ai",
 $ codex login status
@@ -204,16 +228,16 @@ Logged in using ChatGPT
 ```console
 $ cd $T && claude -p --model haiku --tools "" --no-session-persistence --strict-mcp-config \
     --max-budget-usd 0.2 --output-format stream-json --verbose 'Reply with the single word OK.' < /dev/null
-{"type":"system","subtype":"hook_started","hook_id":"<id>","hook_name":"SessionStart:startup","hook_event":"SessionStart","session_id":"<id>"}
-{"type":"system","subtype":"hook_response","hook_id":"<id>","hook_name":"SessionStart:startup","hook_event":"SessionStart","exit_code":0,"outcome":"success",...}
-{"type":"system","subtype":"init",...,"session_id":"<id>","model":"claude-haiku-5-5","permissionMode":"default",...,"apiKeySource":"none","claude_code_version":"2.1.306",...}
-{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"role":"assistant","content":[{"type":"text","text":"OK"}],...}
-{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",...,"rateLimitType":"five_hour",...}
-{"type":"result",...,"stop_reason":"end_turn","session_id":"<id>","total_cost_usd":0.00086079,...}
+{"type":"system","subtype":"hook_started","hook_id":"<id>","hook_name":"SessionStart:startup","hook_event":"SessionStart","uuid":"<id>","session_id":"<id>"}
+{"type":"system","subtype":"hook_response","hook_id":"<id>","hook_name":"SessionStart:startup","hook_event":"SessionStart",...,"exit_code":0,"outcome":"success"...
+{"type":"system","subtype":"init","cwd":"$T","session_id":"<id>","tools":[],"mcp_servers":[],"model":"claude-haiku-5-5","permissionMode":"default",...,"apiKeySource":"none","claude_code_version":"2.1.306",...
+{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"content":[{"type":"text","text":"OK"}],...
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",...,"rateLimitType":"five_hour",...
+{"duration_api_ms":1409,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"OK",...,"type":"result",...
 exit=0
 ```
 
-Fields selected with jq from the same output: init `{"tools":[],"permissionMode":"default"}`, result `{"subtype":"success","is_error":false,"num_turns":1,"result":"OK"}`.
+The `result` line starts with `duration_api_ms`; its `"type":"result"` field comes after `result`.
 
 **3. Claude two-turn session on stdin, then resume in a new process**
 
@@ -222,28 +246,32 @@ $ SID=$(cat /proc/sys/kernel/random/uuid)
 $ { echo '{"type":"user","message":{"role":"user","content":"Remember the word PLUM. Reply with OK only."}}'; sleep 15
     echo '{"type":"user","message":{"role":"user","content":"Which word did I ask you to remember? One word."}}'; sleep 15; } \
   | claude -p --model haiku --tools "" --strict-mcp-config --max-budget-usd 0.2 --session-id "$SID" \
-    --input-format stream-json --output-format stream-json --verbose
-# fields selected with jq:
-{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[{"type":"text","text":"OK"}]}}
-{"type":"result","subtype":"success","result":"OK","num_turns":1,"is_error":false}
-{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[{"type":"text","text":"PLUM"}]}}
-{"type":"result","subtype":"success","result":"PLUM","num_turns":1,"is_error":false}
+    --input-format stream-json --output-format stream-json --verbose > live.jsonl
+$ grep -E '"type":"(assistant|result)"' live.jsonl
+{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"content":[{"type":"text","text":"OK"}],...
+{"duration_api_ms":1360,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"OK",...
+{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"content":[{"type":"text","text":"PLUM"}],...
+{"duration_api_ms":3532,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"PLUM",...
 $ claude -p --model haiku --tools "" --strict-mcp-config --max-budget-usd 0.2 --resume "$SID" \
     --output-format json 'Repeat the word you remembered. One word.' < /dev/null
-# fields selected with jq:
-{"session_id":"<id>","result":"PLUM","num_turns":1,"is_error":false}
+{"duration_api_ms":7389,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"PLUM",...
 ```
+
+All three `session_id` values are `$SID`.
 
 **4. Claude permission request over stdio, answered with a deny**
 
-The probe spawned the command below, wrote one user line, and answered the `can_use_tool` request with the `control_response` shown in [Streaming JSON input](#streaming-json-input-live-session-in-one-process).
+A Node script spawned the command below, wrote one user line asking for `touch probe-marker.txt`, and answered the request. The `control_request` line shown is from a run with the same flags and a similar prompt whose stdin carried only the prompt; the script printed its own summary lines.
 
 ```console
 $ claude -p --model haiku --tools Bash --strict-mcp-config --no-session-persistence --max-budget-usd 0.2 \
     --permission-mode default --permission-prompt-tool stdio \
     --input-format stream-json --output-format stream-json --verbose
-<< control_request can_use_tool Bash "touch probe-marker.txt"
->> control_response deny
+# stdout:
+{"type":"control_request","request_id":"<id>","request":{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"touch probe-marker.txt","description":"Create empty probe-marker.txt file in working directory"},...,"permission_suggestions":[...
+# stdin, written by the script (request_id copied from the request):
+{"type":"control_response","response":{"subtype":"success","request_id":"<id>","response":{"behavior":"deny","message":"Denied by the probe."}}}
+# then, as printed by the script:
 << tool_result is_error=true "Denied by the probe."
 << result success "DENIED"
 $ ls probe-marker.txt
@@ -254,7 +282,26 @@ In an earlier run of the same command with `ls` instead of `touch`, `ls` ran wit
 
 **5. Claude Agent SDK, streaming input, two turns, `canUseTool` deny**
 
-Options: `{ cwd, model: 'haiku', tools: ['Bash'], settingSources: [], persistSession: false, maxBudgetUsd: 0.3, canUseTool }`, prompt from an async generator that yields the next user message after each `result`.
+`cc-sdk.mjs`, run with `@anthropic-ai/claude-agent-sdk` 0.3.306 installed in the scratchpad:
+
+```js
+import { query } from '@anthropic-ai/claude-agent-sdk';
+const cwd = process.argv[2];
+const turns = ['Use the Bash tool to run exactly: touch probe-marker.txt . If it is denied, reply DENIED and do not retry.', 'Remember the word PLUM and reply with that word only.'];
+let release; const gate = () => new Promise((r) => (release = r));
+async function* input() {
+  for (const text of turns) { const wait = gate(); yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null }; await wait; }
+}
+const q = query({ prompt: input(), options: {
+  cwd, model: 'haiku', tools: ['Bash'], settingSources: [], persistSession: false, maxBudgetUsd: 0.3,
+  pathToClaudeCodeExecutable: process.env.CLAUDE_BIN || undefined,
+  canUseTool: async (tool, input) => { console.log('<< canUseTool', tool, JSON.stringify(input.command)); return { behavior: 'deny', message: 'Denied by the probe.' }; },
+} });
+for await (const m of q) {
+  if (m.type === 'system' && m.subtype === 'init') console.log('<< init model=' + m.model, 'claude_code_version=' + m.claude_code_version, 'apiKeySource=' + m.apiKeySource);
+  if (m.type === 'result') { console.log('<< result', m.subtype, JSON.stringify(m.result)); release(); }
+}
+```
 
 ```console
 $ node cc-sdk.mjs $T                      # bundled binary
@@ -275,7 +322,7 @@ $ claude -p --setting-sources project --model haiku --tools "" --no-session-pers
 $ claude -p --safe-mode ... (same flags)
 ```
 
-The probe counted `hook_started` lines and read the `result` line and init `apiKeySource`. Both runs: `hooks=0 result=OK auth=none`. The default run in proof 2 had one `hook_started`.
+For each run, the script counted `hook_started` lines and read `result` and the init `apiKeySource`. Both runs: `hooks=0 result=OK auth=none`. The default run in proof 2 had one `hook_started`.
 
 **7. Codex exec with JSON events**
 
@@ -295,63 +342,190 @@ stderr held one line: `Reading additional input from stdin...`.
 
 ```console
 $ codex exec --json --skip-git-repo-check --ignore-user-config --sandbox read-only \
-    'Remember the word PLUM. Reply with OK only.' < /dev/null
+    'Remember the word PLUM. Reply with OK only.' < /dev/null > r8a.jsonl
+$ TID=$(jq -r 'select(.type=="thread.started")|.thread_id' r8a.jsonl)
+$ codex exec resume --json --skip-git-repo-check --ignore-user-config "$TID" \
+    'Which word did I ask you to remember? One word.' < /dev/null > r8b.jsonl
+$ cat r8a.jsonl
 {"type":"thread.started","thread_id":"<id>"}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}
-{"type":"turn.completed","usage":{"input_tokens":13620,"cached_input_tokens":11520,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
-$ codex exec resume --json --skip-git-repo-check --ignore-user-config <id> \
-    'Which word did I ask you to remember? One word.' < /dev/null
-# fields selected with jq (type, thread_id, item.text), same thread ID as above:
-{"type":"thread.started","thread_id":"<id>","text":null}
-{"type":"item.completed","thread_id":null,"text":"PLUM"}
+{"type":"turn.completed","usage":{"input_tokens":14010,"cached_input_tokens":11520,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
+$ cat r8b.jsonl
+{"type":"thread.started","thread_id":"<id>"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"PLUM"}}
+{"type":"turn.completed","usage":{"input_tokens":28043,"cached_input_tokens":23040,"cache_write_input_tokens":0,"output_tokens":11,"reasoning_output_tokens":0}}
 ```
+
+The `thread_id` in `r8b.jsonl` equals `$TID`.
 
 **9. Codex app server over stdio, two turns on one thread**
 
-The probe spawned `codex app-server --listen stdio://` and wrote JSON-RPC lines such as `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"cleared-probe","version":"0.0.0"}}}`.
+`appserver-min.mjs`, the whole probe used for proofs 9 and 10. It declines every approval request and prints each line it sends and each response, server request and selected notification it receives:
 
-```console
->> initialize
-<< initialize ok, keys=userAgent,codexHome,platformFamily,platformOs
->> model/list
-<< model/list gpt-6-luna* gpt-5.6-terra gpt-5.6-luna
-# params: {cwd, model: "gpt-6-luna", sandbox: "read-only", approvalPolicy: "never", ephemeral: true}
->> thread/start
-<< thread/start ok, model=gpt-6-luna
-# params: input text "Remember the word PLUM. Reply with OK only."
->> turn/start
-<< agentMessage: OK
-<< turn/completed completed
-# params: input text "Which word did I ask you to remember? One word."
->> turn/start
-<< agentMessage: PLUM
-<< turn/completed completed
+```js
+// node appserver-min.mjs <cwd> <approvalPolicy> <prompt>...  Declines every approval request.
+import { spawn } from 'node:child_process';
+import readline from 'node:readline';
+const [cwd, approvalPolicy, ...prompts] = process.argv.slice(2);
+const cx = spawn('codex', ['app-server', '--listen', 'stdio://'], { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+const show = new Set(['thread/started', 'turn/started', 'item/completed', 'turn/completed', 'error']);
+let id = 0; const waiting = new Map(); let turnDone;
+const out = (msg) => { const line = JSON.stringify(msg); console.log('>> ' + line); cx.stdin.write(line + '\n'); };
+const call = (method, params) => new Promise((resolve) => { waiting.set(++id, resolve); out({ id, method, params }); });
+readline.createInterface({ input: cx.stdout }).on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.id !== undefined && !msg.method) { console.log('<< ' + line); waiting.get(msg.id)(msg.result); return; }
+  if (msg.id !== undefined) { console.log('<< ' + line); out({ id: msg.id, result: { decision: 'decline' } }); return; }
+  if (show.has(msg.method)) console.log('<< ' + line);
+  if (msg.method === 'turn/completed') turnDone();
+});
+await call('initialize', { clientInfo: { name: 'cleared-probe', version: '0.0.0' } });
+out({ method: 'initialized' });
+const { data } = await call('model/list', {});
+const model = data.find((m) => m.isDefault).id;
+const { thread } = await call('thread/start', { cwd, model, sandbox: 'read-only', approvalPolicy, ephemeral: true });
+for (const text of prompts) {
+  const done = new Promise((resolve) => (turnDone = resolve));
+  await call('turn/start', { threadId: thread.id, input: [{ type: 'text', text }] });
+  await done;
+}
+cx.kill();
 ```
 
-The first attempt, without `model` (so the user config's `gpt-6-sol` applied), returned for each turn: `<< error ... "The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account."` and `<< turn/completed failed`.
+```console
+$ node appserver-min.mjs $T never 'Remember the word PLUM. Reply with OK only.' 'Which word did I ask you to remember? One word.'
+>> {"id":1,"method":"initialize","params":{"clientInfo":{"name":"cleared-probe","version":"0.0.0"}}}
+<< {"id":1,"result":{"userAgent":"cleared-probe/0.163.0 (Debian 13.0.0; x86_64) ...","codexHome":"~/.codex","platformFamily":"unix","platformOs":"linux"}}
+>> {"method":"initialized"}
+>> {"id":2,"method":"model/list","params":{}}
+<< {"id":2,"result":{"data":[{"id":"gpt-6-luna","model":"gpt-6-luna",...,"displayName":"GPT-6-Luna",...
+>> {"id":3,"method":"thread/start","params":{"cwd":"$T","model":"gpt-6-luna","sandbox":"read-only","approvalPolicy":"never","ephemeral":true}}
+<< {"id":3,"result":{"thread":{"id":"<id>","environments":[{"environmentId":"local","cwd":"$T",...
+>> {"id":4,"method":"turn/start","params":{"threadId":"<id>","input":[{"type":"text","text":"Remember the word PLUM. Reply with OK only."}]}}
+<< {"method":"thread/started","params":{"thread":{"id":"<id>",...
+<< {"id":4,"result":{"turn":{"id":"<id>","rootTurnId":"<id>","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":null,"completedAt":null,"durationMs":null}}}
+<< {"method":"turn/started","params":{"threadId":"<id>","turn":{"id":"<id>",...,"status":"inProgress",...
+<< {"method":"item/completed","params":{"item":{"type":"userMessage","id":"<id>","clientId":null,"content":[{"type":"text","text":"Remember the word PLUM. Reply with OK only.","text_elements":[]}]},...
+<< {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"<id>","text":"OK","phase":"final_answer",...
+<< {"method":"turn/completed","params":{"threadId":"<id>","turn":{...,"status":"completed","error":null,...
+>> {"id":5,"method":"turn/start","params":{"threadId":"<id>","input":[{"type":"text","text":"Which word did I ask you to remember? One word."}]}}
+<< {"id":5,"result":{"turn":{"id":"<id>",...,"status":"inProgress",...
+<< {"method":"turn/started",...
+<< {"method":"item/completed","params":{"item":{"type":"userMessage",...
+<< {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"<id>","text":"PLUM","phase":"final_answer",...
+<< {"method":"turn/completed","params":{"threadId":"<id>","turn":{...,"status":"completed","error":null,...
+```
+
+An earlier probe that sent `thread/start` without `model` (so the user config's `gpt-6-sol` applied) received, for each turn, an `error` notification with `The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account.` and a `turn/completed` with status `failed`.
 
 **10. Codex app server approval request, answered with decline**
 
 ```console
-# params: same as proof 9 except approvalPolicy: "untrusted"
->> thread/start
-# params: input text "Run the shell command: touch probe-marker.txt . If it is declined, reply DECLINED and do not retry."
->> turn/start
-<< server request item/commandExecution/requestApproval "/bin/bash -lc 'touch probe-marker.txt'"
->> response {"decision":"decline"}
-<< commandExecution declined
-<< agentMessage: DECLINED
-<< turn/completed completed
+$ node appserver-min.mjs $T untrusted 'Run the shell command: touch probe-marker.txt . If it is declined, reply DECLINED and do not retry.'
+(initialize, initialized and model/list as in proof 9)
+>> {"id":3,"method":"thread/start","params":{"cwd":"$T","model":"gpt-6-luna","sandbox":"read-only","approvalPolicy":"untrusted","ephemeral":true}}
+>> {"id":4,"method":"turn/start","params":{"threadId":"<id>","input":[{"type":"text","text":"Run the shell command: touch probe-marker.txt . If it is declined, reply DECLINED and do not retry."}]}}
+(thread/started, turn/started, the user message and one commentary agentMessage)
+<< {"method":"item/commandExecution/requestApproval","id":0,"params":{"kind":"command","threadId":"<id>","turnId":"<id>","itemId":"exec-<id>",...,"environmentId":"local","command":"/bin/bash -lc 'touch probe-marker.txt'","cwd":"$T","commandActions":[{"type":"unknown","command":"touch probe-marker.txt"}],"proposedExecpolicyAmendment":["touch","probe-marker.txt"],"availableDecisions":["accept",{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","probe-marker.txt"]}},"cancel"]}}
+>> {"id":0,"result":{"decision":"decline"}}
+<< {"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec-<id>",...,"status":"declined",...
+<< {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"<id>","text":"DECLINED","phase":"final_answer",...
+<< {"method":"turn/completed","params":{"threadId":"<id>","turn":{...,"status":"completed","error":null,...
 $ ls probe-marker.txt
 ls: cannot access 'probe-marker.txt': No such file or directory
 ```
 
-Same prompt with `approvalPolicy: "on-request"`: no server request; `<< agentMessage: The command failed because the filesystem is read-only.`
+The request's `availableDecisions` listed `accept`, `acceptWithExecpolicyAmendment` and `cancel`, not `decline`; the server still accepted `decline` (a value of the schema's `CommandExecutionApprovalDecision`) and marked the item `declined`. The request `id` was `0` while the client's own IDs started at 1: client and server number their requests separately. An earlier run of the same prompt with `approvalPolicy: "on-request"` got no server request; its final message was `The command failed because the filesystem is read-only.`
 
-**11. Help output checked**
+**11. Help excerpts for the flags the recommendation relies on**
 
-`claude --help`, `claude mcp --help`, `claude mcp serve --help`, `claude auth --help`, `codex --help`, `codex exec --help`, `codex exec resume --help`, `codex resume --help`, `codex app-server --help`, `codex app-server generate-json-schema --help`, `codex mcp --help`, `codex queue --help`, `codex login --help`, `codex features list`, `codex debug --help`. `codex mcp-server --help` and `codex proto --help` print the top-level help: neither is a subcommand in 0.163.0.
+Trimmed from the output of the commands shown, 2026-10-21.
+
+```console
+$ claude --help
+  -p, --print                           Print response and exit (useful for
+                                        pipes). ...
+  --input-format <format>               Input format (only works with --print):
+                                        "text" (default), or "stream-json"
+                                        (realtime streaming input) (choices:
+                                        "text", "stream-json")
+  --output-format <format>              Output format (only works with --print):
+                                        "text" (default), "json" (single
+                                        result), or "stream-json" (realtime
+                                        streaming) (choices: "text", "json",
+                                        "stream-json")
+  --permission-mode <mode>              Permission mode to use for the session
+                                        (choices: "acceptEdits", "auto",
+                                        "bypassPermissions", "manual",
+                                        "dontAsk", "plan")
+  --permission-prompts <target>         Who answers permission prompts with
+                                        --print: "host" (the SDK host or
+                                        --permission-prompt-tool) or "none"
+                                        (nobody: anything that would prompt is
+                                        denied automatically; the permission
+                                        mode still decides everything else)
+                                        (choices: "host", "none", default:
+                                        "host")
+  --session-id <uuid>                   Use a specific session ID for the
+                                        conversation (must be a valid UUID)
+  -r, --resume [value]                  Resume a conversation by session ID or
+                                        name, or open interactive picker with
+                                        optional search term
+  --setting-sources <sources>           Comma-separated list of setting sources
+                                        to load (user, project, local).
+  --safe-mode                           Start with all customizations
+                                        (CLAUDE.md, skills, installed plugins,
+                                        hooks, MCP servers, custom commands and
+                                        agents, output styles, workflows, custom
+                                        themes, keybindings, and more) disabled
+                                        ... Admin-managed (policy)
+                                        settings still apply. Auth, model
+                                        selection, built-in tools and plugins,
+                                        and permissions work normally. ...
+  --strict-mcp-config                   Only use MCP servers from --mcp-config,
+                                        ignoring all other MCP configurations
+  --no-session-persistence              Disable session persistence - sessions
+                                        will not be saved to disk and cannot be
+                                        resumed (only works with --print)
+$ codex --help
+  exec              Run Codex non-interactively [aliases: e]
+  app-server        [experimental] Run the app server or related tooling
+  queue             Queue a message for an existing session
+  -s, --sandbox <SANDBOX_MODE>
+          Select the sandbox policy to use when executing model-generated shell commands
+          [possible values: read-only, workspace-write, danger-full-access]
+      --approve-for-me
+          Route approval requests through automatic review using the workspace-write sandbox
+  -a, --ask-for-approval <APPROVAL_POLICY>
+          Configure when the model requires human approval before executing a command
+          Possible values:
+          - on-request: The model decides when to ask the user for approval
+          - never:      Never ask for user approval Execution failures are immediately returned to
+            the model
+$ codex app-server --help
+      --listen <URL>
+          Transport endpoint URL. Supported values: `stdio://` (default), `unix://`, `unix://PATH`,
+          `ws://IP:PORT`, `off`
+          [default: stdio://]
+$ codex app-server generate-ts --help
+[experimental] Generate TypeScript bindings for the app server protocol
+Usage: codex app-server generate-ts [OPTIONS] --out <DIR>
+$ codex exec --help
+      --ephemeral
+          Run without persisting session files to disk
+      --ignore-user-config
+          Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`
+      --json
+          Print events to stdout as JSONL
+$ codex exec resume --help
+Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
+$ codex queue --help
+Usage: codex queue [OPTIONS] --thread <THREAD> --message <TEXT>
+```
+
+Also run without pasting: `claude mcp --help`, `claude mcp serve --help`, `claude auth --help`, `codex resume --help`, `codex mcp --help`, `codex login --help`, `codex features list`, `codex debug --help`. `codex mcp-server --help` and `codex proto --help` print the top-level help: neither is a subcommand in 0.163.0.
 
 ## v1 adapter contract
 
