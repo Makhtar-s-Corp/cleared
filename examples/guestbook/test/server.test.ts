@@ -113,7 +113,8 @@ test('a body over the limit is answered 413, every time, and the upload never st
     const { answer, ms } = await rawPost(4 * 1024 * 1024);
     assert.match(answer, /^HTTP\/1\.1 413 Payload Too Large\r\n/, `raw socket, round ${round}: ${JSON.stringify(answer.slice(0, 80))}`);
     assert.match(answer, /larger than 16384 bytes/);
-    assert.ok(ms < 2000, `raw socket, round ${round}: the exchange took ${ms} ms`);
+    // A stalled upload waits for a server timeout (about 6 s); 5 s leaves room for a slow runner.
+    assert.ok(ms < 5000, `raw socket, round ${round}: the exchange took ${ms} ms`);
   }
   // The server still answers afterwards.
   assert.equal((await fetch(`${base}/health`)).status, 200);

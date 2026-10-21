@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWatcher, LABELS, parseArgs, type Run } from '../deploy/watch.ts';
+import { createWatcher, LABELS, parseArgs, runCommand, type Run } from '../deploy/watch.ts';
 
 // A fake host: a git remote whose head the test moves, and a docker that
 // keeps containers, networks, volumes and images in memory. Every call is
@@ -167,6 +167,18 @@ test('a tick with the same head and the app running does nothing', async () => {
   assert.deepEqual(after, ['ps'], 'only the labelled listing');
 });
 
+test('an app of the head that crash-loops (restarting) is not rebuilt: it waits for the head to move', async () => {
+  const host = new FakeHost();
+  const watch = watcher(host);
+  await watch.tick();
+  host.app()[0]!.state = 'restarting';
+  const before = host.docker().length;
+  assert.deepEqual(await watch.tick(), { kind: 'unchanged', commit: sha('a') });
+  assert.deepEqual(host.docker().slice(before).map((call) => call.args[0]), ['ps'], 'only the labelled listing');
+  host.head = sha('b');
+  assert.deepEqual(await watch.tick(), { kind: 'deployed', commit: sha('b') });
+});
+
 test('when the head moves (a merge, or a revert), the new commit replaces the app; the database stays', async () => {
   const host = new FakeHost();
   const watch = watcher(host);
@@ -266,6 +278,13 @@ test('every docker call carries the labels: on create, as filters on list, and o
 
 test('the labels name Cleared v2 and the example, so the watcher never touches another lane objects', () => {
   assert.deepEqual(LABELS, ['cleared.dev=v2', 'cleared.example=guestbook']);
+});
+
+test('runCommand survives a command that exits before reading its input, and keeps its output', async () => {
+  // git --version reads nothing: writing 8 MiB to it fails with EPIPE once it has exited.
+  const output = await runCommand('git', ['--version'], Buffer.alloc(8 * 1024 * 1024, 'x'));
+  assert.match(output.toString(), /^git version /);
+  await assert.rejects(runCommand('git', ['--no-such-option'], Buffer.alloc(8 * 1024 * 1024, 'x')), /exited with/);
 });
 
 test('parseArgs: --repo is required; the rest has defaults', () => {
