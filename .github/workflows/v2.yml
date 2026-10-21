@@ -1,8 +1,10 @@
 name: v2
 
-# The checks of the v2 service (v2/). They run on pull requests to the v2
-# branch only; checks.yml keeps checking the v1 code on every pull request.
+# The checks of the v2 service (v2/). They run on pushes to the v2 branch and
+# on pull requests to it; checks.yml keeps checking the v1 code on every pull request.
 on:
+  push:
+    branches: [v2]
   pull_request:
     branches: [v2]
     types: [opened, synchronize, reopened, ready_for_review]

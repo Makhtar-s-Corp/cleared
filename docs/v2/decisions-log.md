@@ -139,3 +139,25 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - Milestone 0 used no Fable.
 - The milestone 0 lanes (keep-and-drop, skeleton-ci and adapters-doc) were authored by Opus 5.5 and reviewed by Sonnet 5.5, in two rounds and in fresh sessions. For this lane, the two reviews on its pull request are signed "Sonnet 5.5, fresh session". For the other two lanes, this is as the orchestrator reported it.
 - Until Codex sessions exist, the reviewer is a different Claude model from the author. This settles the review question in the "Claude Code first, then Codex" entry.
+
+## 2026-10-21: CI runs on pushes to v2
+
+**Decision.** The v2 workflow and the checks workflow also run on pushes to the `v2` branch, not only on pull requests.
+
+**Consequences.**
+- `.github/workflows/v2.yml` gets `push: branches: [v2]`. Its `pull_request` trigger stays on `branches: [v2]`.
+- `.github/workflows/checks.yml` (the v1 verify job) had `push: branches: [main]`. It is now `[main, v2]`. Its `pull_request` trigger has no branch filter and is unchanged.
+- A push to `v2` now starts both workflows. Their jobs have timeouts of 10 and 15 minutes.
+- `test/ci-triggers.test.mjs` reads both `on:` blocks and fails if a trigger is removed.
+- Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j1-ci-housekeeping`.
+
+## 2026-10-21: dashboard-builder is defined outside the repository
+
+**Decision.** The `dashboard-builder` agent is not defined in this repository. Its definition is `~/.claude/agents/dashboard-builder.md`, in the user's agents directory. Its frontmatter says `model: opus`. This lane does not change that file.
+
+**Consequences.**
+- The repository has no `.claude/agents/` directory, and no tracked file names `dashboard-builder`. Checked with `grep -rn dashboard-builder` over the tracked Markdown, YAML and JSON files.
+- The file is per user, so a change to it applies to every project on that machine, not to this repository.
+- To run this agent on Haiku, change line 5 of that file to `model: haiku`. This is not tested: the lane did not spawn the agent after the change, so whether the next spawn uses Haiku is unknown.
+- The `Agent` tool also takes a `model` argument per call. The spawns in the global CLAUDE.md do not pass one, so the frontmatter decides.
+- Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j1-ci-housekeeping`.
