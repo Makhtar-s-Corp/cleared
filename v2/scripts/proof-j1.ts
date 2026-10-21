@@ -25,6 +25,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { OUTSIDE, inboxAction } from './proof-inbox.ts';
 
 const env = process.env;
 const APP = (env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').replace(/\/$/, '');
@@ -88,7 +89,6 @@ const timeline: Record<string, string> = {};
 // the session screen as the owner would, each one listed: "Allow once" for
 // work in the checkout, "Deny" for what installs or fetches something.
 const otherRequests: { command: string; answer: 'allow_once' | 'reject_once'; at: string }[] = [];
-const OUTSIDE = /\b(apt-get|apk|sudo|pip3?|curl|wget|ssh|npx|embedded-postgres)\b|\bnpm (i|install|add|view)\b/;
 const REVIEW_ROUNDS = Number(env.PROOF_REVIEW_ROUNDS ?? 2);
 let ticketId = env.PROOF_TICKET ?? '';
 let authorUrl = env.PROOF_AUTHOR_URL ?? '';
@@ -280,7 +280,7 @@ if (live || (signedIn && authorUrl)) {
     await waitAnswering(async () => await request.count() > 0, left());
     timeline.message_acknowledged_at = new Date().toISOString();
     timeline.request_row_at = await rowTime(request.first());
-    return `the session asked to run rm -r ${SCRATCH}, as the message asked`;
+    return `the session issued rm -r ${SCRATCH}, as the message asked`;
   });
 }
 
@@ -288,29 +288,39 @@ if (live || (signedIn && authorUrl)) {
 let answered = false;
 if (sent) {
   answered = await step(6, 'permission-inbox', async () => {
-    await page.goto(`${APP}/inbox`);
-    // The list names the ticket; the detail shows the command.
-    const items = page.locator('a.item:not(.handled)').filter({ hasText: ticketOf() });
-    try {
-      await items.first().waitFor({ timeout: 20_000 });
-    } catch {
-      throw new Error('the inbox does not show the waiting request (the inbox screen is a stub before lane 10)');
+    // The owner works the inbox: this ticket's waiting requests, answered
+    // there, until the one the message asked for comes (scripts/proof-inbox.ts).
+    const items = page.locator('a.item:not(.handled)').filter({ hasText: `${ticketOf()} · ` });
+    const until = Date.now() + Math.min(left(), 10 * 60_000);
+    for (;;) {
+      if (Date.now() > until) throw new Error('the request the message asked for never reached the inbox');
+      await page.goto(`${APP}/inbox`);
+      await page.locator('#inbox-list, .inbox').first().waitFor();
+      const details: { detail: string }[] = [];
+      for (const item of await items.all()) {
+        await item.click();
+        // The detail is drawn after the click: wait for this ticket's, then read it.
+        await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
+        details.push({ detail: await page.locator('#detail').innerText() });
+      }
+      const action = inboxAction(details, SCRATCH);
+      if (action.kind === 'wait') { await page.waitForTimeout(2_000); continue; }
+      await items.nth(action.index).click();
+      await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 });
+      if (action.kind === 'other') {
+        const text = (details[action.index]?.detail ?? '').replace(/\s+/g, ' ').slice(0, 300);
+        await page.locator(`#detail [data-act="${action.decision}"]`).click();
+        otherRequests.push({ command: `inbox: ${text}`, answer: action.decision, at: new Date().toISOString() });
+        console.log(`proof: ${action.decision} from the inbox: ${text.slice(0, 120)}`);
+        await page.waitForTimeout(1_000);
+        continue;
+      }
+      timeline.request_in_inbox_at = new Date().toISOString();
+      await capture(6, 'permission-inbox-open');
+      await page.locator('#detail [data-act="allow_once"]').click();
+      timeline.permission_answered_at = new Date().toISOString();
+      break;
     }
-    let found = false;
-    for (const item of await items.all()) {
-      await item.click();
-      // The detail is drawn after the click: wait for this ticket's, then read it.
-      await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
-      try {
-        await page.locator('#detail').getByText(SCRATCH).first().waitFor({ timeout: 3_000 });
-        found = true;
-        break;
-      } catch { /* another request of this ticket */ }
-    }
-    if (!found) throw new Error('no inbox item shows the command the message asked for');
-    await capture(6, 'permission-inbox-open');
-    await page.locator('#detail [data-act="allow_once"]').click();
-    timeline.permission_answered_at = new Date().toISOString();
     return 'allowed once from the inbox';
   });
   if (!answered) {
