@@ -1,5 +1,536 @@
 # Model adapters
 
+This page has two parts. [v2 session driving modes](#v2-session-driving-modes) records how Claude Code and Codex can be driven programmatically as live sessions, verified on this server on 2026-10-21, and recommends one mode per harness for the v2 session adapter. [v1 adapter contract](#v1-adapter-contract) documents the `adapters/*.sh` contract that the current code still implements.
+
+## v2 session driving modes
+
+Cleared v2 runs each harness as a live session (one Docker container per session) instead of one `run` per prompt. The adapter therefore needs: several user turns in one session, a stream of events, permission requests answered by Cleared, interrupt, resume after a restart, and an explicit model.
+
+Every statement below comes from the installed CLI's own help or behavior, from a run on this server, or from the linked official page. "Unknown" means it was not verified.
+
+### Method and versions
+
+Checked on 2026-10-21 on this server (Linux 6.12). All runs happened in a temporary directory under the session scratchpad, never in a repository. No port was opened, no Docker command ran, and no container was involved. Nothing in this section was tested inside a container. Both CLIs were already logged in: Claude Code with a claude.ai subscription (`claude auth status`: `"authMethod": "claude.ai"`), Codex with ChatGPT (`codex login status`: `Logged in using ChatGPT`).
+
+The runs used the host account's real logins and left state outside the scratchpad:
+
+- `~/.claude/projects/<encoded scratchpad path>/`: one persisted session transcript from proof 3 (`--session-id`, then `--resume`), plus an empty `memory/` directory. The other Claude runs used `--no-session-persistence` or `persistSession: false`.
+- `~/.codex/sessions/2026/10/21/rollout-...jsonl`: one rollout file per non-ephemeral `codex exec` thread (proof 8, run twice), and matching rows in `~/.codex/state_5.sqlite` and `~/.codex/thread_history_1.sqlite` (both modified at 18:15, the first proof 8 run). The other Codex runs used `--ephemeral` or `ephemeral: true` and created no rollout file, but Codex still writes its log database: `~/.codex/logs_2.sqlite-wal` was modified at 18:32, during the app server runs for this review.
+- The npm cache under `~/.npm` from installing the two SDKs into the scratchpad.
+- Usage on both subscriptions: each run is a real model request. The saved Claude `-p` outputs report `total_cost_usd` of at most 0.0013 per run.
+
+| Component | Version on 2026-10-21 | Source |
+| --- | --- | --- |
+| Claude Code CLI | `2.1.306 (Claude Code)` | `claude --version` |
+| Codex CLI | `codex-cli 0.163.0` | `codex --version` |
+| Node.js | `v24.21.0` | `node --version` |
+| `@anthropic-ai/claude-agent-sdk` | 0.3.306, reports `claude_code_version=2.1.306` | `npm view`, installed in the scratchpad for the test below |
+| `@openai/codex-sdk` | 0.163.0, depends on `@openai/codex` 0.163.0 | `npm view`, installed in the scratchpad |
+| `@agentclientprotocol/claude-agent-acp` | 0.94.0, depends on `@anthropic-ai/claude-agent-sdk` 0.3.303 | `npm view` (not installed) |
+| `@agentclientprotocol/codex-acp` | 2.2.2, depends on `@openai/codex` ^0.160.1 | `npm view` (not installed) |
+| `@agentclientprotocol/sdk` | 2.0.0 | `npm view` (not installed) |
+
+The Claude Code binary at `~/.local/bin/claude` was reinstalled by an updater at 18:11 during this check; two commands run at that moment failed with `Error: claude native binary not installed.` and passed when run again. The version stayed 2.1.306. An adapter should pin the CLI version inside its image and not depend on a host updater.
+
+### Summary
+
+| Need | Claude Code 2.1.306 | Codex 0.163.0 |
+| --- | --- | --- |
+| Several turns in one process | Yes: `-p --input-format stream-json --output-format stream-json --verbose`, or Agent SDK `query()` with an async iterable (both verified) | Yes: `codex app-server` over stdio, `turn/start` repeated on one thread (verified). `codex exec` is one process per turn. |
+| Event stream | `stream-json` lines: `system/init`, `assistant`, `user` (tool results), `result`, `rate_limit_event`, hook events | `exec --json`: `thread.started`, `turn.started`, `item.*`, `turn.completed`. App server: JSON-RPC notifications such as `item/completed`, `turn/completed` |
+| Permission requests answered by the driver | `control_request` `can_use_tool` on stdout, `control_response` on stdin (deny round trip verified), or the SDK's `canUseTool` callback (verified) | App server request `item/commandExecution/requestApproval`, answered with `{"decision": ...}` (decline round trip verified). Not available in `codex exec`. |
+| Interrupt | SDK `interrupt()` (docs, streaming input only); SIGINT ends a turn (docs). Not run here. | App server `turn/interrupt` (docs). Not run here. |
+| Resume | `--session-id <uuid>` then `--resume <uuid>` (verified); SDK `resume`, `forkSession` | `codex exec resume <thread_id>` (verified); app server `thread/resume` (in schema, not run) |
+| Model | `--model`, `--fallback-model`, SDK `setModel()` | `-m`, `-c model=...`, app server `model/list` then `thread/start {model}` (verified) |
+| Official ACP support | None in the docs; community adapter `claude-agent-acp` over the Agent SDK | None in the docs; adapter `codex-acp` over the app server |
+| Stability label | `-p` and the Agent SDK are documented; the raw stdin/stdout control envelope is not documented as a public protocol | `exec` "Stable", `app-server` "Experimental" and "aren't supported for production workloads" |
+
+### Claude Code
+
+Official docs: [CLI reference](https://code.claude.com/docs/en/cli-reference.md), [Run Claude Code programmatically](https://code.claude.com/docs/en/headless.md), [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview.md), [Agent SDK TypeScript](https://code.claude.com/docs/en/agent-sdk/typescript.md), [Streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode.md), [Sessions](https://code.claude.com/docs/en/agent-sdk/sessions.md), [SDK permissions](https://code.claude.com/docs/en/agent-sdk/permissions.md), [SDK approvals](https://code.claude.com/docs/en/agent-sdk/user-input.md), [Permission modes](https://code.claude.com/docs/en/permission-modes.md), [Permissions](https://code.claude.com/docs/en/permissions.md), [Hooks](https://code.claude.com/docs/en/hooks.md), [MCP](https://code.claude.com/docs/en/mcp.md), [Settings](https://code.claude.com/docs/en/settings.md), [Model configuration](https://code.claude.com/docs/en/model-config.md), [Authentication](https://code.claude.com/docs/en/authentication.md), [Agent view](https://code.claude.com/docs/en/agent-view.md).
+
+#### Interactive TUI
+
+`claude [prompt]` starts an interactive session ("starts an interactive session by default, use -p/--print for non-interactive output"). It needs a terminal; v1 `talk` runs it in an Orca terminal. Its screen is not a machine-readable stream. Related flags from `claude --help`: `--bg` starts a session in the background and prints an ID for `claude attach`, `logs`, `stop` and `rm`; `claude agents` lists background sessions ([agent view](https://code.claude.com/docs/en/agent-view.md)); `--remote-control [name]` and `--tmux` (with `--worktree`) also exist. None of these was run here.
+
+#### Print mode and output formats
+
+`claude -p` answers and exits. `--output-format text|json|stream-json` (`stream-json` also needs `--verbose`), `--json-schema` for structured output, `--max-budget-usd`, `--include-partial-messages`, `--include-hook-events`. The help warns that `-p` skips the workspace trust dialog and silently ignores settings files that fail validation. v1 `adapters/claude.sh` already uses `-p --output-format stream-json --verbose`.
+
+#### Streaming JSON input (live session in one process)
+
+`--input-format stream-json` (only with `-p`) keeps the process reading user messages from stdin, one JSON object per line. The CLI docs give no raw stdin schema; the line shape below is the SDK's `SDKUserMessage` ([streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode.md)) and it worked here:
+
+```json
+{"type":"user","message":{"role":"user","content":"Remember the word PLUM. Reply with OK only."}}
+```
+
+Each user message produces its own `result` line; the process stays alive until stdin closes. `--replay-user-messages` echoes user lines back.
+
+Permission requests travel on the same pipes. With `--permission-prompt-tool stdio`, a tool call that needs approval appears on stdout as `{"type":"control_request","request_id":...,"request":{"subtype":"can_use_tool","tool_name":"Bash","input":{...}}}`, and the driver answers on stdin with `{"type":"control_response","response":{"subtype":"success","request_id":...,"response":{"behavior":"deny","message":"..."}}}`. A deny round trip was verified (proof 4); an allow was not run. The documented form of `--permission-prompt-tool` takes an MCP tool name (`mcp__<server>__<tool>`). The value `stdio` is not documented; the installed SDK passes `--permission-prompt-tool=stdio` itself when `canUseTool` is set (seen in `@anthropic-ai/claude-agent-sdk` 0.3.306 `sdk.mjs`). The TypeScript reference mentions the `control_request` envelope, `control_response`, and an `interrupt` control request, without a schema. Treat the raw envelope as an SDK internal that can change between versions.
+
+`--permission-prompts host|none` (help text): `host` routes prompts to the SDK host or `--permission-prompt-tool`; `none` denies anything that would prompt.
+
+#### Agent SDK (TypeScript)
+
+`@anthropic-ai/claude-agent-sdk` "runs the Claude Code binary" ([overview](https://code.claude.com/docs/en/agent-sdk/overview.md)) and bundles a native binary per platform (`@anthropic-ai/claude-agent-sdk-linux-x64` and others as optional dependencies). `pathToClaudeCodeExecutable` points it at another binary; both the bundled binary and `~/.local/bin/claude` worked here (proof 5).
+
+- `query({ prompt, options })`: `prompt` is a string or `AsyncIterable<SDKUserMessage>`. The async iterable form keeps one session open for several turns (verified: two turns, `canUseTool` called once, answers `DENIED` then `PLUM`).
+- The returned `Query` exposes, per the [TypeScript reference](https://code.claude.com/docs/en/agent-sdk/typescript.md): `interrupt()` (streaming input only), `setPermissionMode()`, `setModel()`, `supportedModels()`, `supportedCommands()`, `mcpServerStatus()`, `setMcpServers()`, `getContextUsage()`, `streamInput()`, `close()` and others. Only the message stream and `canUseTool` were exercised here.
+- Options used or confirmed in the reference: `cwd`, `model`, `tools`, `allowedTools`, `disallowedTools`, `permissionMode`, `canUseTool`, `hooks` (in-process callbacks), `mcpServers`, `settingSources`, `persistSession`, `sessionId`, `resume`, `forkSession`, `continue`, `maxTurns`, `maxBudgetUsd`, `permissionPrompts`, `pathToClaudeCodeExecutable`.
+- Login: the SDK run here used the CLI's claude.ai login (`apiKeySource=none`) without an API key. The [overview](https://code.claude.com/docs/en/agent-sdk/overview.md) states: "Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK. Use the API key authentication methods described in the Quickstart instead." Whether this covers a self-hosted, open-source tool where each owner signs in to their own subscription on their own host is unknown; the docs do not address that case. The same question applies to `claude-agent-acp`, which is built on the SDK. Whether it applies differently to driving `claude -p` directly is also unknown.
+
+#### Authentication in a container
+
+From [Authentication](https://code.claude.com/docs/en/authentication.md) and [environment variables](https://code.claude.com/docs/en/env-vars.md), not tested in a container: `claude setup-token` prints a one-year OAuth token (Pro, Max, Team or Enterprise plan), not saved anywhere, to be set as `CLAUDE_CODE_OAUTH_TOKEN`; that token "can only make model requests". `CLAUDE_CONFIG_DIR` gives a directory its own settings, session history and login. `--bare` never reads OAuth credentials, the keychain or `CLAUDE_CODE_OAUTH_TOKEN`, so it cannot be used with a subscription login.
+
+#### Configuration isolation
+
+A session should not inherit the host user's hooks, plugins or MCP servers. The default `-p` run here emitted `hook_started` and `hook_response` events from the user's own settings. Verified with the subscription login (proof 6): `--setting-sources project` and `--safe-mode` each ran with zero hook events and answered `OK`. `--strict-mcp-config` keeps only servers from `--mcp-config`. `--restricted` (help text, not run) removes command-running tools unless `--tools` names them, ignores user, project and local settings, and refuses `bypassPermissions`. The SDK equivalent is `settingSources: []` (verified in proof 5).
+
+#### MCP
+
+Client: `--mcp-config <json files or strings>`, `--strict-mcp-config`, `claude mcp add|add-json|list|get|remove|login|logout`. Server: `claude mcp serve` ("Start the Claude Code MCP server", options `--debug`, `--verbose`; help only, not started). The SDK accepts `mcpServers`, including in-process servers.
+
+#### Hooks
+
+Configured under a `"hooks"` key in settings JSON (`~/.claude/settings.json`, `.claude/settings.json`, `.claude/settings.local.json`, managed policy, plugin `hooks/hooks.json`). The [hooks reference](https://code.claude.com/docs/en/hooks.md) lists 33 events, including `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PermissionDenied`, `PostToolUse`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `SessionEnd`. A command hook that exits 2 blocks the action; a `PreToolUse` hook can also return `hookSpecificOutput.permissionDecision = "deny"`. The headless page says a call that needs approval in `-p` is denied unless a `PermissionRequest` hook or `--permission-prompt-tool` approves it. `--include-hook-events` puts hook lifecycle events in the stream.
+
+#### Permission modes
+
+`--permission-mode` accepts `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan` (help text); `default`, missing from that list, was also accepted in the runs below. From [permission modes](https://code.claude.com/docs/en/permission-modes.md): `default` (shown as Manual; `manual` is an alias) runs reads without asking; `acceptEdits` also allows file edits and common filesystem commands; `plan` reads and plans; `auto` runs everything with background classifier checks; `dontAsk` denies anything that would prompt; `bypassPermissions` runs everything, "only in isolated containers and VMs". A `-p` run with no mode starts in Manual mode since v2.1.302. Here, in `default` mode, `Bash` running `ls` was allowed without a prompt and `touch` produced a `can_use_tool` request. `--allowedTools` and `--disallowedTools` take rules such as `Bash(git *)`; `--tools` limits the built-in set (`""` disables all). `--dangerously-skip-permissions` is "Recommended only for sandboxes with no internet access".
+
+#### Session resume
+
+`--session-id <uuid>` sets the ID; `-r, --resume <id or name>` resumes; `-c, --continue` takes the latest in the directory; `--fork-session` resumes under a new ID; `--no-session-persistence` (print mode only) saves nothing. Verified: a two-turn stream-json session with a chosen UUID, then a new `-p --resume <uuid>` process remembered the word (proof 3). Transcripts live under `$CLAUDE_CONFIG_DIR/projects/` ([sessions](https://code.claude.com/docs/en/agent-sdk/sessions.md)), so a container needs that directory on a volume to resume after it is recreated.
+
+#### Model selection
+
+`--model <alias or full name>` (help: aliases such as `opus` or `sonnet`); `--model haiku` resolved to `claude-haiku-5-5` here. `--fallback-model` takes a comma-separated list. `--effort low|medium|high|xhigh|max`. SDK: `model` option, `setModel()`, `supportedModels()`.
+
+#### ACP
+
+The official Claude Code docs have no mention of ACP or the Agent Client Protocol (checked against https://code.claude.com/docs/llms.txt). The [ACP agents list](https://agentclientprotocol.com/get-started/agents) shows "Claude Agent (via Zed's SDK adapter)", which is [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp): "implements an ACP agent by using the official Claude Agent SDK", authored by Zed Industries. The older `@zed-industries/claude-code-acp` and `@zed-industries/claude-agent-acp` packages are deprecated in favor of it. It was not installed or run here.
+
+### Codex
+
+Official docs, plus the [TypeScript SDK README](https://github.com/openai/codex/tree/main/sdk/typescript). On 2026-10-21 each `developers.openai.com/codex/...` URL below answered `308` with the `learn.chatgpt.com` location shown (checked with `curl -s -o /dev/null -w '%{http_code} %{redirect_url}'`). The text was read on the `learn.chatgpt.com` pages. Use the right-hand column if the redirect changes.
+
+| Page | developers.openai.com | Redirect target read |
+| --- | --- | --- |
+| CLI commands | https://developers.openai.com/codex/cli/reference | https://learn.chatgpt.com/docs/developer-commands?surface=cli |
+| Non-interactive mode | https://developers.openai.com/codex/noninteractive | https://learn.chatgpt.com/docs/non-interactive-mode |
+| App Server | https://developers.openai.com/codex/app-server | https://learn.chatgpt.com/docs/app-server |
+| Codex SDK | https://developers.openai.com/codex/sdk | https://learn.chatgpt.com/docs/codex-sdk |
+| Hooks | https://developers.openai.com/codex/hooks | https://learn.chatgpt.com/docs/hooks |
+| MCP | https://developers.openai.com/codex/mcp | https://learn.chatgpt.com/docs/extend/mcp?surface=cli |
+| Sandboxing | https://developers.openai.com/codex/sandboxing | https://learn.chatgpt.com/docs/sandboxing |
+| Approvals and security | https://developers.openai.com/codex/agent-approvals-security | https://learn.chatgpt.com/docs/agent-approvals-security |
+| Config reference | https://developers.openai.com/codex/config-reference | https://learn.chatgpt.com/docs/config-file/config-reference |
+| Authentication | https://developers.openai.com/codex/auth | https://learn.chatgpt.com/docs/auth |
+
+Which of these `developers.openai.com` paths OpenAI treats as canonical is unknown: every path tried under `/codex/`, including guessed ones such as `/codex/sandbox`, answered `308`, so a redirect does not prove that a page existed at that address.
+
+#### Interactive TUI
+
+`codex [PROMPT]` starts the TUI. In 0.163.0 the TUI uses a shared local app-server daemon (`--no-daemon`: "Run without the shared background server, even if it is already running"); `codex agents` browses its sessions, `codex --remote ws://...|unix://PATH` connects the TUI to a remote app server, and `codex queue --thread <id> --message <text>` queues a message for an existing session. None of these was run here.
+
+#### Non-interactive mode (`codex exec`)
+
+`codex exec [PROMPT]` runs one turn and exits; the prompt can come from stdin (`-`). `--json` prints JSONL events: `thread.started`, `turn.started`, `item.started`/`item.completed` (items such as `agent_message`, `command_execution`), `turn.completed` with usage, `turn.failed`, `error`. Other flags: `--ephemeral`, `--skip-git-repo-check`, `--ignore-user-config`, `--ignore-rules`, `--output-schema`, `-o/--output-last-message`, `-C/--cd`, `--add-dir`. The docs label `exec` "Stable" and say it runs in a read-only sandbox by default. There is no way to answer an approval in `exec`; v1 runs it with `approval_policy=never`.
+
+#### App server (JSON-RPC)
+
+`codex app-server` is labeled `[experimental]` in the help. The [App Server page](https://learn.chatgpt.com/docs/app-server) calls it "the interface Codex uses to power rich clients (for example, the Codex VS Code extension)" for "authentication, conversation history, approvals, and streamed agent events", says "If you are automating jobs or running Codex in CI, use the Codex SDK instead", and states "The app-server command and WebSocket transport are experimental and aren't supported for production workloads."
+
+- Transport: `--listen stdio://` (default) is newline-delimited JSON-RPC 2.0 with the `"jsonrpc":"2.0"` field omitted. `unix://`, `unix://PATH` and `ws://IP:PORT` also exist; WebSocket is "experimental and unsupported". Only stdio was used here.
+- Handshake: one `initialize` request (`clientInfo: {name, version}`), then an `initialized` notification.
+- Session calls used here: `model/list`, `thread/start` (`cwd`, `model`, `sandbox`, `approvalPolicy`, `ephemeral`, `developerInstructions` and others), `turn/start` (`threadId`, `input: [{type: "text", text}]`). Also in the schema and docs, not run: `thread/resume`, `thread/fork`, `thread/read`, `turn/steer` (adds input to the running turn), `turn/interrupt` (turn ends with status `interrupted`), `review/start`, `thread/compact/start`, `hooks/list`, `mcpServerStatus/list`.
+- Server requests to the client: `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/permissions/requestApproval`, `item/tool/requestUserInput`, `mcpServer/elicitation/request`, `item/tool/call` and others. Command decisions: `accept`, `acceptForSession`, `acceptWithExecpolicyAmendment`, `applyNetworkPolicyAmendment`, `decline`, `cancel` (from the generated schema).
+- Typed bindings for the installed version: `codex app-server generate-ts --out DIR` and `codex app-server generate-json-schema --out DIR` (the second was run; it wrote 39 files offline).
+
+Verified (proof 9 and 10): two turns on one thread in one process (`OK`, then `PLUM`), and an approval request answered with `decline`: the command item ended `declined` and no file was written. The approval request appeared with `approvalPolicy: "untrusted"`. With `"on-request"` and a read-only sandbox, the model ran the command without asking and the sandbox refused the write. The config reference says `untrusted` "is unsupported" as an approval policy, yet the 0.163.0 schema still accepts it. Which policy reliably routes every write to the client is therefore unresolved.
+
+Model finding: with the user's `~/.codex/config.toml` (`model = "gpt-6-sol"`), the app server started the thread and then every turn failed with `The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account.` `codex exec --ignore-user-config` worked because it skipped that file. Passing the default from `model/list` (`gpt-6-luna` on this account; the list was `gpt-6-luna* gpt-5.6-terra gpt-5.6-luna`) fixed it. An adapter should read `model/list` and pass `model` explicitly.
+
+#### Codex SDK
+
+`@openai/codex-sdk` 0.163.0 "wraps the `codex` CLI from `@openai/codex`. It spawns the CLI and exchanges JSONL events over stdin/stdout" (README). In the installed `dist/index.js`, each run spawns `codex exec --experimental-json`, adds `resume <threadId>` for a resumed thread, and maps options to flags (`--model`, `--sandbox`, `--cd`, `--add-dir`, `--config approval_policy=...`). API: `new Codex()`, `startThread()`, `resumeThread(id)`, `thread.run()`, `thread.runStreamed()`, an `AbortSignal` per turn. It has no callback for approvals and starts one process per turn. The [SDK page](https://learn.chatgpt.com/docs/codex-sdk) says the Python SDK "controls the local Codex app-server over JSON-RPC"; there is no TypeScript app-server client in this package.
+
+#### MCP
+
+Client: `codex mcp add|list|get|remove|login|logout`, servers stored in `~/.codex/config.toml` or a trusted project's `.codex/config.toml`. Server: `codex mcp-server` no longer exists. In 0.163.0 it is not in the command list (`codex mcp-server --help` prints the top-level help). The [CLI page](https://learn.chatgpt.com/docs/developer-commands) says "The codex mcp-server command and standalone codex-mcp-server binary have been removed. Use the Codex app server instead"; the [0.154.0 release](https://github.com/openai/codex/releases/tag/rust-v0.154.0) (2026-09-09) removed it.
+
+#### Hooks
+
+`codex features list` shows `hooks  stable  true`. Hooks live in `hooks.json` or inline `[hooks]` tables in `config.toml`, under `~/.codex/` or `<repo>/.codex/`. Events per the [hooks page](https://learn.chatgpt.com/docs/hooks): `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`, `Interrupt`, `SessionStart`, `SessionEnd`. "Non-managed hooks must be reviewed and trusted before they run"; `--dangerously-bypass-hook-trust` skips that check for one invocation. The app server lists them with `hooks/list` and emits `hook/started` and `hook/completed`.
+
+#### Sandbox and approvals
+
+`-s, --sandbox read-only|workspace-write|danger-full-access`; `-a, --ask-for-approval on-request|never` (the help lists only these two); `--approve-for-me` routes approvals through automatic review in `workspace-write`; `--dangerously-bypass-approvals-and-sandbox` is "Intended solely for running in environments that are externally sandboxed". The config reference gives `approval_policy on-request | never | { granular = {...} }`. Profiles are separate files, `$CODEX_HOME/<name>.config.toml`, selected with `-p/--profile`. v1 notes that the Codex Linux sandbox failed a socket mount in testing on the host; its behavior inside a Docker container is unknown.
+
+#### Session resume
+
+`codex resume [SESSION_ID] [PROMPT]` and `codex resume --last` for the TUI; `codex exec resume <id> [PROMPT]` and `--last` for non-interactive runs; `codex fork`, `archive`, `unarchive`, `delete`. Verified (proof 8): `codex exec --json` returned `thread_id`, then `codex exec resume --json <thread_id> ...` remembered the word. `--ephemeral` sessions cannot be resumed.
+
+#### Model selection
+
+`-m, --model`, `-c model="..."`, `--profile`; `codex debug models` renders the raw model catalog; app server `model/list` returns the models the logged-in account can use, with a default. See the model finding above.
+
+#### Authentication
+
+ChatGPT login or API key. The [auth page](https://learn.chatgpt.com/docs/auth) says "API keys are still the recommended default for automation". `codex login --with-api-key` and `--with-access-token` read from stdin; `--device-auth` exists. The app server has `account/login/start` (`apiKey`, `chatgpt`, `chatgptDeviceCode`). Credentials live under `CODEX_HOME` (`--ignore-user-config` still uses it for auth). Not tested in a container.
+
+#### ACP
+
+None of the Codex docs pages checked mentions ACP, and the CLI has no ACP command. The [ACP agents list](https://agentclientprotocol.com/get-started/agents) shows "Codex CLI (via ACP's adapter)", which is [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp): "a stdio ACP agent server. It starts the Codex App Server, translates ACP requests into Codex operations, and maps Codex events back into the client." It bundles `@openai/codex` (`CODEX_PATH` overrides it). The earlier Rust `zed-industries/codex-acp` is archived. Not installed or run here.
+
+### ACP status
+
+The [Agent Client Protocol](https://agentclientprotocol.com/get-started/introduction) standardizes communication between editors and coding agents over JSON-RPC on stdio. The protocol examples use `"protocolVersion": 1` ([initialization](https://agentclientprotocol.com/protocol/v1/initialization)); a v2 is marked Draft. The `@agentclientprotocol/sdk` 2.0.0 package is a library version that exports protocol v1 by default. Neither Claude Code nor Codex implements ACP natively. Both reach ACP through adapters maintained under the `agentclientprotocol` GitHub org, not by Anthropic or OpenAI, and each adapter sits on the interface recommended below (Agent SDK, app server). It adds a layer, a third-party release cycle and a mapping between protocols, with no driving capability that the direct interface lacks. ACP could become useful when Cleared adds harnesses that only speak ACP; that is not verified for any harness here.
+
+### Recommendation for the v2 session adapter
+
+**Claude Code: the Agent SDK in streaming input mode.** One `query()` per live session, fed by an async iterable that Cleared pushes user turns into. Pin `@anthropic-ai/claude-agent-sdk` to the Claude Code version installed in the session image and set `pathToClaudeCodeExecutable` to that `claude`. Use `settingSources: []` (or `['project']`), explicit `tools`, `allowedTools` and `disallowedTools` from `[permissions.<role>]`, `permissionMode`, `canUseTool` mapped to Cleared's question and approval flow, an explicit `model`, and a Cleared-chosen `sessionId` with `resume` after a restart. Keep the config directory on a volume.
+
+Why: it is the only documented, typed interface that gives multi-turn input, in-process permission answers, `interrupt()`, `setModel()` and `setPermissionMode()` in one session, and the Node core can import it directly. It worked here on the subscription login with both the bundled and the installed binary. The raw `claude -p --input-format stream-json` channel does the same (verified) but its control envelope is not documented as public, so it is the fallback, not the base.
+
+Open question for the owner before building: the SDK overview's sentence on claude.ai login in third-party products (quoted above). If it rules out subscription login for Cleared, the same SDK runs with an API key, which changes the cost model. Raw `-p` driving is not a documented way around it; how the policy treats it is unknown.
+
+**Codex: the app server over stdio.** One `codex app-server --listen stdio://` process per session container, driven by JSON-RPC: `initialize`, `model/list`, `thread/start` with explicit `model`, `cwd`, `sandbox` and `approvalPolicy`, then `turn/start` per user turn, `turn/steer` and `turn/interrupt` from Cleared, approval requests answered from Cleared's queue, `thread/resume` after a restart. Generate the TypeScript types with `codex app-server generate-ts` at the pinned version and commit them with the adapter.
+
+Why: it is the only Codex mode with several turns in one process, approval requests the driver can answer, steering and interrupt. `codex exec` and the TypeScript SDK (which spawns `exec` per turn) cannot answer approvals. `codex-acp` uses the app server itself. Costs: it is labeled experimental and "not supported for production workloads", so pin the CLI version in the image, run a contract test (two turns, one declined approval, one interrupt) before each upgrade, and keep `codex exec --json` plus `exec resume` (stable) as the fallback for roles that need no approvals. The same App Server page says "If you are automating jobs or running Codex in CI, use the Codex SDK instead"; Cleared v2 sessions are interactive and need approvals, which the TypeScript SDK cannot answer, so this advice does not fit them.
+
+**Decision gate (blocks adopting the app server for any role that needs approvals):** do not build approval handling on the app server until a test on the pinned version shows which `approvalPolicy` (with which `sandbox`) sends every command and file write to the client as a server request. Evidence so far: `untrusted` produced the request (proof 10) but the config reference calls it unsupported; `on-request` with `read-only` produced no request and the sandbox refused the write. Until the gate passes, Codex sessions run only roles that need no approvals (`approvalPolicy: "never"` with a `read-only` or `workspace-write` sandbox), and approval-dependent roles go to Claude Code. Owner: the v2 adapter author. Close it by recording the result here.
+
+Not tested and needed before the adapter ships: either mode inside a Docker container labeled `cleared.dev=v2`, container login (`CLAUDE_CODE_OAUTH_TOKEN` or a mounted `CLAUDE_CONFIG_DIR`; Codex `CODEX_HOME`), an allow decision, interrupt, and `thread/resume` on the app server.
+
+### Proof
+
+Commands as run on 2026-10-21 (the resume step of proof 3, and proofs 8, 9 and 10, were run again the same day for review round 1, to save raw output). `$T` is a temporary directory under the session scratchpad. JSON lines are raw output with these edits only: UUIDs, tool IDs and message IDs are replaced with `<id>`, the scratchpad path is shown as `$T` and the home directory as `~`, and long parts are cut, shown as `...`; the text on each side of a `...` is copied unchanged. Lines starting with `>>` (sent) and `<<` (received) are printed by the probe scripts; the script for proofs 9 and 10 is inlined there, and the scripts and their output files stayed in the scratchpad.
+
+**1. Versions and login**
+
+```console
+$ claude --version
+2.1.306 (Claude Code)
+$ codex --version
+codex-cli 0.163.0
+$ claude auth status   # two of its fields
+  "loggedIn": true,
+  "authMethod": "claude.ai",
+$ codex login status
+Logged in using ChatGPT
+```
+
+**2. Claude print mode with stream-json output**
+
+```console
+$ cd $T && claude -p --model haiku --tools "" --no-session-persistence --strict-mcp-config \
+    --max-budget-usd 0.2 --output-format stream-json --verbose 'Reply with the single word OK.' < /dev/null
+{"type":"system","subtype":"hook_started","hook_id":"<id>","hook_name":"SessionStart:startup","hook_event":"SessionStart","uuid":"<id>","session_id":"<id>"}
+{"type":"system","subtype":"hook_response","hook_id":"<id>","hook_name":"SessionStart:startup","hook_event":"SessionStart",...,"exit_code":0,"outcome":"success"...
+{"type":"system","subtype":"init","cwd":"$T","session_id":"<id>","tools":[],"mcp_servers":[],"model":"claude-haiku-5-5","permissionMode":"default",...,"apiKeySource":"none","claude_code_version":"2.1.306",...
+{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"content":[{"type":"text","text":"OK"}],...
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",...,"rateLimitType":"five_hour",...
+{"duration_api_ms":1409,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"OK",...,"type":"result",...
+exit=0
+```
+
+The `result` line starts with `duration_api_ms`; its `"type":"result"` field comes after `result`.
+
+**3. Claude two-turn session on stdin, then resume in a new process**
+
+```console
+$ SID=$(cat /proc/sys/kernel/random/uuid)
+$ { echo '{"type":"user","message":{"role":"user","content":"Remember the word PLUM. Reply with OK only."}}'; sleep 15
+    echo '{"type":"user","message":{"role":"user","content":"Which word did I ask you to remember? One word."}}'; sleep 15; } \
+  | claude -p --model haiku --tools "" --strict-mcp-config --max-budget-usd 0.2 --session-id "$SID" \
+    --input-format stream-json --output-format stream-json --verbose > live.jsonl
+$ grep -E '"type":"(assistant|result)"' live.jsonl
+{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"content":[{"type":"text","text":"OK"}],...
+{"duration_api_ms":1360,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"OK",...
+{"type":"assistant","message":{"model":"claude-haiku-5-5",...,"content":[{"type":"text","text":"PLUM"}],...
+{"duration_api_ms":3532,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"PLUM",...
+$ claude -p --model haiku --tools "" --strict-mcp-config --max-budget-usd 0.2 --resume "$SID" \
+    --output-format json 'Repeat the word you remembered. One word.' < /dev/null
+{"duration_api_ms":7389,"stop_reason":"end_turn","session_id":"<id>",...,"is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"PLUM",...
+```
+
+All three `session_id` values are `$SID`.
+
+**4. Claude permission request over stdio, answered with a deny**
+
+A Node script spawned the command below, wrote one user line asking for `touch probe-marker.txt`, and answered the request. The `control_request` line shown is from a run with the same flags and a similar prompt whose stdin carried only the prompt; the script printed its own summary lines.
+
+```console
+$ claude -p --model haiku --tools Bash --strict-mcp-config --no-session-persistence --max-budget-usd 0.2 \
+    --permission-mode default --permission-prompt-tool stdio \
+    --input-format stream-json --output-format stream-json --verbose
+# stdout:
+{"type":"control_request","request_id":"<id>","request":{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"touch probe-marker.txt","description":"Create empty probe-marker.txt file in working directory"},...,"permission_suggestions":[...
+# stdin, written by the script (request_id copied from the request):
+{"type":"control_response","response":{"subtype":"success","request_id":"<id>","response":{"behavior":"deny","message":"Denied by the probe."}}}
+# then, as printed by the script:
+<< tool_result is_error=true "Denied by the probe."
+<< result success "DENIED"
+$ ls probe-marker.txt
+ls: cannot access 'probe-marker.txt': No such file or directory
+```
+
+In an earlier run of the same command with `ls` instead of `touch`, `ls` ran without any `control_request`.
+
+**5. Claude Agent SDK, streaming input, two turns, `canUseTool` deny**
+
+`cc-sdk.mjs`, run with `@anthropic-ai/claude-agent-sdk` 0.3.306 installed in the scratchpad:
+
+```js
+import { query } from '@anthropic-ai/claude-agent-sdk';
+const cwd = process.argv[2];
+const turns = ['Use the Bash tool to run exactly: touch probe-marker.txt . If it is denied, reply DENIED and do not retry.', 'Remember the word PLUM and reply with that word only.'];
+let release; const gate = () => new Promise((r) => (release = r));
+async function* input() {
+  for (const text of turns) { const wait = gate(); yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null }; await wait; }
+}
+const q = query({ prompt: input(), options: {
+  cwd, model: 'haiku', tools: ['Bash'], settingSources: [], persistSession: false, maxBudgetUsd: 0.3,
+  pathToClaudeCodeExecutable: process.env.CLAUDE_BIN || undefined,
+  canUseTool: async (tool, input) => { console.log('<< canUseTool', tool, JSON.stringify(input.command)); return { behavior: 'deny', message: 'Denied by the probe.' }; },
+} });
+for await (const m of q) {
+  if (m.type === 'system' && m.subtype === 'init') console.log('<< init model=' + m.model, 'claude_code_version=' + m.claude_code_version, 'apiKeySource=' + m.apiKeySource);
+  if (m.type === 'result') { console.log('<< result', m.subtype, JSON.stringify(m.result)); release(); }
+}
+```
+
+```console
+$ node cc-sdk.mjs $T                      # bundled binary
+<< init model=claude-haiku-5-5 claude_code_version=2.1.306 apiKeySource=none
+<< canUseTool Bash "touch probe-marker.txt"
+<< result success "DENIED"
+<< init model=claude-haiku-5-5 claude_code_version=2.1.306 apiKeySource=none
+<< result success "PLUM"
+$ CLAUDE_BIN=$(readlink -f ~/.local/bin/claude) node cc-sdk.mjs $T   # pathToClaudeCodeExecutable
+(same five lines)
+```
+
+**6. Claude without the user's hooks**
+
+```console
+$ claude -p --setting-sources project --model haiku --tools "" --no-session-persistence --strict-mcp-config \
+    --max-budget-usd 0.2 --output-format stream-json --verbose 'Reply with the single word OK.'
+$ claude -p --safe-mode ... (same flags)
+```
+
+For each run, the script counted `hook_started` lines and read `result` and the init `apiKeySource`. Both runs: `hooks=0 result=OK auth=none`. The default run in proof 2 had one `hook_started`.
+
+**7. Codex exec with JSON events**
+
+```console
+$ cd $T && codex exec --json --ephemeral --skip-git-repo-check --ignore-user-config --sandbox read-only \
+    'Reply with the single word OK.' < /dev/null
+{"type":"thread.started","thread_id":"<id>"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}
+{"type":"turn.completed","usage":{"input_tokens":14006,"cached_input_tokens":11520,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
+exit=0
+```
+
+stderr held one line: `Reading additional input from stdin...`.
+
+**8. Codex exec resume**
+
+```console
+$ codex exec --json --skip-git-repo-check --ignore-user-config --sandbox read-only \
+    'Remember the word PLUM. Reply with OK only.' < /dev/null > r8a.jsonl
+$ TID=$(jq -r 'select(.type=="thread.started")|.thread_id' r8a.jsonl)
+$ codex exec resume --json --skip-git-repo-check --ignore-user-config "$TID" \
+    'Which word did I ask you to remember? One word.' < /dev/null > r8b.jsonl
+$ cat r8a.jsonl
+{"type":"thread.started","thread_id":"<id>"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}
+{"type":"turn.completed","usage":{"input_tokens":14010,"cached_input_tokens":11520,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
+$ cat r8b.jsonl
+{"type":"thread.started","thread_id":"<id>"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"PLUM"}}
+{"type":"turn.completed","usage":{"input_tokens":28043,"cached_input_tokens":23040,"cache_write_input_tokens":0,"output_tokens":11,"reasoning_output_tokens":0}}
+```
+
+The `thread_id` in `r8b.jsonl` equals `$TID`.
+
+**9. Codex app server over stdio, two turns on one thread**
+
+`appserver-min.mjs`, the whole probe used for proofs 9 and 10. It declines every approval request and prints each line it sends and each response, server request and selected notification it receives:
+
+```js
+// node appserver-min.mjs <cwd> <approvalPolicy> <prompt>...  Declines every approval request.
+import { spawn } from 'node:child_process';
+import readline from 'node:readline';
+const [cwd, approvalPolicy, ...prompts] = process.argv.slice(2);
+const cx = spawn('codex', ['app-server', '--listen', 'stdio://'], { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+const show = new Set(['thread/started', 'turn/started', 'item/completed', 'turn/completed', 'error']);
+let id = 0; const waiting = new Map(); let turnDone;
+const out = (msg) => { const line = JSON.stringify(msg); console.log('>> ' + line); cx.stdin.write(line + '\n'); };
+const call = (method, params) => new Promise((resolve) => { waiting.set(++id, resolve); out({ id, method, params }); });
+readline.createInterface({ input: cx.stdout }).on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.id !== undefined && !msg.method) { console.log('<< ' + line); waiting.get(msg.id)(msg.result); return; }
+  if (msg.id !== undefined) { console.log('<< ' + line); out({ id: msg.id, result: { decision: 'decline' } }); return; }
+  if (show.has(msg.method)) console.log('<< ' + line);
+  if (msg.method === 'turn/completed') turnDone();
+});
+await call('initialize', { clientInfo: { name: 'cleared-probe', version: '0.0.0' } });
+out({ method: 'initialized' });
+const { data } = await call('model/list', {});
+const model = data.find((m) => m.isDefault).id;
+const { thread } = await call('thread/start', { cwd, model, sandbox: 'read-only', approvalPolicy, ephemeral: true });
+for (const text of prompts) {
+  const done = new Promise((resolve) => (turnDone = resolve));
+  await call('turn/start', { threadId: thread.id, input: [{ type: 'text', text }] });
+  await done;
+}
+cx.kill();
+```
+
+```console
+$ node appserver-min.mjs $T never 'Remember the word PLUM. Reply with OK only.' 'Which word did I ask you to remember? One word.'
+>> {"id":1,"method":"initialize","params":{"clientInfo":{"name":"cleared-probe","version":"0.0.0"}}}
+<< {"id":1,"result":{"userAgent":"cleared-probe/0.163.0 (Debian 13.0.0; x86_64) ...","codexHome":"~/.codex","platformFamily":"unix","platformOs":"linux"}}
+>> {"method":"initialized"}
+>> {"id":2,"method":"model/list","params":{}}
+<< {"id":2,"result":{"data":[{"id":"gpt-6-luna","model":"gpt-6-luna",...,"displayName":"GPT-6-Luna",...
+>> {"id":3,"method":"thread/start","params":{"cwd":"$T","model":"gpt-6-luna","sandbox":"read-only","approvalPolicy":"never","ephemeral":true}}
+<< {"id":3,"result":{"thread":{"id":"<id>","environments":[{"environmentId":"local","cwd":"$T",...
+>> {"id":4,"method":"turn/start","params":{"threadId":"<id>","input":[{"type":"text","text":"Remember the word PLUM. Reply with OK only."}]}}
+<< {"method":"thread/started","params":{"thread":{"id":"<id>",...
+<< {"id":4,"result":{"turn":{"id":"<id>","rootTurnId":"<id>","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":null,"completedAt":null,"durationMs":null}}}
+<< {"method":"turn/started","params":{"threadId":"<id>","turn":{"id":"<id>",...,"status":"inProgress",...
+<< {"method":"item/completed","params":{"item":{"type":"userMessage","id":"<id>","clientId":null,"content":[{"type":"text","text":"Remember the word PLUM. Reply with OK only.","text_elements":[]}]},...
+<< {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"<id>","text":"OK","phase":"final_answer",...
+<< {"method":"turn/completed","params":{"threadId":"<id>","turn":{...,"status":"completed","error":null,...
+>> {"id":5,"method":"turn/start","params":{"threadId":"<id>","input":[{"type":"text","text":"Which word did I ask you to remember? One word."}]}}
+<< {"id":5,"result":{"turn":{"id":"<id>",...,"status":"inProgress",...
+<< {"method":"turn/started",...
+<< {"method":"item/completed","params":{"item":{"type":"userMessage",...
+<< {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"<id>","text":"PLUM","phase":"final_answer",...
+<< {"method":"turn/completed","params":{"threadId":"<id>","turn":{...,"status":"completed","error":null,...
+```
+
+An earlier probe that sent `thread/start` without `model` (so the user config's `gpt-6-sol` applied) received, for each turn, an `error` notification with `The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account.` and a `turn/completed` with status `failed`.
+
+**10. Codex app server approval request, answered with decline**
+
+```console
+$ node appserver-min.mjs $T untrusted 'Run the shell command: touch probe-marker.txt . If it is declined, reply DECLINED and do not retry.'
+(initialize, initialized and model/list as in proof 9)
+>> {"id":3,"method":"thread/start","params":{"cwd":"$T","model":"gpt-6-luna","sandbox":"read-only","approvalPolicy":"untrusted","ephemeral":true}}
+>> {"id":4,"method":"turn/start","params":{"threadId":"<id>","input":[{"type":"text","text":"Run the shell command: touch probe-marker.txt . If it is declined, reply DECLINED and do not retry."}]}}
+(thread/started, turn/started, the user message and one commentary agentMessage)
+<< {"method":"item/commandExecution/requestApproval","id":0,"params":{"kind":"command","threadId":"<id>","turnId":"<id>","itemId":"exec-<id>",...,"environmentId":"local","command":"/bin/bash -lc 'touch probe-marker.txt'","cwd":"$T","commandActions":[{"type":"unknown","command":"touch probe-marker.txt"}],"proposedExecpolicyAmendment":["touch","probe-marker.txt"],"availableDecisions":["accept",{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","probe-marker.txt"]}},"cancel"]}}
+>> {"id":0,"result":{"decision":"decline"}}
+<< {"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec-<id>",...,"status":"declined",...
+<< {"method":"item/completed","params":{"item":{"type":"agentMessage","id":"<id>","text":"DECLINED","phase":"final_answer",...
+<< {"method":"turn/completed","params":{"threadId":"<id>","turn":{...,"status":"completed","error":null,...
+$ ls probe-marker.txt
+ls: cannot access 'probe-marker.txt': No such file or directory
+```
+
+The request's `availableDecisions` listed `accept`, `acceptWithExecpolicyAmendment` and `cancel`, not `decline`; the server still accepted `decline` (a value of the schema's `CommandExecutionApprovalDecision`) and marked the item `declined`. The request `id` was `0` while the client's own IDs started at 1: client and server number their requests separately. An earlier run of the same prompt with `approvalPolicy: "on-request"` got no server request; its final message was `The command failed because the filesystem is read-only.`
+
+**11. Help excerpts for the flags the recommendation relies on**
+
+Trimmed from the output of the commands shown, 2026-10-21.
+
+```console
+$ claude --help
+  -p, --print                           Print response and exit (useful for
+                                        pipes). ...
+  --input-format <format>               Input format (only works with --print):
+                                        "text" (default), or "stream-json"
+                                        (realtime streaming input) (choices:
+                                        "text", "stream-json")
+  --output-format <format>              Output format (only works with --print):
+                                        "text" (default), "json" (single
+                                        result), or "stream-json" (realtime
+                                        streaming) (choices: "text", "json",
+                                        "stream-json")
+  --permission-mode <mode>              Permission mode to use for the session
+                                        (choices: "acceptEdits", "auto",
+                                        "bypassPermissions", "manual",
+                                        "dontAsk", "plan")
+  --permission-prompts <target>         Who answers permission prompts with
+                                        --print: "host" (the SDK host or
+                                        --permission-prompt-tool) or "none"
+                                        (nobody: anything that would prompt is
+                                        denied automatically; the permission
+                                        mode still decides everything else)
+                                        (choices: "host", "none", default:
+                                        "host")
+  --session-id <uuid>                   Use a specific session ID for the
+                                        conversation (must be a valid UUID)
+  -r, --resume [value]                  Resume a conversation by session ID or
+                                        name, or open interactive picker with
+                                        optional search term
+  --setting-sources <sources>           Comma-separated list of setting sources
+                                        to load (user, project, local).
+  --safe-mode                           Start with all customizations
+                                        (CLAUDE.md, skills, installed plugins,
+                                        hooks, MCP servers, custom commands and
+                                        agents, output styles, workflows, custom
+                                        themes, keybindings, and more) disabled
+                                        ... Admin-managed (policy)
+                                        settings still apply. Auth, model
+                                        selection, built-in tools and plugins,
+                                        and permissions work normally. ...
+  --strict-mcp-config                   Only use MCP servers from --mcp-config,
+                                        ignoring all other MCP configurations
+  --no-session-persistence              Disable session persistence - sessions
+                                        will not be saved to disk and cannot be
+                                        resumed (only works with --print)
+$ codex --help
+  exec              Run Codex non-interactively [aliases: e]
+  app-server        [experimental] Run the app server or related tooling
+  queue             Queue a message for an existing session
+  -s, --sandbox <SANDBOX_MODE>
+          Select the sandbox policy to use when executing model-generated shell commands
+          [possible values: read-only, workspace-write, danger-full-access]
+      --approve-for-me
+          Route approval requests through automatic review using the workspace-write sandbox
+  -a, --ask-for-approval <APPROVAL_POLICY>
+          Configure when the model requires human approval before executing a command
+          Possible values:
+          - on-request: The model decides when to ask the user for approval
+          - never:      Never ask for user approval Execution failures are immediately returned to
+            the model
+$ codex app-server --help
+      --listen <URL>
+          Transport endpoint URL. Supported values: `stdio://` (default), `unix://`, `unix://PATH`,
+          `ws://IP:PORT`, `off`
+          [default: stdio://]
+$ codex app-server generate-ts --help
+[experimental] Generate TypeScript bindings for the app server protocol
+Usage: codex app-server generate-ts [OPTIONS] --out <DIR>
+$ codex exec --help
+      --ephemeral
+          Run without persisting session files to disk
+      --ignore-user-config
+          Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`
+      --json
+          Print events to stdout as JSONL
+$ codex exec resume --help
+Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
+$ codex queue --help
+Usage: codex queue [OPTIONS] --thread <THREAD> --message <TEXT>
+```
+
+Also run without pasting: `claude mcp --help`, `claude mcp serve --help`, `claude auth --help`, `codex resume --help`, `codex mcp --help`, `codex login --help`, `codex features list`, `codex debug --help`. `codex mcp-server --help` and `codex proto --help` print the top-level help: neither is a subcommand in 0.163.0.
+
+## v1 adapter contract
+
+This is the contract implemented today by `adapters/claude.sh` and `adapters/codex.sh`, which run one `run` per prompt.
+
 Ticket trackers use a separate contract documented in [Ticket trackers](trackers.md). A model adapter never calls a provider API directly; it uses `tracker.sh` for ticket actions.
 
 An adapter is an executable `adapters/<name>.sh`. Routing uses `[models] alias = adapter:model-id`; dispatch scripts name neither provider nor model. `lib/contract.sh` contains the shared report helpers. An adapter can be added without changing the dispatcher when it implements the commands below and declares its model IDs in the project configuration.
@@ -16,7 +547,7 @@ An adapter is an executable `adapters/<name>.sh`. Routing uses `[models] alias =
 
 A model used for `review` must differ from the one recorded as the pull request's author. A review runs read-only, has its own worktree, and should not run tests or edit the change. The CLI's tool permissions are mapped from `[permissions.<role>]`; the host and any containers still need their own isolation. See [Security](security.md).
 
-## Existing adapters
+### Existing adapters
 
 `adapters/claude.sh` invokes Claude Code on the host. `adapters/codex.sh` invokes Codex on the host by default, in the same lane worktree. Both work in the same lane with its linked dependencies, host-installed browser and test database, heavy-command gate, and capture directory. Provider-specific browser tools still depend on each CLI configuration. A host Codex session holds the heavy-command slot (the door of `when-free.sh`, [`[lanes] heavy_lock`](configuration.md#lanes)) for its entire run, from the service's process, and passes its path to the CLI as `CLEARED_HEAVY_SLOT`, also through `sudo` under `agent_user`, so that its own heavy commands do not wait on it. It commits its own changes, except under `agent_user`, where Git's control files are read-only to it. In every mode, what a session of a pushed role leaves uncommitted in its lane is committed by the dispatcher after it (see [Security](security.md#permissions-and-host-access)). `task_tools` and `commits` apply only to the container runner. Set `[adapter.codex] runner = container` to use the project's executable named by `task_script`.
 
@@ -36,7 +567,7 @@ The CLIs enforce different things. Claude receives an allowed command-prefix lis
 
 The optional container task script receives `<worktree> <prompt-file> <model> [--tools]`. It must run Codex in the environment chosen by the project, leave file changes in that worktree, print the model's answer on stdout, and print usage records such as `token usage <json>` and `rate limits <json>` on stderr when available. Exit 0 means success, 2 means no session started, and 3 means a provider guard refusal. With `task_tools = yes`, list the script in `[lanes] heavy_commands` so it waits for the host's heavy-command gate. The dispatcher commits returned changes under the model's `.commit-message` or a fallback title, whatever `commits` says; a script that commits by itself keeps its commits as it made them. The container is project-owned; Cleared does not embed its recipe or promise that it follows host permissions.
 
-## Add an adapter
+### Add an adapter
 
 1. Copy the command structure of an existing adapter and source `lib/contract.sh` for `run` reports and usage.
 2. Make `list-models` report only IDs that can start now. Make `probe` start the CLI with the same function as `run`, so that it proves what a lane would meet. Keep `version` fast and return null for unavailable metadata.
