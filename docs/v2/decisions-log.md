@@ -162,3 +162,11 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - To run this agent on Haiku, change line 5 of that file to `model: haiku`. This is not tested: the lane did not spawn the agent after the change, so whether the next spawn uses Haiku is unknown.
 - The `Agent` tool also takes a `model` argument per call. The spawns in the global CLAUDE.md do not pass one, so the frontmatter decides.
 - Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j1-ci-housekeeping`.
+
+## 2026-10-21: Fable 5.1 used once to plan milestone 1
+
+**Decision.** Fable 5.1 was used once, on 2026-10-21, to plan milestone 1: the split into lanes and waves, the session contract, the event subset, the policy rules and the choice of the Claude Code driving mode. Reason: strong planning, the case the "model choice per lane" entry allows. It wrote no code and reviewed nothing.
+
+**Consequences.**
+- The plan is [milestone-1-plan.md](milestone-1-plan.md). Its lanes are authored by Opus 5.5 or Haiku 5.5 and reviewed by Sonnet 5.5, as the model rule says.
+- The decisions the plan takes (its section 2) are copied into this log, with their consequences, when the lane that implements each one lands.
