@@ -34,17 +34,21 @@ function requestPath(target: string): string | undefined {
   }
 }
 
-class TooLarge extends Error {}
-
-async function readBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new TooLarge();
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString('utf8');
+// The body as text, or undefined when it is over MAX_BODY_BYTES. The rest of
+// a body over the limit is still read, and dropped: the answer then goes out
+// after the whole request, so an uploading client neither stalls on a
+// server that stopped reading nor gets its connection reset before the answer.
+function readBody(request: IncomingMessage): Promise<string | undefined> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= MAX_BODY_BYTES) chunks.push(chunk);
+    });
+    request.on('end', () => resolve(size > MAX_BODY_BYTES ? undefined : Buffer.concat(chunks).toString('utf8')));
+    request.on('error', reject);
+  });
 }
 
 type Parsed = { readonly ok: true; readonly name: string; readonly message: string } | { readonly ok: false; readonly form: FormState };
@@ -72,12 +76,8 @@ async function addEntry(store: Store, request: IncomingMessage, response: Server
     sendText(response, 415, 'Send the form as application/x-www-form-urlencoded.');
     return;
   }
-  let body: string;
-  try {
-    body = await readBody(request);
-  } catch (error) {
-    if (!(error instanceof TooLarge)) throw error;
-    request.resume();
+  const body = await readBody(request);
+  if (body === undefined) {
     sendText(response, 413, `The form is larger than ${MAX_BODY_BYTES} bytes.`);
     return;
   }
