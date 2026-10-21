@@ -110,6 +110,7 @@ function family(model: string): string {
 const pad = (n: number) => String(n).padStart(2, '0');
 const clock = (iso: string) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const short = (head: string) => head.slice(0, 7);
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // ---------------------------------------------------------------- gestures
 
@@ -298,6 +299,14 @@ ${item.announcement ? `<p class="announce">${esc(item.announcement)}</p>` : ''}
 <dl class="facts">${item.sessions.length > 0 ? fact(t('facts_sessions'), esc(sessionsLine(item, t))) : ''}${fact(t('facts_change'), change)}</dl>`;
 }
 
+// Who asks, and for how long its session has been paused; a handled request pauses nothing.
+function pausedLine(item: InboxItem, session: SessionSummary, now: Date, t: Translate): string {
+  const model = family(session.model);
+  if (item.state === 'handled') return t(`session_${session.role}_plain`, { model });
+  const minutes = (now.getTime() - Date.parse(item.since)) / 60_000;
+  return minutes < 1 ? t(`session_${session.role}_now`, { model }) : t(`session_${session.role}`, { model, time: elapsed(item.since, now, t) });
+}
+
 function permissionBody(item: PermissionItem, view: InboxView, t: Translate): string {
   const input = item.input;
   const verb = input.kind === 'think' || input.kind === 'switch_mode' || input.kind === 'other' ? 'other' : input.kind;
@@ -306,8 +315,8 @@ function permissionBody(item: PermissionItem, view: InboxView, t: Translate): st
   const title = ticketTitle(view, item.ticket);
   const facts = [
     input.kind === 'execute' && input.description ? fact(t('facts_what_for'), esc(input.description)) : '',
-    item.suggestion.decision === 'ask' && item.suggestion.reason ? fact(t('facts_why'), esc(item.suggestion.reason)) : '',
-    session ? fact(t('facts_session'), esc(t(`session_${session.role}`, { model: family(session.model), time: elapsed(item.since, view.now, t) }))) : '',
+    item.suggestion.decision === 'ask' && item.suggestion.reason ? fact(t('facts_why'), esc(sentence(item.suggestion.reason))) : '',
+    session ? fact(t('facts_session'), esc(pausedLine(item, session, view.now, t))) : '',
   ].join('');
   return `${eyebrow(item, 'eyebrow_permission', session ?? { id: item.sessionId } as SessionSummary, 'open_session', t)}
 <h2 class="d-title">${esc(t(`wants_${verb}`, { tool: item.tool }))}${shown ? ` ${code(shown)}` : ''}</h2>
@@ -522,6 +531,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       save(local);
       draw();
       context.inboxChanged();
+      void load();                                   // the list shows the item handled at once
     } catch (error) {
       const { key, settled } = failure(error, gesture);
       if (settled) local.set(item.id, { kind: 'settled' });
@@ -531,6 +541,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       save(local);
       draw();
       say(key);
+      if (settled) context.inboxChanged();
       if (settled || key === 'approve_conflict') void load();
     }
   };

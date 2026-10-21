@@ -213,6 +213,18 @@ test('what the data says is escaped, never markup', () => {
   }
 });
 
+test('the session line says how long it has been paused, and a handled request is not said to pause anything', () => {
+  const fixture = inboxFixture(FIXTURE_NOW);
+  const permission = fixture.items[1] as Extract<InboxItem, { kind: 'permission' }>;
+  const fresh = { ...permission, since: new Date(FIXTURE_NOW.getTime() - 20_000).toISOString(), suggestion: { decision: 'ask' as const, rule: 'shell.compound', reason: 'more than one simple command' } };
+  const shown = text(viewOf({ items: [fresh], selected: fresh.id }));
+  assert.ok(shown.includes('Author · Opus, paused just now'));
+  assert.ok(shown.includes('More than one simple command'), 'the policy\'s reason reads as a sentence');
+  const handled = text(viewOf({ items: [{ ...permission, state: 'handled' }], selected: permission.id }));
+  assert.ok(handled.includes('Author · Opus'));
+  assert.ok(!handled.some((line) => line.includes('paused')));
+});
+
 test('a session the list does not know still shows its request', () => {
   const shown = text(viewOf({ sessions: [], selected: idOf('permission'), open: true }));
   assert.ok(shown.includes('npm install date-fns'));
