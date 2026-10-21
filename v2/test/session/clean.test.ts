@@ -87,6 +87,30 @@ test('a result whose call is unknown keeps nothing of its content', () => {
   const result = c.clean(event({ type: 'TOOL_CALL_RESULT', messageId: 'm1', toolCallId: 'unknown', role: 'tool', content: 'secret file body' }));
   assert.ok(result && result.type === 'TOOL_CALL_RESULT');
   assert.deepEqual(readToolOutput(result), { kind: 'other', ok: true });
+  // Nor in Cleared's own form: without the call's ARGS, no output and no error stay.
+  const shaped = c.clean(toolResult('m2', 'unknown-2', { kind: 'execute', output: 'secret file body', cut: 0, isError: true }));
+  assert.ok(shaped && shaped.type === 'TOOL_CALL_RESULT');
+  assert.deepEqual(readToolOutput(shaped), { kind: 'execute', output: '', cut: 0, isError: true });
+  const failed = c.clean(toolResult('m3', 'unknown-3', { kind: 'edit', ok: false, error: 'secret file body' }));
+  assert.ok(failed && failed.type === 'TOOL_CALL_RESULT');
+  assert.deepEqual(readToolOutput(failed), { kind: 'edit', ok: false });
+  const read = c.clean(toolResult('m4', 'unknown-4', { kind: 'read', path: 'src/a.ts', bytes: 12 }));
+  assert.ok(read && read.type === 'TOOL_CALL_RESULT');
+  assert.deepEqual(readToolOutput(read), { kind: 'read', path: 'src/a.ts', bytes: 12 });
+});
+
+test('fixture events lose the token, the key, the environment variable, the secret value and the service path', () => {
+  const c = cleaner();
+  c.clean(toolArgs('t9', { kind: 'execute', command: 'npm test' }));
+  const output = [`token ${apiKey}`, privateKey, envLine, `forge ${forgeValue}`, `state in ${servicePath}/ledger.db`].join('\n');
+  const events = [
+    c.clean(event({ type: 'TOOL_CALL_RESULT', messageId: 'm9', toolCallId: 't9', role: 'tool', content: output })),
+    c.clean(event({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'a9', delta: output })),
+    c.clean(event({ type: 'RUN_ERROR', message: output })),
+  ];
+  const stored = JSON.stringify(events);
+  for (const value of [apiKey, 'PRIVATE KEY', 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmU', 'ghp_', forgeValue, servicePath]) assert.ok(!stored.includes(value), `${value} is still in a stored event`);
+  for (const marker of ['API key', 'private key', 'assigned secret', 'secret', 'service path']) assert.ok(stored.includes(`[removed: ${marker}]`), marker);
 });
 
 test('a command keeps its command, description and output, cleaned; an edit keeps its counts', () => {

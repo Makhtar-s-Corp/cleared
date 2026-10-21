@@ -124,6 +124,8 @@ test('the base branch push is denied in every form, and other pushes are not all
     { name: 'inside a substitution', request: bash('echo $(git push origin main)'), decision: 'deny', rule: 'push.base' },
     { name: 'gh pr merge', request: bash('gh pr merge 12 --squash'), decision: 'deny', rule: 'push.base' },
     { name: 'gh repo', request: bash('gh repo delete owner/name'), decision: 'deny', rule: 'push.base' },
+    { name: '--mirror', request: bash('git push --mirror origin'), decision: 'deny', rule: 'push.base' },
+    { name: '--all', request: bash('git push --all origin'), decision: 'deny', rule: 'push.base' },
     { name: 'the ticket branch', request: bash('git push origin ticket-1'), decision: 'ask', rule: 'default' },
     { name: 'gh pr create goes to the inbox by default (lane 5 relies on it)', request: bash('gh pr create --fill'), decision: 'ask', rule: 'default' },
   ]);
@@ -156,6 +158,23 @@ test('secrets and production hosts are denied in any tool input', () => {
     { name: 'WebFetch to production', request: { tool: 'WebFetch', input: { url: 'https://api.prod.example.com/x', prompt: 'read' } }, decision: 'deny', rule: 'net.production' },
     { name: 'production in a compound', request: bash('npm test; curl prod.example.com'), decision: 'deny', rule: 'net.production' },
     { name: 'process.env is not an env file', request: bash('grep -r process.env src'), decision: 'allow', rule: 'run.safe' },
+  ]);
+});
+
+test('secret.read looks at the paths a request names, never at the text it writes', () => {
+  check([
+    { name: 'code that reads a .key property', request: { tool: 'Edit', input: { file_path: '/workspace/src/a.ts', old_string: 'return 1;', new_string: 'return event.key;' } }, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a README that names .env.example', request: { tool: 'Write', input: { file_path: '/workspace/README.md', content: 'Copy .env.example to .env first.' } }, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a MultiEdit that writes id_rsa in a string', request: { tool: 'MultiEdit', input: { file_path: '/workspace/src/a.ts', edits: [{ old_string: 'return 1;', new_string: "return 'id_rsa';" }] } }, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a command description', request: { tool: 'Bash', input: { command: 'npm test', description: 'Run the tests that read .env.test' } }, decision: 'allow', rule: 'run.safe' },
+    { name: 'a WebFetch prompt', request: { tool: 'WebFetch', input: { url: 'https://example.org/x', prompt: 'find the .pem section' } }, decision: 'ask', rule: 'net.undeclared' },
+    { name: 'a Grep pattern', request: { tool: 'Grep', input: { pattern: 'event.key', path: 'src' } }, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a file whose name starts with id_ but is no key', request: { tool: 'Read', input: { file_path: '/workspace/src/id_generator.ts' } }, decision: 'allow', rule: 'read.workdir' },
+    { name: 'an ssh public key', request: { tool: 'Read', input: { file_path: '/workspace/id_rsa.pub' } }, decision: 'deny', rule: 'secret.read' },
+    { name: 'an ssh security key', request: bash('cat id_ed25519_sk'), decision: 'deny', rule: 'secret.read' },
+    { name: 'a Write to an env file', request: { tool: 'Write', input: { file_path: '/workspace/.env', content: 'A=1' } }, decision: 'deny', rule: 'secret.read' },
+    { name: 'an edit of a pem file', request: { tool: 'Edit', input: { file_path: '/workspace/certs/a.pem', old_string: 'a', new_string: 'b' } }, decision: 'deny', rule: 'secret.read' },
+    { name: 'a WebFetch URL', request: { tool: 'WebFetch', input: { url: 'https://example.org/.env', prompt: 'read' } }, decision: 'deny', rule: 'secret.read' },
   ]);
 });
 
