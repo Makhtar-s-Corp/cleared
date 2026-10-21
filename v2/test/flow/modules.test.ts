@@ -55,7 +55,7 @@ test('a configured runtime builds one engine over the registry of the request, w
   applyTables(store.db, inbox.tables);
   const env = {
     CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO_URL: 'https://example.invalid/guestbook.git',
-    CLEARED_V2_REPO: 'Makhtar-s-Corp/cleared-example-guestbook', CLEARED_V2_STATE_DIR: '/state', CLEARED_V2_BUDGET_USD: '5',
+    CLEARED_V2_REPO: 'example-org/cleared-example-guestbook', CLEARED_V2_STATE_DIR: '/state', CLEARED_V2_BUDGET_USD: '5',
   };
   const runtime = createRuntime({ env, effects: () => fakeEffects([]) });
   runtime.attach({ store });

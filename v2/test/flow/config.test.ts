@@ -32,7 +32,7 @@ test('without a verdict phrase the project cannot pass a review', () => {
 });
 
 test('loadFlowConfig reads the environment and refuses what is missing or unsafe', () => {
-  const env = { CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO_URL: 'https://github.com/Makhtar-s-Corp/cleared-example-guestbook.git', CLEARED_V2_REPO: 'Makhtar-s-Corp/cleared-example-guestbook', CLEARED_V2_STATE_DIR: '/state' };
+  const env = { CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO_URL: 'https://github.com/example-org/cleared-example-guestbook.git', CLEARED_V2_REPO: 'example-org/cleared-example-guestbook', CLEARED_V2_STATE_DIR: '/state' };
   const config = loadFlowConfig(env);
   assert.equal(config?.base, 'main');
   assert.equal(config?.authorModel, 'claude-opus-5-5');

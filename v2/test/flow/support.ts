@@ -90,7 +90,7 @@ export function fakeEffects(calls: Calls, overrides: Partial<FlowEffects> = {}):
 }
 
 export const CONFIG: FlowConfig = {
-  project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://example.invalid/guestbook.git', repo: 'Makhtar-s-Corp/cleared-example-guestbook',
+  project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://example.invalid/guestbook.git', repo: 'example-org/cleared-example-guestbook',
   base: 'main', workdirRoot: '/work', authorModel: 'claude-opus-5-5', reviewerModel: 'claude-sonnet-5-5',
   idleMs: 15 * 60 * 1000, maxReviewRounds: 2, budgetUsd: undefined,
 };
@@ -103,7 +103,7 @@ export async function setup(options: { scripts?: Scripts; config?: Partial<FlowC
   const clock = { now: Date.parse('2026-10-21T10:00:00.000Z') };
   const tickets = new MemoryTicketStore({ now: () => new Date(clock.now).toISOString() });
   const users = new MemoryUsers();
-  users.users.set('u1', { id: 'u1', name: 'Makhtar' });
+  users.users.set('u1', { id: 'u1', name: 'Demo' });
   const recorder = new MemoryReviewRecorder();
   const approvals = new MemoryApprovalWriter();
   const calls: Calls = [];
