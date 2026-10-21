@@ -111,6 +111,7 @@ export class FlowEngine {
   #live = new Map<SessionId, Live>();
   #inputs = new Map<SessionId, { input: StartInput; settings: ProjectSettings }>();   // kept for a reopen of the author
   #active = new Set<TicketId>();                                    // tickets whose flow has not ended
+  #flows = new Map<TicketId, Set<SessionId>>();                     // the sessions of a ticket's current flow: rounds and times count from its start
   #handlers = new Set<Promise<unknown>>();
   #watchers = new Map<SessionId, Set<{ wake: () => void }>>();
   #timer: NodeJS.Timeout | undefined;
@@ -157,14 +158,18 @@ export class FlowEngine {
       if (ticket && ticket.status === this.registry.ticketStore.states.validate) continue;
       const history = ticket ? await this.registry.ticketStore.history(ticket.id) : [];
       const by = history.at(-1)?.by;
-      this.inbox.handle(release.id, by?.kind === 'human' ? by.id : 'system');
-      const session = this.#lastSession(release.ticket, 'reviewer');
-      if (session) {
-        this.#step(session, 'STEP_FINISHED', 'approval');
-        this.#snapshot(session.id, release.ticket);
-      }
-      this.#active.delete(release.ticket);
+      this.#settleRelease(release.id, release.ticket, release.project, by?.kind === 'human' ? by.id : 'system');
     }
+  }
+
+  // A release item ends when its approval does, or when a newer one replaces
+  // it: its approval step closes on the session it started on.
+  #settleRelease(id: string, ticket: TicketId, project: string, by: UserId | 'system'): void {
+    if (!this.inbox.handle(id, by)) return;
+    const sessionId = this.inbox.releaseSession(id);
+    if (!sessionId) return;
+    this.#step({ id: sessionId, ticket, project }, 'STEP_FINISHED', 'approval');
+    this.#snapshot(sessionId, ticket);
   }
 
   // Waits until no event is being handled. For tests and for a clean stop.
@@ -264,9 +269,21 @@ export class FlowEngine {
     if (row) this.#store.sessions.put({ ...row, status: phase, updatedAt: this.#now().toISOString() });
   }
 
+  #flowOf(ticket: TicketId): Set<SessionId> {
+    let sessions = this.#flows.get(ticket);
+    if (!sessions) this.#flows.set(ticket, (sessions = new Set()));
+    return sessions;
+  }
+
+  // The sessions of the ticket's current flow: a ticket put back and started
+  // again by a person begins again at round 1, with nothing of the old flow.
+  #flowRows(ticket: TicketId) {
+    const mine = this.#flowOf(ticket);
+    return this.#store.sessions.list({ ticket }).filter((row) => mine.has(row.id));
+  }
+
   #lastSession(ticket: TicketId, role: Role): { id: SessionId; ticket: string; project: string } | undefined {
-    const rows = this.#store.sessions.list({ ticket }).filter((row) => row.role === role);
-    const row = rows.at(-1);
+    const row = this.#flowRows(ticket).filter((r) => r.role === role).at(-1);
     return row ? { id: row.id, ticket: row.ticket, project: row.project } : undefined;
   }
 
@@ -285,6 +302,7 @@ export class FlowEngine {
     const adapter = this.registry.sessionAdapters[HARNESS];
     if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
     this.#active.add(ticketId);
+    this.#flows.set(ticketId, new Set());
     const began = this.#now();
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
@@ -324,6 +342,7 @@ export class FlowEngine {
     const live: Live = { id: handle.id, input, settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
     this.#live.set(live.id, live);
     this.#inputs.set(live.id, { input, settings });
+    this.#flowOf(ticket.id).add(live.id);
     return live;
   }
 
@@ -520,7 +539,7 @@ export class FlowEngine {
       await this.#putBack(id, 'The review gave no verdict (no "Verdict:" line in its report), so nothing was published. Move the ticket to Todo to run it again.');
       return;
     }
-    const round = this.#store.sessions.list({ ticket: id }).filter((row) => row.role === 'reviewer').length;
+    const round = this.#flowRows(id).filter((row) => row.role === 'reviewer').length;
     this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: reviewer.id, verdict: parsed.verdict, round } });
     if (parsed.verdict === 'pass') return this.#publishAndAsk(reviewer, report, round);
     if (round >= this.config.maxReviewRounds) {
@@ -597,36 +616,44 @@ export class FlowEngine {
       await this.#putBack(id, `The branch was not published: ${name(error)}`);
       return;
     }
-    const requestedAt = this.#now().toISOString();
+    const reviewedAt = this.#now().toISOString();
     const announcement = [
       `Ticket ${id}: ${ticket.title}`,
       '',
       `Pull request: ${published.url}`,
       `Reviewed by ${model} in ${round} round${round === 1 ? '' : 's'}: ${report.split('\n').filter((line) => /verdict\s*:/i.test(line)).at(-1)?.trim() ?? 'passed'}`,
     ].join('\n');
+    let requestedAt: string;
     try {
-      await this.registry.reviewRecorder.record({ ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: requestedAt });
+      await this.registry.reviewRecorder.record({ ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt });
       await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
-      await tickets.move(id, tickets.states.validate, SERVICE);
+      // The real lock moves the card itself when it asks; a store it did not move gets the move here.
+      if ((await tickets.history(id)).at(-1)?.status !== tickets.states.validate) await tickets.move(id, tickets.states.validate, SERVICE);
+      // The approval is bound to the request time: the time the ticket store holds for the move.
+      requestedAt = (await tickets.history(id)).at(-1)?.at ?? this.#now().toISOString();
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
       await this.#putBack(id, `The release could not be requested: ${name(error)}`);
       return;
     }
+    for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
     this.inbox.addRelease({
       ticket: id, project, title: ticket.title, announcement, requestedAt,
       pr: { number: published.number, url: published.url, checks: 'pending' },
       heads: [{ pr: published.number, head: published.head }],
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
       sessions: this.#releaseSessions(id, round),
-    });
+    }, reviewer.id);
+    // The lock has the request: the flow is over. What follows is the human's, and a person
+    // may send the ticket back from the inbox, which starts a new flow.
+    this.#active.delete(id);
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
   }
 
   #releaseSessions(ticket: TicketId, rounds: number): { role: Role; model: string; minutes: number; rounds?: number }[] {
     const out = new Map<Role, { role: Role; model: string; minutes: number; rounds?: number }>();
-    for (const row of this.#store.sessions.list({ ticket })) {
+    for (const row of this.#flowRows(ticket)) {
       const minutes = Math.max(0, Math.round((Date.parse(row.updatedAt) - Date.parse(row.createdAt)) / 60_000));
       const entry = out.get(row.role) ?? { role: row.role, model: row.model, minutes: 0 };
       out.set(row.role, { ...entry, model: row.model, minutes: entry.minutes + minutes, ...(row.role === 'reviewer' ? { rounds } : {}) });

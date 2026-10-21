@@ -58,9 +58,11 @@ export class InboxStore {
     return this.#get(id) as QuestionItem;
   }
 
-  addRelease(input: Base & Pick<ReleaseItem, 'title' | 'announcement' | 'pr' | 'heads' | 'requestedAt' | 'captures' | 'sessions'>): ReleaseItem {
+  // `session` is the one the approval step runs on: kept in request_id, which
+  // a release has no other use for, so that it is not a request of any session.
+  addRelease(input: Base & Pick<ReleaseItem, 'title' | 'announcement' | 'pr' | 'heads' | 'requestedAt' | 'captures' | 'sessions'>, session: SessionId = ''): ReleaseItem {
     const id = `release:${input.ticket}:${input.pr.number}:${input.requestedAt}`;
-    this.#insert(id, 'release', input, '', '', this.#now().toISOString(),
+    this.#insert(id, 'release', input, '', session, this.#now().toISOString(),
       { title: input.title, announcement: input.announcement, pr: input.pr, heads: input.heads, requestedAt: input.requestedAt, captures: input.captures, sessions: input.sessions });
     return this.#get(id) as ReleaseItem;
   }
@@ -85,6 +87,11 @@ export class InboxStore {
   waitingRelease(ticket: string): ReleaseItem | undefined {
     const row = this.#db.prepare("SELECT * FROM flow_inbox WHERE ticket = ? AND kind = 'release' AND state = 'waiting' ORDER BY since DESC LIMIT 1").get(ticket) as Row | undefined;
     return row ? (this.#item(row) as ReleaseItem) : undefined;
+  }
+
+  releaseSession(id: string): SessionId | undefined {
+    const row = this.#db.prepare("SELECT request_id FROM flow_inbox WHERE id = ? AND kind = 'release'").get(id) as Row | undefined;
+    return row ? String(row.request_id) || undefined : undefined;
   }
 
   waitingReleases(): ReleaseItem[] {

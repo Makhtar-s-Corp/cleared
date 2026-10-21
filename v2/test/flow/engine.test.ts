@@ -336,3 +336,58 @@ test('session summary and detail follow the events: phase, status, steps, files'
   assert.equal(t.engine.sessions().length, 1);
   assert.equal(t.engine.sessionDetail('missing'), undefined);
 });
+
+test('a ticket put back and started again gets its review rounds afresh', async () => {
+  const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), reviewerScript(REPORT_FIX), reviewerScript(REPORT_FIX), reviewerScript(REPORT_PASS)] }, config: { maxReviewRounds: 2 } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(async () => (await t.tickets.get(t.ticket.id))?.status === 'Todo' && !t.engine.isActive(t.ticket.id), 'the first flow out of rounds', 5000);
+  assert.equal(t.recorder.records.length, 0);
+  // A person starts it again: the first review of this flow asks for changes, which is round 1, so the author is reopened.
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => kinds(t).includes('release:waiting'), 'the release item of the second flow', 5000);
+  assert.equal(t.recorder.records.length, 1);
+  assert.equal(t.recorder.records[0]?.round, 2, 'a request for change, then a pass: rounds 1 and 2 of this flow');
+  const release = t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release');
+  assert.equal(release?.sessions.find((s) => s.role === 'reviewer')?.rounds, 2);
+});
+
+test('the release waits for approval without holding the ticket: a person can send it back, and the next tick settles the old item only', async () => {
+  const t = await setup({ scripts: { authors: [quickAuthor, [started, ...text('a1', 'Again.'), { awaitMessage: true }]], reviewers: [reviewerScript(REPORT_PASS), reviewerScript(REPORT_PASS)] } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => kinds(t).includes('release:waiting'), 'the release item');
+  assert.equal(t.engine.isActive(t.ticket.id), false, 'the flow is over once the lock is asked');
+  const firstReviewer = t.startedSessions[1]!.id;
+
+  // "Send back": the human moves it to Todo, which starts a new flow.
+  await t.tickets.move(t.ticket.id, 'Todo', human);
+  await t.engine.start(t.ticket.id, 'u1');
+  assert.equal(t.engine.isActive(t.ticket.id), true);
+  await t.engine.tick();
+  assert.equal(t.inbox.list().find((i) => i.kind === 'release')?.state, 'handled', 'the old release item is settled');
+  assert.equal(t.engine.isActive(t.ticket.id), true, 'and the new flow keeps its marker');
+  assert.equal(stepLines(t.store.events.after(firstReviewer)).at(-1), '-approval', 'the approval step closes on the session it started on');
+  assert.deepEqual(stepLines(t.store.events.after(t.startedSessions[2]!.id)).includes('-approval'), false);
+});
+
+test('the release item carries the time the ticket store holds for the move to Needs Approval, whoever made the move', async () => {
+  // A lock that does not move the card: the flow does, and the item has that time.
+  const slow = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease() { slowClock.now += 5000; } } });
+  const slowClock = slow.clock;
+  await slow.engine.start(slow.ticket.id, 'u1');
+  await until(() => kinds(slow).includes('release:waiting'));
+  const moves = (await slow.tickets.history(slow.ticket.id)).filter((h) => h.status === 'Needs Approval');
+  assert.equal(moves.length, 1);
+  const item = slow.inbox.list().find((i): i is ReleaseItem => i.kind === 'release');
+  assert.equal(item?.requestedAt, moves[0]?.at);
+  assert.equal(item?.requestedAt, '2026-10-21T10:00:05.000Z');
+  assert.equal(slow.recorder.records[0]?.at, '2026-10-21T10:00:00.000Z', 'the review is stamped when it passed');
+
+  // A lock that moves the card itself, as ask-validation.sh does: no second move.
+  let own: Setup | undefined;
+  own = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease({ ticket }) { own!.clock.now += 7000; await own!.tickets.move(ticket, 'Needs Approval', { kind: 'agents', id: 'lock' }); own!.clock.now += 3000; } } });
+  await own.engine.start(own.ticket.id, 'u1');
+  await until(() => kinds(own!).includes('release:waiting'));
+  const lockMoves = (await own.tickets.history(own.ticket.id)).filter((h) => h.status === 'Needs Approval');
+  assert.equal(lockMoves.length, 1, 'the flow does not move a card the lock moved');
+  assert.equal(own.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.requestedAt, '2026-10-21T10:00:07.000Z');
+});

@@ -37,6 +37,7 @@ export const reopenScript: readonly FakeStep[] = [{ awaitMessage: true }, starte
 
 export type Scripts = {
   readonly author?: readonly FakeStep[];
+  readonly authors?: readonly (readonly FakeStep[])[];       // one per author session started, then `author`
   readonly reviewers?: readonly (readonly FakeStep[])[];     // one per review round
   readonly reopen?: readonly FakeStep[] | 'throw';
 };
@@ -47,7 +48,7 @@ export type Started = { readonly input: StartInput; readonly id: SessionId };
 // takes the next script of the list. resume reopens an author under its own
 // id, as the real adapter does, or throws.
 export function scriptedAdapter(store: Store, scripts: Scripts, started_: Started[]): SessionAdapter {
-  const author = createFakeAdapter({ log: store.events, script: scripts.author ?? authorScript });
+  const authors = [...(scripts.authors ?? [])];
   const reviewers = [...(scripts.reviewers ?? [reviewerScript(REPORT_PASS)])];
   const inputs = new Map<SessionId, StartInput>();
   return {
@@ -55,7 +56,7 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
     async start(input) {
       const handle = input.role === 'reviewer'
         ? await createFakeAdapter({ log: store.events, script: reviewers.shift() ?? reviewerScript(REPORT_PASS) }).start(input)
-        : await author.start(input);
+        : await createFakeAdapter({ log: store.events, script: authors.shift() ?? scripts.author ?? authorScript }).start(input);
       inputs.set(handle.id, input);
       started_.push({ input, id: handle.id });
       return handle;

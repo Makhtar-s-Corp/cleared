@@ -7,7 +7,7 @@ import { createApiRoutes } from '../../src/api/routes.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
-import { setup, until, type Setup } from './support.ts';
+import { quickAuthor, setup, until, type Setup } from './support.ts';
 
 const PROOF = 'b'.repeat(64);
 let t: Setup;
@@ -249,3 +249,24 @@ test('with no flow configured every route answers 503 once the proof is checked'
   }
 });
 
+
+test('a ticket waiting for approval can be sent back from the inbox with a move to Todo, which starts a new flow', async () => {
+  const own = await setup({ scripts: { author: quickAuthor } });
+  const app: App = { registry: own.engine.registry, tables: [], routes: createApiRoutes({ engine: () => own.engine, proof: () => PROOF }) };
+  const sending = createServer((request, response) => dispatch(app, request, response, handle));
+  await new Promise<void>((resolve) => sending.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(sending.address() as AddressInfo).port}`;
+  try {
+    await own.engine.start(own.ticket.id, 'u1');
+    await until(() => own.inbox.list().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release item');
+    const before = own.startedSessions.length;
+    const moved = await fetch(`${url}/api/tickets/${own.ticket.id}/move`, { method: 'POST', headers: person, body: JSON.stringify({ status: 'Todo' }) });
+    assert.equal(moved.status, 200);
+    await until(() => own.startedSessions.length > before, 'the new author session');
+    await own.engine.tick();
+    assert.equal(own.inbox.list().find((i) => i.kind === 'release' && i.state === 'handled') !== undefined, true, 'the old release is settled');
+  } finally {
+    sending.closeAllConnections();
+    await new Promise<void>((resolve) => sending.close(() => resolve()));
+  }
+});

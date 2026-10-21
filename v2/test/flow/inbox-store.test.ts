@@ -85,3 +85,14 @@ test('closing a session handles what it still holds, and a release is found by i
   assert.equal(inbox.waitingRelease('LOCAL-2')?.id, release.id);
   assert.equal(inbox.waitingRelease('LOCAL-3'), undefined);
 });
+
+test('a release remembers the session its approval step runs on', () => {
+  const { inbox } = make();
+  const release = inbox.addRelease({
+    ticket: 'LOCAL-1', project: 'guestbook', title: 't', announcement: 'a', requestedAt: 'x', pr: { number: 1, url: 'u', checks: 'pending' }, heads: [],
+    captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } }, sessions: [],
+  }, 'reviewer-session');
+  assert.equal(inbox.releaseSession(release.id), 'reviewer-session');
+  assert.equal(inbox.waitingFor('reviewer-session'), 0, 'it is not a request of that session');
+  assert.equal(inbox.releaseSession('nope'), undefined);
+});
