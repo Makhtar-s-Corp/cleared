@@ -59,6 +59,8 @@ export type InboxView = {
 // ---------------------------------------------------------------- the model
 
 const RANK: Readonly<Record<InboxItem['kind'], number>> = { release: 0, permission: 1, question: 2 };
+// The catalog names a release's checks by colour, as the tower's does.
+const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
 // What waits, releases first, then permissions, then questions, each oldest
 // first; then what was handled, in the service's order (latest first).
@@ -229,7 +231,8 @@ function itemLine(item: InboxItem, view: InboxView, t: Translate): string {
   switch (item.kind) {
     case 'release': {
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
-      return reviewer ? t(`release_reviewed_${item.pr.checks}`, { model: family(reviewer.model) }) : t(`release_unreviewed_${item.pr.checks}`);
+      const checks = CHECKS[item.pr.checks];
+      return reviewer ? t(`release_reviewed_${checks}`, { model: family(reviewer.model) }) : t(`release_unreviewed_${checks}`);
     }
     case 'permission': {
       const role = sessionOf(view, item.sessionId)?.role;
@@ -290,7 +293,7 @@ function sessionsLine(item: ReleaseItem, t: Translate): string {
 function releaseBody(item: ReleaseItem, view: InboxView, t: Translate): string {
   const switcher = (['desktop', 'phone'] as const).map((frame) =>
     `<button type="button" data-frame="${frame}" aria-pressed="${view.frame === frame}">${esc(t(`frame_${frame}`))}</button>`).join('');
-  const change = `${link(item.pr.url, t('pr_link', { n: item.pr.number }))}<span class="sep" aria-hidden="true">·</span><span>${esc(t(`checks_${item.pr.checks}`))}</span>`;
+  const change = `${link(item.pr.url, t('pr_link', { n: item.pr.number }))}<span class="sep" aria-hidden="true">·</span><span>${esc(t(`checks_${CHECKS[item.pr.checks]}`))}</span>`;
   return `${eyebrow(item, item.state === 'waiting' ? 'eyebrow_release' : 'kind_release', releaseSession(view, item.ticket), 'open_sessions', t)}
 <h2 class="d-title">${esc(item.title)}</h2>
 ${item.announcement ? `<p class="announce">${esc(item.announcement)}</p>` : ''}
@@ -516,7 +519,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       data = { items, tickets, sessions };
       draw();
     } catch {
-      if (!stopped && !data) root.innerHTML = `<div class="inbox-error"><p class="empty error">${esc(t('load_failed'))}</p></div>`;
+      if (!stopped && !data) root.innerHTML = `<div class="inbox-error"><p class="empty error">${esc(t('inbox_load_failed'))}</p></div>`;
     }
   };
 

@@ -630,9 +630,9 @@ The choices the lane makes:
   - The upward shadow shown only when more is below: the shadow was removed instead.
 - `env(safe-area-inset-bottom)` stays 0 until the page's viewport meta says `viewport-fit=cover`. That meta is in lane 6's `server.ts`.
 - **Live run, 2026-10-21 from 23:51 to 23:54 (Europe/Paris).**
-  - **Setup.** This worktree's service ran on `127.0.0.1:8795` and its app on `8796`. `ss -ltn` was checked before and after; the orchestrator's proof service on 8791 was not touched.
+  - **Setup.** This worktree's service ran on `127.0.0.1:8795` and its app on `8796`. `ss -ltn` was checked before and after. The orchestrator's proof service on 8791 was not called or changed; the value of `CLEARED_CLAUDE_CREDENTIALS` (a path) was taken from its process environment.
   - **What could not leave the server.** The run had its own state directory. The example repository, cloned bare on the server, was the only remote. `gh` was a stub that refuses, and there was no broker socket. So nothing could reach GitHub or the lock.
-  - **Models and login.** `claude-haiku-5-5` for both roles, and the login named by `CLEARED_CLAUDE_CREDENTIALS`, whose content was never read.
+  - **Models and login.** `claude-haiku-5-5` for both roles, and the login named by `CLEARED_CLAUDE_CREDENTIALS`. The file's content was never read or printed.
   - **Ticket LOCAL-1.**
     - The author asked to run `npm install date-fns 2>&1; echo "exit=$?"` (rule `shell.compound`), and the inbox showed the request.
     - The turn was interrupted through the API, then "Allow once" was clicked. The answer route answered 404, and the screen said the request was settled without the person.
