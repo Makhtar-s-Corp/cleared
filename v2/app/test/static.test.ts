@@ -26,7 +26,7 @@ test('no gradient in any stylesheet, and no theme imposed by the system', () => 
 });
 
 test('no em dash in the app\'s files', () => {
-  for (const path of walk(app).filter((p) => !p.endsWith('.woff2'))) assert.ok(!readFileSync(path, 'utf8').includes('—'), relative(app, path));
+  for (const path of walk(app).filter((p) => !p.endsWith('.woff2'))) assert.ok(!readFileSync(path, 'utf8').includes(String.fromCharCode(0x2014)), relative(app, path));
 });
 
 test('the pages load nothing inline and nothing from another site', async () => {
