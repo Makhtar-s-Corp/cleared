@@ -171,6 +171,119 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - The plan is [milestone-1-plan.md](milestone-1-plan.md). Its lanes are authored by Opus 5.5 or Haiku 5.5 and reviewed by Sonnet 5.5, as the model rule says.
 - The decisions the plan takes (its section 2) are copied into this log, with their consequences, when the lane that implements each one lands.
 
+## 2026-10-21: the guestbook example's own choices
+
+**Decision.** Lane `v2-j1-example-app` builds `examples/guestbook/` as the milestone 1 plan describes (lane 3, decision 9). It takes these choices, which the plan leaves open:
+
+1. **The demo needs no database password.** The Postgres containers (the test container, the CI service, the watcher's database, the `[session]` service) run with `POSTGRES_HOST_AUTH_METHOD=trust`, and every `DATABASE_URL` is `postgres://postgres@<host>:5432/postgres`. Reason: none of them is reachable from outside its job, its loopback port or its own Docker network, and with no password there is no secret to keep out of the repository. The guard also refuses a URL that carries a password.
+2. **Every Docker object of the example carries a second label, `cleared.example=guestbook`**, besides `cleared.dev=v2`. The watcher filters on both, and removes only ids that such a filtered listing returned. Reason: lane 2 creates `cleared.dev=v2` objects on the same machine at the same time, and the watcher must never remove them.
+3. **The app binds `127.0.0.1` by default; the image sets `HOST=0.0.0.0`**, and the watcher publishes `-p 127.0.0.1:8793:8793`. Reason: a published port cannot reach a process that listens on the container's loopback. On the host, only `127.0.0.1:8793` is bound.
+4. **The watcher builds from `git archive <commit>` on the build's standard input**, never from a working tree. It keeps the database container, the network and the volume across deploys, and it removes the guestbook images other than the one running. A failed build leaves the running app untouched. A failed start comes after the old app container was removed, so no app runs until the head moves: `/health` then fails and the release watch rolls the merge back. A failed build or start is not retried until the head moves.
+5. **The release window**, from question 3 of the plan: `deploy_grace_minutes = 2`, `watch_minutes = 5`, `failures_to_rollback = 2`, `auto_rollback = true`, and `reopen_state = Todo`, which a rollback requires. The plan proposed a 3-minute window. Review round 1 found that a 1-minute grace inside it left no margin for the watcher's poll and build. It also found that the value had been chosen without a measured build time. The grace must cover the time from the merge to the new version answering. Until then the probes reach the version before it, so a broken merge would pass for healthy. The release watch probes every 30 seconds from the end of the grace until the end of the window (`lib/release.mjs`, `watchRelease`). So the window gives 7 probes, enough for two failures in a row. Measured on this server on 2026-10-21, with `node:24-slim` already in Docker's build cache:
+   - the watcher's build with `--no-cache`: 3.3 s, 1.9 s and 2.0 s; with `--no-cache --pull` as well: 2.1 s.
+   - a whole tick, measured to the first 200 of `/health` after the tick started: 2.8 s for the first deploy (database, network and volume included); 2.2 s for a merge that changes code only; 4.0 s for a merge that changes `package.json`, which runs `npm ci` again.
+   - With the default 30-second poll, the worst case measured from a merge to the new version answering is about 34 s. The 2-minute grace leaves about 86 s of margin. How long a first pull of `node:24-slim` takes on a host without it is unknown: it was not measured, because the build cache that holds it carries no `cleared.dev=v2` label and may not be emptied.
+6. **The `[session]` keys** are `image`, `services`, `env`, `safe_commands` and `hosts`. Section 3 of the plan does not fix their names. Proposed values: `image = cleared-v2-session:latest`, which is also the only key of `.devcontainer/devcontainer.json`; `services = postgres:16 POSTGRES_HOST_AUTH_METHOD=trust`, a service being reached by its image name without the tag; `env = DATABASE_URL=postgres://postgres@postgres:5432/postgres`; `safe_commands = npm ci, npm test, npm run typecheck`; `hosts = registry.npmjs.org`. Lane 2 builds the image and reads these keys. The image tag and the key names are this lane's choice, and lane 2 had published nothing when they were written. Lane 2, or a small lane after wave 1, aligns one side with the other.
+7. **The tracker's identity keys stay out of the committed file.** `agents_uid`, `owner_id` and `human_public_key` depend on the machine and on the owner's key, so they are written at setup (lane 8).
+
+**Consequences.**
+- `examples/guestbook/` has one runtime dependency, `pg` 8.23.1. Its devDependencies are `typescript` 7.0.2 and `@types/node` 24.19.2, pinned as in `v2/`, plus `@types/pg` 8.23.1. All three are for `tsc --noEmit` only.
+- The database tests fail without `DATABASE_URL`; they do not skip. Each test file works in a schema of its own.
+- The example's CI workflow runs only once the directory is the root of a repository (question 1 of the plan).
+- This entry is the only change outside `examples/guestbook/`. The brief of the lane asks for it.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-example-app`.
+
+## 2026-10-21: the policy gets the inputs its rules need
+
+**Decision.** Lane 1 adds three fields to the `Policy` type of the milestone 1 plan (section 5), and one optional evaluation input:
+- `workdir`: the workdir as the harness sees it, its mount point in the container. `read.workdir`, `edit.workdir` and the path checks of `run.safe` need it, and the tool inputs name container paths, not the host path of `StartInput.workdir`.
+- `scripts`: the script names of `package.json` on the base branch, read by the service. `npm run <script>` is allowed only for these, as the plan's `run.safe` row says.
+- `credentialFile`: the harness's credential file as mounted, for `secret.read`.
+- `PolicyContext.readFile`: the current text of a workdir file. The service passes it so the evaluator can tell what an edit of `package.json` changes.
+
+**Consequences.**
+- `StartInput.policy` carries the three fields. The service fills them (lane 7).
+- An edit of `package.json` is applied to the current text and both versions are compared. A changed `scripts` block asks as `scripts.change`. Changed dependencies ask as `install.package`. An edit the service cannot read or apply also asks as `scripts.change`, with a reason that says so.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: the policy refuses to read what it cannot parse
+
+**Decision.** Lane 1's evaluator goes beyond the rows of the plan's table where a row's intent needs it:
+- The shell-word parser understands quotes and backslashes only. Besides the plan's list (`;`, `&&`, `||`, `|`, `$(`, a backtick, a redirection, a newline), it refuses any unquoted `$`, `*`, `?` or `[`, a `~` or `#` at the start of a word, and brace expansion. These ask as `shell.compound`. Without this, `cat /run/cle*/claude.token` or `cat $HOME/x` would name a secret the deny rules cannot see.
+- `cat`, `head`, `tail`, `ls`, `grep` and `find` are safe only when every path they name resolves under the workdir. `cat /proc/self/environ` asks.
+- git's global options are folded for the deny rules, as the plan says. For an allow, only `-C` is folded. `-c`, `--git-dir`, `--work-tree` and the like make a git command ask, because `-c core.pager=...` runs a program.
+- `push.base` also denies refspecs `HEAD:main`, `+main` and `refs/heads/main`, and `--mirror` and `--all`.
+- `find -fls` asks, like `-fprint`: it writes a file.
+- An edit under `.git/` asks. The service pushes the branch from the host (decision 12 of the plan), and a hook written in the workdir would run there.
+- `docker` and `sudo` are denied where they run as a program: the first word of a command, after a wrapper such as `env`, `xargs` or `sh -c`, or after `find -exec`. Named as text, as in `git commit -m "docker notes"`, they are not denied.
+- `secret.read` reads the fields of a request that name files or places, not what a tool writes. These fields are a command, a URL, a file path, Glob's and Grep's paths, Glob's pattern and Grep's glob. Code that says `event.key` and a README that names `.env.example` would otherwise be denied, and a deny cannot be answered with "Always in this project". A tool the evaluator does not know is read whole.
+- The plan's `id_*` is narrowed to the key names `ssh-keygen` writes (`id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, with `_sk` and `.pub`), so `src/id_generator.ts` stays readable.
+- In Bash, `secret.read` reads the words of a simple command, except the words that are only text: the arguments of `echo` and `printf`, and the message of `git commit` (`-m`, `--message`). `git commit -m "document .env.example"` is allowed; `git commit -m x .env` and `git commit -F .env` are denied. A command the parser cannot read is read whole, so `cat $(echo .env)` is denied. Added in review round 1.
+- A safe git command reads no file outside the workdir. A path operand outside the workdir asks, because `git diff` reads two paths outside the repository even without `--no-index`. `--no-index` asks. For `git commit`, `-F`, `--file`, `-t`, `--template`, `-C`, `-c`, `--reuse-message` and `--reedit-message` ask. Only `git commit`'s options are read as taking a value; for the other safe subcommands, every word that is not an option is checked as a path. Added in review round 1.
+- Path checks are lexical: the evaluator resolves `..` and relative paths against the workdir but does not resolve symbolic links, since it runs on the host and sees only the tool input. A link inside the workdir that points outside it therefore passes `read.workdir`, `edit.workdir` and the path checks of `run.safe`. The container limits what such a link reaches: it mounts nothing of the host besides the workdir and, read only, the credential file (plan, section 5), which `secret.read` denies by name. A link created by a session needs `ln`, which no rule allows, or an edit under `.git/`, which asks. A link already committed in the project is not caught. Resolving links on the service side, against the host path of the workdir, is not done in milestone 1. Noted in review round 2.
+- Every `npx` asks as `install.package`. The plan's "npx <name not in the project's scripts>" is not checkable from script names alone, and an `npx` that is in them would still ask under `default`.
+
+**Consequences.**
+- `ls *.ts` asks. A session writes `ls` or `find . -name '*.ts'` instead, which are allowed.
+- The deny rules read every simple command of the raw text, with quotes dropped, so `ls; docker ps` and `echo $(git push origin main)` are denied.
+- Each case has a row in `v2/test/session/policy.test.ts`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: the cleaner copies the guard's patterns
+
+**Decision.** `v2/src/session/clean.ts` copies the patterns of `lib/guard/codex-guard.mjs` (its `always`, `envAssignments` and `directOnly` lists) instead of importing them. It replaces each match with `[removed: <category>]`. A test reads `codex-guard.mjs` and fails if a copied pattern is not in it word for word. The private-term check uses the guard's fingerprinting (`sha256(salt + term)` over runs of one to four normalised words).
+
+**Consequences.**
+- `codex-guard.mjs` cannot be imported: it parses its arguments and exits when loaded. `private-terms.mjs` runs `git` when loaded.
+- A change to the guard's patterns fails the v2 test until `clean.ts` is updated.
+- The guard only finds a key's first line. The cleaner removes the whole block up to its end line, or to the end of the text when the end was cut off.
+- A private term replaces the whole value with `[removed: private term]`, because a fingerprint says that a term is present, not where.
+- A result's content is read as Cleared's own form only when its `kind` is the call's kind and every field has the right type. Anything else is the tool's raw output: a command that prints JSON with a `kind` keeps its output, and a read of such a file keeps its real size. Added in review round 1.
+- A malformed harness event is cleaned, never thrown on. An id that is not a string becomes empty; a `RUN_FINISHED` without a valid stop reason gets `error`; a step outside the measured ones is dropped. Added in review round 1.
+- Command output is cut to `COMMAND_OUTPUT_LIMIT`, 4096 characters: the first 1024 and the last 3072, with a line saying how many were cut. The end of a test run carries its summary. Commands, descriptions and errors are cut the same way.
+- The cleaner remembers each tool call's kind and path from its `TOOL_CALL_ARGS`. A read's result keeps its path and size only. A result whose call it never saw keeps its kind, and for a read its path and size, but no output and no error. Lane 4 should check this for subagent tool calls, whose ARGS may not reach the cleaner (an open question of the plan, section 13).
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: typed tool input and output inside AG-UI's string fields
+
+**Decision.** AG-UI's `TOOL_CALL_ARGS.delta` and `TOOL_CALL_RESULT.content` are strings. Cleared puts the JSON of a typed value in them (`ToolInput` and `ToolOutput` in `v2/src/session/events.ts`), with Cleared's `kind` inside. `RUN_FINISHED` carries the stop reason and `total_cost_usd` in AG-UI's `result` field, and the tokens in its `usage` list with AG-UI's `TokenUsage` names.
+
+**Consequences.**
+- A stored event is valid AG-UI as it is, and the app reads it back typed with `readToolInput` and `readToolOutput`.
+- Each argument list is sent whole in one `TOOL_CALL_ARGS`, as the plan has no partial messages in milestone 1.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: modules receive the store; main.ts is final
+
+**Decision.** A module's `provide` is a function of `{ store }`, not the plain object of the plan's section 10. `main.ts` does the following:
+- it opens `ledger.db`;
+- it creates every module's tables;
+- it assembles the registry;
+- it serves the modules' routes through a dispatcher in `v2/src/modules/registry.ts`, which leaves `/health` and unknown paths to `server.ts`.
+
+**Consequences.**
+- Lane 8's ticket store and lane 6's users need the database handle, which a plain object cannot get without opening the ledger at import.
+- Lanes 6, 7 and 8 fill their module and never edit `main.ts` or `server.ts`.
+- Two modules filling one slot, or declaring one route, stop the service at start with a message naming both.
+- A table statement that is not `CREATE TABLE IF NOT EXISTS` (or `CREATE INDEX IF NOT EXISTS`) is refused, so opening the store never changes a table another component owns.
+- A failing handler answers 500 `{"error":"internal error"}`. The service log names the route and the error's class only, because an error message may carry what the cleaner removes.
+- The service finds `ledger.db` as v1 does (`ORCH_LEDGER`, then `CLEARED_STATE_DIR` or `ORCH_STATE_DIR`, then `<state home>/cleared/<project name>`), except v1's last resort of asking git. Without a state directory or a project name, it stops with exit code 64. `v2/test/main.test.ts` gives every service it starts a temporary state directory.
+- A ledger that cannot be opened (a directory that cannot be made, a file that is not a database) also stops the service with exit code 64 and the path. The store opens `ledger.db` as `lib/ledger.mjs` does for writing: WAL journal, 5 second busy timeout. Added in review round 1.
+- On SIGINT and SIGTERM, the service ends every open connection after it stops accepting new ones. Otherwise `server.close` waits forever for the event streams lane 7 adds, and lane 7 cannot reach the server without editing `main.ts`. An app reconnects with the last seq it has. Added in review round 1.
+- The `sessionAdapters` slot defaults to no adapter. The fake adapter is never registered: tests and fixtures create it.
+- `TicketStore.move` refuses the go state. Only the approval writer records it (decision 6 of the plan).
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
+## 2026-10-21: text is cleaned per message, at its end
+
+**Decision.** The cleaner holds the deltas of a text message until its `TEXT_MESSAGE_END`, then cleans the whole text at once and stores it as one `TEXT_MESSAGE_CONTENT` just before the end. `createCleaner().clean` returns a list of events instead of one. A run that ends or fails while a message is open first stores that message's text and its end. Reason: each delta was cleaned on its own, so a secret split across two deltas was kept (review round 1 of lane 1, finding 4). The other option, requiring every adapter to send whole blocks, would leave a correctness rule outside the one function the plan makes responsible for cleaning.
+
+**Consequences.**
+- A message's text appears in the store and on the stream when the message ends, not while it is written. Milestone 1 has no partial messages (plan, section 4), so the session screen shows the same thing.
+- An adapter calls `clean` once per harness event and stores every event it returns, in order. The fake adapter does.
+- If partial messages come later, live display needs another path, for example a preview that is never stored. That is not designed here.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-contracts`.
+
 ## 2026-10-21: the session's Docker runtime (lane 2)
 
 **Decision.** The runtime follows decisions 3 and 4 of the [milestone 1 plan](milestone-1-plan.md), with these choices made by the lane:

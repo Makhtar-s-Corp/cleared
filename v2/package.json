@@ -12,9 +12,11 @@
     "start": "node src/main.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "guard": "node scripts/guard.ts"
+    "guard": "node scripts/guard.ts",
+    "doctor": "node scripts/doctor.ts"
   },
   "devDependencies": {
+    "@ag-ui/core": "1.0.3",
     "@types/node": "24.19.2",
     "typescript": "7.0.2"
   }
