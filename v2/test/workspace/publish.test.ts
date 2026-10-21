@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PublishRefused, publish, type PublishInput } from '../../src/workspace/publish.ts';
@@ -78,6 +79,37 @@ test('a diff the guard flags is refused: nothing is pushed and no pull request i
   });
   assert.equal(remoteHead(), '');
   assert.deepEqual(gh.calls(), []);
+});
+
+test('a secret added in one commit and removed in the next is refused: the guard reads every commit', async () => {
+  const { workdir, input, gh, remoteHead } = await setup();
+  commit(workdir, { 'config/settings.ts': `export const apiKey = "${plantedKey}";\n` }, 'Add settings');
+  commit(workdir, { 'config/settings.ts': 'export const apiKey = process.env.API_KEY;\n' }, 'Read the key from the environment');
+  await assert.rejects(publish(input), (error: unknown) => {
+    assert.ok(error instanceof PublishRefused);
+    assert.equal(error.code, 'guard');
+    assert.match(error.message, /API key/);
+    assert.ok(!error.message.includes(plantedKey));
+    return true;
+  });
+  assert.equal(remoteHead(), '');
+  assert.deepEqual(gh.calls(), []);
+});
+
+test('a malformed object the session wrote is refused when it is fetched', async () => {
+  const { workdir, input, gh, remoteHead } = await setup();
+  commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
+  const tree = gitIn(workdir, ['rev-parse', 'HEAD^{tree}']);
+  const parent = gitIn(workdir, ['rev-parse', 'HEAD']);
+  // A commit without an email: git's own commands never write one.
+  const bad = execFileSync('git', ['-C', workdir, 'hash-object', '-t', 'commit', '-w', '--literally', '--stdin'], {
+    input: `tree ${tree}\nparent ${parent}\nauthor nobody 1 +0000\ncommitter nobody 1 +0000\n\nMalformed\n`, encoding: 'utf8',
+  }).trim();
+  gitIn(workdir, ['update-ref', `refs/heads/${BRANCH}`, bad]);
+  await assert.rejects(publish(input), (error: unknown) => error instanceof PublishRefused && error.code === 'unsafe' && /fsck|missingEmail/.test(error.message));
+  assert.equal(remoteHead(), '');
+  assert.deepEqual(gh.calls(), []);
+  assert.equal(gitIn(input.project, ['for-each-ref', 'refs/cleared/']), '');
 });
 
 test('a commit message the guard flags is refused', async () => {

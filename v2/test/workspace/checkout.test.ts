@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BASE_REF, CheckoutError, projectCheckout, ticketBranch, ticketCheckout } from '../../src/workspace/checkout.ts';
 import { commit, gitIn, remote, tempDir } from './git.ts';
@@ -81,6 +81,20 @@ test('the ticket checkout is reused when it is on the ticket branch, refused oth
   mkdirSync(other);
   writeFileSync(join(other, 'file'), 'x');
   await assert.rejects(ticketCheckout({ project: project.dir, workdir: other, base: 'main', branch: 'cleared/DEMO-4' }), CheckoutError);
+});
+
+test('a ticket checkout that fails half way leaves nothing behind, and the next one succeeds', async () => {
+  const { root, project } = await setup();
+  const parent = join(root, 'tickets');
+  const workdir = join(parent, 'DEMO-8');
+  // main/x passes the name checks but cannot be created next to the clone's
+  // own main branch: the clone succeeds, the checkout -b after it fails.
+  await assert.rejects(ticketCheckout({ project: project.dir, workdir, base: 'main', branch: 'main/x' }), CheckoutError);
+  assert.equal(existsSync(workdir), false);
+  assert.deepEqual(readdirSync(parent), []);
+  const ticket = await ticketCheckout({ project: project.dir, workdir, base: 'main', branch: 'cleared/DEMO-8' });
+  assert.equal(ticket.reused, false);
+  assert.equal(gitIn(workdir, ['branch', '--show-current']), 'cleared/DEMO-8');
 });
 
 test('the base branch is never a ticket branch', async () => {

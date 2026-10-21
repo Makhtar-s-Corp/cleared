@@ -75,6 +75,18 @@ test('gh pr create is blocked when the guard flags the diff, without repeating t
   assert.ok(!reason.includes(plantedKey));
 });
 
+test('gh pr create is blocked when a commit added a secret that a later commit removed', async () => {
+  const pre = callback('PreToolUse');
+  const cwd = sessionRepo();
+  commit(cwd, { 'src/settings.ts': `export const apiKey = "${plantedKey}";\n` }, 'Settings');
+  commit(cwd, { 'src/settings.ts': 'export const apiKey = process.env.API_KEY;\n' }, 'Key from the environment');
+  const output = await pre(bash(cwd, 'gh pr create --fill'), 'tu1', { signal });
+  assert.equal(decision(output), 'deny');
+  const reason = String((output.hookSpecificOutput as { permissionDecisionReason?: string }).permissionDecisionReason);
+  assert.match(reason, /API key/);
+  assert.ok(!reason.includes(plantedKey));
+});
+
 test('gh pr create is blocked when its own text or a commit message carries a secret', async () => {
   const pre = callback('PreToolUse');
   const inCommand = sessionRepo();
