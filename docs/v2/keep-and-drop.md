@@ -9,7 +9,7 @@ This is the verdict on every top-level and second-level path that `git ls-files`
   - `keep`: the file stays in v2, with at most small edits.
   - `adapt`: the behavior stays, but the file changes substantially or is rewritten in Node.
   - `drop`: the behavior and the file go.
-- **Milestone**: when the current file is removed. `M4` is milestone 4, the only milestone the decisions name for removals; every removal below is placed there until a milestone plan exists. `-` means the file is not removed.
+- **Milestone**: when the current file is removed. On an `adapt` file row, `M4` means the whole file is removed in M4 once its kept behavior exists in Node. On an `adapt` directory row, `M4` applies only to the children the reason lists after "M4 removes"; the other children are edited in place and stay. `M4` is milestone 4, the only milestone the decisions name for removals; every removal below is placed there until a milestone plan exists. `-` means the file is not removed.
 - **Basis**:
   - `decided`: follows directly from a decision of 2026-10-21 in the decisions log.
   - `proposed`: this review's reading of the code, not decided yet. Confirm or change it before milestone 4.
@@ -85,11 +85,11 @@ This is the verdict on every top-level and second-level path that `git ls-files`
 | `app/.gitignore` | keep | Ignores `node_modules/`. | - | proposed |
 | `app/DESIGN.md` | keep | Named in the decisions as kept. | - | decided |
 | `app/human-write.mjs` | keep | Short-lived writer of the human's gestures to the tracker; unaffected by the login change. | - | proposed |
-| `app/lib/` | adapt | `webauthn.mjs` and `grant-socket.mjs` drop (passkeys); `actions.mjs`, `notifications.mjs` and `credentials.mjs` drop their passkey parts; a password login replaces them. `session.mjs` and `access.mjs` change with the login. | M4 | decided |
+| `app/lib/` | adapt | M4 removes `webauthn.mjs` and `grant-socket.mjs` (passkeys). Edited in place: `actions.mjs`, `notifications.mjs` and `credentials.mjs` lose their passkey parts for a password login; `session.mjs` and `access.mjs` change with the login. | M4 | decided |
 | `app/main.mjs` | adapt | Starts the server; the `cleared app passkey` subcommand goes. | - | decided |
 | `app/package.json` | keep | No runtime dependency; `playwright-core` for screenshots only. | - | proposed |
 | `app/package-lock.json` | keep | Lock file for `app/package.json`. | - | proposed |
-| `app/public/` | adapt | `register.html` and `register.js` drop (passkey registration); `login.*`, `actions.js` and `notify.js` change for the password login. Fonts, icons, `style.css`, `sw.js`, `manifest.webmanifest` stay. | M4 | decided |
+| `app/public/` | adapt | M4 removes `register.html` and `register.js` (passkey registration). Edited in place: `login.*`, `actions.js` and `notify.js`, for the password login. Unchanged: fonts, icons, `style.css`, `sw.js`, `manifest.webmanifest`. | M4 | decided |
 | `app/reference/` | keep | Design references `tower.html` and `porthole-phone.html`. | - | proposed |
 | `app/screenshots/` | keep | Reference pictures (63 tracked files), not code. Pictures of passkey gestures (for example `gesture-no-passkey.png`) go out of date and are retaken. | - | proposed |
 | `app/screenshots-actions.mjs` | adapt | Drives the gestures with a virtual passkey authenticator; switches to the password login. | - | decided |
@@ -141,14 +141,14 @@ This is the verdict on every top-level and second-level path that `git ls-files`
 | `lib/notify/` | keep | Notification contract, store and `webpush` adapter (web notifications, decided). The `ntfy`, `telegram` and `email` adapters are not named in the decisions: open. | - | decided |
 | `lib/notify.mjs` | keep | Notification dispatcher run at the end of each wake. | - | decided |
 | `lib/ports.sh` | adapt | Bash; refuses ports 80, 443 and any port in use before install. The rule is kept, so it moves to Node. | M4 | decided |
-| `lib/pr-body.mjs` | keep | Builds a PR body from a team's report and strips machine paths and tokens; only caller today is `push-lane.sh`. | - | proposed |
+| `lib/pr-body.mjs` | adapt | Builds a PR body from a team's report and strips machine paths and tokens. Its only caller, `push-lane.sh`, drops, and no v2 component that opens a session's pull request is named yet; it is wired to that component or dropped. | - | proposed |
 | `lib/release.mjs` | keep | Post deploy health watch, automatic and manual rollback. | - | decided |
 | `lib/reviews.mjs` | adapt | Reviews run and branch authors, read from the ledger and from the session log of a lane worktree; the authorship source changes with v2 sessions. | - | proposed |
 | `lib/route.mjs` | keep | Picks a model per role with fallbacks; needed for Claude Code first then Codex and for a reviewer from another model. All callers today are bash. | - | proposed |
 | `lib/screens.mjs` | drop | Reads screen tests from the process table for `host-state.sh` (heavy operations lock). | M4 | decided |
-| `lib/session-usage.mjs` | keep | Counts tokens of an interactive session from its CLI log; only caller today is `talk-run.sh`. | - | proposed |
+| `lib/session-usage.mjs` | adapt | Counts tokens of an interactive session from its CLI log. Its only caller, `talk-run.sh`, drops, and no v2 session runner is named yet; it is wired to that runner or dropped. | - | proposed |
 | `lib/terminal/` | drop | Terminal adapters `orca.sh` and `none.sh`. | M4 | decided |
-| `lib/tracker/` | adapt | Contract and Node adapters kept; the local adapter becomes the ticket store. Bash files `dispatch.sh`, `env.sh`, `guard.sh` and `adapters/linear.sh` move to Node. `adapters/import-legacy.mjs` (imports old sessions into the ledger) is proposed for drop. | M4 | decided |
+| `lib/tracker/` | adapt | M4 removes the bash files `guard.sh`, `adapters/dispatch.sh`, `adapters/env.sh` and `adapters/linear.sh`, once their behavior is in Node, and `adapters/import-legacy.mjs` (imports old sessions into the ledger) if its proposed drop is confirmed. Edited in place: the contract and the Node adapters; the local adapter becomes the ticket store. | M4 | decided |
 | `lib/validation-record.mjs` | keep | Records the PR versions shown when approval is asked; read by the app and the snapshot. | - | proposed |
 | `lib/wake.mjs` | adapt | Pre-check of what moved since the last wake; its caller `wake.sh` moves to Node. | - | proposed |
 
@@ -189,7 +189,7 @@ This is the verdict on every top-level and second-level path that `git ls-files`
 | `serve/install.sh` | adapt | Bash installer (291 lines): port checks, harness probe, units. Installing the kept services stays, so it moves to Node without the sudo and bubblewrap steps. | M4 | decided |
 | `serve/lead-actions.mjs` | drop | Entry point that sudoers allows for the lead (sudo). | M4 | decided |
 | `serve/release-broker.mjs` | keep | The deploy lock service: checks the peer UID and runs the guarded merge. | - | decided |
-| `serve/serve-dashboard.mjs` | adapt | The static page server goes, but `app/lib/access.mjs` imports `allowed` and `TAILSCALE` from it; those move into the app first. | M4 | proposed |
+| `serve/serve-dashboard.mjs` | adapt | M4 removes the whole file. The static page server goes, but `app/lib/access.mjs` imports `allowed` and `TAILSCALE` from it, so those move into the app first. | M4 | proposed |
 
 ## test
 

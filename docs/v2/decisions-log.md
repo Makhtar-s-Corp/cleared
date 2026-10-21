@@ -116,5 +116,5 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 
 **Consequences.**
 - No copy of the v1 runtime state (ledger, lanes, worktrees, snapshot) is made before it stops. v2 starts from the repository, not from a v1 archive.
-- Disabling the v1 services and timers is recorded as Makhtar stated it. It was not checked while writing this log: the session that wrote it could not reach the user systemd bus or read the home directories of the Cleared system accounts.
+- The orchestrator confirmed that the v1 stop was executed and verified on 2026-10-21, including the disabled services and timers.
 - The units `serve/` installs are still tracked: `cleared-wake.timer`, `cleared-dashboard-refresh.timer`, `cleared-legacy-import.timer` and their services. Their verdicts are in keep-and-drop.md.
