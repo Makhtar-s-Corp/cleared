@@ -232,7 +232,8 @@ function itemLine(item: InboxItem, view: InboxView, t: Translate): string {
     case 'release': {
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
       const checks = CHECKS[item.pr.checks];
-      return reviewer ? t(`release_reviewed_${checks}`, { model: family(reviewer.model) }) : t(`release_unreviewed_${checks}`);
+      // The ticket first, as the other kinds: two releases can share a title.
+      return reviewer ? t(`release_reviewed_${checks}`, { ticket: item.ticket, model: family(reviewer.model) }) : t(`release_unreviewed_${checks}`, { ticket: item.ticket });
     }
     case 'permission': {
       const role = sessionOf(view, item.sessionId)?.role;

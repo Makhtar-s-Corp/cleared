@@ -40,10 +40,10 @@ if (!passwordFile || !env.PROOF_PLAYWRIGHT) {
 const TITLE = 'The guestbook shows the newest entry first';
 const DESCRIPTION = `The page lists the entries oldest first, so a new entry lands at the bottom, out of sight once the list is long. Show the newest entry at the top.
 
-Acceptance criteria:
-- The page lists the entries from the newest to the oldest.
-- A test adds three entries one after the other and checks that the list gives them back newest first.
-- \`npm test\` and \`npm run typecheck\` pass.`;
+Acceptance criteria (a checklist, which the session screen reads as such):
+- [ ] The page lists the entries from the newest to the oldest.
+- [ ] A test adds three entries one after the other and checks that the list gives them back newest first.
+- [ ] \`npm test\` and \`npm run typecheck\` pass.`;
 // The message sent mid run. It asks for one command the policy sends to the
 // human (rule delete.outside_ticket): the request reaching the inbox is what
 // shows the session took the message into account.
@@ -221,8 +221,8 @@ if (created) {
     await page.waitForURL(/\/sessions\/[A-Za-z0-9_-]+$/);
     authorUrl = page.url();
     await page.locator('#timeline [data-row]').first().waitFor({ timeout: 300_000 });
-    // Some work, not just the start: a few rows.
-    await page.locator('#timeline [data-row]').nth(2).waitFor({ timeout: 300_000 });
+    // Some work, not just the start: a few rows. The author may ask first.
+    await waitAnswering(async () => await page.locator('#timeline [data-row]').nth(2).count() > 0, 300_000);
     timeline.first_row_at = await rowTime(page.locator('#timeline [data-row]').first());
     return `author session ${authorUrl.split('/').pop()}, first row at ${timeline.first_row_at}`;
   });
@@ -330,9 +330,8 @@ if (reviewed) {
   approved = await step(8, 'approve', async () => {
     await page.goto(`${APP}/inbox`);
     const approve = page.locator('#detail [data-act="approve"]');
-    // The list names a release by its title; the detail by its ticket, which
-    // is checked after the click: another ticket's release may wait beside it.
-    const item = page.locator('a.item:not(.handled)').filter({ hasText: 'Release' }).filter({ hasText: TITLE }).last();
+    // This ticket's release: another ticket's, with the same title, may wait beside it.
+    const item = page.locator('a.item:not(.handled)').filter({ hasText: 'Release' }).filter({ hasText: `${ticketOf()} · ` }).first();
     try {
       // The release waits until the branch is published and the lock asked.
       await waitAnswering(async () => {

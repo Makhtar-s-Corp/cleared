@@ -32,7 +32,7 @@ test('the list reads as the capture: what waits, with its time, then what was ha
   const shown = text(viewOf());
   for (const expected of [
     'Inbox', '3 waiting',
-    'Release', '12 min', RELEASE_TITLE, 'Reviewed by Sonnet, checks green',
+    'Release', '12 min', RELEASE_TITLE, `${RELEASE_TICKET} · Reviewed by Sonnet, checks green`,
     'Permission', '3 min', 'Install date-fns to group dates by week', 'LOCAL-161 · author paused',
     'Question', '1 h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
     'Handled today', 'Apply the new migration to the test database', 'LOCAL-160 · no longer waits for you',
@@ -40,6 +40,17 @@ test('the list reads as the capture: what waits, with its time, then what was ha
   const html = renderInbox(viewOf(), en);
   const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(order.map((id) => id?.split(':')[0]), ['release', 'permission', 'question', 'permission'], 'release first, then by kind; handled last');
+});
+
+test('two releases with the same title, from two tickets, are told apart in the list by their ticket', () => {
+  const fixture = inboxFixture(FIXTURE_NOW);
+  const release = fixture.items.find((i): i is ReleaseItem => i.kind === 'release' && i.state === 'waiting') as ReleaseItem;
+  const again: ReleaseItem = { ...release, id: `${release.id}-again`, ticket: 'LOCAL-999' };
+  const html = renderInbox(viewOf({ items: [release, again] }), en);
+  const lines = [...html.matchAll(/<span class="item-line">([^<]*)<\/span>/g)].map((m) => m[1]);
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0]?.startsWith(`${RELEASE_TICKET} · `), lines[0]);
+  assert.ok(lines[1]?.startsWith('LOCAL-999 · '), lines[1]);
 });
 
 test('with nothing chosen, the computer shows the first item, and the phone shows the list alone', () => {
