@@ -1,7 +1,14 @@
-// The inbox module, a stub until lane 7 (flow): the inbox items and their routes.
-// That lane fills this file only (docs/v2/milestone-1-plan.md, section 10).
-import { emptyModule, type Module } from './registry.ts';
+// The inbox module (lane 7): the items that wait for a person (a permission,
+// a question, a release) and their state, in flow_inbox of ledger.db, and
+// the route that lists them.
+import { INBOX_TABLE } from '../inbox/store.ts';
+import { runtime } from '../flow/runtime.ts';
+import type { Module } from './registry.ts';
 
-const inbox: Module = emptyModule;
+const inbox: Module = {
+  tables: [INBOX_TABLE],
+  routes: runtime.routes((path) => path === '/api/inbox'),
+  provide: () => ({}),
+};
 
 export default inbox;
