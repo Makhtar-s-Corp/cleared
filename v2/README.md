@@ -92,7 +92,7 @@ docker build --label cleared.dev=v2 --tag cleared-v2-session:2.1.306 v2/images/s
 docker build --label cleared.dev=v2 --tag cleared-v2-egress:1 v2/images/egress
 ```
 
-`src/container/devcontainer.ts` reads a project's `.devcontainer/devcontainer.json` (comments and trailing commas allowed) for two things only: `image`, or `build.dockerfile` with `build.context`, resolved from the `.devcontainer` folder and kept inside the checkout. Without either, the session uses Cleared's image. Every other key (features, mounts, `runArgs`, lifecycle commands, ports) is reported as ignored and never applied: the rest of the devcontainer specification is out of scope. A project image must carry what the runner needs (Node 24, Claude Code and the SDK); the runner arrives in lane 4.
+`src/container/devcontainer.ts` reads a project's `.devcontainer/devcontainer.json` (comments and trailing commas allowed) for two things only: `image`, or `build.dockerfile` with `build.context`, resolved from the `.devcontainer` folder and kept inside the checkout. Without either, the session uses Cleared's image. Every other key (features, mounts, `runArgs`, lifecycle commands, ports) is reported as ignored and never applied: the rest of the devcontainer specification is out of scope. A project image must carry what the runner needs (Node 24, Claude Code and the SDK); the runner arrives in lane 4. An image the devcontainer file names is pulled from its registry as it is, with no check of who published it: choosing it is the project's decision, unlike Cleared's own images, which are built from `node:24` here.
 
 ### The doctor
 

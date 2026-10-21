@@ -13,7 +13,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { connect } from 'node:net';
+import { connect, isIP } from 'node:net';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,8 +30,19 @@ const SERVICE_PORT = 8791;
 // Values replaced in everything printed: the checkout and the home folder
 // first (the build contexts are absolute paths), then what the run adds.
 const replacements: [string, string][] = [[V2, '<v2>'], [homedir(), '~']];
+
+// Every address that is not loopback or a wildcard is replaced: by the name
+// of its interface when it is one of the host's (addressLabels), else by
+// <ipv4> or <ipv6>. Ports stay.
+const addressLabels = new Map<string, string>();
+const kept = (address: string): boolean => address.startsWith('127.') || ['0.0.0.0', '::', '::1'].includes(address);
+const hideAddresses = (text: string): string =>
+  text
+    .replace(/(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])/g, (a) => (isIP(a) === 4 && !kept(a) ? addressLabels.get(a) ?? '<ipv4>' : a))
+    .replace(/(?<![\w.:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])/g, (a) => (isIP(a) === 6 && !kept(a) ? addressLabels.get(a) ?? '<ipv6>' : a));
+
 const redact = (text: string): string =>
-  replacements.reduce((out, [value, label]) => out.split(value).join(label), text).replace(/\b[0-9a-f]{64}\b/g, '<id>');
+  hideAddresses(replacements.reduce((out, [value, label]) => out.split(value).join(label), text)).replace(/\b[0-9a-f]{64}\b/g, '<id>');
 
 const say = (line: string): void => console.log(redact(line));
 const rawLines = (text: string): void => {
@@ -87,15 +98,16 @@ function egressSummary(logs: string): string[] {
 
 async function dockerSection(build: boolean): Promise<void> {
   say('== docker (lane 2)');
-  // The public and Tailscale addresses are replaced before anything prints.
+  // The host's addresses are named before anything prints; any other
+  // address is replaced too (hideAddresses).
   const interfaces = networkInterfaces();
   for (const [name, entries] of Object.entries(interfaces)) {
-    if (!/^(eth|en|tailscale)/.test(name)) continue;
-    for (const entry of entries ?? []) replacements.push([entry.address, `<${name} ${entry.family}>`]);
+    if (!/^(eth|en|tailscale|docker0$)/.test(name)) continue;
+    for (const entry of entries ?? []) addressLabels.set(entry.address, `<${name} ${entry.family}>`);
   }
   const before = listening();
   say(`ss -ltn before: ${before.length} listening sockets`);
-  rawLines(before.join('\n'));
+  // Only the counts and the difference are printed: the list itself is the host's.
 
   // Every command line, as it runs.
   const docker = new Docker(async (args, options) => {
@@ -211,7 +223,11 @@ async function dockerSection(build: boolean): Promise<void> {
     let tailscalePort = 0;
     for (const address of before.filter((a) => tailscale !== undefined && a.startsWith(`${tailscale}:`))) {
       const port = Number(address.split(':').at(-1));
-      if (tailscale !== undefined && (await hostConnect(tailscale, port)) === 'connected') { tailscalePort = port; break; }
+      if (tailscale !== undefined && (await hostConnect(tailscale, port)) === 'connected') {
+        tailscalePort = port;
+        replacements.push([`:${port}`, ':<port>']);
+        break;
+      }
     }
     const targets: [string, string | undefined, number][] = [
       ['docker0', ipv4('docker0'), SERVICE_PORT], ['docker0', ipv4('docker0'), 22],
@@ -303,12 +319,11 @@ async function dockerSection(build: boolean): Promise<void> {
   const after = [...afterMap.keys()].sort();
   const added = after.filter((address) => !before.includes(address));
   say(`ss -ltn after: ${after.length} listening sockets`);
-  rawLines(after.join('\n'));
   // This is a shared server: other processes and lanes open sockets while
   // the doctor runs. A new socket is this run's if this process holds it or
   // if the session published it (it publishes nothing: no -p in any line above).
   const ours = added.filter((address) => (afterMap.get(address) ?? '').includes(`pid=${process.pid},`));
-  for (const address of added.filter((a) => !ours.includes(a))) say(`    new socket ${address}, not held by this process: ${afterMap.get(address) || 'owner not visible to this user (a container port or another user)'}`);
+  for (const address of added.filter((a) => !ours.includes(a))) say(`    new socket ${address}, held by another process`);
   check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
 }
 

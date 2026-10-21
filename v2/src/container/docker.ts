@@ -35,25 +35,38 @@ export class LabelRuleError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-// Runs the real CLI. Output is kept in memory: the commands this module
+// Runs a command (the real CLI: cliRunner). Output is kept in memory: the commands this module
 // builds print ids, JSON rows or a probe's short output.
-export const cliRunner: DockerRunner = (args, options) =>
+export const commandRunner = (command: string): DockerRunner => (args, options) =>
   new Promise((resolve, reject) => {
-    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'], timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    // Its own timer rather than spawn's `timeout`, which stayed armed after a
+    // failed spawn and kept the process alive until it fired.
+    const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.on('error', reject);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on('close', (code, signal) => {
+      clearTimeout(timer);
       resolve({
         code: code ?? (signal ? 128 : 1),
         stdout: Buffer.concat(stdout).toString('utf8'),
         stderr: Buffer.concat(stderr).toString('utf8') + (signal ? `\nkilled by ${signal}` : ''),
       });
     });
+    // A command that exits without reading its input (or never starts)
+    // makes the write fail with EPIPE: its exit code or spawn error says what
+    // happened, so the write error is not thrown on its own.
+    child.stdin.on('error', () => undefined);
     child.stdin.end(options.input ?? '');
   });
+
+export const cliRunner: DockerRunner = commandRunner('docker');
 
 export const cliSpawner: DockerSpawner = (args) => spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
 

@@ -17,10 +17,11 @@
 //                          address this name has, the session network's
 //   EGRESS_PORT            default 3128
 //   EGRESS_DENY_ADDRESSES  the host's own addresses, comma separated
+//   EGRESS_CONNECT_TIMEOUT_MS  default 10000, per address dialled
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { lookup } from 'node:dns/promises';
-import { BlockList, connect as netConnect, isIP, type Socket } from 'node:net';
+import { BlockList, connect as netConnect, isIP, type Server as NetServer, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 
 export type AllowEntry = { readonly host: string; readonly port: number; readonly wildcard: boolean };
@@ -92,14 +93,15 @@ function canonical(address: string): { readonly family: 'ipv4' | 'ipv6'; readonl
 
 // Never reachable through the proxy: this host, its private networks (the
 // Docker bridges among them), Tailscale's shared range, link-local (cloud
-// metadata), multicast and reserved space.
+// metadata), multicast and reserved space, and the IPv6 forms that embed an
+// IPv4 address (NAT64, 6to4, Teredo), which could carry a private one.
 const BLOCKED = new BlockList();
 for (const [network, prefix] of [
   ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
   ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['224.0.0.0', 4], ['240.0.0.0', 4],
 ] as const) BLOCKED.addSubnet(network, prefix, 'ipv4');
 for (const [network, prefix] of [
-  ['::', 96], ['fe80::', 10], ['fc00::', 7], ['ff00::', 8], ['64:ff9b::', 96], ['64:ff9b:1::', 48],
+  ['::', 96], ['fe80::', 10], ['fc00::', 7], ['ff00::', 8], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['2002::', 16], ['2001::', 32],
 ] as const) BLOCKED.addSubnet(network, prefix, 'ipv6');
 
 export function blockedReason(address: string, hostAddresses: ReadonlySet<string>): string | undefined {
@@ -118,8 +120,10 @@ export function parseTarget(target: string): { host: string; port: number } | un
   return { host: match[1], port };
 }
 
+// addresses: every address the name resolved to, all checked, IPv4 first
+// (Docker bridge networks have no IPv6 unless it is turned on).
 export type Decision =
-  | { readonly ok: true; readonly host: string; readonly port: number; readonly address: string }
+  | { readonly ok: true; readonly host: string; readonly port: number; readonly addresses: readonly string[] }
   | { readonly ok: false; readonly host?: string; readonly port?: number; readonly reason: string };
 
 export type DecideContext = {
@@ -140,10 +144,10 @@ export async function decide(target: string, context: DecideContext): Promise<De
   } catch {
     return { ok: false, host, port, reason: 'unresolved' };
   }
-  const [first] = addresses;
-  if (first === undefined) return { ok: false, host, port, reason: 'unresolved' };
+  if (addresses.length === 0) return { ok: false, host, port, reason: 'unresolved' };
   if (addresses.some((address) => blockedReason(address, context.hostAddresses) !== undefined)) return { ok: false, host, port, reason: 'blocked_address' };
-  return { ok: true, host, port, address: first };
+  const ordered = [...addresses.filter((a) => isIP(a) === 4), ...addresses.filter((a) => isIP(a) !== 4)];
+  return { ok: true, host, port, addresses: ordered };
 }
 
 export type LogLine = {
@@ -160,6 +164,8 @@ export type ProxyOptions = {
   readonly connect: (port: number, address: string) => Socket;
   readonly hostAddresses: ReadonlySet<string>;
   readonly log: (line: LogLine) => void;
+  // How long one address may take to accept, before the next one is tried.
+  readonly connectTimeoutMs?: number;
 };
 
 function urlHost(url: string | undefined): string | undefined {
@@ -201,24 +207,57 @@ export function createProxy(options: ProxyOptions): Server {
         refuse('403 Forbidden', { host: decision.host, port: decision.port, reason: decision.reason });
         return;
       }
-      const upstream = options.connect(decision.port, decision.address);
-      let open = false;
-      upstream.once('connect', () => {
-        open = true;
-        record('allowed', { host: decision.host, port: decision.port });
-        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-        if (head.length > 0) upstream.write(head);
-        upstream.pipe(client);
-        client.pipe(upstream);
-      });
-      upstream.on('error', () => {
-        if (!open) refuse('502 Bad Gateway', { host: decision.host, port: decision.port, reason: 'upstream_error' });
-        else client.destroy();
-      });
-      client.on('close', () => upstream.destroy());
+      // Each checked address in turn, until one accepts within the timeout.
+      const dial = (index: number): void => {
+        const address = decision.addresses[index];
+        if (address === undefined || client.destroyed) {
+          refuse('502 Bad Gateway', { host: decision.host, port: decision.port, reason: 'upstream_error' });
+          return;
+        }
+        const upstream = options.connect(decision.port, address);
+        let open = false;
+        const timer = setTimeout(() => upstream.destroy(new Error('connect timeout')), options.connectTimeoutMs ?? 10_000);
+        upstream.once('connect', () => {
+          clearTimeout(timer);
+          if (client.destroyed) {
+            upstream.destroy();
+            return;
+          }
+          open = true;
+          record('allowed', { host: decision.host, port: decision.port });
+          client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+          if (head.length > 0) upstream.write(head);
+          upstream.pipe(client);
+          client.pipe(upstream);
+          client.on('close', () => upstream.destroy());
+        });
+        upstream.on('error', () => {
+          clearTimeout(timer);
+          if (open) client.destroy();
+          else dial(index + 1);
+        });
+      };
+      dial(0);
     });
   });
   return server;
+}
+
+// Listens on the address `host` resolves to (the session network's, for the
+// egress alias). A name that does not resolve is logged, and the process exits.
+export async function listenOn(
+  server: NetServer, host: string, port: number,
+  deps: { readonly resolve: (host: string) => Promise<string>; readonly log: (line: object) => void; readonly exit: (code: number) => void },
+): Promise<void> {
+  let address: string;
+  try {
+    address = await deps.resolve(host);
+  } catch (error) {
+    deps.log({ at: new Date().toISOString(), error: `cannot resolve ${host}: ${(error as Error).message}` });
+    deps.exit(1);
+    return;
+  }
+  server.listen(port, address, () => deps.log({ at: new Date().toISOString(), listening: `${address}:${port}` }));
 }
 
 function main(): void {
@@ -232,9 +271,12 @@ function main(): void {
     connect: (upstreamPort, address) => netConnect({ port: upstreamPort, host: address }),
     hostAddresses,
     log: (line) => console.log(JSON.stringify(line)),
+    connectTimeoutMs: Number(process.env.EGRESS_CONNECT_TIMEOUT_MS || 10_000),
   });
-  void lookup(listenHost).then(({ address }) => {
-    server.listen(port, address, () => console.log(JSON.stringify({ at: new Date().toISOString(), listening: `${address}:${port}` })));
+  void listenOn(server, listenHost, port, {
+    resolve: async (host) => (await lookup(host)).address,
+    log: (line) => console.log(JSON.stringify(line)),
+    exit: (code) => process.exit(code),
   });
 }
 

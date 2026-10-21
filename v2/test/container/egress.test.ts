@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connect as netConnect, createServer, type AddressInfo, type Server, type Socket } from 'node:net';
+import { Socket, connect as netConnect, createServer, type AddressInfo, type Server } from 'node:net';
 import { once } from 'node:events';
-import { AllowListError, blockedReason, createProxy, decide, isAllowed, parseAllowList, parseTarget, type LogLine } from '../../images/egress/proxy.ts';
+import { AllowListError, blockedReason, createProxy, decide, isAllowed, listenOn, parseAllowList, parseTarget, type LogLine } from '../../images/egress/proxy.ts';
 
 // 203.0.113.0/24 is a documentation range the proxy does not block by itself;
 // here it stands for the host's own public address, which it must block.
@@ -39,6 +39,8 @@ test('private, loopback, link-local, shared, multicast and the host own addresse
     '172.31.255.255', '192.168.1.1', '192.0.0.8', '198.18.0.1', '224.0.0.1', '239.1.2.3', '240.0.0.1', '255.255.255.255',
     '::', '::1', 'fe80::1', 'fc00::1', 'fd7a:115c:a1e0::1', 'ff02::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:10.0.0.1',
     '64:ff9b::a00:1', '203.0.113.7', '2001:db8::7', 'not an address',
+    // 6to4 and Teredo embed an IPv4 address, which could be a private one.
+    '2002:a00:1::1', '2002:c0a8:101::', '2001:0:4136:e378:8000:63bf:3fff:fdd2',
   ];
   for (const address of blocked) assert.ok(blockedReason(address, HOST_ADDRESSES), address);
   for (const address of ['160.79.104.10', '104.16.0.1', '2607:6bc0::10', '::ffff:160.79.104.10', '172.32.0.1', '100.128.0.1', '203.0.113.8']) {
@@ -54,9 +56,10 @@ test('a CONNECT target is a host and a port, nothing else', () => {
   }
 });
 
-const ALLOW = parseAllowList('api.anthropic.com\nrebind.example.org\nsplit.example.org\n');
+const ALLOW = parseAllowList('api.anthropic.com\nrebind.example.org\nsplit.example.org\ndual.example.org\n');
 const DNS: Record<string, string[]> = {
   'api.anthropic.com': ['160.79.104.10'],
+  'dual.example.org': ['2607:6bc0::10', '160.79.104.12'],
   'rebind.example.org': ['127.0.0.1'],
   'split.example.org': ['160.79.104.11', '10.0.0.5'],
 };
@@ -68,7 +71,9 @@ const resolve = async (host: string): Promise<string[]> => {
 
 test('the decision allows a listed public host and refuses everything else with a reason', async () => {
   const context = { allow: ALLOW, resolve, hostAddresses: HOST_ADDRESSES };
-  assert.deepEqual(await decide('api.anthropic.com:443', context), { ok: true, host: 'api.anthropic.com', port: 443, address: '160.79.104.10' });
+  assert.deepEqual(await decide('api.anthropic.com:443', context), { ok: true, host: 'api.anthropic.com', port: 443, addresses: ['160.79.104.10'] });
+  // Docker bridges have no IPv6 by default: IPv4 addresses are dialled first.
+  assert.deepEqual(await decide('dual.example.org:443', context), { ok: true, host: 'dual.example.org', port: 443, addresses: ['160.79.104.12', '2607:6bc0::10'] });
   const refusals: [string, string][] = [
     ['example.com:443', 'not_allowed'],
     ['api.anthropic.com:22', 'not_allowed'],
@@ -155,4 +160,65 @@ test('the proxy tunnels an allowed CONNECT, refuses the rest, and logs one line 
     ['refused', 'api.anthropic.com', 443, 'allow_list_invalid'],
   ]);
   for (const line of lines) assert.match(line.at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+// A socket that fails as soon as it is used, like a dial to an unreachable address.
+function failing(): Socket {
+  const socket = new Socket();
+  process.nextTick(() => socket.destroy(new Error('ENETUNREACH')));
+  return socket;
+}
+
+test('the proxy tries each checked address in turn, and gives up on one that never answers', async (t) => {
+  const echo = createServer((socket) => socket.pipe(socket));
+  const echoPort = await listen(echo);
+  const dialled: string[] = [];
+  const lines: LogLine[] = [];
+  const proxy = createProxy({
+    readAllowList: () => 'dual.example.org\napi.anthropic.com\n',
+    resolve,
+    hostAddresses: HOST_ADDRESSES,
+    connect: (port, address) => {
+      dialled.push(`${address}:${port}`);
+      if (address === '160.79.104.12') return failing();
+      // An address that never answers: a socket that is never connected.
+      if (address === '160.79.104.10') return new Socket();
+      return netConnect(echoPort, '127.0.0.1');
+    },
+    log: (line) => lines.push(line),
+    connectTimeoutMs: 50,
+  });
+  const proxyPort = await listen(proxy);
+  t.after(() => { proxy.close(); echo.close(); });
+
+  const fallback = await rawRequest(proxyPort, 'CONNECT dual.example.org:443 HTTP/1.1\r\n\r\n');
+  assert.match(fallback.head, /^HTTP\/1\.1 200 /);
+  fallback.socket.write('ping');
+  const [echoed] = (await once(fallback.socket, 'data')) as [Buffer];
+  assert.equal(echoed.toString(), 'ping');
+  fallback.socket.destroy();
+  assert.deepEqual(dialled, ['160.79.104.12:443', '2607:6bc0::10:443']);
+
+  const silent = await rawRequest(proxyPort, 'CONNECT api.anthropic.com:443 HTTP/1.1\r\n\r\n');
+  assert.match(silent.head, /^HTTP\/1\.1 502 /);
+  silent.socket.destroy();
+  assert.deepEqual(lines.map((line) => [line.verdict, line.host, line.reason]), [
+    ['allowed', 'dual.example.org', undefined],
+    ['refused', 'api.anthropic.com', 'upstream_error'],
+  ]);
+});
+
+test('a listen address that does not resolve is logged and exits 1', async () => {
+  const lines: object[] = [];
+  const exits: number[] = [];
+  const server = createServer();
+  await listenOn(server, 'egress', 3128, {
+    resolve: async () => { throw new Error('getaddrinfo EAI_AGAIN egress'); },
+    log: (line) => lines.push(line),
+    exit: (code) => exits.push(code),
+  });
+  assert.deepEqual(exits, [1]);
+  assert.equal(lines.length, 1);
+  assert.match(JSON.stringify(lines[0]), /"error":"cannot resolve egress: getaddrinfo EAI_AGAIN egress"/);
+  assert.equal(server.listening, false);
 });

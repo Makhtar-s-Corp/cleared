@@ -6,7 +6,7 @@
 // mounts, runArgs, lifecycle commands, ports) is reported as ignored and
 // never applied: the rest of the devcontainer specification is out of scope.
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const DEVCONTAINER_FILE = '.devcontainer/devcontainer.json';
 
@@ -73,7 +73,7 @@ function inside(checkout: string, base: string, path: string, what: string): str
   const real = realpathSync(resolved);
   const root = realpathSync(checkout);
   const rel = relative(root, real);
-  if (rel.startsWith('..') || isAbsolute(rel)) throw new DevcontainerError(`${DEVCONTAINER_FILE}: ${what} ${JSON.stringify(path)} leaves the checkout`);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new DevcontainerError(`${DEVCONTAINER_FILE}: ${what} ${JSON.stringify(path)} leaves the checkout`);
   return resolved;
 }
 

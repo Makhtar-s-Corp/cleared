@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Docker, LABEL, LabelRuleError, assertLabelRule, assertSessionId, type ContainerSpec } from '../../src/container/docker.ts';
+import { Docker, LABEL, LabelRuleError, assertLabelRule, assertSessionId, commandRunner, type ContainerSpec } from '../../src/container/docker.ts';
 import { FakeDocker, type Call } from './fake-docker.ts';
 
 const SESSION = '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b';
@@ -226,4 +226,12 @@ test('a spec value that could smuggle a flag or another mount is refused', async
     { tmpfs: ['/tmp:exec,uid=0', 'relative'] },
   ];
   for (const overrides of bad) await assert.rejects(docker.createContainer(spec(`cleared-v2-${SESSION}-session`, overrides)), JSON.stringify(overrides));
+});
+
+test('the CLI runner reports a command that exits without reading its input, or is missing, instead of crashing', async () => {
+  // Several megabytes of input to a command that never reads it: writing to its stdin fails with EPIPE.
+  const input = 'x'.repeat(8 * 1024 * 1024);
+  const result = await commandRunner('true')([], { input });
+  assert.equal(result.code, 0);
+  await assert.rejects(commandRunner('cleared-v2-no-such-command')([], { input }), /ENOENT/);
 });

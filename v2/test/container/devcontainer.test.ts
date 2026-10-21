@@ -72,6 +72,12 @@ test('a malformed file, image and build together, or a path outside the checkout
   for (const files of cases) assert.throws(() => readDevcontainer(checkout(files), DEFAULT), DevcontainerError, JSON.stringify(files));
 });
 
+test('a folder whose name starts with two dots is inside the checkout', () => {
+  const root = checkout({ '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "../..docker/Dockerfile" } }', '..docker/Dockerfile': 'FROM node:24\n' });
+  const choice = readDevcontainer(root, DEFAULT);
+  assert.equal(choice.kind === 'dockerfile' && choice.dockerfile, join(root, '..docker/Dockerfile'));
+});
+
 test('a Dockerfile reached through a symbolic link that leaves the checkout is refused', () => {
   const outside = checkout({ 'Dockerfile': 'FROM node:24\n' });
   const root = checkout({ '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" } }' });
