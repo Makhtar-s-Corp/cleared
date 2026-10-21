@@ -127,12 +127,14 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
           emit(session, { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: session.pending, decision: 'cancelled', by: 'policy' } });
           session.pending = undefined;
         }
-        // The turn ends here; the script goes on at the next message.
+        // The turn ends here; the script goes on at the next message, and a
+        // script with no message left ends the session.
         while (script[session.step] !== undefined && !('awaitMessage' in (script[session.step] as FakeStep))) session.step++;
         emit(session, {
           type: 'RUN_FINISHED', threadId: session.id, runId: `${session.id}-interrupted`,
           outcome: { type: 'cancelled' }, usage: [], result: { stopReason: 'cancelled', total_cost_usd: null },
         });
+        if (script[session.step] === undefined) close(session);
       },
       async stop() {
         close(session);

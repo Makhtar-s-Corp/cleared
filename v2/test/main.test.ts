@@ -140,3 +140,16 @@ test('SIGTERM ends a connection that never ends on its own, as an event stream d
   socket.destroy();
   assert.deepEqual([code, signal], [0, null], 'the service exits by itself, before the 5 s watchdog');
 });
+
+test('a second signal during shutdown changes nothing: one clean exit (review round 2, finding 1)', async () => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.CLEARED_V2_HOST;
+  const { child } = await startService(env);
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.kill('SIGINT');
+  child.kill('SIGTERM');
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
+  assert.equal(stderr, '');
+});

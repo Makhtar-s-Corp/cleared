@@ -147,3 +147,22 @@ test('the example script plays a whole author turn the app can render', withStor
 test('lane 1 registers no real harness adapter', () => {
   assert.deepEqual(Object.keys(adapterFactories), []);
 });
+
+test('an interrupt with no message left in the script ends the session and its readers (review round 2, finding 5)', withStore(async (store) => {
+  const handle = await createFakeAdapter({
+    log: store.events,
+    script: [
+      { emit: { type: 'RUN_STARTED', threadId: 's', runId: 'r1' } },
+      { permission: { requestId: 'q1', toolCallId: 't1', tool: 'Bash', input: { kind: 'execute', command: 'touch x' }, suggestion: { decision: 'ask', rule: 'default', reason: 'r' } } },
+      { emit: { type: 'STEP_FINISHED', stepName: 'author' } },
+    ],
+    newId: () => 's',
+  }).start(input);
+  const reader = collect(handle);
+  await handle.interrupt();
+  const timeout = new Promise<'stuck'>((resolve) => setTimeout(() => resolve('stuck'), 2_000).unref());
+  const events = await Promise.race([reader, timeout]);
+  assert.notEqual(events, 'stuck', 'the reader ends');
+  if (events !== 'stuck') assert.equal(events.at(-1)?.event.type, 'RUN_FINISHED');
+  await assert.rejects(handle.send({ text: 'late', by: 'u1' }), /stopped/);
+}));

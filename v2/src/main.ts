@@ -44,9 +44,13 @@ server.listen(port, host, () => {
 // server.close waits for every open connection to end, and the event
 // streams (GET /api/sessions/:id/events, lane 7) never end on their own.
 // So the service ends them itself: an app reconnects with the last seq it
-// has (Last-Event-ID) and misses nothing.
+// has (Last-Event-ID) and misses nothing. A second signal while stopping
+// does nothing: the store is closed once.
+let closing = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    if (closing) return;
+    closing = true;
     server.close(() => {
       store.close();
       process.exit(0);
