@@ -1,0 +1,25 @@
+{
+  "name": "cleared-example-guestbook",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The demo project of Cleared v2: a guestbook on Postgres. TypeScript run by Node's type stripping, without a build step.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "watch": "node deploy/watch.ts"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "typescript": "7.0.2"
+  }
+}
