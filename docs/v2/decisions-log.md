@@ -338,10 +338,13 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 
 **Decision.** Passwords are hashed with `crypto.argon2` of Node 24 (`argon2id`, no dependency) with the second recommended option of RFC 9106, section 4: "t=3 iterations, p=4 lanes, m=2^(16) (64 MiB of RAM), 128-bit salt, and 256-bit tag size". The first option needs 2 GiB per sign-in. One hash took about 100 ms on this server on 2026-10-21. The stored value is the PHC string (`$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`), so the parameters can change later without breaking stored hashes. An unknown name costs a hash too.
 
-Failures are counted per peer address and per user name over 15 minutes. After five of either, the sign-in answers 429 with `Retry-After` until the window has passed, even for the right password, so a lucky guess during a lockout tells nothing. This differs from v1, where a right token always gets in.
+Failures are counted per peer address and per user name over 15 minutes. After five of either, the sign-in answers 429 with `Retry-After` until the window has passed, even for the right password, so a lucky guess during a lockout tells nothing. This differs from v1, where a right token always gets in. An attempt is counted when it starts, before its password is checked, and a right password takes its own attempt back. Counting only after the check let a burst of parallel requests all pass the count while it was still zero (review round 1, blocking 1).
+
+A password is 15 to 1024 characters. NIST SP 800-63B-4 ("Password Verifiers") requires at least 15 characters for a password used as a single factor and asks verifiers to permit at least 64. The maximum is the sign-in form's `maxlength`, so any password the command accepts can be typed at sign-in.
 
 **Consequences.**
 - The counts live in memory: a restart of the app clears them, which only an account on this machine can cause.
+- The peer is the TCP peer address. Behind a proxy on this machine (`CLEARED_V2_APP_ORIGIN`), every browser arrives as `127.0.0.1`, so five wrong passwords from anyone block every sign-in through the proxy for 15 minutes. The name key also lets anyone who knows a user name block that user for 15 minutes. Both are accepted for a tool with one owner on a private network: the cost is a 15 minute wait, never a way in. A forwarded address header is not trusted instead, since any client can send one (review round 1, followup 2).
 - A sign-in form posted from another origin, or with `Sec-Fetch-Site` other than `same-origin`, is refused before any password is checked.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-app-shell-login`.
 

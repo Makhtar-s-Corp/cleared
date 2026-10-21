@@ -60,7 +60,10 @@ The app finds `ledger.db` as the service does (`CLEARED_STATE_DIR`, and so on). 
 
 Sign-in and writes:
 - The session cookie is `HttpOnly`, `Secure`, `SameSite=Strict` and lasts 30 days. It survives a restart of the app.
-- Five wrong passwords from one address, or for one name, within 15 minutes block that address or name for the rest of the 15 minutes. During the block, even the right password gets `429`.
+- A session ends 30 days after its sign-in, whatever happens in between: it is not renewed by use. Then the app asks for the password again.
+- `Secure` is set even on plain `http://127.0.0.1:8792`. Headless Chromium kept the cookie there on 2026-10-21. Review round 1 of the pull request reports that Safari does not keep a `Secure` cookie on plain `http`; that was not checked here. In Safari, open the app through an `https` address (`CLEARED_V2_APP_ORIGIN`, served by a proxy on this machine) or sign-in will not hold.
+- A password is 15 to 1024 characters (`cleared-v2 user add` refuses others). NIST SP 800-63B-4 asks for at least 15 for a password used alone, and 1024 is the sign-in form's limit.
+- Five sign-in attempts from one address, or for one name, within 15 minutes block that address or name for the rest of the 15 minutes. An attempt counts from the moment it arrives, so a burst sent at once is limited the same way, and a right password does not count. During the block, even the right password gets `429`.
 - A write needs the session, its anti-forgery token in `X-CSRF-Token` (from `GET /api/me`) and the app's own origin.
 - A request for another host name gets `421`.
 - The pages load nothing inline and nothing from another site.

@@ -70,6 +70,12 @@ export async function verifyPassword(password: string, stored: string): Promise<
   }
 }
 
+// NIST SP 800-63B-4, "Password Verifiers": a password used as a single factor
+// SHALL be at least 15 characters, and verifiers SHOULD permit at least 64.
+// The maximum is the sign-in form's maxlength, so any password that can be
+// set can also be typed there. Characters are counted, not bytes.
+export const PASSWORD_LENGTH = { min: 15, max: 1024 } as const;
+
 // A name typed at the sign-in page and shown in the header: letters,
 // digits, dot, dash and underscore, 1 to 32 characters.
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
@@ -98,6 +104,9 @@ export class SqliteUsers implements UserDirectory {
   async add(name: string, password: string): Promise<User> {
     if (!NAME.test(name)) throw new UserError('a user name is 1 to 32 letters, digits, dots, dashes or underscores, starting with a letter or a digit');
     if (password === '') throw new UserError('the password is empty');
+    const length = [...password].length;
+    if (length < PASSWORD_LENGTH.min) throw new UserError(`a password is at least ${PASSWORD_LENGTH.min} characters`);
+    if (length > PASSWORD_LENGTH.max) throw new UserError(`a password is at most ${PASSWORD_LENGTH.max} characters`);
     if (this.#byName.get(name)) throw new UserError(`a user named ${name} already exists`);
     const hash = await hashPassword(password, this.#params);
     const id: UserId = randomUUID();
@@ -174,7 +183,8 @@ export function readOrCreateProof(path: string): string {
   }
 }
 
-// What the service's routes call on SERVICE_PROOF_HEADER (lanes 7 and 8).
+// What the service's routes call on SERVICE_PROOF_HEADER (lanes 7 and 8),
+// and the app on its anti-forgery token: a constant-time comparison.
 export function sameProof(given: unknown, proof: string): boolean {
   if (typeof given !== 'string') return false;
   const a = Buffer.from(given);

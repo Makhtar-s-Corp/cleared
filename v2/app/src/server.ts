@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { stripTypeScriptTypes } from 'node:module';
 import { extname, join } from 'node:path';
 import type { User } from '../../src/modules/registry.ts';
+import { sameProof } from '../../src/modules/users.ts';
 import { requestPath } from '../../src/server.ts';
 import type { UserId } from '../../src/session/contract.ts';
 import { translator, type Translate } from '../public/i18n.ts';
@@ -190,7 +191,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   };
 
   const csrfOk = (request: IncomingMessage, cookie: CookieSession) =>
-    request.headers['x-csrf-token'] === cookie.csrf && sameOrigin(request);
+    sameProof(request.headers['x-csrf-token'], cookie.csrf) && sameOrigin(request);
 
   async function signIn(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (!sameOrigin(request)) return send(response, 403, loginPage(shellT, options.language, shellT('login_refused')));
@@ -199,16 +200,15 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     const name = (form.get('name') ?? '').trim();
     const password = form.get('password') ?? '';
     const peer = request.socket.remoteAddress ?? 'unknown';
-    const wait = options.throttle.blocked(peer, name);
-    if (wait > 0) {
-      const minutes = Math.max(1, Math.ceil(wait / 60));
-      return send(response, 429, loginPage(shellT, options.language, shellT('login_throttled', { minutes })), undefined, { 'retry-after': String(wait) });
+    // Counted before the password is checked: see users.ts.
+    const attempt = options.throttle.start(peer, name);
+    if (attempt.succeeded === undefined) {
+      const minutes = Math.max(1, Math.ceil(attempt.wait / 60));
+      return send(response, 429, loginPage(shellT, options.language, shellT('login_throttled', { minutes })), undefined, { 'retry-after': String(attempt.wait) });
     }
     const user = body === undefined ? undefined : await options.users.verify(name, password);
-    if (!user) {
-      options.throttle.failed(peer, name);
-      return send(response, 401, loginPage(shellT, options.language, shellT('login_wrong')));
-    }
+    if (!user) return send(response, 401, loginPage(shellT, options.language, shellT('login_wrong')));
+    attempt.succeeded();
     const made = options.sessions.create(user.id);
     redirect(response, '/', { 'set-cookie': sessionCookie(made.id) });
   }
