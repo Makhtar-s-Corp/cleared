@@ -313,3 +313,12 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 - A project whose devcontainer names another image needs Node 24, Claude Code and the SDK in that image for lane 4's runner.
 - `docker.ts` gives lane 4 `Docker.attach` (`docker start --attach --interactive`) for the runner's standard streams, and `startSession` with `interactive: true` creates the session container without starting it.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j1-container`.
+
+## 2026-10-21: the example's repository and the sessions' login (plan questions 1 and 2)
+
+**Decision.**
+1. Question 1, answer (a): the demo project lives in its own public repository, [Makhtar-s-Corp/cleared-example-guestbook](https://github.com/Makhtar-s-Corp/cleared-example-guestbook), Apache-2.0, seeded from `examples/guestbook/` on `v2` and kept in sync by hand. No other organisation setting was changed. The lock's pull requests and merges for the demo happen there, never in this repository.
+2. Question 2, answer (a), the default: sessions log in with a `claude setup-token` token held by the service, written once by the owner into the service-owned token file. No API key.
+
+**Consequences.** Lane 8's real proof (wave 3) runs against that repository. A change to `examples/guestbook/` is copied there by hand until milestone 4.
+- Decided by the owner on 2026-10-21 at 21:33 (Europe/Paris); written by the orchestrator.
