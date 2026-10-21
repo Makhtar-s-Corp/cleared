@@ -186,7 +186,7 @@ export function readOrCreateProof(path: string): string {
 // What the service's routes call on SERVICE_PROOF_HEADER (lanes 7 and 8),
 // and the app on its anti-forgery token: a constant-time comparison.
 export function sameProof(given: unknown, proof: string): boolean {
-  if (typeof given !== 'string') return false;
+  if (typeof given !== 'string' || proof === '') return false;
   const a = Buffer.from(given);
   const b = Buffer.from(proof);
   return a.length === b.length && timingSafeEqual(a, b);

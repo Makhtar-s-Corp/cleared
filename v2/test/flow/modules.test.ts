@@ -35,7 +35,7 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
 test('the modules assemble with the other lanes\' stubs: no route declared twice, the adapters provided', () => {
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
-  const app = assemble({ sessions, users: emptyModule, tickets, flow, approval, inbox }, { store });
+  const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox }, { store });
   assert.equal(app.routes.length, 11);
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code']);
   assert.ok(!app.routes.some((r) => r.path.endsWith('/approve')), 'the approval route is lane 8\'s');

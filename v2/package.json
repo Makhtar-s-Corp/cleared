@@ -12,6 +12,7 @@
     "start": "node src/main.ts",
     "app": "node app/main.ts",
     "user": "node src/cli/user.ts",
+    "setup": "node src/cli/setup.ts",
     "test": "node --test \"test/**/*.test.ts\" \"app/test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p app",
     "guard": "node scripts/guard.ts",

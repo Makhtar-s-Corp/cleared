@@ -1,7 +1,18 @@
-// The approval module, a stub until lane 8 (approval and lock): the approval route, the signer and the review recorder.
-// That lane fills this file only (docs/v2/milestone-1-plan.md, section 10).
-import { emptyModule, type Module } from './registry.ts';
+// The approval module (lane 8, approval and lock): the approval route and its
+// Undo, the signer behind them, the review recorder merge-pr.sh reads. It
+// fills the approvalWriter and reviewRecorder slots; the signing key is read
+// by this process alone (plan, decision 6).
+import { approvalEnvironment, APPROVAL_TABLES } from '../approval/service.ts';
+import { approvalRoutes } from '../approval/route.ts';
+import type { Module } from './registry.ts';
 
-const approval: Module = emptyModule;
+const approval: Module = {
+  tables: APPROVAL_TABLES,
+  routes: approvalRoutes,
+  provide: ({ store }) => {
+    const { approvalWriter, reviewRecorder } = approvalEnvironment(store.db);
+    return { approvalWriter, reviewRecorder };
+  },
+};
 
 export default approval;
