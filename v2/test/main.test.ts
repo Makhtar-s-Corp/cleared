@@ -3,8 +3,23 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer, type AddressInfo } from 'node:net';
 import { once } from 'node:events';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 
 const main = new URL('../src/main.ts', import.meta.url).pathname;
+
+// The service opens the ledger at start: every run here gets a state
+// directory of its own, never the machine's.
+const state = mkdtempSync(join(tmpdir(), 'cleared-v2-main-'));
+after(() => rmSync(state, { recursive: true, force: true }));
+function isolated(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state };
+  delete out.ORCH_LEDGER;
+  return out;
+}
 
 // A port the system says is free right now, on this machine only.
 async function freePort(): Promise<number> {
@@ -21,7 +36,7 @@ async function freePort(): Promise<number> {
 async function startService(env: NodeJS.ProcessEnv): Promise<{ child: ChildProcessWithoutNullStreams; port: number; line: string }> {
   for (let attempt = 1; ; attempt++) {
     const port = await freePort();
-    const child = spawn(process.execPath, [main], { env: { ...env, CLEARED_V2_PORT: String(port) } });
+    const child = spawn(process.execPath, [main], { env: isolated({ ...env, CLEARED_V2_PORT: String(port) }) });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     const started = await Promise.race([
@@ -49,7 +64,7 @@ test('node src/main.ts serves /health on 127.0.0.1 at CLEARED_V2_PORT and stops 
 });
 
 test('a reserved port stops the service before it listens', () => {
-  const run = spawnSync(process.execPath, [main], { env: { ...process.env, CLEARED_V2_PORT: '8788' }, encoding: 'utf8', timeout: 10_000 });
+  const run = spawnSync(process.execPath, [main], { env: isolated({ ...process.env, CLEARED_V2_PORT: '8788' }), encoding: 'utf8', timeout: 10_000 });
   assert.equal(run.status, 64);
   assert.match(run.stderr, /^cleared-v2: CLEARED_V2_PORT 8788 is reserved/m);
   assert.doesNotMatch(run.stdout, /listening/);
@@ -60,7 +75,7 @@ test('a port already in use is said as such', async () => {
   await new Promise<void>((resolve) => holder.listen(0, '127.0.0.1', resolve));
   const { port } = holder.address() as AddressInfo;
   try {
-    const child = spawn(process.execPath, [main], { env: { ...process.env, CLEARED_V2_HOST: '127.0.0.1', CLEARED_V2_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [main], { env: isolated({ ...process.env, CLEARED_V2_HOST: '127.0.0.1', CLEARED_V2_PORT: String(port) }), stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     const [code] = await once(child, 'exit');
@@ -69,4 +84,31 @@ test('a port already in use is said as such', async () => {
   } finally {
     await new Promise<void>((resolve) => holder.close(() => resolve()));
   }
+});
+
+test('the service opens the ledger of its state directory and creates its tables there', async () => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.CLEARED_V2_HOST;
+  const { child } = await startService(env);
+  child.kill('SIGTERM');
+  await once(child, 'exit');
+  const path = join(state, 'ledger.db');
+  assert.ok(existsSync(path));
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const names = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((row) => row.name);
+    for (const name of ['session_events', 'sessions', 'policy_rules']) assert.ok(names.includes(name), name);
+  } finally {
+    db.close();
+  }
+});
+
+test('a ledger the service cannot place stops it before it listens', () => {
+  // No state directory, no project: the ledger has no place. Port 1 cannot
+  // be bound by this account, so a regression could never start listening.
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: state, XDG_CONFIG_HOME: join(state, 'no-config'), CLEARED_V2_PORT: '1' };
+  const run = spawnSync(process.execPath, [main], { env, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(run.status, 64);
+  assert.match(run.stderr, /^cleared-v2: .*CLEARED_STATE_DIR/m);
+  assert.doesNotMatch(run.stdout, /listening/);
 });
