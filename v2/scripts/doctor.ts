@@ -87,6 +87,12 @@ function egressSummary(logs: string): string[] {
 
 async function dockerSection(build: boolean): Promise<void> {
   say('== docker (lane 2)');
+  // The public and Tailscale addresses are replaced before anything prints.
+  const interfaces = networkInterfaces();
+  for (const [name, entries] of Object.entries(interfaces)) {
+    if (!/^(eth|en|tailscale)/.test(name)) continue;
+    for (const entry of entries ?? []) replacements.push([entry.address, `<${name} ${entry.family}>`]);
+  }
   const before = listening();
   say(`ss -ltn before: ${before.length} listening sockets`);
   rawLines(before.join('\n'));
@@ -103,16 +109,11 @@ async function dockerSection(build: boolean): Promise<void> {
   if (build) await buildBaseImages(docker, join(V2, 'images'));
 
   // The host's addresses, refused by the proxy and probed from the session.
-  const interfaces = networkInterfaces();
   // Loopback and link-local are already in the proxy's blocked ranges.
   const hostAddresses = Object.values(interfaces).flatMap((entries) => entries ?? [])
     .filter((entry) => !entry.internal && !entry.address.startsWith('fe80:'))
     .map((entry) => entry.address);
   const ipv4 = (name: string): string | undefined => interfaces[name]?.find((entry) => entry.family === 'IPv4')?.address;
-  for (const [name, entries] of Object.entries(interfaces)) {
-    if (!/^(eth|en|tailscale)/.test(name)) continue;
-    for (const entry of entries ?? []) replacements.push([entry.address, `<${name} ${entry.family}>`]);
-  }
 
   // Something real on 127.0.0.1:8791 for the duration of the run, so that
   // "unreachable" is measured against a listener.
