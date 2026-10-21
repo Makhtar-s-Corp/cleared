@@ -554,7 +554,7 @@ The Cleared app. It reads the board snapshot and the ledger the last wake record
 | Key | Purpose | Requirement or default |
 | --- | --- | --- |
 | `bind` | Address the app listens on. Use the Tailscale address to reach it from a phone; the installer does this. | Default: 127.0.0.1 |
-| `port` | Port the app listens on when `cleared app` is started by hand; the installed service is given `CLEARED_APP_PORT` of `serve/install.sh` (default 8788) instead. Never 80 or 443: the installer refuses them, and any port something else listens on ([Decisions](concepts.md#decisions)). | Default: 8788 |
+| `port` | Port the app listens on when `cleared app` is started by hand; the installed service is given `CLEARED_APP_PORT` of `serve/install.sh` (8788 when unset) instead. Never 80 or 443: the installer refuses them, and any port something else listens on ([Decisions](concepts.md#decisions)). 8788 is the port of the v1 app only: the Cleared v2 service never uses it and has its own default ([v2/README.md](../v2/README.md#settings)). | Default: 8788 (v1 app only) |
 | `ranges` | Peers allowed to connect, as CIDR ranges separated by spaces or commas. | Optional; no default (Tailscale ranges and this machine are used) |
 | `hosts` | Extra host names the browser may use, besides addresses, `localhost` and `*.ts.net`. | Optional; no default |
 | `token_file` | Private file (mode `0600`, owned by the service account, outside the project) holding the access token. Created on first start if missing. | Optional; no default (`~/.config/cleared/app-token` is used) |

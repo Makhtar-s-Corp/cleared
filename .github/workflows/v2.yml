@@ -1,0 +1,42 @@
+name: v2
+
+# The checks of the v2 service (v2/). They run on pull requests to the v2
+# branch only; checks.yml keeps checking the v1 code on every pull request.
+on:
+  pull_request:
+    branches: [v2]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: v2-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Types
+        run: npx tsc --noEmit
+      - name: Private terms and secrets guard
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: npm run guard -- --base "origin/$BASE_REF"
