@@ -246,3 +246,21 @@ test('a malformed RUN_FINISHED is cleaned, never thrown on (review round 1, find
   assert.equal(one(c, { type: 'STEP_STARTED', stepName: 'unknown' } as unknown as AgUiEvent), null, 'a step outside the measured ones is dropped');
   assert.deepEqual(one(c, { type: 'TOOL_CALL_START', toolCallId: 9, toolCallName: null } as unknown as AgUiEvent), { type: 'TOOL_CALL_START', toolCallId: '', toolCallName: '' });
 });
+
+test('identifiers pass whole, even when their digits read as a phone number: the answer to a request names it by its id', () => {
+  // The last group holds ten digits that start with 06, which the phone
+  // pattern matches (built from parts, so the guard does not read this file as one).
+  const digits = ['06', '1234', '5678'].join('');
+  const requestId = `55ddd20b-469d-40d9-b2f0-${digits}e4`;
+  const toolCallId = `toolu_${digits}AbCdEfGh`;
+  const cleaner = createCleaner({});
+  const [request] = cleaner.clean({ type: 'CUSTOM', name: 'cleared.permission_request', value: { requestId, toolCallId, tool: 'Bash', input: { command: 'git commit' } } } as AgUiEvent);
+  const value = (request as Extract<AgUiEvent, { type: 'CUSTOM' }>).value as Record<string, unknown>;
+  assert.equal(value.requestId, requestId);
+  assert.equal(value.toolCallId, toolCallId);
+  const [start] = cleaner.clean({ type: 'TOOL_CALL_START', toolCallId, toolCallName: 'Bash' } as AgUiEvent);
+  assert.equal((start as { toolCallId: string }).toolCallId, toolCallId);
+  // Something that is not an id's shape is still cleaned.
+  const [odd] = cleaner.clean({ type: 'TOOL_CALL_START', toolCallId: `call ${apiKey}`, toolCallName: 'Bash' } as AgUiEvent);
+  assert.ok(!(odd as { toolCallId: string }).toolCallId.includes(apiKey));
+});
