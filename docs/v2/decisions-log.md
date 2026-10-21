@@ -48,7 +48,7 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 
 **Consequences.**
 - v1 requires the reviewer to be a different model from the one that wrote the change (README, Principles).
-- Open: which model reviews the work of Claude Code sessions before Codex sessions exist.
+- Until Codex sessions exist, another Claude model reviews: see "model choice per lane" below.
 - `lib/route.mjs`, which picks a model per role with fallbacks, is proposed for keep.
 
 ## 2026-10-21: what v2 keeps
@@ -112,9 +112,30 @@ Each entry has a date, the decision as it was taken, and its consequences for th
 
 ## 2026-10-21: v1 is stopped without an archive
 
-**Decision.** Makhtar decided not to archive the v1 state when stopping it, because it is not needed. The v1 services and timers are disabled.
+**Decision.** The owner decided not to archive the v1 state when stopping it, because it is not needed. The v1 services and timers are disabled.
 
 **Consequences.**
 - No copy of the v1 runtime state (ledger, lanes, worktrees, snapshot) is made before it stops. v2 starts from the repository, not from a v1 archive.
-- The orchestrator confirmed that the v1 stop was executed and verified on 2026-10-21, including the disabled services and timers.
+- The orchestrator reported on 2026-10-21 that the v1 stop was executed and verified, including the disabled services and timers. This change does not verify it.
 - The units `serve/` installs are still tracked: `cleared-wake.timer`, `cleared-dashboard-refresh.timer`, `cleared-legacy-import.timer` and their services. Their verdicts are in keep-and-drop.md.
+
+## 2026-10-21: lane branches are named v2-jN-topic
+
+**Decision.** A v2 lane's branch is named `v2-jN-topic`, where N is the milestone number, for example `v2-j0-keep-and-drop`. Its pull request targets the `v2` branch.
+
+**Consequences.**
+- The name `v2/jN-topic` is not possible. Git stores branches as paths under `refs/heads/`, so `refs/heads/v2/...` cannot exist next to `refs/heads/v2`. Locally, `git branch -m v2/j0-keep-and-drop` fails with "'refs/heads/v2' exists; cannot create 'refs/heads/v2/j0-keep-and-drop'". The remote has a `v2` branch too.
+- The `v2` branch keeps its name.
+
+## 2026-10-21: model choice per lane
+
+**Decision.**
+- The model may vary from lane to lane: Haiku for small fixes and simple docs, Opus for the core, Sonnet for review.
+- The reviewer is always a different model from the author.
+- Fable is allowed only when strong planning is needed, for example splitting a milestone into lanes or designing the session contract. It is never used for coding or review.
+- Every use of Fable is logged in this file, with its reason.
+
+**Consequences.**
+- Milestone 0 used no Fable.
+- The milestone 0 lanes (keep-and-drop, skeleton-ci and adapters-doc) were authored by Opus 5.5 and reviewed by Sonnet 5.5, in two rounds and in fresh sessions. For this lane, the two reviews on its pull request are signed "Sonnet 5.5, fresh session". For the other two lanes, this is as the orchestrator reported it.
+- Until Codex sessions exist, the reviewer is a different Claude model from the author. This settles the review question in the "Claude Code first, then Codex" entry.
