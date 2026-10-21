@@ -161,6 +161,33 @@ test('secrets and production hosts are denied in any tool input', () => {
   ]);
 });
 
+// Claude Code 2.1.306 removes CLAUDE_CODE_OAUTH_TOKEN from a Bash child's
+// environment, but the claude process keeps it in its own, which any process
+// of the session's uid reads in /proc/<pid>/environ (measured in a labelled
+// container on 2026-10-21; decisions log, review round 1 of PR 143).
+test('the environment of the session processes is a secret: printenv, a bare env, /proc/*/environ', () => {
+  check([
+    { name: 'printenv', request: bash('printenv'), decision: 'deny', rule: 'secret.read' },
+    { name: 'printenv of one variable', request: bash('printenv CLAUDE_CODE_OAUTH_TOKEN'), decision: 'deny', rule: 'secret.read' },
+    { name: 'printenv by its path', request: bash('/usr/bin/printenv HOME'), decision: 'deny', rule: 'secret.read' },
+    { name: 'a bare env', request: bash('env'), decision: 'deny', rule: 'secret.read' },
+    { name: 'env with options only', request: bash('env -0'), decision: 'deny', rule: 'secret.read' },
+    { name: 'env with assignments only', request: bash('env -u HOME A=1'), decision: 'deny', rule: 'secret.read' },
+    { name: 'env in a compound', request: bash('env | grep TOKEN'), decision: 'deny', rule: 'secret.read' },
+    { name: 'printenv in a substitution', request: bash('echo $(printenv)'), decision: 'deny', rule: 'secret.read' },
+    { name: 'printenv behind a wrapper', request: bash('sh -c printenv'), decision: 'deny', rule: 'secret.read' },
+    { name: 'a process environ', request: bash('cat /proc/1/environ'), decision: 'deny', rule: 'secret.read' },
+    { name: 'every process environ', request: bash('cat /proc/*/environ'), decision: 'deny', rule: 'secret.read' },
+    { name: 'the parent environ', request: bash('cat /proc/$PPID/environ'), decision: 'deny', rule: 'secret.read' },
+    { name: 'self environ through Read', request: { tool: 'Read', input: { file_path: '/proc/self/environ' } }, decision: 'deny', rule: 'secret.read' },
+    { name: 'environ from inside /proc', request: bash('cd /proc/12 && cat environ'), decision: 'deny', rule: 'secret.read' },
+    { name: 'environ through Grep', request: { tool: 'Grep', input: { pattern: 'TOKEN', path: '/proc/7/environ' } }, decision: 'deny', rule: 'secret.read' },
+    { name: 'env running a command is no read', request: bash('env NODE_ENV=test npm test'), decision: 'ask', rule: 'default' },
+    { name: 'a word that only contains env', request: bash('grep -r environment src'), decision: 'allow', rule: 'run.safe' },
+    { name: 'a file named environ.ts in the workdir is not /proc', request: { tool: 'Read', input: { file_path: '/workspace/src/environ.ts' } }, decision: 'allow', rule: 'read.workdir' },
+  ]);
+});
+
 test('secret.read looks at the paths a request names, never at the text it writes', () => {
   check([
     { name: 'code that reads a .key property', request: { tool: 'Edit', input: { file_path: '/workspace/src/a.ts', old_string: 'return 1;', new_string: 'return event.key;' } }, decision: 'allow', rule: 'edit.workdir' },
@@ -212,7 +239,7 @@ test('safe commands match the whole word list, and their unsafe words go to ask'
     { name: 'ls', request: bash('ls -la src'), decision: 'allow', rule: 'run.safe' },
     { name: 'lsof is not ls', request: bash('lsof'), decision: 'ask', rule: 'default' },
     { name: 'cat in the workdir', request: bash('cat src/app.ts'), decision: 'allow', rule: 'run.safe' },
-    { name: 'cat outside the workdir', request: bash('cat /proc/self/environ'), decision: 'ask', rule: 'default' },
+    { name: 'cat outside the workdir', request: bash('cat /etc/passwd'), decision: 'ask', rule: 'default' },
     { name: 'cat with ..', request: bash('cat ../../etc/passwd'), decision: 'ask', rule: 'default' },
     { name: 'tail -n', request: bash('tail -n 20 log.txt'), decision: 'allow', rule: 'run.safe' },
     { name: 'grep pattern then path', request: bash('grep -rn TODO src'), decision: 'allow', rule: 'run.safe' },
@@ -230,8 +257,8 @@ test('safe commands match the whole word list, and their unsafe words go to ask'
 
 test('a safe git command never reads a file outside the workdir (review round 1, finding 1)', () => {
   check([
-    { name: 'git diff --no-index', request: bash('git diff --no-index /proc/self/environ /dev/null'), decision: 'ask', rule: 'default' },
-    { name: 'git diff with a path outside, which git reads without --no-index', request: bash('git diff /proc/self/environ /dev/null'), decision: 'ask', rule: 'default' },
+    { name: 'git diff --no-index', request: bash('git diff --no-index /etc/passwd /dev/null'), decision: 'ask', rule: 'default' },
+    { name: 'git diff with a path outside, which git reads without --no-index', request: bash('git diff /etc/passwd /dev/null'), decision: 'ask', rule: 'default' },
     { name: 'git diff with ..', request: bash('git diff ../../etc/passwd'), decision: 'ask', rule: 'default' },
     { name: 'git log of a path outside', request: bash('git log -- /etc/passwd'), decision: 'ask', rule: 'default' },
     { name: 'git add of a path outside', request: bash('git add /etc/passwd'), decision: 'ask', rule: 'default' },

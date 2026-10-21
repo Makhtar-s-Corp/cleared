@@ -318,9 +318,27 @@ function secretNamed(text: string, policy: Policy): boolean {
   for (const token of text.split(/[\s"'`=,;:|&<>()$]+/).filter(Boolean)) {
     if (token.includes('.ssh/') || token.includes('/run/cleared/') || (credential !== '' && token.includes(credential))) return true;
     for (const part of token.split('/')) {
-      if (part === '.ssh' || part.startsWith('.env') || part.endsWith('.pem') || part.endsWith('.key') || SSH_KEY.test(part)) return true;
+      // environ: a process's environment in /proc, where the claude process keeps its login.
+      if (part === '.ssh' || part.startsWith('.env') || part.endsWith('.pem') || part.endsWith('.key') || SSH_KEY.test(part) || part === 'environ') return true;
       if (credentialName !== '' && part === credentialName) return true;
     }
+  }
+  return false;
+}
+
+// An `env` that runs no command, which prints the environment: after its
+// options (-u, -C and -S take a value) and its assignments, nothing is left.
+function printsEnvironment(words: readonly string[]): boolean {
+  for (const [at, word] of words.entries()) {
+    if (basename(word) !== 'env') continue;
+    let i = at + 1;
+    while (i < words.length) {
+      const next = words[i] as string;
+      if (['-u', '--unset', '-C', '--chdir', '-S', '--split-string'].includes(next)) i += 2;
+      else if (next.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(next)) i += 1;
+      else break;
+    }
+    if (i >= words.length) return true;
   }
   return false;
 }
@@ -365,6 +383,12 @@ function denied(request: ToolRequest, policy: Policy): Verdict | undefined {
   const production = command !== undefined ? namesHost(command, policy.forbiddenHosts) : url !== undefined ? namesHost(urlHost(url) ?? url, policy.forbiddenHosts) : undefined;
   if (production) return deny('net.production', `${production} is a production host: a session never reaches it`);
   if (namedPaths(request).some((text) => secretNamed(text, policy))) return deny('secret.read', 'secrets, keys and credential files are never read in a session');
+  // The environment holds the login: printenv, and an env that runs nothing
+  // (it prints the environment), are reads of it wherever they run.
+  for (const words of commands) {
+    if (commandWords(words).includes('printenv') || printsEnvironment(words))
+      return deny('secret.read', 'the environment of a session holds its login and is never printed');
+  }
   if (policy.role === 'reviewer') {
     if (EDIT_TOOLS.has(request.tool)) return deny('reviewer.edit', 'a reviewer reads and runs the checks; it does not edit');
     for (const words of commands) {
