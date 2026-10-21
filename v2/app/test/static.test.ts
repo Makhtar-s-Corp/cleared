@@ -36,7 +36,7 @@ test('the pages load nothing inline and nothing from another site', async () => 
     assert.equal(login.status, 200);
     assert.equal(login.headers.get('content-security-policy'), "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     assert.equal(login.headers.get('x-content-type-options'), 'nosniff');
-    assert.equal(login.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(login.headers.get('referrer-policy'), 'same-origin');
     const html = await login.text();
     assert.doesNotMatch(html, /<script(?![^>]*\ssrc=)[^>]*>/, 'no inline script');
     assert.doesNotMatch(html, /\sstyle=|<style/, 'no inline style');

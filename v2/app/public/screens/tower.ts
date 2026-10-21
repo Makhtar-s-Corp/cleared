@@ -5,6 +5,7 @@
 // tests run them without a browser; mount wires them to the service.
 import type { InboxItem, SessionSummary } from '../../../src/api/types.ts';
 import type { Harness, Role } from '../../../src/session/contract.ts';
+import type { SessionPhase } from '../../../src/session/events.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import { esc } from '../html.ts';
 import type { Translate } from '../i18n.ts';
@@ -42,6 +43,7 @@ export type LiveCard = {
   readonly harness: Harness;
   readonly model: string;
   readonly minutes: number;
+  readonly phase: SessionPhase;
 };
 
 export type LandedRow = { readonly ticket: string; readonly title: string; readonly time: string; readonly minutes: number };
@@ -69,12 +71,16 @@ function family(model: string): string {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+// The catalog names a release's checks by colour.
+const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
+
 function need(item: InboxItem, now: Date): NeedCard {
   const base = { kind: item.kind, id: item.id, ticket: item.ticket, minutes: minutesSince(item.since, now) };
   switch (item.kind) {
     case 'release': {
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
-      const key = reviewer ? `release_reviewed_${item.pr.checks}` : `release_unreviewed_${item.pr.checks}`;
+      const checks = CHECKS[item.pr.checks];
+      const key = reviewer ? `release_reviewed_${checks}` : `release_unreviewed_${checks}`;
       return { ...base, title: item.title, detail: '', detailKey: key, detailValues: reviewer ? { model: family(reviewer.model) } : {} };
     }
     case 'permission': {
@@ -98,7 +104,7 @@ export function towerModel(data: TowerData, now: Date): TowerModel {
     .sort((a, b) => b.minutes - a.minutes);
   const live = data.sessions.filter((s) => LIVE_PHASES.has(s.phase)).map((s): LiveCard => ({
     id: s.id, role: s.role, ticket: s.ticket, title: titles.get(s.ticket) ?? s.ticket, status: s.status, harness: s.harness, model: s.model,
-    minutes: minutesSince(s.startedAt, now),
+    minutes: minutesSince(s.startedAt, now), phase: s.phase,
   }));
   const today = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
   const landed = data.tickets.filter((ticket) => {
@@ -148,7 +154,7 @@ function needCard(card: NeedCard, t: Translate): string {
 function liveCard(card: LiveCard, t: Translate): string {
   const square = card.harness === 'claude-code' ? 'claude' : card.harness === 'codex' ? 'codex' : 'other';
   return `<li class="session-card">
-<span class="session-head"><span class="live ${card.role === 'reviewer' ? 'review' : ''}" aria-hidden="true"></span><span class="role">${esc(t(`role_${card.role}`))}</span><span class="id">${esc(card.ticket)}</span></span>
+<span class="session-head"><span class="live${card.phase === 'waiting_human' ? ' waiting' : card.role === 'reviewer' ? ' review' : ''}" aria-hidden="true"></span><span class="role">${esc(t(`role_${card.role}`))}</span><span class="id">${esc(card.ticket)}</span></span>
 <span class="session-title">${esc(card.title)}</span>
 <span class="phrase">${esc(card.status)}</span>
 <span class="session-foot"><span class="model"><span class="sq ${square}" aria-hidden="true"></span>${esc(formatModel(card.harness, card.model))}</span><span class="elapsed">${esc(duration(card.minutes, t))}</span><a class="open" href="/sessions/${esc(card.id)}">${esc(t('open_session'))}</a></span>

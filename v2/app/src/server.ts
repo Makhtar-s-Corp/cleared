@@ -39,7 +39,7 @@ export const PUBLIC_DIR = new URL('../public/', import.meta.url).pathname;
 const SECURITY_HEADERS = {
   'content-security-policy': "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
+  'referrer-policy': 'same-origin',   // not no-referrer: Chromium then sends Origin: null on a form POST, and the sign-in is refused
   'cross-origin-opener-policy': 'same-origin',
 };
 
@@ -110,8 +110,8 @@ ${tab('inbox', '/inbox', t('nav_inbox'), `<span class="count" id="inbox-count" h
 ${tab('session', '/sessions', t('nav_sessions'))}
 <span aria-disabled="true" title="${escape(t('nav_tickets_later'))}">${escape(t('nav_tickets'))}</span>
 </nav>
-<div class="right">
 ${options.source === 'fixtures' ? `<span class="source-pill">${escape(t('source_fixtures'))}</span>` : ''}
+<div class="right">
 <time class="clock" id="clock"></time>
 <button class="icon theme" id="theme" type="button" aria-label="${escape(t('theme_dark'))}" data-dark="${escape(t('theme_dark'))}" data-light="${escape(t('theme_light'))}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path class="moon" d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/><circle class="sun" cx="12" cy="12" r="4.5"/><path class="sun" d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1"/></svg></button>
 <details class="me">
