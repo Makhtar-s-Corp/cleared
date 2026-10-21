@@ -60,13 +60,14 @@ test('POST /entries stores the entry and sends the visitor back to the page', as
 
 test('an empty or too long field is 400 with the page and its error, and nothing is stored', async () => {
   const before = (await db.store.list()).length;
-  for (const fields of [
+  const invalid: Record<string, string>[] = [
     { name: '', message: 'm' },
     { name: 'n', message: '   ' },
     { message: 'no name field' },
     { name: 'x'.repeat(81), message: 'm' },
     { name: 'n', message: 'y'.repeat(501) },
-  ]) {
+  ];
+  for (const fields of invalid) {
     const response = await fetch(`${base}/entries`, form(fields));
     assert.equal(response.status, 400, JSON.stringify(fields));
     assert.match(await response.text(), /role="alert"/);

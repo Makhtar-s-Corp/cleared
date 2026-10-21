@@ -58,7 +58,7 @@ class FakeHost {
     const id = (): string => `id${++this.next}`;
     const nameOf = (): string => args[args.indexOf('--name') + 1] ?? '';
     if (verb === 'ps') {
-      return out(this.containers.filter(matches).map((c) => `${c.id} ${c.labels['cleared.commit'] ?? '-'} ${c.state}\n`).join(''));
+      return out(this.containers.filter(matches).map((c) => `${c.id} ${c.state} ${c.labels['cleared.commit'] ?? ''}\n`).join(''));
     }
     if (verb === 'network' && sub === 'ls') return out(this.networks.filter(matches).map((n) => `${n.name}\n`).join(''));
     if (verb === 'network' && sub === 'create') {
