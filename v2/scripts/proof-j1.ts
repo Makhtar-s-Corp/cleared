@@ -61,7 +61,7 @@ const timeline: Record<string, string> = {};
 const otherRequests: { command: string; answer: 'allow_once' | 'reject_once'; at: string }[] = [];
 const OUTSIDE = /\b(apt-get|apk|sudo|pip3?|curl|wget|ssh|npx|embedded-postgres)\b|\bnpm (i|install|add|view)\b/;
 const REVIEW_ROUNDS = Number(env.PROOF_REVIEW_ROUNDS ?? 2);
-let ticketId = '';
+let ticketId = env.PROOF_TICKET ?? '';
 let authorUrl = env.PROOF_AUTHOR_URL ?? '';
 let reviewerUrl = '';
 
@@ -153,6 +153,12 @@ async function waitAnswering(done: () => Promise<boolean>, timeout: number): Pro
     }
     await page.waitForTimeout(3_000);
   }
+}
+
+// The ticket this run created, or the one of the session it resumed.
+function ticketOf(): string {
+  if (ticketId) return ticketId;
+  throw new Error('the ticket id is not known: run from the start, or give PROOF_TICKET with PROOF_AUTHOR_URL');
 }
 
 async function rowTime(row: any): Promise<string> {
@@ -249,15 +255,21 @@ let answered = false;
 if (sent) {
   answered = await step(6, 'permission-inbox', async () => {
     await page.goto(`${APP}/inbox`);
-    const item = page.getByText(SCRATCH).first();
+    // The list names the ticket; the detail shows the command.
+    const items = page.locator('a.item:not(.handled)').filter({ hasText: ticketOf() });
     try {
-      await item.waitFor({ timeout: 20_000 });
+      await items.first().waitFor({ timeout: 20_000 });
     } catch {
       throw new Error('the inbox does not show the waiting request (the inbox screen is a stub before lane 10)');
     }
-    await item.click();
+    let found = false;
+    for (const item of await items.all()) {
+      await item.click();
+      if (await page.locator('#detail').getByText(SCRATCH).count() > 0) { found = true; break; }
+    }
+    if (!found) throw new Error('no inbox item shows the command the message asked for');
     await capture(6, 'permission-inbox-open');
-    await page.getByRole('button', { name: 'Allow once' }).first().click();
+    await page.locator('#detail [data-act="allow_once"]').click();
     timeline.permission_answered_at = new Date().toISOString();
     return 'allowed once from the inbox';
   });
@@ -265,10 +277,12 @@ if (sent) {
     // Not the plan's path, said as such: the session screen's own buttons.
     answered = await step(6, 'permission-session-fallback', async () => {
       await page.goto(authorUrl);
-      const request = page.locator('#timeline [data-row]:not([data-row="message"])').filter({ hasText: SCRATCH }).first();
-      const allow = request.locator('[data-answer="allow_once"]:not([disabled])');
-      if (await allow.count() === 0) return `already answered by an earlier run: ${(await request.innerText()).replace(/\s+/g, ' ').slice(-60)}`;
-      await allow.click();
+      // The session may ask for the command alone or fold it into another one.
+      const request = page.locator('#timeline [data-row="request"]').filter({ hasText: SCRATCH }).first();
+      const answered = page.locator('#timeline [data-row]:not([data-row="message"])').filter({ hasText: SCRATCH }).filter({ hasText: /Allowed once by|Denied by|Allowed in this project by/ });
+      await waitAnswering(async () => await request.count() > 0 || await answered.count() > 0, 60_000);
+      if (await request.count() === 0) return `already answered by an earlier run: ${(await answered.first().innerText()).replace(/\s+/g, ' ').slice(-60)}`;
+      await request.locator('[data-answer="allow_once"]:not([disabled])').click();
       timeline.permission_answered_at = new Date().toISOString();
       await page.locator('#timeline').getByText(/Allowed once by/).first().waitFor();
       return 'answered on the session screen, not the inbox';
@@ -315,16 +329,35 @@ let approved = false;
 if (reviewed) {
   approved = await step(8, 'approve', async () => {
     await page.goto(`${APP}/inbox`);
-    const approve = page.getByRole('button', { name: /Approve the release/ }).first();
+    const approve = page.locator('#detail [data-act="approve"]');
+    // This ticket's release: another ticket's may wait beside it.
+    const item = page.locator('a.item:not(.handled)').filter({ hasText: ticketOf() }).filter({ hasText: 'Release' }).first();
     try {
       // The release waits until the branch is published and the lock asked.
-      await page.getByText(TITLE).first().waitFor({ timeout: Math.min(left(), 15 * 60_000) });
-      await page.getByText(TITLE).first().click();
+      await waitAnswering(async () => {
+        if (await item.count() > 0) return true;
+        await page.reload();
+        return false;
+      }, Math.min(left(), 15 * 60_000));
+      await item.click();
       await approve.waitFor({ timeout: 60_000 });
     } catch {
-      throw new Error('the inbox shows no release to approve (the inbox screen is a stub before lane 10)');
+      throw new Error('the inbox shows no release to approve for this ticket (the inbox screen is a stub before lane 10)');
     }
+    timeline.release_seen_at = new Date().toISOString();
     await capture(8, 'release-card');
+    // As a careful owner: approve once the checks are green. The lock queues
+    // a release whose checks still run, and nothing in v2 retries the queue.
+    const green = page.locator('#detail').getByText(/all checks green|checks green/);
+    await waitAnswering(async () => {
+      if (await green.count() > 0) return true;
+      if (await page.locator('#detail').getByText(/checks failed/).count() > 0) throw new Error('the release card says the checks failed');
+      await page.reload();
+      await item.click();
+      return false;
+    }, Math.min(left(), 20 * 60_000));
+    timeline.checks_green_seen_at = new Date().toISOString();
+    await capture(8, 'release-checks-green');
     await approve.click();
     timeline.approved_at = new Date().toISOString();
     await page.getByRole('button', { name: /Undo/ }).first().waitFor({ timeout: 10_000 });
