@@ -2,16 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import flow from '../../src/modules/flow.ts';
-import inbox from '../../src/modules/inbox.ts';
-import sessions from '../../src/modules/sessions.ts';
 import { MODULE_NAMES, assemble, dispatch, emptyModule, matchRoute, type Module, type Route } from '../../src/modules/registry.ts';
 import { handle as health } from '../../src/server.ts';
 import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 
-// The users module is filled by lane 6 (test/modules/users.test.ts) and
-// needs the store; lane 8 fills tickets and approval (test/approval/); the other three are still stubs.
-const stubs = { sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox };
+// Lanes 6, 7 and 8 filled the users, sessions, flow, inbox, tickets and
+// approval modules (their own tests); the registry tests use empty modules for all six.
+const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule };
 const deps = { store: undefined as never };
 
 test('the module stubs are empty and assemble into the in-memory defaults', async () => {
