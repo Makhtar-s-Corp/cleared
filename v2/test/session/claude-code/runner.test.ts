@@ -95,6 +95,8 @@ test('the runner starts query() with the plan options, the token in the child en
   assert.equal(options.sessionId, start.sessionId);
   assert.equal(options.resume, undefined);
   assert.deepEqual(options.settingSources, []);
+  // No co-author trailer: its address would make the guard refuse the publish.
+  assert.deepEqual(options.settings, { attribution: { commit: '', pr: '' } });
   assert.equal(options.permissionMode, 'default');
   assert.equal(options.persistSession, true);
   assert.equal(options.includePartialMessages, false);

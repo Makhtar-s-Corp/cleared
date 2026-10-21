@@ -211,6 +211,9 @@ export async function run(deps: RunnerDeps): Promise<number> {
     model: start.model,
     ...(start.resume ? { resume: start.sessionId } : { sessionId: start.sessionId }),
     settingSources: [],
+    // No co-author trailer on commits: its address would make the guard
+    // refuse the publish (lib/guard/codex-guard.mjs, "email address").
+    settings: { attribution: { commit: '', pr: '' } },
     permissionMode: 'default',
     canUseTool,
     hooks: (() => {

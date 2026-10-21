@@ -13,6 +13,7 @@ export function authorPrompt(ticket: TicketText): string {
     '',
     'Work on the checkout you are in: it is on the ticket branch. Change what the ticket asks and nothing else, write or update tests, run them, and commit your work with git.',
     'Never push, and never open a pull request: Cleared publishes the branch from the host once the change is reviewed.',
+    'Commit messages carry no email address and no Co-Authored-By trailer: the guard that runs before the branch leaves refuses an address.',
     'When you stop, write HANDOVER.md at the root of the checkout (the end-of-session notice gives the headings). Never commit it.',
   ].join('\n');
 }

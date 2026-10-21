@@ -11,6 +11,8 @@ test('the author prompt carries the ticket and its criteria, and says what Clear
   assert.match(text, /the test proves it/);
   assert.match(text, /HANDOVER\.md/);
   assert.match(text, /never push/i);
+  // The guard refuses a publish whose commit messages carry an address.
+  assert.match(text, /no email address/i);
 });
 
 test('the review prompt is the v1 one with the project verdict phrase and the base branch filled in', () => {
