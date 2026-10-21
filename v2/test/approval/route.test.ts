@@ -121,3 +121,20 @@ test('the default registry (no approval set up) answers 503, not a fake acceptan
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); server.closeAllConnections(); }
   void s;
 });
+
+test('with no proof configured (its file unreadable) every request is refused, the empty header and the absent header included', async () => {
+  const s = await service({ proof: '' });
+  const ticket = await s.waiting();
+  const asked = s.ask([{ pr: 7, head: head('a') }]);
+  const body = { requestedAt: asked.requestedAt, heads: asked.heads };
+  await serve(s, async (call) => {
+    const path = `/api/tickets/${ticket.id}/approve`;
+    assert.equal((await call(path, { proof: '', body })).status, 401);
+    assert.equal((await call(path, { proof: null, body })).status, 401);
+    assert.equal((await call(`${path}/undo`, { proof: '' })).status, 401);
+    assert.equal(s.timers.pending.size, 0);
+    assert.equal((await s.store.history(ticket.id)).length, 2);
+  });
+  assert.equal(s.writer.verifyProof(''), false);
+  assert.equal(s.writer.verifyProof(undefined), false);
+});

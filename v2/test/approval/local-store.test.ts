@@ -11,7 +11,7 @@ import { MemoryUsers } from '../../src/modules/registry.ts';
 import { applyTables } from '../../src/store/db.ts';
 import { OWNER, lockBox, scratch } from './harness.ts';
 
-const service = { kind: 'agents' as const, id: 'makhtar' };
+const service = { kind: 'agents' as const, id: 'cleared-v2' };
 const oracle = new URL('./oracle.mjs', import.meta.url).pathname;
 
 function open(options: { signed?: boolean } = {}) {

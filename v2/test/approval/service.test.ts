@@ -46,8 +46,8 @@ async function prepare(options: { withKey: boolean }) {
   const users = new SqliteUsers(db, { params: { algorithm: 'argon2id', memory: 64, passes: 1, parallelism: 1, saltLength: 16, tagLength: 32 } });
   const owner = await users.add(OWNER, 'a long passphrase for the owner');
   const store = new LocalTicketStore(db, { stateDir: box.state });
-  const ticket = await store.create({ title: 'Newest entry first', project: 'guestbook' }, { kind: 'agents', id: 'makhtar' });
-  await store.move(ticket.id, 'Needs Approval', { kind: 'agents', id: 'makhtar' });
+  const ticket = await store.create({ title: 'Newest entry first', project: 'guestbook' }, { kind: 'agents', id: 'cleared-v2' });
+  await store.move(ticket.id, 'Needs Approval', { kind: 'agents', id: 'cleared-v2' });
   db.close();
   mkdirSync(join(box.state, 'validations'), { recursive: true });
   const at = '2026-10-21T09:59:00.123456789Z';

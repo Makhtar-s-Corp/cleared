@@ -57,8 +57,8 @@ test('after the approval the service asks the broker, and the broker runs merge-
   const store: LocalTicketStore = parts.ticketStore;
   box.commit('src/page.ts', 'export const page = 2;\n');
   box.publish();
-  const ticket = await store.create({ title: 'Newest entry first', body: 'Newest first.', project: 'guestbook' }, { kind: 'agents', id: 'makhtar' });
-  await store.move(ticket.id, 'Needs Approval', { kind: 'agents', id: 'makhtar' });
+  const ticket = await store.create({ title: 'Newest entry first', body: 'Newest first.', project: 'guestbook' }, { kind: 'agents', id: 'cleared-v2' });
+  await store.move(ticket.id, 'Needs Approval', { kind: 'agents', id: 'cleared-v2' });
   await new LedgerReviewRecorder(db, { stateDir: box.state, verdict: 'no blocking issues' }).record({ ticket: 'LOCAL-1', pr: 7, session: 'sess-1', model: 'claude-sonnet-5-5', round: 1, verdict: 'pass', report: 'ok', at: new Date().toISOString(), commit: box.head() } as never);
   const broker = await startBroker(box);
   try {

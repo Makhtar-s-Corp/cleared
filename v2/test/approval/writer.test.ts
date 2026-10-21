@@ -123,7 +123,7 @@ test('everything is checked before the grace starts, and nothing is signed when 
   await refused({ requestedAt: '2026-10-21T09:58:00.000Z' }, 'version');
   await refused({ heads: [{ pr: 7, head: head('b') }] }, 'version');
   await refused({ heads: [] }, 'version');
-  await s.store.move(ticket.id, 'In Review', { kind: 'agents', id: 'makhtar' });
+  await s.store.move(ticket.id, 'In Review', { kind: 'agents', id: 'cleared-v2' });
   await refused({}, 'state');
   assert.equal((await s.store.history(ticket.id)).at(-1)?.status, 'In Review');
 });
@@ -138,7 +138,7 @@ test('the checks are made again when the grace ends: a new request, a new head o
   for (const [name, change] of [
     ['a new request landed', (s: Awaited<ReturnType<typeof service>>) => { s.ask([{ pr: 7, head: head('a') }], '2026-10-21T10:00:30.000000000Z'); }],
     ['the branch moved and the request was made again', (s: Awaited<ReturnType<typeof service>>) => { s.ask([{ pr: 7, head: head('c') }]); }],
-    ['the card was moved back', (s: Awaited<ReturnType<typeof service>>) => s.store.move('LOCAL-1', 'In Progress', { kind: 'agents', id: 'makhtar' })],
+    ['the card was moved back', (s: Awaited<ReturnType<typeof service>>) => s.store.move('LOCAL-1', 'In Progress', { kind: 'agents', id: 'cleared-v2' })],
   ] as const) {
     const s = await service();
     const ticket = await s.waiting();

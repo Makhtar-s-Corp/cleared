@@ -72,6 +72,8 @@ export class LockApprovalWriter implements GraceApprovalWriter {
   }
 
   verifyProof(given: unknown): boolean {
+    // No proof configured (its file could not be read) refuses everything, the empty header included.
+    if (!this.#options.proof) return false;
     return sameProof(given, this.#options.proof);
   }
 

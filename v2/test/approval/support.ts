@@ -38,7 +38,7 @@ export class FakeBroker {
   async requestRelease(request: ReleaseBrokerRequest) { this.requests.push(request); return this.answer; }
 }
 
-export async function service(options: { broker?: FakeBroker | null; withKey?: boolean; realClock?: boolean } = {}) {
+export async function service(options: { broker?: FakeBroker | null; withKey?: boolean; realClock?: boolean; proof?: string } = {}) {
   const box = lockBox();
   const db = new DatabaseSync(join(box.state, 'ledger.db'));
   db.exec('PRAGMA busy_timeout = 5000');
@@ -54,7 +54,7 @@ export async function service(options: { broker?: FakeBroker | null; withKey?: b
   const signer = options.withKey === false ? undefined : ApprovalSigner.load(box.keyFile);
   const parts = createApproval({
     db, users, stateDir: box.state, ownerId: OWNER, publicKey: box.keys.publicKey, ...(signer ? { signer } : {}),
-    proof: PROOF, verdict: 'no blocking issues', timers, broker, ...(options.realClock ? {} : { now }),
+    proof: options.proof ?? PROOF, verdict: 'no blocking issues', timers, broker, ...(options.realClock ? {} : { now }),
   });
   const store = parts.ticketStore;
   const writer = parts.approvalWriter;
@@ -64,7 +64,7 @@ export async function service(options: { broker?: FakeBroker | null; withKey?: b
     writeFileSync(join(box.state, 'validations', `${ticket}.json`), JSON.stringify({ ticket, at, pulls: heads }));
     return { ticket, requestedAt: at, heads };
   };
-  const service = { kind: 'agents' as const, id: 'makhtar' };
+  const service = { kind: 'agents' as const, id: 'cleared-v2' };
   const waiting = async () => {
     const ticket = await store.create({ title: 'Newest entry first', body: 'The guestbook shows the newest entry first.', project: 'guestbook' }, service);
     await store.move(ticket.id, 'Needs Approval', service);
