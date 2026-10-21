@@ -291,7 +291,7 @@ function releaseBody(item: ReleaseItem, view: InboxView, t: Translate): string {
     `<button type="button" data-frame="${frame}" aria-pressed="${view.frame === frame}">${esc(t(`frame_${frame}`))}</button>`).join('');
   const change = `${link(item.pr.url, t('pr_link', { n: item.pr.number }))}<span class="sep" aria-hidden="true">·</span><span>${esc(t(`checks_${item.pr.checks}`))}</span>`;
   return `${eyebrow(item, item.state === 'waiting' ? 'eyebrow_release' : 'kind_release', releaseSession(view, item.ticket), 'open_sessions', t)}
-<h2 class="d-title" id="detail-title" tabindex="-1">${esc(item.title)}</h2>
+<h2 class="d-title">${esc(item.title)}</h2>
 ${item.announcement ? `<p class="announce">${esc(item.announcement)}</p>` : ''}
 <div class="shots-head"><h3>${esc(t('shots_title'))}</h3><div class="switch" role="group" aria-label="${esc(t('frame_label'))}">${switcher}</div></div>
 <div class="shots frame-${view.frame}">${shot(item, 'before', view.frame, t)}${shot(item, 'after', view.frame, t)}</div>
@@ -310,7 +310,7 @@ function permissionBody(item: PermissionItem, view: InboxView, t: Translate): st
     session ? fact(t('facts_session'), esc(t(`session_${session.role}`, { model: family(session.model), time: elapsed(item.since, view.now, t) }))) : '',
   ].join('');
   return `${eyebrow(item, 'eyebrow_permission', session ?? { id: item.sessionId } as SessionSummary, 'open_session', t)}
-<h2 class="d-title" id="detail-title" tabindex="-1">${esc(t(`wants_${verb}`, { tool: item.tool }))}${shown ? ` ${code(shown)}` : ''}</h2>
+<h2 class="d-title">${esc(t(`wants_${verb}`, { tool: item.tool }))}${shown ? ` ${code(shown)}` : ''}</h2>
 ${title ? `<p class="d-ticket">${esc(title)}</p>` : ''}
 ${facts ? `<dl class="facts">${facts}</dl>` : ''}`;
 }
@@ -331,9 +331,11 @@ ${options ? `<div class="options">${options}</div>` : ''}${free}</fieldset>`;
   }).join('');
   const title = ticketTitle(view, item.ticket);
   const session = sessionOf(view, item.sessionId) ?? { id: item.sessionId } as SessionSummary;
+  // The question first, on the colour of what waits; the ticket under it (DESIGN.md, 4).
   return `${eyebrow(item, 'eyebrow_question', session, 'open_session', t)}
-${title ? `<h2 class="d-title small-title" id="detail-title" tabindex="-1">${esc(title)}</h2>` : `<h2 class="sr-only" id="detail-title" tabindex="-1">${esc(t('kind_question'))}</h2>`}
-<div class="questions">${questions}</div>`;
+<h2 class="sr-only">${esc(t('kind_question'))}</h2>
+<div class="questions${waiting ? ' waits' : ''}">${questions}</div>
+${title ? `<p class="d-ticket for-question">${esc(title)}</p>` : ''}`;
 }
 
 const button = (act: string, label: string, primary = false, disabled = false, extra = '') =>
@@ -374,7 +376,8 @@ export function renderActions(item: InboxItem, view: InboxView, t: Translate): s
       return `<label class="deny-reason" for="deny-reason"><span class="sr-only">${esc(t('deny_reason'))}</span><input id="deny-reason" type="text" maxlength="2000" autocomplete="off" placeholder="${esc(t('deny_reason'))}"${busy ? ' disabled' : ''}></label>`
         + `<div class="d-buttons">${button('reject_once', esc(t('deny')), false, busy)}${button('allow_always', esc(t('allow_always')), false, busy)}${button('allow_once', esc(t('allow_once')), true, busy)}</div>${note}`;
     case 'question':
-      return `<span class="signed">${esc(t('signed_in', { name: view.me.name }))}</span><div class="d-buttons">${button('answer', esc(t('send_answer')), true, busy)}</div>${note}`;
+      // Disabled until every question has a choice or a free answer: mount enables it.
+      return `<span class="signed">${esc(t('signed_in', { name: view.me.name }))}</span><div class="d-buttons">${button('answer', esc(t('send_answer')), true, true)}</div>${note}`;
   }
 }
 
@@ -391,7 +394,7 @@ export function renderInbox(view: InboxView, t: Translate): string {
   if (view.items.length === 0) return `<div class="inbox empty-inbox" data-open="false"><aside class="inbox-list" id="inbox-list" aria-labelledby="inbox-title">${renderList(view, t)}</aside></div>`;
   return `<div class="inbox" data-open="${view.open}">
 <aside class="inbox-list" id="inbox-list" aria-label="${esc(t('list_label'))}">${renderList(view, t)}</aside>
-<section class="detail" id="detail" aria-label="${esc(t('detail_label'))}">${renderDetail(view, t)}</section>
+<section class="detail" id="detail" tabindex="-1" aria-label="${esc(t('detail_label'))}">${renderDetail(view, t)}</section>
 </div>`;
 }
 
@@ -469,6 +472,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
         detailKey = key;
       }
     }
+    ready();
     tick();
   };
 
@@ -531,6 +535,19 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
     }
   };
 
+  // What the person chose and typed for each question of the item shown.
+  const given = (item: QuestionItem): [string[][], string[]] => [
+    item.questions.map((_, index) => [...root.querySelectorAll<HTMLButtonElement>(`[data-q="${index}"][aria-pressed="true"]`)].map((b) => b.dataset.option ?? '')),
+    item.questions.map((_, index) => $<HTMLInputElement>(`[data-free="${index}"]`)?.value ?? ''),
+  ];
+  const ready = () => {
+    const item = data ? chosen(view()) : undefined;
+    const send = $<HTMLButtonElement>('[data-act="answer"]');
+    if (!send || item?.kind !== 'question' || local.get(item.id)?.kind === 'busy') return;
+    send.disabled = answersFor(item.questions, ...given(item)).missing !== undefined;
+  };
+  root.addEventListener('input', (event) => { if ((event.target as Element).closest('[data-free]')) ready(); });
+
   root.addEventListener('click', (event) => {
     const target = event.target as Element;
     const switcher = target.closest<HTMLButtonElement>('[data-frame]');
@@ -544,6 +561,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       const pressed = option.getAttribute('aria-pressed') === 'true';
       if (!option.closest('[data-multi]')) for (const other of root.querySelectorAll<HTMLButtonElement>(`[data-q="${option.dataset.q}"]`)) other.setAttribute('aria-pressed', 'false');
       option.setAttribute('aria-pressed', String(!pressed));
+      ready();
       return;
     }
     const button = target.closest<HTMLButtonElement>('[data-act]');
@@ -577,9 +595,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       }
       case 'answer': {
         if (item.kind !== 'question') return;
-        const picks = item.questions.map((_, index) => [...root.querySelectorAll<HTMLButtonElement>(`[data-q="${index}"][aria-pressed="true"]`)].map((b) => b.dataset.option ?? ''));
-        const free = item.questions.map((_, index) => $<HTMLInputElement>(`[data-free="${index}"]`)?.value ?? '');
-        const result = answersFor(item.questions, picks, free);
+        const result = answersFor(item.questions, ...given(item));
         if (result.missing !== undefined) { say('answer_missing'); return; }
         void act(item, 'answer', () => answerRequest(api, item, { kind: 'answer', answers: result.answers }));
         return;
@@ -592,7 +608,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   const onHash = () => {
     draw(true);
     if (itemFromHash(location.hash) !== undefined) {
-      $('#detail-title')?.focus({ preventScroll: true });
+      $('#detail')?.focus({ preventScroll: true });
       if (window.matchMedia('(max-width: 1023px)').matches) window.scrollTo(0, 0);
     }
   };
