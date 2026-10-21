@@ -69,7 +69,7 @@ function event(e: AgUiEvent): AgUiEvent {
 
 // The one event the cleaner gives back for one it is handed, or null.
 function one(c: Cleaner, e: AgUiEvent): AgUiEvent | null {
-  const out = one(c, e);
+  const out = c.clean(e);
   assert.ok(out.length <= 1, `one event expected, got ${JSON.stringify(out)}`);
   return out[0] ?? null;
 }

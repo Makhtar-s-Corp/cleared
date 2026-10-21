@@ -32,6 +32,12 @@ export class LedgerPathError extends Error {
   override name = 'LedgerPathError';
 }
 
+// The ledger exists where it should but cannot be opened: a directory that
+// cannot be made or written, a file that is not a database, a lock.
+export class StoreError extends Error {
+  override name = 'StoreError';
+}
+
 // The project whose ledger this is, named as v1 names it (lib/conf.mjs
 // projectDir): CLEARED_REPO, ORCH_REPO, or the first line of
 // <config>/cleared/project. v1's last resort, asking git for the checkout
@@ -117,12 +123,26 @@ function session(row: Row): SessionRecord {
   };
 }
 
+// Opened as lib/ledger.mjs openLedger opens it for writing: the directory
+// made, a 5 second busy timeout, the WAL journal, which v1 already sets on
+// the same file, so merge-pr.sh and the tracker read it as before.
+function openDatabase(path: string): DatabaseSync {
+  let db: DatabaseSync | undefined;
+  try {
+    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+    db = new DatabaseSync(path);
+    db.exec('PRAGMA busy_timeout = 5000');
+    if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+    db.exec(SCHEMA);
+    return db;
+  } catch (error) {
+    db?.close();
+    throw new StoreError(`cannot open the ledger at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export function openStore(path: string): Store {
-  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path);
-  db.exec('PRAGMA busy_timeout = 5000');
-  if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
-  db.exec(SCHEMA);
+  const db = openDatabase(path);
 
   // One statement, so the next seq is read and written at once.
   const append = db.prepare(

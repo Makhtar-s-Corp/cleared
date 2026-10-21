@@ -186,6 +186,35 @@ function gitCommand(words: readonly string[]): { readonly rest: readonly string[
   return { rest: words.slice(i), risky };
 }
 
+// The arguments of a git subcommand: its options, the values its options
+// take (with their index in `args`) and its operands. Only git commit's
+// options are known to take a value; for the other safe subcommands every
+// word that is not an option is an operand, which is the careful reading.
+const GIT_COMMIT_VALUES = new Set(['--message', '--file', '--template', '--reuse-message', '--reedit-message', '--author', '--date', '--cleanup', '--fixup', '--squash', '--trailer']);
+function gitArguments(sub: string, args: readonly string[]): { options: string[]; values: { option: string; value: string; at: number }[]; operands: string[] } {
+  const options: string[] = [];
+  const values: { option: string; value: string; at: number }[] = [];
+  const operands: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i] as string;
+    if (word === '--') {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (!word.startsWith('-') || word === '-') {
+      operands.push(word);
+      continue;
+    }
+    options.push(word);
+    const takesValue = sub === 'commit' && (word.startsWith('--') ? GIT_COMMIT_VALUES.has(word) : /[mFtCc]$/.test(word));
+    if (takesValue && i + 1 < args.length) {
+      values.push({ option: word, value: args[i + 1] as string, at: i + 1 });
+      i++;
+    }
+  }
+  return { options, values, operands };
+}
+
 // ---------------------------------------------------------------- matching
 
 function globWord(pattern: string, word: string): boolean {
@@ -257,8 +286,23 @@ const SSH_KEY = /^id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?(?:\.pub)?$/;
 // (an edit's text, a description, a prompt) is never read for names: code
 // says event.key and a README says .env.example. A tool this list does not
 // know is read whole.
+//
+// In Bash, a simple command is read word by word, without the words that
+// are text: the arguments of echo and printf, the message of git commit.
+// A command the parser cannot read is read whole, quotes and all.
 function namedPaths(request: ToolRequest): string[] {
   const { input } = request;
+  if (request.tool === 'Bash' && typeof input.command === 'string') {
+    const words = parseCommand(input.command);
+    if (!words) return [input.command];
+    if (words[0] === 'echo' || words[0] === 'printf') return [];
+    const git = gitCommand(words);
+    if (words[0] === 'git' && git?.rest[0] === 'commit') {
+      const message = new Set(gitArguments('commit', git.rest.slice(1)).values.filter((v) => v.option === '--message' || /^-[A-Za-z]*m$/.test(v.option)).map((v) => v.at));
+      return [...words.slice(0, words.length - git.rest.length + 1), ...git.rest.slice(1).filter((word, i) => !message.has(i) && !word.startsWith('--message='))];
+    }
+    return [...words];
+  }
   const fields: Record<string, readonly string[]> = {
     Bash: ['command'], WebFetch: ['url'], WebSearch: [], Read: ['file_path'], Glob: ['path', 'pattern'], Grep: ['path', 'glob'],
     Edit: ['file_path'], Write: ['file_path'], MultiEdit: ['file_path'], NotebookEdit: ['notebook_path'],
@@ -398,8 +442,14 @@ function unsafeWords(words: readonly string[], policy: Policy): boolean {
   if (program === 'git') {
     const git = gitCommand(words);
     if (!git || git.risky) return true;
-    return git.rest.some((word) =>
-      word.startsWith('--output') || word === '-o' || ((word.startsWith('--format') || word.startsWith('--pretty')) && /%\(|%x/.test(word)));
+    const [sub = '', ...rest] = git.rest;
+    const { options, operands } = gitArguments(sub, rest);
+    // A file read through git: a path outside the workdir (git diff reads
+    // two paths without --no-index when one is outside), a message file.
+    if (operands.some((path) => !inside(policy.workdir, path))) return true;
+    if (sub === 'commit' && options.some((word) => /^--(?:file|template|reuse-message|reedit-message)(?:=|$)/.test(word) || /^-[A-Za-z]*[FtCc]/.test(word))) return true;
+    return options.some((word) =>
+      word === '--no-index' || word.startsWith('--output') || word === '-o' || ((word.startsWith('--format') || word.startsWith('--pretty')) && /%\(|%x/.test(word)));
   }
   if (program === 'find') {
     const firstExpression = args.findIndex((word) => word.startsWith('-') || word === '(' || word === '!');

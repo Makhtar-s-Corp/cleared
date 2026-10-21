@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createServer, type AddressInfo } from 'node:net';
+import { connect, createServer, type AddressInfo } from 'node:net';
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -122,4 +122,21 @@ test('a ledger that cannot be opened stops the service with exit 64 and says whe
   assert.equal(run.status, 64);
   assert.match(run.stderr, /^cleared-v2: cannot open the ledger at .*not-a-directory\/ledger\.db: /m);
   assert.doesNotMatch(run.stderr, /\n\s+at /, 'no stack trace');
+});
+
+test('SIGTERM ends a connection that never ends on its own, as an event stream does (review round 1, finding 8)', async () => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.CLEARED_V2_HOST;
+  const { child, port } = await startService(env);
+  // A request whose body never ends keeps its connection open, as a stream would.
+  const socket = connect(port, '127.0.0.1');
+  socket.on('error', () => {}); // the service resetting it is what this test expects
+  await once(socket, 'connect');
+  socket.write('POST /health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\nx');
+  child.kill('SIGTERM');
+  const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
+  const [code, signal] = await once(child, 'exit');
+  clearTimeout(timer);
+  socket.destroy();
+  assert.deepEqual([code, signal], [0, null], 'the service exits by itself, before the 5 s watchdog');
 });

@@ -12,13 +12,13 @@ import sessions from './modules/sessions.ts';
 import tickets from './modules/tickets.ts';
 import users from './modules/users.ts';
 import { formatAddress, handle } from './server.ts';
-import { LedgerPathError, applyTables, ledgerPath, openStore, type Store } from './store/db.ts';
+import { LedgerPathError, StoreError, applyTables, ledgerPath, openStore, type Store } from './store/db.ts';
 
 function orExit<T>(make: () => T): T {
   try {
     return make();
   } catch (error) {
-    if (!(error instanceof ConfigError || error instanceof LedgerPathError)) throw error;
+    if (!(error instanceof ConfigError || error instanceof LedgerPathError || error instanceof StoreError)) throw error;
     console.error(`cleared-v2: ${error.message}`);
     process.exit(64);
   }
@@ -41,9 +41,16 @@ server.listen(port, host, () => {
   console.log(`cleared-v2: listening on http://${address} (health: /health)`);
 });
 
+// server.close waits for every open connection to end, and the event
+// streams (GET /api/sessions/:id/events, lane 7) never end on their own.
+// So the service ends them itself: an app reconnects with the last seq it
+// has (Last-Event-ID) and misses nothing.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => server.close(() => {
-    store.close();
-    process.exit(0);
-  }));
+  process.on(signal, () => {
+    server.close(() => {
+      store.close();
+      process.exit(0);
+    });
+    server.closeAllConnections();
+  });
 }

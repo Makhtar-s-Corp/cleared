@@ -44,10 +44,9 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
   const sessions = new Map<SessionId, Session>();
 
   function emit(session: Session, event: AgUiEvent): void {
-    const clean = session.cleaner.clean(event);
-    if (!clean) return;
-    log.append({ at: now().toISOString(), sessionId: session.id, ticket: session.ticket, project: session.project, event: clean });
-    for (const wake of session.wake) wake();
+    const cleaned = session.cleaner.clean(event);
+    for (const clean of cleaned) log.append({ at: now().toISOString(), sessionId: session.id, ticket: session.ticket, project: session.project, event: clean });
+    if (cleaned.length > 0) for (const wake of session.wake) wake();
   }
 
   function close(session: Session): void {

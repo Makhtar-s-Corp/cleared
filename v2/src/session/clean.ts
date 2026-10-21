@@ -8,7 +8,8 @@
 // when loaded, and lib/guard/private-terms.mjs runs git when loaded. A test
 // keeps the copies word for word equal to the guard's.
 import { createHash } from 'node:crypto';
-import { CUSTOM_NAMES, isSubsetType, toolArgs, toolResult, type AgUiEvent, type ToolInput, type ToolOutput } from './events.ts';
+import type { StopReason, ToolKind } from './contract.ts';
+import { CUSTOM_NAMES, STEP_NAMES, isSubsetType, toolArgs, toolResult, type AgUiEvent, type ToolInput, type ToolOutput } from './events.ts';
 
 // Characters of a command's output that are kept: the first
 // COMMAND_OUTPUT_HEAD and the last ones, with a line saying how many were cut.
@@ -111,27 +112,47 @@ function cut(text: string): { readonly text: string; readonly cut: number } {
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0);
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const count = (value: unknown): number => (isCount(value) ? Math.floor(value) : 0);
 
-function parseKind(text: string): Record<string, unknown> | undefined {
+const KINDS: readonly ToolKind[] = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other'];
+const STOP_REASONS: readonly StopReason[] = ['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled', 'error'];
+
+function parseObject(text: string): Record<string, unknown> | undefined {
   try {
-    const value = record(JSON.parse(text));
-    return typeof value?.kind === 'string' ? value : undefined;
+    return record(JSON.parse(text));
   } catch {
     return undefined;
   }
 }
 
+// A result content in Cleared's own form for this kind, every field of the
+// right type; anything else (a command printing JSON with a `kind`) is not.
+function ownOutput(kind: ToolKind, parsed: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (parsed?.kind !== kind) return undefined;
+  if (kind === 'read') return typeof parsed.path === 'string' && isCount(parsed.bytes) ? parsed : undefined;
+  if (kind === 'execute') return typeof parsed.output === 'string' && isCount(parsed.cut) && typeof parsed.isError === 'boolean' ? parsed : undefined;
+  return typeof parsed.ok === 'boolean' && (parsed.error === undefined || typeof parsed.error === 'string') ? parsed : undefined;
+}
+
 export type Cleaner = {
-  clean(event: AgUiEvent): AgUiEvent | null;
+  // The events to store for one event of the harness: none, one, or, at the
+  // end of a text message or of a run, the message's text before its end.
+  clean(event: AgUiEvent): AgUiEvent[];
 };
 
-// One cleaner per session: it remembers each tool call's kind and path from
-// its ARGS, so that a result is cleaned by what the call was, whatever the
-// result carries. A result whose call it never saw keeps its kind, and for
-// a read its path and size, but no output and no error.
+// One cleaner per session.
+// - It remembers each tool call's kind and path from its ARGS, so that a
+//   result is cleaned by what the call was, whatever the result carries. A
+//   result whose call it never saw keeps its kind, and for a read its path
+//   and size, but no output and no error.
+// - It holds the text of a message until TEXT_MESSAGE_END and cleans it
+//   whole, so that a secret split across deltas is still found. The text
+//   goes out as one TEXT_MESSAGE_CONTENT just before the end; a run that
+//   ends or fails first closes its open messages.
 export function createCleaner(options: CleanOptions = {}): Cleaner {
   const calls = new Map<string, ToolInput>();
+  const messages = new Map<string, string[]>();
   const text = (value: unknown): string => (typeof value === 'string' ? cleanText(value, options) : '');
   const short = (value: unknown): string => cut(text(value)).text;
   const deep = (value: unknown): unknown => {
@@ -160,73 +181,101 @@ export function createCleaner(options: CleanOptions = {}): Cleaner {
   }
 
   function shapeOutput(call: ToolInput | undefined, content: string): ToolOutput {
-    const parsed = parseKind(content);
-    const kind = call?.kind ?? (typeof parsed?.kind === 'string' ? parsed.kind : 'other');
-    const own = parsed?.kind === kind ? parsed : undefined;
+    const parsed = parseObject(content);
+    const kind = call?.kind ?? KINDS.find((k) => ownOutput(k, parsed)) ?? 'other';
+    const own = ownOutput(kind, parsed);
     if (kind === 'read') {
       const path = call?.kind === 'read' ? call.path : text(own?.path);
-      return { kind: 'read', path, bytes: own ? count(own.bytes) : parsed ? 0 : Buffer.byteLength(content) };
+      return { kind: 'read', path, bytes: own ? count(own.bytes) : call ? Buffer.byteLength(content) : 0 };
     }
     if (kind === 'execute') {
       // Without the call's ARGS, no output is kept: it could be anything.
-      const raw = !call ? '' : own ? own.output : parsed ? '' : content;
-      const kept = cut(text(raw));
-      return { kind: 'execute', output: kept.text, cut: count(own?.cut) + kept.cut, isError: own?.isError === true };
+      const kept = cut(text(!call ? '' : own ? own.output : content));
+      return { kind: 'execute', output: kept.text, cut: (call ? count(own?.cut) : 0) + kept.cut, isError: own?.isError === true };
     }
-    const other = (['edit', 'delete', 'move', 'search', 'think', 'fetch', 'switch_mode'] as const).find((k) => k === kind) ?? 'other';
     const ok = typeof own?.ok === 'boolean' ? own.ok : true;
-    return call && typeof own?.error === 'string' ? { kind: other, ok, error: short(own.error) } : { kind: other, ok };
+    return call && typeof own?.error === 'string' ? { kind, ok, error: short(own.error) } : { kind, ok };
   }
 
-  function clean(event: AgUiEvent): AgUiEvent | null {
+  // The text of a message, cleaned whole, if it has any.
+  function flush(messageId: string): AgUiEvent[] {
+    const parts = messages.get(messageId);
+    messages.delete(messageId);
+    return parts && parts.length > 0 ? [{ type: 'TEXT_MESSAGE_CONTENT', messageId, delta: text(parts.join('')) }] : [];
+  }
+
+  // Every message still open, closed: when the run ends without their end.
+  function closeAll(): AgUiEvent[] {
+    return [...messages.keys()].flatMap((messageId) => [...flush(messageId), { type: 'TEXT_MESSAGE_END', messageId } as const]);
+  }
+
+  function clean(event: AgUiEvent): AgUiEvent[] {
     const e = event as unknown as Record<string, unknown>;
-    if (typeof e.type !== 'string' || !isSubsetType(e.type)) return null;
+    if (typeof e.type !== 'string' || !isSubsetType(e.type)) return [];
     const stamp = typeof e.timestamp === 'number' ? { timestamp: e.timestamp } : {};
     switch (event.type) {
       case 'RUN_STARTED':
-        return { type: event.type, threadId: event.threadId, runId: event.runId, ...stamp };
-      case 'RUN_FINISHED':
-        return {
-          type: event.type, threadId: event.threadId, runId: event.runId,
-          outcome: event.outcome?.type === 'cancelled' ? { type: 'cancelled' } : { type: 'success' },
-          usage: (event.usage ?? []).map((u) => Object.fromEntries(Object.entries(u).filter(([k, v]) => (k === 'model' ? typeof v === 'string' : typeof v === 'number')))),
-          result: { stopReason: event.result.stopReason, total_cost_usd: typeof event.result.total_cost_usd === 'number' ? event.result.total_cost_usd : null },
+        return [{ type: event.type, threadId: text(event.threadId), runId: text(event.runId), ...stamp }];
+      case 'RUN_FINISHED': {
+        const result = record(e.result);
+        const stopReason = STOP_REASONS.find((reason) => reason === result?.stopReason) ?? 'error';
+        const cancelled = record(e.outcome)?.type === 'cancelled' || stopReason === 'cancelled';
+        const usage = (Array.isArray(e.usage) ? e.usage : []).map(record).filter((u) => u !== undefined)
+          .map((u) => Object.fromEntries(Object.entries(u).filter(([k, v]) => (k === 'model' ? typeof v === 'string' : isCount(v)))));
+        return [...closeAll(), {
+          type: event.type, threadId: text(e.threadId), runId: text(e.runId),
+          outcome: cancelled ? { type: 'cancelled' } : { type: 'success' },
+          usage,
+          result: { stopReason, total_cost_usd: typeof result?.total_cost_usd === 'number' ? result.total_cost_usd : null },
           ...stamp,
-        };
+        }];
+      }
       case 'RUN_ERROR':
-        return { type: event.type, message: short(event.message), ...(typeof event.code === 'string' ? { code: text(event.code) } : {}), ...stamp };
+        return [...closeAll(), { type: event.type, message: short(event.message), ...(typeof event.code === 'string' ? { code: text(event.code) } : {}), ...stamp }];
       case 'STEP_STARTED': case 'STEP_FINISHED':
-        return { type: event.type, stepName: event.stepName, ...stamp };
-      case 'TEXT_MESSAGE_START':
-        return { type: event.type, messageId: event.messageId, role: event.role === 'user' ? 'user' : 'assistant', ...(typeof event.name === 'string' ? { name: event.name } : {}), ...stamp };
-      case 'TEXT_MESSAGE_CONTENT':
-        return { type: event.type, messageId: event.messageId, delta: text(event.delta), ...stamp };
-      case 'TEXT_MESSAGE_END':
-        return { type: event.type, messageId: event.messageId, ...stamp };
+        return (STEP_NAMES as readonly string[]).includes(event.stepName) ? [{ type: event.type, stepName: event.stepName, ...stamp }] : [];
+      case 'TEXT_MESSAGE_START': {
+        const messageId = text(event.messageId);
+        messages.set(messageId, []);
+        return [{ type: event.type, messageId, role: event.role === 'user' ? 'user' : 'assistant', ...(typeof event.name === 'string' ? { name: text(event.name) } : {}), ...stamp }];
+      }
+      case 'TEXT_MESSAGE_CONTENT': {
+        const messageId = text(event.messageId);
+        const parts = messages.get(messageId) ?? [];
+        if (typeof event.delta === 'string') parts.push(event.delta);
+        messages.set(messageId, parts);
+        return [];
+      }
+      case 'TEXT_MESSAGE_END': {
+        const messageId = text(event.messageId);
+        return [...flush(messageId), { type: event.type, messageId, ...stamp }];
+      }
       case 'TOOL_CALL_START':
-        return { type: event.type, toolCallId: event.toolCallId, toolCallName: text(event.toolCallName), ...(typeof event.parentMessageId === 'string' ? { parentMessageId: event.parentMessageId } : {}), ...stamp };
+        return [{ type: event.type, toolCallId: text(event.toolCallId), toolCallName: text(event.toolCallName), ...(typeof event.parentMessageId === 'string' ? { parentMessageId: text(event.parentMessageId) } : {}), ...stamp }];
       case 'TOOL_CALL_ARGS': {
-        const input = shapeInput(parseKind(event.delta));
-        calls.set(event.toolCallId, input);
-        return { ...toolArgs(event.toolCallId, input), ...stamp };
+        const toolCallId = text(event.toolCallId);
+        const input = shapeInput(typeof event.delta === 'string' ? parseObject(event.delta) : undefined);
+        calls.set(toolCallId, input);
+        return [{ ...toolArgs(toolCallId, input), ...stamp }];
       }
       case 'TOOL_CALL_END':
-        return { type: event.type, toolCallId: event.toolCallId, ...stamp };
+        return [{ type: event.type, toolCallId: text(event.toolCallId), ...stamp }];
       case 'TOOL_CALL_RESULT': {
+        const toolCallId = text(event.toolCallId);
         const content = typeof event.content === 'string' ? event.content : '';
-        return { ...toolResult(event.messageId, event.toolCallId, shapeOutput(calls.get(event.toolCallId), content)), ...stamp };
+        return [{ ...toolResult(text(event.messageId), toolCallId, shapeOutput(calls.get(toolCallId), content)), ...stamp }];
       }
       case 'REASONING_START': case 'REASONING_END':
-        return { type: event.type, messageId: event.messageId, ...stamp };
+        return [{ type: event.type, messageId: text(event.messageId), ...stamp }];
       case 'STATE_SNAPSHOT':
-        return { type: event.type, snapshot: deep(event.snapshot) as typeof event.snapshot, ...stamp };
+        return [{ type: event.type, snapshot: deep(event.snapshot) as typeof event.snapshot, ...stamp }];
       case 'STATE_DELTA':
-        return { type: event.type, delta: deep(event.delta) as typeof event.delta, ...stamp };
+        return [{ type: event.type, delta: (Array.isArray(event.delta) ? deep(event.delta) : []) as typeof event.delta, ...stamp }];
       case 'CUSTOM': {
-        if (!(CUSTOM_NAMES as readonly string[]).includes(event.name)) return null;
-        const value = deep(event.value) as Record<string, unknown>;
-        if (event.name === 'cleared.permission_request') value.input = shapeInput(record(event.value.input));
-        return { type: 'CUSTOM', name: event.name, value, ...stamp } as AgUiEvent;
+        if (!(CUSTOM_NAMES as readonly string[]).includes(event.name)) return [];
+        const value = (deep(event.value) ?? {}) as Record<string, unknown>;
+        if (event.name === 'cleared.permission_request') value.input = shapeInput(record(record(event.value)?.input));
+        return [{ type: 'CUSTOM', name: event.name, value, ...stamp } as AgUiEvent];
       }
     }
   }
