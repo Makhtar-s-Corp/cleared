@@ -136,7 +136,7 @@
   "takeover_other_title": "Un collègue a pris la main sur cette session à {time}",
   "takeover_body": "La session est en pause : Cleared ne lui envoie rien tant que la main ne lui est pas rendue. Pour travailler dans son conteneur, lancez ceci dans un terminal sur le serveur :",
   "takeover_after": "Quand vous avez fini, rendez-lui la main ici : la session reprend là où elle s'était arrêtée, et relit les fichiers que vous avez modifiés.",
-  "composer_taken_over": "Session prise en main : rendez-lui la main pour lui écrire",
+  "composer_taken_over": "Pris en main : rendez la main pour écrire",
   "service_line": "sur {name}",
   "plan_tab_title": "Plan de la session",
   "confidence_low": "Confiance faible",

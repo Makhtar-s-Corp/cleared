@@ -136,7 +136,7 @@
   "takeover_other_title": "A teammate took this session over at {time}",
   "takeover_body": "The session is paused: Cleared sends it nothing until it is given back. To work in its container, run this in a terminal on the server:",
   "takeover_after": "When you are done, give it back here: the session carries on where it left off, and reads again the files you changed.",
-  "composer_taken_over": "Taken over: give the session back to write to it",
+  "composer_taken_over": "Taken over: give it back to write",
   "service_line": "on {name}",
   "plan_tab_title": "Session plan",
   "confidence_low": "Low confidence",
