@@ -124,6 +124,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 | O11 | OpenAPI 3 is the contract format of milestone 2; JSON Schema, protobuf and events come in milestone 3 (2026-10-22 08:27, replan question 5) | 2, 3 | lanes 15, 23, 28 (OpenAPI 3) | M2 (milestone 2), M11 (milestone 3) | planned (OpenAPI 3); later (the other formats, M11) |
 | O12 | Approved knowledge reaches the skill by a daily fast-lane ticket per service, through the lock (2026-10-22 08:27, replan question 6 (a)) | 2 | lane 24 | lane 24's skill tests | planned |
 | O13 | The 48-hour proof runs once, after the last wave, with no early run (2026-10-22 08:27, replan question 7 (a)) | 2 | process | B6.2p's proof run, after wave 12 | planned |
+| O15 | The Consumption screen (Consommation) at milestone 3: per-harness projection to 100 % before and after the reset, tokens per day, clickable levers, cost in dollars only from a real source (2026-10-22, owner decision) | 3 | none yet | none yet | planned |
 | O14 | The CSSOM style-attribute function of pull request 199 (`installStyleAttributeCssom` in `v2/app/web/lib/style-nonce.ts`) is validated (2026-10-22 11:27) | 2 | the owner's decision; lane 32 installs it | the log entry of 2026-10-22 11:27; `app/test/style-nonce-shim.test.ts`; lane 32's browser test | partial (lane 32 installs it) |
 
 ## C. The milestones
