@@ -8,7 +8,10 @@
 // (docs/v2/milestone-2-plan.md, section 4: decisions 18, 20 and 21), and
 // those of waves 7 and 8 (the session plan, the release's groups and flags,
 // the sensitivity, the paused session, the files and the takeover), written
-// by lane 16 (decisions 22, 23, 24 and 30).
+// by lane 16 (decisions 22, 23, 24 and 30), and those of waves 9 to 11
+// (the ticket's steps, the contract and knowledge items, the questions to
+// the code, the recipes and the schedules, the web terminal and the
+// editor's save), written by lane 17 (decisions 26 to 29, 32 and 33).
 //
 // The app calls the service on loopback, forwarding /api/service/* to these
 // routes. Every request carries the shared proof the service checks
@@ -205,8 +208,162 @@ export type PlanItemInbox = InboxBase & {
   readonly totals: Plan['totals'];
 };
 
+// A contract step's change, proposed for the owner's validation (decision
+// 26, lane 23): the contract file's diff, Approve, or Send back with a
+// message that reopens the step. `outcome` says what the owner did.
+export type ContractItem = InboxBase & {
+  readonly kind: 'contract';
+  readonly sessionId: SessionId;                            // the contract step's session
+  readonly step: string;                                    // the ticket step (TicketStep.id)
+  readonly service: string;                                 // the providing service, whose contract it is
+  readonly path: string;                                    // the contract file, in that service's repository
+  readonly diff: string;
+  readonly outcome: { readonly decision: 'approve'; readonly by: UserId; readonly at: string }
+    | { readonly decision: 'send_back'; readonly message: string; readonly by: UserId; readonly at: string } | null;
+};
+
+// Knowledge a handover proposed (decision 27, lane 24), at its memory
+// level: the workspace's, a service's or a contract's (named by the service
+// that provides it). Approve writes it into the memory at once and queues it
+// for the service's skill; Reject writes nothing.
+export type KnowledgeLevel = 'workspace' | 'service' | 'contract';
+export type KnowledgeItem = InboxBase & {
+  readonly kind: 'knowledge';
+  readonly sessionId: SessionId;                            // the session whose handover proposed it
+  readonly text: string;
+  readonly level: KnowledgeLevel;
+  readonly service: string | null;                          // null at the workspace's level
+  readonly outcome: { readonly decision: 'approve' | 'reject'; readonly by: UserId; readonly at: string } | null;
+};
+
 export type InboxItem = PermissionItem | QuestionItem | ReleaseItem | PlanItemInbox;
-export type NextInboxItem = InboxItem | SessionPlanItem;
+// The kinds of the replanned milestone 2, which the inbox store keeps and
+// GET /api/inbox answers; each joins InboxItem with the inbox screen that
+// renders it (lanes 21 and 27), since the screen's model maps every kind.
+export type NextInboxItem = InboxItem | SessionPlanItem | ContractItem | KnowledgeItem;
+
+// ---------------------------------------------------------------- the replanned milestone 2: waves 9 to 11 (lane 17)
+
+// A step of a ticket (decision 26, lane 23): the contract first, on the
+// providing service; a step per service, in parallel, after it; the
+// integration last, on the consuming service. `after` holds the positions
+// it waits for; `costUsd` is what its session spent, null before it runs.
+export type TicketStep = {
+  readonly id: string;
+  readonly ticket: TicketId;
+  readonly kind: 'contract' | 'service' | 'integration';
+  readonly service: string;
+  readonly position: number;                                // 1-based, the order the plan shows
+  readonly after: readonly number[];
+  readonly state: 'waiting' | 'running' | 'validating' | 'done' | 'failed';
+  readonly session: SessionId | null;
+  readonly costUsd: number | null;
+};
+
+// A read-only question to the code or to the platform (decision 28, lane
+// 25): asked on a service's base branch, or on every service's checkout
+// when `service` is null; `target` is the `service:path:line` it names.
+// Each turn carries its cost; the ask carries the sum, and the week share
+// when the seven-day window is measured.
+export type AskAnswer = {
+  readonly question: string;
+  readonly answer: string | null;                           // null while the turn runs
+  readonly at: string;
+  readonly costUsd: number | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+};
+export type Ask = {
+  readonly id: string;
+  readonly question: string;                                // the first question
+  readonly service: string | null;
+  readonly target: { readonly service: string; readonly path: string; readonly line: number } | null;
+  readonly session: SessionId | null;
+  readonly state: 'starting' | 'running' | 'answered' | 'stopped' | 'failed';
+  readonly turns: readonly AskAnswer[];
+  readonly costUsd: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly weekPercent: number | null;
+  readonly createdAt: string;
+  readonly by: UserId;
+};
+export type AskBody = { readonly question: string; readonly service?: string; readonly target?: string };   // target: service:path:line
+export type AskFollowBody = { readonly question: string };
+
+// A recipe (decision 29, lane 26): `.cleared/recipes/<name>.md` of a
+// service's repository, read at its base branch; its body holds
+// `{{parameter}}` marks. A ticket recipe runs as a one-item plan, a goal
+// recipe as an owner turn to the lead.
+export type Recipe = {
+  readonly name: string;
+  readonly service: string;                                 // the repository it was read from
+  readonly kind: 'ticket' | 'goal';
+  readonly parameters: readonly { readonly name: string; readonly description?: string; readonly required: boolean }[];
+  readonly lane?: 'fast' | 'full';
+  readonly size?: PlanItem['size'];
+  readonly services: readonly string[];
+  readonly body: string;
+};
+export type RunRecipeBody = { readonly parameters: Readonly<Record<string, string>> };
+
+// A schedule (decision 29, lane 26): a recipe or a goal, run `at` a time or
+// `every` period in the server's time zone, with a budget and a week-share
+// cap; its creator's approval is the plan's.
+export type Schedule = {
+  readonly id: string;
+  readonly recipe: string | null;
+  readonly goal: string | null;
+  readonly parameters: Readonly<Record<string, string>>;
+  readonly at: string | null;
+  readonly every: string | null;                            // for example 'day 03:00'
+  readonly budgetUsd: number;
+  readonly weekCapPercent: number;
+  readonly createdBy: UserId;
+  readonly enabled: boolean;
+  readonly nextRunAt: string | null;
+  readonly lastRunAt: string | null;
+  readonly createdAt: string;
+};
+export type CreateScheduleBody = {
+  readonly recipe?: string; readonly goal?: string; readonly parameters?: Readonly<Record<string, string>>;
+  readonly at?: string; readonly every?: string; readonly budgetUsd: number; readonly weekCapPercent: number;
+};
+
+// The web terminal of a session taken over (decision 32, lane 31): its
+// output streams as server-sent events of TerminalChunk (`data`, UTF-8
+// text, in order by `seq`), then one TerminalClosed; the input is posted in
+// batches of at most TERMINAL_INPUT_MAX_BYTES.
+export const TERMINAL_INPUT_MAX_BYTES = 4096;
+export type TerminalChunk = { readonly seq: number; readonly data: string };
+export type TerminalClosed = { readonly reason: 'give_back' | 'idle' | 'closed' | 'exit' };
+export type TerminalOpenBody = { readonly cols: number; readonly rows: number };
+export type TerminalInputBody = { readonly data: string };
+export type TerminalResizeBody = { readonly cols: number; readonly rows: number };
+export type TerminalOpened = { readonly opened: true; readonly cols: number; readonly rows: number; readonly resume: string };   // resume: the command that resumes the harness inside it
+
+// The editor's save (decision 33, lane 31): the text, the hash of the
+// version the editor loaded, and, on a second save after a confirmation,
+// the one rule it confirms. A refusal names the rule and its reason; a stale
+// hash (409) carries the current one; `confirmable` says whether a second
+// save carrying the rule would write.
+export type ConfirmableRule = 'install.package' | 'scripts.change';
+export type FileWrite = { readonly text: string; readonly hash: string; readonly confirm?: ConfirmableRule };
+export type FileWriteRefusal = { readonly error: string; readonly rule: string | null; readonly reason: string; readonly hash?: string; readonly confirmable: boolean };
+export type FileWritten = { readonly saved: true; readonly hash: string };
+
+// A file a human changed in the session's checkout (decision 33): through
+// the editor, or found at Give back after the terminal. Never its content.
+export type HumanEdit = {
+  readonly path: string;
+  readonly by: UserId;
+  readonly at: string;
+  readonly added: number;
+  readonly removed: number;
+  readonly before: string | null;                           // the hashes, null for a file created or deleted
+  readonly after: string | null;
+  readonly via: 'editor' | 'terminal';
+};
 
 // ---------------------------------------------------------------- milestone 2: plans
 
@@ -374,7 +531,7 @@ export type ApiRoutes = {
   'GET /api/tickets/:id': { readonly body: null; readonly response: Ticket };
   'POST /api/tickets/:id/move': { readonly body: MoveTicketBody; readonly response: Ticket };
   'POST /api/tickets/:id/approve': { readonly body: ApproveBody; readonly response: { readonly accepted: true; readonly by: UserId } };
-  'GET /api/inbox': { readonly body: null; readonly response: InboxItem[] };
+  'GET /api/inbox': { readonly body: null; readonly response: NextInboxItem[] };   // the replanned kinds included (inbox/store.ts list)
   // The replanned milestone 2: the workspace (lane 14), and the trial
   // environment of a session (decision 20), served by lane 15 from its
   // `run` sibling under the session's previewKey, every answer sandboxed.
@@ -389,6 +546,32 @@ export type ApiRoutes = {
   'GET /api/sessions/:id/files/*': { readonly body: null; readonly response: SessionFile };
   'POST /api/sessions/:id/takeover': { readonly body: null; readonly response: { readonly accepted: true; readonly by: UserId } };
   'POST /api/sessions/:id/giveback': { readonly body: null; readonly response: { readonly accepted: true } };
+  // Waves 9 to 11, written by lane 17: the ticket's steps and the contract
+  // item's Approve and Send back (lane 23), the knowledge items' Approve and
+  // Reject and "Update the skill now" (lane 24), the questions to the code
+  // (lane 25), the recipes and the schedules (lane 26), the web terminal and
+  // the editor's save (lane 31). A contract or a knowledge item is named by
+  // its inbox id.
+  'GET /api/tickets/:id/steps': { readonly body: null; readonly response: TicketStep[] };
+  'POST /api/contracts/:id/approve': { readonly body: null; readonly response: { readonly accepted: true } };
+  'POST /api/contracts/:id/sendback': { readonly body: { readonly message: string }; readonly response: { readonly accepted: true } };
+  'POST /api/knowledge/:id/approve': { readonly body: null; readonly response: { readonly accepted: true } };
+  'POST /api/knowledge/:id/reject': { readonly body: null; readonly response: { readonly accepted: true } };
+  'POST /api/services/:name/skill': { readonly body: null; readonly response: { readonly accepted: true; readonly ticket: TicketId | null } };   // null: nothing was queued
+  'POST /api/asks': { readonly body: AskBody; readonly response: Ask };
+  'GET /api/asks/:id': { readonly body: null; readonly response: Ask };
+  'POST /api/asks/:id/follow': { readonly body: AskFollowBody; readonly response: Ask };
+  'GET /api/recipes': { readonly body: null; readonly response: Recipe[] };
+  'POST /api/recipes/:name/run': { readonly body: RunRecipeBody; readonly response: { readonly accepted: true; readonly plan?: string; readonly message?: number } };
+  'GET /api/schedules': { readonly body: null; readonly response: Schedule[] };
+  'POST /api/schedules': { readonly body: CreateScheduleBody; readonly response: Schedule };
+  'DELETE /api/schedules/:id': { readonly body: null; readonly response: { readonly deleted: true } };
+  'POST /api/sessions/:id/terminal/open': { readonly body: TerminalOpenBody; readonly response: TerminalOpened };
+  'POST /api/sessions/:id/terminal/input': { readonly body: TerminalInputBody; readonly response: { readonly accepted: true } };
+  'POST /api/sessions/:id/terminal/resize': { readonly body: TerminalResizeBody; readonly response: { readonly accepted: true } };
+  'POST /api/sessions/:id/terminal/close': { readonly body: null; readonly response: { readonly accepted: true } };
+  'GET /api/sessions/:id/terminal/stream': { readonly body: null; readonly response: 'text/event-stream' };
+  'PUT /api/sessions/:id/files/*': { readonly body: FileWrite; readonly response: FileWritten };
   // Milestone 2. `messages` answers the thread after `?after=<seq>`.
   'GET /api/lead': { readonly body: null; readonly response: LeadState };
   'GET /api/lead/messages': { readonly body: null; readonly response: LeadMessage[] };
@@ -427,6 +610,26 @@ const routes = {
   'GET /api/sessions/:id/files/*': true,
   'POST /api/sessions/:id/takeover': true,
   'POST /api/sessions/:id/giveback': true,
+  'GET /api/tickets/:id/steps': true,
+  'POST /api/contracts/:id/approve': true,
+  'POST /api/contracts/:id/sendback': true,
+  'POST /api/knowledge/:id/approve': true,
+  'POST /api/knowledge/:id/reject': true,
+  'POST /api/services/:name/skill': true,
+  'POST /api/asks': true,
+  'GET /api/asks/:id': true,
+  'POST /api/asks/:id/follow': true,
+  'GET /api/recipes': true,
+  'POST /api/recipes/:name/run': true,
+  'GET /api/schedules': true,
+  'POST /api/schedules': true,
+  'DELETE /api/schedules/:id': true,
+  'POST /api/sessions/:id/terminal/open': true,
+  'POST /api/sessions/:id/terminal/input': true,
+  'POST /api/sessions/:id/terminal/resize': true,
+  'POST /api/sessions/:id/terminal/close': true,
+  'GET /api/sessions/:id/terminal/stream': true,
+  'PUT /api/sessions/:id/files/*': true,
   'GET /api/lead': true,
   'GET /api/lead/messages': true,
   'GET /api/lead/stream': true,
@@ -445,10 +648,21 @@ export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 export const SESSION_PREVIEW_ROUTE: ApiRoute = 'GET /api/sessions/:id/preview/*';
 
 // The routes of waves 7 and 8 written ahead of their servers (lane 16):
-// the plan's Go and Change are lane 17's (flow/plan-gate.ts), the files,
-// takeover and giveback lane 20's (flow/files.ts, flow/takeover.ts).
+// the plan's Go and Change are lane 17's (flow/plan-gate.ts, registered by
+// the flow module), the files, takeover and giveback lane 20's
+// (flow/files.ts, flow/takeover.ts).
 export const SESSION_PLAN_ROUTES: readonly ApiRoute[] = ['POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/plan/change'];
 export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'POST /api/sessions/:id/takeover', 'POST /api/sessions/:id/giveback'];
+
+// The routes of waves 9 to 11 written ahead of their servers (lane 17).
+export const STEP_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/steps', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback'];   // lane 23, flow/
+export const KNOWLEDGE_ROUTES: readonly ApiRoute[] = ['POST /api/knowledge/:id/approve', 'POST /api/knowledge/:id/reject', 'POST /api/services/:name/skill'];   // lane 24, knowledge/
+export const ASK_ROUTES: readonly ApiRoute[] = ['POST /api/asks', 'GET /api/asks/:id', 'POST /api/asks/:id/follow'];   // lane 25, reader/
+export const RECIPE_ROUTES: readonly ApiRoute[] = ['GET /api/recipes', 'POST /api/recipes/:name/run', 'GET /api/schedules', 'POST /api/schedules', 'DELETE /api/schedules/:id'];   // lane 26, recipes/ and schedules/
+export const TERMINAL_ROUTES: readonly ApiRoute[] = [   // lane 31, terminal/ and flow/files.ts
+  'POST /api/sessions/:id/terminal/open', 'POST /api/sessions/:id/terminal/input', 'POST /api/sessions/:id/terminal/resize', 'POST /api/sessions/:id/terminal/close',
+  'GET /api/sessions/:id/terminal/stream', 'PUT /api/sessions/:id/files/*',
+];
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));

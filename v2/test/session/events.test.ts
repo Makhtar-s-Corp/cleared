@@ -24,11 +24,16 @@ test('the subset is the one of the plan, section 4, and leaves out what it says 
 });
 
 test('the measured steps and the custom names are the plan\'s', () => {
-  assert.deepEqual([...STEP_NAMES], ['workspace', 'author', 'waiting_human', 'review', 'approval', 'release', 'watch']);
+  // plan_gate: the session plan waiting for its Go, measured apart from the author's work (lane 17).
+  assert.deepEqual([...STEP_NAMES], ['workspace', 'author', 'waiting_human', 'review', 'approval', 'release', 'watch', 'plan_gate']);
   assert.deepEqual([...CUSTOM_NAMES], [
     'cleared.permission_request', 'cleared.permission_answered', 'cleared.question', 'cleared.answered', 'cleared.review_verdict', 'cleared.handover_captured',
     // Milestone 2, section 3.1.
     'cleared.host_call', 'cleared.context_usage', 'cleared.compacted', 'cleared.rate_limit', 'cleared.lead_refreshed',
+    // The replanned milestone 2 (lane 17): the session plan and the author's report of its changes
+    // (decisions 22 and 23), and the four names lane 31 emits (decisions 32 and 33).
+    'cleared.session_plan', 'cleared.changes',
+    'cleared.terminal_opened', 'cleared.terminal_input', 'cleared.terminal_closed', 'cleared.human_edit',
   ]);
 });
 
@@ -69,4 +74,21 @@ test('the milestone 2 custom events go through the cleaner with their values', (
   assert.deepEqual([compacted?.name, rate?.name, refreshed?.name], ['cleared.compacted', 'cleared.rate_limit', 'cleared.lead_refreshed']);
   const state: SessionState = { status: 'Waiting', phase: 'working', steps: [], files: [], checks: [], usage: {}, context: { percent: 45, totalTokens: 90_000, maxTokens: 200_000 } };
   assert.equal(state.context?.percent, 45);
+});
+
+test('the events of lane 17 and lane 31 carry what their readers need, and never a file\'s content', () => {
+  const at = '2026-10-23T08:00:00.000Z';
+  const events: AgUiEvent[] = [
+    { type: 'CUSTOM', name: 'cleared.session_plan', value: { steps: ['Sort'], files: ['src/entries.ts'], confidence: 'high', reason: 'One function.', proposedAt: at, go: { by: 'delay', at } } },
+    { type: 'CUSTOM', name: 'cleared.changes', value: { groups: [{ intent: 'Sort', files: ['src/entries.ts'] }, { intent: 'Other changes', files: ['README.md'] }] } },
+    { type: 'CUSTOM', name: 'cleared.terminal_opened', value: { by: 'u1', cols: 120, rows: 32 } },
+    { type: 'CUSTOM', name: 'cleared.terminal_input', value: { by: 'u1', line: 'git status' } },
+    { type: 'CUSTOM', name: 'cleared.terminal_closed', value: { by: 'u1', reason: 'give_back', outputBytes: 2048 } },
+    { type: 'CUSTOM', name: 'cleared.human_edit', value: { by: 'u1', path: 'src/page.ts', added: 1, removed: 1, before: 'a'.repeat(64), after: 'b'.repeat(64), via: 'editor' } },
+  ];
+  assert.equal(events.length, 6);
+  const edit = events[5] as Extract<AgUiEvent, { name: 'cleared.human_edit' }>;
+  assert.deepEqual(Object.keys(edit.value).sort(), ['added', 'after', 'before', 'by', 'path', 'removed', 'via'], 'a human edit is journaled without its content');
+  const closed = events[4] as Extract<AgUiEvent, { name: 'cleared.terminal_closed' }>;
+  assert.ok(!('output' in closed.value), 'the terminal\'s output is never stored, only its byte count');
 });

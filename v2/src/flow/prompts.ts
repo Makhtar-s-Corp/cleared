@@ -5,15 +5,26 @@ import type { SessionEvent } from '../session/events.ts';
 
 type TicketText = { readonly id: string; readonly title: string; readonly body: string };
 
-export function authorPrompt(ticket: TicketText): string {
+// What the author's host tools add to its first turn (decisions 22 and 23,
+// lane 17): `plan`, its session plan before any change, and `report`, its
+// changes by intent at the end. A configuration without the tools asks for
+// neither, and a new author after a review is not asked for a plan again.
+export type AuthorAsks = { readonly plan: boolean; readonly report: boolean };
+
+export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: false, report: false }): string {
   return [
     `Ticket ${ticket.id}: ${ticket.title}`,
     '',
     ticket.body.trim() || '(The ticket has no description: the title is the whole request.)',
     '',
+    ...(asks.plan ? [
+      'Before you change any file, read what you need, then call propose_session_plan with your plan: its steps, the files you mean to change, your confidence (high when the change is clear and small, medium when one point is uncertain, low when the owner should look first) and why.',
+      'Then end your turn and change nothing: Cleared sends you the Go, or what to change in your plan.',
+    ] : []),
     'Work on the checkout you are in: it is on the ticket branch. Change what the ticket asks and nothing else, write or update tests, run them, and commit your work with git.',
     'Never push, and never open a pull request: Cleared publishes the branch from the host once the change is reviewed.',
     'Commit messages carry no email address and no Co-Authored-By trailer: the guard that runs before the branch leaves refuses an address.',
+    ...(asks.report ? ['When your work is committed, call report_changes with the files you changed, grouped by intent, each file in one group.'] : []),
     'When you stop, write HANDOVER.md at the root of the checkout (the end-of-session notice gives the headings). Never commit it.',
   ].join('\n');
 }

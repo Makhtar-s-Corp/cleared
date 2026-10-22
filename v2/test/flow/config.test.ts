@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FlowConfigError, loadFlowConfig, parseConf, projectSettings, workspaceOf } from '../../src/flow/config.ts';
+import { FlowConfigError, PLAN_GO_MINUTES, loadFlowConfig, parseConf, projectSettings, workspaceOf } from '../../src/flow/config.ts';
 import { publicWorkspace } from '../../src/workspace/config.ts';
 
 const conf = `
@@ -36,6 +36,16 @@ test('projectSettings gives the declared test services, in the form the guestboo
   assert.deepEqual(settings.services.map((s) => [s.alias, s.image, s.sessionEnv.DATABASE_URL]), [['postgres', 'postgres:16', 'postgres://postgres@postgres:5432/postgres']]);
   assert.deepEqual(projectSettings(parseConf('[merge]\nverdict = no blocking issues\n')).services, []);
   assert.throws(() => projectSettings(parseConf('[merge]\nverdict = no blocking issues\n[session]\nservices = redis:7\n')), (error: unknown) => error instanceof FlowConfigError && /redis/.test(error.message));
+});
+
+test('[session] plan_go_minutes is the delay of a session plan\'s Go, when the service sets it (lane 17)', () => {
+  const read = (conf: string) => projectSettings(parseConf(`[merge]\nverdict = ok\n${conf}`));
+  assert.equal(read('[session]\nplan_go_minutes = 25\n').planGoMinutes, 25);
+  assert.equal(read('[session]\nplan_go_minutes = 2.5\n').planGoMinutes, 2.5);
+  // Unset, the engine's default of 10 minutes applies, and the settings carry nothing new.
+  assert.equal('planGoMinutes' in read(''), false);
+  assert.equal(PLAN_GO_MINUTES, 10);
+  for (const wrong of ['soon', '0', '-5']) assert.throws(() => read(`[session]\nplan_go_minutes = ${wrong}\n`), (error: unknown) => error instanceof FlowConfigError && /plan_go_minutes/.test(error.message), wrong);
 });
 
 test('without a verdict phrase the project cannot pass a review', () => {
@@ -77,7 +87,9 @@ const M1_ENV = {
 test('the milestone 1 variables make a one-service workspace, and the flow configuration is the one milestone 1 had', () => {
   const config = loadFlowConfig(M1_ENV);
   assert.ok(config);
-  const { workspace, ...rest } = config;
+  const { workspace, authorTools, ...rest } = config;
+  // The author's host tools and the session plan's gate (lane 17), on in every configuration the service reads.
+  assert.equal(authorTools, true);
   // The fields and values of the milestone 1 FlowConfig, unchanged.
   assert.deepEqual(rest, {
     project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://github.com/example-org/cleared-example-guestbook.git',

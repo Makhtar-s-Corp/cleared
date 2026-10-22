@@ -36,12 +36,20 @@
 // the review and asks the approval on each service's own lock, and the
 // release item carries the train, which release/train.ts lands. A ticket of
 // a one-service workspace runs as in milestone 1.
+//
+// With the author's host tools (decisions 22 and 23, lane 17;
+// FlowConfig.authorTools), the author's first turn ends with its session
+// plan and the flow holds it until a Go (flow/plan-gate.ts): `workspace`,
+// `author`, `plan_gate`, then `author` again from the Go. The engine also
+// applies two sensitivities of the ticket's services (decision 24): a
+// `reviewer:<model>` names the reviewer, and `full` keeps a Quick ticket
+// off Haiku.
 import { posix } from 'node:path';
-import type { PermissionItem, ReleaseItem, SessionDetail, SessionSummary } from '../api/types.ts';
+import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
-import type { Answer, Briefing, Decision, Role, SessionAdapter, SessionHandle, SessionId, StartInput, UserId } from '../session/contract.ts';
+import { HostToolRefused, type Answer, type Briefing, type Decision, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
 import { readToolInput, readToolOutput, type AgUiEvent, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
@@ -55,11 +63,13 @@ import { compatibility, landingOrder } from '../release/order.ts';
 import { TrainStore, view, type Stop } from '../release/store.ts';
 import { TrainRunner } from '../release/train.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
-import { workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
+import { AUTHOR_TOOLS, bindAuthorTools, readChangesReport, readSessionPlan } from './author-tools.ts';
+import { PLAN_GO_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
+import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
 import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
-import { foldState } from './state.ts';
+import { foldState, sessionPlanOf } from './state.ts';
 
 export type { ProjectSettings } from './config.ts';
 export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
@@ -166,6 +176,14 @@ function patternOf(item: PermissionItem): string | undefined {
   }
 }
 
+// The policy's answer to a session's own host tools: the runner asks the
+// policy before every tool call, and an author's mcp__cleared__ tools match
+// no row of its role, so they are allowed as learned answers are (the lead
+// has its own row, lead.tools).
+function toolRules(tools: readonly HostTool[] | undefined): { tool: string; pattern: string }[] {
+  return (tools ?? []).filter((tool) => AUTHOR_TOOLS.some((known) => known.name === tool.name)).map((tool) => ({ tool: `mcp__cleared__${tool.name}`, pattern: '*' }));
+}
+
 export class FlowEngine {
   readonly registry: Registry;
   readonly inbox: InboxStore;
@@ -191,6 +209,8 @@ export class FlowEngine {
   #runner: TrainRunner;
   #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
   #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
+  #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
+  #origins = new Map<TicketId, Origin>();                           // the plan item a ticket's current flow runs for
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -279,12 +299,18 @@ export class FlowEngine {
   // is the human's.
   async tick(): Promise<void> {
     const now = this.#now().getTime();
+    // A session held by its plan, or its want of one, is not idle: its delay decides (#gateTick).
     for (const live of [...this.#live.values()]) {
-      if (live.closed || this.inbox.waitingFor(live.id) > 0) continue;
+      if (live.closed || this.inbox.waitingFor(live.id) > 0 || this.#holds(live.id)) continue;
       if (now - live.lastActivity < this.config.idleMs) continue;
       const minutes = Math.round(this.config.idleMs / 60_000);
       await this.#stopTicket(live, 'idle', `No activity for ${minutes} minutes: the session was stopped.`,
         `The session stopped after ${minutes} minutes without activity. Move the ticket to Todo to start it again.`, 'stopped', 'idle');
+    }
+    // Scanned synchronously: a tick with nothing due yields as it did before the gate.
+    for (const { live, minutes, go } of this.#dueGates(now)) {
+      if (go) await this.#go(live, 'delay').catch((error: unknown) => console.error(`cleared-v2: the Go by the delay of ${live.id} failed (${error instanceof Error ? error.name : typeof error})`));
+      else await this.#stopTicket(live, 'no_plan', 'The author proposed no session plan: the session was stopped.', noPlanNote(minutes), 'stopped', 'failed');
     }
     const tickets = this.registry.ticketStore;
     for (const release of this.inbox.waitingReleases()) {
@@ -539,11 +565,13 @@ export class FlowEngine {
     const events = this.#store.events.after(id);
     const phase = row.status as SessionPhase;
     const state = foldState(events, phase);
+    const plan = sessionPlanOf(events);
     // The service and the preview key the runtime stored when the session's
-    // containers started (lane 15), when its row holds them.
+    // containers started (lane 15), when its row holds them; the session
+    // plan of an author that proposed one (lane 17).
     return {
       id: row.id, project: row.project, ticket: row.ticket, role: row.role, harness: row.harness, model: row.model,
-      phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0, state,
+      phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0, state: plan ? { ...state, plan } : state,
       ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}),
     };
   }
@@ -642,14 +670,18 @@ export class FlowEngine {
     if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
     this.#active.add(ticketId);
     this.#flows.set(ticketId, new Set());
+    if (origin) this.#origins.set(ticketId, origin);
+    else this.#origins.delete(ticketId);
     const began = this.#now();
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
       const settings = await this.#settings(ticket);
       const prepared = await this.#prepare(ticket, 'author');
       const workspaceDone = this.#now();
-      const prompt = origin?.note ? `${authorPrompt(ticket)}\n\n${origin.note}` : authorPrompt(ticket);
-      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt);
+      const tools = this.config.authorTools === true;
+      const first = authorPrompt(ticket, { plan: tools, report: tools });
+      const prompt = origin?.note ? `${first}\n\n${origin.note}` : first;
+      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined);
       const session = { id: live.id, ticket: ticketId, project: this.config.project };
       this.#step(session, 'STEP_STARTED', 'workspace', began);
       this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
@@ -665,8 +697,19 @@ export class FlowEngine {
     }
   }
 
+  // Haiku for a Quick ticket, unless Haiku reviews it or a service it
+  // touches is `full` (decision 24), which refuses the fast lane.
   #authorModel(ticket: Ticket): string {
-    return ticket.labels.includes(QUICK_LABEL) && this.config.reviewerModel !== QUICK_MODEL ? QUICK_MODEL : this.config.authorModel;
+    if (!ticket.labels.includes(QUICK_LABEL) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.config.authorModel;
+    return this.#servicesOf(ticket).some((service) => service.sensitivity === 'full') ? this.config.authorModel : QUICK_MODEL;
+  }
+
+  // The reviewer a `reviewer:<model>` sensitivity names, on the first service
+  // of the ticket that names one (decision 24); else the configured one. The
+  // workspace's configuration refuses one naming the author model.
+  #reviewerModel(ticket: Ticket): string {
+    for (const service of this.#servicesOf(ticket)) if (service.sensitivity.startsWith('reviewer:')) return service.sensitivity.slice('reviewer:'.length);
+    return this.config.reviewerModel;
   }
 
   // start() in the background, for the routes: a person's click does not
@@ -713,14 +756,19 @@ export class FlowEngine {
     }
   }
 
-  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string): Promise<Live> {
+  // `author`: the author's host tools, with its session plan to propose
+  // first (`plan`), or not again after a review (`report`, lane 17).
+  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report'): Promise<Live> {
     // A train ticket's session works on the first service the ticket names (decision 20, lane 15's runtime).
     const service = this.#several ? this.#servicesOf(ticket)[0]?.name : undefined;
+    const tools = author ? this.#authorTools(ticket, author === 'plan') : undefined;
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness: HARNESS, model, workdir, briefing,
-      policy: this.#policy(role, settings), prompt, services: settings.services, ...(service ? { service } : {}),
+      policy: this.#policy(role, settings, tools), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
     };
     const handle = await adapter.start(input);
+    // The fake adapter plays a first turn's host calls inside start(): the gate may exist already.
+    if (author === 'plan' && !this.#gates.has(handle.id)) this.#gates.set(handle.id, { phase: 'planning', stepOpen: false });
     const at = this.#now().toISOString();
     this.#store.sessions.put({ id: handle.id, project: input.project, ticket: ticket.id, role, harness: HARNESS, model, status: role === 'reviewer' ? 'reviewing' : 'working', createdAt: at, updatedAt: at });
     const live: Live = { id: handle.id, input, settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
@@ -736,7 +784,7 @@ export class FlowEngine {
   // deletion rule knows them. The lead's is its own (lane 5).
   policyFor(input: StartInput): Policy {
     if (input.role === 'lead' || input.project !== this.config.project) return input.policy;
-    return { ...input.policy, learned: this.#store.policyRules.learned(input.project), ticketFiles: this.#ticketFiles(input.ticket) };
+    return { ...input.policy, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket) };
   }
 
   // An edit counts once its result says it was made: a refused or failed
@@ -767,12 +815,166 @@ export class FlowEngine {
     return [...out];
   }
 
-  #policy(role: Role, settings: ProjectSettings): Policy {
+  #policy(role: Role, settings: ProjectSettings, tools?: readonly HostTool[]): Policy {
     return {
       role, base: this.config.base, workdir: WORKDIR_MOUNT, scripts: settings.scripts, credentialFile: LOGIN_FILE_MOUNT,
       safeCommands: [...DEFAULT_SAFE_COMMANDS, ...settings.safeCommands], allowedHosts: settings.hosts, forbiddenHosts: [],
-      ticketFiles: [], learned: this.#store.policyRules.learned(this.config.project),
+      ticketFiles: [], learned: [...this.#store.policyRules.learned(this.config.project), ...toolRules(tools)],
     };
+  }
+
+  // ---- the author's host tools and its session plan (lane 17) ------------------
+
+  // The tools of one author session. Its id is the call's: the fake adapter
+  // plays a first turn's calls before start() returns, so nothing here reads
+  // the session's row or its Live. `plan`: this author proposes its plan
+  // first; a new author after a review does not.
+  #authorTools(ticket: Ticket, plan: boolean): HostTool[] {
+    const project = this.config.project;
+    return bindAuthorTools({
+      propose_session_plan: async (input, context) => {
+        if (!plan) throw new HostToolRefused(NOT_AGAIN);
+        const gate = this.#gates.get(context.sessionId) ?? { phase: 'planning' as const, stepOpen: false };
+        this.#gates.set(context.sessionId, gate);
+        if (gate.phase === 'working') throw new HostToolRefused(NOT_NOW);
+        const read = readSessionPlan(input);
+        const proposal: SessionPlan = {
+          steps: read.steps.map(this.#clean), files: read.files.map(this.#clean), confidence: read.confidence, reason: this.#clean(read.reason),
+          proposedAt: this.#at(), go: null,
+        };
+        // A plan proposed again while the last one waits (the owner wrote to the author) replaces it.
+        if (gate.phase === 'held') {
+          const waiting = this.inbox.sessionPlan(context.sessionId);
+          if (waiting) this.inbox.handle(waiting.id, 'system');
+          gate.plan = undefined;
+          gate.phase = 'planning';
+        }
+        gate.pending = proposal;
+        this.#journal({ id: context.sessionId, ticket: ticket.id, project }, { type: 'CUSTOM', name: 'cleared.session_plan', value: proposal });
+        return PROPOSED;
+      },
+      report_changes: async (input, context) => {
+        const read = readChangesReport(input, this.#ticketFiles(ticket.id));
+        const report = { groups: read.groups.map((g) => ({ intent: this.#clean(g.intent), files: g.files.map(this.#clean) })) };
+        // On the session that called: the publish step reads the last author's last one (release/flags.ts).
+        this.#journal({ id: context.sessionId, ticket: ticket.id, project }, { type: 'CUSTOM', name: 'cleared.changes', value: report });
+        const count = report.groups.length;
+        return `Your report is kept: ${count} group${count === 1 ? '' : 's'}.`;
+      },
+    });
+  }
+
+  // True while the session's plan, or its want of one, holds it.
+  #holds(id: SessionId): boolean {
+    const phase = this.#gates.get(id)?.phase;
+    return phase === 'held' || phase === 'unplanned';
+  }
+
+  // The end of an author's turn while its plan has no Go: the hold begins,
+  // or goes on. True when the turn is not the end of the author's work.
+  async #gateHolds(live: Live): Promise<boolean> {
+    const gate = this.#gates.get(live.id);
+    if (!gate || gate.phase === 'working') return false;
+    const session = { id: live.id, ticket: live.input.ticket, project: live.input.project };
+    if (!gate.stepOpen) {
+      this.#step(session, 'STEP_FINISHED', 'author');
+      this.#step(session, 'STEP_STARTED', 'plan_gate');
+      gate.stepOpen = true;
+    }
+    const now = this.#now().getTime();
+    if (gate.pending) {
+      gate.plan = gate.pending;
+      gate.pending = undefined;
+      gate.phase = 'held';
+      gate.heldAt = now;
+      if (this.#origins.has(live.input.ticket) && gate.plan.confidence === 'high') {
+        await this.#go(live, 'lead');
+        return true;
+      }
+      const service = this.#several ? this.#servicesOf(await this.#ticketOf(live.input.ticket))[0]?.name : undefined;
+      this.inbox.addSessionPlan({ ticket: session.ticket, project: session.project, sessionId: live.id, plan: gate.plan, ...(service ? { service } : {}) });
+      this.#setPhase(live, 'waiting_human');
+      this.#snapshot(live.id, live.input.ticket);
+      return true;
+    }
+    if (gate.phase === 'planning') {
+      gate.phase = 'unplanned';
+      gate.heldAt = now;
+    }
+    return true;
+  }
+
+  async #ticketOf(id: TicketId): Promise<Ticket> {
+    const ticket = await this.registry.ticketStore.get(id);
+    if (!ticket) throw new FlowError('not_found', `unknown ticket ${id}`);
+    return ticket;
+  }
+
+  // What the delay decides at this tick: a high plan that waited its delay
+  // gets its Go (`go`); a session that proposed none in its delay is put back.
+  #dueGates(now: number): { live: Live; minutes: number; go: boolean }[] {
+    const due: { live: Live; minutes: number; go: boolean }[] = [];
+    for (const live of this.#live.values()) {
+      const gate = this.#gates.get(live.id);
+      if (live.closed || !gate || gate.heldAt === undefined) continue;
+      const minutes = live.settings.planGoMinutes ?? PLAN_GO_MINUTES;
+      if (now < gate.heldAt + minutes * 60_000) continue;
+      if (gate.phase === 'held' && gate.plan?.confidence === 'high') due.push({ live, minutes, go: true });
+      else if (gate.phase === 'unplanned') due.push({ live, minutes, go: false });
+    }
+    return due;
+  }
+
+  // The Go: the plan journaled again with who and when, the gate closed, the
+  // item handled, and the author told to carry the plan out.
+  async #go(live: Live, by: GoBy): Promise<void> {
+    const gate = this.#gates.get(live.id);
+    if (!gate || gate.phase !== 'held' || !gate.plan) throw new FlowError('conflict', `session ${live.id} has no session plan waiting for its Go`);
+    const session = { id: live.id, ticket: live.input.ticket, project: live.input.project };
+    const plan: SessionPlan = { ...gate.plan, go: { by, at: this.#at() } };
+    gate.phase = 'working';
+    gate.plan = undefined;
+    gate.heldAt = undefined;
+    this.#journal(session, { type: 'CUSTOM', name: 'cleared.session_plan', value: plan });
+    const waiting = this.inbox.sessionPlan(live.id);
+    if (waiting) this.inbox.handle(waiting.id, by === 'delay' || by === 'lead' ? 'system' : by);
+    if (gate.stepOpen) {
+      this.#step(session, 'STEP_FINISHED', 'plan_gate');
+      this.#step(session, 'STEP_STARTED', 'author');
+      gate.stepOpen = false;
+    }
+    this.#setPhase(live, 'working');
+    this.#snapshot(live.id, live.input.ticket);
+    live.lastActivity = this.#now().getTime();
+    const minutes = live.settings.planGoMinutes ?? PLAN_GO_MINUTES;
+    try {
+      await live.handle.send({ text: goMessage(by, minutes, this.#origins.get(live.input.ticket)), by: FLOW_USER });
+    } catch (error) {
+      await this.#stopTicket(live, 'error', `The Go could not reach the session: ${name(error)}`, `The session plan had its Go, but the session could not be told: ${name(error)}`, 'failed', 'failed');
+    }
+  }
+
+  // The owner's Go, from the session plan's inbox item (POST /api/sessions/:id/plan/go).
+  async planGo(id: SessionId, by: UserId): Promise<void> {
+    await this.#go(this.#liveSession(id), by);
+  }
+
+  // The owner's Change: the plan's item handled, and the author reopened with
+  // the message; its next proposal replaces the plan (POST .../plan/change).
+  async planChange(id: SessionId, message: string, by: UserId): Promise<void> {
+    if (message.trim() === '') throw new FlowError('invalid', 'a Change says what to change in the plan');
+    const live = this.#liveSession(id);
+    const gate = this.#gates.get(id);
+    if (!gate || gate.phase !== 'held' || !gate.plan) throw new FlowError('conflict', `session ${id} has no session plan waiting for its Go`);
+    const waiting = this.inbox.sessionPlan(id);
+    if (waiting) this.inbox.handle(waiting.id, by);
+    gate.phase = 'planning';
+    gate.plan = undefined;
+    gate.heldAt = undefined;
+    this.#setPhase(live, 'working');
+    this.#snapshot(id, live.input.ticket);
+    live.lastActivity = this.#now().getTime();
+    await live.handle.send({ text: changeMessage(message), by });
   }
 
   // ---- watching a session -------------------------------------------------
@@ -849,6 +1051,7 @@ export class FlowEngine {
     }
     // A turn that ends while the inbox still holds a request of this session is not the end of the work.
     if (this.inbox.waitingFor(live.id) > 0) return;
+    if (live.input.role === 'author' && await this.#gateHolds(live)) return;
     if (live.input.role === 'author') await this.#authorDone(live);
     else if (live.input.role === 'reviewer') await this.#reviewDone(live);
   }
@@ -892,6 +1095,14 @@ export class FlowEngine {
       live.waitOpen = false;
       this.#step({ id: live.id, ticket: live.input.ticket, project: live.input.project }, 'STEP_FINISHED', 'waiting_human');
     }
+    // A gate that closes with its session: its step ends; a plan that had
+    // its Go is remembered, so that a resumed author does not propose again.
+    const gate = this.#gates.get(live.id);
+    if (gate?.stepOpen) {
+      gate.stepOpen = false;
+      this.#step({ id: live.id, ticket: live.input.ticket, project: live.input.project }, 'STEP_FINISHED', 'plan_gate');
+    }
+    if (gate && gate.phase !== 'working') this.#gates.delete(live.id);
     this.#setPhase(live, phase);
     this.inbox.handleSession(live.id, 'system');
     await live.handle.stop().catch(() => undefined);
@@ -919,6 +1130,7 @@ export class FlowEngine {
   async #putBack(ticket: TicketId, note: string, reason: PutBackReason): Promise<boolean> {
     const tickets = this.registry.ticketStore;
     this.#active.delete(ticket);
+    this.#origins.delete(ticket);
     await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
     try {
       await tickets.move(ticket, tickets.states.todo, SERVICE);
@@ -959,7 +1171,7 @@ export class FlowEngine {
       const prepared = this.#several
         ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
         : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer' });
-      const live = await this.#launch(adapter, ticket, 'reviewer', this.config.reviewerModel, prepared.workdir || workdir, prepared.briefing, settings,
+      const live = await this.#launch(adapter, ticket, 'reviewer', this.#reviewerModel(ticket), prepared.workdir || workdir, prepared.briefing, settings,
         reviewPrompt({ ticket, base: this.config.base, verdict: settings.verdict }));
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
       this.#snapshot(live.id, ticket.id);
@@ -1036,7 +1248,9 @@ export class FlowEngine {
     try {
       const settings = kept?.settings ?? (await this.#settings(ticket));
       const prepared = await this.#prepare(ticket, 'author');
-      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, `${authorPrompt(ticket)}\n\n${message}`);
+      const tools = this.config.authorTools === true;
+      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings,
+        `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined);
       this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
       this.#snapshot(live.id, id);
       this.#supervise(live, 0);

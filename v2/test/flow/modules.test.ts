@@ -26,7 +26,10 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
     'GET /api/sessions', 'GET /api/sessions/:id', 'GET /api/sessions/:id/events',
     'POST /api/sessions/:id/interrupt', 'POST /api/sessions/:id/messages', 'POST /api/sessions/:id/requests/:requestId/answer',
   ]);
-  assert.deepEqual(routeKeys(flow), ['GET /api/tickets', 'GET /api/tickets/:id', 'POST /api/tickets', 'POST /api/tickets/:id/move']);
+  // The session plan's Go and Change (lane 17, flow/plan-gate.ts) are the flow module's.
+  assert.deepEqual(routeKeys(flow), [
+    'GET /api/tickets', 'GET /api/tickets/:id', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/tickets', 'POST /api/tickets/:id/move',
+  ]);
   assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
   assert.equal(inbox.tables.length, 1);
   assert.match(inbox.tables[0] as string, /CREATE TABLE IF NOT EXISTS flow_inbox/);
@@ -37,7 +40,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule }, { store });
-  assert.equal(app.routes.filter((r) => !r.path.includes('/preview/')).length, 11);
+  assert.equal(app.routes.filter((r) => !r.path.includes('/preview/')).length, 13);
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code']);
   assert.ok(!app.routes.some((r) => r.path.endsWith('/approve')), 'the approval route is lane 8\'s');
 });
