@@ -3045,3 +3045,31 @@ The owner took three more decisions at the same time. They are recorded here as 
 - `proof-terminal.ts` is missing;
 - the real-adapter test, run with its gate open, answers "The claude-code harness cannot be resumed in a terminal yet: open the Shell instead.", the real run's sentence.
 The fixture source's reviewer case (`fixture-human.test.ts`) was added after that commit; it failed on the old source with its 409 before the source changed.
+
+**The real-adapter test on this server** (2026-10-22, Docker 29.8.1, `cleared-v2-session:2.1.306`, the owner's current Claude Code login mounted read only as the service mounts it, Haiku 5.5):
+- **First run:** the reviewer passed. The author's first turn did not end in 240 s: its Stop hook sends a turn without `HANDOVER.md` back once, and the test answered no request. The session that run left was removed by its label. The test now allows each request once, as the doctor does, asks the author for the handover, and removes by the label what a failed stop leaves.
+- **Second run, both roles passed in 55 s:**
+  - the author: the terminal closed in 456 ms, the transcript went from 32 to 50 lines, and the reloaded runner answered what the human had asked the harness; in the Shell, `DATABASE_URL` was set, no login was in the environment, and `npm ci && npm test` ended with `ℹ fail 0`;
+  - the reviewer: closed in 443 ms, from 24 to 40 lines, the same answer after the reload.
+  - Nothing with either session's label was left, and both volumes were removed.
+- No proof ran against the live service on 8791 and 8792, and nothing of the demo on 8796 to 8799 was touched. The LOCAL-14 checkout and container were only read: the names of its environment, the mount of its checkout, its `git status` and a clone for the labelled reproduction.
+
+**The multi-service rehearsal** (fake adapter, its own service and app, `PROOF_SCREENS=0`) ran on commit `f3925e2`: 12 steps ok, 0 failed, in `/tmp/cleared-captures/j2/multi-rehearsal-takeover/` (`result.json`, `durations.md`, the steps' captures). Step 11: the harness unsupported on the fake adapter, then the Shell with `git status` (answered), `npm ci` and `npm test`, 3 lines journaled, one save (200), given back, and `src/page.ts` on the card of LOCAL-4. It recorded "npm test: no summary on the screen": the stand-in's sentence wraps across the terminal's rows, so it is now looked for with the white space taken out. A unit test covers that, and the rehearsal was not run again for this record-only change.
+
+**The visual loop.** The tower fixture's live reviewer (LOCAL-152), taken over, with its harness in the Terminal tab, on an ephemeral `127.0.0.1` port in headless Chromium 1248, with the clock fixed at the fixture's time.
+- **Captures:** `/tmp/cleared-captures/j2/takeover-reviewer-<width>-<theme>.png` at 1440, 1280, 768 and 390, light and dark, and `takeover-reviewer-reference-session-<width>.png` rendered from `/tmp/cleared-reference/session.html`. Mode 644, the pointer in a corner. None is committed.
+- **Checks:** no horizontal overflow, no page error, no `securitypolicyviolation`, no `docker exec`.
+- **Known, not this lane's:** at 768 the terminal's last rows sit under the composer. This is lanes 20 and 32's layout, declined in issue 213, and the same on the author's screen. The fixture's stand-in harness shows the same words on every session.
+- No art director's pass was run: the change on the screen is a button that now shows on one more role.
+
+**Checks.**
+- `npm test`: 1250 node tests, 1240 pass and 10 skipped (the browser tests without `CLEARED_V2_PLAYWRIGHT`, and the real-adapter test without its gate), 0 fail; 184 Vitest tests pass.
+- `npm run typecheck` is green.
+- `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+
+**Followups.**
+- The live service needs a restart to carry choice 1, and the real proof's step 11 then shows the harness attached.
+- Issue 231: item 1 of the second list (the release is re-sent after a timeout) and item 1 of the first (the raw harness id in the sentence) are not taken.
+
+- Pull request: PRNUM, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-takeover-real-harness`.

@@ -41,5 +41,8 @@ test('what each line said', () => {
     const answer = shellAnswer(line) as { kind: string; text: string };
     assert.equal(answer.kind, 'text', line);
     assert.equal(lineOutcome(line, `${answer.text}\nrehearsal:/workspace$ `), 'not run by the rehearsal\'s stand-in shell', line);
+    // As the terminal shows it: cut into rows of 40 columns.
+    const wrapped = (answer.text.match(/.{1,40}/g) ?? []).join('\n');
+    assert.equal(lineOutcome(line, `${wrapped}\nrehearsal:/workspace$ `), 'not run by the rehearsal\'s stand-in shell', `${line}, wrapped`);
   }
 });

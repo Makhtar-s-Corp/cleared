@@ -34,13 +34,13 @@ export function atPrompt(rows: string): boolean {
   return /\$$/.test(last);
 }
 
-// The rehearsal's stand-in shell names itself in what it answers
-// (proof-rehearsal-multi.ts shellAnswer).
-const STAND_IN = /the rehearsal's stand-in shell/;
-
-// What a line said, from the rows on the screen once it answered.
+// What a line said, from the rows on the screen once it answered. The
+// rehearsal's stand-in shell names itself in its answer (proof-rehearsal-
+// multi.ts shellAnswer); a long answer wraps across rows, so its sentence is
+// looked for with the white space taken out.
+const bare = (text: string) => text.replace(/\s+/g, '');
 export function lineOutcome(line: string, rows: string): string {
-  if (STAND_IN.test(rows) && rows.includes(`${line}: the rehearsal's stand-in shell`)) return 'not run by the rehearsal\'s stand-in shell';
+  if (bare(rows).includes(bare(`${line}: the rehearsal's stand-in shell`))) return 'not run by the rehearsal\'s stand-in shell';
   if (line === 'npm ci') {
     if (/added \d+ packages?|up to date/.test(rows)) return 'installed';
     return /npm error/.test(rows) ? 'failed' : 'answered';
