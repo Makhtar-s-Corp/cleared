@@ -4,7 +4,7 @@
 // the plans under way, and what landed today with its duration. In a
 // workspace of several services (lane 22): the services' line, each live
 // session's service, a session taken over, and a chip per service in the bar.
-import { HandGrabbing } from '@phosphor-icons/react';
+import { Check, HandGrabbing } from '@phosphor-icons/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
@@ -39,7 +39,11 @@ export function Bar({ t, title, body, services = [], picked = [], onTitle, onBod
       <Textarea id="ask-body" name="body" maxLength={20000} rows={5} placeholder={t('bar_body_placeholder')} aria-label={t('bar_body_label')} value={body} onChange={(event) => onBody?.(event.target.value)} />
       {services.length >= 2 ? (
         <div className="ask-services" role="group" aria-label={t('bar_services_label')}>
-          {services.map((name) => <Toggle key={name} className="svc-toggle" pressed={picked.includes(name)} onPressedChange={() => onPick?.(name)} data-service={name}>{name}</Toggle>)}
+          {services.map((name) => (
+            <Toggle key={name} className="svc-toggle" pressed={picked.includes(name)} onPressedChange={() => onPick?.(name)} data-service={name}>
+              {picked.includes(name) ? <Check size={12} aria-hidden="true" /> : null}{name}
+            </Toggle>
+          ))}
         </div>
       ) : null}
     </form>
@@ -68,7 +72,7 @@ export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: 
         {card.service ? <span className="svc-tag">{card.service}</span> : null}<span className="id">{card.ticket}</span>
       </span>
       <span className="session-title">{card.title}</span>
-      {card.takenOver ? <span className="phrase taken-line"><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase">{card.status}</span>}
+      {card.takenOver ? <span className="phrase taken-line"><HandGrabbing size={16} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase">{card.status}</span>}
       <span className="session-foot">
         <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" />{formatModel(card.harness, card.model)}</span>
         <span className="elapsed">{duration(card.minutes, t)}</span>

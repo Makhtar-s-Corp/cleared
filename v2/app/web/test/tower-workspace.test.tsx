@@ -35,7 +35,7 @@ test('the bar offers a chip per service, pressed when picked', () => {
   const markup = html(<Bar t={en} title="" body="" services={['guestbook', 'filter-api']} picked={['filter-api']} />);
   assert.match(markup, /<div class="ask-services" role="group" aria-label="Services this ticket touches">/);
   assert.match(markup, /<button[^>]*aria-pressed="false"[^>]*data-service="guestbook"[^>]*>guestbook<\/button>/);
-  assert.match(markup, /<button[^>]*aria-pressed="true"[^>]*data-service="filter-api"[^>]*>filter-api<\/button>/);
+  assert.match(markup, /<button[^>]*aria-pressed="true"[^>]*data-service="filter-api"[^>]*><svg[^]*?<\/svg>filter-api<\/button>/);
   assert.doesNotMatch(html(<Bar t={en} title="" body="" services={['guestbook']} picked={[]} />), /ask-services|data-service/);
   assert.doesNotMatch(html(<Bar t={en} title="" body="" />), /ask-services/);
 });

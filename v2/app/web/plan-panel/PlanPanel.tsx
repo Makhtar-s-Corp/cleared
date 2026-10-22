@@ -3,6 +3,7 @@
 // estimates, its totals and the gestures its state offers. Ink for the
 // gesture the plan waits for (approve, resume); Change and Pause are
 // outlined, since a running plan needs nothing of the person.
+import { ShieldCheck } from '@phosphor-icons/react';
 import type { Plan, PlanItem } from '../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -19,7 +20,7 @@ function Item({ item, plan, t, language, services }: { readonly item: PlanItem; 
         {chips.length > 0 ? (
           <ul className="plan-services" aria-label={t('services_label')}>
             {chips.map((c) => c.kind === 'normal' ? <li key={c.service} className="svc-chip">{chipText(c, t)}</li>
-              : <li key={c.service} className="svc-chip sensitive" data-sensitivity={c.kind}>{chipText(c, t)}</li>)}
+              : <li key={c.service} className="svc-chip sensitive" data-sensitivity={c.kind}><ShieldCheck size={12} aria-hidden="true" />{chipText(c, t)}</li>)}
           </ul>
         ) : null}
         {item.after.length > 0 ? <p className="plan-after">{t('plan_after', { list: positions(item.after, t) })}</p> : null}

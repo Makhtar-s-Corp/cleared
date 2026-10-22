@@ -25,7 +25,7 @@ test('the lead\'s panel names each item\'s services, the sensitive one marked', 
   assert.match(side, /<ul class="plan-services" aria-label="Services">/);
   assert.equal(side.match(/class="svc-chip"/g)?.length, 3, 'guestbook, plainly, on items 2, 3 and 4');
   assert.equal(side.match(/class="svc-chip sensitive" data-sensitivity="full"/g)?.length, 3);
-  assert.match(side, /<li class="svc-chip sensitive" data-sensitivity="full">filter-api · full review<\/li>/);
+  assert.match(side, /<li class="svc-chip sensitive" data-sensitivity="full"><svg[^>]*aria-hidden="true"[^]*?<\/svg>filter-api · full review<\/li>/);
   assert.doesNotMatch(side, /\sstyle=/);
 });
 
