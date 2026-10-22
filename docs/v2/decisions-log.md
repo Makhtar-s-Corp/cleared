@@ -2823,7 +2823,7 @@ The lane's choices:
      - the ticket Done after the landing;
      - "Rolled back, 2 of 2", with the guestbook reverted before the filter API;
      - the blocked card with no Approve, and its proposal;
-     - the terminal open, the two lines typed, the editor's save, Give back, and the owner's file on the ticket's next card.
+     - the terminal on the session's own harness (pull request 230), or the reason it cannot be resumed, recorded; then the Shell beside it, where the two lines are typed; the editor's save, Give back, and the owner's file on the ticket's next card.
    - **The trial environment.** Step 4 loads the guestbook's root page only. Its form posts to `/entries`, which leaves the preview address, and the preview relays no write: a known limit of the Browser tab (issue 213, item 5), not a failure of the step.
    - **The fake's calls** are read through the docker wrapper under its label rule. The session's egress container asks the fake's `/__fake/calls` with the preview's own relay, as the preview asks the page. The real run's only docker commands are these, through the wrapper, which lists by the label and acts on what the list returned.
    - **Each save and its answer are recorded,** and whether the branch carries it. That is the rate issue 226 (item 7) asks the real run's step 11 for.
@@ -2836,7 +2836,7 @@ The lane's choices:
      - their inspection;
      - the service's own programs (the editor's read and save, the checkout at Take over and Give back), run on the session's checkout here;
      - the preview's relay, sent to the trial stand-in;
-     - the terminal's shell, given a stand-in shell, and its end.
+     - the terminal's Shell (`terminalCommand(SHELL_COMMAND)`), given a stand-in shell, and its end. A harness resumed in the terminal is refused: the fake adapter has none, and its scripted sessions answer that they cannot be resumed.
      It refuses anything else, a run, a build, a push and any other program included, and never runs the real docker. The stand-in shell answers `pwd`, runs `git status` on the checkout, says it does not run `npm test`, and refuses a push for want of a credential. The terminal's real shell script, whose pid file is in the container's `/tmp` and whose end is a `pkill -s`, never runs on this machine.
    - **The trial environment.** A loopback server stands for a session's siblings: the guestbook's page, which checks a sample entry with the filter API's fake at each load, and the fake itself. The fake is `images/fake/fake.ts`, built from the contract the owner validated (`ticket_steps.contract`), one per session.
    - **The forge.** The gh stand-in keeps each pull request's repository: the services of a ticket share their branch name, and the numbers run across the forge, so `pr view`, which names no repository, finds the right one.
@@ -2860,7 +2860,8 @@ The lane's choices:
     - The card: two pull requests, the filter API first, the compatibility line, the `contract` flag. The train landed the filter API, then the guestbook, 45 s apart, each healthy.
     - Ticket 2: the guestbook's watch failed twice, it reverted, then the filter API was rolled back. The card says "Rolled back, 2 of 2" and the ticket is in Todo.
     - Ticket 3: the card was blocked with the proposal and had no Approve.
-    - Ticket 4: taken over, `git status` and `npm test` typed and both journaled, one line of `src/page.ts` saved (200), given back. The notice's turn came 1 s after Give back, and `src/page.ts` was on the ticket's next card.
+    - Ticket 4: taken over; the terminal said the scripted harness cannot be resumed and offered the Shell; `git status` and `npm test` typed there and both journaled, one line of `src/page.ts` saved (200), given back. The notice's turn came 1 s after Give back, and `src/page.ts` was on the ticket's next card.
+- **The merge of `origin/v2` with pull request 230** (the web terminal on the session's own harness, Shell beside it). Take over now opens the harness by default, so step 11 records what the terminal showed, then opens the Shell for its two lines; the docker stand-in recognises the Shell by `terminalCommand(SHELL_COMMAND)`, which replaced `TERMINAL_SHELL`. The adaptation is in the merge commit with the matrix's renumbering (this lane's lines became P44 and P45). Both rehearsals were run again after it.
 - **Captures and results.** `/tmp/cleared-captures/j2/rehearsal/` and `/tmp/cleared-captures/j2/multi-rehearsal/` hold each step's capture, `result.json` and `durations.md`, mode 644, with the pointer off the buttons. Each rehearsal's folder (`/tmp/cleared-j2-rehearsal-*`, `/tmp/cleared-j2-multi-*`) is kept for reading, its password file removed.
 - **The visual loop.** No screen file changed. The multi-service proof captured the tower, the inbox, the lead screen and step 11's session, in the state it left them, at 1440, 1280, 768 and 390, light and dark: `/tmp/cleared-captures/j2/proof-multi-<screen>-<width>-<theme>.png`, 32 files, mode 644. They are a record, not a design pass, and no art director's pass was run.
 - **Not proven here:**

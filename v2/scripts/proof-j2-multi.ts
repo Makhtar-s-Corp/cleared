@@ -440,7 +440,11 @@ if (signedIn) {
       const state = await terminal.getAttribute('data-terminal-state');
       return state === 'open' || (state === 'closed' && (await terminal.getAttribute('data-reason')) === 'unsupported') ? state : undefined;
     }, 60_000, 500, false);
-    harnessShown = `${(await terminal.getAttribute('data-mode')) ?? '?'}: ${(await page.locator('.term-mode').first().innerText().catch(() => '')).trim()}`;
+    // Attached to the harness, or unsupported (the fake adapter's scripted
+    // sessions have no interactive harness: said as such, not as a failure).
+    const attached = (await terminal.getAttribute('data-terminal-state')) === 'open';
+    const said = (await page.locator('.term-mode').first().innerText().catch(() => '')).trim();
+    harnessShown = attached ? `Take over attached to the harness ("${said}")` : `the harness unsupported${REHEARSAL ? ' on the fake adapter' : ''} ("${said}")`;
     times.terminal_open_at = now();
     await capture('takeover-harness');
     if ((await terminal.getAttribute('data-mode')) !== 'shell') {
@@ -489,7 +493,7 @@ if (signedIn) {
     // as not kept.
     for (const s of saves) s.kept = s.status === 200;
     const facts = ledger((db) => humanFacts(db, session.id, times.give_back_at ?? null));
-    return `taken over; the terminal showed ${harnessShown}; ${facts?.lines ?? '?'} lines journaled in the Shell, ${saves.length} save(s), given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
+    return `taken over: ${harnessShown}; then the Shell button, git status and npm test typed, ${facts?.lines ?? '?'} lines journaled; ${saves.length} editor save(s) (${saves.map((x) => x.status).join(', ')}); given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
   });
 }
 
