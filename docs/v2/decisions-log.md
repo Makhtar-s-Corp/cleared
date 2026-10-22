@@ -2845,8 +2845,8 @@ The lane's choices:
 - **Tests first.** Commit `22e0b27` holds them alone, and each failed on `origin/v2` at `309aea5`: three files at import (`leftForOwner`, `NOTIFICATIONS_SKIPPED_NOTE`, `proof-rehearsal-multi.ts` missing), and the gh stand-in, the reserved ports, the rollback request, the commit at the Go, the author rules and the workspace check in the others. The new file is `test/scripts/proof-rehearsal-multi.test.ts`. `proof-inbox`, `proof-report`, `proof-rehearsal` and `rehearsal-adapter` gained cases.
 - **The rehearsal before this lane** (run 0, on `origin/v2`): steps 0 to 6 passed on the React screens with the selectors of pull request 181. The night then held every author without a plan, as lane 17 foresaw: `item 4: ready → put_back → held`.
 - **Rehearsals on this server, 2026-10-22, on the fake adapter:**
-  - **The 48-hour proof, 3-minute night, notifications skipped:** 9 steps ok, 1 skipped (the notifications, with the owner's note), none failed, the plan done 11 minutes after the goal.
-    - The session plans: four high, with the lead's Go at once, and one medium, held 2 min 36 s until the morning's Go.
+  - **The 48-hour proof, 3-minute night, notifications skipped:** 9 steps ok, 1 skipped (the notifications, with the owner's note), none failed, the plan done 11 minutes after the goal (on the merged head with pull request 230).
+    - The session plans: four high, with the lead's Go at once, and one medium, held 2 min 37 s until the morning's Go.
     - The night left 2 releases, 1 session plan and 2 knowledge items. The morning gave the Go, denied the permission that followed, and approved the 5 cards, each with 1 group.
     - 5 knowledge items were left to the owner.
     - 2 refreshes, highest share 4.5 % (threshold 5 %). Both planted commitments were done, and every "after" was kept.
@@ -2855,12 +2855,12 @@ The lane's choices:
     - **The lock stand-in closed its side of the socket** as soon as the request ended, so an answer written after a git merge or revert never reached the client: `approval/broker.ts` read "invalid release broker reply". The merges still landed, because the train reads the ledger before it asks again (lane 16), which hid the fault since lane 11. The filter API's rollback was refused, and the card said "Rolled back, 1 of 2". The server is now half open.
     - **The proof waited for buttons on a handled card.** It now waits for the item to be shown.
     - **The reopened author's commit named `CLAUDE.md`, which git ignores, in an exclusion,** so the notice's turn failed. It now adds the tracked files the human changed (`git add --update`).
-  - **The multi-service proof, final run:** 12 steps ok (0 to 11), none failed, in about 14 minutes.
+  - **The multi-service proof, final run on the merged head (`bf709b1`):** 12 steps ok (0 to 11), none failed, in about 14 minutes.
     - Ticket 1's steps: the contract, then each service, then the integration. The contract's diff with `severity` was validated 8 s after it was shown. The two service steps ran at once (read from the ledger's sessions). The Browser tab showed the trial page, whose fake answered 1 call.
     - The card: two pull requests, the filter API first, the compatibility line, the `contract` flag. The train landed the filter API, then the guestbook, 45 s apart, each healthy.
     - Ticket 2: the guestbook's watch failed twice, it reverted, then the filter API was rolled back. The card says "Rolled back, 2 of 2" and the ticket is in Todo.
     - Ticket 3: the card was blocked with the proposal and had no Approve.
-    - Ticket 4: taken over; the terminal said the scripted harness cannot be resumed and offered the Shell; `git status` and `npm test` typed there and both journaled, one line of `src/page.ts` saved (200), given back. The notice's turn came 1 s after Give back, and `src/page.ts` was on the ticket's next card.
+    - Ticket 4: taken over. The terminal opened on the harness and said it cannot be resumed ("Claude Code cannot be resumed here": the fake adapter's scripted session has no interactive harness, said as such in the step). The Shell button opened the Shell, where `git status` and `npm test` were typed and both journaled; one line of `src/page.ts` saved (200), given back. The notice's turn came 1 s after Give back, and `src/page.ts` was on the ticket's next card.
 - **The merge of `origin/v2` with pull request 230** (the web terminal on the session's own harness, Shell beside it). Take over now opens the harness by default, so step 11 records what the terminal showed, then opens the Shell for its two lines; the docker stand-in recognises the Shell by `terminalCommand(SHELL_COMMAND)`, which replaced `TERMINAL_SHELL`. The adaptation is in the merge commit with the matrix's renumbering (this lane's lines became P44 and P45). Both rehearsals were run again after it.
 - **Captures and results.** `/tmp/cleared-captures/j2/rehearsal/` and `/tmp/cleared-captures/j2/multi-rehearsal/` hold each step's capture, `result.json` and `durations.md`, mode 644, with the pointer off the buttons. Each rehearsal's folder (`/tmp/cleared-j2-rehearsal-*`, `/tmp/cleared-j2-multi-*`) is kept for reading, its password file removed.
 - **The visual loop.** No screen file changed. The multi-service proof captured the tower, the inbox, the lead screen and step 11's session, in the state it left them, at 1440, 1280, 768 and 390, light and dark: `/tmp/cleared-captures/j2/proof-multi-<screen>-<width>-<theme>.png`, 32 files, mode 644. They are a record, not a design pass, and no art director's pass was run.
@@ -2874,7 +2874,7 @@ The lane's choices:
   - **What the real run's step 11 types:** in the session's real container, `npm test` runs the guestbook's tests.
 - **Followups.**
   - **Recipes, schedules and asks.** The matrix lines C7, C11 and M9 say "the live run: lane 29". Section 4.6 gives this lane neither a recipe, nor a schedule, nor an ask, and neither proof drives them, so their live run is still open. The orchestrator decides whether a step joins a proof.
-  - **The session screen at 390** after Give back reads "Working" while the review has started. It is visible in `proof-multi-session-390-dark.png`, and not this lane's file.
+  - **The session screen at 390** after Give back reads "Working" while the review has started. It is visible in `proof-multi-session-390-dark.png`, and not this lane's file: issue 233.
 - **Files.** All are of the lane's list: `v2/scripts/proof-*.ts` (`proof-j2-multi.ts` and `proof-rehearsal-multi.ts` new), `v2/src/session/adapters/index.ts`, and the tests under `v2/test/scripts/`. Beyond them, only this entry and `docs/v2/requirements-matrix.md`:
   - B6.2p, B6.2m, O8, C2, C8, C10, M2, M3, M5, B5.10f and O1 name this pull request (232).
   - They stay `partial` or `planned` until the real runs.
@@ -2883,5 +2883,12 @@ The lane's choices:
   - `npm test`: 1204 node tests, 1196 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
   - `npm run typecheck` is green.
   - `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+- **Review round 1 (2026-10-22), CHANGES, taken:**
+  - the merge of `origin/v2` with pull request 230 (`61b6795`) is pushed; it resolves the conflicts in this log and the matrix, adapts the stand-in and step 11 to the harness-first terminal, and renumbers this lane's matrix lines P44 and P45, which B6.2p and B6.2m cite;
+  - both rehearsals ran again on the merged head, and the `durations.md` the pull request quotes are those runs';
+  - step 11 says whether Take over attached to the harness or found it unsupported (the fake adapter, said as such), then the Shell with `git status` and `npm test`, the editor's save and Give back;
+  - "What the rehearsal replaced" says the live-harness path (Take over attached to Claude Code, then the Shell) is the real run's only;
+  - the "Working" label after Give back is issue 233.
+- **Checks on the merged head:** `npm test` (1224 node tests, 1216 pass and 8 skipped; 184 Vitest tests pass), `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
 - Pull request: 232, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-scripts-m2`.
