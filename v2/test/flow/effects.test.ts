@@ -222,3 +222,16 @@ test('the handover of a session on a service files its lessons in that service\'
   assert.deepEqual(lessons(join(state, 'contracts', 'filter-api', 'memory', 'ledger.db')), ['A severity is low or high.']);
   assert.deepEqual(lessons(join(state, 'ledger.db')), []);
 });
+
+test('a session on the service whose checkout is the workspace\'s files its service lessons in the workspace\'s memory, which its briefing reads', async () => {
+  const { env, flow, guestbook } = twoServices();
+  const { workdir } = await flow.prepareWorkdir({ ticket: ticketOn('guestbook'), role: 'author', service: guestbook });
+  assert.match(readFileSync(join(workdir, 'CLAUDE.md'), 'utf8'), /`## Lessons for the service` \(filed in the workspace's memory, which is this service's\)/);
+  writeFileSync(join(workdir, 'HANDOVER.md'), `${HANDOVER}${LESSON_HEADINGS.service}\nThe guestbook renders on the server.\n`);
+  await flow.captureHandover({ workdir, role: 'author', model: 'claude-opus-5-5', ticket: 'LOCAL-2', sessionId: '2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a' });
+  const db = new DatabaseSync(join(env.CLEARED_STATE_DIR as string, 'ledger.db'), { readOnly: true });
+  const filed = db.prepare("SELECT content FROM memory_entries WHERE type = 'lesson' AND source_who LIKE 'agent:%'").all().map((row) => row.content);
+  db.close();
+  assert.deepEqual(filed, ['The guestbook renders on the server.']);
+  assert.equal(existsSync(join(env.CLEARED_STATE_DIR as string, 'services', 'guestbook')), false);
+});

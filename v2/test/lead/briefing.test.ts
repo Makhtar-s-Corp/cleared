@@ -111,3 +111,20 @@ test('with a full list of services, the lead\'s memory stays in its budget and t
   const text = renderLeadBriefing({ generation: 1, at: 'now', commitments: [], handover: null, memory });
   assert.ok(Buffer.byteLength(text) < 20 * 1024, `${Buffer.byteLength(text)} bytes`);
 });
+
+test('the briefing of a refreshed generation, every part at its cap, stays near the 35 KB the lane 5 entry states (issue 168, item 4)', async () => {
+  const full = (n: number, char: string) => char.repeat(n);
+  const commitments = Array.from({ length: 20 }, (_v, i) => ({ id: `c${i + 1}`, text: full(300, 'c'), ticket: `LOCAL-${i + 1}`, due: '2026-10-22T06:00:00.000Z', state: 'open' as const, createdAt: '2026-10-21T20:00:00.000Z', fulfilledAt: null, note: null }));
+  const messages = Array.from({ length: 10 }, (_v, i) => ({ seq: i + 1, at: '2026-10-22T07:00:00.000Z', by: 'owner' as const, text: full(1000, 'm'), kind: 'message' as const }));
+  // The memory at its cap: the services' lines, and the workspace's entries filling the rest of the 12 000 bytes.
+  const services = (await leadMemory(15, `Filter API ${'x'.repeat(300)}`)).filter((entry) => entry.type === 'services');
+  const memory = [{ type: 'project', content: full(12_000 - Buffer.byteLength(services[0]?.content ?? ''), 'p') }, ...services];
+  const text = renderLeadBriefing({
+    generation: 7, at: '2026-10-22T08:01:00.000Z', commitments,
+    handover: { ...record, summary: full(9000, 's'), parts: `## Live sessions\n${Array.from({ length: 20 }, (_v, i) => `- LOCAL-${i + 1} author working`).join('\n')}`, messages },
+    memory,
+  });
+  assert.ok(text.includes(full(4000, 's')) && !text.includes(full(4097, 's')), 'the summary at its cap');
+  assert.equal(memory.reduce((n, entry) => n + Buffer.byteLength(entry.content), 0), 12_000);
+  assert.ok(Buffer.byteLength(text) < 36 * 1024, `${Buffer.byteLength(text)} bytes`);
+});

@@ -5,7 +5,7 @@
 // author names.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { REFERENCE_LINE, levelContext, levelDirectory, readLeveledBriefing, renderBriefing } from '../../src/workspace/briefing.ts';
@@ -182,6 +182,25 @@ test('a handover with the three lessons sections files each in its level, as pro
   assert.deepEqual(read.workspace.lessons, ['Workspace lesson: run every service\'s tests.\n']);
   assert.deepEqual(read.levels.map((l) => l.briefing?.lessons), [['Service lesson: keep words.txt sorted.\n'], []]);
   assert.match(read.workspace.lastHandover ?? '', /## Lessons for the service\nKeep words\.txt sorted\./);
+});
+
+test('a lesson that cannot be filed is logged; the handover and the other lessons are stored all the same', async () => {
+  const t = await three();
+  const dir = join(t.root, 'w');
+  await ticketCheckout({ project: t.service, workdir: dir, base: 'main', branch: 'cleared/DEMO-8' });
+  // A file where the contracts' folder would be: that level cannot be made.
+  mkdirSync(t.state, { recursive: true });
+  writeFileSync(join(t.state, 'contracts'), 'not a folder\n');
+  writeFileSync(join(dir, 'HANDOVER.md'), `${HANDOVER}${LESSON_HEADINGS.service}\nKeep words.txt sorted.\n${LESSON_HEADINGS.contract}\nThe severity is one of low, high.\n`);
+  const logged: string[] = [];
+  const error = console.error;
+  console.error = (line: string) => { logged.push(line); };
+  let id;
+  try { id = await captureHandover({ ...t.base, workdir: dir, role: 'author', model: 'claude-opus-5-5', ticket: 'DEMO-8', sessionId: SESSION, service: t.levels[0], contract: t.levels[1] }); }
+  finally { console.error = error; }
+  assert.equal(typeof id, 'string');
+  assert.deepEqual(logged, ['cleared-v2: a lesson of DEMO-8 could not be filed in the memory of the contract filter-api (Error)']);
+  assert.deepEqual(rows(join(t.state, 'services', 'filter-api', 'memory', 'ledger.db')).map((r) => r.content), ['Keep words.txt sorted.']);
 });
 
 test('lessons for a level the session has not are filed in the workspace\'s', async () => {

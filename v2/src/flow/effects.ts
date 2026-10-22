@@ -72,10 +72,14 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   const serviceLevel = (own: ServiceConfig) => levelContext(memory, { kind: 'service', name: own.name, project: own.dir });
   const contractLevel = (provider: ServiceConfig) =>
     levelContext(memory, { kind: 'contract', name: provider.name, project: provider.dir, contract: provider.contract?.path as string });
-  const levelsOf = (own: ServiceConfig, ticket: Ticket): MemoryLevel[] => [
-    ...(resolve(own.dir) === resolve(config.projectDir) ? [] : [serviceLevel(own)]),
-    ...providers(own, ticket).map(contractLevel),
-  ];
+  // A service whose checkout is the workspace's has no level of its own:
+  // its page is the workspace's, and its lessons are filed there, so every
+  // filed lesson is in a ledger a briefing reads.
+  const ownLevel = (own: ServiceConfig) => (resolve(own.dir) === resolve(config.projectDir) ? undefined : serviceLevel(own));
+  const levelsOf = (own: ServiceConfig, ticket: Ticket): MemoryLevel[] => {
+    const level = ownLevel(own);
+    return [...(level ? [level] : []), ...providers(own, ticket).map(contractLevel)];
+  };
   // The service of a checkout <workdirs>/<ticket>/<service>, else the first.
   const serviceOfWorkdir = (workdir: string, ticket: string) => {
     const parts = relative(config.workdirRoot, workdir).split(sep);
@@ -141,15 +145,16 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       if (role === 'author' && resolve(own.dir) !== resolve(config.projectDir)) await refresh().catch(() => undefined);
       if (role === 'author') for (const provider of providers(own, ticket)) if (provider.dir !== own.dir) await refresh(provider).catch(() => undefined);
       const read = await readLeveledBriefing({ ...memory, role, ticket: { id: ticket.id, title: ticket.title, body: ticket.body }, levels: levelsOf(own, ticket) });
-      const lessons = workspace.services.length > 1 ? { service: own.name, contract: lessonContract(own)?.name ?? null } : undefined;
+      const lessons = workspace.services.length > 1 ? { service: ownLevel(own) ? own.name : null, contract: lessonContract(own)?.name ?? null } : undefined;
       await writeBriefing({ project: dir, base, workdir }, read.workspace, { levels: read.levels, ...(lessons ? { lessons } : {}) });
       return { workdir, briefing: flatBriefing(read) };
     },
 
     async captureHandover(input) {
       const own = serviceOfWorkdir(input.workdir, input.ticket);
+      const level = ownLevel(own);
       const contract = lessonContract(own);
-      return captureHandover({ ...memory, ...input, service: serviceLevel(own), ...(contract ? { contract: contractLevel(contract) } : {}) });
+      return captureHandover({ ...memory, ...input, ...(level ? { service: level } : {}), ...(contract ? { contract: contractLevel(contract) } : {}) });
     },
 
     async publish(input) {

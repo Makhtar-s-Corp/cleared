@@ -8,8 +8,9 @@
 // The handover's lessons are filed by level (milestone 2 plan, decision 25,
 // lane 19): each `## Lessons for the ...` section of the stored handover is
 // written as a lesson of the author's role in that level's memory, as a
-// proposal, which lib/memory never briefs; a level the session has not, and
-// lessons under no level, go to the workspace's.
+// proposal, which lib/memory never briefs; a level the session has not goes
+// to the workspace's. A lesson that cannot be filed is logged by its level:
+// the handover is stored all the same, and the capture answers its id.
 import type { Role } from '../session/contract.ts';
 import { LESSON_HEADINGS, ensureLevel, runMemory, type MemoryContext, type MemoryLevel } from './briefing.ts';
 
@@ -81,7 +82,6 @@ export async function captureHandover(input: HandoverInput): Promise<string | nu
   // Taken from the entry lib/memory stored, never from a second read of the file.
   const lessons = lessonsOf(answer.content);
   const targets: [Level, MemoryContext | MemoryLevel][] = [['workspace', workspace], ['service', input.service ?? workspace], ['contract', input.contract ?? workspace]];
-  const failed: string[] = [];
   for (const [level, context] of targets) {
     for (const content of lessons[level]) {
       try {
@@ -90,11 +90,11 @@ export async function captureHandover(input: HandoverInput): Promise<string | nu
           command: 'lesson',
           entry: { type: 'lesson', scope: `role:${input.role}`, content, source_who: `agent:${input.role}/${input.model}`, source_where: `session:${input.sessionId}` },
         });
-      } catch {
-        failed.push('kind' in context ? `the ${(context as MemoryLevel).kind} ${(context as MemoryLevel).name}` : 'the workspace');
+      } catch (error) {
+        const where = 'kind' in context ? `the ${(context as MemoryLevel).kind} ${(context as MemoryLevel).name}` : 'the workspace';
+        console.error(`cleared-v2: a lesson of ${input.ticket} could not be filed in the memory of ${where} (${error instanceof Error ? error.name : typeof error})`);
       }
     }
   }
-  if (failed.length) throw new HandoverError(`the handover is stored, but lessons could not be filed in the memory of ${[...new Set(failed)].join(', ')}`);
   return id;
 }

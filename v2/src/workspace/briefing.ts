@@ -225,7 +225,8 @@ export async function readLeveledBriefing(input: BriefingInput & { readonly leve
       const answer = await briefingOf(level, { ...request, budget: header + room });
       bytes += answer.bytes - header;
       levels.push({ kind, name, briefing: briefingFromEntries(answer.entries), omitted: answer.omitted });
-    } catch {
+    } catch (error) {
+      console.error(`cleared-v2: the memory of the ${kind} ${name} could not be read (${error instanceof Error ? error.name : typeof error})`);
       levels.push({ kind, name, briefing: null, omitted: 0, reason: 'unreadable' });
     }
   }
@@ -253,9 +254,10 @@ function block(content: string): string {
 }
 
 // Where a handover's lessons are filed, said to the author of a session on
-// a workspace of several services: its service, and the contract
+// a workspace of several services: its service (null when its checkout is
+// the workspace's, whose memory takes them), and the contract
 // `## Lessons for the contract` goes to, if any (workspace/handover.ts).
-export type LessonTargets = { readonly service: string; readonly contract: string | null };
+export type LessonTargets = { readonly service: string | null; readonly contract: string | null };
 
 export type RenderOptions = { readonly levels?: readonly LevelBriefing[]; readonly lessons?: LessonTargets };
 
@@ -293,7 +295,7 @@ export function renderBriefing(briefing: Briefing, options: RenderOptions = {}):
     + `At the end of the session, even if the task failed or stopped, write \`HANDOVER.md\` at the root of this checkout with these exact headings, in this order: ${headings}. Never commit it: Cleared stores it in the project's memory after the session.\n\n`;
   const targets = options.lessons;
   if (targets) {
-    text += `After those headings, you may add lessons for later sessions under \`${LESSON_HEADINGS.workspace}\` (filed in the workspace's memory), \`${LESSON_HEADINGS.service}\` (filed in the memory of the service ${targets.service})`
+    text += `After those headings, you may add lessons for later sessions under \`${LESSON_HEADINGS.workspace}\` (filed in the workspace's memory), \`${LESSON_HEADINGS.service}\` (filed in ${targets.service ? `the memory of the service ${targets.service}` : "the workspace's memory, which is this service's"})`
       + `${targets.contract ? `, or \`${LESSON_HEADINGS.contract}\` (filed in the memory of the contract of ${targets.contract})` : ''}. Each is filed as a proposal: it is briefed only once approved.\n\n`;
   }
   text += `${REFERENCE_LINE}\n`;
