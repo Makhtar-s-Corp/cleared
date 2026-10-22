@@ -1224,6 +1224,18 @@ The choices the lane makes:
   - Until a harness is named, the default stays `claude-code`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-fix-doctor-window`.
 
+## 2026-10-22: Owner decision: the complement text is integrated into milestones 1 to 5
+
+**Decision.** On 2026-10-22 at 06:45 (Europe/Paris), the owner decided how the complement text ([complement-devin.md](complement-devin.md)) is integrated:
+
+- Milestone 1 items 1, 8, 9 and 10 become a milestone 2 catch-up wave, after the React port and the clickable answers lane, before the 48 h proof.
+- Milestone 2 items 2, 7, 11 and 12 are added to milestone 2.
+- The other items will be planned in the milestone 3, 4 and 5 plans.
+- The order and the proofs of the milestones do not change.
+
+- Author: the owner, relayed on 2026-10-22 06:45 (Europe/Paris); written in this log.
+- A second owner complement (a workspace is several services; a ticket can span several repositories) is recorded in [complement-multi-depots.md](complement-multi-depots.md); milestone 2 is being replanned to include it.
+
 ## 2026-10-22: the milestone 2 proof script and its rehearsal (milestone 2, lane 11)
 
 **Decision.** Lane `v2-j2-proof-script` writes `v2/scripts/proof-j2.ts`, the driver of section 1 of the [milestone 2 plan](milestone-2-plan.md), with its pure parts in `scripts/proof-report.ts`, its rehearsal in `scripts/proof-rehearsal.ts`, the morning's inbox rules in `scripts/proof-inbox.ts`, and the `CLEARED_V2_ADAPTER=fake` setting in `src/session/adapters/index.ts`. The lane's choices:
