@@ -42,14 +42,16 @@ export function TerminalFrame({ t, status, host, note = '', onOpen }: {
 }
 
 // The terminal's colours from the page's tokens, as the command block's:
-// ink with its text in light, the canvas in dark.
-function themeOf(): { background: string; foreground: string; cursor: string; cursorAccent: string; selectionBackground: string } {
+// ink with its text in light, the canvas in dark; on both, the ANSI colours
+// lifted to the dark theme's own (the default red reads at about 3:1).
+const ANSI = { red: '#FF6B6B', brightRed: '#FF8A8A', green: '#3DD068', brightGreen: '#5FE08A', yellow: '#F7B955', brightYellow: '#FFCB70', blue: '#52A8FF', brightBlue: '#7DBEFF', magenta: '#D2A8FF', brightMagenta: '#E2C5FF', cyan: '#3DC6D8', brightCyan: '#6FD8E6' };
+function themeOf(): Record<string, string> {
   const style = getComputedStyle(document.documentElement);
   const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
   const dark = document.documentElement.dataset.theme === 'dark';
   const background = dark ? token('--canvas', '#0A0A0A') : token('--ink', '#171717');
   const foreground = dark ? token('--text', '#EDEDED') : token('--on-ink', '#FFFFFF');
-  return { background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: 'rgba(82, 168, 255, 0.35)' };
+  return { ...ANSI, background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: 'rgba(255, 255, 255, 0.2)' };
 }
 
 // Fit only a terminal that is shown: a hidden one measures nothing.
@@ -83,7 +85,7 @@ export function WebTerminal({ session, csrf, active, t }: { readonly session: st
       const theme = themeOf();
       const term = new Terminal({
         fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace',
-        fontSize: 13, lineHeight: 1.2, cursorBlink: true, scrollback: 2000, theme,
+        fontSize: element.offsetWidth > 0 && element.offsetWidth < 480 ? 12 : 13, lineHeight: 1.2, cursorBlink: true, scrollback: 2000, theme,
       });
       const fit = new FitAddon();
       term.loadAddon(fit);

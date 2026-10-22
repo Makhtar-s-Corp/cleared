@@ -2,6 +2,9 @@
    styles/app.css: same tokens, flat colours, nothing inline. */
 .session { --ok-text: #15803D; --add-fill: rgba(22,163,74,.09); --del-fill: rgba(196,0,0,.07); }
 :root[data-theme="dark"] .session { --ok-text: var(--success); --add-fill: rgba(61,208,104,.13); --del-fill: rgba(255,107,107,.12); }
+/* The editor's code colours (lane 32), each at 4.5:1 or more on its surface. */
+.session { --code-keyword: #7928CA; --code-string: #15803D; --code-comment: #707070; --code-number: #AB570A; --code-function: #0060DF; --code-definition: #171717; --code-property: #4D4D4D; }
+:root[data-theme="dark"] .session { --code-keyword: #C9A2FF; --code-string: #7EE2A0; --code-comment: #8F8F8F; --code-number: #F7B955; --code-function: #79B8FF; --code-definition: #EDEDED; --code-property: #B8B8B8; }
 
 .session-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 28px; font-size: 13px; color: var(--text-muted); }
 .crumbs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
@@ -190,6 +193,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .takeover.web .takeover-title { margin-bottom: 2px; }
 .command-line { display: grid; gap: 4px; margin: 8px 0 6px; }
 .command-line .command { margin: 0; padding: 6px 10px; }
+.command-line > .takeover-body { font-size: 12px; color: var(--text-muted); }
 .term { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .term-host { flex: 1; min-height: 260px; padding: 8px 4px 8px 10px; border-radius: 8px; background: var(--ink); overflow: hidden; }
 :root[data-theme="dark"] .term-host { background: var(--canvas); box-shadow: 0 0 0 1px var(--hairline); }
@@ -211,10 +215,13 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .editing { display: flex; flex-direction: column; gap: 10px; }
 .cm-host { min-width: 0; }
 .cm-host .cm-editor { min-height: 280px; max-height: max(280px, calc(100vh - 420px)); }
-.editing-foot { display: flex; align-items: flex-start; gap: 8px 12px; flex-wrap: wrap; }
+/* Save stays in view while the tab scrolls (the panel's height is capped below 1440). */
+.editing-foot { position: sticky; bottom: -16px; z-index: 1; display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 10px 0 16px; background: var(--surface); }
 .editor-state { flex: 1 1 280px; min-height: 20px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
 .editor-state.bad { color: var(--danger-text); }
 .editor-stale { display: block; color: var(--awaiting-text); }
+/* A confirmation waits for the person: amber, as every such card. */
+.editing[data-editor-state="confirm"] .editor-state { padding: 8px 12px; border-radius: 8px; background: var(--awaiting-pill); box-shadow: 0 0 0 1px rgba(245,166,35,.5); color: var(--awaiting-text); }
 .editing-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* Browser */
@@ -228,6 +235,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 
 @media (max-width: 1439px) {
   .panel { height: auto; max-height: calc(100vh - 132px); }
+  .cm-host .cm-editor { max-height: max(240px, calc(100vh - 540px)); }
 }
 /* Below the widest screen the diff takes the panel's width; the files become a strip above it. */
 @media (max-width: 1439px) {
@@ -278,6 +286,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
   .term-wrap { overflow: visible; padding: 12px; }
   .term-host { min-height: 380px; padding: 6px 2px 6px 6px; }
   .cm-host .cm-editor { max-height: 70vh; }
+  .editing-foot { bottom: 0; padding-bottom: 12px; }
   .editing-actions { width: 100%; }
   .editing-actions .btn { flex: 1 1 auto; }
   .edit-button { flex: 1 1 100%; min-height: 44px; }
