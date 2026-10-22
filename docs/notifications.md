@@ -167,5 +167,6 @@ Cleared v2 ([milestone 2 plan](v2/milestone-2-plan.md), section 6) keeps the ada
 Limits of the v2 dispatcher:
 
 - The flow's events (`FlowEngine.subscribe`) are not read. The flow's engine is built at the first request to the service's API, so a service restarted at night with no browser open would never hear of a rollback; the release watch's rows are written in any case.
+- After a restart, the requests a stopped session left waiting are closed by the flow's engine, which is built at the first request to the API. Until then the dispatcher sees them waiting and may send one that nobody can answer any more; the inbox shows it handled once the app is opened.
 - The lead's health (`lead_start_failed`) and the usage stop (`week_stop`) are sent when the lead engine and the plan runner report them (`reportHealth` in `v2/src/notify/queue.ts`); until those land, nothing reports them.
 - Web Push to a real device was not delivered by a test on this server: no browser here holds a subscription to a real push service.
