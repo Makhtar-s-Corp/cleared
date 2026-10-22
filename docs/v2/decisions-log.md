@@ -1792,8 +1792,8 @@ The choices the lane makes:
   - A waiting session plan raises no notification: `flow/events.ts` and `notify/sources.ts` are not this lane's files (lane 26 owns both in wave 10). The inbox and the session JSON show it.
   - The author is not kept read-only before its Go: a model that writes code in its planning turn is not stopped by the policy. A read-only policy until the Go needs the policy's rows (lane 25).
   - The app's session catalogs have no `step_plan_gate` key yet (lane 20's file in wave 8).
-  - Lane 21 renders the `session_plan` item, and lane 27 renders the `contract` and `knowledge` items.
-  - Lane 29's rehearsal must give a session plan its Go in its morning rule, as the plan says.
+  - Lane 21 renders the `session_plan` item, and lane 27 renders the `contract` and `knowledge` items. Until lane 21 lands, the inbox screen receives `session_plan` items from `GET /api/inbox` with no rank, title or chip key for that kind: a real server with the gate on shows them as unlabelled rows.
+  - **The rehearsal of lane 11 stops completing once this lane lands.** `scripts/proof-rehearsal.ts` starts the real service (`src/main.ts`), where `loadFlowConfig` turns the gate on. The rehearsal's author scripts never call `propose_session_plan`, so each author is put back with `no_plan` after the delay. The plan runner starts it once more, then holds the item. Lane 29 needs both changes: a proposal step in the author scripts (`src/session/adapters/index.ts`), and a Go in the morning rule of `proof-inbox.ts`.
 - **The requirements matrix.** C8, C9, C10, C2, M2 and M8 name this pull request (204) and are `partial`. P19 records the gate's choices and P20 the policy's answer to the author's tools.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-session-plan-gate`, at the orchestrator's request.
 
