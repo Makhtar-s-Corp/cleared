@@ -1558,4 +1558,7 @@ The choices the lane makes:
   - a narrower inbox column and the question outside the amber card: both are lane 10's design, unchanged here;
   - the inbox bar's own Send: it is the bar's, not the component's.
 - **Left as it was:** answering the lead's question from the inbox (issue 168, item 3): the inbox still sends the person to the lead's screen. That is the inbox's bar, outside this lane's question detail.
+- **For lane 29.** On `v2` before this lane, a lead question that was single but multi-select was answered by one click, which sent its label. Now its clicks toggle, and `[data-choice-send]` sends, as for an ask of several questions. Proof-j2's step 2 clicks one `[data-answer]` and waits for the question to clear, so against such a question it would wait out its two minutes. `scripts/proof-j2.ts` is lane 29's file and was not edited.
+- **Edits beyond the question detail**, mechanical: in the inbox, the bar's Send says when an answer is over the limit (`Inbox.tsx`), the model's `answersFor` delegates to the component's, and `.deny-reason input` keeps its rules in `inbox.css`, which it shared with the removed `.free input`.
+- **The branch.** This lane's branch is `v2-j2-choices-react`. The local name `v2-j2-choices` belongs to the on-hold worktree, which was left untouched.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-choices`.
