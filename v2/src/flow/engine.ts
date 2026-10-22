@@ -28,6 +28,14 @@
 // the ticket), and `watch` with them. `workspace` is written after the
 // adapter has started the session, with the time it began, because the
 // session's id does not exist before.
+//
+// A ticket of a workspace of several services (docs/v2/milestone-2-plan.md,
+// decision 21, lane 16) has a checkout per service it touches, under
+// <workdirs>/<ticket>/<service>, the author working in the first one's; a
+// pass publishes one pull request per service on the same branch, records
+// the review and asks the approval on each service's own lock, and the
+// release item carries the train, which release/train.ts lands. A ticket of
+// a one-service workspace runs as in milestone 1.
 import { posix } from 'node:path';
 import type { PermissionItem, ReleaseItem, SessionDetail, SessionSummary } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -40,7 +48,14 @@ import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
 import { ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
-import type { FlowConfig, ProjectSettings } from './config.ts';
+import { serviceLocks } from '../approval/service.ts';
+import { changesReport, flags } from '../release/flags.ts';
+import { reviewRun, type MergeOutcome, type ServiceLock } from '../release/lock.ts';
+import { compatibility, landingOrder } from '../release/order.ts';
+import { TrainStore, view, type Stop } from '../release/store.ts';
+import { TrainRunner } from '../release/train.ts';
+import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
+import { workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
@@ -48,24 +63,27 @@ import { foldState } from './state.ts';
 
 export type { ProjectSettings } from './config.ts';
 export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
+// What the lock answered a merge (effects.ts mergeRelease, release/lock.ts).
+export type { MergeOutcome } from '../release/lock.ts';
 
-// What the lock answered a merge (effects.ts mergeRelease): merged; not now
-// (a check still runs, the host is busy, another release goes on); refused
-// for good, with merge-pr.sh's reason; or the lock could not be asked.
-export type MergeOutcome = { readonly outcome: 'merged' | 'queued' | 'refused' | 'unavailable'; readonly message: string };
-
-// What the flow does outside this process.
+// What the flow does outside this process. `service` names the service of
+// a workspace of several the call is for; absent, the one-service
+// workspace's (its first service, which the milestone 1 fields name).
 export type FlowEffects = {
-  settings(): Promise<ProjectSettings>;                           // the project's settings at the base branch
-  refreshProject(): Promise<void>;                                // projectCheckout: fetch the forge, so publish sees the base as it is now (issue 141)
-  prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
+  settings(service?: ServiceConfig): Promise<ProjectSettings>;    // the service's settings at its base branch
+  refreshProject(service?: ServiceConfig): Promise<void>;         // projectCheckout: fetch the forge, so publish sees the base as it is now (issue 141)
+  // The ticket's checkout: <workdirs>/<ticket>, or <workdirs>/<ticket>/<service> for a service of a workspace of several.
+  prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
-  publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string }): Promise<Published>;
+  publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string; readonly service?: ServiceConfig }): Promise<Published>;
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
-  prChecks(pr: number): Promise<ReleaseItem['pr']['checks']>;      // the pull request's checks on the forge now
+  prChecks(pr: number, service?: ServiceConfig): Promise<ReleaseItem['pr']['checks']>;   // the pull request's checks on the forge now
   // The lock's merge (`request_release` without --ask), after the human's approval.
   mergeRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
+  // What a published head changes against the base: its files, and the diff
+  // the release card's flags are read from (release/flags.ts). Absent: none.
+  changes?(input: { readonly ticket: TicketId; readonly head: string; readonly service?: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
 };
 
 export type FlowDeps = {
@@ -78,6 +96,10 @@ export type FlowDeps = {
   // Applied to every text the flow writes to a ticket or a session from an
   // error (paths, tokens): the cleaner of the service. Identity by default.
   readonly clean?: (text: string) => string;
+  // The lock of each service of a workspace of several (release/lock.ts):
+  // its broker, its validations, its review reports. Built from the
+  // environment when absent (approval/service.ts serviceLocks).
+  readonly locks?: (service: ServiceConfig) => ServiceLock;
 };
 
 export type FlowErrorKind = 'not_found' | 'conflict' | 'invalid' | 'unavailable';
@@ -164,6 +186,11 @@ export class FlowEngine {
   #landed = new Set<string>();                                      // release items whose watch is closed: final
   #checked = new Map<string, number>();                             // when a release's checks were last read
   #files = new Map<SessionId, { seq: number; open: Map<string, string>; files: string[] }>();
+  #workspace: WorkspaceConfig;
+  #trains: TrainStore;
+  #runner: TrainRunner;
+  #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
+  #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -173,8 +200,62 @@ export class FlowEngine {
     this.#effects = deps.effects;
     this.#now = deps.now ?? (() => new Date());
     this.#clean = deps.clean ?? ((text) => text);
+    this.#workspace = workspaceOf(deps.config);
+    this.#locks = deps.locks;
+    this.#trains = new TrainStore(deps.store.db, this.#now);
+    this.#runner = new TrainRunner({
+      db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
+      lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
+      card: (item, train) => this.inbox.setTrain(item, train), putBack: (ticket, note, reason) => this.#putBack(ticket, note, reason),
+      track: (promise) => this.#track(promise),
+    });
     // A new engine has no live session: requests left by the last process are closed.
     this.inbox.handleRequests('system');
+  }
+
+  // ---- the workspace's services -----------------------------------------------
+
+  // True when the workspace has several services: its tickets land as trains.
+  get #several(): boolean {
+    return this.#workspace.services.length > 1;
+  }
+
+  #service(name: string): ServiceConfig {
+    const service = this.#workspace.services.find((s) => s.name === name);
+    if (!service) throw new FlowError('invalid', `${name} is not a service of workspace ${this.#workspace.id}`);
+    return service;
+  }
+
+  // The services a ticket touches, in the order it names them; a ticket that
+  // names none is on the workspace's first service.
+  #servicesOf(ticket: Ticket): ServiceConfig[] {
+    const named = (ticket.services ?? []).map((s) => this.#service(s.name));
+    return named.length > 0 ? named : [this.#workspace.services[0] as ServiceConfig];
+  }
+
+  #lockOf(service: ServiceConfig): ServiceLock {
+    this.#locks ??= serviceLocks(this.#store.db, this.#workspace);
+    return this.#locks(service);
+  }
+
+  // The checkouts of a ticket: one per service of a train ticket, the
+  // author and the reviewer working in the first one's.
+  async #prepare(ticket: Ticket, role: Role): Promise<{ readonly workdir: string; readonly briefing: Briefing }> {
+    if (!this.#several) return this.#effects.prepareWorkdir({ ticket, role });
+    const services = this.#servicesOf(ticket);
+    const workdirs = this.#workdirs.get(ticket.id) ?? new Map<string, string>();
+    this.#workdirs.set(ticket.id, workdirs);
+    let first: { readonly workdir: string; readonly briefing: Briefing } | undefined;
+    for (const service of services) {
+      const prepared = await this.#effects.prepareWorkdir({ ticket, role, service });
+      workdirs.set(service.name, prepared.workdir);
+      first ??= prepared;
+    }
+    return first as { readonly workdir: string; readonly briefing: Briefing };
+  }
+
+  async #settings(ticket: Ticket): Promise<ProjectSettings> {
+    return this.#several ? this.#effects.settings(this.#servicesOf(ticket)[0]) : this.#effects.settings();
   }
 
   // ---- the periodic work -------------------------------------------------
@@ -214,10 +295,7 @@ export class FlowEngine {
         // Asked once a minute per release, not at every tick (issue 157).
         if (now - (this.#checked.get(release.id) ?? -Infinity) < CHECKS_MS) continue;
         this.#checked.set(release.id, now);
-        const checks = await this.#effects.prChecks(release.pr.number).catch((error: unknown) => {
-          console.error(`cleared-v2: the checks of pull request #${release.pr.number} could not be read (${error instanceof Error ? error.name : typeof error})`);
-          return undefined;
-        });
+        const checks = await this.#checksOf(release);
         if (checks && checks !== release.pr.checks) this.inbox.setReleaseChecks(release.id, checks);
         continue;
       }
@@ -233,6 +311,21 @@ export class FlowEngine {
         this.#emit({ type: 'release_approved', at: this.#at(), project: release.project, ticket: release.ticket, item: release.id, pr: release.pr.number, by: approvedBy });
     }
     for (const candidate of await this.#landings()) this.#follow(candidate);
+    this.#runner.tick();
+  }
+
+  // A release's checks; a train's are failed when one service's are, else
+  // pending while one service's are.
+  async #checksOf(release: ReleaseItem): Promise<ReleaseItem['pr']['checks'] | undefined> {
+    const read = (pr: number, service?: ServiceConfig) => this.#effects.prChecks(pr, service).catch((error: unknown) => {
+      console.error(`cleared-v2: the checks of pull request #${pr} could not be read (${error instanceof Error ? error.name : typeof error})`);
+      return undefined;
+    });
+    if (!release.train) return read(release.pr.number);
+    const all: (ReleaseItem['pr']['checks'] | undefined)[] = [];
+    for (const stop of release.train.services) if (stop.pr) all.push(await read(stop.pr.number, this.#service(stop.service)));
+    if (all.includes(undefined)) return undefined;
+    return all.includes('failed') ? 'failed' : all.includes('pending') ? 'pending' : 'passed';
   }
 
   // A release item ends when its approval does, or when a newer one replaces
@@ -268,6 +361,7 @@ export class FlowEngine {
     }
     const out: Candidate[] = [];
     for (const [id, row] of latest) {
+      if (this.#trains.has(String(row.id))) continue;              // a train lands through release/train.ts
       const ticket = await tickets.get(id);
       if (!ticket || (ticket.status !== tickets.states.go && ticket.status !== tickets.states.done)) continue;
       const approval = (await tickets.history(id)).filter((h) => h.status === tickets.states.go && h.by.kind === 'human').at(-1);
@@ -545,8 +639,8 @@ export class FlowEngine {
     const began = this.#now();
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
-      const settings = await this.#effects.settings();
-      const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author' });
+      const settings = await this.#settings(ticket);
+      const prepared = await this.#prepare(ticket, 'author');
       const workspaceDone = this.#now();
       const prompt = origin?.note ? `${authorPrompt(ticket)}\n\n${origin.note}` : authorPrompt(ticket);
       const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt);
@@ -853,8 +947,10 @@ export class FlowEngine {
     const began = this.#now();
     try {
       if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
-      const settings = await this.#effects.settings();
-      const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'reviewer' });
+      const settings = await this.#settings(ticket);
+      const prepared = this.#several
+        ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
+        : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer' });
       const live = await this.#launch(adapter, ticket, 'reviewer', this.config.reviewerModel, prepared.workdir || workdir, prepared.briefing, settings,
         reviewPrompt({ ticket, base: this.config.base, verdict: settings.verdict }));
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
@@ -930,8 +1026,8 @@ export class FlowEngine {
     }
     if (reopened) return;
     try {
-      const settings = kept?.settings ?? (await this.#effects.settings());
-      const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author' });
+      const settings = kept?.settings ?? (await this.#settings(ticket));
+      const prepared = await this.#prepare(ticket, 'author');
       const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, `${authorPrompt(ticket)}\n\n${message}`);
       this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
       this.#snapshot(live.id, id);
@@ -949,6 +1045,7 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
     if (!ticket) return;
+    if (this.#several) return this.#publishTrain(reviewer, ticket, report, round);
     this.#step(session, 'STEP_STARTED', 'release');
     let published: Published;
     try {
@@ -983,12 +1080,14 @@ export class FlowEngine {
       return;
     }
     for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
+    const changed = await this.#changes(id, published.head);
+    const card = flags({ diff: changed?.diff ?? '', ...this.#report(id) });
     const item = this.inbox.addRelease({
       ticket: id, project, title: ticket.title, announcement, requestedAt,
       pr: { number: published.number, url: published.url, checks: 'pending' },
       heads: [{ pr: published.number, head: published.head }],
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
-      sessions: this.#releaseSessions(id, round),
+      sessions: this.#releaseSessions(id, round), groups: card.groups, flags: card.flags,
     }, reviewer.id);
     // The lock has the request: the flow is over. What follows is the human's, and a person
     // may send the ticket back from the inbox, which starts a new flow.
@@ -996,6 +1095,102 @@ export class FlowEngine {
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
     this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: published.number, url: published.url });
+  }
+
+  // What a published head changes, for the card's flags and the
+  // compatibility check; undefined when it cannot be read.
+  async #changes(ticket: TicketId, head: string, service?: ServiceConfig): Promise<{ readonly files: readonly string[]; readonly diff: string } | undefined> {
+    if (!this.#effects.changes) return undefined;
+    try {
+      return await this.#effects.changes({ ticket, head, ...(service ? { service } : {}) });
+    } catch (error) {
+      console.error(`cleared-v2: what ${ticket} changes could not be read (${error instanceof Error ? error.name : typeof error})`);
+      return undefined;
+    }
+  }
+
+  // The author's report of its changes: the last `cleared.changes` event of its last session.
+  #report(ticket: TicketId): { report?: NonNullable<ReturnType<typeof changesReport>> } {
+    const author = this.#lastSession(ticket, 'author');
+    const report = author ? changesReport(this.#store.events.after(author.id)) : undefined;
+    return report ? { report } : {};
+  }
+
+  // ---- a pass of a ticket of several services: the train ------------------
+
+  // One pull request per service the ticket changed, on the same branch, in
+  // landing order; each review recorded and each approval asked on that
+  // service's own lock; the card blocked when a contract changes without its
+  // consumer. A service whose branch has no commit of its own is not in the
+  // train. The approval and the landing are the train's (release/train.ts).
+  async #publishTrain(reviewer: Live, ticket: Ticket, report: string, round: number): Promise<void> {
+    const { ticket: id, project, model } = reviewer.input;
+    const session = { id: reviewer.id, ticket: id, project };
+    const tickets = this.registry.ticketStore;
+    this.#step(session, 'STEP_STARTED', 'release');
+    const fail = async (note: string, reason: PutBackReason) => {
+      this.#step(session, 'STEP_FINISHED', 'release');
+      await this.#putBack(id, note, reason);
+    };
+    const order = landingOrder(this.#workspace.services, this.#servicesOf(ticket).map((s) => s.name)).map((name) => this.#service(name));
+    const published: { service: ServiceConfig; pr: Published; files: readonly string[]; diff: string }[] = [];
+    const skipped: string[] = [];
+    for (const service of order) {
+      try {
+        await this.#effects.refreshProject(service);
+        const workdir = this.#workdirs.get(id)?.get(service.name) ?? posix.join(this.config.workdirRoot, id, service.name);
+        const pr = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report, service });
+        const changed = await this.#changes(id, pr.head, service);
+        published.push({ service, pr, files: changed?.files ?? [], diff: changed?.diff ?? '' });
+      } catch (error) {
+        if ((error as { code?: unknown }).code === 'empty') { skipped.push(service.name); continue; }
+        return fail(`The branch was not published on ${service.name}: ${name(error)}`, 'publish_refused');
+      }
+    }
+    if (published.length === 0) return fail(`The branch was not published: no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`, 'publish_refused');
+    const announcement = [
+      `Ticket ${id}: ${ticket.title}`,
+      '',
+      ...published.map((p) => `Pull request on ${p.service.name}: ${p.pr.url}`),
+      `Reviewed by ${model} in ${round} round${round === 1 ? '' : 's'}: ${report.split('\n').filter((line) => /verdict\s*:/i.test(line)).at(-1)?.trim() ?? 'passed'}`,
+    ].join('\n');
+    const compat = compatibility(this.#workspace.services, Object.fromEntries(published.map((p) => [p.service.name, p.files])));
+    const stops: Stop[] = [];
+    try {
+      const reviewedAt = this.#now().toISOString();
+      for (const p of published) {
+        const lock = this.#lockOf(p.service);
+        const verdictPhrase = (await this.#effects.settings(p.service)).verdict;
+        await lock.recordReview({ ticket: id, pr: p.pr.number, session: reviewRun(reviewer.id, p.service.name), model, verdict: 'pass', round, report, at: reviewedAt, commit: p.pr.head, verdictPhrase });
+      }
+      for (const p of published) {
+        const asked = await this.#lockOf(p.service).ask({ ticket: id, pr: p.pr.number, request: announcement });
+        stops.push({ service: p.service.name, pr: { number: p.pr.number, url: p.pr.url }, head: p.pr.head, requestedAt: asked.requestedAt, state: 'waiting', at: null, note: null, signed: false, askedAt: null, mergedAt: null, next: null });
+      }
+      // The real lock moves the card itself when it asks; a store it did not move gets the move here.
+      if ((await tickets.history(id)).at(-1)?.status !== tickets.states.validate) await tickets.move(id, tickets.states.validate, SERVICE);
+    } catch (error) {
+      return fail(`The release could not be requested: ${name(error)}`, 'release_refused');
+    }
+    if (skipped.length > 0) await tickets.comment(id, `Not in the release: ${skipped.join(', ')}, whose branch has no commit of its own.`, SERVICE).catch(() => undefined);
+    for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
+    const first = stops[0] as Stop;
+    const card = flags({ diff: published.map((p) => p.diff).join(''), ...this.#report(id) });
+    const train = {
+      ticket: id, project, state: compat.blocked ? 'blocked' as const : 'waiting' as const, stops, compatibility: compat.line, blocked: compat.blocked, announcement,
+    };
+    const item = this.inbox.addRelease({
+      ticket: id, project, title: ticket.title, announcement, requestedAt: first.requestedAt,
+      pr: { number: first.pr.number, url: first.pr.url, checks: 'pending' },
+      heads: stops.map((stop) => ({ pr: stop.pr.number, head: stop.head })),
+      captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
+      sessions: this.#releaseSessions(id, round), train: view({ ...train, item: '', approver: null }), groups: card.groups, flags: card.flags,
+    }, reviewer.id);
+    this.#trains.add({ ...train, item: item.id });
+    this.#active.delete(id);
+    this.#step(session, 'STEP_FINISHED', 'release');
+    this.#step(session, 'STEP_STARTED', 'approval');
+    this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: first.pr.number, url: first.pr.url });
   }
 
   #releaseSessions(ticket: TicketId, rounds: number): { role: Role; model: string; minutes: number; rounds?: number }[] {

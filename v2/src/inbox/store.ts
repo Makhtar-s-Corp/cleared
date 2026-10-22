@@ -3,7 +3,7 @@
 // are the API's (api/types.ts); this file stores them, it does not decide
 // what is asked: the flow does.
 import type { DatabaseSync } from 'node:sqlite';
-import type { InboxItem, PermissionItem, PlanItemInbox, QuestionItem, ReleaseItem } from '../api/types.ts';
+import type { InboxItem, PermissionItem, PlanItemInbox, QuestionItem, ReleaseItem, TrainState } from '../api/types.ts';
 import { LEAD_TICKET } from '../lead/contract.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 
@@ -61,11 +61,20 @@ export class InboxStore {
 
   // `session` is the one the approval step runs on: kept in request_id, which
   // a release has no other use for, so that it is not a request of any session.
-  addRelease(input: Base & Pick<ReleaseItem, 'title' | 'announcement' | 'pr' | 'heads' | 'requestedAt' | 'captures' | 'sessions'>, session: SessionId = ''): ReleaseItem {
+  // A ticket of several services carries its train (lane 16); the groups and
+  // the flags are kept when there are any (release/flags.ts).
+  addRelease(input: Base & Pick<ReleaseItem, 'title' | 'announcement' | 'pr' | 'heads' | 'requestedAt' | 'captures' | 'sessions'> & Partial<Pick<ReleaseItem, 'train' | 'groups' | 'flags'>>, session: SessionId = ''): ReleaseItem {
     const id = `release:${input.ticket}:${input.pr.number}:${input.requestedAt}`;
-    this.#insert(id, 'release', input, '', session, this.#now().toISOString(),
-      { title: input.title, announcement: input.announcement, pr: input.pr, heads: input.heads, requestedAt: input.requestedAt, captures: input.captures, sessions: input.sessions });
+    this.#insert(id, 'release', input, '', session, this.#now().toISOString(), {
+      title: input.title, announcement: input.announcement, pr: input.pr, heads: input.heads, requestedAt: input.requestedAt, captures: input.captures, sessions: input.sessions,
+      ...(input.train ? { train: input.train } : {}), ...(input.groups?.length ? { groups: input.groups } : {}), ...(input.flags?.length ? { flags: input.flags } : {}),
+    });
     return this.#get(id) as ReleaseItem;
+  }
+
+  // A train's state as it lands: the card shows it, waiting or handled.
+  setTrain(id: string, train: TrainState): void {
+    this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.train', json(?)) WHERE id = ? AND kind = 'release'").run(JSON.stringify(train), id);
   }
 
   // A plan the lead proposed (milestone 2, section 5.1), under the lead's

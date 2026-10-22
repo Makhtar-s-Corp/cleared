@@ -19,6 +19,10 @@ export type BrokerAnswer = {
   readonly output: string;
   readonly reason: string;
   readonly problem?: string | null;
+  // The broker's own code (serve/release-broker.mjs): 0 done, 5 not now, 1
+  // with `definitive` a refusal for good, 69 anything else.
+  readonly code?: number;
+  readonly definitive?: boolean;
 };
 
 export interface ReleaseBroker {
@@ -62,8 +66,12 @@ export class SocketReleaseBroker implements ReleaseBroker {
       client.on('error', (error) => finish({ ...PLAIN, reason: `release broker unavailable: ${error.message}` }));
       client.on('end', () => {
         try {
-          const result = JSON.parse(reply) as { ok?: boolean; output?: unknown; reason?: unknown; problem?: unknown };
-          finish({ ok: result.ok === true, output: String(result.output ?? ''), reason: String(result.reason ?? ''), ...(result.problem !== undefined ? { problem: result.problem === null ? null : String(result.problem) } : {}) });
+          const result = JSON.parse(reply) as { ok?: boolean; output?: unknown; reason?: unknown; problem?: unknown; code?: unknown; definitive?: unknown };
+          finish({
+            ok: result.ok === true, output: String(result.output ?? ''), reason: String(result.reason ?? ''),
+            ...(result.problem !== undefined ? { problem: result.problem === null ? null : String(result.problem) } : {}),
+            ...(typeof result.code === 'number' ? { code: result.code } : {}), ...(typeof result.definitive === 'boolean' ? { definitive: result.definitive } : {}),
+          });
         } catch {
           finish({ ...PLAIN, reason: 'invalid release broker reply' });
         }
@@ -72,9 +80,18 @@ export class SocketReleaseBroker implements ReleaseBroker {
   }
 
   // `request_release` without --ask: the broker runs merge-pr.sh, which merges
-  // when every check holds. Minutes, not seconds.
-  requestRelease(request: ReleaseBrokerRequest): Promise<BrokerAnswer> {
-    return this.#send({ operation: 'request_release', ticket: request.ticket, pr: request.pr, announcement: request.announcement }, 15 * 60_000);
+  // when every check holds. Minutes, not seconds. `fromQueue`: merge-pr.sh
+  // answers "not now" without writing v1's merge-queue file (the broker
+  // honours it from the service's uid only), as ORCH_FROM_QUEUE does for
+  // release-request.mjs.
+  requestRelease(request: ReleaseBrokerRequest & { readonly fromQueue?: boolean }): Promise<BrokerAnswer> {
+    return this.#send({ operation: 'request_release', ticket: request.ticket, pr: request.pr, announcement: request.announcement, ...(request.fromQueue ? { from_queue: true } : {}) }, 15 * 60_000);
+  }
+
+  // `request_rollback`: the broker runs lib/release.mjs rollback under its
+  // merge.lock, for the configured human account only.
+  requestRollback(ticket: string): Promise<BrokerAnswer> {
+    return this.#send({ operation: 'request_rollback', ticket }, 15 * 60_000);
   }
 
   // `request_release --ask`: the broker runs ask-validation.sh, which only
