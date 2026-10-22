@@ -6,7 +6,7 @@
 // captured at each width in each theme, then everything is stopped.
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
-//     [--screens tower,inbox,sessions,session,lead] [--widths 1440,390] [--themes light,dark]
+//     [--screens tower,inbox,sessions,session,lead,review] [--widths 1440,390] [--themes light,dark]
 //     [--via load|click]
 //
 // --via load (the default) opens each screen's address as a page; --via
@@ -38,7 +38,10 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export type CaptureScreen = typeof SCREENS[number];
+// Screens a lane asks for by name, outside the default set: a reviewer's
+// session (lane 36, the ticket's view at its review).
+export const EXTRA_SCREENS = ['review'] as const;
+export type CaptureScreen = typeof SCREENS[number] | typeof EXTRA_SCREENS[number];
 const ACCOUNT = 'owner';
 
 // playwright-core is read untyped, as the proof scripts read it: its types need the DOM's,
@@ -58,7 +61,7 @@ export async function capture(options: { readonly out: string; readonly screens?
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
   const themes = options.themes ?? ['light', 'dark'];
-  for (const s of screens) if (!(SCREENS as readonly string[]).includes(s)) throw new Error(`unknown screen ${s}`);
+  for (const s of screens) if (![...SCREENS, ...EXTRA_SCREENS].includes(s as CaptureScreen)) throw new Error(`unknown screen ${s}`);
   for (const w of widths) if (!WIDTHS[w]) throw new Error(`unknown width ${w}`);
   mkdirSync(options.out, { recursive: true });
 
@@ -87,7 +90,10 @@ export async function capture(options: { readonly out: string; readonly screens?
         await page.waitForURL(`${app.base}/`);
         const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
-        const paths: Readonly<Record<CaptureScreen, string>> = { tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead' };
+        const reviewer = sessions.find((s) => s.role === 'reviewer') ?? sessions[0];
+        const paths: Readonly<Record<CaptureScreen, string>> = {
+          tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead', review: `/sessions/${reviewer?.id ?? ''}`,
+        };
         let documents = 0;
         page.on('load', () => { documents += 1; });
         for (const screen of screens) {
