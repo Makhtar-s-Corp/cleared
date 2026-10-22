@@ -1,6 +1,6 @@
 // The tab-switch budget in a real browser (docs/v2/ui-overhaul-plan.md,
 // 2.1.8 and U5, lane 34), on the fixtures source: twenty switches among the
-// five screens, timed from the click to the first frame in which the next
+// five screens, two sessions among them (LAP_TWO), timed from the click to the first frame in which the next
 // screen's data is drawn (switch-budget.ts). The median of the runs' p95 is
 // under 100 ms, no switch loads a document, none asks more than one
 // request, and after the first visit of each screen none draws a busy
@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { fixtureSource } from '../../fixtures/source.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { PASSWORD, startApp } from '../support.ts';
-import { PROBE, percentile, switchRun, type Run } from '../switch-budget.ts';
+import { LAP_TWO, PROBE, percentile, switchRun, type Run } from '../switch-budget.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -54,6 +54,11 @@ test('twenty switches among the five screens: under 100 ms at p95, no document, 
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       await context.addInitScript(PROBE);
       await context.addInitScript(BUSY_WATCH);
+      await context.addInitScript(() => {
+        document.addEventListener('securitypolicyviolation', (event) => {
+          ((window as unknown as { violations?: string[] }).violations ??= []).push(`${event.violatedDirective} ${event.blockedURI}`);
+        });
+      });
       const page = await context.newPage();
       page.on('pageerror', (error: Error) => errors.push(error.message));
       await page.goto(`${app.base}/login`);
@@ -62,7 +67,7 @@ test('twenty switches among the five screens: under 100 ms at p95, no document, 
       await page.click('button[type=submit]');
       await page.waitForURL(`${app.base}/`);
       await page.locator('#tower-body .tower').waitFor();
-      const run = await switchRun(page, 20, () => page.evaluate(() => { (window as unknown as { __busy: { armed: boolean } }).__busy.armed = true; }));
+      const run = await switchRun(page, 20, () => page.evaluate(() => { (window as unknown as { __busy: { armed: boolean } }).__busy.armed = true; }), LAP_TWO);
       runs.push(run);
       const busy = await page.evaluate(() => (window as unknown as { __busy: { count: number } }).__busy.count);
       const navigations = await page.evaluate(() => performance.getEntriesByType('navigation').length);
@@ -72,6 +77,8 @@ test('twenty switches among the five screens: under 100 ms at p95, no document, 
       assert.equal(navigations, 1, 'one document for the whole run');
       assert.ok(Math.max(...run.requests) <= 1, `at most one request per switch: ${run.requests.join(' ')}`);
       assert.equal(busy, 0, 'no busy placeholder once each screen was drawn');
+      assert.deepEqual(await page.evaluate(() => (window as unknown as { violations?: string[] }).violations ?? []), [], 'no policy violation');
+      assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /\u27e6/, 'no missing key drawn');
       await context.close();
     }
   } finally {

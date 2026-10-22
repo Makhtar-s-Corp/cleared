@@ -529,10 +529,11 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
     event.preventDefault();
     const typed = text.trim();
     if (!typed) { document.getElementById('message')?.focus(); return; }
-    // The composer empties at once; a refused message comes back to it.
+    // The composer empties at once; a refused message comes back to it,
+    // before what was typed meanwhile.
     setSending(true);
     setText('');
-    if (!(await post('/messages', { text: typed }, 'send_failed'))) setText((current) => current || text);
+    if (!(await post('/messages', { text: typed }, 'send_failed'))) setText((current) => (current.trim() ? `${text} ${current}` : text));
     setSending(false);
     document.getElementById('message')?.focus();
   };

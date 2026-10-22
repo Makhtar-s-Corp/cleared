@@ -19,6 +19,7 @@ export const PAINTED: Readonly<Record<string, string>> = {
   inbox: '.inbox .inbox-list',
   sessions: '.index .sessions, .index .empty',
   session: '.session:not([aria-busy]) #status',
+  session2: '.session:not([aria-busy]) #status',
   lead: '.lead-screen:not([aria-busy])',
 };
 
@@ -28,11 +29,16 @@ export const LINKS: Readonly<Record<string, string>> = {
   inbox: 'header nav a[href="/inbox"]',
   sessions: 'header nav a[href="/sessions"]',
   session: '.index a.open[href^="/sessions/"]',
+  session2: '.index .sessions > li:nth-child(2) a.open[href^="/sessions/"]',
   lead: 'header nav a[href="/lead"]',
 };
 
 // The order of a lap: each step is reachable from the one before it.
-export const LAP = ['inbox', 'sessions', 'session', 'lead', 'tower'] as const;
+export const LAP: readonly string[] = ['inbox', 'sessions', 'session', 'lead', 'tower'];
+// The browser job's lap, through two sessions, so the kept stack moves
+// between them (review of 248, F10). The "before" of lane 34 was measured
+// on LAP.
+export const LAP_TWO: readonly string[] = ['inbox', 'sessions', 'session', 'sessions', 'session2', 'lead', 'tower'];
 
 export type Run = { readonly times: number[]; readonly p95: number; readonly median: number; readonly documents: number; readonly requests: number[] };
 
@@ -64,7 +70,7 @@ export const percentile = (values: readonly number[], p: number): number => {
 // The page is signed in and on the tower, with PROBE installed.
 // `warmed` runs once the five screens were each drawn once, before the
 // twenty switches that are counted.
-export async function switchRun(page: any, switches = 20, warmed?: () => Promise<unknown>): Promise<Run> {
+export async function switchRun(page: any, switches = 20, warmed?: () => Promise<unknown>, lap: readonly string[] = LAP): Promise<Run> {
   const go = async (screen: string): Promise<{ time: number; requests: number }> => {
     let requests = 0;
     const count = (request: { url(): string }) => {
@@ -87,7 +93,7 @@ export async function switchRun(page: any, switches = 20, warmed?: () => Promise
     });
     return { time, requests };
   };
-  for (const screen of LAP) await go(screen);
+  for (const screen of lap) await go(screen);
   await warmed?.();
   let documents = 0;
   const loaded = () => { documents += 1; };
@@ -95,7 +101,7 @@ export async function switchRun(page: any, switches = 20, warmed?: () => Promise
   const times: number[] = [];
   const requests: number[] = [];
   for (let i = 0; i < switches; i += 1) {
-    const one = await go(LAP[i % LAP.length] as string);
+    const one = await go(lap[i % lap.length] as string);
     times.push(one.time);
     requests.push(one.requests);
   }

@@ -22,7 +22,9 @@ test('open, an event, a drop and the reconnect: live, one key refetched, polling
   const cache = new Cache(async (path) => { asked.push(path); return []; });
   const sources: FakeSource[] = [];
   const later: { run: () => void; ms: number }[] = [];
+  let refused = 0;
   const stream = new ChangeStream(cache, {
+    refused: () => { refused += 1; },
     open: (url) => { assert.equal(url, EVENTS_URL); const s = new FakeSource(); sources.push(s); return s; },
     later: (run, ms) => { later.push({ run, ms }); return () => {}; },
   });
@@ -44,6 +46,7 @@ test('open, an event, a drop and the reconnect: live, one key refetched, polling
     source.fire('error');
     assert.equal(cache.live, false, 'down: the cache polls again');
     assert.equal(later.length, 0, 'the EventSource retries on its own');
+    assert.equal(refused, 0, 'a drop is not a refusal');
     asked.length = 0;
     source.readyState = 1;
     source.fire('open');
@@ -54,6 +57,7 @@ test('open, an event, a drop and the reconnect: live, one key refetched, polling
     source.readyState = CLOSED;                            // refused for good (a 404, a sign out)
     source.fire('error');
     assert.equal(later.length, 1);
+    assert.equal(refused, 1, 'the shell is told, and checks the sign-in');
     assert.equal(later[0]?.ms, RETRY_MS);
     later[0]?.run();
     assert.equal(sources.length, 2, 'opened again after RETRY_MS');

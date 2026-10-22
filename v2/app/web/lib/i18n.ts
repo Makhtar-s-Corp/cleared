@@ -13,8 +13,9 @@ export function format(template: string, values: Values = {}): string {
 // A key missing from the catalog is drawn marked (⟦key⟧), never thrown:
 // one missing word blanked a whole page before (the sessions index without
 // role_lead, docs/v2/ui-overhaul-plan.md, 1.4 and U10). The catalogs' test
-// (app/test/foundation/catalogs.test.ts) keeps every key the components
-// use in both languages, and a test of a page fails on any mark it draws.
+// (app/test/catalog.test.ts) keeps every key the components use in both
+// languages, and the browser tests of app/test/foundation/ fail on any
+// mark a screen draws.
 export const MARK_OPEN = '\u27e6';
 export const MARK_CLOSE = '\u27e7';
 export const marked = (key: string): string => `${MARK_OPEN}${key}${MARK_CLOSE}`;

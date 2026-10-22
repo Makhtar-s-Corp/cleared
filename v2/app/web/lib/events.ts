@@ -26,6 +26,10 @@ export const CLOSED = 2;
 export type StreamOptions = {
   readonly open: (url: string) => SourceLike;
   readonly later: (run: () => void, ms: number) => () => void;
+  // The stream was closed for good (a refusal: the sign-in may have
+  // expired); the shell checks /api/me and sends a signed-out page to the
+  // sign-in (review of pull request 248, F2).
+  readonly refused?: () => void;
 };
 
 export class ChangeStream {
@@ -79,6 +83,7 @@ export class ChangeStream {
       this.#cache.setLive(false);
       if (source.readyState !== CLOSED || this.#stopped) return;
       source.close();
+      this.#options.refused?.();
       const wait = this.#wait;
       this.#wait = Math.min(this.#wait * 2, RETRY_MAX_MS);
       this.#cancel = this.#options.later(() => {

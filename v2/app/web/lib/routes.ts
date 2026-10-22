@@ -54,3 +54,11 @@ export const STACK_MAX = 5;
 export function pushStack(stack: readonly string[], id: string, max = STACK_MAX): string[] {
   return [id, ...stack.filter((other) => other !== id)].slice(0, max);
 }
+
+// The order the kept sessions are drawn in: the order they were first
+// opened, never the order of the visits. A keyed list whose order changes
+// makes React move a node, and a node moved in the document reloads its
+// frames and loses its scroll (review of pull request 248, B1).
+export function stackOrder(drawn: readonly string[], stack: readonly string[]): string[] {
+  return [...drawn.filter((id) => stack.includes(id)), ...stack.filter((id) => !drawn.includes(id)).reverse()];
+}

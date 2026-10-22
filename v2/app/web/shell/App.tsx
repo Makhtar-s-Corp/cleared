@@ -25,7 +25,8 @@ import { ChangeStream, type SourceLike } from '@/lib/events.ts';
 import { translator } from '@/lib/i18n.ts';
 import { CacheContext, useReader } from '@/lib/query.tsx';
 import { SCREEN_NAMES, createAppRouter, interceptLinks, loadScreen, loadedScreen } from '@/lib/router.tsx';
-import { placeOf, pushStack, titleKey, type Place, type ScreenName } from '@/lib/routes.ts';
+import { KeptView } from '@/lib/stack.tsx';
+import { placeOf, pushStack, stackOrder, titleKey, type Place, type ScreenName } from '@/lib/routes.ts';
 import { ApiError, type Me, type ScreenContext } from '@/lib/screen.ts';
 import { showSheets } from '@/lib/sheets.ts';
 import { Header } from './Header.tsx';
@@ -60,6 +61,9 @@ export function App({ start }: { readonly start: ShellStart }) {
     const stream = new ChangeStream(cache, {
       open: (url) => new EventSource(url) as unknown as SourceLike,
       later: (run, ms) => { const timer = setTimeout(run, ms); return () => clearTimeout(timer); },
+      refused: () => {
+        json('/api/me').catch((error: unknown) => { if (error instanceof ApiError && error.status === 401) location.assign('/login'); });
+      },
     });
     stream.start();
     const release = interceptLinks(router, cache);
@@ -117,18 +121,44 @@ const ScreenHost = memo(function ScreenHost({ screen, path, me, language, cache,
 });
 
 // The window's scroll, kept for each place and given back on its return.
+// The screen shown again may not be as tall at its first frame (its data
+// arrives a frame or two later), so the scroll is set again at each frame
+// until it holds, or for RESTORE_FRAMES at most; the scroll events of the
+// swap itself (the browser clamping to the new height) are not taken for
+// the person's.
+const RESTORE_FRAMES = 30;
+
 function useScrollKept(key: string): void {
   const kept = useRef(new Map<string, number>());
   const current = useRef(key);
+  const restoring = useRef(false);
   useEffect(() => {
-    const onScroll = () => { kept.current.set(current.current, window.scrollY); };
+    const onScroll = () => { if (!restoring.current) kept.current.set(current.current, window.scrollY); };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
   useLayoutEffect(() => {
     if (current.current === key) return;
     current.current = key;
-    window.scrollTo(0, kept.current.get(key) ?? 0);
+    const target = kept.current.get(key) ?? 0;
+    restoring.current = true;
+    let frames = 0;
+    let frame = 0;
+    const settle = () => {
+      window.scrollTo(0, target);
+      frames += 1;
+      if (Math.abs(window.scrollY - target) < 1 || frames >= RESTORE_FRAMES) {
+        // The last clamp's event comes after this frame: let it pass first.
+        frame = requestAnimationFrame(() => { restoring.current = false; });
+        return;
+      }
+      frame = requestAnimationFrame(settle);
+    };
+    settle();
+    return () => {
+      cancelAnimationFrame(frame);
+      restoring.current = false;
+    };
   }, [key]);
 }
 
@@ -181,13 +211,18 @@ function Shell({ shared }: { readonly shared: Shared }) {
   }, [me, cache]);
 
   const navigate = useCallback<NonNullable<ScreenContext['navigate']>>((href, options) => {
-    void router.navigate({ href, ...(options?.replace ? { replace: true } : {}) });
+    void router.navigate({ href, resetScroll: false, ...(options?.replace ? { replace: true } : {}) });
   }, [router]);
   const inboxChanged = useCallback(() => { void cache.refetch(['inbox']).catch(() => {}); }, [cache]);
 
-  // The sessions kept mounted: the one shown first.
+  // The sessions kept mounted: by their last visit for the five kept, and
+  // drawn in the order they were first opened, so none moves in the page.
   const stack = useRef<string[]>([]);
-  if (place.session && stack.current[0] !== place.session) stack.current = pushStack(stack.current, place.session);
+  const drawn = useRef<string[]>([]);
+  if (place.session && stack.current[0] !== place.session) {
+    stack.current = pushStack(stack.current, place.session);
+    drawn.current = stackOrder(drawn.current, stack.current);
+  }
 
   useScrollKept(place.path);
   useLayoutEffect(() => {
@@ -217,10 +252,8 @@ function Shell({ shared }: { readonly shared: Shared }) {
       <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
       <main id="screen" className="screen" tabIndex={-1} style={{ outline: 'none' }}>
         {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}
-        {stack.current.map((id) => (
-          <div key={id} data-session-view={id} style={{ display: id === place.session ? 'contents' : 'none' }}>
-            {host('session', `/sessions/${id}`)}
-          </div>
+        {drawn.current.map((id) => (
+          <KeptView key={id} id={id} shown={id === place.session}>{host('session', `/sessions/${id}`)}</KeptView>
         ))}
       </main>
     </>

@@ -231,6 +231,9 @@ export class Cache {
   // and back if the service refuses; then what it touched is refetched.
   async write<T>(path: string, body: unknown, send: Write): Promise<T> {
     const patch = optimistic(path);
+    // A read of the inbox already under way would land after the move and
+    // put the item back for a moment: it is dropped, its value kept.
+    if (patch) void this.client.cancelQueries({ queryKey: ['inbox'], exact: true }, { revert: false, silent: true });
     const before = patch ? this.client.getQueryData<Item[]>(['inbox']) : undefined;
     if (patch && before) this.client.setQueryData(['inbox'], patch(before));
     try {

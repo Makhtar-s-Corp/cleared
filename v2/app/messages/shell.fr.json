@@ -50,6 +50,6 @@
   "notify_ready_title": "Notifications activées",
   "notify_ready_body": "Cet appareil sera prévenu quand quelque chose vous attend.",
   "lead_pill": "Lead · toujours actif",
-  "boundary_failed": "{screen} n'a pas pu s'afficher.",
-  "boundary_retry": "L'afficher à nouveau"
+  "boundary_failed": "{screen} ne s'est pas chargé.",
+  "boundary_retry": "Réessayer"
 }

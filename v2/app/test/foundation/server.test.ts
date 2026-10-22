@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { fixtureSource } from '../../fixtures/source.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { readBundle, screenSheets } from '../../src/server.ts';
-import { placeOf, pushStack, takenOver } from '../../web/lib/routes.ts';
+import { placeOf, pushStack, stackOrder, takenOver } from '../../web/lib/routes.ts';
 import { signedIn, startApp } from '../support.ts';
 
 const ADDRESSES = ['/', '/inbox', '/sessions', '/sessions/fixture-author', '/lead', '/plans/plan-1', '/ask/ask-1'];
@@ -78,6 +78,19 @@ test('the sessions kept mounted: the last one first, each once, five at most', (
   let stack: string[] = [];
   for (const id of ['a', 'b', 'c', 'a', 'd', 'e', 'f']) stack = pushStack(stack, id);
   assert.deepEqual(stack, ['f', 'e', 'd', 'a', 'c']);
+});
+
+test('the kept sessions are drawn in the order they were first opened: a visit moves none (review of 248, B1)', () => {
+  let stack: string[] = [];
+  let drawn: string[] = [];
+  const visit = (id: string) => { stack = pushStack(stack, id); drawn = stackOrder(drawn, stack); return drawn; };
+  assert.deepEqual(visit('a'), ['a']);
+  assert.deepEqual(visit('b'), ['a', 'b']);
+  assert.deepEqual(visit('a'), ['a', 'b'], 'back to a: nothing moves');
+  assert.deepEqual(visit('b'), ['a', 'b']);
+  for (const id of ['c', 'd', 'e']) visit(id);
+  assert.deepEqual(visit('f'), ['b', 'c', 'd', 'e', 'f'], 'the least recent (a) falls off; the others keep their places');
+  assert.deepEqual(visit('a'), ['c', 'd', 'e', 'f', 'a'], 'a comes back at the end; b, now the least recent, falls off');
 });
 
 test('the change stream reaches the page through the app, with the session cookie only', async () => {

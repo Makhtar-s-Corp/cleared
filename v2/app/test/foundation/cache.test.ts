@@ -177,3 +177,22 @@ test('an answer, a Go and a plan\'s approval move the inbox at once, and back wh
   assert.deepEqual(touchedBy('/sessions/s1/messages'), [['session', 's1'], ['sessions'], ['inbox']]);
   leave();
 });
+
+test('a read of the inbox under way when a gesture moves an item is dropped: it does not put the item back (review of 248, F3)', async () => {
+  const items: Item[] = [{ id: 'permission:s1:r1', kind: 'permission', state: 'waiting', sessionId: 's1', requestId: 'r1' }];
+  let slow: ((value: unknown) => void) | undefined;
+  let reads = 0;
+  const cache = new Cache(async () => {
+    reads += 1;
+    if (reads === 2) return await new Promise((done) => { slow = done; });
+    return structuredClone(reads === 1 ? items : items.map((i) => ({ ...i, state: 'handled' })));
+  });
+  t_caches.push(cache);
+  await cache.read('/inbox');
+  void cache.refetch(['inbox']).catch(() => {});      // a poll under way, with the old list
+  const written = cache.write('/sessions/s1/requests/r1/answer', null, async () => ({ accepted: true }));
+  slow?.(structuredClone(items));
+  await settle();
+  assert.equal((cache.peek<Item[]>('/inbox') ?? [])[0]?.state, 'handled', 'the old list did not land over the move');
+  await written;
+});

@@ -700,10 +700,12 @@ export function sseFrame(event: SessionEvent): string {
 // The change stream (GET /api/events, lane 34): a thin event says which
 // resource changed, never what it holds, so nothing of a session's content
 // travels on it. `id` names the session, the ticket or the plan; null for
-// the inbox and the lead, which are one resource each.
+// the inbox and the lead, which are one resource each. 'plan' is reserved:
+// the service says none yet (a plan moves with its tickets' events and the
+// lead's, and the app reads plans at the polling interval); the app
+// already refetches the plan an event would name.
 export type ChangeKind = 'session' | 'ticket' | 'inbox' | 'lead' | 'plan';
 export type ChangeEvent = { readonly kind: ChangeKind; readonly id: string | null; readonly at: string };
-export const CHANGE_KINDS: readonly ChangeKind[] = ['session', 'ticket', 'inbox', 'lead', 'plan'];
 
 // One change as one server-sent event: its number as the id, the event on one data line.
 export function changeFrame(seq: number, event: ChangeEvent): string {

@@ -7,17 +7,24 @@
 //     unsaved text, in one document;
 //   - a switch moves the focus to the new screen and says its title;
 //   - a message leaves the composer at once and comes back when refused;
+//   - two sessions visited A, B, A, B: neither moves in the page (the
+//     browser frame is not loaded again, the terminal is the same), the
+//     shown one holds the only copy of its ids, and the tower's scroll is
+//     given back on return;
 //   - a screen that throws while it draws shows which screen failed and a
 //     way to draw it again; the header stays, and the other screens draw.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/foundation/stack-browser.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { AUTHOR_ID, sessionFixture, sessionSource } from '../../fixtures/session.ts';
+import { AUTHOR_ID, fixturePreview, sessionFixture, sessionSource } from '../../fixtures/session.ts';
 import { fixtureSource } from '../../fixtures/source.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
+import { createPreviewHandler } from '../../src/preview.ts';
 import { sendJson, type DataSource } from '../../src/proxy.ts';
 import { PASSWORD, startApp, type Running } from '../support.ts';
 
@@ -31,7 +38,15 @@ async function signedInPage(app: Running, run: (page: any, errors: string[]) => 
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    // A policy violation fails the test as loudly as a page error (review of 248, F7).
+    await context.addInitScript(() => {
+      document.addEventListener('securitypolicyviolation', (event) => {
+        const seen = ((window as unknown as { violations?: string[] }).violations ??= []);
+        seen.push(`${event.violatedDirective} ${event.blockedURI}`);
+      });
+    });
+    const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', (error: Error) => errors.push(error.message));
     await page.goto(`${app.base}/login`);
@@ -41,6 +56,8 @@ async function signedInPage(app: Running, run: (page: any, errors: string[]) => 
     await page.waitForURL(`${app.base}/`);
     if (start !== '/') await page.goto(`${app.base}${start}`);
     await run(page, errors);
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { violations?: string[] }).violations ?? []), [], 'no policy violation');
+    assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /\u27e6/, 'no missing key drawn');
   } finally {
     await browser.close();
   }
@@ -121,7 +138,7 @@ test('a message comes back when refused; a session\'s terminal and editor live t
   }
 });
 
-test('a screen that throws says so and offers to draw it again; the header stays and the other screens draw', { skip }, async () => {
+async function broken(): Promise<DataSource> {
   const fixtures = await fixtureSource({ now: () => FIXTURE_NOW });
   // The sessions index draws a list from /sessions: a service answering an object breaks it.
   const source: DataSource = {
@@ -134,13 +151,28 @@ test('a screen that throws says so and offers to draw it again; the header stays
       fixtures.forward(request, response, forward);
     },
   };
-  const app = await startApp({ source });
+  return source;
+}
+
+test('a screen that throws says so, in its language, and offers to try again; the header stays and the other screens draw', { skip }, async () => {
+  const fr = await startApp({ source: await broken(), extra: { language: 'fr' } });
+  try {
+    await signedInPage(fr, async (page) => {
+      const failed = page.locator('[data-failed="session"]');
+      await failed.waitFor();
+      assert.match(await failed.innerText(), /Sessions ne s'est pas chargé\./, 'the screen\'s name from the French catalog, not a mark');
+      assert.equal(await page.locator('#boundary-retry').innerText(), 'Réessayer');
+    }, '/sessions');
+  } finally {
+    await fr.close();
+  }
+  const app = await startApp({ source: await broken() });
   try {
     await signedInPage(app, async (page) => {
       const failed = page.locator('[data-failed="session"]');
       await failed.waitFor();
-      assert.match(await failed.innerText(), /Sessions could not be drawn\./);
-      assert.equal(await page.locator('#boundary-retry').innerText(), 'Draw it again');
+      assert.match(await failed.innerText(), /Sessions did not load\./, 'the screen\'s name, translated');
+      assert.equal(await page.locator('#boundary-retry').innerText(), 'Try again');
       assert.equal(await page.locator('header nav a[href="/lead"]').count(), 1, 'the header stays');
       await page.locator('#boundary-retry').click();
       await failed.waitFor();
@@ -150,5 +182,79 @@ test('a screen that throws says so and offers to draw it again; the header stays
     }, '/sessions');
   } finally {
     await app.close();
+  }
+});
+
+test('two sessions visited A, B, A, B: neither moves, the frame is not loaded again, the terminal is the same, the shown one holds its ids alone; the tower\'s scroll comes back', { skip }, async () => {
+  const preview = createServer();
+  await new Promise<void>((done) => preview.listen(0, '127.0.0.1', done));
+  const previewBase = `http://127.0.0.1:${(preview.address() as AddressInfo).port}`;
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase } });
+  const pages: string[] = [];
+  preview.on('request', (request) => { if (request.headers['sec-fetch-dest'] === 'iframe') pages.push(request.url ?? ''); });
+  preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
+  try {
+    await signedInPage(app, async (page) => {
+      const opens: string[] = [];
+      page.on('request', (request: { url(): string }) => { if (request.url().endsWith('/terminal/open')) opens.push(request.url()); });
+      const go = async (path: string) => {
+        await page.evaluate((href: string) => {
+          const link = document.createElement('a');
+          link.href = href;
+          document.body.append(link);
+          link.click();
+          link.remove();
+        }, path);
+        await page.waitForURL((url: URL) => url.pathname === path);
+      };
+      await page.setViewportSize({ width: 1280, height: 600 });
+      await page.locator('#tower-body .tower').waitFor();
+      await page.evaluate(() => window.scrollTo(0, 240));
+      await page.waitForFunction(() => window.scrollY === 240);
+
+      const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
+      const [a, b] = sessions.filter((s) => s.role === 'author').map((s) => s.id);
+      assert.ok(a && b, 'two authors in the fixtures');
+      const view = (id: string) => `[data-session-view="${id}"]`;
+
+      await go(`/sessions/${a}`);
+      await page.locator(`${view(a)} [role="tab"][aria-controls="tab-browser"]`).click();
+      await page.locator(`${view(a)} iframe`).waitFor();
+      await page.waitForFunction(() => true);
+      const loaded = pages.length;
+      assert.ok(loaded >= 1, 'the preview drawn in its frame');
+      await page.evaluate((selector: string) => { (document.querySelector(selector) as unknown as { kept: string }).kept = 'frame'; }, `${view(a)} iframe`);
+
+      await go(`/sessions/${b}`);
+      await page.locator(`${view(b)} #takeover`).click();
+      await page.locator(`${view(b)} .xterm`).waitFor();
+      await page.evaluate((selector: string) => { (document.querySelector(selector) as unknown as { kept: string }).kept = 'terminal'; }, `${view(b)} .xterm`);
+      const order = () => page.evaluate(() => [...document.querySelectorAll('[data-session-view]')].map((el) => (el as HTMLElement).dataset.sessionView));
+      const before = await order();
+
+      await go(`/sessions/${a}`);
+      await page.locator(`${view(a)} iframe`).waitFor();
+      await go(`/sessions/${b}`);
+      await page.locator(`${view(b)} .xterm`).waitFor();
+      assert.deepEqual(await order(), before, 'no session moved in the page');
+      assert.deepEqual(await page.evaluate((s: string) => (document.querySelector(s) as unknown as { kept?: string } | null)?.kept, `${view(a)} iframe`), 'frame');
+      assert.deepEqual(await page.evaluate((s: string) => (document.querySelector(s) as unknown as { kept?: string } | null)?.kept, `${view(b)} .xterm`), 'terminal');
+      assert.equal(pages.length, loaded, 'the frame was not loaded again');
+      assert.equal(opens.length, 1, 'the terminal opened once');
+      const ids = await page.evaluate(() => ({
+        message: document.querySelectorAll('#message').length,
+        terminal: document.querySelectorAll('#tab-terminal').length,
+        owner: (document.getElementById('message')?.closest('[data-session-view]') as HTMLElement | null)?.dataset.sessionView,
+      }));
+      assert.deepEqual(ids, { message: 1, terminal: 1, owner: b }, 'the shown session holds its ids alone');
+
+      await page.locator('header nav a[href="/"]').click();
+      await page.locator('#tower-body .tower').waitFor();
+      await page.waitForFunction(() => window.scrollY === 240, undefined, { timeout: 3000 });
+    });
+  } finally {
+    await app.close();
+    preview.closeAllConnections();
+    await new Promise<void>((done) => preview.close(() => done()));
   }
 });

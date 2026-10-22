@@ -89,7 +89,8 @@ export function interceptLinks(router: AnyRouter, cache: Cache, root: Document =
     if (url.hash && url.pathname === location.pathname && url.search === location.search) return;
     event.preventDefault();
     if (href === `${location.pathname}${location.search}${location.hash}`) return;
-    void router.navigate({ href });
+    // The shell gives each place its scroll back (shell/App.tsx): the router resets none.
+    void router.navigate({ href, resetScroll: false });
   };
   const onIntent = (event: Event) => {
     const link = linkOf(event.target);
