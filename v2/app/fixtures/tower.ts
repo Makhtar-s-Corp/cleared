@@ -1,10 +1,10 @@
-// The tower's fixture: the data of tower.png that milestone 1 has, made by
-// playing lane 1's fake adapter into an in-memory store, so that every
-// session has real stored events. Names are neutral: the project is the
-// example guestbook and tickets carry the local tracker's LOCAL-<n> ids;
-// the titles and phrases are the capture's. The capture's plan card, the
-// lead's message and the plan bar belong to milestone 2 and are left out.
-import type { InboxItem, SessionSummary } from '../../src/api/types.ts';
+// The tower's fixture: the data of tower.png, made by playing lane 1's fake
+// adapter into an in-memory store, so that every session has real stored
+// events. Names are neutral: the project is the example guestbook and
+// tickets carry the local tracker's LOCAL-<n> ids; the titles and phrases
+// are the capture's, and the two plans are the capture's shape with the
+// guestbook's content: one proposed for 25 minutes, one with 3 of 6 landed.
+import type { InboxItem, LeadState, Plan, PlanItem, SessionSummary } from '../../src/api/types.ts';
 import type { Harness, Role, SessionId } from '../../src/session/contract.ts';
 import { createFakeAdapter, type FakeStep } from '../../src/session/adapters/fake.ts';
 import type { SessionPhase, SessionState } from '../../src/session/events.ts';
@@ -49,6 +49,9 @@ const TITLES: Readonly<Record<string, string>> = {
   'LOCAL-163': 'Bank sync: retry once before failing',
 };
 
+// The lead's last line to the owner, as the capture writes it.
+export const LEAD_LINE = 'LOCAL-161 is paused on a permission. I moved LOCAL-163 ahead so the machine stays busy.';
+
 const minutesBefore = (now: Date, minutes: number) => new Date(now.getTime() - minutes * 60_000);
 const at = (now: Date, hours: number, minutes: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
 
@@ -92,6 +95,53 @@ function summary(store: Store, id: SessionId, spec: LiveSpec, startedAt: Date, p
 
 export type TowerFixture = TowerData & { readonly store: Store };
 
+const planItem = (position: number, title: string, state: PlanItem['state'], minutes: number, after: readonly number[] = []): PlanItem => ({
+  position, title, body: `${title}.\n\nAcceptance criteria\n- [ ] ${title}, with a test.`, lane: minutes <= 10 ? 'fast' : 'full', size: minutes <= 10 ? 'xs' : 's', after,
+  estimate: { minutes, costUsd: minutes <= 10 ? 0.15 : 0.3, weekPercent: minutes <= 10 ? 0.4 : 0.9, samples: 23 },
+  ticket: state === 'waiting' || state === 'ready' ? null : `LOCAL-${140 + position}`, state,
+});
+
+// The plan under way (3 of 6 landed, 1 running) and the one the lead
+// proposes, which waits for the owner under Needs you.
+function plans(now: Date): Plan[] {
+  return [
+    {
+      id: 'plan-entries', goal: 'goal-12', title: 'Entries on desktop', summary: 'The guestbook reads well on a wide screen.', maxParallel: 2,
+      items: [
+        planItem(1, 'Entries in two columns from 1024 px', 'landed', 30),
+        planItem(2, 'The form stays visible while scrolling', 'landed', 20),
+        planItem(3, 'Long names wrap instead of overflowing', 'landed', 10),
+        planItem(4, 'Each entry shows the time it was written', 'running', 30),
+        planItem(5, 'Pages of 20 entries on desktop', 'waiting', 40, [4]),
+        planItem(6, 'A link back to the newest page', 'waiting', 10, [5]),
+      ],
+      totals: { minutes: 110, costUsd: 1.65, weekPercent: 3.9, samples: 23 }, state: 'approved',
+      proposedAt: minutesBefore(now, 26 * 60).toISOString(), approvedAt: minutesBefore(now, 25 * 60).toISOString(), approvedBy: 'demo',
+    },
+    {
+      id: 'plan-readable', goal: 'goal-31', title: 'Make the guestbook readable on desktop', summary: 'Five tickets that make a long guestbook easy to read on a computer.', maxParallel: 2,
+      items: [
+        planItem(1, 'A GET /entries.json route that lists the entries', 'waiting', 40),
+        planItem(2, 'Names and messages trimmed before they are stored', 'waiting', 30),
+        planItem(3, 'The port and the database host in the start log', 'waiting', 20),
+        planItem(4, 'A Troubleshooting section in the README', 'waiting', 10),
+        planItem(5, 'The time each entry was written, on the page', 'waiting', 30, [1, 2, 3, 4]),
+      ],
+      totals: { minutes: 120, costUsd: 1.9, weekPercent: 4, samples: 23 }, state: 'proposed',
+      proposedAt: minutesBefore(now, 25).toISOString(), approvedAt: null, approvedBy: null,
+    },
+  ];
+}
+
+// The lead as the capture shows it: always on, at 31 % of its context,
+// refreshed from memory 10 minutes ago.
+function lead(now: Date, sessionId: string): LeadState {
+  return {
+    generation: 3, sessionId, phase: 'idle', model: 'claude-opus-5-5', context: { percent: 31, totalTokens: 62_000, maxTokens: 200_000 },
+    highestPercent: 41, refreshedAt: minutesBefore(now, 10).toISOString(), refreshCount: 2, openCommitments: 1, pendingQuestion: null,
+  };
+}
+
 export async function towerFixture(now: Date, options: { readonly project?: string } = {}): Promise<TowerFixture> {
   const project = options.project ?? FIXTURE_PROJECT;
   const store = openStore(':memory:');
@@ -109,6 +159,7 @@ export async function towerFixture(now: Date, options: { readonly project?: stri
   }
 
   const permission = LIVE[0] as LiveSpec & { permission: NonNullable<LiveSpec['permission']> };
+  const proposed = plans(now).filter((plan) => plan.state === 'proposed');
   const inbox: InboxItem[] = [
     {
       kind: 'release', id: 'release-158', ticket: 'LOCAL-158', project, since: minutesBefore(now, 12).toISOString(), state: 'waiting',
@@ -123,6 +174,10 @@ export async function towerFixture(now: Date, options: { readonly project?: stri
       input: { kind: 'execute', command: permission.permission.command, description: permission.permission.description },
       suggestion: { decision: 'ask', rule: 'network', reason: permission.permission.reason },
     },
+    ...proposed.map((plan): InboxItem => ({
+      kind: 'plan', id: `plan-item-${plan.id}`, ticket: 'lead', project, since: plan.proposedAt, state: 'waiting',
+      planId: plan.id, title: plan.title, summary: plan.summary, itemCount: plan.items.length, totals: plan.totals,
+    })),
   ];
 
   const open = (id: string, status: string, minutes: number): Ticket => ({
@@ -140,5 +195,5 @@ export async function towerFixture(now: Date, options: { readonly project?: stri
     landed('LOCAL-149', 'Stale figures no longer survive two crossing reads', at(now, 7, 34), 52),
     landed('LOCAL-151', 'The envelope list reads one section at a time', at(now, 9, 22), 38),
   ];
-  return { sessions, inbox, tickets, store };
+  return { sessions, inbox, tickets, lead: lead(now, 'lead-generation-3'), leadLine: LEAD_LINE, plans: plans(now), weekLeft: null, store };
 }

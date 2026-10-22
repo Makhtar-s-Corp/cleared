@@ -47,6 +47,9 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
 
+  // The lead and the plan it proposes are the lead fixture's, so the tower
+  // and the lead's screen agree; the tower fixture adds its plan under way.
+  const plans = [...lead.plans, ...fixture.plans.filter((plan) => plan.state !== 'proposed')];
   const storeOf = (id: string) => (id === lead.session.id ? lead.store : fixture.store);
   const state = (id: string): SessionState | undefined => {
     let found: SessionState | undefined;
@@ -63,7 +66,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     const parts = url.pathname.split('/').slice(2);              // after '/api'
     const [collection, id, sub] = parts;
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, fixture.sessions);
-    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox, ...lead.inbox]);
+    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...lead.inbox]);
     if (method === 'GET' && collection === 'lead') {
       if (parts.length === 1) return sendJson(response, 200, lead.state);
       if (id === 'messages' && parts.length === 2) return sendJson(response, 200, lead.messages.filter((m) => m.seq > after(request, url)));
@@ -78,8 +81,8 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       }
     }
     if (method === 'GET' && collection === 'plans') {
-      if (parts.length === 1) return sendJson(response, 200, lead.plans);
-      const plan = lead.plans.find((p) => p.id === id);
+      if (parts.length === 1) return sendJson(response, 200, plans);
+      const plan = plans.find((p) => p.id === id);
       if (parts.length === 2) return plan ? sendJson(response, 200, plan) : sendJson(response, 404, { error: 'no such plan' });
     }
     if (collection === 'sessions' && id) {
