@@ -2788,11 +2788,12 @@ The lane's choices:
   - **Recipes, schedules and asks.** The matrix lines C7, C11 and M9 say "the live run: lane 29". Section 4.6 gives this lane neither a recipe, nor a schedule, nor an ask, and neither proof drives them, so their live run is still open. The orchestrator decides whether a step joins a proof.
   - **The session screen at 390** after Give back reads "Working" while the review has started. It is visible in `proof-multi-session-390-dark.png`, and not this lane's file.
 - **Files.** All are of the lane's list: `v2/scripts/proof-*.ts` (`proof-j2-multi.ts` and `proof-rehearsal-multi.ts` new), `v2/src/session/adapters/index.ts`, and the tests under `v2/test/scripts/`. Beyond them, only this entry and `docs/v2/requirements-matrix.md`:
-  - B6.2p, B6.2m, O8, C2, C8, C10, M2, M3, M5, B5.10f and O1 name the lane.
+  - B6.2p, B6.2m, O8, C2, C8, C10, M2, M3, M5, B5.10f and O1 name this pull request (232).
   - They stay `partial` or `planned` until the real runs.
   - The new lines are P42 (choices 1 to 6 and 8) and P43 (choices 7 and 9).
 - **Checks.**
   - `npm test`: 1204 node tests, 1196 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
   - `npm run typecheck` is green.
   - `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+- Pull request: 232, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-scripts-m2`.
