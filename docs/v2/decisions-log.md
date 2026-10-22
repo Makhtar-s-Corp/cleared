@@ -2201,7 +2201,14 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - `images/session/runner/hooks.ts`: no Stop hook for a reader, then drop the placeholder.
 - `flow/engine.ts`, `policyFor`: set `planning: true` while the author's gate is `planning` (lane 23 or a small fix lane).
 - The tower and `GET /api/sessions` list a reader's session like any other (`role: 'reader'`, its ask's id as the ticket), and a platform ask's row names the workspace's first service, which the wrapper sets. Lane 27 shows the ask screen, and may leave the reader out of the live sessions or link it to `/ask/:id`.
-- `flow/engine.ts` line 1075 and `lead/plans/estimates.ts` line 65 add up `total_cost_usd` over the `RUN_FINISHED` events of a session. The real run shows that value is a running total, so a session of several turns is counted more than once there.
+- **The cost of a session of several turns is over-counted in three places.** Each adds up `total_cost_usd` over every `RUN_FINISHED` event, and the real run shows that value is the session's running total:
+  - `flow/engine.ts` (about line 1075): the ticket's budget stop. A reopened author is the same session, so a ticket can be put back before its budget is spent.
+  - `lead/plans/runner.ts` (about line 531): the plans' day budget. The lead is one long session per generation, so the day stop can trip early, during the 48-hour proof too.
+  - `lead/plans/estimates.ts` (about line 65): the estimates' median cost.
+
+  A small fix lane before wave 12 would count the last total of each session instead.
 - A reader sees no git history: the export carries none.
+- A reader has no cost ceiling of its own. The registry's adapter sets no `maxBudgetUsd`, and the flow's ticket budget never sees a reader. Its bounds are the idle rule and three asks at once.
+- `test/reader/runtime.test.ts` covers the production path: the model setting, the recovery at start, the reader built once from the flow's configuration, and a reader's start through the flow runtime's wrapper (no sibling planned, a reader's row).
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ask-code`.
