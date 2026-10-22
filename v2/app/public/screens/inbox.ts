@@ -204,6 +204,13 @@ export async function approvePlan(api: Api, item: PlanItemInbox): Promise<Plan> 
   return await api<Plan>(`/plans/${encodeURIComponent(item.planId)}/approve`, { method: 'POST', body: null });
 }
 
+// A refusal of the plan's approval, read against the plan read again: one
+// no longer proposed was approved or replaced, even when the call failed
+// after the service wrote it (issue 175, item 2).
+export function afterPlanRefusal(key: string, plan: Plan | undefined): string {
+  return plan && plan.state !== 'proposed' ? 'approve_plan_conflict' : key;
+}
+
 export function decisionFor(kind: 'allow_once' | 'allow_always' | 'reject_once', message: string, t: Translate): Decision {
   if (kind === 'allow_once') return { kind: 'allow_once' };
   if (kind === 'allow_always') return { kind: 'allow_always', scope: 'project' };
@@ -688,7 +695,10 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       if (settled) context.inboxChanged();
       if (settled || key === 'approve_conflict' || gesture === 'approve_plan') {
         await load();
-        say(key);
+        const plan = item.kind === 'plan' ? plans.get(item.planId) : undefined;
+        const now = afterPlanRefusal(key, plan);
+        say(now);
+        if (now !== key) context.inboxChanged();
       }
     }
   };

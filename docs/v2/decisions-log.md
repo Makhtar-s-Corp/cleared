@@ -1156,7 +1156,7 @@ The choices the lane makes:
 4. **Approve** calls `POST /api/plans/:id/approve` at once, with no grace (decision 6). The plan the service answers replaces the one shown, and the bar says "Approved by you at HH:MM. The tickets start in order, the first ones now." Nothing is kept in `sessionStorage`: the service's list already shows the plan as handled.
    - A refusal reads the list and the plan again, and the reread plan says what happened.
    - 409 says the plan changed meanwhile (approved elsewhere, replaced, or not approved). 404 says it no longer exists, and 503 that the service runs without the lead.
-   - This rereading also covers issue 175, item 2: an approval written whose answer failed shows the plan running.
+   - This rereading also covers issue 175, item 2. An approval the service wrote but answered with a failure shows the plan running, and the bar says the plan changed meanwhile instead of "Try again".
 5. **A handled plan** reads "Lead · Running · 0 of 5 landed" in the list. Its detail is the panel with each item's state and ticket, and no button. A handled plan not read reads "Lead · no longer waits for you".
 6. **The lead's question** is shown read only, its choices as lines, with one outlined link to `/lead`: "The lead waits for your answer on its screen." The session answer route refuses the lead's session (issue 168, item 3; lanes 5, 7 and 8), and the inbox would have reported that refusal as a request settled without the person.
 7. **The lead's ticket is never shown.** `inbox.ts` repeats `LEAD_TICKET`, as it does `TODO_STATE`, and a test keeps the two equal. "Lead" stands in the id slot and leads the item's line.
@@ -1192,6 +1192,7 @@ The choices the lane makes:
   - **Within lane 8's shared panel** (a label above the items, stronger key figures, 14 px item titles, the phone row layout): the panel stays the same on both screens, and those changes belong to lane 8's file.
   - **An upward shadow on the sticky bar:** milestone 1's inbox removed it.
   - **A success mark on the approved line, and a lighter summary box in dark:** the release's approved line and announcement look the same, and the two kinds stay alike.
+- **Fixtures mode.** Lane 1's `fixtures/source.ts` answers every write with a 404. Under `CLEARED_V2_APP_SOURCE=fixtures`, Approve on its plan therefore says the plan no longer exists, as milestone 1's release gestures there are refused. That source is not this lane's file.
 - **Not run live.** Lane 7's routes are in `v2`, but a proposed plan needs a lead generation proposing one. The fake adapter behind the service is lane 11's, in this wave.
 - **Left for other lanes:**
   - the tower's plan card still links to `/plans/<id>`, which lane 9 chose because this detail did not exist (`tower.ts`, lane 9's file);

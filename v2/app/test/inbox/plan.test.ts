@@ -11,7 +11,7 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../../public/i18n.ts';
 import { ApiError } from '../../public/screen.ts';
-import { LEAD_TICKET, detailKey, failure, ordered, readPlan, renderInbox, type InboxView, type Local } from '../../public/screens/inbox.ts';
+import { LEAD_TICKET, afterPlanRefusal, detailKey, failure, ordered, readPlan, renderInbox, type InboxView, type Local } from '../../public/screens/inbox.ts';
 import { strings, visibleText } from '../session/support.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
@@ -157,6 +157,14 @@ test('how a refusal of the plan\'s approval reads', () => {
   assert.deepEqual(failure(new ApiError(503, 'x'), 'approve_plan'), { key: 'approve_plan_lead_off', settled: false });
   assert.deepEqual(failure(new ApiError(500, 'x'), 'approve_plan'), { key: 'approve_plan_failed', settled: false });
   assert.deepEqual(failure(new Error('network'), 'approve_plan'), { key: 'approve_plan_failed', settled: false });
+});
+
+test('a failed approval of a plan that the service did write reads as a plan that moved (issue 175, item 2)', () => {
+  const plan = proposedPlan(FIXTURE_NOW);
+  assert.equal(afterPlanRefusal('approve_plan_failed', { ...plan, state: 'approved' }), 'approve_plan_conflict');
+  assert.equal(afterPlanRefusal('approve_plan_failed', plan), 'approve_plan_failed', 'still proposed: it did not reach the service');
+  assert.equal(afterPlanRefusal('approve_plan_failed', undefined), 'approve_plan_failed');
+  assert.equal(afterPlanRefusal('approve_plan_conflict', { ...plan, state: 'superseded' }), 'approve_plan_conflict');
 });
 
 test('every word of the plan and the lead\'s question comes from the catalog or from the data, with no inline style', () => {
