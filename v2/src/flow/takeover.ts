@@ -17,13 +17,25 @@
 // owner's too, and only for a session the owner took over.
 //
 // This file holds the routes and the words; the engine (flow/engine.ts)
-// does the work, since it owns the sessions.
+// does the work, since it owns the sessions. What the human did meanwhile
+// (decisions 32 and 33, lane 31) is the human side's (terminal/human.ts):
+// Take over records the checkout's state in the session's container; Give
+// back closes the web terminal, finds the files the human changed since
+// (the terminal's, against that state, and the editor's saves), journals
+// them as `cleared.human_edit`, lets the engine resume the session, then
+// tells it, in one notice, every file and its counts. The engine's own
+// words at Give back (GIVEN_BACK) come first, as a separate message: the
+// engine sends them and is not this lane's file. A session whose plan still
+// waits for its Go is told nothing by the engine, and nothing here either:
+// the Go tells it, and the reviewer's prompt names the files.
 import type { IncomingMessage } from 'node:http';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../api/types.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
 import type { UserId } from '../session/contract.ts';
+import type { HumanSide } from '../terminal/human.ts';
 import { FlowError, type FlowEngine } from './engine.ts';
+import { humanEditNotice, userName } from './human-edits.ts';
 
 // The rule a request cancelled by the take over is settled with.
 export const TAKEN_OVER = 'takeover';
@@ -37,6 +49,7 @@ export const GIVEN_BACK = [
 export type TakeoverDeps = {
   readonly engine: (registry: Registry) => FlowEngine | undefined;
   readonly proof: () => string;
+  readonly human?: (registry: Registry) => HumanSide | undefined;   // lane 31; none: Take over and Give back as lane 20 made them
 };
 
 class HttpError extends Error {
@@ -58,6 +71,16 @@ function answer(context: RouteContext, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   context.response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(text)), 'cache-control': 'no-store' });
   context.response.end(text);
+}
+
+// One line per file for the notice: the counts of a file changed twice added up.
+function merged(edits: readonly { readonly path: string; readonly added: number; readonly removed: number }[]): { path: string; added: number; removed: number }[] {
+  const out = new Map<string, { path: string; added: number; removed: number }>();
+  for (const edit of edits) {
+    const seen = out.get(edit.path) ?? { path: edit.path, added: 0, removed: 0 };
+    out.set(edit.path, { path: edit.path, added: seen.added + edit.added, removed: seen.removed + edit.removed });
+  }
+  return [...out.values()];
 }
 
 // The owner account of milestone 2: the first of the users table.
@@ -89,6 +112,7 @@ export function takeoverRoutes(deps: TakeoverDeps): Route[] {
       method: 'POST', path: '/api/sessions/:id/takeover',
       handle: write(async (engine, user, id, context) => {
         const taken = await engine.takeOver(id, user);
+        await deps.human?.(context.registry)?.takenOver(id);
         answer(context, 200, { accepted: true, by: taken.by });
       }),
     },
@@ -97,7 +121,16 @@ export function takeoverRoutes(deps: TakeoverDeps): Route[] {
       handle: write(async (engine, user, id, context) => {
         const taken = engine.takenOver(id);
         if (taken && taken.by !== user) throw new HttpError(403, 'only the account that took the session over gives it back');
+        const human = taken ? deps.human?.(context.registry) : undefined;
+        const edits = human ? await human.givingBack(id, user) : [];
         await engine.giveBack(id);
+        human?.given(id);
+        const plan = engine.sessionDetail(id)?.state.plan;
+        if (edits.length > 0 && !(plan && !plan.go)) {
+          const notice = humanEditNotice(await userName(context.registry.users, user), merged(edits));
+          await engine.send(id, notice, 'cleared').catch((error: unknown) =>
+            console.error(`cleared-v2: session ${id} could not be told of the human's changes (${error instanceof Error ? error.name : typeof error})`));
+        }
         answer(context, 200, { accepted: true });
       }),
     },

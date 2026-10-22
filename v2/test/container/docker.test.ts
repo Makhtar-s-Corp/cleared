@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { Docker, LABEL, LabelRuleError, assertLabelRule, assertSessionId, commandRunner, type ContainerSpec } from '../../src/container/docker.ts';
 import { FakeDocker, type Call } from './fake-docker.ts';
 
@@ -311,4 +314,43 @@ test('the CLI runner reports a command that exits without reading its input, or 
   const result = await commandRunner('true')([], { input });
   assert.equal(result.code, 0);
   await assert.rejects(commandRunner('cleared-v2-no-such-command')([], { input }), /ENOENT/);
+});
+
+// The web terminal (milestone 2, decision 32, lane 31): `docker exec
+// --interactive --tty` on the owned id, as the session's user, in its
+// checkout, under the host's `script`; what the human types goes to the
+// process's input and never into a command line.
+test('the terminal runs docker exec --interactive --tty on the owned id under script, and a typed line reaches the input only', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner, fake.spawner, (args) => {
+    scripted.push([...args]);
+    const child = new EventEmitter() as unknown as ChildProcessWithoutNullStreams;
+    Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+    children.push(child);
+    return child;
+  });
+  const scripted: string[][] = [];
+  const children: ChildProcessWithoutNullStreams[] = [];
+  const name = `cleared-v2-${SESSION}-session`;
+  await docker.createContainer(spec(name));
+  const id = fake.containers[0]!.id;
+  const child = await docker.terminal(SESSION, name, { user: '1000:1000', workdir: '/workspace', command: ['sh', '-c', 'echo $$ > /tmp/.cleared-terminal.pid; exec bash -l'] });
+  assertLog(fake.calls);
+  assert.equal(scripted.length, 1);
+  const args = scripted[0]!;
+  assert.deepEqual([...args.slice(0, 4), args.at(-1)], ['--quiet', '--return', '--flush', '--command', '/dev/null']);
+  assert.equal(args[4], `'docker' 'exec' '--interactive' '--tty' '--env' 'TERM=xterm-256color' '--user' '1000:1000' '--workdir' '/workspace' '--' '${id}' 'sh' '-c' 'echo $$ > /tmp/.cleared-terminal.pid; exec bash -l'`);
+
+  const typed: Buffer[] = [];
+  child.stdin.on('data', (chunk: Buffer) => typed.push(chunk));
+  child.stdin.write("git push; echo '$(rm -rf /)'\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(Buffer.concat(typed).toString(), "git push; echo '$(rm -rf /)'\r");
+  assert.equal(scripted.length, 1, 'no new command line');
+  assert.ok(!scripted[0]!.join(' ').includes('git push'));
+
+  await assert.rejects(docker.terminal(SESSION, name, { user: "1000; rm -rf /", workdir: '/workspace', command: ['bash'] }), /invalid user/);
+  await assert.rejects(docker.terminal(SESSION, name, { user: '1000:1000', workdir: "/workspace'; id; '", command: ['bash'] }), /invalid workdir/);
+  await assert.rejects(docker.terminal(OTHER, name, { user: '1000:1000', workdir: '/workspace', command: ['bash'] }), /no container named/, 'another session\'s container is not found');
+  assert.equal(scripted.length, 1);
 });

@@ -98,7 +98,9 @@ test('the review prompt names each file a human changed, and who, with the chang
   assert.ok(text.startsWith(before.split('\n')[0] as string));
 });
 
-test('humanEdits answers no edit by default, whatever the journal holds (lane 31 fills it)', () => {
+test('humanEdits answers the journal\'s human edits, filled by lane 31 (test/flow/human-edits.test.ts has the merge per path)', () => {
   const value = { path: 'src/page.ts', by: 'u1', added: 1, removed: 0, before: 'a', after: 'b', via: 'editor' };
-  assert.deepEqual(humanEdits({ events: [{ seq: 1, at: '2026-10-22T10:00:00.000Z', sessionId: 's1', ticket: 'LOCAL-2', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.human_edit', value } as never }] }), []);
+  assert.deepEqual(humanEdits({ events: [{ seq: 1, at: '2026-10-22T10:00:00.000Z', sessionId: 's1', ticket: 'LOCAL-2', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.human_edit', value } as never }] }),
+    [{ ...value, at: '2026-10-22T10:00:00.000Z' }]);
+  assert.deepEqual(humanEdits({ events: [] }), []);
 });
