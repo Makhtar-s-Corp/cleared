@@ -3099,5 +3099,5 @@ The fixture source's reviewer case (`fixture-human.test.ts`) was added after tha
 - Lane 34's tab-switch test prints its measures in the form the job summary reads.
 - If a later Chromium build changes the notifications test's result, the headless shell's refusal is the first thing to recheck.
 
-- Pull request: NUMBER (filled in by the second commit of this lane).
+- Pull request: 244, against `v2`.
 - Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-deps-ui-foundation`.
