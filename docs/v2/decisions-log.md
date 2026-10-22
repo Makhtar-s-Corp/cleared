@@ -1223,3 +1223,14 @@ The choices the lane makes:
   - The Cursor and Codex harnesses follow the session adapter contract (plan, section 6), with the harness named in `StartInput.harness`.
   - Until a harness is named, the default stays `claude-code`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-fix-doctor-window`.
+
+## 2026-10-22: Owner decision: the complement text is integrated into milestones 1 to 5
+
+**Decision.** On 2026-10-22 at 06:45 (Europe/Paris), the owner decided how the complement text ([complement-devin.md](complement-devin.md)) is integrated:
+
+- Milestone 1 items 1, 8, 9 and 10 become a milestone 2 catch-up wave, after the React port and the clickable answers lane, before the 48 h proof.
+- Milestone 2 items 2, 7, 11 and 12 are added to milestone 2.
+- The other items will be planned in the milestone 3, 4 and 5 plans.
+- The order and the proofs of the milestones do not change.
+
+- Author: the owner, relayed on 2026-10-22 06:45 (Europe/Paris); written in this log.
