@@ -425,10 +425,14 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       const typing = body.querySelector<HTMLInputElement>('#lead-ask-input');
       const draft = typing?.value ?? '';
       const focused = typing !== null && document.activeElement === typing;
+      const selection = typing ? [typing.selectionStart, typing.selectionEnd] as const : null;
       body.innerHTML = renderTowerBody(towerModel(loaded.data, context.now()), t);
       const field = body.querySelector<HTMLInputElement>('#lead-ask-input');
       if (field && draft) field.value = draft;
-      if (field && focused) field.focus();
+      if (field && focused) {
+        field.focus();
+        if (selection) field.setSelectionRange(selection[0], selection[1]);
+      }
     } catch (error) {
       if (stopped) return;
       body.innerHTML = `<p class="empty error">${esc(t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed'))}</p>`;
