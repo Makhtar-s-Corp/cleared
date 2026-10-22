@@ -212,3 +212,19 @@ test('the new parts carry no inline style', () => {
     assert.doesNotMatch(html, /\sstyle=/, item.id);
   }
 });
+
+test('a line shaped like a secret is a chip with its words, as every flag', () => {
+  const item = { ...trainRelease(FIXTURE_NOW, 'waiting'), flags: [{ kind: 'secret_shape' as const, files: ['src/check.ts'], detail: 'Adds a line one of the guard\'s patterns flags (token): read it before approving.' }] };
+  const html = detailOf(item);
+  assert.match(html, /data-flag="secret_shape"><span class="flag-chip secret_shape">Secret shape<\/span><span class="flag-note">A line looks like a secret\. Read it before approving\.<\/span>/);
+  assert.match(html, /data-file="src\/check.ts"[\s\S]*?data-file-flag="secret_shape">Secret shape</);
+  assert.ok(shown(detailOf(item, fr)).includes('Forme de secret'));
+});
+
+test('in the list, a train that is not waiting carries its state beside its kind; a waiting one does not', () => {
+  const states = ['blocked', 'landing', 'landed', 'rolled_back', 'halted'] as const;
+  const items = states.map((state) => ({ ...trainRelease(FIXTURE_NOW, state), id: `release:${state}` }));
+  const html = renderInbox(viewOf([...items, trainRelease(FIXTURE_NOW, 'waiting')], { selected: undefined, open: false }), en);
+  assert.deepEqual([...html.matchAll(/data-train-chip="([a-z_]+)">([^<]*)</g)].map((m) => `${m[1]}:${m[2]}`),
+    ['blocked:Blocked', 'landing:Landing', 'landed:Landed', 'rolled_back:Rolled back', 'halted:Halted']);
+});

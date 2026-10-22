@@ -100,8 +100,12 @@
 .d-body .plan-facts { flex-wrap: wrap; padding: 14px 0 0; }
 
 /* a release of several services: the train (decision 21) */
-.inbox { --danger-surface: #FFF6F6; --danger-ring: rgba(238,0,0,.32); --ok-fill: #ECF8F0; --progress-fill: rgba(0,112,243,.08); }
-:root[data-theme="dark"] .inbox { --danger-surface: rgba(255,77,77,.08); --danger-ring: rgba(255,107,107,.4); --ok-fill: rgba(61,208,104,.12); --progress-fill: rgba(82,168,255,.12); }
+.inbox { --danger-surface: #FFF6F6; --danger-ring: rgba(238,0,0,.32); --ok-fill: #ECF8F0; --ok-ring: rgba(22,163,74,.35); --progress-fill: rgba(0,112,243,.08); }
+:root[data-theme="dark"] .inbox { --danger-surface: rgba(255,77,77,.08); --danger-ring: rgba(255,107,107,.4); --ok-fill: rgba(61,208,104,.12); --ok-ring: rgba(61,208,104,.4); --progress-fill: rgba(82,168,255,.12); }
+/* a train's state beside its kind in the list, so a failure is seen without opening it */
+.chip.train-chip.landing { background: var(--progress-fill); color: var(--stage-progress); }
+.chip.train-chip.landed { background: var(--ok-fill); color: var(--ok-text); }
+.chip.train-chip.blocked, .chip.train-chip.rolled_back, .chip.train-chip.halted { background: var(--danger-surface); color: var(--danger-text); }
 .d-sub, .train-head h3, .changes h3 { font-size: 14px; font-weight: 600; }
 .d-sub { margin: 20px 0 8px; }
 .train { margin-top: 20px; }
@@ -116,7 +120,7 @@
 .stop { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 14px; }
 .stop + .stop { border-top: 1px solid var(--hairline); }
 /* the rail from one service to the next: the order is the point */
-.stop:not(:last-child)::after { content: ""; position: absolute; left: 24px; top: 34px; bottom: -12px; width: 2px; background: var(--hairline); z-index: 1; }
+.stop:not(:last-child)::after { content: ""; position: absolute; left: 24px; top: 32px; bottom: -14px; width: 2px; background: var(--hairline); z-index: 1; }
 .stop-mark { position: relative; z-index: 2; display: flex; justify-content: center; padding-top: 1px; color: var(--text-faint); background: var(--surface); height: 20px; }
 .stop[data-state="healthy"] .stop-mark { color: var(--ok-text); }
 .stop[data-state="merged"] .stop-mark { color: var(--stage-progress); }
@@ -128,7 +132,9 @@
 .stop-pr { font-size: 13px; }
 .stop-pr.none { color: var(--text-faint); }
 .stop-line { font-size: 13px; color: var(--text-secondary); }
-.stop[data-state="failed"] .stop-line, .stop[data-state="reverted"] .stop-line { color: var(--danger-text); font-weight: 500; }
+.stop[data-state="failed"] .stop-state, .stop[data-state="reverted"] .stop-state { color: var(--danger-text); font-weight: 500; }
+.stop-line .sep { margin: 0 6px; color: var(--text-faint); }
+.stop-time { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .stop-note { font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
 .compat { margin-top: 8px; font-size: 12.5px; color: var(--text-muted); }
 .blocked { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--danger-surface); box-shadow: 0 0 0 1px var(--danger-ring); font-size: 13.5px; color: var(--text-secondary); }
@@ -139,7 +145,7 @@
 /* what changes: the intents and the flags (decision 23) */
 .changes { margin-top: 22px; }
 .flags { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.flag { display: flex; align-items: baseline; gap: 10px; font-size: 13px; color: var(--text-secondary); }
+.flag { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: baseline; column-gap: 10px; font-size: 13px; color: var(--text-secondary); }
 .flag-chip, .file-flag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--sunken); color: var(--text-secondary); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .flag-chip { min-width: 92px; text-align: center; }
 .flag-chip.contract, .flag-chip.secret_shape, .file-flag.contract, .file-flag.secret_shape { background: var(--awaiting-pill); color: var(--awaiting-text); }
@@ -151,11 +157,16 @@
 .file-flag { padding: 0 7px; font-size: 11px; }
 
 /* an author's session plan (decision 22) */
+/* the confidence is what the owner reads first: the card takes its colour */
 .confidence { margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: var(--canvas); box-shadow: var(--e-outline); }
-.confidence-chip { display: inline-block; margin-bottom: 6px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; }
-.confidence[data-confidence="high"] .confidence-chip { background: var(--ok-fill); color: var(--ok-text); }
-.confidence[data-confidence="medium"] .confidence-chip { background: var(--awaiting-pill); color: var(--awaiting-text); }
-.confidence[data-confidence="low"] .confidence-chip { background: var(--danger-surface); color: var(--danger-text); }
+.confidence[data-confidence="high"] { background: var(--ok-fill); box-shadow: 0 0 0 1px var(--ok-ring); }
+.confidence[data-confidence="medium"] { background: var(--awaiting-surface); box-shadow: 0 0 0 1px var(--awaiting-highlight); }
+.confidence[data-confidence="low"] { background: var(--danger-surface); box-shadow: 0 0 0 1px var(--danger-ring); }
+.confidence-chip { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+.confidence-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.confidence[data-confidence="high"] .confidence-chip { color: var(--ok-text); }
+.confidence[data-confidence="medium"] .confidence-chip { color: var(--awaiting-text); }
+.confidence[data-confidence="low"] .confidence-chip { color: var(--danger-text); }
 .confidence-reason { color: var(--text-secondary); }
 .confidence-rule { margin-top: 6px; font-size: 12.5px; color: var(--text-faint); }
 .plan-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text); }
@@ -186,7 +197,6 @@ a.btn, a.btn:hover { text-decoration: none; }
 .btn:disabled { cursor: progress; opacity: .55; }
 .btn.primary[data-act="answer"]:disabled { cursor: default; opacity: 1; background: var(--surface-muted); color: var(--text-faint); box-shadow: var(--e-outline); }
 .commit { font: 400 11px/1.3 var(--mono); opacity: .7; }
-.commit.count { font: 400 12px/1.3 var(--sans); }
 .deny-reason { flex: 1 1 220px; display: flex; }
 .deny-reason input { flex: 1; min-width: 0; }
 .d-note { flex-basis: 100%; font-size: 13px; color: var(--text-secondary); }
@@ -237,7 +247,6 @@ a.btn, a.btn:hover { text-decoration: none; }
   .grace .btn { min-width: 96px; flex: none; }
   .stop { padding: 12px; gap: 10px; }
   .stop:not(:last-child)::after { left: 22px; }
-  .flag { flex-direction: column; gap: 2px; }
   .flag-chip { min-width: 0; }
 }
 @media (max-width: 359px) { .shots { flex-direction: column; } .shots.frame-phone .shot { flex-basis: auto; width: 70%; } }

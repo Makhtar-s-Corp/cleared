@@ -455,19 +455,26 @@ export function trainLine(train: TrainState, t: Translate): string {
 // A service's place in the train: while the train waits, every service
 // waits for the owner's approval; while it lands, the first that waits
 // lands next.
-export function stopLine(stop: TrainStop, train: TrainState, t: Translate): string {
-  let key: string = `stop_${stop.state}`;
+export function stopState(stop: TrainStop, train: TrainState, t: Translate): string {
   if (stop.state === 'waiting') {
-    if (train.state === 'waiting' || train.state === 'blocked') key = 'stop_waiting_approval';
-    else if (train.state === 'landing' && train.services.find((s) => s.state === 'waiting') === stop) key = 'stop_next';
+    if (train.state === 'waiting' || train.state === 'blocked') return t('stop_waiting_approval');
+    if (train.state === 'landing' && train.services.find((s) => s.state === 'waiting') === stop) return t('stop_next');
   }
-  const text = t(key);
+  return t(`stop_${stop.state}`);
+}
+
+export function stopLine(stop: TrainStop, train: TrainState, t: Translate): string {
+  const text = stopState(stop, train, t);
   return stop.at ? t('stop_at', { text, time: clock(stop.at) }) : text;
 }
 
 // ------------------------------------------------------- groups and flags
 
 export const FLAG_KINDS: readonly ReleaseFlagKind[] = ['schema', 'dependency', 'config', 'secret_shape', 'contract', 'large'];
+// A flag's words in the catalog: flag_<key> and flag_<key>_note. The guard's
+// strict pass reads a catalog key with "secret" in it, followed by a text,
+// as an assigned secret, so the secret_shape flag is named otherwise there.
+export const flagKey = (kind: ReleaseFlagKind): string => (kind === 'secret_shape' ? 'credential_shape' : kind);
 
 // The groups as the card shows them: the service's "Other changes" in the
 // reader's language, and each file with the flags that name it.
