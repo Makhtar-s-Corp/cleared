@@ -899,6 +899,7 @@ export class FlowEngine {
       }
     }
     const cost = this.#stepCost(step);
+    const minutes = this.#stepMinutes(step);
     if (step.kind === 'contract') {
       const contract = read?.contract;
       if (!contract) return this.#failStep(step, `${step.service} has no contract file to change`);
@@ -906,16 +907,16 @@ export class FlowEngine {
       if (others.length > 0)
         return this.#failStep(step, `it changed ${others.join(', ')} besides the contract ${contract.path}. The contract step changes the contract file only: take those changes off the ticket branch before the ticket starts again.`);
       if (contract.diff.trim() === '') {
-        this.#steps.update(step.id, { state: 'done', contract: contract.snapshot, blob: contract.blob, cost });
+        this.#steps.update(step.id, { state: 'done', contract: contract.snapshot, blob: contract.blob, cost, minutes });
       } else {
-        this.#steps.update(step.id, { state: 'validating', contract: contract.snapshot, blob: contract.blob, cost });
+        this.#steps.update(step.id, { state: 'validating', contract: contract.snapshot, blob: contract.blob, cost, minutes });
         this.inbox.addContract({ ticket: id, project, sessionId: live.id, step: step.id, service: step.service, path: contract.path, diff: this.#clean(contract.diff) });
         return;
       }
     } else {
       if (validated !== null && read?.contract && read.contract.blob !== validated)
         return this.#failStep(step, `it changed the validated contract ${read.contract.path} of ${step.service}. A change to the contract goes through the contract step: take it off the ticket branch before the ticket starts again.`);
-      this.#steps.update(step.id, { state: 'done', cost });
+      this.#steps.update(step.id, { state: 'done', cost, minutes });
     }
     await this.#runSteps(id);
   }
@@ -954,6 +955,17 @@ export class FlowEngine {
     for (const session of step.sessions)
       for (const { event } of this.#store.events.after(session)) if (event.type === 'RUN_FINISHED') total += event.result.total_cost_usd ?? 0;
     return Math.round(total * 100) / 100;
+  }
+
+  // How long a step's sessions ran, the history of the plans' step
+  // estimates (lead/plans/estimates.ts): from each one's start to its last change.
+  #stepMinutes(step: Pick<Step, 'sessions'>): number {
+    let ms = 0;
+    for (const id of step.sessions) {
+      const row = this.#store.sessions.get(id);
+      if (row) ms += Math.max(0, Date.parse(row.updatedAt) - Date.parse(row.createdAt));
+    }
+    return Math.round(ms / 600) / 100;
   }
 
   // The ticket's steps (GET /api/tickets/:id/steps): none for a ticket that
@@ -1504,7 +1516,7 @@ export class FlowEngine {
     const session = { id: author.id, ticket: id, project };
     this.#step(session, 'STEP_FINISHED', 'author');
     await this.#close(author, 'done');
-    if (step) this.#steps.update(step.id, { state: 'done', cost: this.#stepCost(step) ?? 0 });
+    if (step) this.#steps.update(step.id, { state: 'done', cost: this.#stepCost(step) ?? 0, minutes: this.#stepMinutes(step) });
     this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: author.id });
     try {
       await this.#effects.captureHandover({ workdir: author.input.workdir, role: 'author', model: author.input.model, ticket: id, sessionId: author.id });

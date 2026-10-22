@@ -62,9 +62,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
 
   function engineOf(registry: Registry): FlowEngine | undefined {
     if (engine || !config || !store) return engine;
+    const made = (options.effects ?? ((c) => realEffects(c, { env })))(config);
+    const flow = config;
     engine = new FlowEngine({
       store, inbox: new InboxStore(store.db), registry, config,
-      effects: (options.effects ?? ((c) => realEffects(c, { env })))(config),
+      // A step's siblings are planned as a session's are, then adapted to its kind (lane 23).
+      effects: made.siblings ? made : { ...made, siblings: ({ ticket, service, workdir }) => siblingsOf({ ticket, service: service.name, workdir }, flow) },
       clean: (text) => cleanText(text, cleanOptions()),
     });
     engine.startTimer();
@@ -78,6 +81,35 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
 
   const stateDir = (): string => env.CLEARED_V2_STATE_DIR || join(env.XDG_STATE_HOME || join(env.HOME || homedir(), '.local', 'state'), 'cleared-v2');
 
+  // A service's base exported under `root`, or undefined, its error logged by name only.
+  async function exported(flow: FlowConfig, name: string, root: string, only?: string) {
+    const source = workspaceOf(flow).services.find((candidate) => candidate.name === name);
+    if (!source) return undefined;
+    try {
+      return await exportBase({ project: source.dir, base: source.base, root, ...(only === undefined ? {} : { only }) });
+    } catch (error) {
+      console.error(`cleared-v2: the base of ${name} cannot be read (${error instanceof Error ? error.name : typeof error})`);
+      return undefined;
+    }
+  }
+
+  // The siblings of a session on `service`: the other services, and its own
+  // when it runs, real from their checkouts or bases, or fakes of their contracts.
+  async function siblingsOf(input: { readonly ticket: string; readonly service: string; readonly workdir: string }, flow: FlowConfig) {
+    return planSiblings({
+      services: workspaceOf(flow).services, own: input.service, ownCheckout: input.workdir,
+      // A ticket checkout of another service is a plain folder the flow made.
+      checkoutOf: (name) => {
+        const dir = join(flow.workdirRoot, input.ticket, name);
+        return lstatSync(dir, { throwIfNoEntry: false })?.isDirectory() ? dir : undefined;
+      },
+      baseOf: (name) => exported(flow, name, join(stateDir(), 'siblings', name)),
+      contractPort: (file) => {
+        try { return contractPort(readContract(readFileSync(file, 'utf8'), file)); } catch { return undefined; }
+      },
+    });
+  }
+
   // What the flow did not say: the session's service, its siblings, the
   // project's skills. A base that cannot be read leaves its sibling, or the
   // skills, out; its error is logged by name only.
@@ -86,29 +118,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     const service = input.service ?? workspace.services[0]?.name ?? '';
     const own = workspace.services.find((candidate) => candidate.name === service);
     if (!own) throw new Error(`${service} is not a service of the workspace ${workspace.id}`);
-    const exported = async (name: string, root: string, only?: string) => {
-      const source = workspace.services.find((candidate) => candidate.name === name);
-      if (!source) return undefined;
-      try {
-        return await exportBase({ project: source.dir, base: source.base, root, ...(only === undefined ? {} : { only }) });
-      } catch (error) {
-        console.error(`cleared-v2: the base of ${name} cannot be read (${error instanceof Error ? error.name : typeof error})`);
-        return undefined;
-      }
-    };
-    const siblings = input.siblings ?? await planSiblings({
-      services: workspace.services, own: service, ownCheckout: input.workdir,
-      // A ticket checkout of another service is a plain folder the flow made.
-      checkoutOf: (name) => {
-        const dir = join(flow.workdirRoot, input.ticket, name);
-        return lstatSync(dir, { throwIfNoEntry: false })?.isDirectory() ? dir : undefined;
-      },
-      baseOf: (name) => exported(name, join(stateDir(), 'siblings', name)),
-      contractPort: (file) => {
-        try { return contractPort(readContract(readFileSync(file, 'utf8'), file)); } catch { return undefined; }
-      },
-    });
-    const skills = input.skills ?? (await exported(service, join(stateDir(), 'skills', service), '.claude/skills'))?.dir;
+    const siblings = input.siblings ?? await siblingsOf({ ticket: input.ticket, service, workdir: input.workdir }, flow);
+    const skills = input.skills ?? (await exported(flow, service, join(stateDir(), 'skills', service), '.claude/skills'))?.dir;
     return { ...input, service, siblings, ...(skills === undefined ? {} : { skills }) };
   }
 

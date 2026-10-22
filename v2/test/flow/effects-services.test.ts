@@ -71,3 +71,28 @@ test('what a head changes is read in its service\'s checkout, against that servi
   assert.match(changed.diff, /\+info: \{\}/);
   await assert.rejects((flow.changes as NonNullable<typeof flow.changes>)({ ticket: TICKET.id, head: '--output=x', service: filter }), /not a commit/);
 });
+
+// Lane 23: what a step's branch changes, fetched out of its checkout as publish does.
+test('a step\'s branch is read against its service\'s base: its files, the contract\'s diff and blob, and the contract as committed in the snapshot', async () => {
+  const { flow, filter, root } = world();
+  const service = { ...filter, contract: { format: 'openapi' as const, path: 'contract/openapi.yaml' } };
+  const { workdir } = await flow.prepareWorkdir({ ticket: TICKET, role: 'author', service });
+  const read = flow.stepChanges as NonNullable<typeof flow.stepChanges>;
+  const before = await read({ ticket: TICKET.id, service, workdir });
+  assert.deepEqual(before.files, []);
+  assert.equal(before.contract?.diff, '');
+  assert.match(before.contract?.blob ?? '', /^[0-9a-f]{40}$/);
+  writeFileSync(join(workdir, 'contract', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: {}\n');
+  gitIn(workdir, ['commit', '-q', '-am', 'The contract gains its info']);
+  writeFileSync(join(workdir, 'contract', 'openapi.yaml'), 'not committed\n');
+  const snapshot = join(root, 'work', 'LOCAL-4', '.validated', 'step-1-1');
+  const after = await read({ ticket: TICKET.id, service, workdir, snapshot });
+  assert.deepEqual(after.files, ['contract/openapi.yaml']);
+  assert.match(after.contract?.diff ?? '', /\+info: \{\}/);
+  assert.notEqual(after.contract?.blob, before.contract?.blob);
+  assert.equal(after.contract?.snapshot, join(snapshot, 'openapi.yaml'));
+  assert.equal(readFileSync(join(snapshot, 'openapi.yaml'), 'utf8'), 'openapi: 3.1.0\ninfo: {}\n', 'what is committed, not the working file');
+  assert.equal((await read({ ticket: TICKET.id, service: filter, workdir })).contract, null, 'a service without a contract');
+  writeFileSync(join(workdir, '.git', 'objects', 'info', 'alternates'), '/elsewhere/objects\n');
+  await assert.rejects(read({ ticket: TICKET.id, service, workdir }), /alternates/);
+});
