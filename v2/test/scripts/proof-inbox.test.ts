@@ -6,7 +6,7 @@
 // plan, then the releases whose checks are green.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answerFor, inboxAction, insideCheckout, morningAction, type InboxEntry } from '../../scripts/proof-inbox.ts';
+import { answerFor, inboxAction, insideCheckout, leftForOwner, morningAction, type InboxEntry } from '../../scripts/proof-inbox.ts';
 
 const target = 'rm -r /tmp/cleared-proof-scratch';
 
@@ -76,4 +76,31 @@ test('what the morning leaves: pending or failed checks, questions, and the rele
   assert.deepEqual(morningAction([release('release:1', 'passed')], { releases: false, plan: true }), { kind: 'wait', left: ['release:1 (the owner approves)'] });
   assert.deepEqual(morningAction([{ id: 'plan:p1', kind: 'plan', ticket: 'lead' }], { releases: true, plan: false }), { kind: 'wait', left: ['plan:p1 (the owner approves)'] });
   assert.deepEqual(morningAction([], { releases: true, plan: true }), { kind: 'wait', left: [] });
+});
+
+// Lane 29: the kinds of the replanned milestone 2 in the morning rule.
+const sessionPlan = (id: string, confidence: 'low' | 'medium' | 'high', ticket = 'LOCAL-4'): InboxEntry => ({ id, kind: 'session_plan', ticket, session: `s-${id}`, confidence });
+
+test('a session plan that waits gets its Go in the morning, after the permissions and before the plan and the releases (lane 29)', () => {
+  // A medium or low confidence holds its ticket until the morning; step 7 would wait for it forever.
+  const entries: InboxEntry[] = [release('release:1', 'passed'), sessionPlan('session_plan:s4', 'medium'), { id: 'plan:p1', kind: 'plan', ticket: 'lead' }];
+  assert.deepEqual(morningAction(entries, { releases: true, plan: true }), { kind: 'session_plan', id: 'session_plan:s4', session: 's-session_plan:s4' });
+  assert.deepEqual(morningAction([{ id: 'permission:s1:r1', kind: 'permission', ticket: 'LOCAL-2', command: 'npm test' }, ...entries], { releases: true, plan: true }).kind, 'permission');
+  // The owner who approves in the morning gives the Go too.
+  assert.deepEqual(morningAction([sessionPlan('session_plan:s4', 'low')], { releases: false, plan: false }), { kind: 'wait', left: ['session_plan:s4 (the owner approves)'] });
+});
+
+test('a knowledge item is left to the owner and a contract item to the multi-service proof: neither is answered in the morning (lane 29)', () => {
+  const entries: InboxEntry[] = [
+    { id: 'knowledge:k1', kind: 'knowledge', ticket: 'LOCAL-2' },
+    { id: 'contract:c1', kind: 'contract', ticket: 'LOCAL-9' },
+    release('release:1', 'pending'),
+  ];
+  assert.deepEqual(morningAction(entries, { releases: true, plan: true }), {
+    kind: 'wait',
+    left: ['knowledge:k1 (knowledge, for the owner)', 'contract:c1 (a contract, validated in the multi-service proof only)', 'release:1 (checks pending)'],
+  });
+  // They do not hold the releases back.
+  assert.deepEqual(morningAction([...entries.slice(0, 2), release('release:2', 'passed')], { releases: true, plan: true }), { kind: 'release', id: 'release:2' });
+  assert.deepEqual(leftForOwner([...entries, { id: 'knowledge:k2', kind: 'knowledge', ticket: 'LOCAL-3' }]), { knowledge: 2, contract: 1 });
 });

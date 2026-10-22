@@ -14,7 +14,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readApprovalRecord } from '../../src/approval/record.ts';
-import { REHEARSAL_PLAN, brokerRequest, ghStub, freePort, rehearsalScript, writeValidation, type Forge } from '../../scripts/proof-rehearsal.ts';
+import { REHEARSAL_PLAN, RESERVED_PORTS, brokerRequest, ghStub, freePort, rehearsalScript, writeValidation, type Forge } from '../../scripts/proof-rehearsal.ts';
 
 const DUE = '2026-10-23T06:00:00.000Z';
 const script = rehearsalScript({ due: DUE });
@@ -65,7 +65,7 @@ test('an event turn whose state lists the commitments does not record them again
 
 test('the gh stand-in opens one pull request per branch, lists the open one, passes its checks and gives its head', () => {
   let forge: Forge = { next: 101, prs: [] };
-  const head = (branch: string) => (branch === 'local-1' ? 'abc123' : undefined);
+  const head = (branch: string, _repo: string) => (branch === 'local-1' ? 'abc123' : undefined);
   const gh = (...args: string[]) => {
     const out = ghStub(args, forge, head);
     forge = out.forge;
@@ -93,7 +93,28 @@ test('the lock stand-in reads the requests of release-request.mjs and of the app
   assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_release', ticket: 'LOCAL-1', pr: 101, announcement: 'What changes' })), { op: 'merge', ticket: 'LOCAL-1', pr: 101 });
   assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'status', ticket: 'LOCAL-1' })), { op: 'status', ticket: 'LOCAL-1', pr: null });
   assert.deepEqual(brokerRequest('nonsense'), { op: 'invalid', ticket: '', pr: null });
-  assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_rollback', ticket: 'LOCAL-1' })), { op: 'invalid', ticket: 'LOCAL-1', pr: null });
+  // The train's reverse rollback (release/train.ts), through approval/broker.ts.
+  assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_rollback', ticket: 'LOCAL-1' })), { op: 'rollback', ticket: 'LOCAL-1', pr: null });
+  assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_rollback' })), { op: 'invalid', ticket: '', pr: null });
+});
+
+test('the gh stand-in keeps each repository apart: one branch name on two services gives two pull requests (lane 29)', () => {
+  let forge: Forge = { next: 101, prs: [] };
+  const heads: Record<string, string> = { 'rehearsal/guestbook local-1': 'aaa', 'rehearsal/filter-api local-1': 'fff' };
+  const gh = (...args: string[]) => {
+    const out = ghStub(args, forge, (branch, repo) => heads[`${repo} ${branch}`]);
+    forge = out.forge;
+    return out;
+  };
+  const list = (repo: string) => JSON.parse(gh('pr', 'list', '--repo', repo, '--head', 'local-1', '--state', 'open', '--json', 'number,url').stdout);
+  assert.equal(gh('pr', 'create', '--repo', 'rehearsal/filter-api', '--base', 'main', '--head', 'local-1', '--title', 'LOCAL-1: x', '--body-file', '/tmp/x').stdout, 'https://forge.invalid/rehearsal/filter-api/pull/101\n');
+  assert.deepEqual(list('rehearsal/guestbook'), [], 'the filter API\'s pull request is not the guestbook\'s');
+  assert.equal(gh('pr', 'create', '--repo', 'rehearsal/guestbook', '--base', 'main', '--head', 'local-1', '--title', 'LOCAL-1: x', '--body-file', '/tmp/x').stdout, 'https://forge.invalid/rehearsal/guestbook/pull/102\n');
+  assert.deepEqual(list('rehearsal/filter-api'), [{ number: 101, url: 'https://forge.invalid/rehearsal/filter-api/pull/101' }]);
+  // The approval's `gh pr view` names no repository: the number is unique across the forge.
+  assert.deepEqual(JSON.parse(gh('pr', 'view', '101', '--json', 'headRefOid').stdout), { headRefOid: 'fff' });
+  assert.deepEqual(JSON.parse(gh('pr', 'view', '102', '--json', 'headRefOid').stdout), { headRefOid: 'aaa' });
+  assert.deepEqual(forge.prs.map((pr) => [pr.number, pr.repo]), [[101, 'rehearsal/filter-api'], [102, 'rehearsal/guestbook']]);
 });
 
 test('the lock stand-in keeps the request for agreement as ask-validation.sh does, so the approval finds it', () => {
@@ -110,8 +131,31 @@ test('the lock stand-in keeps the request for agreement as ask-validation.sh doe
 });
 
 test('a free port is never a reserved one nor one in use', () => {
-  const reserved = [80, 443, 8787, 8788, 8790, 8791, 8792, 8793];
+  // 8794 and 8795: the preview listener's and the filter API's on this server (lane 29).
+  const reserved = [80, 443, 8787, 8788, 8790, 8791, 8792, 8793, 8794, 8795];
+  for (const port of reserved) assert.ok(RESERVED_PORTS.has(port), String(port));
   const port = freePort(new Set([9700, 9701]), () => 0);
   assert.equal(port, 9702);
   assert.ok(!reserved.includes(port));
+});
+
+// The authors of the replanned milestone 2 (lane 29): each proposes its
+// session plan, waits for the Go, then works and reports its changes.
+const hostCalls = (steps: readonly unknown[]) => steps.flatMap((s) => (typeof s === 'object' && s !== null && 'hostCall' in s ? [(s as { hostCall: { name: string; input: { confidence?: string } } }).hostCall] : []));
+
+test('every rehearsal author proposes its session plan before it works, and reports its changes at the end (lane 29)', () => {
+  for (const steps of [script.author.steps, ...(script.authors ?? [])]) {
+    const calls = hostCalls(steps);
+    assert.deepEqual(calls.map((c) => c.name), ['propose_session_plan', 'report_changes']);
+    const proposal = steps.findIndex((s) => 'hostCall' in s && s.hostCall.name === 'propose_session_plan');
+    const wait = steps.findIndex((s) => 'awaitMessage' in s);
+    assert.ok(proposal >= 0 && wait > proposal, 'the turn ends on the plan, and the Go is a message');
+    assert.ok(steps.slice(wait).some((s) => 'hostCall' in s && s.hostCall.name === 'report_changes'), 'the report comes after the Go');
+  }
+  // Most are high, so the lead's Go starts them by the plan; one is medium, so the morning gives its Go.
+  const confidences = [script.author.steps, ...(script.authors ?? [])].map((steps) => hostCalls(steps)[0]?.input.confidence);
+  assert.ok(confidences.includes('medium'));
+  assert.ok(confidences.filter((c) => c === 'high').length >= 2);
+  // One author leaves a handover with a lesson: the morning counts the knowledge item and leaves it to the owner.
+  assert.ok([script.author, ...(script.authorRules ?? [])].some((a) => a.handover?.includes('## Lessons for the workspace')), 'a handover with a lesson');
 });
