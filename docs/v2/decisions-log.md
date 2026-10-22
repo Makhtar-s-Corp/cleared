@@ -2401,5 +2401,6 @@ A visual reference exists outside the repository. It is inspiration only; nothin
   - **No route enables, disables or edits a schedule** (the API lane 17 fixed has none): delete it and create it again.
   - **The schedule's week cap** is read when a run starts. Its tickets then keep to the runner's own week stop.
   - **A goal schedule's plan** is approved only when the lead proposes it under the goal's id. Otherwise it waits for the owner.
+- Pull request: 222, against `v2`.
 - **The requirements matrix.** C7 and C12 (partial: the screens are lane 27's), C8 and M2 (the notifications), and this lane's own lines P32, P33 and P34.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-recipes-schedules`.
