@@ -10,8 +10,8 @@ A web page that lists guestbook entries and adds one, on Postgres. Cleared v2's 
 | Route | What it does |
 | --- | --- |
 | `GET /` | The page: the entries, oldest first, then the form. |
-| `POST /entries` | Adds an entry from the form (`name` up to 80 characters, `message` up to 500). Answers 303 to `/` when stored, or 400 with the page and the error when a field is empty or too long. Answers 415 for a body that is not a form, and 413 for a body over 16 KiB. |
-| `GET /health` | `200 {"status":"ok"}` while the database answers within 2 seconds, else `503 {"status":"unavailable"}`. |
+| `POST /entries` | Adds an entry from the form (`name` up to 80 characters, `message` up to 500). Answers 303 to `/` when stored, or 400 with the page and the error when a field is empty or too long. Answers 415 for a body that is not a form, and 413 for a body over 16 KiB. With a filter (`FILTER_URL`), the entry is checked first: one it refuses is 400 with the words it names, and when the filter fails or takes more than 2 seconds the entry is 503 and not stored. |
+| `GET /health` | `200 {"status":"ok"}` while the database answers within 2 seconds, else `503 {"status":"unavailable"}`. It never calls the filter. With `PROOF_BREAK_HEALTH` on, `503 {"status":"broken","reason":"PROOF_BREAK_HEALTH"}`. |
 
 One table, `entries (id, name, message, created_at)`, which the app creates if it is missing when it starts.
 
@@ -24,9 +24,17 @@ DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres npm start
 
 `HOST` defaults to `127.0.0.1` and `PORT` to `8793`. Ports 80, 443, 8787, 8788 and 8790 are refused.
 
+## The filter API, when `FILTER_URL` is set
+
+The guestbook consumes the filter API (`examples/filter-api/` in the Cleared repository, its own repository for the demo): with `FILTER_URL` set to its address, for example `http://127.0.0.1:8795`, every entry is sent to its `POST /check` as `{"text": "<name>\n<message>"}` before it is stored. Unset, the filter is never called, as before. Nothing is stored unchecked: a filter that answers anything but its contract's `200 {"ok", "words"}`, or nothing within 2 seconds, makes the entry a 503 with the form kept. `FILTER_URL` is an http or https address with no credentials, no query and no fragment. The deploy watcher passes no `FILTER_URL` to the app it runs.
+
+## The proof's switch: `PROOF_BREAK_HEALTH`
+
+`PROOF_BREAK_HEALTH` in `src/config.ts` is `false` as committed. The multi-service proof's second ticket sets it to `true` in a change of its own: once that change is deployed, `/health` answers 503 and the release watch rolls the guestbook back. `PROOF_BREAK_HEALTH=1` in the environment turns it on by hand. Nothing else changes: the page and the form still work.
+
 ## Tests
 
-The tests need a Postgres database in `DATABASE_URL`. Each test file works in a schema of its own, which it drops at the end. Without `DATABASE_URL` the database tests fail; they do not skip. For example, with a throwaway container on a loopback port that `ss -ltn` shows free:
+The tests need a Postgres database in `DATABASE_URL`. The filter's tests run a fake filter API of their own (`test/helpers/fake-filter.ts`) on a port the system picks. Each test file works in a schema of its own, which it drops at the end. Without `DATABASE_URL` the database tests fail; they do not skip. For example, with a throwaway container on a loopback port that `ss -ltn` shows free:
 
 ```sh
 docker run -d --name cleared-v2-guestbook-test --label cleared.dev=v2 --label cleared.example=guestbook \
@@ -36,7 +44,7 @@ npm run typecheck
 docker ps -aq --filter label=cleared.dev=v2 --filter label=cleared.example=guestbook --filter name=cleared-v2-guestbook-test | xargs -r docker rm -f
 ```
 
-The CI workflow, `.github/workflows/checks.yml`, does the same with a Postgres service container. GitHub runs it once this directory is the root of a repository.
+The CI workflow, `.github/workflows/checks.yml`, does the same with a Postgres service container. GitHub runs it once this directory is the root of a repository. In the Cleared repository, `.github/workflows/examples.yml` runs the same steps for both examples.
 
 ## The deployment: `deploy/watch.ts`
 
@@ -77,3 +85,43 @@ The owner creates this ticket in the Cleared app, then moves it to Todo. It chan
 > - The page lists the entries from the newest to the oldest.
 > - A test adds three entries one after the other and checks that the list gives them back newest first.
 > - `npm test` and `npm run typecheck` pass.
+
+## The proof's tickets, with the filter API
+
+Cleared v2's multi-service proof (`docs/v2/milestone-2-plan.md` in the Cleared repository, section 2.2) runs in a workspace of two services, the guestbook and the filter API (`examples/workspace.conf` there). The owner creates these three tickets in the Cleared app, in that order, naming the services each one touches.
+
+**Ticket 1**, on the guestbook and the filter API:
+
+> **Title:** An entry the filter flags is held for review instead of refused
+>
+> **Description:** Today an entry with a word of the filter's list is refused, and the visitor loses it. The filter API's `POST /check` should also answer a `severity`: `none` when `ok` is true, `review` otherwise. The guestbook stores an entry whose severity is `review` as held: it is not shown on the page, and the visitor reads that the entry waits for review.
+>
+> **Acceptance criteria:**
+> - `contract/openapi.yaml` of the filter API gives `severity` in the answer of `POST /check`, with its examples, and the contract test passes.
+> - The filter API answers `severity`, with a test for each value.
+> - The guestbook stores a flagged entry as held and leaves it off the page, with a test using a fake filter.
+> - `npm test` and `npm run typecheck` pass in both projects.
+
+**Ticket 2**, on the guestbook and the filter API, the proof's provoked failure:
+
+> **Title:** The filter refuses "casino", and the guestbook's refusal lists the words in bold
+>
+> **Description:** Add `casino` to the filter API's `words.txt`. In the guestbook, show each word of a refusal in bold. This ticket also sets `PROOF_BREAK_HEALTH` to `true` in the guestbook's `src/config.ts`: it is the proof's provoked failure, and the guestbook's release must be rolled back.
+>
+> **Acceptance criteria:**
+> - The filter API refuses a text holding "Casino", with a test.
+> - The guestbook's refusal shows each word in `<strong>`, with a test.
+> - `PROOF_BREAK_HEALTH` is `true` in the guestbook's `src/config.ts`, and its config test says so.
+> - `npm test` and `npm run typecheck` pass in both projects.
+
+**Ticket 3**, on the filter API only:
+
+> **Title:** The filter API answers where each word was found
+>
+> **Description:** `POST /check` also answers `positions`: for each word found, the character offsets where it starts in the text. Change the contract and the app; the guestbook is not part of this ticket.
+>
+> **Acceptance criteria:**
+> - `contract/openapi.yaml` gives `positions` in the answer of `POST /check`, with its examples, and the contract test passes.
+> - `npm test` and `npm run typecheck` pass.
+
+The third ticket changes the contract the guestbook consumes without a step on the guestbook, so Cleared blocks its release card before approval and proposes to extend the ticket to the guestbook or keep the contract backward compatible.

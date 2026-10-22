@@ -1,0 +1,21 @@
+{
+  "name": "cleared-example-filter-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The second demo project of Cleared v2: a word filter the guestbook consumes. TypeScript run by Node's type stripping, without a build step.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "watch": "node deploy/watch.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}
