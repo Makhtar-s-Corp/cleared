@@ -174,13 +174,15 @@ export type ServiceLockOptions = {
 };
 
 // The ticket store of one service's state folder: the same ledger and the
-// same signer, its validations record. Its recordApproval signs the owner's
-// move bound to that record, which that service's merge-pr.sh reads.
-function serviceStore(db: DatabaseSync, environment: Environment, stateDir: string, now: () => Date): LocalTicketStore {
+// same signer, its validations record. Its recordApproval signs the
+// approver's move bound to that record, which that service's merge-pr.sh
+// reads: the owner, or the user a human:<user> sensitivity names
+// (decision 24), whom that service's lock trusts as its owner_id.
+function serviceStore(db: DatabaseSync, environment: Environment, stateDir: string, now: () => Date, ownerId = environment.conf.ownerId): LocalTicketStore {
   const { conf, signer, users } = environment;
   return new LocalTicketStore(db, {
     stateDir, users, now: () => now().toISOString(), states: conf.states,
-    ...(conf.ownerId ? { ownerId: conf.ownerId } : {}), ...(conf.publicKey ? { publicKey: conf.publicKey } : {}), ...(signer ? { signer } : {}),
+    ...(ownerId ? { ownerId } : {}), ...(conf.publicKey ? { publicKey: conf.publicKey } : {}), ...(signer ? { signer } : {}),
   });
 }
 
@@ -220,7 +222,8 @@ export function serviceLocks(db: DatabaseSync, workspace: WorkspaceConfig, optio
         return undefined;
       },
       async sign(input) {
-        await serviceStore(db, environment(), where.stateDir, now).recordApproval(input.ticket, input);
+        const pieces = environment();
+        await serviceStore(db, pieces, where.stateDir, now, approverOf(service, pieces.conf.ownerId)).recordApproval(input.ticket, input);
       },
       async release(input) {
         return outcomeOf(await broker.requestRelease({ ticket: input.ticket, pr: input.pr, announcement: input.announcement, fromQueue: true }));
@@ -233,6 +236,77 @@ export function serviceLocks(db: DatabaseSync, workspace: WorkspaceConfig, optio
     made.set(service.name, lock);
     return lock;
   };
+}
+
+// ---------------------------------------------------------------- the approver per service (decision 24)
+
+// Who approves a service's release: the user its human:<user> sensitivity
+// names, else the owner its lock trusts ([tracker] owner_id).
+export function approverOf(service: Pick<ServiceConfig, 'sensitivity'>, ownerId: string | undefined): string | undefined {
+  return service.sensitivity.startsWith('human:') ? service.sensitivity.slice('human:'.length) : ownerId;
+}
+
+const and = (names: readonly string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+// The refusals of decision 24, before anything is held. Only a ticket on a
+// human:<user> service is checked here; the others are the owner's, as the
+// approval writer already says. A ticket whose services name two
+// approvers cannot be approved in one gesture (409); a user other than the
+// one named answers 403, with that user's name.
+export async function checkApprover(
+  users: UserDirectory, by: string, services: readonly Pick<ServiceConfig, 'name' | 'sensitivity'>[], ownerId: string | undefined,
+): Promise<void> {
+  const human = services.filter((service) => service.sensitivity.startsWith('human:'));
+  if (human.length === 0) return;
+  const approvers = new Map<string, string[]>();
+  for (const service of services) {
+    const name = approverOf(service, ownerId) ?? 'the owner, whom no [tracker] owner_id names';
+    approvers.set(name, [...(approvers.get(name) ?? []), service.name]);
+  }
+  if (approvers.size > 1) {
+    const who = [...approvers].map(([name, names]) => `${name} (${names.join(', ')})`);
+    throw new ApprovalError('state', `This release needs the approval of ${and(who)}: one approval cannot be both. Split the ticket by service, or give its services one approver.`);
+  }
+  const [approver] = [...approvers.keys()] as [string];
+  const user = await users.get(by);
+  if (!user) throw new ApprovalError('user', 'unknown user');
+  if (user.name !== approver) {
+    throw new ApprovalError('owner', `Only ${approver} approves the release of ${and(human.map((service) => service.name))}: its sensitivity is human:${approver}.`);
+  }
+}
+
+// The gate of the one-service path, where the registry's approval writer
+// signs for the owner of the service's own lock: a human:<user> service
+// whose lock trusts another owner_id is refused as not set up, since its
+// merge-pr.sh would refuse the user's move.
+export type ApproverGate = (input: { readonly ticket: string; readonly by: string; readonly users: UserDirectory }) => Promise<void>;
+
+export function approverGate(read: () => { readonly workspace: WorkspaceConfig | undefined; readonly ownerId: string | undefined }): ApproverGate {
+  let known: ReturnType<typeof read> | undefined;
+  return async ({ by, users }) => {
+    known ??= read();
+    const { workspace, ownerId } = known;
+    if (!workspace || workspace.services.length !== 1) return;
+    const service = workspace.services[0] as ServiceConfig;
+    const approver = approverOf(service, ownerId);
+    if (service.sensitivity.startsWith('human:') && approver !== ownerId) {
+      throw new ApprovalError('setup', `${service.name}'s sensitivity is ${service.sensitivity}, and its lock trusts [tracker] owner_id = ${ownerId ?? '(none)'}: the lock would refuse ${approver}'s move. Set owner_id = ${approver} in its agents.conf, or change the sensitivity.`);
+    }
+    await checkApprover(users, by, [service], ownerId);
+  };
+}
+
+// The gate as the service's environment says: its workspace and its lock's owner_id, read once.
+export function environmentApprovers(env: NodeJS.ProcessEnv = process.env): ApproverGate {
+  return approverGate(() => {
+    let workspace: WorkspaceConfig | undefined;
+    try {
+      workspace = loadFlowConfig(env)?.workspace;
+    } catch {
+      workspace = undefined;                                             // the flow module stops the service on that
+    }
+    return { workspace, ownerId: readLockConf(env).ownerId };
+  });
 }
 
 // ---------------------------------------------------------------- the approval of a train
@@ -295,8 +369,9 @@ export class TrainApprovals {
     const { db, environment } = this.#options;
     const now = this.#options.now ?? (() => new Date());
     const stateDir = lockPaths(this.#options.workspace, this.#options.env ?? process.env).get(service)?.stateDir ?? environment.stateDir;
+    const ownerId = approverOf(this.#service(service), environment.conf.ownerId);
     const writer = new LockApprovalWriter({
-      store: serviceStore(db, environment, stateDir, now), db, users: environment.users, proof: environment.proof, ownerId: environment.conf.ownerId, now, broker: null,
+      store: serviceStore(db, environment, stateDir, now, ownerId), db, users: environment.users, proof: environment.proof, ownerId, now, broker: null,
       ...(this.#options.timers ? { timers: this.#options.timers } : {}), ...(this.#options.graceMs !== undefined ? { graceMs: this.#options.graceMs } : {}),
     });
     this.#writers.set(service, writer);
@@ -315,6 +390,7 @@ export class TrainApprovals {
     if (train.state === 'blocked' && train.blocked) throw new TrainBlocked(train.blocked.reason, train.blocked.proposal);
     const first = train.stops[0];
     if (!first) throw new ApprovalError('state', 'the train has no service');
+    await checkApprover(this.#options.environment.users, request.by, train.stops.map((stop) => this.#service(stop.service)), this.#options.environment.conf.ownerId);
     const shown = train.stops.map((stop) => ({ pr: stop.pr.number, head: stop.head })).sort(byHead);
     const asked = [...request.heads].map(({ pr, head }) => ({ pr, head })).sort(byHead);
     if (request.requestedAt !== first.requestedAt || !sameVersions(shown, asked)) throw new ApprovalError('version', 'the versions asked for are not the ones the card showed: review again');
