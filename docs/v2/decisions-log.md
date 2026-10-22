@@ -1543,5 +1543,19 @@ The choices the lane makes:
   - `choices-reference-{session,lead-and-plan,inbox}.png`, rendered from `/tmp/cleared-reference/`.
   - The app ran on an ephemeral `127.0.0.1` port with the fixture sources. There was no page error, no request off the origin, and no horizontal overflow.
   - The references have no question with options. The comparison was against `origin/v2`'s own question renderings, captured the same way, and the tokens of the reference's request card. The lead's and the inbox's questions keep their earlier look, apart from the descriptions, which the lead now shows. A question that no longer waits on the session screen loses its amber.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on these captures and the references. Taken:
+  - the enabled Send drew its label in its own fill's colour, so it was unreadable: the ink fill and its label are now set by the component;
+  - the question's header pill, invisible on the amber surface, now has the highlight fill;
+  - a 14 px question on the session screen, and a 12 px gap above the options;
+  - in the answered state, the check hangs in the gutter so the labels share one edge, and the answered line is quieter, under a hairline;
+  - one field ring for the free answer on every screen;
+  - a readable disabled Send in dark;
+  - a hairline frame for a settled question in dark;
+  - plain wrapping for the lead's question in its bubble.
+  Not taken:
+  - "Recommended" as a filled tag: it keeps the underlined mark of lane 10's inbox;
+  - quieter option rings in the lead's bubble: the options are the gesture the bubble waits for;
+  - a narrower inbox column and the question outside the amber card: both are lane 10's design, unchanged here;
+  - the inbox bar's own Send: it is the bar's, not the component's.
 - **Left as it was:** answering the lead's question from the inbox (issue 168, item 3): the inbox still sends the person to the lead's screen. That is the inbox's bar, outside this lane's question detail.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-choices`.

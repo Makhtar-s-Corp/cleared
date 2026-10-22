@@ -80,7 +80,7 @@
 .questions .choice-options { display: grid; gap: 8px; }
 .questions .choice { min-height: 44px; padding: 10px 14px; box-shadow: var(--option-ring); }
 .questions .choice-free { margin-top: 2px; font-size: 13px; }
-.questions .choice-free-input { height: 44px; box-shadow: var(--field-ring); }
+.questions .choice-free-input { height: 44px; }
 /* the lead's question is read here, answered on the lead's screen */
 .questions.read .choice-line { padding: 10px 0; border-top-color: var(--awaiting-highlight); }
 .questions.read .choice-line .choice-label { font-weight: 500; color: var(--text); }

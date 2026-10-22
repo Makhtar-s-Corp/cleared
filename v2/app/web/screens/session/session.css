@@ -69,6 +69,8 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .request.question.waits { background: var(--awaiting-surface); }
 /* amber only while the question waits */
 .request.question:not(.waits) { background: var(--surface-muted); box-shadow: var(--e-outline); }
+:root[data-theme="dark"] .request.question:not(.waits) { box-shadow: 0 0 0 1px var(--hairline); }
+.request .choice-text { font-size: 14px; }
 .request-title { margin-bottom: 4px; font-weight: 600; overflow-wrap: anywhere; }
 .request-why { margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); }
 .request-why span { display: block; }
