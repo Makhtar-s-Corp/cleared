@@ -148,10 +148,12 @@ test('the checkout at Take over and at Give back: a change, a new file, a commit
     writeFileSync(join(c.dir, 'run.sh'), '#!/bin/sh\necho run\necho twice\n');
     git(c.dir, 'commit', '-qam', 'by hand');
     writeFileSync(join(c.dir, 'NOTES.txt'), 'one\ntwo\n');
+    symlinkSync('src/entries.ts', join(c.dir, 'entries-link.ts'));
 
     const given = await c.run<{ files: { path: string; before: string | null; after: string | null; added: number; removed: number }[] }>(giveCommand(taken.head), JSON.stringify(Object.keys(taken.files)));
     const byPath = Object.fromEntries(given.files.map((f) => [f.path, f]));
-    assert.deepEqual(Object.keys(byPath).sort(), ['NOTES.txt', 'run.sh', 'src/entries.ts']);
+    assert.deepEqual(Object.keys(byPath).sort(), ['NOTES.txt', 'entries-link.ts', 'run.sh', 'src/entries.ts']);
+    assert.equal(byPath['entries-link.ts']?.after, sha('symlink:src/entries.ts'), 'a link is hashed by where it points, not followed');
     assert.deepEqual(byPath['run.sh'], { path: 'run.sh', before: sha('#!/bin/sh\necho run\n'), after: sha('#!/bin/sh\necho run\necho twice\n'), added: 1, removed: 0 });
     assert.deepEqual(byPath['NOTES.txt'], { path: 'NOTES.txt', before: null, after: sha('one\ntwo\n'), added: 2, removed: 0 });
     assert.equal(byPath['src/entries.ts']?.after, sha('export const order = "oldest";\n'), 'the undone change is seen');

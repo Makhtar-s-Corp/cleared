@@ -35,7 +35,8 @@
 // CLAUDE.md) before it renames. A stale hash answers 409 with the current
 // one. Each save is journaled as `cleared.human_edit`, never with the
 // content; a live session is told at once through the engine's send, a
-// taken-over one at Give back (flow/takeover.ts).
+// taken-over one at Give back (flow/takeover.ts), and one whose plan waits
+// for its Go is not told (the Go tells it; the reviewer's prompt names it).
 //
 // A route matches a fixed number of segments (modules/registry.ts), so the
 // file route is one route per depth, up to FILE_DEPTH.
@@ -363,7 +364,10 @@ export function filesRoutes(deps: FilesDeps): Route[] {
       const counts = lineCounts(before, text);
       const edit = { path: human.clean(path), by: user, added: counts.added, removed: counts.removed, before: current.hash, after: written.hash, via: 'editor' as const };
       human.edited(detail.id, edit, taken !== undefined);
-      if (!taken) {
+      // A plan that waits for its Go is not interrupted: a message would
+      // make the author propose again (flow/plan-gate.ts); the Go tells it.
+      const plan = detail.state.plan;
+      if (!taken && !(plan && !plan.go)) {
         const notice = humanEditNotice(await userName(context.registry.users, user), [edit]);
         await engine.send(detail.id, notice, 'cleared').catch((error: unknown) =>
           console.error(`cleared-v2: session ${detail.id} could not be told of a save (${error instanceof Error ? error.name : typeof error})`));

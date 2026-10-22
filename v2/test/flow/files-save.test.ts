@@ -27,7 +27,7 @@ import type { SessionId } from '../../src/session/contract.ts';
 import { evaluate } from '../../src/session/policy.ts';
 import { HumanSide } from '../../src/terminal/human.ts';
 import { LocalContainer } from '../terminal/support.ts';
-import { finished, permission, setup, started, text, until, type Setup, type SetupOptions } from './support.ts';
+import { fakeEffects, finished, permission, setup, started, text, until, type Setup, type SetupOptions } from './support.ts';
 
 const PROOF = 'e'.repeat(64);
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -282,5 +282,26 @@ test('a save after the publish, while the review runs, or on an ended session an
     assert.equal(read(r, 'src/entries.ts'), 'export const order = "oldest";\n');
   } finally {
     await r.close();
+  }
+});
+
+test('a save while the session plan waits for its Go is journaled but not said: a message would make the author propose again', async () => {
+  const proposal: FakeStep = { hostCall: { toolCallId: 'plan-1', name: 'propose_session_plan', input: { steps: ['Sort the list'], files: ['src/entries.ts'], confidence: 'medium', reason: 'One function.' } } };
+  const settings = await fakeEffects([]).settings();
+  const plan = (t: Setup) => t.inbox.items().find((item) => item.kind === 'session_plan' && item.state === 'waiting');
+  const h = await harness({
+    scripts: { author: [started, proposal, finished(0.1), { awaitMessage: true }, started, finished(0.3)] },
+    config: { authorTools: true }, effects: { settings: async () => settings }, ready: (t) => plan(t) !== undefined,
+  });
+  try {
+    const before = said(h).length;
+    const answer = await h.save('src/entries.ts', { text: 'export const order = "newest";\n', hash: loaded(h, 'src/entries.ts') });
+    assert.equal(answer.status, 200);
+    assert.equal(humanEdits(h).length, 1, 'journaled');
+    await h.engine.settled();
+    assert.equal(said(h).length, before, 'nothing said to the author while its plan waits');
+    assert.ok(plan(h), 'the plan still waits, not replaced');
+  } finally {
+    await h.close();
   }
 });

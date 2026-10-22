@@ -97,13 +97,14 @@ out({ saved: true, hash: sha(text) });
 `;
 
 // The checkout at Take over: the commit, and the hash of each file that
-// differs from it (changed, deleted: null, or new and not ignored).
+// differs from it (changed, deleted: null, or new and not ignored). A link
+// is hashed by where it points, never followed.
 export const TAKE_PROGRAM = String.raw`
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto'), { execFileSync } = require('node:child_process');
 const [root] = process.argv.slice(1);
 const git = (...args) => execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', ...args], { maxBuffer: 64 * 1024 * 1024 }).toString('utf8');
 const list = (text) => text.split('\0').filter(Boolean);
-const hashOf = (rel) => { try { const p = path.join(root, rel); const s = fs.lstatSync(p); return s.isFile() ? crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex') : 'not-a-file'; } catch { return null; } };
+const hashOf = (rel) => { try { const p = path.join(root, rel); const s = fs.lstatSync(p); return crypto.createHash('sha256').update(s.isFile() ? fs.readFileSync(p) : s.isSymbolicLink() ? 'symlink:' + fs.readlinkSync(p) : 'not a file').digest('hex'); } catch { return null; } };
 const head = git('rev-parse', 'HEAD').trim();
 const files = {};
 for (const rel of new Set([...list(git('diff', '--name-only', '-z', 'HEAD')), ...list(git('ls-files', '--others', '--exclude-standard', '-z'))])) files[rel] = hashOf(rel);
@@ -122,8 +123,9 @@ const named = JSON.parse(fs.readFileSync(0, 'utf8') || '[]');
 const git = (...args) => execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', ...args], { maxBuffer: 64 * 1024 * 1024 });
 const list = (bytes) => bytes.toString('utf8').split('\0').filter(Boolean);
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const now = (rel) => { try { const p = path.join(root, rel); const s = fs.lstatSync(p); return s.isFile() ? sha(fs.readFileSync(p)) : 'not-a-file'; } catch { return null; } };
-const then = (rel) => { try { return sha(git('cat-file', 'blob', head + ':' + rel)); } catch { return null; } };
+const now = (rel) => { try { const p = path.join(root, rel); const s = fs.lstatSync(p); return sha(s.isFile() ? fs.readFileSync(p) : s.isSymbolicLink() ? 'symlink:' + fs.readlinkSync(p) : 'not a file'); } catch { return null; } };
+// At the commit, a link's blob is where it points.
+const then = (rel) => { try { const kind = git('ls-tree', head, '--', rel).toString('utf8').split(' ')[0]; const blob = git('cat-file', 'blob', head + ':' + rel); return sha(kind === '120000' ? Buffer.concat([Buffer.from('symlink:'), blob]) : blob); } catch { return null; } };
 const counts = {};
 for (const line of git('diff', '--numstat', '-z', head).toString('utf8').split('\0')) {
   const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
