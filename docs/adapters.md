@@ -279,6 +279,84 @@ doctor: all checks passed
 
 The whole output (274 lines, every docker command line and every stored event) is in the lane's pull request.
 
+### Host tools, context and login in a container (2026-10-22)
+
+Run on this server on 2026-10-22 by lane `v2-j2-runner-host-tools` with `node v2/scripts/doctor.ts host-tools lead`, which builds the session image first; the `claude-code` section of milestone 1 passed on the same image. The setup was the same as the run above: Claude Code 2.1.306, `@anthropic-ai/claude-agent-sdk` 0.3.306, zod 4.6.7 (now pinned), `claude-haiku-5-5`, objects labelled `cleared.dev=v2` only, and the service account's login named by `CLEARED_CLAUDE_CREDENTIALS`, mounted read only and never read by the lane or the doctor. The login check below used a token file the doctor wrote itself. The three sessions of the `host-tools` section reported 0.0017 USD (the lead), 0.0012 USD (the author) and 0 USD (the invalid login). The proxy saw `api.anthropic.com:443` only.
+
+What the run established (milestone 2 plan, section 13, lane 4's unknowns):
+
+- **An in-process MCP server works in the container with `settingSources: []`.** The runner passes `createSdkMcpServer({ name: 'cleared', tools, alwaysLoad: true, timeout })` in `mcpServers`. `system/init` lists `{"name":"cleared","status":"connected","source":"sdk"}` and the tool `mcp__cleared__ping`. The model called it with `{"word":"plum"}`, the host ran the handler, and the model replied with the code on the answer's first line.
+- **`tool()` takes a zod raw shape, not a JSON Schema** (`sdk.d.ts`: `tool<Schema extends AnyZodRawShape>`). The runner builds the shape from the host's schema subset with the image's zod (`v2/images/session/runner/schema.ts`).
+- **The call's tool use id.** The handler's second argument carries `_meta['claudecode/toolUseId']`, besides `signal`, `requestId` and the MCP transport's own keys. So `cleared.host_call` is journaled under the id of the `tool_use` block.
+- **Permission.** In `default` mode the CLI asks `canUseTool` for a host tool call; the policy answers `allow_once` under `lead.tools`.
+- **`getContextUsage()`**, ten calls of each detail between turns:
+  - Speed: `summary` had a median of 9 ms. `full` had a median of 10 ms, but its first call of a session took 0.6 s and 1 s in two runs.
+  - Fields: `totalTokens`, `maxTokens`, `rawMaxTokens`, `percentage` (a whole number), `autoCompactThreshold` and `isAutoCompactEnabled`.
+  - Window: for `claude-haiku-5-5`, `maxTokens` and `rawMaxTokens` are 1 000 000 and `autoCompactThreshold` is 967 000. Claude Code does not compact below 50 % on its own, and no `compact_boundary` frame was seen; `settings.autoCompactWindow` was not tried.
+  - Before a turn the two details differed: `summary` read 19 181 tokens and `full` 17 829. After the turn they agreed (20 999).
+- **The measure after a tool call lags.** Taken in `PostToolUse`, `summary` answers from the last response's usage, which does not count the tool's own answer yet. With an 8 461-byte answer the measure read 19 181 tokens before the call, 19 181 right after it, and 20 999 at the end of the turn.
+- **Rate limits.** One `rate_limit_event` in the lead's two turns. Its `rate_limit_info` has no top-level `utilization`. The two windows are in `unifiedWindows`, which `sdk.d.ts` does not declare: `{"five_hour":{"utilization":0.03,"resetsAt":1792650600},"seven_day":{"utilization":0.15,"resetsAt":1793091600}}`. Read as the CLI's own code reads them (`Math.round(utilization * 100)`, `new Date(resets_at * 1000)`), that is 3 % and 15 %, with reset times in seconds.
+- **The experimental usage call** (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })`) answered `rate_limits_available: false`, with no subscription type, for a session logged in with `CLAUDE_CODE_OAUTH_TOKEN`. It is recorded, not adopted.
+- **The Stop hook by role.** A lead's two turns ended with no `HANDOVER.md` request. An author's turn ended with `HANDOVER.md` written, all five headings present.
+- **Commit identity.** In an author session, `git commit` then `git log -1 --format=identity:%an/%ae/%cn/%ce` printed `identity:Cleared//Cleared/`: the name `Cleared` and no address. Without the variables, git 2.39 in the image refuses to commit.
+- **An expired or revoked login.** With an invalid token, the CLI printed `system/api_retry` with `error: "authentication_failed"` and `error_status: 401`. The runner printed `login failed` and the turn ended as cancelled. 15 seconds later the session still waited, with the status "Waiting for a new login".
+  - A rewrite of the token file in place was seen through the bind mount. The runner printed `login renewed`, resumed the same session in the same container, and failed again on the new, still invalid, token.
+  - A rename over the file (a new inode) was not seen: a single-file bind mount keeps the inode it was given. So re-reading the login helps only if the host CLI rewrites its credentials file in place, which was not measured.
+- **Still unknown:**
+  - a valid token after a failure (only the owner may put a `setup-token` token into the service's token file, plan question 1);
+  - whether the host CLI rewrites its credentials file in place when it refreshes;
+  - the week share against `/usage` on the host.
+
+Raw lines of the `host-tools` section, edited as above: ids are `<id>`, the host's paths `<scratch>`, `<state>` and `<login file>`, and a long line is cut around `...`. The doctor's own check lines come first, then the runner lines it printed (`<<`).
+
+```console
+$ CLEARED_CLAUDE_CREDENTIALS=<login file> node scripts/doctor.ts host-tools lead
+== host-tools (milestone 2, lane 4)
+PASS the login file (the Claude Code credentials file named by CLEARED_CLAUDE_CREDENTIALS) is a file of the service's account that only it can read: mode 600
+PASS the CLI lists the in-process MCP server cleared as connected, with mcp__cleared__ping
+PASS the model called mcp__cleared__ping and the host ran the handler once, with the model's input: [{"word":"plum"}]
+PASS the call is journaled as cleared.host_call ok, under the tool call's own id: {"calls":[{"toolCallId":"<id>","name":"ping","input":{"word":"plum"},"outcome":"ok"}],"started":["<id>"]}
+PASS the model read the host's answer: CODE-5E26A50F
+OBSERVED the host tool's permission: canUseTool asked for mcp__cleared__ping; policy answers in the turn: [["allow_once","lead.tools"]]
+PASS the context is measured after the tool call and after the turn, as cleared.context_usage with a percentage and rawMaxTokens: 3 events
+OBSERVED the summary measure around a 8461-byte tool answer: 19181 tokens after the first turn, 19181 after the tool call, 20999 after the turn
+PASS getContextUsage() timed over ten calls of each detail: summary: median 8.100000000000001 ms, max 9 ms; full: median 8.8 ms, max 9.6 ms
+OBSERVED the full measure across the tool call's turn: 17829 tokens before, 20999 after (the turn added the prompt, the call, a 8461-byte answer and the reply)
+OBSERVED summary and full after the turn: 20999 and 20999 tokens, 2 % and 2 %; autoCompactThreshold 967000, isAutoCompactEnabled true, maxTokens 1000000, rawMaxTokens 1000000
+OBSERVED the experimental usage call: {"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}
+OBSERVED rate_limit_event frames: 1
+OBSERVED compact_boundary frames: 0
+PASS the lead's turns ended without the Stop hook asking for HANDOVER.md: 2 turn ends
+PASS a commit in the session carries the runner's identity: Cleared, no address: ["identity:Cleared//Cleared/","/workspace\n/workspace\nmaster\nfdb70eb probe"]
+PASS an author still writes HANDOVER.md, asked by the Stop hook: 5 of 5 headings
+PASS with an invalid token, the runner reports the login error and the turn ends as cancelled, not failed: ["failed"]
+PASS 15 s later the runner still waits, and the session says it waits for a new login: status "Waiting for a new login", exited false
+PASS a rewrite of the file in place is read: the runner resumes the session in the same container with the new token (which fails again, being invalid): ["failed","renewed","failed"]
+OBSERVED a rename over the login file (a new inode), 25 s later: not seen by the runner: the bind mount still shows the old file
+NOT MEASURED the recovering half (a valid token after a failure): no setup-token token in the service's token file (plan question 1); the proof observes a natural refresh
+PASS nothing with the sessions' labels remains (containers, networks, volumes): 0 objects
+PASS no new listening socket on the host from this run: none (0 new from other processes)
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","mcp_servers":[{"name":"cleared","status":"connected","source":"sdk"}],"cleared_tools":["mcp__cleared__ping"]}
+<< {"type":"context","after":"turn","detail":"summary","ms":50.4,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< (before the tool call) {"type":"measure","summaryMs":[10.5,10.2,11.4,10,9.2,9,10.5,8.4,8.5,8.3],"fullMs":[730.7,9.2,9,10.5,8.7,9.5,8.7,7,7.1,7.4],"summary":{"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":17829,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
+<< {"type":"host_call","callId":"<id>","toolUseId":"<id>","name":"ping","input":{"word":"plum"}}
+<< stderr cleared-runner: a host call's extra has the keys signal,sessionId,_meta,sendNotification,sendRequest,authInfo,requestId,requestInfo,taskId,taskStore,taskRequestedTtl,closeSSEStream,closeStandaloneSSEStream; its _meta claudecode/toolUseId,progressToken
+<< {"type":"context","after":"tool","detail":"summary","ms":17.7,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< {"type":"context","after":"turn","detail":"summary","ms":14,"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< (after the tool call's turn) {"type":"measure","summaryMs":[8.3,7.4,9,8.9,7.1,7.7,8.4,6.6,7.9,8.9],"fullMs":[8.9,8.8,9.6,8.3,8.8,7.5,7.5,8.4,8.8,9.1],"summary":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
+<< sdk {"type":"system","subtype":"api_retry","error":"authentication_failed","error_status":401}
+<< sdk {"type":"system","subtype":"api_retry","error":"authentication_failed","error_status":401}
+<< sdk {"type":"assistant","error":"authentication_failed","text":"Failed to authenticate. API Error: 401 Invalid bearer token"}
+<< {"type":"login","state":"failed"}
+<< sdk {"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}
+<< {"type":"login","state":"failed"}
+<< {"type":"login","state":"renewed"}
+<< {"type":"login","state":"failed"}
+<< rate_limit_info {"status":"allowed","resetsAt":1792650600,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1792650600},"seven_day":{"utilization":0.16,"resetsAt":1793091600}}}
+```
+
+The whole output, with every docker command line and every stored event, is in the lane's pull request.
+
 ### Proof
 
 Commands as run on 2026-10-21 (the resume step of proof 3, and proofs 8, 9 and 10, were run again the same day for review round 1, to save raw output). `$T` is a temporary directory under the session scratchpad. JSON lines are raw output with these edits only: UUIDs, tool IDs and message IDs are replaced with `<id>`, the scratchpad path is shown as `$T` and the home directory as `~`, and long parts are cut, shown as `...`; the text on each side of a `...` is copied unchanged. Lines starting with `>>` (sent) and `<<` (received) are printed by the probe scripts; the script for proofs 9 and 10 is inlined there, and the scripts and their output files stayed in the scratchpad.

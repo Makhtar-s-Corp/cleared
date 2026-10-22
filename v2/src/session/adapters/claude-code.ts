@@ -11,6 +11,11 @@
 //   - a permission request is evaluated by the policy: an allow
 //     or a deny is answered at once, an ask waits for answer() from the inbox;
 //     a question (AskUserQuestion) always waits;
+//   - a host tool call (milestone 2, the lead's tools) runs the handler of
+//     the tool of that name in StartInput.tools, and only of those: the
+//     answer goes back to the runner, and cleared.host_call records the
+//     outcome. A refusal (HostToolRefused) is said to the model; any other
+//     error stays on the host, and the model reads a generic line;
 //   - interrupt() cancels what waits and asks the runner to interrupt the turn;
 //   - stop() asks the runner to stop, then removes the containers and the
 //     networks; the config volume stays, so resume() can start a new
@@ -28,7 +33,7 @@ import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
 import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
-import { NotImplemented, type Answer, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { HostToolRefused, NotImplemented, type Answer, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../events.ts';
 import { evaluate, type Policy, type PolicyContext } from '../policy.ts';
 import { createMapper, toolRequest, type Mapper } from './claude-code/map.ts';
@@ -171,6 +176,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       emit(session, session.mapper.answered(line.requestId, { decision: { kind: 'reject_once', message: verdict.message }, by: 'policy', rule: verdict.rule }));
       return;
     }
+    if (line.type === 'host_call') {
+      void hostCall(session, line);
+      return;
+    }
     if (line.type === 'question') {
       session.pending.set(line.requestId, { kind: 'question' });
       emit(session, session.mapper.question(line));
@@ -180,6 +189,31 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     if (line.type === 'request_cancelled' && !session.pending.delete(line.requestId)) return;
     if (line.type === 'exit') session.exitSeen = true;
     emit(session, session.mapper.line(line));
+  }
+
+  // A host tool call: the handler's answer, as text, back to the runner
+  // that asked, unless it is gone by then.
+  async function hostCall(session: Session, line: Extract<RunnerOutput, { type: 'host_call' }>): Promise<void> {
+    const child = session.child;
+    const tool = session.input.tools?.find((candidate) => candidate.name === line.name);
+    let outcome: 'ok' | 'refused' | 'failed' = 'ok';
+    let text: string;
+    if (!tool) {
+      outcome = 'failed';
+      text = `No host tool is named ${line.name}.`;
+    } else {
+      try {
+        const answer = await tool.handle(line.input, { sessionId: session.id, turn: session.mapper.turn() ?? '' });
+        text = typeof answer === 'string' ? answer : JSON.stringify(answer) ?? '';
+      } catch (error) {
+        outcome = error instanceof HostToolRefused ? 'refused' : 'failed';
+        text = error instanceof HostToolRefused ? error.message : 'The host could not run this tool.';
+      }
+    }
+    if (session.closed || session.child !== child) return;
+    write(session, { type: 'host_result', callId: line.callId, ok: outcome === 'ok', text });
+    const toolCallId = line.toolUseId || line.callId;
+    emit(session, [{ type: 'CUSTOM', name: 'cleared.host_call', value: outcome === 'ok' ? { toolCallId, name: line.name, input: line.input, outcome } : { toolCallId, name: line.name, input: line.input, outcome, message: text } }]);
   }
 
   // Starts the session container with the runner attached and sends `start`.
@@ -212,7 +246,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     child.stderr.resume();                          // the runner's and the CLI's diagnostics are not events
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (text) => onLine(session, text));
     write(session, {
-      type: 'start', sessionId: id, model: input.model, resume,
+      type: 'start', sessionId: id, model: input.model, resume, role: input.role,
+      ...(input.tools?.length ? { tools: input.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) } : {}),
       ...(runtime.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: runtime.maxBudgetUsd }),
     });
     emit(session, session.mapper.start(input.model));
