@@ -143,12 +143,24 @@ export function morningSummary(snap: Snapshot, messages: readonly LeadMessage[],
 
 // ---- the ledger ------------------------------------------------------------
 
+// The status the Claude Code adapter gives a session whose runner waits for a
+// new login after an authentication error (session/adapters/claude-code/map.ts).
+// The runner relaunches the session in the same container once the login
+// file holds a new token (images/session/runner/main.ts): its next turn
+// starts. The owner chose this (plan question 1, option b); the proof counts each cut.
+export const LOGIN_WAIT = 'Waiting for a new login';
+
+export type LoginCut = { readonly session: string; readonly role: string; readonly ticket: string; readonly at: string; readonly relaunchedAt: string | null; readonly seconds: number | null };
+
 export type LedgerFacts = {
   readonly notifications: { readonly count: number; readonly byKind: Record<string, number>; readonly firstAt: Record<string, string> };
   readonly lead: { readonly generations: number; readonly turns: number; readonly costUsd: number; readonly highestPercent: number | null; readonly compactions: number };
-  // Each ticket from its first session's start to its last session's last update.
-  readonly tickets: Record<string, { readonly sessions: number; readonly reviewRounds: number; readonly costUsd: number; readonly startedAt: string; readonly lastAt: string }>;
+  // Each ticket from its first session's start to its last session's last
+  // update, and when the release watch first saw it healthy (the row the
+  // flow reads to call it landed, flow/ledger.ts).
+  readonly tickets: Record<string, { readonly sessions: number; readonly reviewRounds: number; readonly costUsd: number; readonly startedAt: string; readonly lastAt: string; readonly landedAt: string | null }>;
   readonly maxLive: number;                                 // the most tickets in those spans at once
+  readonly loginCuts: readonly LoginCut[];
 };
 
 type Row = Record<string, unknown>;
@@ -180,13 +192,17 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
   const events = (types: string) => rows(db, `SELECT session_id, type, event FROM session_events WHERE at >= ? AND type IN (${types})`, since);
   const role = new Map(sessions.map((s) => [String(s.id), { ticket: String(s.ticket), role: String(s.role) }]));
   const lead = { generations: sessions.filter((s) => s.role === 'lead').length, turns: 0, costUsd: 0, highestPercent: null as number | null, compactions: 0 };
-  const tickets: Record<string, { sessions: number; reviewRounds: number; costUsd: number; startedAt: string; lastAt: string }> = {};
+  const tickets: Record<string, { sessions: number; reviewRounds: number; costUsd: number; startedAt: string; lastAt: string; landedAt: string | null }> = {};
   for (const s of sessions) {
     if (s.role !== 'author' && s.role !== 'reviewer') continue;
-    const t = tickets[String(s.ticket)] ??= { sessions: 0, reviewRounds: 0, costUsd: 0, startedAt: String(s.created_at), lastAt: String(s.updated_at) };
+    const t = tickets[String(s.ticket)] ??= { sessions: 0, reviewRounds: 0, costUsd: 0, startedAt: String(s.created_at), lastAt: String(s.updated_at), landedAt: null };
     t.sessions++;
     if (s.role === 'reviewer') t.reviewRounds++;
     if (String(s.updated_at) > t.lastAt) t.lastAt = String(s.updated_at);
+  }
+  for (const row of rows(db, "SELECT at, ticket FROM events WHERE kind IN ('release_watch_complete', 'release_health_unconfigured') AND at >= ? ORDER BY at", since)) {
+    const t = tickets[String(row.ticket)];
+    if (t && t.landedAt === null) t.landedAt = String(row.at);
   }
   // A sweep over the spans: +1 at a start, -1 at an end, a start first at the same time.
   const marks = Object.values(tickets).flatMap((t) => [{ at: Date.parse(t.startedAt), d: 1 }, { at: Date.parse(t.lastAt), d: -1 }]).sort((a, b) => a.at - b.at || b.d - a.d);
@@ -207,7 +223,24 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
   }
   lead.costUsd = cents(lead.costUsd);
   for (const t of Object.values(tickets)) t.costUsd = cents(t.costUsd);
-  return { notifications: { count: sent, byKind, firstAt }, lead, tickets, maxLive };
+  // Each login cut: from the first "waiting for a new login" to the session's next turn.
+  const loginCuts: LoginCut[] = [];
+  const open = new Map<string, number>();                   // session → index of its open cut
+  for (const row of rows(db, "SELECT session_id, at, type, event FROM session_events WHERE at >= ? AND type IN ('STATE_DELTA', 'STATE_SNAPSHOT', 'RUN_STARTED') ORDER BY at, seq", since)) {
+    const id = String(row.session_id);
+    const of = role.get(id) ?? { ticket: '', role: 'unknown' };
+    if (row.type === 'RUN_STARTED') {
+      const index = open.get(id);
+      if (index === undefined) continue;
+      const cut = loginCuts[index] as LoginCut;
+      loginCuts[index] = { ...cut, relaunchedAt: String(row.at), seconds: Math.round((Date.parse(String(row.at)) - Date.parse(cut.at)) / 1000) };
+      open.delete(id);
+    } else if (String(row.event).includes(LOGIN_WAIT) && !open.has(id)) {
+      open.set(id, loginCuts.length);
+      loginCuts.push({ session: id, role: of.role, ticket: of.ticket, at: String(row.at), relaunchedAt: null, seconds: null });
+    }
+  }
+  return { notifications: { count: sent, byKind, firstAt }, lead, tickets, maxLive, loginCuts };
 }
 
 // ---- the result and its table ---------------------------------------------
@@ -235,6 +268,8 @@ export type ProofResult = {
   readonly gestures: readonly { readonly at: string; readonly what: string }[];
   readonly planDoneAt: string | null;
   readonly stand_ins: readonly string[];                   // what the rehearsal replaced, and so does not prove
+  readonly notificationsSkipped: string | null;            // why the notifications were not part of the run, when they were not
+  readonly loginCuts: readonly LoginCut[] | null;          // null: the ledger was not read
 };
 
 export function duration(from: string | undefined | null, to: string | undefined | null): string {
@@ -271,7 +306,7 @@ export function renderDurations(r: ProofResult): string {
     row('---', '---'),
     row('goal sent → first question', duration(t.goal_sent_at, t.first_question_at)),
     row('last answer → plan proposed', duration(lastAnswer, t.plan_proposed_at)),
-    row('plan proposed → plan notification sent', duration(t.plan_proposed_at, r.notifications?.firstAt.plan)),
+    ...(r.notificationsSkipped ? [] : [row('plan proposed → plan notification sent', duration(t.plan_proposed_at, r.notifications?.firstAt.plan))]),
     row('plan proposed → approved', duration(t.plan_proposed_at, t.approved_at)),
     row('approved → first session start', duration(t.approved_at, t.first_start_at)),
     row('goal sent → plan done', r.planDoneAt ? duration(t.goal_sent_at, r.planDoneAt) : 'the plan is not done'),
@@ -304,7 +339,9 @@ export function renderDurations(r: ProofResult): string {
     '',
     '## Notifications',
     '',
-    r.notifications ? `${r.notifications.count} sent.` : 'The ledger was not read: no count.',
+    r.notificationsSkipped
+      ? `Skipped: ${r.notificationsSkipped}. The waits are read from the inbox.${r.notifications ? ` The service still recorded ${r.notifications.count} sent.` : ''}`
+      : r.notifications ? `${r.notifications.count} sent.` : 'The ledger was not read: no count.',
     '',
     row('Kind', 'Sent'),
     row('---', '---'),
@@ -323,6 +360,14 @@ export function renderDurations(r: ProofResult): string {
     ...Object.values(r.waits).map((w) => row(w.kind, w.ticket, w.seenAt, w.goneAt ?? 'still waiting', w.goneAt ? duration(w.seenAt, w.goneAt) : '')),
     '',
   ];
+  out.push('## Login cuts', '');
+  if (r.loginCuts === null) out.push('The ledger was not read: no count.', '');
+  else if (r.loginCuts.length === 0) out.push('No login cut.', '');
+  else {
+    out.push(`${r.loginCuts.length} login cuts, ${r.loginCuts.filter((c) => c.relaunchedAt).length} relaunched.`, '', row('Cut at', 'Role', 'Ticket', 'Relaunched at', 'Lasted'), row('---', '---', '---', '---', '---'));
+    for (const c of r.loginCuts) out.push(row(c.at, c.role, c.ticket, c.relaunchedAt ?? 'not relaunched', c.relaunchedAt ? duration(c.at, c.relaunchedAt) : ''));
+    out.push('');
+  }
   if (r.morning) {
     out.push('## The morning', '', `At ${r.morning.at}: waiting ${JSON.stringify(r.morning.waitingByKind)}; plan items ${JSON.stringify(r.morning.itemsByState)}.`, '');
     for (const m of r.morning.nightMessages) out.push(`- ${m.at} (${m.by}): ${cell(m.text)}`);

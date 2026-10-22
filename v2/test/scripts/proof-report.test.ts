@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { LeadCommitment } from '../../src/api/types.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { RUNS_TABLES } from '../../src/approval/review.ts';
-import { changes, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track, PLANTED, type ProofResult, type Snapshot } from '../../scripts/proof-report.ts';
+import { LOGIN_WAIT, changes, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track, PLANTED, type ProofResult, type Snapshot } from '../../scripts/proof-report.ts';
 
 const lead = { generation: 1, phase: 'idle', percent: 3, highestPercent: 3, refreshCount: 0, openCommitments: 2 };
 const items = (states: string[]) => states.map((state, i) => ({ position: i + 1, title: `Item ${i + 1}`, state, ticket: state === 'waiting' ? null : `LOCAL-${i + 1}`, after: i === 2 ? [2] : [] }));
@@ -121,7 +121,10 @@ test('the ledger facts: notifications by kind, the lead\'s turns, cost and highe
   const facts = ledgerFacts(db, since);
   assert.deepEqual(facts.notifications, { count: 4, byKind: { plan: 1, permission: 1, approval: 2 }, firstAt: { plan: '2026-10-22T22:00:00.000Z', permission: '2026-10-22T22:00:00.000Z', approval: '2026-10-22T22:00:00.000Z' } });
   assert.deepEqual(facts.lead, { generations: 2, turns: 3, costUsd: 0.2, highestPercent: 4.2, compactions: 0 });
-  assert.deepEqual(facts.tickets, { 'LOCAL-1': { sessions: 3, reviewRounds: 2, costUsd: 0.52, startedAt: '2026-10-22T21:01:00.000Z', lastAt: '2026-10-22T21:01:00.000Z' } });
+  db.prepare("INSERT INTO events (at, kind, ticket, detail, value, source) VALUES (?, 'release_watch_complete', 'LOCAL-1', '', 101, 'dispatcher')").run('2026-10-22T23:00:00.000Z');
+  db.prepare("INSERT INTO events (at, kind, ticket, detail, value, source) VALUES (?, 'release_watch_complete', 'LOCAL-1', '', 101, 'dispatcher')").run('2026-10-22T20:00:00.000Z');
+  const landed = ledgerFacts(db, since);
+  assert.deepEqual(landed.tickets, { 'LOCAL-1': { sessions: 3, reviewRounds: 2, costUsd: 0.52, startedAt: '2026-10-22T21:01:00.000Z', lastAt: '2026-10-22T21:01:00.000Z', landedAt: '2026-10-22T23:00:00.000Z' } });
   assert.equal(facts.maxLive, 1);
   // A ledger without the v1 events table yet has no notifications.
   const bare = openStore(':memory:');
@@ -141,6 +144,25 @@ test('the most tickets live at once, from the sessions\' first start to their la
   assert.equal(facts.tickets['LOCAL-1']?.lastAt, '2026-10-22T21:09:00.000Z');
 });
 
+test('each login cut: when the runner waited for a new login, when it relaunched the session, how long it lasted', () => {
+  const store = openStore(':memory:');
+  const put = (id: string, ticket: string, role: string) => store.sessions.put({ id, project: 'guestbook', ticket, role: role as never, harness: 'claude-code', model: 'm', status: 'working', createdAt: '2026-10-22T21:01:00.000Z', updatedAt: '2026-10-22T21:01:00.000Z' });
+  const at = (sessionId: string, ticket: string, when: string, event: unknown) => store.events.append({ at: when, sessionId, ticket, project: 'guestbook', event: event as never });
+  const waiting = { type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/phase', value: 'waiting_human' }, { op: 'replace', path: '/status', value: LOGIN_WAIT }] };
+  const started = { type: 'RUN_STARTED', threadId: 't', runId: 'r' };
+  put('l1', 'lead', 'lead'); put('a1', 'LOCAL-1', 'author');
+  at('l1', 'lead', '2026-10-23T02:00:00.000Z', started);
+  at('l1', 'lead', '2026-10-23T02:10:00.000Z', waiting);
+  at('l1', 'lead', '2026-10-23T02:10:01.000Z', waiting);                 // the turn's end says it again: one cut
+  at('l1', 'lead', '2026-10-23T02:18:30.000Z', started);                 // the runner relaunched the session
+  at('a1', 'LOCAL-1', '2026-10-23T03:00:00.000Z', waiting);              // never relaunched
+  const facts = ledgerFacts(store.db, '2026-10-22T21:00:00.000Z');
+  assert.deepEqual(facts.loginCuts, [
+    { session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510 },
+    { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null },
+  ]);
+});
+
 test('the durations table names every step with its time, the lead, the commitments, the costs and the waits', () => {
   const result: ProofResult = {
     mode: 'rehearsal', app: 'http://127.0.0.1:9700', goal: 'Make the guestbook ready for a small team.', startedAt: '2026-10-22T21:00:00.000Z',
@@ -156,10 +178,12 @@ test('the durations table names every step with its time, the lead, the commitme
     commitments: [{ key: 'first_landing', planted: 'When the first ticket lands, tell me how long it took from start to live.', state: 'done', ids: ['c1'], due: null, fulfilledAt: '2026-10-23T08:11:00.000Z', note: 'told' }],
     order: { state: 'done', note: 'item 3 started after item 2 landed' },
     notifications: { count: 3, byKind: { plan: 1, approval: 2 }, firstAt: { plan: '2026-10-22T21:01:40.000Z' } },
-    tickets: { 'LOCAL-1': { sessions: 2, reviewRounds: 1, costUsd: 0.4, startedAt: '2026-10-22T21:03:30.000Z', lastAt: '2026-10-22T21:20:00.000Z' } },
+    tickets: { 'LOCAL-1': { sessions: 2, reviewRounds: 1, costUsd: 0.4, startedAt: '2026-10-22T21:03:30.000Z', lastAt: '2026-10-22T21:20:00.000Z', landedAt: '2026-10-23T08:10:00.000Z' } },
     gestures: [{ at: '2026-10-22T21:00:05.000Z', what: 'sent the goal' }, { at: '2026-10-23T08:05:00.000Z', what: 'approved release:a' }],
     planDoneAt: null,
     stand_ins: ['a bare copy of the guestbook as the forge'],
+    notificationsSkipped: null,
+    loginCuts: [{ session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510 }, { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null }],
   };
   const text = renderDurations(result);
   for (const expected of [
@@ -167,5 +191,11 @@ test('the durations table names every step with its time, the lead, the commitme
     'last answer → plan proposed | 50 s', '| 1 | Entries as JSON | LOCAL-1 |', 'refreshes | 3', 'highest context share | 4.5 % (threshold 5 %)',
     '| first_landing | done | c1 |', '"3 after 2" | done', '| approval | 2 |', '| LOCAL-1 | 2 | 1 | $0.40 |', '| release | LOCAL-1 | 2026-10-22T21:20:00.000Z | 2026-10-23T08:05:00.000Z | 10 h 45 |',
     'owner gestures | 2', 'a bare copy of the guestbook as the forge', 'the plan is not done',
+    '2 login cuts, 1 relaunched', '| 2026-10-23T02:10:00.000Z | lead | lead | 2026-10-23T02:18:30.000Z | 8 min 30 s |', '| 2026-10-23T03:00:00.000Z | author | LOCAL-1 | not relaunched |  |',
   ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
+  // Without an https address for the Mac (plan question 2), the notifications are skipped, not failed.
+  const skipped = renderDurations({ ...result, notificationsSkipped: 'no https address for the Mac (plan question 2): inbox only', loginCuts: [] });
+  assert.ok(skipped.includes('Skipped: no https address for the Mac (plan question 2): inbox only.'), skipped);
+  assert.ok(skipped.includes('No login cut.'));
+  assert.ok(!skipped.includes('plan proposed → plan notification sent'));
 });

@@ -32,6 +32,10 @@
 //   PROOF_WATCH_MINUTES    the night watch's interval (default 5; the rehearsal: 10 seconds)
 //   PROOF_OWNER_APPROVES=1 the owner approves the releases and answers the permissions in
 //                          the morning; the proof only watches and measures
+//   PROOF_NOTIFICATIONS    skipped (the real run's default: the owner left plan question 2,
+//                          the https address for the Mac, unanswered, so the proof runs on
+//                          the inbox only and records the notifications as skipped, not
+//                          failed) or counted (the rehearsal's default: its e-mail stand-in)
 //   PROOF_NIGHT_MINUTES    the rehearsal's night (default 4)
 //   PROOF_TIMEOUT_MINUTES  the rehearsal's whole run at most (default 30)
 // No trace and no video are recorded: a trace keeps what is typed, the password included.
@@ -73,13 +77,21 @@ const DEADLINE = REHEARSAL ? startedAt.getTime() + minutes('PROOF_TIMEOUT_MINUTE
 const OWNER_APPROVES = env.PROOF_OWNER_APPROVES === '1';
 const GOAL = env.PROOF_GOAL ?? REHEARSAL_GOAL;
 const ANSWERS = (env.PROOF_ANSWERS ?? 'recommended').split('||').map((a) => a.trim()).filter(Boolean);
+const NOTIFICATIONS = env.PROOF_NOTIFICATIONS ?? (REHEARSAL ? 'counted' : 'skipped');
+if (NOTIFICATIONS !== 'counted' && NOTIFICATIONS !== 'skipped') { console.error('proof: PROOF_NOTIFICATIONS is counted or skipped'); process.exit(64); }
+const NOTIFICATIONS_SKIPPED = NOTIFICATIONS === 'skipped' ? 'no https address for the Mac (plan question 2 has no answer), so the proof runs on the inbox only' : null;
 const OUT = env.PROOF_OUT ?? `/tmp/cleared-captures/j2/${REHEARSAL ? 'rehearsal' : 'proof'}`;
 
 const log = (line: string) => console.log(`proof: ${line}`);
 mkdirSync(OUT, { recursive: true });
 
 let world: World | undefined;
-if (REHEARSAL) world = await startRehearsal({ reminder: MORNING.toISOString(), log });
+if (REHEARSAL) {
+  world = await startRehearsal({ reminder: MORNING.toISOString(), log });
+  // An interrupted rehearsal stops the service and the app it started.
+  const started = world;
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void started.stop().finally(() => process.exit(130)); });
+}
 const APP = (world?.appUrl ?? env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').replace(/\/$/, '');
 const OWNER = world?.owner ?? env.PROOF_OWNER ?? 'owner';
 const PASSWORD_FILE = (world?.passwordFile ?? env.PROOF_PASSWORD_FILE) as string;
@@ -292,10 +304,15 @@ if (goalSent) {
     const n = proposed.items.length;
     const lanes = proposed.items.map((i) => `${i.position}:${i.lane}${i.after.length ? ` after ${i.after.join(',')}` : ''}`).join('; ');
     // The plan's notification, when the ledger is read: it may follow the plan by a tick.
-    const sent = await until('the plan notification', async () => (LEDGER ? facts()?.notifications.firstAt.plan : 'not read'), 3 * 60_000, 5_000).catch(() => undefined);
-    if (sent && sent !== 'not read') times.plan_notified_at = sent;
+    let sent: string | undefined = 'skipped';
+    if (!NOTIFICATIONS_SKIPPED) {
+      sent = await until('the plan notification', async () => (LEDGER ? facts()?.notifications.firstAt.plan : 'not read'), 3 * 60_000, 5_000).catch(() => undefined);
+      if (sent && sent !== 'not read') times.plan_notified_at = sent;
+    }
     return `${n} items (${n >= 4 && n <= 6 ? 'within' : 'outside'} 4 to 6): ${lanes}; about ${proposed.totals.minutes} min, $${proposed.totals.costUsd.toFixed(2)}; notification ${sent ?? 'not seen'}`;
   });
+  // Step 3's notification on the Mac, and every wait's, are not part of this run: recorded as skipped.
+  if (NOTIFICATIONS_SKIPPED) skip(3, 'notifications', NOTIFICATIONS_SKIPPED);
 }
 
 // ---- 4. Approve, then tell the lead what it must not forget -----------------------
@@ -336,7 +353,7 @@ if (approved) {
     }
     const f = facts();
     const waits = Object.values(timeline.waits);
-    return `${watchLog.length} changes seen; ${waits.length} waits, ${waits.filter((w) => !w.goneAt).length} still open; notifications ${f ? f.notifications.count : 'not read'}; most running at once ${timeline.maxRunning}`;
+    return `${watchLog.length} changes seen; ${waits.length} waits, ${waits.filter((w) => !w.goneAt).length} still open; notifications ${NOTIFICATIONS_SKIPPED ? 'skipped' : f ? f.notifications.count : 'not read'}; most running at once ${timeline.maxRunning}`;
   });
 } else {
   skip(5, 'night', 'no approved plan');
@@ -412,7 +429,11 @@ if (approved) {
         await page.getByRole('button', { name: /Undo|Annuler/ }).first().waitFor({ timeout: 15_000 }).catch(() => undefined);
         await capture('release-approved');
       }
-      await until('the item to leave the inbox', async () => !(await api<InboxItem[]>('/inbox')).some((i) => i.id === action.id && i.state === 'waiting'), 3 * 60_000, 2_000).catch(() => undefined);
+      // The readings go on meanwhile, so no landing is seen late.
+      await until('the item to leave the inbox', async () => {
+        await watch('morning');
+        return !(await api<InboxItem[]>('/inbox')).some((i) => i.id === action.id && i.state === 'waiting');
+      }, 3 * 60_000, 2_000).catch(() => undefined);
     }
     if (!planDoneAt) throw new Error(`the plan is not done: ${JSON.stringify(last?.plan?.items.map((i) => `${i.position}:${i.state}`))}`);
     return `plan done at ${planDoneAt}`;
@@ -460,12 +481,14 @@ try {
   memory ??= await api<LeadMemory>('/lead/memory');
 } catch { /* the app is gone: the report says what it has */ }
 const f = facts();
-// The ledger knows when each ticket's first session started, which a reading
-// every few minutes may miss; the earlier of the two is kept.
+// The ledger knows when each ticket's first session started and when its
+// release was seen healthy, which a reading every few minutes may miss: the
+// earlier of the two times is kept.
 if (f) {
   for (const item of Object.values(timeline.items)) {
-    const started = item.ticket ? f.tickets[item.ticket]?.startedAt : undefined;
-    if (started && (!item.states.running || started < item.states.running)) item.states.running = started;
+    const ticket = item.ticket ? f.tickets[item.ticket] : undefined;
+    for (const [state, at] of [['running', ticket?.startedAt], ['landed', ticket?.landedAt]] as const)
+      if (at && (!item.states[state] || at < (item.states[state] as string))) item.states[state] = at;
   }
   timeline.maxRunning = Math.max(timeline.maxRunning, f.maxLive);
 }
@@ -480,6 +503,7 @@ const result: ProofResult = {
   },
   commitments: commitmentOutcomes(memory?.commitments ?? []), order: orders(), notifications: f?.notifications ?? null, tickets: f?.tickets ?? {},
   gestures, planDoneAt, stand_ins: world?.standIns ?? [],
+  notificationsSkipped: NOTIFICATIONS_SKIPPED, loginCuts: f?.loginCuts ?? null,
 };
 const durations = join(OUT, 'durations.md');
 writeFileSync(durations, renderDurations(result));
@@ -491,4 +515,5 @@ if (world) {
   rmSync(world.passwordFile, { force: true });
   log(`the rehearsal's folder is kept for reading: ${world.root}`);
 }
-log(`done, ${steps.filter((s) => s.status === 'ok').length} of ${steps.length} steps ok; ${durations}`);
+const counted = (status: Step['status']) => steps.filter((s) => s.status === status).length;
+log(`done: ${counted('ok')} steps ok, ${counted('skipped')} skipped, ${counted('failed')} failed; ${durations}`);

@@ -1200,3 +1200,64 @@ The choices the lane makes:
   - answering the lead's question from the inbox (issue 168, item 3).
 - This entry is the only change outside the lane's files.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-inbox-plan`.
+
+## 2026-10-22: the milestone 2 proof script and its rehearsal (milestone 2, lane 11)
+
+**Decision.** Lane `v2-j2-proof-script` writes `v2/scripts/proof-j2.ts`, the driver of section 1 of the [milestone 2 plan](milestone-2-plan.md), with its pure parts in `scripts/proof-report.ts`, its rehearsal in `scripts/proof-rehearsal.ts`, the morning's inbox rules in `scripts/proof-inbox.ts`, and the `CLEARED_V2_ADAPTER=fake` setting in `src/session/adapters/index.ts`. The lane's choices:
+
+1. **One driver, two modes.** `node scripts/proof-j2.ts` runs against the running app, as `proof-j1.ts` does. `PROOF_REHEARSAL=1` first starts a service and an app of its own, then runs the same steps. The steps are numbered as section 1: 0 sign-in, 1 the goal, 2 the questions, 3 the plan, 4 the approval and the two planted commitments, 5 the night, 6 the morning, 7 the inbox until the plan is done, 8 what the lead remembers. Each step that fails is recorded with what the screen showed, and the steps after it go on when they can.
+2. **What it reads.** The app's routes, through the signed-in page's own `fetch` on `/api/service/*`, as the screens read them. The ledger is read too, read only, when `PROOF_LEDGER` names it (the rehearsal always does). It gives what no screen shows: notifications by kind, the lead's turns, cost and highest share, each ticket's sessions, review rounds and cost, each ticket's first start and its landing (`release_watch_complete`, the row the flow reads), the most tickets live at once, and the login cuts. A reading every few minutes misses short states, so the earlier of the reading and the ledger wins. The first rehearsal showed why: two tickets reached Needs Approval before the first reading.
+3. **The goal is given on the lead screen** with Goal pressed, not from the tower bar. The bar's title field holds 200 characters, and the goal of question 5 (a) is longer. The tower's New goal opens the same screen and the same field.
+4. **The planted commitments.** After the approval, the owner writes two messages in the thread: "When the first ticket lands, tell me how long it took from start to live." and "Tomorrow at 08:00, remind me to check the texts of the page." The lead writes its commitments in its own words, so `commitmentOutcomes` recognises them by their words. Each one is done, open, or lost (the lead holds none). The third commitment is the plan's own "after". The check covers every `after` of the plan the lead proposes: an item must start no earlier than its dependency's landing. The goal of question 5 (a) has no "3 after 2", so a check fixed on items 3 and 2 would prove nothing in the real run.
+5. **The morning** (`morningAction`):
+   - permissions come first, since each one pauses a session;
+   - then a plan item, which lane 10's inbox approves with the shared panel's button;
+   - then the releases whose checks passed, oldest first, each approved once and not again while its 60-second grace runs;
+   - a question is left to the owner.
+   With `PROOF_OWNER_APPROVES=1` the proof only watches.
+6. **Issue 157, item 4.** A request is allowed once only when every simple command in it is work inside the checkout: `npm test`, `npm run`, `npm ci`, `node`, `npx tsc`, git without push, fetch or config, and the shell's readers and writers on relative paths or `/workspace`. Anything else is denied: an install, the network, `$(...)`, a way up, a home, an absolute path elsewhere. `proof-j1.ts` now judges the command from the screens' code chip, not the whole row.
+7. **The fake adapter behind a setting.** `CLEARED_V2_ADAPTER=fake` with `CLEARED_V2_FAKE_SCRIPT` (a JSON file) registers the fake adapter under the `claude-code` name, which the flow and the lead start sessions with. The service refuses it with exit code 64 unless the ledger's folder, and `CLEARED_V2_STATE_DIR`, `CLEARED_V2_WORKDIRS` and `CLEARED_V2_PROJECT_DIR` when set, are inside the temporary folder (paths resolved, links followed). So no rehearsal can write fake sessions into a real ledger.
+8. **A lead that answers each turn by rule.** The number and order of a night's event turns cannot be known in advance, so a fixed script would play the wrong turn. The rehearsal's lead answers each turn with the acts of the first rule whose regular expression matches the turn's text:
+   - The acts are: say, ask through AskUserQuestion, or call a host tool.
+   - `$1` passes a match group (the goal id); `${name}` passes an id a tool answered (commit's).
+   - A rule can apply once.
+   - The turn's steps are added to the fake adapter's script when its message comes. `fake.ts` reads its steps as it plays them, so it is unchanged.
+   - The share starts at 1 % and rises 0.5 points per turn. With the 5 % threshold, the handover point is 4 %, so a handover turn ends at 4.5 %: one turn grows less than the gap, as section 4.1 wants.
+   - The rules are tested against the engine's own texts (`goalTurn`, `eventTurn`, `commitmentDue`, `HANDOVER_REQUEST`), and against a compact state that lists the commitments, which must not make the lead record them again.
+9. **Authors leave a real commit.** `publish` refuses a branch with no commit of its own. So a rehearsal author first commits one file of its ticket (`notes/<ticket>.md`) in its checkout, with the runner's commit identity, then plays its steps. The third author asks to run `npm view embedded-postgres version`, a permission that waits through the night and is denied in the morning. The plan is lane 7's night (1, 2 and 4 independent, 3 after 2, 5 after 3) with the guestbook's content of question 5 (a). It passes lane 7's `validatePlan`.
+10. **Stand-ins at the edges of the machine.** The flow's effects are real (git, `gh`, the lock), and `runtime.ts` and `effects.ts` are not this lane's files. So the rehearsal replaces what lies beyond the process:
+    - The forge: a bare copy of the example as the remote, and a `gh` stand-in first on `PATH`. It knows `pr list`, `pr create`, `pr checks` and `pr view` and refuses everything else, and the repository name `rehearsal/guestbook` exists nowhere.
+    - The lock: a broker on a Unix socket of the temporary state folder. On `--ask` it writes `validations/<ticket>.json` as ask-validation.sh does; the approval is refused without it, as the second rehearsal found. On a merge it merges into the bare copy and writes `merged_by_script`, then after 15 seconds a complete `releases` row and `release_watch_complete`.
+    - The mail: the e-mail notifier's sendmail is a script that appends to a file.
+    - HOME is the temporary folder, so the notifier's private folder and no file of the account's own are used.
+    `durations.md` lists these under "What the rehearsal replaced", since the rehearsal does not prove them. The ports are two free ones from 9700 to 9799, checked with `ss -ltn` and never a reserved one, on `127.0.0.1`. An interrupted rehearsal stops its service and app.
+11. **Notifications are skipped in the real run (the owner's update of 2026-10-22).** Plan question 2, the https address for the Mac, has no answer, so the 48-hour proof runs without Mac notifications, on the inbox only. `PROOF_NOTIFICATIONS` is `skipped` by default for a real run. Step 3 then does not wait for the plan's notification. A step `3 notifications` is recorded as skipped, with the reason, not failed. `durations.md` says "Skipped", reads the waits from the inbox, and still gives the count the service recorded. The rehearsal counts them by default through its e-mail stand-in. `PROOF_NOTIFICATIONS=counted` brings the count back for a real run once the address exists.
+12. **Login cuts (question 1, option b, the owner's update of 2026-10-22).** The runner keeps the host login. On an authentication error it waits for the login file to change, then relaunches the session in the same container with `resume` (lane 4, `images/session/runner/main.ts`). The adapter shows the cut as the status "Waiting for a new login" (`claude-code/map.ts`). The proof report counts each cut from the ledger: when it began, the session's role and ticket, when the session's next turn started (the relaunch), and how long it lasted. A cut never relaunched says so. The relaunch itself is lane 4's code, which this lane does not edit.
+
+**Consequences.**
+- **Rehearsals on this server, 2026-10-22, on the fake adapter, 4-minute nights:**
+  - **Run 1:** steps 0 to 6 and 8 passed. Step 7 failed on the proof's own wait for the inbox's detail.
+  - **Run 2:** the approval answered 409 ("no request for agreement is kept"), because the lock stand-in kept no request for agreement. That led to the `validations` record (choice 10).
+  - **Run 3** (after merging `origin/v2` with lane 10) passed all 9 steps in 12 minutes:
+    - one question; a plan of 5 items, notified 16 s after it was proposed;
+    - at most 2 tickets live;
+    - in the morning, 2 releases and 1 permission waited;
+    - the permission was denied, and the 5 releases were approved and merged one by one, each with its 60-second grace;
+    - 2 refreshes, highest share 4.5 % (threshold 5 %);
+    - both planted commitments done, the reminder fulfilled 5 s after its due time;
+    - 7 notifications (plan 1, approval 5, permission 1), 11 owner gestures.
+    Its "3 after 2" read as broken, wrongly: a landing seen by a reading 90 s late. This led to the ledger's landing time and to readings during the morning's waits (choice 2).
+  - **Run 4**, with `PROOF_NOTIFICATIONS=skipped` as the real run will have it: 9 steps ok and step `3 notifications` skipped. The plan was done 12 minutes after the goal. Both commitments were done, and every "after" was kept: item 3 started 25 s after item 2 landed, item 5 8 s after item 3. No login cut. The plan's own notification was not sent in this run: the dispatcher's first tick sends nothing (v1's rule), and the plan came before its second. The real run should start the service well before the goal.
+- **Captures and results** are in `/tmp/cleared-captures/j2/rehearsal/` (mode 644, the pointer moved off the buttons), with `durations.md` and `result.json`. Each rehearsal folder (`/tmp/cleared-j2-rehearsal-*`) is kept for reading, its password file removed.
+- **No screen changed**, so the lane ran no visual loop.
+- **Not proven here:**
+  - The real run: a model, the real lock and release watch, the forge, a deployment, a login cut. That is the milestone proof, by the orchestrator, after wave 4.
+  - A login cut was not simulated: the count is tested on ledger rows of the adapter's shape.
+  - The inbox's plan approval (lane 10) is in `morningAction`, but the rehearsal approves the plan from the lead screen, as section 8 says.
+- **Real run settings:**
+  - `PROOF_PASSWORD_FILE`, `PROOF_PLAYWRIGHT`, `PROOF_CHROME`, and `PROOF_LEDGER` (the service's `ledger.db`) for the counts.
+  - `PROOF_MORNING` if the morning is not the next 08:00.
+  - `PROOF_OWNER_APPROVES=1` if the owner approves in the morning.
+  - `CLEARED_V2_LEAD_CONTEXT_PERCENT` for the threshold the report prints.
+- This entry is the only change outside the lane's files.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-script`.
