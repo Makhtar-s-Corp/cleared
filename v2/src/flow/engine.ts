@@ -42,7 +42,7 @@ import { ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
 import type { FlowConfig, ProjectSettings } from './config.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
-import { landingOf } from './ledger.ts';
+import { atOrAfter, landingOf } from './ledger.ts';
 import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
 import { foldState } from './state.ts';
 
@@ -215,9 +215,13 @@ export class FlowEngine {
         continue;
       }
       this.#checked.delete(release.id);
+      // The human's move to go since the request, whatever the ticket's
+      // state now: the lock may have merged and moved it to Done before
+      // this tick.
       const history = ticket ? await tickets.history(ticket.id) : [];
+      const approval = history.filter((h) => h.status === tickets.states.go && h.by.kind === 'human' && atOrAfter(h.at, release.requestedAt)).at(-1);
       const by = history.at(-1)?.by;
-      const approvedBy = ticket?.status === tickets.states.go && by?.kind === 'human' ? by.id : undefined;
+      const approvedBy = approval?.by.id;
       if (this.#settleRelease(release.id, release.ticket, release.project, approvedBy ?? (by?.kind === 'human' ? by.id : 'system')) && approvedBy)
         this.#emit({ type: 'release_approved', at: this.#at(), project: release.project, ticket: release.ticket, item: release.id, pr: release.pr.number, by: approvedBy });
     }

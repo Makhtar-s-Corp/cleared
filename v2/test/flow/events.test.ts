@@ -171,6 +171,19 @@ test('a ticket started for a plan says its origin, in the event and in the comme
   assert.match(t.startedSessions[0]!.input.prompt, /Newest entry first/);
 });
 
+test('an approval the lock merged and moved to Done before the tick is still the human\'s approval', async () => {
+  const t = await setup({ scripts: { author: quickAuthor } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => waiting(t));
+  await t.engine.settled();
+  await t.tickets.recordApproval(t.ticket.id, { kind: 'human', id: 'u1' });
+  await t.tickets.move(t.ticket.id, 'Done', { kind: 'agents', id: 'lock' });
+  await t.engine.tick();
+  assert.deepEqual(of(t, 'release_approved').map((e) => [e.by, e.pr]), [['u1', 7]]);
+  const item = t.store.db.prepare("SELECT handled_by FROM flow_inbox WHERE kind = 'release'").get() as { handled_by: string };
+  assert.equal(item.handled_by, 'u1');
+});
+
 test('a release sent back by a person is not an approval', async () => {
   const t = await setup({ scripts: { author: quickAuthor } });
   await t.engine.start(t.ticket.id, 'u1');

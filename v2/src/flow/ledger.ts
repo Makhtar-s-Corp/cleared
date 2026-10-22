@@ -23,6 +23,9 @@ type Event = { readonly at: string; readonly kind: string; readonly detail: stri
 const instant = (at: string): number => Date.parse(at);
 const second = (at: string): number => Math.floor(instant(at) / 1000) * 1000;
 
+// True when `at` is in the second of `since` or later.
+export const atOrAfter = (at: string, since: string): boolean => instant(at) >= second(since);
+
 // What a watch that ended without a healthy verdict says, last first.
 const FAILURES = ['release_watch_failed', 'rollback_failed', 'rollback_overlapping_release', 'rollback_ambiguous_base', 'rollback_migrations_blocked', 'release_health_failing'];
 
