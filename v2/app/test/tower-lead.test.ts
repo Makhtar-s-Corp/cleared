@@ -46,7 +46,7 @@ test('the lead card is live: its state line, then the last thing the lead said t
   });
   const html = renderTower(model, en);
   const words = text(html);
-  assert.ok(words.includes('Always on · context 31 % · refreshed from memory 10 min ago'));
+  assert.ok(words.includes('Always on · context 31 % · refreshed 10 min ago'));
   assert.match(html, /<q>LOCAL-161 is paused on a permission\. I moved LOCAL-163 ahead so the machine stays busy\.<\/q>/, 'quoted in the reader\'s language by the browser');
   assert.match(html, /<form class="lead-ask" id="lead-ask"[^>]*>\s*<input id="lead-ask-input"[^>]*placeholder="Message the lead…"/);
   assert.doesNotMatch(words, /Comes in milestone 2|milestone 2/, 'the milestone 1 sentences are gone');
@@ -56,7 +56,7 @@ test('each state of the lead reads as such, and a lead the tower cannot read is 
   const line = (lead: LeadState | null) => text(renderTowerBody(towerModel({ sessions: [], inbox: [], tickets: [], lead, leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), en));
   assert.match(line(leadState('idle')), /Always on · context 12 %/);
   assert.doesNotMatch(line(leadState('idle')), /refreshed/, 'a first generation was never refreshed');
-  assert.match(line(leadState('working', { refreshedAt: minutesAgo(90), refreshCount: 1 })), /Always on · context 12 % · refreshed from memory 1 h 30 ago/);
+  assert.match(line(leadState('working', { refreshedAt: minutesAgo(90), refreshCount: 1 })), /Always on · context 12 % · refreshed 1 h 30 ago/);
   assert.match(line(leadState('idle', { context: null })), /^Always on$/m, 'no share before the first measure');
   assert.match(line(leadState('starting')), /^Starting$/m);
   assert.match(line(leadState('refreshing')), /^Refreshing from memory$/m);

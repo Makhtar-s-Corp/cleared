@@ -47,5 +47,6 @@
   "notify_failed": "Notifications could not be turned on. Try again.",
   "notify_off_failed": "Notifications could not be turned off. Try again.",
   "notify_ready_title": "Notifications are on",
-  "notify_ready_body": "This device will be told when something waits for you."
+  "notify_ready_body": "This device will be told when something waits for you.",
+  "lead_pill": "Lead · always on"
 }

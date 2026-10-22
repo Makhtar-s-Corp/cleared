@@ -1,12 +1,21 @@
 // The shell in the browser: who is signed in, the clock, the inbox count,
-// the theme button, the notifications button (notify.ts), signing out, and the screen of this page (body's
+// the "Lead · always on" pill, the theme button, the notifications button
+// (notify.ts), signing out, and the screen of this page (body's
 // data-screen), mounted with its catalog over the shell's.
+import type { LeadState } from '../../src/api/types.ts';
 import { translator, type Catalog } from './i18n.ts';
 import { initNotify } from './notify.ts';
 import { ApiError, type Me, type Mount, type ScreenContext } from './screen.ts';
 
 const INBOX_MS = 15_000;
 const THEME_KEY = 'cleared-v2-theme';
+
+// The pill says the lead is always on while a generation is live, and
+// while it refreshes from one generation to the next, which is part of
+// being always on. Starting (no generation yet) and down are not.
+export function leadPillShown(state: LeadState | null): boolean {
+  return state !== null && (state.phase === 'idle' || state.phase === 'working' || state.phase === 'refreshing');
+}
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', ...init });
@@ -78,11 +87,25 @@ async function start(): Promise<void> {
       count.hidden = true;
     }
   };
+  // On the inbox count's poll, on every page. This read is also what
+  // starts the lead after a service restart (the lead starts on its first
+  // route), so the lead does not wait for its own screen to be opened.
+  const pill = document.getElementById('lead-pill');
+  const lead = async () => {
+    if (!pill) return;
+    try { pill.hidden = !leadPillShown(await api<LeadState>('/lead')); }
+    catch { pill.hidden = true; }
+  };
   void recount();
-  setInterval(() => void recount(), INBOX_MS);
+  void lead();
+  setInterval(() => {
+    void recount();
+    void lead();
+  }, INBOX_MS);
 
   const module = await import(`./screens/${screen}.ts`) as { mount: Mount };
   module.mount(root, { t, me, api, now: () => new Date(), path: location.pathname, inboxChanged: () => void recount() });
 }
 
-void start();
+// Under Node, the tests import leadPillShown and there is no page to start.
+if (typeof document !== 'undefined') void start();

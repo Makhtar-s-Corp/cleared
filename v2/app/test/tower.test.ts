@@ -63,7 +63,7 @@ test('the English tower reads as the capture', async () => {
   const text = visibleText(html).join('\n');
   for (const expected of [
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Needs you', 'Open inbox', 'Release · 12 min', 'Permission · 3 min', 'Plan · 25 min', 'Goal',
-    'The lead proposes 5 tickets, about 2 h of work and 4 % of the week.', 'Always on · context 31 % · refreshed from memory 10 min ago',
+    'The lead proposes 5 tickets, about 2 h of work and 4 % of the week.', 'Always on · context 31 % · refreshed 10 min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Network access and a new dependency. The author is paused until you answer.',
     'Live sessions', 'Author', 'Reviewer', 'Open session', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
