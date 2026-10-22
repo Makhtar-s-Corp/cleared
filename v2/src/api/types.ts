@@ -5,7 +5,10 @@
 // sections 5.1 and 7.1), implemented by lanes 5 and 7. The replanned
 // milestone 2 adds the workspace and its services, and the shapes of wave 6
 // (the release train, the preview route), written by lane 14 one wave ahead
-// (docs/v2/milestone-2-plan.md, section 4: decisions 18, 20 and 21).
+// (docs/v2/milestone-2-plan.md, section 4: decisions 18, 20 and 21), and
+// those of waves 7 and 8 (the session plan, the release's groups and flags,
+// the sensitivity, the paused session, the files and the takeover), written
+// by lane 16 (decisions 22, 23, 24 and 30).
 //
 // The app calls the service on loopback, forwarding /api/service/* to these
 // routes. Every request carries the shared proof the service checks
@@ -16,6 +19,14 @@ import type { Decision, Harness, Role, SessionId, UserId } from '../session/cont
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
 import type { Ticket, TicketId } from '../tickets/contract.ts';
+
+// A session the owner took over (decision 30) is paused until Give back:
+// the flow leaves it alone, and `takenOver` says by whom and since when.
+// Lane 20 writes it. `phase` keeps the harness's phases in this wave: the
+// screens map every phase, so the `paused` phase (ApiSessionPhase) joins
+// SessionSummary.phase with the screens that show it (lanes 20 and 22).
+export type ApiSessionPhase = SessionPhase | 'paused';
+export type TakenOver = { readonly by: UserId; readonly at: string };
 
 export const SERVICE_USER_HEADER = 'x-cleared-user';
 export const SERVICE_PROOF_HEADER = 'x-cleared-proof';
@@ -35,12 +46,35 @@ export type SessionSummary = {
   readonly updatedAt: string;
   readonly lastSeq: number;                                 // the seq of its last stored event
   readonly service?: string;                                // the workspace service it works on; absent before lane 15 starts sessions per service
+  readonly takenOver?: TakenOver | null;                    // who took it over (decision 30, lane 20); absent or null otherwise
+};
+
+// The session plan an author proposes before writing code (decision 22,
+// lane 17): its steps, the files it means to change, its confidence and
+// why. `go` says who let it start and when: the owner (a user id), the
+// delay of [session] plan_go_minutes, or the lead for an item of a plan the
+// owner approved; null while it waits.
+export type SessionPlanConfidence = 'low' | 'medium' | 'high';
+export type SessionPlan = {
+  readonly steps: readonly string[];
+  readonly files: readonly string[];
+  readonly confidence: SessionPlanConfidence;
+  readonly reason: string;
+  readonly proposedAt: string;
+  readonly go: { readonly by: UserId | 'delay' | 'lead'; readonly at: string } | null;
+};
+
+// The session's state as the API shows it: the harness's, with the session
+// plan (lane 17) and the takeover (lane 20).
+export type ApiSessionState = SessionState & {
+  readonly plan?: SessionPlan | null;
+  readonly takenOver?: TakenOver | null;
 };
 
 // previewKey: the unguessable segment of the session's preview address
 // (decision 20), issued by the service when the session's containers start
 // (lane 15); absent or null while the session has no preview.
-export type SessionDetail = SessionSummary & { readonly state: SessionState; readonly previewKey?: string | null };
+export type SessionDetail = SessionSummary & { readonly state: ApiSessionState; readonly previewKey?: string | null };
 
 type InboxBase = {
   readonly id: string;
@@ -77,7 +111,36 @@ export type ReleaseItem = InboxBase & {
   readonly requestedAt: string;
   readonly captures: { readonly before: Capture; readonly after: Capture };
   readonly sessions: readonly { readonly role: Role; readonly model: string; readonly minutes: number; readonly rounds?: number }[];
-  readonly train?: TrainState;                              // a ticket of several services (decision 21, lane 16); absent for one service
+  readonly train?: TrainState;                              // a ticket of a workspace of several services (decision 21, lane 16); absent for one service
+  // What the author said it changed, grouped by intent, and the flags the
+  // diff raised (decision 23): written at publish by release/flags.ts, whose
+  // default (lane 16) gives none; lane 18 fills them.
+  readonly groups?: readonly ReleaseGroup[];
+  readonly flags?: readonly ReleaseFlag[];
+};
+
+// The author's report of its changes (`report_changes`, decision 23), kept
+// as the session's `cleared.changes` journal event: lane 17 writes it.
+export type ChangesReport = { readonly groups: readonly { readonly intent: string; readonly files: readonly string[] }[] };
+
+// One group of the release card: an intent and its files. The files no
+// group names go to "Other changes".
+export type ReleaseGroup = { readonly intent: string; readonly files: readonly string[] };
+
+// A chip on the release card, from the diff (decision 23). Never a block,
+// except `contract` on an untouched consumer (the train's `blocked`).
+export type ReleaseFlagKind = 'schema' | 'dependency' | 'config' | 'secret_shape' | 'contract' | 'large';
+export type ReleaseFlag = { readonly kind: ReleaseFlagKind; readonly files: readonly string[]; readonly detail: string };
+
+// A session plan waiting for its Go (decision 22, lane 17): Go, or Change
+// with a message that reopens the author. It joins InboxItem (as
+// NextInboxItem shows) with the inbox screen that renders it (lane 21): the
+// screen's model maps every kind of the union.
+export type SessionPlanItem = InboxBase & {
+  readonly kind: 'session_plan';
+  readonly sessionId: SessionId;
+  readonly service?: string;
+  readonly plan: SessionPlan;
 };
 
 // ---------------------------------------------------------------- the workspace (decisions 18 and 21)
@@ -93,13 +156,15 @@ export type Service = {
   readonly base: string;                                    // the base branch
   readonly path: string | null;                             // folder only
   readonly healthUrl: string | null;
-  // full: never the fast lane; reviewer:<model>: that model reviews its
-  // sessions; human:<user>: that user approves its releases (decision 24).
-  readonly sensitivity: 'normal' | 'full' | `reviewer:${string}` | `human:${string}`;
+  readonly sensitivity: ServiceSensitivity;
   readonly consumes: readonly string[];                     // the services it calls: they land before it
   readonly run: { readonly dockerfile: string; readonly port: number } | null;   // how a sibling of it runs (decision 20)
   readonly contract: { readonly format: 'openapi'; readonly path: string } | null; // OpenAPI 3 only in milestone 2
 };
+
+// full: never the fast lane; reviewer:<model>: that model reviews its
+// sessions; human:<user>: that user approves its releases (decision 24).
+export type ServiceSensitivity = 'normal' | 'full' | `reviewer:${string}` | `human:${string}`;
 
 // A workspace: its id is the `project` value of every row it holds.
 export type Workspace = { readonly id: string; readonly name: string; readonly services: readonly Service[] };
@@ -112,14 +177,18 @@ export type TrainStop = {
   readonly pr: { readonly number: number; readonly url: string } | null;
   readonly state: TrainServiceState;
   readonly at: string | null;                               // when it reached that state
+  readonly head?: string | null;                            // the commit shown, which the approval is bound to (lane 16)
+  readonly note?: string | null;                            // what went wrong with this service, when something did (lane 16)
 };
 
 // The release card's train (decision 21): blocked before approval when the
 // ticket changes a contract without a step on every consumer, with the
 // proposal; then waiting, landing service by service with the health read
-// between landings, landed, or rolled back newest first.
+// between landings, landed, or rolled back newest first. `halted`: a
+// service could not land, or landed unhealthy with nothing reverted; the
+// next services were not landed and the owner decides (lane 16).
 export type TrainState = {
-  readonly state: 'blocked' | 'waiting' | 'landing' | 'landed' | 'rolled_back';
+  readonly state: 'blocked' | 'waiting' | 'landing' | 'landed' | 'rolled_back' | 'halted';
   readonly services: readonly TrainStop[];
   readonly compatibility: string | null;                    // the line: who consumes whom, and what this ticket changes
   readonly blocked: { readonly reason: string; readonly proposal: string } | null;
@@ -137,6 +206,7 @@ export type PlanItemInbox = InboxBase & {
 };
 
 export type InboxItem = PermissionItem | QuestionItem | ReleaseItem | PlanItemInbox;
+export type NextInboxItem = InboxItem | SessionPlanItem;
 
 // ---------------------------------------------------------------- milestone 2: plans
 
@@ -157,6 +227,8 @@ export type PlanItem = {
   readonly estimate: Estimate;
   readonly ticket: TicketId | null;                         // once the plan is approved
   readonly state: PlanItemState;
+  // The services its body names, with their sensitivity (decision 24, lane 18): the plan panel's chips.
+  readonly sensitivity?: readonly { readonly service: string; readonly sensitivity: ServiceSensitivity }[];
 };
 
 export type PlanState = 'proposed' | 'superseded' | 'rejected' | 'approved' | 'paused' | 'done';
@@ -279,6 +351,13 @@ export type MoveTicketBody = { readonly status: string };
 export type ApproveBody = { readonly requestedAt: string; readonly heads: readonly { readonly pr: number; readonly head: string }[] };
 export type LeadMessageBody = { readonly text: string; readonly goal?: true };   // goal: the text is a goal
 export type RejectPlanBody = { readonly message: string };
+export type ChangeSessionPlanBody = { readonly message: string };   // what the author is to change in its plan
+
+// The Editor tab (decision 30, lane 20): the files the session changed, and
+// one file of its checkout, cut at 400 lines (`cut` says so), with the hash
+// of what was read, which a save (decision 33, lane 17's shapes) sends back.
+export type SessionFiles = { readonly files: readonly { readonly path: string; readonly added: number; readonly removed: number }[] };
+export type SessionFile = { readonly path: string; readonly text: string; readonly lines: number; readonly cut: boolean; readonly hash: string };
 
 // Every route: its body (null for none) and its answer. `events` answers
 // with a stream of sseFrame() frames, from the seq after `?after=`; the
@@ -301,6 +380,15 @@ export type ApiRoutes = {
   // `run` sibling under the session's previewKey, every answer sandboxed.
   'GET /api/workspace': { readonly body: null; readonly response: Workspace };
   'GET /api/sessions/:id/preview/*': { readonly body: null; readonly response: 'the sibling\'s answer' };
+  // Waves 7 and 8, written by lane 16: the session plan's Go and Change
+  // (lane 17 serves them), the Editor tab's files and Take over and Give
+  // back (lane 20 serves them).
+  'POST /api/sessions/:id/plan/go': { readonly body: null; readonly response: { readonly accepted: true } };
+  'POST /api/sessions/:id/plan/change': { readonly body: ChangeSessionPlanBody; readonly response: { readonly accepted: true } };
+  'GET /api/sessions/:id/files': { readonly body: null; readonly response: SessionFiles };
+  'GET /api/sessions/:id/files/*': { readonly body: null; readonly response: SessionFile };
+  'POST /api/sessions/:id/takeover': { readonly body: null; readonly response: { readonly accepted: true; readonly by: UserId } };
+  'POST /api/sessions/:id/giveback': { readonly body: null; readonly response: { readonly accepted: true } };
   // Milestone 2. `messages` answers the thread after `?after=<seq>`.
   'GET /api/lead': { readonly body: null; readonly response: LeadState };
   'GET /api/lead/messages': { readonly body: null; readonly response: LeadMessage[] };
@@ -333,6 +421,12 @@ const routes = {
   'GET /api/inbox': true,
   'GET /api/workspace': true,
   'GET /api/sessions/:id/preview/*': true,
+  'POST /api/sessions/:id/plan/go': true,
+  'POST /api/sessions/:id/plan/change': true,
+  'GET /api/sessions/:id/files': true,
+  'GET /api/sessions/:id/files/*': true,
+  'POST /api/sessions/:id/takeover': true,
+  'POST /api/sessions/:id/giveback': true,
   'GET /api/lead': true,
   'GET /api/lead/messages': true,
   'GET /api/lead/stream': true,
@@ -349,6 +443,12 @@ export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
 // The preview route: lane 15 serves it (container/preview.ts), not the flow's API.
 export const SESSION_PREVIEW_ROUTE: ApiRoute = 'GET /api/sessions/:id/preview/*';
+
+// The routes of waves 7 and 8 written ahead of their servers (lane 16):
+// the plan's Go and Change are lane 17's (flow/plan-gate.ts), the files,
+// takeover and giveback lane 20's (flow/files.ts, flow/takeover.ts).
+export const SESSION_PLAN_ROUTES: readonly ApiRoute[] = ['POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/plan/change'];
+export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'POST /api/sessions/:id/takeover', 'POST /api/sessions/:id/giveback'];
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));
