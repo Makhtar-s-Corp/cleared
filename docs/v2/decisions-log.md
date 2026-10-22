@@ -1274,6 +1274,7 @@ The choices the lane makes:
     - 7 notifications (plan 1, approval 5, permission 1), 11 owner gestures.
     Its "3 after 2" read as broken, wrongly: a landing seen by a reading 90 s late. This led to the ledger's landing time and to readings during the morning's waits (choice 2).
   - **Run 4**, with `PROOF_NOTIFICATIONS=skipped` as the real run will have it: 9 steps ok and step `3 notifications` skipped. The plan was done 12 minutes after the goal. Both commitments were done, and every "after" was kept: item 3 started 25 s after item 2 landed, item 5 8 s after item 3. No login cut. The plan's own notification was not sent in this run: the dispatcher's first tick sends nothing (v1's rule), and the plan came before its second. The real run should start the service well before the goal.
+  - **Run 5**, on the final code, notifications skipped: 9 steps ok, 1 skipped, none failed. Step 4 recorded the planted commitments' ids (c1, c2), and step 8 found both done. Every "after" was kept.
 - **Captures and results** are in `/tmp/cleared-captures/j2/rehearsal/` (mode 644, the pointer moved off the buttons), with `durations.md` and `result.json`. Each rehearsal folder (`/tmp/cleared-j2-rehearsal-*`) is kept for reading, its password file removed.
 - **No screen changed**, so the lane ran no visual loop.
 - **Not proven here:**
