@@ -11,13 +11,14 @@ import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 // approval modules (their own tests); the registry tests use empty modules
 // for those six. Milestone 2 adds lead and notify (decision 14): lane 5
 // filled lead and lane 6 filled notify (their own tests, test/lead/ and
-// test/notify/).
-const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule };
+// test/notify/). The replanned milestone 2 adds knowledge (decision 27, lane
+// 24, its own tests in test/knowledge/).
+const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule };
 const deps = { store: undefined as never };
 
 test('the module stubs are empty and assemble into the in-memory defaults', async () => {
-  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify']);
-  assert.equal(MODULE_NAMES.length, 8);
+  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge']);
+  assert.equal(MODULE_NAMES.length, 9);
   // Lane 5 filled the lead module (its own test, test/lead/module.test.ts): it provides no slot.
   assert.deepEqual(lead.provide(deps), {});
   for (const [name, module] of Object.entries(stubs)) {
@@ -30,6 +31,13 @@ test('the module stubs are empty and assemble into the in-memory defaults', asyn
   assert.deepEqual(await app.registry.users.list(), []);
   await app.registry.reviewRecorder.record({ ticket: 'LOCAL-1', pr: 3, session: 's', model: 'claude-sonnet-5-5', verdict: 'pass', round: 1, report: 'ok', at: '2026-10-21T10:00:00.000Z' });
   await app.registry.approvalWriter.approve({ ticket: 'LOCAL-1', by: 'u1', requestedAt: '2026-10-21T10:00:00.000Z', heads: [{ pr: 3, head: 'abc' }] });
+});
+
+test('a module left out of the record assembles as an empty one', () => {
+  // A test that builds the record of the modules it needs (test/flow/modules.test.ts) keeps working when a module is added.
+  const { knowledge: _left, ...eight } = stubs;
+  const app = assemble(eight, deps);
+  assert.deepEqual([app.tables, app.routes], [[], []]);
 });
 
 const route = (method: Route['method'], path: string, name: string): Route => ({
