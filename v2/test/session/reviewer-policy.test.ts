@@ -112,6 +112,74 @@ test('a read that writes, runs a program or reads outside the workdir still asks
   ]);
 });
 
+// Review round 1 of pull request 240: `--` before a pattern that starts with
+// a dash (B1), an abbreviated long option (B2: GNU programs and git's
+// parse-options take any unambiguous prefix), and the same classes for every
+// read. Each program's options are an allowlist: an option it does not list,
+// or a long option not named whole, asks.
+test('review round 1: --, abbreviated long options and unlisted options ask', () => {
+  table([
+    // B1: after --, the first operand is the pattern and the others are paths.
+    ['rg -- -x /etc/passwd', 'ask', 'default'],
+    ['rg -- -zz /etc', 'ask', 'default'],
+    ['grep -- -x /etc/passwd', 'ask', 'default'],
+    ['rg -- --files /etc', 'ask', 'default'],
+    ['rg -e -x -- /etc', 'ask', 'default'],
+    ['rg -- -x src', 'allow', 'reviewer.read'],
+    ['grep -n -A 3 -- -x src', 'allow', 'run.safe'],
+    // B2: an abbreviation of a long option that reads a file.
+    ['wc --files0=/etc/passwd', 'ask', 'default'],
+    ['wc --files0 x', 'ask', 'default'],
+    ['wc --files0-f=list.txt', 'ask', 'default'],
+    ['wc --lin src/page.ts', 'ask', 'default'],
+    ['wc --lines src/page.ts', 'allow', 'reviewer.read'],
+    // F1: rg, whatever its version does with abbreviations.
+    ['rg --pr=cat x', 'ask', 'default'],
+    ['rg --hostname-b=x y', 'ask', 'default'],
+    ['rg --ignore-fil=/etc/x y', 'ask', 'default'],
+    ['rg -z x src', 'ask', 'default'],
+    ['rg --search-zip x src', 'ask', 'default'],
+    ['rg --type-add "x:*.x" x src', 'ask', 'default'],
+    ['rg -tts -g "*.ts" --max-count=3 x src', 'allow', 'reviewer.read'],
+    ['rg --glob="*.ts" -C2 x src', 'allow', 'reviewer.read'],
+    // F2 and git's prefix class: log, show and diff refuse an abbreviation
+    // themselves; merge-base and rev-parse take one, so they list theirs whole.
+    ['git show -O/etc/passwd HEAD', 'ask', 'default'],
+    ['git diff -O /etc/passwd', 'ask', 'default'],
+    ['git diff --orderfile=/etc/passwd', 'ask', 'default'],
+    ['git log --outp=x', 'ask', 'default'],
+    ['git show --output-indicator-old=x HEAD', 'ask', 'default'],
+    ['git show --ext-diff HEAD', 'ask', 'default'],
+    ['git diff --no-ind a b', 'ask', 'default'],
+    ['git merge-base --is-anc main HEAD', 'ask', 'default'],
+    ['git merge-base --octopus a b c', 'allow', 'reviewer.read'],
+    ['git rev-parse --show-top', 'ask', 'default'],
+    ['git rev-parse --git-path hooks', 'ask', 'default'],
+    ['git rev-parse --short=8 HEAD', 'allow', 'reviewer.read'],
+    ['git rev-parse --abbrev-ref HEAD@{upstream}', 'allow', 'reviewer.read'],
+    // The other reads: cat, head, tail, ls, find.
+    ['cat --show-a src/page.ts', 'ask', 'default'],
+    ['cat -n -- src/page.ts', 'allow', 'run.safe'],
+    ['cat -- /etc/passwd', 'ask', 'default'],
+    ['head --lin=5 src/page.ts', 'ask', 'default'],
+    ['head --lines=5 src/page.ts', 'allow', 'run.safe'],
+    ['head -n -5 src/page.ts', 'allow', 'run.safe'],
+    ['head -20 src/page.ts', 'allow', 'run.safe'],
+    ['tail -f server.log', 'ask', 'default'],
+    ['tail --pid=1 -n 5 server.log', 'ask', 'default'],
+    ['tail -- -n /etc/passwd', 'ask', 'default'],
+    ['ls --hid=x src', 'ask', 'default'],
+    ['ls -la --sort=time src', 'allow', 'run.safe'],
+    ['ls -- /etc', 'ask', 'default'],
+    ['find . -files0-from list.txt', 'ask', 'default'],
+    ['find . -fprintf out "%p"', 'ask', 'default'],
+    ['find . -newer /etc/passwd', 'ask', 'default'],
+    ['find . -execdir cat {} +', 'ask', 'default'],
+    ['find -L src -name "*.ts" -type f -print', 'allow', 'run.safe'],
+    ['find src -maxdepth 2 -not -path "*/node_modules/*"', 'allow', 'run.safe'],
+  ]);
+});
+
 test('tricky quoting: a separator inside quotes or escaped is a character, an expansion inside double quotes asks', () => {
   table([
     ["grep -n 'a|b' src", 'allow', 'run.safe'],
