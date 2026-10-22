@@ -438,10 +438,11 @@ ${options ? `<div class="options">${options}</div>` : ''}${free}</fieldset>`;
   }).join('');
   const title = lead ? undefined : ticketTitle(view, item.ticket);
   // The question first, on the colour of what waits; the ticket under it (DESIGN.md, 4).
-  const head = lead ? eyebrow(item, t('eyebrow_lead_question'), '/lead', 'answer_on_lead', t) : eyebrow(item, t('eyebrow_question'), sessionLink(item.sessionId), 'open_session', t);
+  // The lead's question has one way out, the bar's link to the lead's screen.
+  const head = lead ? eyebrow(item, t('eyebrow_lead_question'), undefined, '', t) : eyebrow(item, t('eyebrow_question'), sessionLink(item.sessionId), 'open_session', t);
   return `${head}
 <h2 class="sr-only">${esc(t('kind_question'))}</h2>
-<div class="questions${item.state === 'waiting' ? ' waits' : ''}">${questions}</div>
+<div class="questions${item.state === 'waiting' ? ' waits' : ''}${lead ? ' read' : ''}">${questions}</div>
 ${title ? `<p class="d-ticket for-question">${esc(title)}</p>` : ''}`;
 }
 
@@ -483,7 +484,8 @@ export function renderActions(item: InboxItem, view: InboxView, t: Translate): s
   if (local?.kind === 'plan_approved') return done(t('approved_plan', { time: clock(local.at) }));
   if (item.state === 'handled') return done(t('handled_note'));
   if (item.kind === 'question' && isLead(item)) {
-    return `<p class="d-done">${esc(t('lead_waits'))}</p><div class="d-buttons"><a class="btn primary" href="/lead">${esc(t('answer_on_lead'))}</a></div>${note}`;
+    // Outlined: it only opens the lead's screen; ink is for a gesture.
+    return `<p class="d-done">${esc(t('lead_waits'))}</p><div class="d-buttons"><a class="btn" href="/lead">${esc(t('answer_on_lead'))}</a></div>${note}`;
   }
   switch (item.kind) {
     case 'release': {

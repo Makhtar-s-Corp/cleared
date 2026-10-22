@@ -81,6 +81,11 @@
 .option[aria-pressed="true"] { box-shadow: 0 0 0 1.5px var(--ink); }
 .option:disabled { cursor: default; opacity: .7; }
 .o-label { font-weight: 500; }
+/* the lead's question is read here, answered on the lead's screen: its
+   choices are lines, not buttons */
+.questions.read .options { gap: 0; }
+.questions.read .option:disabled { padding: 10px 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--awaiting-highlight); opacity: 1; cursor: default; }
+.questions.read .o-desc { color: var(--text-secondary); }
 .o-rec { justify-self: start; margin: 2px 0; padding-bottom: 2px; border-bottom: 1px solid var(--awaiting-highlight); font-size: 12px; color: var(--awaiting-text); font-weight: 500; }
 .o-desc { font-size: 12.5px; color: var(--text-muted); }
 .free { display: grid; gap: 6px; margin-top: 12px; font-size: 13px; color: var(--text-muted); }
@@ -153,7 +158,7 @@ a.btn, a.btn:hover { text-decoration: none; }
   .d-buttons { width: 100%; margin-left: 0; }
   .d-buttons .btn { flex: 1 1 0; min-width: 0; padding: 4px 10px; }
   .btn[data-act="approve"], .btn[data-act="approve_plan"] { min-width: 0; flex-grow: 1.6; }
-  .d-body .plan-facts { padding: 12px 0 0; }
+  .d-body .plan-facts { display: flex; flex-direction: column; gap: 4px; padding: 12px 0 0; }
   .switch button { min-height: 38px; }
   .facts { grid-template-columns: 84px minmax(0, 1fr); }
   .shots { gap: 10px; }

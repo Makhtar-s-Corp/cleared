@@ -123,8 +123,9 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the lead\'s session');
   assert.deepEqual(acts(html), [], 'no Send: the answer is given on the lead\'s screen');
-  assert.match(html, /<a class="d-link" href="\/lead">/);
-  assert.match(html, /<a class="btn primary" href="\/lead">Answer on the lead&#39;s screen<\/a>/);
+  assert.match(html, /<a class="btn" href="\/lead">Answer on the lead&#39;s screen<\/a>/);
+  assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the lead\'s screen, in the bar');
+  assert.match(html, /class="questions waits read"/);
   for (const option of html.matchAll(/<button[^>]*data-option=[^>]*>/g)) assert.match(option[0], /disabled/);
   const handled: QuestionItem = { ...question, state: 'handled' };
   assert.equal(lineOf(renderInbox(viewOf({ items: [handled] }), en), handled.id), 'Lead · no longer waits for you');
