@@ -2392,7 +2392,7 @@ A visual reference exists outside the repository. It is inspiration only; nothin
   - a disabled schedule never runs;
   - the creator is the plan's approver;
   - and beyond it: the summer time's end, a catch up once after a stop, a repeated failure told once, a removed schedule's id never given again, a schedule `at` a time disabled once run, a goal schedule's plan approved for its creator, a recipe gone, the creation's refusals, the routes' guards, a recipe naming two services run in steps, a fast recipe on a `full` service run in the full lane, and the base read from git's objects, never the working tree.
-- **Checks.** `npm test`: 1080 node tests, 1074 pass and 6 skipped; 154 Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
+- **Checks.** `npm test`: 1083 node tests, 1077 pass and 6 skipped; 154 Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
 - **No real run.** Nothing here calls a model or Docker. A schedule's real run belongs to the proof (lane 29).
 - **No screen changed.** The lane touches no file of the app, so it ran no visual loop and made no capture. Lane 27 draws "Run a recipe" and the schedules in the tower's plans card.
 - **Followups.**
