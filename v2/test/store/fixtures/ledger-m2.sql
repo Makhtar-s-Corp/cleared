@@ -1,7 +1,9 @@
 -- A ledger made by the milestone 2 schema (origin/v2 at 50faee9, before the
 -- workspace migration of lane 14): every module table of the eight modules,
 -- with sessions, session events, tickets, plans and inbox rows. Written by a
--- script on that commit with the real stores; test/store/migrations.test.ts
+-- script on that commit: the tickets, sessions, events and the policy rule
+-- through the real stores, the plan, its items, the inbox items and the lead
+-- message as plain inserts with their columns. test/store/migrations.test.ts
 -- runs the migrations on a ledger made from it.
 CREATE TABLE session_events (
   session_id TEXT NOT NULL, seq INTEGER NOT NULL, at TEXT NOT NULL, ticket TEXT NOT NULL, project TEXT NOT NULL,

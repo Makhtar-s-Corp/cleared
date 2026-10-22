@@ -187,7 +187,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 
 | Id | Requirement | Milestone | Delivered by | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
-| P1 | The store is migrated by versioned, tested, reversible migrations (replan decision 19); reversible by the consistent copy made before the first migration of a start, restored by hand | 2 | 187 (lane 14) | `test/store/migrations.test.ts` | done |
+| P1 | The store is migrated by versioned, tested, reversible migrations (replan decision 19) | 2 | 187 (lane 14) | `test/store/migrations.test.ts` (reversible by the copy made before the first migration of a start, restored by hand) | done |
 | P8 | A page built by a session (the trial environment) runs on another origin than the app, sandboxed, without the owner's credentials, behind an unguessable per-session address, so it can approve nothing (replan decision 20) | 2 | lanes 15, 20 | lane 20's preview isolation test; lane 15's header test | planned |
 | P9 | No instruction written by a session runs during a sibling's build, and the ticket layer is built with no network (replan decision 20) | 2 | lane 15 | lane 15's build command-line test | planned |
 | P2 | The front end's build never reaches a CopilotKit host; the telemetry switches are off (owner decision of 2026-10-22 06:29) | 2 | 184 | `app/web/test/copilot.test.tsx`; the Chromium captures' request logs in 184 | done |
