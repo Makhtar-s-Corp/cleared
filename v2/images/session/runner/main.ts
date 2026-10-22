@@ -62,6 +62,9 @@ export const HOST_CALL_TIMEOUT_MS = 300_000;
 export const LOGIN_POLL_MS = 10_000;
 // A context measure slower than this runs after every third tool call only.
 export const SLOW_MEASURE_MS = 200;
+// A context measure that does not answer within this is given up, so the
+// end-of-turn measure, which the relay awaits, cannot hold the session.
+export const MEASURE_TIMEOUT_MS = 5_000;
 // The commit identity of every session: a name and no address. Git 2.39
 // (the image's) accepts an empty address from these variables, and the
 // guard has nothing to refuse in it (lib/guard/codex-guard.mjs, "email
@@ -164,6 +167,7 @@ export type RunnerDeps = {
   readonly log?: (text: string) => void;          // stderr
   readonly sleep?: (ms: number) => Promise<void>;
   readonly clock?: () => number;                  // milliseconds, for the measures' latency
+  readonly measureTimeoutMs?: number;
 };
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -228,7 +232,8 @@ function loginToken(text: string | undefined): string | undefined {
 
 // An SDK frame that says the login was refused: the typed error of an
 // assistant message or of an API retry (SDKAssistantMessageError), never
-// the text.
+// the text. The CLI retries a 401, so only the turn's result tells whether
+// the login failed.
 function authenticationFailed(message: unknown): boolean {
   const frame = record(message);
   return frame?.error === 'authentication_failed' && (frame.type === 'assistant' || (frame.type === 'system' && frame.subtype === 'api_retry'));
@@ -361,14 +366,22 @@ export async function run(deps: RunnerDeps): Promise<number> {
     const query = current;
     if (!query?.getContextUsage) return;
     const began = clock();
+    const timeoutMs = deps.measureTimeoutMs ?? MEASURE_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const fields = contextFields(await query.getContextUsage({ detail: 'summary' }));
+      const answer = await Promise.race([
+        query.getContextUsage({ detail: 'summary' }),
+        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs); }),
+      ]);
+      const fields = contextFields(answer);
       const ms = round(clock() - began);
       slow = ms > SLOW_MEASURE_MS;
       if (fields) out({ type: 'context', after, detail: 'summary', ms, ...fields });
     } catch (error) {
       slow = clock() - began > SLOW_MEASURE_MS;
       deps.log?.(`cleared-runner: context measure failed: ${(error as Error).message}\n`);
+    } finally {
+      clearTimeout(timer);
     }
   }
   // After a tool call: the call goes on at once, the line comes when the measure does.
@@ -499,14 +512,19 @@ export async function run(deps: RunnerDeps): Promise<number> {
     for (;;) {
       const query = deps.query({ prompt: turns.iterable, options: optionsFor(resume) });
       current = query;
+      let refused = false;                        // an authentication error in this turn
       let failed = false;
       for await (const message of query) {
-        if (!failed && authenticationFailed(message)) {
-          failed = true;
-          out({ type: 'login', state: 'failed' });
+        const frame = record(message);
+        if (authenticationFailed(message)) refused = true;
+        if (frame?.type === 'result') {
+          // A turn that ends in an error after a refused login waits for a new one.
+          failed = refused && (frame.is_error === true || frame.subtype !== 'success');
+          refused = false;
+          if (failed) out({ type: 'login', state: 'failed' });
         }
         out({ type: 'sdk', message });
-        if (record(message)?.type !== 'result') continue;
+        if (frame?.type !== 'result') continue;
         if (failed) break;
         await measure('turn');
       }

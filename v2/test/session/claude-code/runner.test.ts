@@ -584,7 +584,8 @@ test('a login error: the failed turn ends, the runner waits for a new token in t
   source.end();
   assert.equal(await done, 0);
   const kinds = out.map((line) => (line.type === 'sdk' ? `sdk:${(line.message as { type: string }).type}` : line.type === 'login' ? `login:${line.state}` : line.type));
-  assert.deepEqual(kinds.filter((k) => k !== 'context'), ['login:failed', 'sdk:assistant', 'sdk:result', 'login:renewed', 'sdk:result', 'exit']);
+  // The failure is decided at the turn's result, and said before it.
+  assert.deepEqual(kinds.filter((k) => k !== 'context'), ['sdk:assistant', 'login:failed', 'sdk:result', 'login:renewed', 'sdk:result', 'exit']);
   // The same file is read again until its token changes; the same session is resumed with it.
   assert.ok(sleeps.length >= 3 && sleeps.every((ms) => ms > 0));
   assert.equal(queries, 2);
@@ -634,4 +635,38 @@ test('a measure line times ten summary and ten full context measures and reads t
   assert.equal(seen.context.filter((d) => d === 'full').length, 10);
   assert.equal(seen.usage, 1);
   assert.deepEqual(measure.usage, { subscriptionType: 'max', rateLimitsAvailable: true, windows: { five_hour: { utilization: 12, resetsAt: '2026-10-22T20:00:00Z' }, seven_day: { utilization: 31, resetsAt: '2026-10-27T08:00:00Z' } } });
+});
+
+test('an authentication error the CLI retries successfully is no login failure: no wait, the turn ends as usual', async () => {
+  let sleeps = 0;
+  const { query } = fakeQuery(async function* () {
+    yield { type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 3, retry_delay_ms: 1, error_status: 401, error: 'authentication_failed' };
+    yield result('fine after all');
+  });
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(query, source.lines, out, { sleep: async () => { sleeps++; } }));
+  source.send(start);
+  source.send({ type: 'user', uuid: 'u-1', text: 'Work.' });
+  await until(() => out.some((line) => line.type === 'context'));
+  source.end();
+  assert.equal(await done, 0);
+  assert.deepEqual(out.filter((line) => line.type === 'login'), []);
+  assert.equal(sleeps, 0);
+});
+
+test('a context measure that never answers does not hold the session: it gives up after its timeout', async () => {
+  const { query } = fakeQuery(async function* () { yield result('one'); yield result('two'); });
+  const stuck: QueryFn = (args) => Object.assign(query(args), { getContextUsage: () => new Promise(() => {}) });
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const logs: string[] = [];
+  const done = run(deps(stuck, source.lines, out, { measureTimeoutMs: 20, log: (text) => logs.push(text) }));
+  source.send(start);
+  source.send({ type: 'user', uuid: 'u-1', text: 'Go.' });
+  await until(() => out.filter((line) => line.type === 'sdk').length === 2);
+  source.end();
+  assert.equal(await done, 0);
+  assert.equal(out.filter((line) => line.type === 'context').length, 0);
+  assert.ok(logs.some((text) => /context measure failed: no answer within 20 ms/.test(text)), logs.join('\n'));
 });
