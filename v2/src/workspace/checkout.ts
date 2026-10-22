@@ -1,6 +1,10 @@
 // The checkouts around a session (milestone 1 plan, lane 5, decision 12):
 // the service's own checkout of the project, cloned once and fetched after,
-// and one checkout per ticket on the ticket branch, made from the base. The
+// and one checkout per ticket on the ticket branch, made from the base. In a
+// workspace of several services (milestone 2 plan, decision 20), a ticket
+// has one checkout per service it touches, <workdirs>/<ticket>/<service>,
+// each on the same branch; for a folder of a monorepo, the checkout is the
+// whole repository and the session works in the folder (`cwd`). The
 // ticket checkout is the session's workdir: a host folder mounted alone in
 // the container, so it is a clone with a .git folder of its own (no linked
 // worktree, no alternates, no hard links into the project checkout).
@@ -102,13 +106,33 @@ export type TicketCheckoutInput = {
   readonly workdir: string;             // the ticket checkout, mounted in the session's container
   readonly base: string;
   readonly branch: string;              // ticketBranch(ticket)
+  readonly path?: string;               // a folder of a monorepo: the service's folder in the repository
 };
 
 export type TicketCheckout = {
   readonly workdir: string;
   readonly branch: string;
   readonly reused: boolean;             // true when the checkout was already there, on its branch
+  readonly cwd: string;                 // where the session works: the workdir, or the service's folder in it
 };
+
+// A folder inside the repository: relative, and never above it.
+function checkFolder(path: string): void {
+  if (!path || isAbsolute(path) || path.split('/').some((part) => part === '' || part === '.' || part === '..'))
+    throw new CheckoutError(`"${path}" is not a folder inside the repository`);
+}
+
+// The service's folder in a checkout: every part a plain folder, never a
+// link, since the session writes the checkout.
+function folderIn(workdir: string, path: string | undefined): string {
+  if (path === undefined) return workdir;
+  let dir = workdir;
+  for (const part of path.split('/')) {
+    dir = join(dir, part);
+    if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new CheckoutError(`${path} is not a folder of the checkout ${workdir}`);
+  }
+  return dir;
+}
 
 // A path inside the checkout's .git folder, refused when any part of it is
 // a link or not the kind expected: the session can write that folder. The
@@ -164,12 +188,13 @@ export async function ticketCheckout(input: TicketCheckoutInput): Promise<Ticket
   await checkBranchName(input.base, 'base branch');
   await checkBranchName(input.branch, 'ticket branch');
   if (input.branch === input.base) throw new CheckoutError(`the base branch ${input.base} is never a ticket branch`);
+  if (input.path !== undefined) checkFolder(input.path);
   if (existsSync(input.workdir)) {
     if (!existsSync(join(input.workdir, '.git'))) throw new CheckoutError(`${input.workdir} exists and is not a ticket checkout`);
     const branch = readHead(input.workdir);
     if (branch !== input.branch) throw new CheckoutError(`${input.workdir} is on ${branch ?? 'no branch'}, not on ${input.branch}`);
     ensureExcluded(input.workdir);
-    return { workdir: input.workdir, branch: input.branch, reused: true };
+    return { workdir: input.workdir, branch: input.branch, reused: true, cwd: folderIn(input.workdir, input.path) };
   }
   const url = (await git(input.project, ['remote', 'get-url', 'origin'])).trim();
   checkUrl(url);
@@ -197,5 +222,45 @@ export async function ticketCheckout(input: TicketCheckoutInput): Promise<Ticket
     rmSync(partial, { recursive: true, force: true });
     throw error instanceof CheckoutError ? error : new CheckoutError(`the ticket checkout ${input.workdir} could not be made: ${(error as Error).message}`);
   }
-  return { workdir: input.workdir, branch: input.branch, reused: false };
+  return { workdir: input.workdir, branch: input.branch, reused: false, cwd: folderIn(input.workdir, input.path) };
+}
+
+export type BaseExport = {
+  readonly dir: string;                 // <root>/<commit>
+  readonly commit: string;
+};
+
+// The files of the base branch, as the service's checkout last fetched it,
+// written once per commit under `root`, without .git: what a sibling's base
+// layer is built from, its contract and the project's skills are read from
+// (decisions 20 and 27). Landed code only: never the checkout's working
+// tree, never a ticket checkout. With `only`, that folder of the repository
+// alone, its content at the top; undefined when the base has no such folder.
+export async function exportBase(input: { readonly project: string; readonly base: string; readonly root: string; readonly only?: string }): Promise<BaseExport | undefined> {
+  checkPath(input.project, 'project checkout');
+  checkPath(input.root, 'export folder');
+  await checkBranchName(input.base, 'base branch');
+  if (input.only !== undefined) checkFolder(input.only);
+  const commit = (await git(input.project, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${input.base}^{commit}`])).trim();
+  if (input.only !== undefined && !(await git(input.project, ['ls-tree', '-d', commit, '--', input.only])).trim()) return undefined;
+  const dir = join(input.root, commit);
+  if (existsSync(dir)) return { dir, commit };
+  mkdirSync(input.root, { recursive: true });
+  // Written in a sibling folder, then renamed, as a ticket checkout is.
+  const partial = join(input.root, `.${commit}.partial-${randomUUID()}`);
+  const archive = `${partial}.tar`;
+  try {
+    mkdirSync(partial);
+    await git(input.project, ['archive', '--format=tar', '-o', archive, commit, ...(input.only === undefined ? [] : ['--', input.only])]);
+    const strip = input.only === undefined ? [] : [`--strip-components=${input.only.split('/').length}`];
+    await run('tar', ['-x', '--no-same-owner', '-f', archive, '-C', partial, ...strip]);
+    renameSync(partial, dir);
+  } catch (error) {
+    rmSync(partial, { recursive: true, force: true });
+    if (existsSync(dir)) return { dir, commit };      // another start exported it first
+    throw error instanceof CheckoutError ? error : new CheckoutError(`the base of ${input.project} could not be exported: ${(error as Error).message}`);
+  } finally {
+    rmSync(archive, { force: true });
+  }
+  return { dir, commit };
 }

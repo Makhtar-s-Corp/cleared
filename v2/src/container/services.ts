@@ -11,6 +11,8 @@
 // and Docker would create an anonymous volume, without Cleared's label, for
 // each one; the table names those paths so they become tmpfs mounts instead,
 // and gives each image what the session needs to reach it.
+import { closeSync, constants, lstatSync, openSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 export type ServiceSpec = {
   readonly alias: string;
@@ -82,4 +84,133 @@ export function parseServices(setting: string): ServiceSpec[] {
     services.push({ alias, image: `${name}:${tag}`, env: known.env, tmpfs: known.tmpfs, ready: known.ready, sessionEnv: known.sessionEnv(alias) });
   }
   return services;
+}
+
+// ------------------------------------------------------------- siblings
+//
+// The other services of the workspace, run beside a session on its
+// internal network under their names (milestone 2 plan, decision 20): the
+// ticket's trial environment. A real sibling is built in two layers, so
+// that no instruction a session wrote runs during a build and no build of
+// the branch reaches a network: the base layer is the service's own `run`
+// Dockerfile, built from its base branch as landed (a folder the service
+// exports from its own checkout, never a session's); the ticket layer is
+// Cleared's Dockerfile, FROM the base layer and a COPY of the ticket
+// checkout, built with no network. A ticket that changes the dependencies
+// cannot be built that way, and a service with no `run` cannot run at all:
+// those are the fake, built from the service's contract.
+
+export type SiblingSpec = {
+  readonly name: string;                         // the service's name: its alias on the session network
+  readonly port: number;                         // where it listens
+  readonly real?: {
+    readonly base: string;                       // host folder of the service's base branch
+    readonly dockerfile: string;                 // its run Dockerfile, relative to that folder
+    readonly tag: string;                        // the base layer's tag
+    readonly checkout?: string;                  // the ticket checkout of the service: the ticket layer
+  };
+  readonly contract?: string;                    // host path of the OpenAPI file the fake answers from
+  readonly env?: Readonly<Record<string, string>>;
+};
+
+// What a sibling's checkout may change without leaving the base layer: not
+// the dependencies (package.json's four lists) nor a lock file.
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
+const LOCK_FILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'] as const;
+
+// A file at the top of a folder, or undefined when there is none. The
+// folder and the file must be plain, never links: the checkout is written
+// by a session, and the host does not follow what it planted.
+function plainFile(dir: string, name: string): string | undefined {
+  const folder = lstatSync(dir, { throwIfNoEntry: false });
+  if (!folder?.isDirectory()) throw new ServiceError(`${dir} is not a plain folder`);
+  const path = join(dir, name);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat) return undefined;
+  if (!stat.isFile()) throw new ServiceError(`${name} is not a plain file`);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { return readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
+}
+
+// Each dependency list of a package.json, as JSON text; none without a file.
+function dependencies(text: string | undefined, where: string): Record<string, string> {
+  if (text === undefined) return {};
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new ServiceError(`${where} package.json is not JSON`); }
+  const object = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  return Object.fromEntries(DEPENDENCY_FIELDS.map((field) => [field, JSON.stringify(object[field] ?? null)]));
+}
+
+// Why the checkout cannot be built on the base layer, or undefined when it
+// can: its dependencies or a lock file differ from the base's.
+export function dependencyChange(base: string, checkout: string): string | undefined {
+  try {
+    const before = dependencies(plainFile(base, 'package.json'), 'the base\'s');
+    const after = dependencies(plainFile(checkout, 'package.json'), 'the checkout\'s');
+    const field = DEPENDENCY_FIELDS.find((name) => (before[name] ?? 'null') !== (after[name] ?? 'null'));
+    if (field) return `the ticket changes the package.json ${field}`;
+    for (const lock of LOCK_FILES)
+      if (plainFile(base, lock) !== plainFile(checkout, lock)) return `the ticket changes ${lock}`;
+  } catch (error) {
+    if (error instanceof ServiceError) return `the dependencies cannot be compared: ${error.message}`;
+    throw error;
+  }
+  return undefined;
+}
+
+// The ticket layer: the base layer, and the checkout copied into its
+// working folder. Nothing else: no RUN, no instruction from the branch.
+export function ticketLayerDockerfile(baseTag: string, workdir: string): string {
+  if (!/^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(baseTag)) throw new ServiceError(`not an image tag: ${JSON.stringify(baseTag)}`);
+  if (!/^\/[A-Za-z0-9._/-]*$/.test(workdir)) throw new ServiceError(`the base layer's working folder must be an absolute path, not ${JSON.stringify(workdir)}`);
+  return `# Generated by Cleared v2 (decision 20): the base layer and the ticket's checkout, no other instruction.\nFROM ${baseTag}\nCOPY . ${workdir.replace(/\/+$/, '')}/\n`;
+}
+
+// What planSiblings reads of a service of the workspace (workspace/config.ts).
+export type SiblingSource = {
+  readonly name: string;
+  readonly kind: 'repository' | 'folder';
+  readonly path: string | null;                  // a folder of a monorepo: run and contract are relative to it
+  readonly run: { readonly dockerfile: string; readonly port: number } | null;
+  readonly contract: { readonly format: 'openapi'; readonly path: string } | null;
+};
+
+export type SiblingPlan = {
+  readonly services: readonly SiblingSource[];
+  readonly own: string;                          // the service the session works on
+  readonly ownCheckout: string;                  // its ticket checkout: the session's workdir
+  readonly checkoutOf: (name: string) => string | undefined;   // another service's ticket checkout, when the ticket has one
+  readonly baseOf: (name: string) => Promise<{ readonly dir: string; readonly commit: string } | undefined>;
+  readonly contractPort: (file: string) => number | undefined;
+};
+
+export const DEFAULT_FAKE_PORT = 8080;
+
+// The siblings of a session from its workspace: every service that runs or
+// has a contract, the session's own one included when it runs (the Browser
+// tab shows it), each real when it runs and its fake otherwise. A service
+// whose base branch cannot be read is left out.
+export async function planSiblings(plan: SiblingPlan): Promise<SiblingSpec[]> {
+  const siblings: SiblingSpec[] = [];
+  for (const service of plan.services) {
+    const own = service.name === plan.own;
+    if (!service.run && (own || !service.contract)) continue;
+    const base = await plan.baseOf(service.name);
+    if (!base) continue;
+    const root = service.path ? join(base.dir, service.path) : base.dir;
+    const contract = service.contract ? join(root, service.contract.path) : undefined;
+    const checkout = own ? plan.ownCheckout : plan.checkoutOf(service.name);
+    const port = service.run?.port ?? (contract === undefined ? undefined : plan.contractPort(contract)) ?? DEFAULT_FAKE_PORT;
+    siblings.push({
+      name: service.name, port,
+      ...(contract === undefined ? {} : { contract }),
+      ...(service.run ? {
+        real: {
+          base: root, dockerfile: service.run.dockerfile, tag: `cleared-v2-base-${service.name}:${base.commit.slice(0, 12)}`,
+          ...(checkout === undefined ? {} : { checkout: service.path ? join(checkout, service.path) : checkout }),
+        },
+      } : {}),
+    });
+  }
+  return siblings;
 }

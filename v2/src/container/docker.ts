@@ -1,7 +1,8 @@
 // The only way v2 talks to Docker: the `docker` CLI, spawned as a child
 // process (milestone 1 plan, decision 3). The label rule lives here:
 //   - every object it creates carries `--label cleared.dev=v2`, and every
-//     network, volume and container also `cleared.session=<id>`;
+//     network, volume and container also `cleared.session=<id>`, as does an
+//     image built for one session (a sibling's ticket layer, milestone 2);
 //   - every list carries `--filter label=cleared.dev=v2`, and a listed row
 //     without that label is refused even if the CLI ignored the filter;
 //   - `docker stop`, `rm`, `exec` and the other commands that act on an
@@ -72,18 +73,20 @@ export const cliSpawner: DockerSpawner = (args) => spawn('docker', args, { stdio
 
 const CREATES = new Set(['create', 'build', 'network create', 'volume create']);
 const SESSION_CREATES = new Set(['create', 'network create', 'volume create']);
-const LISTS = new Set(['ps', 'network ls', 'volume ls']);
+// `image ls` prints no labels: each listed image is inspected, and its
+// labels checked, before anything acts on it.
+const LISTS = new Set(['ps', 'network ls', 'volume ls', 'image ls']);
 // Commands that act on objects, with how many of the words after `--` are
 // targets: all of them, or only the first (exec: the rest is the command).
 const TARGETED = new Map<string, 'all' | 'first'>([
   ['start', 'all'], ['stop', 'all'], ['rm', 'all'], ['inspect', 'all'], ['logs', 'all'], ['exec', 'first'],
-  ['network rm', 'all'], ['network inspect', 'all'], ['volume rm', 'all'],
+  ['network rm', 'all'], ['network inspect', 'all'], ['volume rm', 'all'], ['image inspect', 'all'], ['image rm', 'all'],
 ]);
 const META = new Set(['version']);
 
 function verbOf(args: readonly string[]): string {
   const [first = '', second = ''] = args;
-  return first === 'network' || first === 'volume' ? `${first} ${second}` : first;
+  return first === 'network' || first === 'volume' || first === 'image' ? `${first} ${second}` : first;
 }
 
 const hasPair = (args: readonly string[], flag: string, value: string): boolean =>
@@ -173,6 +176,7 @@ export type ContainerSpec = {
 export type ContainerRow = { readonly id: string; readonly name: string; readonly state: string; readonly labels: Readonly<Record<string, string>> };
 export type NetworkRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>> };
 export type VolumeRow = { readonly name: string; readonly labels: Readonly<Record<string, string>> };
+export type ImageRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>>; readonly workdir: string };
 
 // `docker ... --format '{{json .}}'` prints labels as "k=v,k=v".
 function parseLabels(text: unknown): Record<string, string> {
@@ -231,13 +235,21 @@ export class Docker {
     return parsed.Server?.Version ?? 'unknown';
   }
 
-  // Builds an image from a context folder; the image carries the label.
-  async build(spec: { readonly context: string; readonly dockerfile?: string; readonly tag: string; readonly timeoutMs?: number }): Promise<void> {
+  // Builds an image from a context folder; the image carries the label,
+  // and the session's when it is built for one session. With `network:
+  // 'none'`, no step of the build reaches a network.
+  async build(spec: {
+    readonly context: string; readonly dockerfile?: string; readonly tag: string; readonly timeoutMs?: number;
+    readonly network?: 'none'; readonly session?: string;
+  }): Promise<void> {
     check(absolute(spec.context), 'build context', spec.context);
     check(spec.dockerfile === undefined || absolute(spec.dockerfile), 'Dockerfile', spec.dockerfile);
     check(IMAGE.test(spec.tag), 'image tag', spec.tag);
+    if (spec.session !== undefined) assertSessionId(spec.session);
     const file = spec.dockerfile === undefined ? [] : ['--file', spec.dockerfile];
-    await this.must(['build', '--label', LABEL, '--tag', spec.tag, ...file, '--', spec.context], undefined, { timeoutMs: spec.timeoutMs ?? 1_800_000 });
+    const session = spec.session === undefined ? [] : ['--label', `${SESSION_LABEL}=${spec.session}`];
+    const network = spec.network === undefined ? [] : ['--network', spec.network];
+    await this.must(['build', '--label', LABEL, ...session, ...network, '--tag', spec.tag, ...file, '--', spec.context], undefined, { timeoutMs: spec.timeoutMs ?? 1_800_000 });
   }
 
   async createNetwork(spec: { readonly name: string; readonly session: string; readonly internal: boolean }): Promise<string> {
@@ -325,6 +337,30 @@ export class Docker {
     return labelled(rows, 'volume', (row) => row.name);
   }
 
+  // The labelled images, of one session or with one tag: listed with the
+  // label filter, then inspected, and each one's labels checked, since the
+  // list does not print them.
+  private async imageRows(filters: readonly string[]): Promise<ImageRow[]> {
+    const out = await this.must(['image', 'ls', '--no-trunc', ...filters, '--format', '{{json .}}']);
+    const ids = [...new Set(jsonLines(out).map((row) => String(row.ID)))];
+    if (ids.length === 0) return [];
+    const inspected = JSON.parse(await this.must(['image', 'inspect', '--', ...ids], new Set(ids))) as { Id?: string; RepoTags?: string[] | null; Config?: { Labels?: Record<string, string> | null; WorkingDir?: string } }[];
+    const rows = inspected.map((image) => ({ id: String(image.Id), name: image.RepoTags?.[0] ?? '<none>', labels: { ...(image.Config?.Labels ?? {}) }, workdir: image.Config?.WorkingDir ?? '' }));
+    return labelled(rows, 'image', (row) => row.name);
+  }
+
+  async images(session: string): Promise<ImageRow[]> {
+    const rows = await this.imageRows(this.filters(session));
+    for (const row of rows) if (row.labels[SESSION_LABEL] !== session) throw new LabelRuleError(`docker listed image ${row.name} without ${SESSION_LABEL}=${session}: refused`);
+    return rows;
+  }
+
+  // A labelled image by its tag, or undefined when there is none.
+  async image(tag: string): Promise<ImageRow | undefined> {
+    check(IMAGE.test(tag), 'image tag', tag);
+    return (await this.imageRows(['--filter', LABEL_FILTER, '--filter', `reference=${tag}`]))[0];
+  }
+
   // The id of the session's container with this name, from a labelled list.
   private async owned(session: string, name: string): Promise<{ id: string; owned: ReadonlySet<string> }> {
     const row = (await this.containers(session)).find((c) => c.name === name || c.name === `/${name}`);
@@ -381,13 +417,16 @@ export class Docker {
     return result.stdout + result.stderr;
   }
 
-  // Stops and removes the session's containers, then its networks; with
-  // `only`, just the ones named there. Each removal names only what the
-  // labelled list just returned.
+  // Stops and removes the session's containers, then its networks, then
+  // the images built for it; with `only`, just the ones named there. Each
+  // removal names only what the labelled list just returned.
   async removeSession(
     session: string,
-    options: { readonly stopTimeoutSeconds?: number; readonly only?: { readonly containers: readonly string[]; readonly networks: readonly string[] } } = {},
-  ): Promise<{ containers: number; networks: number }> {
+    options: {
+      readonly stopTimeoutSeconds?: number;
+      readonly only?: { readonly containers: readonly string[]; readonly networks: readonly string[]; readonly images?: readonly string[] };
+    } = {},
+  ): Promise<{ containers: number; networks: number; images: number }> {
     assertSessionId(session);
     const { stopTimeoutSeconds = 5, only } = options;
     const named = (name: string, list: readonly string[] | undefined): boolean => list === undefined || list.includes(name.replace(/^\//, ''));
@@ -399,7 +438,9 @@ export class Docker {
     }
     const networks = (await this.networks(session)).filter((row) => named(row.name, only?.networks)).map((row) => row.id);
     if (networks.length > 0) await this.must(['network', 'rm', '--', ...networks], new Set(networks));
-    return { containers: containers.length, networks: networks.length };
+    const images = (await this.images(session)).filter((row) => only === undefined || (only.images ?? []).includes(row.name)).map((row) => row.id);
+    if (images.length > 0) await this.must(['image', 'rm', '--force', '--', ...images], new Set(images));
+    return { containers: containers.length, networks: networks.length, images: images.length };
   }
 
   async removeVolumes(session: string): Promise<number> {
