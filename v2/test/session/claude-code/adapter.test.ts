@@ -194,6 +194,25 @@ test('the policy reads package.json from the host workdir: same scripts allowed,
   } finally { t.cleanup(); }
 });
 
+// The owner decision of 2026-10-22 22:03: the reviewer's chained reads of the
+// demo inbox capture are answered by the policy, and nothing reaches the inbox.
+test('a reviewer\'s chained reads and checks are allowed by the policy, with no inbox request; a part that asks still asks', async () => {
+  const t = await setup();
+  try {
+    const author = input(t.workdir);
+    const handle = await t.adapter.start({ ...author, role: 'reviewer', policy: { ...author.policy, role: 'reviewer' } });
+    const runner = t.runners[0] as FakeRunner;
+    const command = 'git log --oneline -5; git merge-base main HEAD; git show --stat HEAD && npm test 2>&1 | tail -20';
+    runner.say({ type: 'permission_request', requestId: 'r-review', toolName: 'Bash', toolUseId: 'toolu_1', input: { command } });
+    runner.say({ type: 'permission_request', requestId: 'r-curl', toolName: 'Bash', toolUseId: 'toolu_2', input: { command: 'git log -3; curl https://example.com' } });
+    assert.deepEqual((await runner.waitFor((l) => l.requestId === 'r-review')).decision, { kind: 'allow_once' });
+    await settle();
+    assert.deepEqual(custom(t.log, 'cleared.permission_answered')[0], { requestId: 'r-review', decision: 'allow_once', by: 'policy', rule: 'shell.compound_safe' });
+    assert.deepEqual(custom(t.log, 'cleared.permission_request').map((v) => (v as { requestId: string }).requestId), ['r-curl']);
+    await handle.stop();
+  } finally { t.cleanup(); }
+});
+
 test('a question goes to the inbox and its answer goes back with the answers', async () => {
   const t = await setup();
   try {

@@ -64,6 +64,18 @@ export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
   'pwd',
 ];
 
+// The reviewer's own reads, on top of the safe commands (owner decision of
+// 2026-10-22 22:03): what a review runs to find the ticket's change and read
+// it. The reviewer's only, so that neither the author nor the reader, whose
+// policy is built from DEFAULT_SAFE_COMMANDS, gains them.
+export const REVIEWER_READS: readonly string[] = [
+  'git show', 'git show *',
+  'git merge-base *',
+  'git rev-parse *',
+  'rg *',
+  'wc', 'wc *',
+];
+
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -610,23 +622,38 @@ function unsafeWords(words: readonly string[], policy: Policy): boolean {
     if (starts.some((path) => !inside(policy.workdir, path))) return true;
     return args.some((word) => ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fls'].includes(word) || word.startsWith('-fprint'));
   }
-  if (program === 'grep') {
-    if (args.some((word) => word === '-f' || word.startsWith('--file') || /^-[A-Za-z]*f/.test(word))) return true;
+  if (program === 'grep' || program === 'rg') {
+    if (args.some((word) => word === '-f' || /^--file(?:=|$)/.test(word) || (program === 'grep' && word.startsWith('--file')) || /^-[A-Za-z]*f/.test(word))) return true;
+    // rg runs a program on every file it searches with --pre, and another
+    // with --hostname-bin; --ignore-file reads a file.
+    if (program === 'rg' && args.some((word) => word.startsWith('--pre') || word.startsWith('--hostname-bin') || word.startsWith('--ignore-file'))) return true;
     const operands = args.filter((word) => !word.startsWith('-'));
-    const named = args.some((word) => word === '-e' || word.startsWith('--regexp'));
+    // The pattern given by -e, also in a group of short options (-ie, -eroot),
+    // or none to find (rg --files): every operand is then a path.
+    const named = args.some((word) => word.startsWith('--regexp') || /^-[A-Za-z]*e/.test(word)) || (program === 'rg' && args.includes('--files'));
     return (named ? operands : operands.slice(1)).some((path) => !inside(policy.workdir, path));
+  }
+  if (program === 'wc') {
+    if (args.some((word) => word.startsWith('--files0-from'))) return true;
+    return args.filter((word) => !word.startsWith('-')).some((path) => !inside(policy.workdir, path));
   }
   if (program === 'cat' || program === 'head' || program === 'tail' || program === 'ls')
     return args.filter((word) => !word.startsWith('-')).some((path) => !inside(policy.workdir, path));
   return false;
 }
 
+const folded = (words: readonly string[]) => (words[0] === 'git' ? ['git', ...(gitCommand(words)?.rest ?? [])] : words);
+
+// A command one of the patterns matches, with none of its unsafe words.
+function matches(words: readonly string[], patterns: readonly string[], policy: Policy): boolean {
+  const command = folded(words);
+  return patterns.some((pattern) => globWords(splitPattern(pattern), command)) && !unsafeWords(words, policy);
+}
+
 function safeCommand(words: readonly string[], policy: Policy): boolean {
-  const folded = words[0] === 'git' ? ['git', ...(gitCommand(words)?.rest ?? [])] : words;
-  if (folded[0] === 'npm' && folded[1] === 'run' && folded[2] !== undefined && policy.scripts.includes(folded[2]) && (folded.length === 3 || folded[3] === '--'))
-    return true;
-  if (!policy.safeCommands.some((pattern) => globWords(splitPattern(pattern), folded))) return false;
-  return !unsafeWords(words, policy);
+  const [program, run, script, rest] = folded(words);
+  if (program === 'npm' && run === 'run' && script !== undefined && policy.scripts.includes(script) && (rest === undefined || rest === '--')) return true;
+  return matches(words, policy.safeCommands, policy);
 }
 
 // An author deletes a file its ticket changed without asking (milestone 2,
@@ -696,25 +723,43 @@ function asked(request: ToolRequest, words: readonly string[] | undefined, polic
 
 const GENERIC = 'default';
 
-// A list of simple commands: allowed when each part is allowed on its own
-// and each file it writes is one an Edit may write without asking; else the
-// verdict of the first part that is not, with its own rule when it has one.
+// One part of a list: its command, then each file it writes, which must be
+// one an Edit may write without asking. A deny of either wins; else the
+// first ask, with its own rule when it has one.
+function part(request: ToolRequest, command: SimpleCommand, policy: Policy, context: PolicyContext): Verdict {
+  const verdict = simple(request, command.words, policy);
+  let asked: Verdict | undefined =
+    verdict.decision !== 'ask' ? undefined : verdict.rule === GENERIC ? ask('shell.compound', `${command.words.join(' ')} is not a command the policy allows on its own`) : verdict;
+  for (const target of command.writes) {
+    const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
+    if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
+    if (edit.decision === 'deny') return edit;
+    asked ??= edit.decision === 'ask' && edit.rule !== GENERIC
+      ? ask(edit.rule, `the redirection to ${target}: ${edit.reason}`)
+      : ask('shell.compound', `the redirection writes ${target}, which an edit could not write without asking`);
+  }
+  return asked ?? allow('shell.compound_safe');
+}
+
+// A list of simple commands, split part by part (owner decision of
+// 2026-10-22 22:03): allowed when every part is; denied when any part is,
+// wherever it stands, so that an "Allow once" given to an earlier part never
+// runs a later one the policy denies; else it asks for the parts that ask
+// and names them, and only them, with the rule of the first.
 function compound(request: ToolRequest, command: string, policy: Policy, context: PolicyContext): Verdict {
   const list = parseList(command);
   if (!list) return ask('shell.compound', 'shell syntax the policy does not read word for word');
-  for (const part of list) {
-    const verdict = simple(request, part.words, policy);
-    if (verdict.decision === 'ask')
-      return verdict.rule === GENERIC ? ask('shell.compound', `${part.words.join(' ')} is not a command the policy allows on its own`) : verdict;
-    for (const target of part.writes) {
-      const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
-      if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
-      if (edit.decision === 'deny') return edit;
-      if (edit.decision === 'ask' && edit.rule !== GENERIC) return ask(edit.rule, `the redirection to ${target}: ${edit.reason}`);
-      return ask('shell.compound', `the redirection writes ${target}, which an edit could not write without asking`);
-    }
+  const asks: { readonly words: readonly string[]; readonly verdict: Extract<Verdict, { decision: 'ask' }> }[] = [];
+  for (const command of list) {
+    const verdict = part(request, command, policy, context);
+    if (verdict.decision === 'deny') return verdict;
+    if (verdict.decision === 'ask') asks.push({ words: command.words, verdict });
   }
-  return allow('shell.compound_safe');
+  const [first] = asks;
+  if (!first) return allow('shell.compound_safe');
+  if (asks.length === 1) return first.verdict;
+  const reasons = asks.map(({ words, verdict }) => (verdict.reason.startsWith(words.join(' ')) ? verdict.reason : `${words.join(' ')}: ${verdict.reason}`));
+  return ask(first.verdict.rule, `${asks.length} parts of this command ask, the others are allowed: ${reasons.join('; ')}`);
 }
 
 // ---------------------------------------------------------------- lead
@@ -841,6 +886,7 @@ function rules(request: ToolRequest, policy: Policy, context: PolicyContext): Ve
 // The verdict of one simple command, after the deny rules.
 function simple(request: ToolRequest, words: readonly string[], policy: Policy): Verdict {
   if (safeCommand(words, policy)) return allow('run.safe');
+  if (policy.role === 'reviewer' && matches(words, REVIEWER_READS, policy)) return allow('reviewer.read');
   if (learned(request, words, policy)) return allow('learned');
   if (ticketDeletion(words, policy)) return allow('delete.ticket');
   return asked(request, words, policy);
