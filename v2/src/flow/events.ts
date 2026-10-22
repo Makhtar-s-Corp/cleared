@@ -10,10 +10,13 @@ import type { TicketId } from '../tickets/contract.ts';
 // (lane 7). `note` is added to the author's prompt, for a ticket put back
 // and started again. `steps`: the item's steps, when the lead gave some
 // (decision 26, lane 23); `maxParallel`: the plan's limit of sessions at
-// once, which the ticket's steps keep to.
+// once, which the ticket's steps keep to. `budgetUsd`: the ticket's budget
+// when a schedule started the plan (decision 29, lane 26), in place of
+// CLEARED_V2_BUDGET_USD.
 export type Origin = {
   readonly plan: string; readonly item: number; readonly note?: string;
   readonly steps?: readonly StepSpec[]; readonly maxParallel?: number;
+  readonly budgetUsd?: number;
 };
 
 // A step of a ticket as a plan item or the flow gives it: its kind, its
