@@ -1,1 +1,3 @@
 node_modules/
+# Vite builds the front end here (npm run build).
+app/dist/

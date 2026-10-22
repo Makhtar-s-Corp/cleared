@@ -7,13 +7,13 @@ import type { InboxItem, ReleaseItem } from '../../../src/api/types.ts';
 import { RELEASE_HEAD, inboxFixture } from '../../fixtures/inbox.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { loadCatalog } from '../../src/catalog.ts';
-import { translator } from '../../public/i18n.ts';
-import { ApiError } from '../../public/screen.ts';
+import { translator } from '../../web/lib/i18n.ts';
+import { ApiError } from '../../web/lib/screen.ts';
 import { DEFAULT_STATES } from '../../../src/tickets/contract.ts';
 import {
   TODO_STATE, answerRequest, answersFor, approve, approveBody, decisionFor, detailKey, elapsed, failure, itemFromHash, ordered, sameOrigin, sendBack, undoApproval,
   type InboxView,
-} from '../../public/screens/inbox.ts';
+} from '../../web/screens/inbox/model.ts';
 
 const en = translator(loadCatalog('inbox', 'en'));
 const fixture = inboxFixture(FIXTURE_NOW);

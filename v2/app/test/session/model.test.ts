@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { AUTHOR_ID, ANSWER_TEXT, QUESTION_TEXT, REQUEST_ID, USER, detailOf, sessionFixture } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { applyAll, applyEvent, emptyModel, EVENT_NAMES, parseCriteria, resultSummary, stepsOf, timeline, type Row } from '../../public/screens/session.ts';
+import { applyAll, applyEvent, emptyModel, EVENT_NAMES, parseCriteria, resultSummary, stepsOf, timeline, type Row } from '../../web/screens/session/model.ts';
 import { EVENT_TYPES, type AgUiEvent } from '../../../src/session/events.ts';
 import { createMapper, toolRequest } from '../../../src/session/adapters/claude-code/map.ts';
 import { createCleaner } from '../../../src/session/clean.ts';

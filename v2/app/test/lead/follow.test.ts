@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { leadFrame, type LeadMessage, type LeadStreamFrame } from '../../../src/api/types.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { leadFixture, otherPlans } from '../../fixtures/lead.ts';
-import { followLead, mergeMessages, mergePlan, type StreamLike } from '../../public/screens/lead.ts';
+import { followLead, mergeMessages, mergePlan, type StreamLike } from '../../web/screens/lead/model.ts';
 
 class FakeStream implements StreamLike {
   readonly listeners = new Map<string, (event: { data: string }) => void>();

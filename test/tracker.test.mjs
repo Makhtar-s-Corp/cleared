@@ -21,6 +21,8 @@ test('runtime and provider-neutral tests contain no provider name or query', () 
     // The Orca terminal adapter names the one tracker whose issues Orca links to a worktree.
     if (file.startsWith('lib/tracker/adapters/') || file === 'lib/terminal/orca.sh' || file.startsWith('docs/') || file.startsWith('prompts/')
       || file === 'agents.example.conf' || file.startsWith('test/')) return false;
+    // npm's lock files list registry packages by name: v2's names graphql (a package CopilotKit pulls in), not a tracker.
+    if (file.endsWith('package-lock.json')) return false;
     return file === 'cleared' || /\.(?:sh|mjs|jq|json|service|timer|yml|yaml)$/.test(file);
   });
   for (const file of checked) {

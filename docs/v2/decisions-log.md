@@ -1328,6 +1328,84 @@ The choices the lane makes:
   Beyond those, the lane edited `v2/src/session/adapters/index.ts` and its tests under `v2/test/scripts/`. This entry is the only change outside the lane's files.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-script`.
 
+## 2026-10-22: Owner decision: the v2 interface moves to React, with CopilotKit for the chat
+
+**Decision.** On 2026-10-22 at 06:29 (Europe/Paris), the owner decided that the v2 interface moves to React, with CopilotKit for the chat:
+- open source packages only: no Copilot Cloud, no public API key, nothing sent to CopilotKit's servers;
+- CopilotKit's telemetry turned off, with every opt-out set, and a test or a check that no request leaves for CopilotKit's hosts;
+- a justified exception to "no build": Vite, for the front end only. The service stays native TypeScript (erasable syntax, no build).
+
+- Author: the owner, relayed on 2026-10-22 06:29 (Europe/Paris); written in this log.
+
+## 2026-10-22: Owner decision: shadcn/ui as the component library
+
+**Decision.** On 2026-10-22 at 06:30 (Europe/Paris), the owner decided that shadcn/ui is the component library of the v2 interface:
+- the components are copied into the repository (Radix plus Tailwind);
+- light and dark themes go through the shadcn CSS variables, keeping the current colours and the Geist font, with no gradients;
+- English by default, translatable to French;
+- no generic shadcn look: the interface keeps the identity of the kit's mockups.
+
+- Author: the owner, relayed on 2026-10-22 06:30 (Europe/Paris); written in this log.
+
+## 2026-10-22: Owner decision: Phosphor icons everywhere
+
+**Decision.** On 2026-10-22 at 06:30 (Europe/Paris), the owner decided that the v2 interface uses Phosphor icons (`@phosphor-icons/react`) everywhere, instead of shadcn's default Lucide, in one consistent weight: regular, and bold only for active states if needed.
+
+- Author: the owner, relayed on 2026-10-22 06:30 (Europe/Paris); written in this log.
+
+## 2026-10-22: the v2 interface in React, with CopilotKit, shadcn/ui and Phosphor (the author's choices, lane j2-react-port)
+
+**Decision.** These are the author's choices for applying the three owner entries above, not the owner's decisions. Lane `v2-j2-react-port` ports the tower, the session, the lead and the inbox screens and the sign-in page to React with strict TypeScript, with the same routes, the same server checks (anti-forgery token, origin, host, password session) and the same look. For the page's code, it supersedes the 2026-10-21 entry "the browser runs the app's TypeScript with its types stripped": the service and the app's server still run that way.
+
+1. **Where the code is.** The React front end is `v2/app/web/` (Vite's root, its own `tsconfig.json`). Vite builds it into `v2/app/dist/`, which git ignores. `v2/app/public/` stays Vite's public folder, so the fonts, the icons, the manifest and `sw.js` keep their addresses and the guard's binary exclusions. The theme script is now plain `theme.js`: it must run before the bundle.
+2. **The server writes each page.** For each route it writes the HTML: the language, the title, the screen and what the header shows first (`<body data-screen data-project data-user data-source>`). It names the bundle's files from `dist/.vite/manifest.json`, and preloads the screen's chunk with its sheets, the imported ones first (the lead's sheet before the inbox's, which adapts the plan panel). Without a build, a page answers 503 and `app/main.ts` stops at once; both say to run `npm run build`. The sign-in form still posts to `/login`. A refusal comes back with the server's sentence on `<body data-error>`, since the page runs no inline script. The CSP is unchanged.
+3. **Same markup.** The components render the classes, ids and data attributes of the HTML renderers, so the kit's sheets apply as they are and the proof scripts' selectors still match (`#timeline [data-row]`, `[data-act="approve_plan"]`, `#plan-side [data-plan][data-state]`, and the others). Each screen keeps its own chunk and sheet, as each screen loaded its own sheet before. The rules are in each screen's `model.ts`, as pure functions, and the components draw them.
+4. **shadcn/ui.** Button, Input, Textarea, Popover and Toggle are copied into `app/web/components/ui/` and restyled. The theme is shadcn/ui's variables (`--background`, `--card`, `--primary` ...) with the kit's colours, light and dark under `data-theme`; the kit's roles (`--canvas`, `--surface`, `--ink` ...) are read from them. Tailwind brings its theme and utilities in layers, without its preflight. The kit's sheets stay unlayered, so they win, and a component's base sets nothing they would have to undo (no gap, height or alignment). The notifications and avatar menus are non-modal Popovers instead of `<details>`: a modal popover locks the scroll with an injected `<style>`, which the CSP refuses.
+5. **Phosphor**, regular weight: the bell (bold while this device is told), the moon and the sun, the inbox's back arrow, the timeline's marks (read, edit, run, search, fetch, delete, move, refused, interrupted, error, verdict) and the criteria's marks. They replace the drawn SVGs and the text glyphs. The brand's triangle stays: it is the logo, not an icon.
+6. **CopilotKit.**
+   - The version is 1.77.2, pinned exactly; it was two weeks old on this date.
+   - Only the headless entries of `@copilotkit/react-core` are imported (`/v2/headless`, `/v2/context`). A `CopilotKitCoreReact` with the screen's agents is provided through CopilotKit's own context, with no runtime URL, no public API key and no license key. The root and `/v2` entries would bring CopilotKit's stylesheet, its prebuilt chat (Lucide icons) and its inspector (Google Fonts).
+   - Each thread is an AG-UI agent (`AbstractAgent` of `@ag-ui/client`). The session's agent follows the session's stored AG-UI events. The lead's agent follows the lead's stream, whose frames are not AG-UI. `connect()` opens one AG-UI run for the screen's life and publishes the thread as STATE_SNAPSHOT and MESSAGES_SNAPSHOT events. The screens read them with `useAgent`.
+   - Snapshots, not the stored events: AG-UI's verifier refuses a stream that starts inside a run or carries several runs, which a stored session does.
+   - The person's words, answers and gestures go through the app's routes, as before. `run()` refuses.
+   - Not used: CopilotKit's chat components (their look and Lucide) and `useHumanInTheLoop`, since the harness's questions are not front-end tool calls.
+   - Risk: local agents go through `agents__unsafe_dev_only`, CopilotKit's only path without a runtime, and a later version may change it. `app/web/test/copilot.test.tsx` holds the behaviour.
+7. **Every opt-out**, and what checks it:
+   - `v2/.npmrc` runs no install script, and `scarfSettings.enabled = false` turns off `@scarf/scarf`, which CopilotKit pulls in.
+   - The CI job sets `SCARF_ANALYTICS=false`, `DO_NOT_TRACK=1` and `COPILOTKIT_TELEMETRY_DISABLED=true`. Vite defines the same, and `NODE_ENV=production`, so the inspector never mounts.
+   - `@copilotkit/web-inspector` is replaced by an empty module at build time.
+   - Telemetry lives in CopilotKit's runtime package, which is not installed. The built page names `telemetry.copilotkit.ai` only in a list of addresses CopilotKit's capture ignores.
+   - The test runs the core with both agents while `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon` are watched, and requires no request at all. A planted request makes it fail.
+   - In Chromium, every capture logged its requests: none left the app's origin.
+8. **zod** is one copy (an `overrides` entry), set to `jitless` before any schema is built. Otherwise zod probes `new Function`, which the CSP reports, since it allows no eval.
+9. **The catalogs** are the same files, bundled into the page by screen. A key missing from French falls back to English, as on the server. `/messages/<screen>.json` is still served. The catalog test now reads every file of a screen's folder and of the shell.
+10. **Tests.**
+    - The models' tests stay under `node --test`.
+    - The renderers' tests moved to `app/web/test/` and run under Vitest, under Node, with the components rendered to HTML (`react-dom/server`). The helper drops shadcn/ui's `data-slot` and utility classes, so the assertions read the kit's classes. Assertions on exact markup were rewritten for attribute order.
+    - Counts: 183 app tests before the port; 87 under `node --test` and 101 under Vitest after it, the three CopilotKit tests and two server tests added.
+    - `npm test` builds first.
+11. **The guard.**
+    - Its git calls get a 256 MB buffer: the lock file's diff passed Node's 1 MB.
+    - The strict diff pass leaves out `v2/package-lock.json`. There, the "assigned secret" rule reads the dependency js-tokens, followed by its version range, as a secret. The tree pass still checks the whole file.
+12. **Dependencies.** All are dev dependencies: the service and the app's server still have no runtime dependency, and the rest is types, tools or code Vite bundles. The pull request lists each with its licence and size. The 598 installed packages are MIT, ISC, Apache-2.0, BSD, MPL-2.0, 0BSD or Unlicense. Two have other forms, both open source. `@bufbuild/protobuf` (through AG-UI's client) is Apache-2.0 AND BSD-3-Clause. `khroma` declares no licence field, but its licence file is MIT; it comes in through CopilotKit's markdown renderer (streamdown, mermaid), which the headless entries do not bundle.
+
+**Consequences.**
+- **Captures**, none committed, in `/tmp/cleared-captures/j2/`:
+  - `before-<screen>-<width>-<theme>.png` were taken at `a31851c` before any change, and `after-*.png` on this branch, at 1440, 1280, 768 and 390, light and dark. The screens are tower, session, lead, inbox, inbox-plan (the plan selected) and login: 48 of each.
+  - The app ran on ephemeral `127.0.0.1` ports, with each screen's fixture source and a fixed clock.
+  - Pair by pair, every page has the same size. At most 0.12 % of the pixels differ, and only the Phosphor icons account for it.
+  - Both runs logged the same 24 errors, a 404 of `/api/service/lead` from the two fixture sources without the lead's routes. Neither run had a CSP violation, a request off the origin, or horizontal overflow.
+- **Behaviour in Chromium**, against the fixture sources: 51 checks across the sign-in, the tower bar and its draft to the lead, the lead's goal, memory, Change and Approve, the session's answer, message, interrupt and hand-over note, the inbox's grace, Undo, Send back, frame switch, deny with a reason, answer and plan approval, Escape, and sign out. The lead's waiting question was answered by its option button. `app/test/notify/browser.test.ts` passes (the worker, subscribe and unsubscribe through the menu). No page error.
+- **Size.** The shell's chunk is 122 kB gzipped (React, Radix, the shell). The CopilotKit chunk is 156 kB gzipped (CopilotKit's core, AG-UI's client, rxjs, zod) and loads on the session and lead screens only.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the after captures and the kit's references.
+  - Taken: 44 px targets on a phone for the brand, "Open inbox", "Open session" (43 px before), the lead card's title, the lead pill, the crumbs and the other plans. Each uses padding cancelled by a negative margin, or a pseudo-element, so the captures do not change.
+  - Not taken: the phone header's two rows, the kit's light grey for placeholders, non-breaking spaces in figures, the inbox bar's 46 and 44 px buttons, the tower bar's button order and the dark selection ring. They are the kit's current design, identical before the port, and outside a like-for-like port.
+  - Not a fault: the sticky bar over the last plan item is the full-page capture of a sticky bar, as lane 10 noted. The lead pill missing on the session and inbox captures comes from their fixture sources, which have no lead route.
+- **The plans' file lists** (milestone 1 and 2) still name `v2/app/public/screens/*.ts`. Those files are now `v2/app/web/screens/<screen>/`.
+- **A v1 test.** `test/tracker.test.mjs` reads every tracked `.json` for a tracker provider's name or query. It now leaves out npm's lock files: v2's names the `graphql` package, which CopilotKit pulls in, and no tracker.
+- Files outside the app: `test/tracker.test.mjs`, `v2/scripts/guard.ts`, `.github/workflows/v2.yml`, `v2/README.md`, `v2/package.json` and its lock file, `v2/.npmrc`, `v2/.gitignore` and this log.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-react-port`.
+
 ## 2026-10-22: Fable 5.1 used once to replan milestone 2
 
 **Decision.** Fable 5.1 was used once more, on 2026-10-22 at 07:05 (Europe/Paris), to replan what remains of milestone 2 after the owner's decisions of the same morning: the interface moves to React with CopilotKit, shadcn/ui and Phosphor (06:29 and 06:30), a workspace is several services ([complement-multi-depots.md](complement-multi-depots.md)), and the two complements are integrated into the milestones (06:45). Reason: the migration of the project to a workspace of services touches the ledger, the containers and the lock at once, which is the strong-planning case the "model choice per lane" entry allows. Brief rule 10 asks for the owner's explicit request for any use of Fable: the orchestrator's brief for this session named the model, and the orchestrator confirms that request, with its date, in its next report. The session wrote no code and reviewed nothing; it edited three documentation files and this log only.
