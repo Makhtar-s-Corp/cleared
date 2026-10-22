@@ -10,17 +10,19 @@ import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 
 // Lanes 6, 7 and 8 filled the users, sessions, flow, inbox, tickets and
 // approval modules (their own tests); the registry tests use empty modules
-// for those six. Milestone 2 adds lead and notify (decision 14), stubs
-// that lanes 5, 7 and 6 fill.
+// for those six. Milestone 2 adds lead and notify (decision 14): lane 5
+// filled lead, notify is a stub until lane 6.
 const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule };
 const deps = { store: undefined as never };
 
 test('the module stubs are empty and assemble into the in-memory defaults', async () => {
   assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify']);
   assert.equal(MODULE_NAMES.length, 8);
-  for (const [name, module] of Object.entries({ lead, notify })) {
+  for (const [name, module] of Object.entries({ notify })) {
     assert.deepEqual([module.tables, module.routes, module.provide(deps)], [[], [], {}], `the ${name} stub is empty`);
   }
+  // Lane 5 filled the lead module (its own test, test/lead/module.test.ts): it provides no slot.
+  assert.deepEqual(lead.provide(deps), {});
   for (const [name, module] of Object.entries(stubs)) {
     assert.deepEqual([module.tables, module.routes, module.provide(deps)], [[], [], {}], name);
   }
