@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GUARD_PATTERNS, HANDOVER_HEADINGS, hooks, type HookCallback } from '../../images/session/runner/hooks.ts';
+import { GUARD_PATTERNS, HANDOVER_HEADINGS, hooks, hooksFor, type HookCallback } from '../../images/session/runner/hooks.ts';
 import { commit, gitIn, plantedKey, tempDir } from '../workspace/git.ts';
 
 const signal = new AbortController().signal;
@@ -33,6 +33,18 @@ const decision = (output: Record<string, unknown>) => (output.hookSpecificOutput
 test('the runner hooks are a PreToolUse hook on Bash and a Stop hook', () => {
   assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'Stop']);
   assert.equal(hooks.PreToolUse?.[0]?.matcher, 'Bash');
+});
+
+test('the Stop hook is an author\'s only: a reviewer cannot write HANDOVER.md and a lead hands over with its tool (issue 139)', () => {
+  assert.equal(hooksFor('author'), hooks);
+  for (const role of ['reviewer', 'lead']) {
+    const set = hooksFor(role);
+    assert.deepEqual(Object.keys(set), ['PreToolUse'], role);
+    assert.equal(set.PreToolUse, hooks.PreToolUse, role);
+  }
+  // A run of its own keeps the role's choice.
+  assert.deepEqual(Object.keys(hooksFor('lead', async () => '')), ['PreToolUse']);
+  assert.deepEqual(Object.keys(hooksFor('author', async () => '')).sort(), ['PreToolUse', 'Stop']);
 });
 
 test('a git push to the base branch is blocked, in every form', async () => {
