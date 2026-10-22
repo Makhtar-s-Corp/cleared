@@ -3071,5 +3071,5 @@ The fixture source's reviewer case (`fixture-human.test.ts`) was added after tha
 - The live service needs a restart to carry choice 1, and the real proof's step 11 then shows the harness attached.
 - Issue 231: item 1 of the second list (the release is re-sent after a timeout) and item 1 of the first (the raw harness id in the sentence) are not taken.
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 242, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-takeover-real-harness`.
