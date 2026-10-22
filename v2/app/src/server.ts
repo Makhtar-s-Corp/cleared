@@ -21,6 +21,14 @@
 // nothing else, the page reads it from <body data-preview>, and the app's
 // own origin never serves a preview, not even through /api/service/.
 //
+// The web terminal of a session taken over (/api/service/sessions/:id/terminal/*,
+// decision 32, lane 31) is answered on the app's loopback address only: a
+// Host of 127.0.0.1, localhost or [::1] at this server's port, reached on a
+// loopback socket, never the public origin's; every post with the
+// anti-forgery token and an Origin equal to that loopback address, the
+// stream with the cookie and, when the browser sends it, Sec-Fetch-Site:
+// same-origin. /api/me says whether the terminal is offered (`terminal`).
+//
 // /api/notifications and its two writes are the app's own (notifications.ts):
 // a browser of the signed-in person asks to be told, with the same checks
 // as any write. The manifest, the service worker and the icons are served
@@ -88,6 +96,9 @@ export const contentPolicy = (previewOrigin?: string): string =>
 
 // A preview of a session (/api/sessions/:id/preview/...), which the app's origin never forwards.
 const PREVIEW_PATH = /^sessions\/[^/]+\/preview(?:\/|$)/;
+// The web terminal of a session (/api/sessions/:id/terminal/...), forwarded on the loopback address only.
+const TERMINAL_PATH = /^sessions\/[^/]+\/terminal(?:\/|$)/;
+const LOOPBACK_SOCKET = /^(?:127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/;
 
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -232,6 +243,26 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     return user ? { id, cookie, user } : undefined;
   };
 
+  // The request reached this server on its loopback address, by a loopback
+  // name, and not through the public origin (decision 32).
+  const loopback = (request: IncomingMessage): boolean => {
+    const host = request.headers.host?.toLowerCase();
+    const { localAddress, localPort } = request.socket;
+    if (!host || !localAddress || !LOOPBACK_SOCKET.test(localAddress)) return false;
+    if (options.publicOrigin !== undefined && host === new URL(options.publicOrigin).host) return false;
+    return [`127.0.0.1:${localPort}`, `localhost:${localPort}`, `[::1]:${localPort}`].includes(host);
+  };
+
+  // The terminal's own check, on top of the writes': its loopback address,
+  // and an Origin (always on a post) equal to that address.
+  const terminalOk = (request: IncomingMessage, read: boolean): boolean => {
+    if (!loopback(request)) return false;
+    const site = request.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin') return false;
+    const origin = request.headers.origin;
+    return origin === `http://${request.headers.host}` || (read && origin === undefined);
+  };
+
   const csrfOk = (request: IncomingMessage, cookie: CookieSession) =>
     sameProof(request.headers['x-csrf-token'], cookie.csrf) && sameOrigin(request);
 
@@ -326,7 +357,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
       if (!mine) return sendJson(response, 401, { error: 'sign in first' });
       if (path === '/api/me') {
         if (!read) return sendJson(response, 405, { error: 'method not allowed' });
-        return sendJson(response, 200, { user: mine.user, csrf: mine.cookie.csrf, language: options.language, project: options.project, source: options.source.kind });
+        return sendJson(response, 200, { user: mine.user, csrf: mine.cookie.csrf, language: options.language, project: options.project, source: options.source.kind, terminal: loopback(request) });
       }
       if (path === '/api/notifications' || path.startsWith('/api/notifications/')) return notify(request, response, path, mine);
       if (path.startsWith('/api/service/')) {
@@ -334,6 +365,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
         const rest = path.slice('/api/service/'.length);
         if (!rest || rest.split('/').some((part) => part === '' || part === '.' || part === '..' || /%2f|%5c/i.test(part))) return sendJson(response, 404, { error: 'not found' });
         if (PREVIEW_PATH.test(rest)) return sendJson(response, 404, { error: 'a preview is served by the preview listener only' });
+        if (TERMINAL_PATH.test(rest) && !terminalOk(request, read)) return sendJson(response, 403, { error: 'the web terminal opens on this machine\'s browser only, at the app\'s loopback address' });
         const url = request.url ?? '';
         const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
         return options.source.forward(request, response, { method, path: `/api/${rest}${query}`, user: mine.user });
