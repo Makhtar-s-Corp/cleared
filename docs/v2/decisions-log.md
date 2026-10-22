@@ -1223,3 +1223,28 @@ The choices the lane makes:
   - The Cursor and Codex harnesses follow the session adapter contract (plan, section 6), with the harness named in `StartInput.harness`.
   - Until a harness is named, the default stays `claude-code`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-fix-doctor-window`.
+
+## 2026-10-22: Owner decision: the v2 interface moves to React, with CopilotKit for the chat
+
+**Decision.** On 2026-10-22 at 06:29 (Europe/Paris), the owner decided that the v2 interface moves to React, with CopilotKit for the chat:
+- open source packages only: no Copilot Cloud, no public API key, nothing sent to CopilotKit's servers;
+- CopilotKit's telemetry turned off, with every opt-out set, and a test or a check that no request leaves for CopilotKit's hosts;
+- a justified exception to "no build": Vite, for the front end only. The service stays native TypeScript (erasable syntax, no build).
+
+- Author: the owner, relayed on 2026-10-22 06:29 (Europe/Paris); written in this log.
+
+## 2026-10-22: Owner decision: shadcn/ui as the component library
+
+**Decision.** On 2026-10-22 at 06:30 (Europe/Paris), the owner decided that shadcn/ui is the component library of the v2 interface:
+- the components are copied into the repository (Radix plus Tailwind);
+- light and dark themes go through the shadcn CSS variables, keeping the current colours and the Geist font, with no gradients;
+- English by default, translatable to French;
+- no generic shadcn look: the interface keeps the identity of the kit's mockups.
+
+- Author: the owner, relayed on 2026-10-22 06:30 (Europe/Paris); written in this log.
+
+## 2026-10-22: Owner decision: Phosphor icons everywhere
+
+**Decision.** On 2026-10-22 at 06:30 (Europe/Paris), the owner decided that the v2 interface uses Phosphor icons (`@phosphor-icons/react`) everywhere, instead of shadcn's default Lucide, in one consistent weight: regular, and bold only for active states if needed.
+
+- Author: the owner, relayed on 2026-10-22 06:30 (Europe/Paris); written in this log.
