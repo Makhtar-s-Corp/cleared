@@ -1,10 +1,13 @@
 // The policy that answers a harness's permission requests, per role
-// (docs/v2/milestone-1-plan.md, section 5). Order: deny, then the compound
-// command check, then allow (learned answers included), then ask. The deny
-// rules read the raw text, every part of it, so that a compound command that
-// names the base branch, a production host or a secret is denied, not asked.
-// The allow rules read the one simple command a strict shell-word parser
-// finds, word for word, never a prefix of the raw text.
+// (docs/v2/milestone-1-plan.md, section 5). Order: deny, then the lead's
+// rows for the lead (docs/v2/milestone-2-plan.md, section 3.3), then the
+// compound command check, then allow (learned answers included), then ask.
+// The deny rules read the raw text, every part of it, so that a compound
+// command that names the base branch, a production host or a secret is
+// denied, not asked. The allow rules read each simple command a strict
+// shell-word parser finds, word for word, never a prefix of the raw text: a
+// list of simple commands each allowed on its own is allowed as a whole
+// (milestone 2, decision 10).
 import { posix } from 'node:path';
 import type { Role } from './contract.ts';
 
@@ -147,6 +150,112 @@ function looseCommands(text: string): string[][] {
     .split(/\$\(|[;&|\n\r()`<>{}]/)
     .map((part) => part.trim().split(/\s+/).filter(Boolean))
     .filter((words) => words.length > 0);
+}
+
+// One simple command of a list: its words, the operator that joins it to
+// the one before, and what its redirections do.
+export type SimpleCommand = {
+  readonly words: readonly string[];
+  readonly after: ';' | '&&' | '||' | '|' | null;
+  readonly writes: readonly string[];         // the files its > and >> write, whatever the stream
+  readonly redirected: boolean;               // any redirection, a duplication such as 2>&1 included
+};
+
+// A list of simple commands joined by &&, ||, ; or |, each read by
+// parseCommand, with its output redirections taken out: `>`, `>>`, `N>`,
+// `&>` with one word as the target, and the duplications `N>&M`. Anything
+// else is undefined: a lone & (background), |&, >|, an empty command, an
+// input redirection or a here-document (parseCommand refuses <), and
+// whatever parseCommand refuses in a part or a target. Quotes and
+// backslashes are skipped whole, so a separator inside them is a character.
+export function parseList(text: string): readonly SimpleCommand[] | undefined {
+  const list: SimpleCommand[] = [];
+  let part = '';
+  let writes: string[] = [];
+  let redirected = false;
+  let after: SimpleCommand['after'] = null;
+  let i = 0;
+  // The quoted or escaped run that starts at i, copied whole; false when it does not close.
+  const quoted = (): string | false => {
+    const c = text[i] as string;
+    if (c === '\\') return i + 1 < text.length ? text.slice(i, i + 2) : false;
+    if (c === "'") {
+      const close = text.indexOf("'", i + 1);
+      return close < 0 ? false : text.slice(i, close + 1);
+    }
+    let j = i + 1;
+    while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+    return j < text.length ? text.slice(i, j + 1) : false;
+  };
+  const end = (next: SimpleCommand['after']): boolean => {
+    const words = parseCommand(part);
+    if (!words) return false;
+    list.push({ words, after, writes, redirected });
+    part = '';
+    writes = [];
+    redirected = false;
+    after = next;
+    return true;
+  };
+  // A redirection at i, after its `>`, `>>` or `&>`: a duplication, or a target word.
+  const redirect = (): boolean => {
+    redirected = true;
+    if (text[i] === '|') return false;
+    if (text[i] === '&') {
+      const digits = /^[0-9]+/.exec(text.slice(i + 1))?.[0];
+      if (!digits) return false;
+      i += 1 + digits.length;
+      return i >= text.length || ' \t;&|'.includes(text[i] as string);
+    }
+    while (text[i] === ' ' || text[i] === '\t') i++;
+    let raw = '';
+    while (i < text.length && !' \t;&|<>()\n\r'.includes(text[i] as string)) {
+      const run = '\\\'"'.includes(text[i] as string) ? quoted() : (text[i] as string);
+      if (run === false) return false;
+      raw += run;
+      i += run.length;
+    }
+    const target = parseCommand(raw);
+    if (target?.length !== 1 || target[0] === '') return false;
+    writes.push(target[0] as string);
+    return true;
+  };
+  while (i < text.length) {
+    const c = text[i] as string;
+    const next = text[i + 1];
+    if (c === '\\' || c === "'" || c === '"') {
+      const run = quoted();
+      if (run === false) return undefined;
+      part += run;
+      i += run.length;
+    } else if (c === ';') {
+      if (!end(';')) return undefined;
+      i++;
+    } else if (c === '&' && next === '&') {
+      if (!end('&&')) return undefined;
+      i += 2;
+    } else if (c === '|' && next === '|') {
+      if (!end('||')) return undefined;
+      i += 2;
+    } else if (c === '|') {
+      if (next === '&' || !end('|')) return undefined;
+      i++;
+    } else if (c === '&' && next === '>') {
+      i += next === '>' && text[i + 2] === '>' ? 3 : 2;
+      if (!redirect()) return undefined;
+    } else if (c === '&') {
+      return undefined;
+    } else if (c === '>') {
+      // A file descriptor is digits standing alone just before the >.
+      part = part.replace(/(^|[ \t])[0-9]+$/, '$1');
+      i += next === '>' ? 2 : 1;
+      if (!redirect()) return undefined;
+    } else {
+      part += c;
+      i++;
+    }
+  }
+  return end(null) ? list : undefined;
 }
 
 const basename = (word: string) => word.slice(word.lastIndexOf('/') + 1);
@@ -543,16 +652,114 @@ function asked(request: ToolRequest, words: readonly string[] | undefined, polic
   return ask('default', 'no rule allows this request');
 }
 
+// ---------------------------------------------------------------- compound
+
+const GENERIC = 'default';
+
+// A list of simple commands: allowed when each part is allowed on its own
+// and each file it writes is one an Edit may write without asking; else the
+// verdict of the first part that is not, with its own rule when it has one.
+function compound(request: ToolRequest, command: string, policy: Policy, context: PolicyContext): Verdict {
+  const list = parseList(command);
+  if (!list) return ask('shell.compound', 'shell syntax the policy does not read word for word');
+  for (const part of list) {
+    const verdict = simple(request, part.words, policy);
+    if (verdict.decision === 'ask')
+      return verdict.rule === GENERIC ? ask('shell.compound', `${part.words.join(' ')} is not a command the policy allows on its own`) : verdict;
+    for (const target of part.writes) {
+      // Writing to /dev/null changes nothing.
+      if (target === '/dev/null') continue;
+      const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
+      if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
+      if (edit.decision === 'deny') return edit;
+      if (edit.decision === 'ask' && edit.rule !== GENERIC) return ask(edit.rule, `the redirection to ${target}: ${edit.reason}`);
+      return ask('shell.compound', `the redirection writes ${target}, which an edit could not write without asking`);
+    }
+  }
+  return allow('shell.compound_safe');
+}
+
+// ---------------------------------------------------------------- lead
+
+// The longest Read, and the longest head, the lead may ask for: one answer
+// stays far below the distance between the handover point and the
+// threshold (milestone 2 plan, section 4.1).
+export const LEAD_READ_LINES = 400;
+
+const LEAD_GIT_READS = ['git log *', 'git show *', 'git diff *', 'git status', 'git branch --show-current'].map(splitPattern);
+const LEAD_DELEGATES = new Set(['WebFetch', 'WebSearch', 'Agent', 'Task']);
+
+// `head -n N` or `head -nN` with N from 1 to LEAD_READ_LINES, and the files
+// it reads; undefined for any other head.
+function capped(words: readonly string[]): readonly string[] | undefined {
+  if (words[0] !== 'head') return undefined;
+  const option = words[1] === '-n' ? words[2] : words[1]?.startsWith('-n') ? words[1].slice(2) : undefined;
+  if (option === undefined || !/^[1-9][0-9]*$/.test(option) || Number(option) > LEAD_READ_LINES) return undefined;
+  return words.slice(words[1] === '-n' ? 3 : 2);
+}
+
+// The lead's shell reads: a git read alone or piped into head, ls, grep or
+// find piped into head, or head itself reading files, all under the
+// workdir and under milestone 1's conditions on their words.
+function leadRead(command: string, policy: Policy): boolean {
+  const list = parseList(command);
+  if (!list || list.length > 2 || list.some((part) => part.redirected)) return false;
+  const [first, pipe] = list as [SimpleCommand, SimpleCommand | undefined];
+  if (pipe && (pipe.after !== '|' || capped(pipe.words)?.length !== 0)) return false;
+  const words = first.words;
+  if (words[0] === 'git') {
+    const git = gitCommand(words);
+    return !!git && !git.risky && LEAD_GIT_READS.some((pattern) => globWords(pattern, ['git', ...git.rest])) && !unsafeWords(words, policy);
+  }
+  if (words[0] === 'head') {
+    const files = capped(words);
+    return files !== undefined && files.length > 0 && !unsafeWords(words, policy);
+  }
+  return pipe !== undefined && (words[0] === 'ls' || words[0] === 'grep' || words[0] === 'find') && !unsafeWords(words, policy);
+}
+
+// Section 3.3 of the milestone 2 plan, for the lead only: what is not
+// decided here goes on to the role-free rows.
+function leadRows(request: ToolRequest, policy: Policy): Verdict | undefined {
+  const { tool, input } = request;
+  if (tool.startsWith('mcp__cleared__')) return allow('lead.tools');
+  if (tool === 'Read') {
+    const limit = input.limit;
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > LEAD_READ_LINES)
+      return deny('lead.read_cap', `read with a limit of at most ${LEAD_READ_LINES} lines (the limit parameter), and an offset for the next part`);
+    return allowedRead(request, policy);
+  }
+  if (tool === 'Glob' || tool === 'Grep') return allowedRead(request, policy);
+  if (EDIT_TOOLS.has(tool)) return deny('lead.edit', 'the lead edits nothing: a change is a ticket of a plan');
+  if (tool === 'Bash') {
+    const command = typeof input.command === 'string' ? input.command : '';
+    if (leadRead(command, policy)) return allow('lead.git_read');
+    for (const words of looseCommands(command)) {
+      const sub = gitCommand(words)?.rest[0];
+      if (sub === 'commit' || sub === 'push' || sub === 'checkout' || sub === 'add') return deny('lead.edit', `the lead does not run git ${sub}: a change is a ticket of a plan`);
+    }
+    return deny('lead.command', `the lead runs nothing: it reads with git log, show, diff and status, and with ls, grep and find piped into head -n ${LEAD_READ_LINES} at most`);
+  }
+  if (LEAD_DELEGATES.has(tool)) return deny('lead.command', 'the lead reaches no network and starts no agent: it gives the work to a ticket');
+  return undefined;
+}
+
 // ---------------------------------------------------------------- evaluate
 
 export function evaluate(request: ToolRequest, policy: Policy, context: PolicyContext = {}): Verdict {
   const refused = denied(request, policy);
   if (refused) return refused;
 
+  if (policy.role === 'lead') {
+    const lead = leadRows(request, policy);
+    if (lead) return lead;
+  }
+
   let words: readonly string[] | undefined;
   if (request.tool === 'Bash') {
-    words = typeof request.input.command === 'string' ? parseCommand(request.input.command) : undefined;
-    if (!words) return ask('shell.compound', 'more than one simple command, or shell syntax the policy does not read word for word');
+    const command = typeof request.input.command === 'string' ? request.input.command : undefined;
+    words = command === undefined ? undefined : parseCommand(command);
+    if (!words) return command === undefined ? ask('shell.compound', 'a command the policy cannot read') : compound(request, command, policy, context);
   }
 
   if (READ_TOOLS.has(request.tool)) {
@@ -563,8 +770,15 @@ export function evaluate(request: ToolRequest, policy: Policy, context: PolicyCo
     const edit = allowedEdit(request, policy, context);
     if (edit) return edit;
   }
-  if (words && safeCommand(words, policy)) return allow('run.safe');
-  if (learned(request, words, policy)) return allow('learned');
+  if (words) return simple(request, words, policy);
+  if (learned(request, undefined, policy)) return allow('learned');
 
+  return asked(request, undefined, policy);
+}
+
+// The verdict of one simple command, after the deny rules.
+function simple(request: ToolRequest, words: readonly string[], policy: Policy): Verdict {
+  if (safeCommand(words, policy)) return allow('run.safe');
+  if (learned(request, words, policy)) return allow('learned');
   return asked(request, words, policy);
 }
