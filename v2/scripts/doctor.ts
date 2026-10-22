@@ -1,7 +1,7 @@
 // Checks this server can run v2 sessions, with real objects, labelled
 // cleared.dev=v2 only. One section per lane that needs a real run
 // (milestone 1 plan, section 10); `cleared doctor` will run it in milestone 5.
-//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [--no-build] [--model <id>]
+//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [--no-build] [--model <id>]
 //
 // docker (lane 2): builds the two images, starts a session with a postgres:16
 // service, proves from inside the session container what it can and cannot
@@ -21,6 +21,17 @@
 //
 // lead (milestone 2, lane 5): the checks of scripts/doctor-lead.ts, run
 // only when named.
+//
+// workspace (milestone 2, lane 15): a labelled session on the guestbook
+// with a real postgres, a real guestbook sibling built in two layers (its
+// base from the base branch, its ticket layer from the ticket checkout,
+// with no network) and a fake filter API built from its contract, since
+// the ticket's checkout of it changes a dependency; from
+// inside the session, the sibling answers on its name and the fake answers
+// an example; a preview through the route is sandboxed and has no cookie;
+// stop leaves nothing with the session label. The two examples are seeded
+// into temporary repositories from examples/; no model is called, so no
+// session runs on either example. Run only when named.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -30,10 +41,15 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { Docker, cliRunner, cliSpawner, type DockerResult } from '../src/container/docker.ts';
-import { parseServices } from '../src/container/services.ts';
+import { PREVIEW_POLICY, RELAY, previewRoutes } from '../src/container/preview.ts';
+import { parseServices, planSiblings } from '../src/container/services.ts';
 import {
-  CONFIG_MOUNT, LOGIN_FILE_MOUNT, SESSION_IMAGE, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, startSession, stopSession,
+  CONFIG_MOUNT, LOGIN_FILE_MOUNT, SESSION_IMAGE, SKILLS_MOUNT, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, siblingAddress, startSession, stopSession,
 } from '../src/container/session-runtime.ts';
+import { defaultRegistry } from '../src/modules/registry.ts';
+import { exportBase, projectCheckout, ticketBranch, ticketCheckout } from '../src/workspace/checkout.ts';
+import { parseWorkspace } from '../src/workspace/config.ts';
+import { contractPort, readContract } from '../images/fake/fake.ts';
 import { createHealthServer } from '../src/server.ts';
 import { claudeCodeRuntime, createClaudeCodeAdapter } from '../src/session/adapters/claude-code.ts';
 import { createCleaner } from '../src/session/clean.ts';
@@ -914,11 +930,192 @@ async function leadSection(build: boolean, model: string): Promise<void> {
   }
 }
 
+// workspace (milestone 2, lane 15).
+async function workspaceSection(build: boolean): Promise<void> {
+  say('== workspace (milestone 2, lane 15)');
+  const interfaces = networkInterfaces();
+  for (const [name, entries] of Object.entries(interfaces)) {
+    if (!/^(eth|en|tailscale|docker0$)/.test(name)) continue;
+    for (const entry of entries ?? []) addressLabels.set(entry.address, `<${name} ${entry.family}>`);
+  }
+  const before = listening();
+  say(`ss -ltn before: ${before.length} listening sockets`);
+  // Every command line as it runs, and how long each build took.
+  const timings: string[] = [];
+  const docker = new Docker(async (args, options) => {
+    say(`$ docker ${args.map((arg) => (/[\s'"{}]/.test(arg) ? `'${arg}'` : arg)).join(' ')}`);
+    // The ticket layer's Dockerfile is generated in a folder removed after the build: shown now.
+    if (args[0] === 'build' && args.includes('--network')) rawLines(`generated ${readFileSync(args[args.indexOf('--file') + 1] ?? '', 'utf8')}`);
+    const at = Date.now();
+    const result = await cliRunner(args, options);
+    if (args[0] === 'build') timings.push(`${args[args.indexOf('--tag') + 1]}: ${Date.now() - at} ms`);
+    return result;
+  });
+  say(`docker server ${await docker.version()}`);
+  if (build) await buildBaseImages(docker, join(V2, 'images'));
+
+  const scratch = mkdtempSync(join(tmpdir(), 'cleared-doctor-'));
+  replacements.push([scratch, '<scratch>']);
+  const session = randomUUID();
+  replacements.push([session, '<session>']);
+  const names = sessionNames(session);
+  const examples = join(V2, '..', 'examples');
+  const identity = ['-c', 'user.name=Cleared doctor', '-c', 'user.email=doctor@example.invalid', '-c', 'commit.gpgSign=false'];
+  const gitRun = (cwd: string, gitArgs: string[]): string => execFileSync('git', ['-C', cwd, ...identity, ...gitArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // A bare repository holding one example's committed files on main, as
+  // its forge would; `extra` files are committed with them.
+  const seed = (name: string, extra: Record<string, string> = {}): string => {
+    const bare = join(scratch, 'forge', `${name}.git`);
+    const work = join(scratch, 'seed', name);
+    mkdirSync(work, { recursive: true });
+    execFileSync('sh', ['-c', `git -C "$1" archive HEAD "examples/${name}" | tar -x --strip-components=2 -C "$2"`, 'sh', join(V2, '..'), work]);
+    for (const [path, text] of Object.entries(extra)) {
+      mkdirSync(dirname(join(work, path)), { recursive: true });
+      writeFileSync(join(work, path), text);
+    }
+    gitRun(scratch, ['init', '-q', '--bare', '-b', 'main', bare]);
+    gitRun(work, ['init', '-q', '-b', 'main']);
+    gitRun(work, ['add', '-A']);
+    gitRun(work, ['commit', '-q', '-m', `${name} as landed`]);
+    gitRun(work, ['push', '-q', bare, 'main']);
+    return bare;
+  };
+  const tokenFile = join(scratch, 'claude.token');
+  writeFileSync(tokenFile, 'dummy token written by the doctor, not a credential\n');
+  chmodSync(tokenFile, 0o600);
+  const hostAddresses = Object.values(interfaces).flatMap((entries) => entries ?? []).filter((entry) => !entry.internal && !entry.address.startsWith('fe80:')).map((entry) => entry.address);
+
+  let started = false;
+  const baseLayers: string[] = [];
+  try {
+    // The proof's workspace file, read as the service reads it.
+    const state = join(scratch, 'state');
+    const workspace = parseWorkspace(readFileSync(join(examples, 'workspace.conf'), 'utf8'), { authorModel: 'claude-opus-5-5', stateDir: state, file: join(examples, 'workspace.conf') });
+    say(`    workspace ${workspace.id}: ${workspace.services.map((service) => `${service.name} (run ${service.run ? service.run.port : 'none'}, contract ${service.contract?.path ?? 'none'})`).join(', ')}`);
+    const skill = '---\nname: doctor-skill\ndescription: Planted by the doctor in the guestbook\'s base branch.\n---\nRun the tests first.\n';
+    const forge: Record<string, string> = { guestbook: seed('guestbook', { '.claude/skills/doctor-skill/SKILL.md': skill }), 'filter-api': seed('filter-api') };
+    for (const service of workspace.services) await projectCheckout({ url: forge[service.name] ?? '', dir: service.dir, base: service.base });
+    const guestbook = workspace.services.find((service) => service.name === 'guestbook');
+    if (!guestbook) throw new Error('the workspace file has no guestbook');
+    // The session's checkout of the guestbook, with a change the session made.
+    const workdir = join(scratch, 'work', 'DOCTOR-1', 'guestbook');
+    await ticketCheckout({ project: guestbook.dir, workdir, base: guestbook.base, branch: ticketBranch('DOCTOR-1') });
+    writeFileSync(join(workdir, 'src', 'doctor-ticket.ts'), 'export const ticket = "DOCTOR-1";\n');
+    gitRun(workdir, ['add', '-A']);
+    gitRun(workdir, ['commit', '-q', '-m', 'DOCTOR-1: a change of the ticket']);
+
+    // The ticket's checkout of the filter API changes a dependency: its
+    // ticket layer cannot be built on its base layer, so it is the fake.
+    const filter = workspace.services.find((service) => service.name === 'filter-api');
+    if (!filter) throw new Error('the workspace file has no filter-api');
+    const filterWorkdir = join(scratch, 'work', 'DOCTOR-1', 'filter-api');
+    await ticketCheckout({ project: filter.dir, workdir: filterWorkdir, base: filter.base, branch: ticketBranch('DOCTOR-1') });
+    const pkg = JSON.parse(readFileSync(join(filterWorkdir, 'package.json'), 'utf8')) as { devDependencies?: Record<string, string> };
+    writeFileSync(join(filterWorkdir, 'package.json'), JSON.stringify({ ...pkg, devDependencies: { ...pkg.devDependencies, 'left-pad': '1.3.0' } }, null, 2) + '\n');
+    gitRun(filterWorkdir, ['commit', '-q', '-a', '-m', 'DOCTOR-1: a new dependency']);
+
+    const siblings = await planSiblings({
+      services: workspace.services, own: 'guestbook', ownCheckout: workdir, checkoutOf: (name) => (name === 'filter-api' ? filterWorkdir : undefined),
+      baseOf: (name) => exportBase({ project: workspace.services.find((service) => service.name === name)?.dir ?? '', base: 'main', root: join(state, 'siblings', name) }),
+      contractPort: (file) => contractPort(readContract(readFileSync(file, 'utf8'), file)),
+    });
+    say(`    siblings planned: ${JSON.stringify(siblings)}`);
+    for (const sibling of siblings) if (sibling.real) baseLayers.push(sibling.real.tag);
+    const skills = (await exportBase({ project: guestbook.dir, base: guestbook.base, root: join(state, 'skills', 'guestbook'), only: '.claude/skills' }))?.dir;
+
+    const startedAt = Date.now();
+    const result = await startSession(docker, {
+      session, workdir, tokenFile, allowDir: join(scratch, 'egress'), allowHosts: [], hostAddresses,
+      services: parseServices('postgres:16'), siblings, ...(skills === undefined ? {} : { skills }),
+      user: `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, command: ['sleep', 'infinity'], limits: { memory: '2g', cpus: '1', pids: 512 },
+    });
+    started = true;
+    say(`session started in ${Date.now() - startedAt} ms; builds: ${timings.join('; ')}`);
+    say(`    siblings started: ${JSON.stringify(result.siblings)}`);
+    check('the guestbook sibling runs its ticket layer', result.siblings.some((sibling) => sibling.name === 'guestbook' && sibling.kind === 'ticket' && sibling.ready));
+    check('the filter API sibling is the fake, and answers', result.siblings.some((sibling) => sibling.name === 'filter-api' && sibling.kind === 'fake' && sibling.ready));
+
+    const run = (command: string[], timeoutMs = 60_000): Promise<DockerResult> => docker.exec(session, names.container, command, { timeoutMs });
+    const health = await run(['curl', '-sS', '--max-time', '10', '-w', ' %{http_code}', 'http://guestbook:8793/health']);
+    check('from the session, the guestbook sibling answers on its name (GET /health, which reads its database)', health.code === 0 && /"status":"ok"\} 200$/.test(health.stdout.trim()), shown(health));
+    const inLayer = await docker.exec(session, names.sibling('guestbook'), ['cat', '/app/src/doctor-ticket.ts']);
+    check('the guestbook sibling holds the ticket\'s change (its ticket layer)', inLayer.code === 0 && inLayer.stdout.includes('DOCTOR-1'), shown(inLayer));
+    const checked = await run(['curl', '-sS', '--max-time', '10', '-X', 'POST', '-H', 'content-type: application/json', '-d', '{"text":"Win the jackpot"}', 'http://filter-api:8795/check']);
+    check('from the session, the fake filter API answers POST /check with the contract\'s first example', checked.code === 0 && checked.stdout.trim() === '{"ok":true,"words":[]}', shown(checked));
+    const calls = await run(['curl', '-sS', '--max-time', '10', 'http://filter-api:8795/__fake/calls']);
+    check('the fake counted the call', calls.code === 0 && calls.stdout.trim() === '{"total":1,"operations":{"check":1}}', shown(calls));
+    const skillRead = await run(['sh', '-c', `cat ${SKILLS_MOUNT}/doctor-skill/SKILL.md | head -2`]);
+    check('the project\'s skills are in the session', skillRead.code === 0 && skillRead.stdout.includes('name: doctor-skill'), shown(skillRead));
+    const skillWrite = await run(['sh', '-c', `touch ${SKILLS_MOUNT}/doctor-was-here`]);
+    check('the project\'s skills are read only', skillWrite.code !== 0, shown(skillWrite));
+
+    type Inspected = {
+      HostConfig?: { CapDrop?: string[]; PortBindings?: unknown; ReadonlyRootfs?: boolean; SecurityOpt?: string[] }; NetworkSettings?: { Networks?: Record<string, unknown> };
+      Config?: { Labels?: Record<string, string> }; Mounts?: { Type?: string; Destination?: string; RW?: boolean }[];
+    };
+    for (const name of [names.sibling('guestbook'), names.sibling('filter-api')]) {
+      const inspected = await docker.inspect(session, name) as Inspected;
+      const networks = Object.keys(inspected.NetworkSettings?.Networks ?? {});
+      say(`    ${name.replace(session, '<session>')}: labels ${JSON.stringify(inspected.Config?.Labels ?? {})}, networks ${JSON.stringify(networks)}, CapDrop ${JSON.stringify(inspected.HostConfig?.CapDrop)}, PortBindings ${JSON.stringify(inspected.HostConfig?.PortBindings)}`);
+      check(`${name.replace(session, '<session>')} is labelled, on the session network only, without capability or published port`,
+        inspected.Config?.Labels?.['cleared.dev'] === 'v2' && inspected.Config.Labels['cleared.session'] === session && networks.length === 1 && networks[0] === names.network
+        && (inspected.HostConfig?.CapDrop ?? []).includes('ALL') && Object.keys((inspected.HostConfig?.PortBindings ?? {}) as object).length === 0);
+      const mounts = (inspected.Mounts ?? []).map((m) => ({ Type: m.Type, Destination: m.Destination, RW: m.RW }));
+      check(`${name.replace(session, '<session>')} has no volume mount (no unlabelled anonymous volume)`, !mounts.some((m) => m.Type === 'volume'), `Mounts ${JSON.stringify(mounts)}`);
+    }
+    const images = await docker.images(session);
+    say(`    images with the session label: ${images.map((image) => image.name.replace(session, '<session>')).join(', ')}`);
+
+    // The preview: what the relay brings back as it is, then the route's answer.
+    const address = await siblingAddress(docker, session, 'guestbook');
+    say(`    the guestbook sibling's address on the session network: ${address ?? 'none'}`);
+    const raw = await docker.exec(session, names.egress, ['node', '-e', RELAY, `http://${address}:8793/`, '1000000', '10000']);
+    const rawHeaders = (JSON.parse(raw.stdout.trim() || '{}') as { status?: number; headers?: [string, string][] });
+    say(`    relayed from the guestbook sibling: status ${rawHeaders.status}, headers ${JSON.stringify((rawHeaders.headers ?? []).map(([name]) => name))}`);
+    const key = randomUUID();
+    const routes = previewRoutes({ proof: () => 'doctor-proof', target: (id) => (id === session ? { session, key, alias: 'guestbook', port: 8793 } : undefined), docker: () => docker });
+    const answer = await new Promise<{ status: number; headers: Record<string, string>; body: string }>((resolve, reject) => {
+      const response = {
+        status: 0, headers: {} as Record<string, string>, headersSent: false,
+        writeHead(status: number, headers: Record<string, string>) { this.status = status; this.headers = headers; this.headersSent = true; return this; },
+        end(body?: Buffer | string) { resolve({ status: this.status, headers: this.headers, body: String(body ?? '') }); },
+        destroy() { reject(new Error('destroyed')); },
+      };
+      const request = { method: 'GET', url: `/api/sessions/${session}/preview/${key}`, headers: { 'x-cleared-proof': 'doctor-proof' } };
+      Promise.resolve(routes[0]?.handle({ request, response, params: { id: session, key }, registry: defaultRegistry() } as never)).catch(reject);
+    });
+    say(`    preview answer: status ${answer.status}, headers ${JSON.stringify(answer.headers)}, body ${short(answer.body.replace(/\s+/g, ' '), 160)}`);
+    check('a preview response carries the sandbox policy and no Set-Cookie', answer.status === 200 && answer.headers['content-security-policy'] === PREVIEW_POLICY
+      && !Object.keys(answer.headers).some((name) => name.toLowerCase().startsWith('set-cookie')));
+  } finally {
+    if (started || (await docker.containers(session)).length > 0 || (await docker.networks(session)).length > 0) {
+      const removed = await stopSession(docker, session);
+      say(`stop: removed ${removed.containers} containers, ${removed.networks} networks and ${removed.images} images`);
+    }
+    await removeSessionVolume(docker, session);
+    const left = [(await docker.containers(session)).length, (await docker.networks(session)).length, (await docker.volumes(session)).length, (await docker.images(session)).length];
+    check('after stop and the volume removal, nothing has the session label (containers, networks, volumes, images)', left.every((count) => count === 0), JSON.stringify(left));
+    // The base layers are shared by the sessions of a commit, so stop
+    // keeps them, labelled, with no session label. The doctor's own commits
+    // are made for the run: their layers are removed.
+    for (const tag of baseLayers) {
+      const image = await docker.image(tag);
+      say(`    base layer kept by stop: ${tag} ${JSON.stringify(image?.labels ?? 'missing')}`);
+      check(`the doctor's base layer ${tag} is removed`, await docker.removeImage(tag));
+    }
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  const afterMap = sockets();
+  const added = [...afterMap.keys()].filter((address) => !before.includes(address));
+  const ours = added.filter((address) => (afterMap.get(address) ?? '').includes(`pid=${process.pid},`));
+  check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
+}
+
 const args = process.argv.slice(2);
 const modelAt = args.indexOf('--model');
 const model = modelAt >= 0 ? args[modelAt + 1] ?? '' : 'claude-haiku-5-5';
 const sections = args.filter((arg, index) => !arg.startsWith('--') && (modelAt < 0 || index !== modelAt + 1));
-const known = ['docker', 'claude-code', 'host-tools', 'lead'];
+const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace'];
 const unknown = sections.filter((section) => !known.includes(section));
 if (unknown.length > 0) {
   console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build] [--model <id>]; unknown: ${unknown.join(', ')}`);
@@ -928,5 +1125,6 @@ if (sections.length === 0 || sections.includes('docker')) await dockerSection(!a
 if (sections.includes('claude-code')) await claudeCodeSection(!args.includes('--no-build'), model);
 if (sections.includes('host-tools')) await hostToolsSection(!args.includes('--no-build'), model);
 if (sections.includes('lead')) await leadSection(!args.includes('--no-build'), model);
+if (sections.includes('workspace')) await workspaceSection(!args.includes('--no-build'));
 say(failures === 0 ? 'doctor: all checks passed' : `doctor: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

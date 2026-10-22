@@ -18,7 +18,8 @@ import tickets from '../../src/modules/tickets.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { fakeEffects } from './support.ts';
 
-const routeKeys = (m: { routes: readonly { method: string; path: string }[] }) => m.routes.map((r) => `${r.method} ${r.path}`).sort();
+// A session's preview routes are lane 15's (container/preview.ts), which the sessions module registers.
+const routeKeys = (m: { routes: readonly { method: string; path: string }[] }) => m.routes.filter((r) => !r.path.includes('/preview/')).map((r) => `${r.method} ${r.path}`).sort();
 
 test('the three modules of lane 7 declare the routes of the API that are theirs, and the inbox its table', () => {
   assert.deepEqual(routeKeys(sessions), [
@@ -36,7 +37,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule }, { store });
-  assert.equal(app.routes.length, 11);
+  assert.equal(app.routes.filter((r) => !r.path.includes('/preview/')).length, 11);
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code']);
   assert.ok(!app.routes.some((r) => r.path.endsWith('/approve')), 'the approval route is lane 8\'s');
 });

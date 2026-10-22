@@ -6,11 +6,13 @@
 //
 // The browser may only `import type` from v2/src, so the names of the AG-UI
 // subset are copied here and a test keeps the copy equal to EVENT_TYPES.
+import type { Interrupt } from '@ag-ui/core';
 import type { SessionSummary } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
+import type { ChoiceStatus } from '../../components/choices/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
 
 export const EVENT_NAMES = [
@@ -47,7 +49,11 @@ export type ToolRow = {
   request?: RequestState;
 };
 export type MessageRow = { readonly kind: 'message'; readonly id: string; readonly at: string; readonly role: 'assistant' | 'user'; readonly by: string | undefined; text: string };
-export type QuestionRow = { readonly kind: 'question'; readonly id: string; readonly requestId: string; readonly at: string; readonly questions: readonly Question[]; answeredBy?: string };
+export type QuestionRow = {
+  readonly kind: 'question'; readonly id: string; readonly requestId: string; readonly at: string; readonly questions: readonly Question[];
+  answeredBy?: string;
+  cancelled?: boolean;                              // the turn was interrupted while it waited
+};
 export type ReadRow = { readonly kind: 'read'; readonly at: string; readonly paths: readonly string[] };
 export type Row =
   | ToolRow
@@ -208,7 +214,13 @@ function custom(model: SessionModel, at: string, event: Extract<AgUiEvent, { typ
     case 'cleared.permission_answered': {
       const { requestId, decision, by, rule } = event.value;
       const row = model.requests.get(requestId);
-      if (row?.request) {
+      const asked = model.questions.get(requestId);
+      if (asked) {
+        // A question settled without an answer: the adapters cancel a
+        // waiting question this way when its turn is interrupted.
+        if (decision === 'cancelled') asked.cancelled = true;
+        model.pending = model.pending.filter((id) => id !== requestId);
+      } else if (row?.request) {
         row.request.state = 'answered';
         row.request.decision = decision;
         row.request.by = by;
@@ -318,20 +330,39 @@ export function stepsOf(model: { readonly steps: readonly Step[]; readonly state
 
 // ------------------------------------------------------------------ thread
 
+// A question that waits, as the thread's interrupt in AG-UI's shape: its id
+// is the request's, and its metadata keeps the questions exactly as the
+// harness asked them (AskUserQuestion's header, options, multiSelect).
+export type QuestionInterrupt = Interrupt & {
+  readonly reason: 'cleared.question';
+  readonly message: string;
+  readonly metadata: { readonly questions: readonly Question[] };
+};
+
 // What the session's agent holds for the screen (agent.ts): the rows as the
-// timeline shows them, the state, what waits and the steps. Plain data, as
-// an AG-UI state snapshot carries it.
+// timeline shows them, the state, what waits, the questions that wait as
+// interrupts, and the steps. Plain data, as an AG-UI state snapshot carries it.
 export type SessionThread = {
   readonly lastSeq: number;
   readonly lastAt: string | undefined;
   readonly state: SessionState | undefined;
   readonly rows: readonly Row[];
   readonly pending: readonly string[];
+  readonly interrupts: readonly QuestionInterrupt[];
   readonly steps: readonly Step[];
 };
 
+export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
+  return model.pending.flatMap((id) => {
+    const row = model.questions.get(id);
+    return row ? [{ id, reason: 'cleared.question' as const, message: row.questions[0]?.question ?? '', metadata: { questions: row.questions } }] : [];
+  });
+}
+
 export function threadOf(model: SessionModel): SessionThread {
-  return { lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), pending: [...model.pending], steps: [...model.steps] };
+  return {
+    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps],
+  };
 }
 
 // ------------------------------------------------------------------ wording
@@ -345,7 +376,15 @@ export type SessionView = {
   readonly language: 'en' | 'fr';
   readonly now: Date;
   readonly busy?: ReadonlySet<string>;                    // request ids whose answer is on its way
+  readonly answers?: ReadonlyMap<string, LocalAnswer>;     // what this tab knows of its questions' answers
 };
+
+// The stored events say who answered a question, not with what: what this
+// tab sent is kept here, and an answer that came after the question no
+// longer waited is settled.
+export type LocalAnswer =
+  | { readonly kind: 'sent'; readonly sent: string; readonly chosen: readonly string[] }
+  | { readonly kind: 'settled' };
 
 export const ENDED: ReadonlySet<SessionPhase> = new Set(['done', 'stopped', 'failed']);
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -406,6 +445,18 @@ export function who(by: string | undefined, view: Pick<SessionView, 'me'>, t: Tr
   return by === view.me ? t('who_you') : t('who_other');
 }
 
+// What a question of the timeline is now, for the clickable answers.
+export function questionStatus(row: QuestionRow, view: SessionView, t: Translate): ChoiceStatus {
+  const local = view.answers?.get(row.requestId);
+  if (local?.kind === 'sent') return { kind: 'answered', who: t('who_you'), sent: local.sent, chosen: local.chosen };
+  if (row.cancelled) return { kind: 'cancelled' };
+  if (row.answeredBy !== undefined) return { kind: 'answered', who: who(row.answeredBy, view, t) };
+  if (local?.kind === 'settled') return { kind: 'settled' };
+  if (ENDED.has(phaseOf(view))) return { kind: 'ended' };
+  if (view.thread.interrupts.some((i) => i.id === row.requestId)) return { kind: 'waiting', busy: view.busy?.has(row.requestId) ?? false };
+  return { kind: 'read' };
+}
+
 export function answerLine(request: RequestState, view: Pick<SessionView, 'me'>, t: Translate): string {
   switch (request.decision) {
     case 'allow_once': return t('answer_allow_once', { who: who(request.by, view, t) });
@@ -439,7 +490,13 @@ export function refusal(rule: string, t: Translate): string {
   return named !== undefined ? t('refused', { rule: named }) : rule ? t('refused_rule', { rule }) : t('refused_plain');
 }
 
-// The decision an answer button sends.
+// What the session answer route is given for a question: the answers keyed
+// by the question's text, each label as the harness wrote it.
+export function answerBody(answers: Readonly<Record<string, string>>): { readonly decision: Decision } {
+  return { decision: { kind: 'answer', answers: { ...answers } } };
+}
+
+// The decision a permission's answer button sends.
 export function decisionOf(kind: string | undefined, t: Translate): Decision {
   return kind === 'allow_once' ? { kind: 'allow_once' }
     : kind === 'allow_always' ? { kind: 'allow_always', scope: 'project' }

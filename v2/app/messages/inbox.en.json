@@ -102,8 +102,6 @@
   "settled": "This request was settled without you: the session was interrupted or ended, or someone answered it from the session.",
   "handled_note": "This no longer waits for you.",
   "gone": "This item is no longer in the inbox.",
-  "recommended": "Recommended by the team",
-  "free_answer": "Or answer in your own words",
   "send_answer": "Send the answer",
   "answer_missing": "Answer every question first.",
   "answer_settled": "Already settled without you. The inbox was refreshed.",
@@ -174,5 +172,14 @@
   "plan_change": "Change the plan",
   "plan_approve": "Approve the plan and start",
   "plan_pause": "Pause",
-  "plan_resume": "Resume"
+  "plan_resume": "Resume",
+  "choice_recommended": "Recommended",
+  "choice_free": "Or answer in your own words",
+  "choice_send": "Send the answer",
+  "choice_too_long": "An answer is at most {n} characters.",
+  "choice_answered": "Answered by {who}",
+  "choice_answered_with": "Answered by {who}: {answer}",
+  "choice_cancelled": "Cancelled when the turn was interrupted",
+  "choice_settled": "This question was settled without you.",
+  "choice_ended": "The session ended before an answer."
 }

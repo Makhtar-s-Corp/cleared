@@ -539,9 +539,12 @@ export class FlowEngine {
     const events = this.#store.events.after(id);
     const phase = row.status as SessionPhase;
     const state = foldState(events, phase);
+    // The service and the preview key the runtime stored when the session's
+    // containers started (lane 15), when its row holds them.
     return {
       id: row.id, project: row.project, ticket: row.ticket, role: row.role, harness: row.harness, model: row.model,
       phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0, state,
+      ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}),
     };
   }
 
@@ -711,9 +714,11 @@ export class FlowEngine {
   }
 
   async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string): Promise<Live> {
+    // A train ticket's session works on the first service the ticket names (decision 20, lane 15's runtime).
+    const service = this.#several ? this.#servicesOf(ticket)[0]?.name : undefined;
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness: HARNESS, model, workdir, briefing,
-      policy: this.#policy(role, settings), prompt, services: settings.services,
+      policy: this.#policy(role, settings), prompt, services: settings.services, ...(service ? { service } : {}),
     };
     const handle = await adapter.start(input);
     const at = this.#now().toISOString();

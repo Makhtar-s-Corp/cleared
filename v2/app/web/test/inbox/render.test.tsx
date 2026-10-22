@@ -114,16 +114,18 @@ test('a permission shows the command, what for, why it asks, and its three answe
   assert.match(html, /<label[^>]*for="deny-reason"/);
 });
 
-test('a question shows each question, its choices and a free answer', () => {
+test('a question shows each question, its choices and a free answer, through the clickable answers, sent from the bar', () => {
   const html = renderInbox(viewOf({ selected: idOf('question'), open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Question', 'LOCAL-164', 'Open the session', 'Empty name', QUESTION_TEXT, 'Show “Anonymous”', 'Recommended by the team',
+    'Question', 'LOCAL-164', 'Open the session', 'Empty name', QUESTION_TEXT, 'Show “Anonymous”', 'Recommended',
     'Every entry stays visible, and the form keeps the name optional.', 'Refuse the entry', 'Or answer in your own words', 'Send the answer',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  assert.equal(count(html, /<button[^>]*data-option=/g), 2);
-  assert.equal(count(html, /aria-pressed="false"[^>]*data-option=|data-option=[^>]*aria-pressed="false"/g), 2, 'no choice is made for the person');
+  assert.match(html, /<div class="questions waits"><div class="choices" data-choices="true" data-request-id="[^"]+">/);
+  assert.equal(count(html, /<button[^>]*data-answer=/g), 2);
+  assert.equal(count(html, /aria-pressed="false"[^>]*data-answer=|data-answer=[^>]*aria-pressed="false"/g), 2, 'no choice is made for the person: a click picks, the bar sends');
   assert.match(html, /<input[^>]*data-free="0"/);
+  assert.doesNotMatch(html, /data-choice-send/, 'one Send, in the bar');
   assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['answer']);
 });
 

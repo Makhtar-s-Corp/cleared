@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sseFrame, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createCleaner } from '../../src/session/clean.ts';
-import type { AgUiEvent, SessionEvent, SessionState } from '../../src/session/events.ts';
+import type { AgUiEvent, Question, SessionEvent, SessionState } from '../../src/session/events.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import { emptyModel, applyAll } from '../web/screens/session/model.ts';
@@ -37,6 +37,20 @@ export const REQUEST_ID = 'request-161';
 export const QUESTION_TEXT = 'Weeks start on Monday in France. Should a week that spans two months appear under the first month or be split?';
 export const ANSWER_TEXT = 'Under the first month, never split.';
 export const USER = 'user-demo';
+
+// The same story with the author's question asked through AskUserQuestion
+// instead of in a message, waiting with its three options (the clickable
+// answers' fixture: `sessionFixture(now, { question: true })`).
+export const QUESTION_REQUEST_ID = 'question-161';
+export const MONTH_QUESTION: Question = {
+  question: QUESTION_TEXT,
+  header: 'Month edges',
+  options: [
+    { label: 'Under the first month (Recommended)', description: 'One heading per week, as the list reads today.' },
+    { label: 'Split at the month\'s end', description: 'Two half weeks, each under its own month.' },
+    { label: 'Under the month with more days' },
+  ],
+};
 
 export type SessionFixture = {
   readonly store: Store;
@@ -91,7 +105,7 @@ export class Player {
   }
 }
 
-export function sessionFixture(now: Date = FIXTURE_NOW): SessionFixture {
+export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly question?: boolean } = {}): SessionFixture {
   const project = FIXTURE_PROJECT;
   const store = openStore(':memory:');
   const start = new Date(now.getTime() - 18 * MINUTE);
@@ -123,13 +137,19 @@ export function sessionFixture(now: Date = FIXTURE_NOW): SessionFixture {
     call('run-1', 'Bash', { kind: 'execute', command: 'npm run test:upcoming', description: 'Run the upcoming tests' }, { kind: 'execute', output: '# tests 18\n# pass 18\n# fail 0\n', cut: 0, isError: false }),
     delta({ checks: [{ name: 'Targeted tests', state: 'passed' }, { name: 'Full suite', state: 'pending' }] }),
   );
-  player.play(at(8), text('assistant-1', 'assistant', QUESTION_TEXT));
-  player.play(at(9), text('user-1', 'user', ANSWER_TEXT, USER));
+  if (!options.question) {
+    player.play(at(8), text('assistant-1', 'assistant', QUESTION_TEXT));
+    player.play(at(9), text('user-1', 'user', ANSWER_TEXT, USER));
+  }
   player.play(at(10),
     call('edit-2', 'Edit', { kind: 'edit', path: 'src/screens/Upcoming.jsx', added: 41, removed: 12 }, { kind: 'edit', ok: true }),
     delta({ files: [{ path: 'src/engine/upcoming.mjs', added: 24, removed: 6 }, { path: 'src/screens/Upcoming.jsx', added: 41, removed: 12 }, { path: 'test/upcoming.test.mjs', added: 38, removed: 0 }] }),
   );
-  player.play(at(15),
+  if (options.question) player.play(at(15),
+    { type: 'CUSTOM', name: 'cleared.question', value: { requestId: QUESTION_REQUEST_ID, questions: [MONTH_QUESTION] } },
+    delta({ phase: 'waiting_human', status: 'Waiting for you', steps: steps(at(15)) }),
+  );
+  else player.play(at(15),
     { type: 'TOOL_CALL_START', toolCallId: 'run-2', toolCallName: 'Bash' },
     { type: 'TOOL_CALL_ARGS', toolCallId: 'run-2', delta: JSON.stringify({ kind: 'execute', command: 'npm install date-fns', description: 'Install date-fns to group dates by week' }) },
     {
@@ -152,7 +172,9 @@ export function sessionFixture(now: Date = FIXTURE_NOW): SessionFixture {
     id: TICKET_ID, title: TICKET_TITLE, body: TICKET_BODY, labels: [], project, status: 'In Progress',
     createdAt: new Date(now.getTime() - 20 * MINUTE).toISOString(), updatedAt: start.toISOString(),
   };
-  const inbox: InboxItem[] = [{
+  const inbox: InboxItem[] = options.question ? [{
+    kind: 'question', id: 'question-item-161', ticket: TICKET_ID, project, since: at(15).toISOString(), state: 'waiting', sessionId: AUTHOR_ID, requestId: QUESTION_REQUEST_ID, questions: [MONTH_QUESTION],
+  }] : [{
     kind: 'permission', id: 'permission-161', ticket: TICKET_ID, project, since: at(15).toISOString(), state: 'waiting', sessionId: AUTHOR_ID, requestId: REQUEST_ID, tool: 'Bash',
     input: { kind: 'execute', command: 'npm install date-fns', description: 'Install date-fns to group dates by week' },
     suggestion: { decision: 'ask', rule: 'install.package', reason: 'Network access and a new dependency.' },
@@ -185,7 +207,10 @@ function readJson(request: IncomingMessage): Promise<unknown> {
 
 // The session routes of the service API, over the fixture. A write is
 // recorded in `calls` and stored as the event the service would store, so a
-// reload shows it. The stream answers the events after `?after=` and ends.
+// reload shows it: an answer to a question as `cleared.answered`, to a
+// permission as `cleared.permission_answered`, and an interrupt cancels
+// what waits as the adapters do. The stream answers the events after
+// `?after=` and ends.
 export function sessionSource(fixture: SessionFixture, options: { readonly now?: () => Date } = {}): SessionSource {
   const calls: Call[] = [];
   const now = options.now ?? (() => new Date());
@@ -231,14 +256,23 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
     if (sub === 'requests' && action === 'answer' && requestId) {
       const decision = (body as { decision?: { kind?: string } } | undefined)?.decision;
       if (!decision?.kind) return sendJson(response, 400, { error: 'an answer needs a decision' });
+      const item = fixture.inbox.find((i) => (i.kind === 'question' || i.kind === 'permission') && i.sessionId === id && i.requestId === requestId);
+      if (!item || item.state !== 'waiting') return sendJson(response, 404, { error: `no request ${requestId} is waiting` });
+      if ((item.kind === 'question') !== (decision.kind === 'answer')) return sendJson(response, 400, { error: 'a question is answered with an answer' });
+      fixture.inbox.splice(fixture.inbox.indexOf(item), 1, { ...item, state: 'handled' });
       player(id as string).play(stamp,
-        { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId, decision: decision.kind as 'allow_once', by: user } },
+        item.kind === 'question'
+          ? { type: 'CUSTOM', name: 'cleared.answered', value: { requestId, by: user } }
+          : { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId, decision: decision.kind as 'allow_once', by: user } },
         delta({ phase: 'working', status: 'Working' }),
       );
       return sendJson(response, 202, { accepted: true });
     }
     if (sub === 'interrupt' && parts.length === 3) {
+      const waiting = fixture.inbox.filter((i) => (i.kind === 'question' || i.kind === 'permission') && i.sessionId === id && i.state === 'waiting');
+      for (const item of waiting) fixture.inbox.splice(fixture.inbox.indexOf(item), 1, { ...item, state: 'handled' });
       player(id as string).play(stamp,
+        ...waiting.map((item): AgUiEvent => ({ type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: (item as { requestId: string }).requestId, decision: 'cancelled', by: 'policy', rule: 'interrupt' } })),
         { type: 'RUN_FINISHED', threadId: id as string, runId: 'interrupted', outcome: { type: 'cancelled' }, usage: [], result: { stopReason: 'cancelled', total_cost_usd: null } },
         delta({ phase: 'waiting_human', status: 'Waiting for a message' }),
       );

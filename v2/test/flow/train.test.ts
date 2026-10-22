@@ -342,3 +342,29 @@ test('what a provider with an untouched consumer changes cannot be read: the car
   assert.match(card.train?.blocked?.reason ?? '', /on filter-api could not be read/);
   await t.engine.close();
 });
+
+test('a train ticket\'s sessions name their service, and the session JSON answers the service and the preview key its row holds', async () => {
+  const { t } = await train();
+  const author = t.startedSessions.find((s) => s.input.role === 'author');
+  const reviewer = t.startedSessions.find((s) => s.input.role === 'reviewer');
+  assert.equal(author?.input.service, 'guestbook', 'the first service the ticket names');
+  assert.equal(reviewer?.input.service, 'guestbook');
+  // What lane 15's runtime stores when the session's containers start.
+  const row = t.store.sessions.get(author!.id)!;
+  t.store.sessions.put({ ...row, service: 'guestbook', previewKey: 'k'.repeat(43) });
+  const detail = t.engine.sessionDetail(author!.id);
+  assert.equal(detail?.service, 'guestbook');
+  assert.equal(detail?.previewKey, 'k'.repeat(43));
+  await t.engine.close();
+});
+
+test('a one-service ticket\'s session names no service of its own, and its JSON has no service or preview key while its row holds none', async () => {
+  const t = await setup({ scripts: { author: quickAuthor } });
+  await t.engine.start(t.ticket.id, 'u1');
+  const author = t.startedSessions[0]!;
+  assert.equal('service' in author.input, false);
+  const detail = t.engine.sessionDetail(author.id);
+  assert.equal(detail && 'service' in detail, false);
+  assert.equal(detail && 'previewKey' in detail, false);
+  await t.engine.close();
+});

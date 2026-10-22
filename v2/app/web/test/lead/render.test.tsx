@@ -58,25 +58,28 @@ test('the thread: the owner in ink on the right, the lead with its square, a gre
   assert.match(html, /<div class="bubble lead question"><p class="bubble-text">Before I plan: on desktop/);
 });
 
-test('a question that waits is a bubble with its options as buttons, the recommendation marked, and the free answer below', async () => {
+test('a question that waits is a bubble with its options as the clickable answers, the recommendation marked, and the reply field as its free answer', async () => {
   const fixture = await leadFixture(FIXTURE_NOW);
   const waiting = waitingForAnswer(fixture);
   const html = renderThread(await view({ state: waiting.state, messages: waiting.messages }), en);
   assert.match(html, /class="bubble lead question waits"/);
-  assert.match(html, /<button type="button" class="option" data-answer="Pages of 20 \(Recommended\)"><span>Pages of 20<\/span><span class="recommended">Recommended<\/span><\/button>/);
-  assert.match(html, /<button type="button" class="option" data-answer="One long list"><span>One long list<\/span><\/button>/);
+  assert.match(html, /<button type="button" class="choice" data-answer="Pages of 20 \(Recommended\)" data-q="0"><span class="choice-label">Pages of 20<\/span><span class="choice-rec">Recommended<\/span>/);
+  assert.match(html, /<button type="button" class="choice" data-answer="One long list" data-q="0"><span class="choice-label">One long list<\/span>/);
+  assert.doesNotMatch(html, /data-free=|data-choice-send/, 'the reply field below is the free answer');
   assert.match(html, /Or write your answer below\./);
   assert.match(text(html), /Before I plan: on desktop, do you want the entries in pages of 20/);
-  assert.match(html, /<span class="q-header">Desktop list<\/span>/);
-  // A question that is not the pending one, or an ask of several questions, gets no buttons.
+  assert.match(html, /<span class="choice-header">Desktop list<\/span>/);
+  // A question that is not the pending one reads as a line of the lead.
   const stale = renderThread(await view({ state: { ...waiting.state, pendingQuestion: null }, messages: waiting.messages }), en);
   assert.doesNotMatch(stale, /data-answer=/);
+  // An ask of several questions: each is picked, then Send answers them in one message.
   const asked = waiting.messages[2]?.question;
   assert.ok(asked);
   const several = waiting.messages.map((m) => (m.question ? { ...m, question: { ...asked, questions: [...asked.questions, { question: 'And on the phone?', options: [{ label: 'Same' }] }] } } : m));
   const two = renderThread(await view({ state: waiting.state, messages: several }), en);
-  assert.doesNotMatch(two, /data-answer=/, 'one answer would go to both questions, so they are answered in the field');
-  assert.match(two, /Answer them in the field below, in one message\./);
+  assert.equal(count(two, /aria-pressed="false"/), 3, 'the clicks pick');
+  assert.match(two, /data-choice-send="true" disabled="">Send the answer/);
+  assert.match(two, /Or write your answer below\./);
 });
 
 test('the plan panel against the capture: five numbered items, After lines, lane chips, estimates, the footer and the two buttons', async () => {

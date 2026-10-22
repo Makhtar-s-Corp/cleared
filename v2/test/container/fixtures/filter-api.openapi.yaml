@@ -1,0 +1,130 @@
+# The filter API's contract, which the guestbook consumes. Cleared builds a
+# fake of this service from it (each operation answers its first example), so
+# every example here is what the app really answers: test/contract.test.ts
+# sends each request example to the app and compares. The file keeps to the
+# small block subset of YAML the README states (no anchor, no flow
+# collection but [] and {}, no block scalar, comments on their own line).
+openapi: 3.1.0
+info:
+  title: Filter API
+  version: 1.0.0
+  description: Tells whether a text holds a word of the filter's list.
+paths:
+  /check:
+    post:
+      operationId: check
+      summary: Checks a text against the word list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckRequest"
+            examples:
+              accepted:
+                summary: A text with no listed word
+                value:
+                  text: Lovely guestbook, thank you!
+              refused:
+                summary: A text with two listed words
+                value:
+                  text: Win the jackpot, no scam
+      responses:
+        "200":
+          description: The verdict. ok is false when the text holds a listed word, and words names each one found, once, in the order of the text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckAnswer"
+              examples:
+                accepted:
+                  summary: No listed word
+                  value:
+                    ok: true
+                    words: []
+                refused:
+                  summary: Two listed words
+                  value:
+                    ok: false
+                    words:
+                      - jackpot
+                      - scam
+        "400":
+          description: The body is not JSON, or has no text string.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: The body needs "text", a string.
+        "413":
+          description: The body is larger than 16384 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: The body is larger than 16384 bytes.
+        "415":
+          description: The body is not sent as application/json.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Send the body as application/json.
+  /health:
+    get:
+      operationId: health
+      summary: Says the app is up.
+      responses:
+        "200":
+          description: The app answers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+components:
+  schemas:
+    CheckRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: The text to check, in any language.
+      additionalProperties: true
+    CheckAnswer:
+      type: object
+      required:
+        - ok
+        - words
+      properties:
+        ok:
+          type: boolean
+        words:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+      additionalProperties: false
+    Health:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+      additionalProperties: false

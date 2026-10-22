@@ -27,6 +27,7 @@
 import type { ApproveBody, InboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { Question, ToolInput } from '../../../../src/session/events.ts';
+import { answersFor as choiceAnswers } from '../../components/choices/model.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
@@ -222,18 +223,11 @@ export async function answerRequest(api: Api, item: PermissionItem | QuestionIte
 }
 
 // A question's answers, keyed by the question's text as the harness asked
-// it. A free answer wins over the choices; several choices of a multiple
-// choice question are joined with a comma; every question needs an answer.
-export function answersFor(questions: readonly Question[], picks: readonly (readonly string[])[], free: readonly string[]):
-  { readonly answers: Record<string, string>; readonly missing?: undefined } | { readonly missing: number; readonly answers?: undefined } {
-  const answers: Record<string, string> = {};
-  for (const [index, question] of questions.entries()) {
-    const own = (free[index] ?? '').trim();
-    const value = own || (picks[index] ?? []).join(', ');
-    if (!value) return { missing: index };
-    answers[question.question] = value;
-  }
-  return { answers };
+// it: the clickable answers' rule (a free answer wins over the choices,
+// several choices of a multiple choice question are joined with a comma,
+// every question needs an answer, none longer than the route accepts).
+export function answersFor(questions: readonly Question[], picks: readonly (readonly string[])[], free: readonly string[]): ReturnType<typeof choiceAnswers> {
+  return choiceAnswers(questions, { picks, free });
 }
 
 export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan';

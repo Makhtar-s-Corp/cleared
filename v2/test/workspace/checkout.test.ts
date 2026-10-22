@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BASE_REF, CheckoutError, projectCheckout, ticketBranch, ticketCheckout } from '../../src/workspace/checkout.ts';
+import { BASE_REF, CheckoutError, exportBase, projectCheckout, ticketBranch, ticketCheckout } from '../../src/workspace/checkout.ts';
 import { commit, gitIn, remote, tempDir } from './git.ts';
 
 const SKILL = '---\nname: demo-skill\ndescription: A skill of the project.\n---\nRun the tests first.\n';
@@ -109,4 +109,77 @@ test('a reused checkout whose git folder was replaced by a link is refused', asy
   rmSync(join(workdir, '.git', 'info'), { recursive: true });
   symlinkSync(join(root, 'elsewhere'), join(workdir, '.git', 'info'));
   await assert.rejects(ticketCheckout({ project: project.dir, workdir, base: 'main', branch: 'cleared/DEMO-5' }), CheckoutError);
+});
+
+// ------------------------------------------ one checkout per ticket and per service (milestone 2, decision 20)
+
+test('a ticket touching two services has one checkout of each, <workdirs>/<ticket>/<service>, on the same branch', async () => {
+  const root = tempDir('two-services');
+  const guestbook = await projectCheckout({ url: remote({ 'src/page.ts': 'page\n' }), dir: join(root, 'services', 'guestbook', 'checkout'), base: 'main' });
+  const filter = await projectCheckout({ url: remote({ 'src/check.ts': 'check\n' }), dir: join(root, 'services', 'filter-api', 'checkout'), base: 'main' });
+  const branch = ticketBranch('LOCAL-7');
+  const one = await ticketCheckout({ project: guestbook.dir, workdir: join(root, 'work', 'LOCAL-7', 'guestbook'), base: 'main', branch });
+  const two = await ticketCheckout({ project: filter.dir, workdir: join(root, 'work', 'LOCAL-7', 'filter-api'), base: 'main', branch });
+  assert.equal(gitIn(one.workdir, ['branch', '--show-current']), 'cleared/LOCAL-7');
+  assert.equal(gitIn(two.workdir, ['branch', '--show-current']), 'cleared/LOCAL-7');
+  assert.ok(existsSync(join(one.workdir, 'src/page.ts')) && existsSync(join(two.workdir, 'src/check.ts')), 'each is a clone of its own service');
+  assert.equal(one.cwd, one.workdir, 'a repository service works at the root of its checkout');
+  assert.deepEqual(readdirSync(join(root, 'work', 'LOCAL-7')).sort(), ['filter-api', 'guestbook']);
+});
+
+test('a folder of a monorepo: the clone is the repository, and the session works in the folder', async () => {
+  const url = remote({ 'services/billing/package.json': '{}\n', 'services/web/package.json': '{}\n' });
+  const root = tempDir('monorepo');
+  const project = await projectCheckout({ url, dir: join(root, 'project'), base: 'main' });
+  const workdir = join(root, 'work', 'LOCAL-8', 'billing');
+  const made = await ticketCheckout({ project: project.dir, workdir, base: 'main', branch: ticketBranch('LOCAL-8'), path: 'services/billing' });
+  assert.equal(made.cwd, join(workdir, 'services', 'billing'));
+  assert.ok(existsSync(join(workdir, 'services/web/package.json')), 'the whole repository is cloned');
+  const reused = await ticketCheckout({ project: project.dir, workdir, base: 'main', branch: ticketBranch('LOCAL-8'), path: 'services/billing' });
+  assert.equal(reused.reused, true);
+  assert.equal(reused.cwd, made.cwd);
+  for (const bad of ['../x', '/services/billing', 'services//billing', '']) {
+    await assert.rejects(ticketCheckout({ project: project.dir, workdir: join(root, 'work', 'bad'), base: 'main', branch: ticketBranch('LOCAL-9'), path: bad }), CheckoutError, bad);
+  }
+  await assert.rejects(ticketCheckout({ project: project.dir, workdir, base: 'main', branch: ticketBranch('LOCAL-8'), path: 'services/missing' }), /not a folder of the checkout/);
+  // The session can replace the folder by a link: the host refuses it.
+  rmSync(join(workdir, 'services', 'billing'), { recursive: true });
+  symlinkSync('/etc', join(workdir, 'services', 'billing'));
+  await assert.rejects(ticketCheckout({ project: project.dir, workdir, base: 'main', branch: ticketBranch('LOCAL-8'), path: 'services/billing' }), /not a folder of the checkout/);
+});
+
+test('the base branch is exported once per commit from the service\'s own checkout, never from its working tree', async () => {
+  const { url, root, project } = await setup();
+  writeFileSync(join(project.dir, 'src/app.ts'), 'a change nobody committed\n');
+  const exports = join(root, 'exports');
+  const first = await exportBase({ project: project.dir, base: 'main', root: exports });
+  assert.ok(first);
+  assert.equal(first.commit, project.base);
+  assert.equal(first.dir, join(exports, project.base));
+  assert.equal(readFileSync(join(first.dir, 'src/app.ts'), 'utf8'), 'export const answer = 42;\n');
+  assert.equal(existsSync(join(first.dir, '.git')), false);
+  writeFileSync(join(first.dir, 'marker'), 'kept');
+  const again = await exportBase({ project: project.dir, base: 'main', root: exports });
+  assert.equal(readFileSync(join(again?.dir ?? '', 'marker'), 'utf8'), 'kept', 'an export of the same commit is reused');
+  assert.deepEqual(readdirSync(exports), [project.base], 'no partial folder is left');
+
+  // The base moves: a new commit, a new folder.
+  const seed = tempDir('seed');
+  gitIn(seed, ['clone', '-q', url, 'w']);
+  const moved = commit(join(seed, 'w'), { 'src/app.ts': 'export const answer = 43;\n' }, 'base moves');
+  gitIn(join(seed, 'w'), ['push', '-q', 'origin', 'main']);
+  await projectCheckout({ url, dir: project.dir, base: 'main' });
+  const next = await exportBase({ project: project.dir, base: 'main', root: exports });
+  assert.equal(next?.commit, moved);
+  assert.equal(readFileSync(join(next?.dir ?? '', 'src/app.ts'), 'utf8'), 'export const answer = 43;\n');
+});
+
+test('one folder of the base can be exported alone, its content at the top; a base without it exports nothing', async () => {
+  const { root, project } = await setup();
+  const skills = await exportBase({ project: project.dir, base: 'main', root: join(root, 'skills'), only: '.claude/skills' });
+  assert.deepEqual(readdirSync(skills?.dir ?? ''), ['demo-skill']);
+  assert.equal(readFileSync(join(skills?.dir ?? '', 'demo-skill/SKILL.md'), 'utf8'), SKILL);
+  assert.equal(await exportBase({ project: project.dir, base: 'main', root: join(root, 'none'), only: '.claude/agents' }), undefined);
+  assert.equal(existsSync(join(root, 'none')), false);
+  await assert.rejects(exportBase({ project: project.dir, base: 'main', root: join(root, 'x'), only: '../x' }), CheckoutError);
 });

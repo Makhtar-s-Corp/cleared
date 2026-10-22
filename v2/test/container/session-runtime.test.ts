@@ -1,15 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Docker, LABEL } from '../../src/container/docker.ts';
 import { parseServices } from '../../src/container/services.ts';
 import {
-  ALLOW_FILE, DEFAULT_ALLOW_HOSTS, DEFAULT_LIMITS, EGRESS_IMAGE, SESSION_IMAGE, buildBaseImages, removeSessionVolume,
+  ALLOW_FILE, DEFAULT_ALLOW_HOSTS, DEFAULT_LIMITS, EGRESS_IMAGE, FAKE_IMAGE, SESSION_IMAGE, SKILLS_MOUNT, buildBaseImages, removeSessionVolume,
   sessionImage, sessionNames, startSession, stopSession, writeAllowList, type SessionRuntimeSpec,
 } from '../../src/container/session-runtime.ts';
 import { FakeDocker, type FakeObject } from './fake-docker.ts';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createClaudeCodeAdapter } from '../../src/session/adapters/claude-code.ts';
+import { createCleaner } from '../../src/session/clean.ts';
+import type { StartInput } from '../../src/session/contract.ts';
+import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
 
 const SESSION = '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b';
 
@@ -163,7 +170,7 @@ test('the base images are built with the label, and a devcontainer Dockerfile be
   await buildBaseImages(docker, '/repo/v2/images');
   const builds = fake.calls.filter((c) => c.args[0] === 'build').map((c) => c.args);
   assert.deepEqual(builds.map((args) => [args[args.indexOf('--tag') + 1], args.at(-1)]), [
-    [SESSION_IMAGE, '/repo/v2/images/session'], [EGRESS_IMAGE, '/repo/v2/images/egress'],
+    [SESSION_IMAGE, '/repo/v2/images/session'], [EGRESS_IMAGE, '/repo/v2/images/egress'], [FAKE_IMAGE, '/repo/v2/images/fake'],
   ]);
   for (const args of builds) assert.ok(hasPair(args, '--label', LABEL));
 
@@ -225,11 +232,11 @@ test('stop removes the containers and the networks and keeps the config volume u
   const fake = new FakeDocker();
   const docker = new Docker(fake.runner);
   await startSession(docker, runtimeSpec());
-  assert.deepEqual(await stopSession(docker, SESSION), { containers: 3, networks: 2 });
+  assert.deepEqual(await stopSession(docker, SESSION), { containers: 3, networks: 2, images: 0 });
   assert.deepEqual(fake.withLabel('cleared.session', SESSION).map((o) => o.name), [sessionNames(SESSION).volume]);
   assert.equal(await removeSessionVolume(docker, SESSION), 1);
   assert.deepEqual(fake.withLabel('cleared.session', SESSION), []);
-  assert.deepEqual(await stopSession(docker, SESSION), { containers: 0, networks: 0 }, 'a second stop is a no-op');
+  assert.deepEqual(await stopSession(docker, SESSION), { containers: 0, networks: 0, images: 0 }, 'a second stop is a no-op');
 });
 
 test('the allow list file holds the defaults and the declared hosts, and is replaced in one rename', () => {
@@ -266,4 +273,248 @@ test('the labels are the only way the runtime finds its objects', async () => {
     assert.ok(hasPair(call.args, '--filter', `label=${LABEL}`), call.args.join(' '));
     assert.ok(hasPair(call.args, '--filter', `label=cleared.session=${SESSION}`), call.args.join(' '));
   }
+});
+
+// ------------------------------------------ siblings and skills (milestone 2, decision 20)
+
+const PACKAGE = '{"name":"guestbook","dependencies":{"pg":"8.13.1"}}';
+
+// A base folder and a ticket checkout of the guestbook, with the same
+// dependencies unless `checkoutPackage` says otherwise; the filter API's
+// contract, copied from lane 28's example.
+function workspaceFiles(checkoutPackage = PACKAGE) {
+  const dir = scratch();
+  const write = (path: string, text: string) => {
+    mkdirSync(join(dir, path, '..'), { recursive: true });
+    writeFileSync(join(dir, path), text);
+  };
+  write('base/guestbook/Dockerfile', 'FROM node:24-slim\nWORKDIR /app\nCOPY . .\nRUN npm ci\n');
+  write('base/guestbook/package.json', PACKAGE);
+  write('work/T-1/guestbook/package.json', checkoutPackage);
+  write('work/T-1/guestbook/src/main.ts', 'changed by the session');
+  write('base/filter-api/contract/openapi.yaml', readFileSync(new URL('./fixtures/filter-api.openapi.yaml', import.meta.url), 'utf8'));
+  write('skills/cleared-guestbook/SKILL.md', '---\nname: cleared-guestbook\ndescription: x\n---\n');
+  return {
+    skills: join(dir, 'skills'),
+    contract: join(dir, 'base/filter-api/contract/openapi.yaml'),
+    guestbook: { name: 'guestbook', port: 8793, real: { base: join(dir, 'base/guestbook'), dockerfile: 'Dockerfile', tag: 'cleared-v2-base-guestbook:cafe0b1ec7ed', checkout: join(dir, 'work/T-1/guestbook') } },
+    filter: { name: 'filter-api', port: 8795, contract: join(dir, 'base/filter-api/contract/openapi.yaml') },
+  };
+}
+
+// The text of each generated Dockerfile, read while its build runs: the
+// folder is removed after the build.
+function recordGenerated(fake: FakeDocker): string[] {
+  const texts: string[] = [];
+  fake.intercept = (args) => {
+    if (args[0] === 'build' && args.includes('--network')) texts.push(readFileSync(args[args.indexOf('--file') + 1] ?? '', 'utf8'));
+    return undefined;
+  };
+  return texts;
+}
+
+const builds = (fake: FakeDocker) => fake.calls.filter((call) => call.args[0] === 'build').map((call) => call.args);
+
+test('a real sibling is built in two layers: the base from the landed branch with its own Dockerfile, the ticket layer with no network and FROM and COPY only', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const generated = recordGenerated(fake);
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] }));
+  const [base, ticket, ...more] = builds(fake);
+  assert.deepEqual(more, []);
+  assert.ok(base && hasPair(base, '--label', LABEL) && hasPair(base, '--tag', 'cleared-v2-base-guestbook:cafe0b1ec7ed'), base?.join(' '));
+  assert.ok(base && hasPair(base, '--file', join(files.guestbook.real.base, 'Dockerfile')) && base.at(-1) === files.guestbook.real.base);
+  assert.ok(base && !base.includes('--network') && !base.includes(`cleared.session=${SESSION}`), 'the base layer is shared, and may install its dependencies');
+  assert.ok(ticket && hasPair(ticket, '--network', 'none'), `the ticket layer reaches no network: ${ticket?.join(' ')}`);
+  assert.ok(ticket && hasPair(ticket, '--label', LABEL) && hasPair(ticket, '--label', `cleared.session=${SESSION}`));
+  assert.ok(ticket && hasPair(ticket, '--tag', sessionNames(SESSION).siblingImage('guestbook')));
+  assert.equal(ticket?.at(-1), files.guestbook.real.checkout, 'the checkout is the build context');
+  assert.ok(!(ticket?.[ticket.indexOf('--file') + 1] ?? '').startsWith(files.guestbook.real.checkout), 'the generated Dockerfile is not in the checkout');
+  assert.equal(generated.length, 1);
+  assert.deepEqual(generated[0]?.split('\n').filter((line) => line && !line.startsWith('#')), ['FROM cleared-v2-base-guestbook:cafe0b1ec7ed', 'COPY . /app/']);
+  assert.deepEqual(started.siblings, [{ name: 'guestbook', container: sessionNames(SESSION).sibling('guestbook'), kind: 'ticket', ready: true }]);
+});
+
+test('a sibling runs labelled on the session network under its name, without privilege, with the test services\' variables', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook, files.filter] }));
+  const names = sessionNames(SESSION);
+  const sibling = byName(fake.containers, names.sibling('guestbook')).args ?? [];
+  assert.ok(hasPair(sibling, '--label', LABEL) && hasPair(sibling, '--label', `cleared.session=${SESSION}`) && hasPair(sibling, '--label', 'cleared.role=sibling'));
+  assert.ok(hasPair(sibling, '--network', `name=${names.network},alias=guestbook`));
+  assert.ok(hasPair(sibling, '--cap-drop', 'ALL') && hasPair(sibling, '--security-opt', 'no-new-privileges'));
+  assert.ok(hasPair(sibling, '--env', 'DATABASE_URL=postgres://postgres@postgres:5432/postgres'));
+  assert.ok(sibling.includes(names.siblingImage('guestbook')));
+  const fakeArgs = byName(fake.containers, names.sibling('filter-api')).args ?? [];
+  assert.ok(hasPair(fakeArgs, '--label', LABEL) && hasPair(fakeArgs, '--label', `cleared.session=${SESSION}`) && hasPair(fakeArgs, '--label', 'cleared.role=fake'));
+  assert.ok(hasPair(fakeArgs, '--network', `name=${names.network},alias=filter-api`));
+  assert.ok(hasPair(fakeArgs, '--mount', `type=bind,source=${join(files.contract, '..')},target=/etc/cleared/fake,readonly`), 'the contract is mounted read only');
+  assert.ok(hasPair(fakeArgs, '--env', 'FAKE_CONTRACT=/etc/cleared/fake/openapi.yaml') && hasPair(fakeArgs, '--env', 'FAKE_PORT=8795'));
+  assert.ok(fakeArgs.includes('--read-only') && hasPair(fakeArgs, '--cap-drop', 'ALL'));
+  assert.ok(fakeArgs.includes(FAKE_IMAGE));
+  for (const args of [sibling, fakeArgs]) for (const flag of ['-p', '--publish', '--publish-all', '-P', '--privileged']) assert.ok(!args.includes(flag));
+  const session = byName(fake.containers, names.container).args ?? [];
+  const noProxy = session[session.findIndex((arg, i) => arg === '--env' && session[i + 1]?.startsWith('NO_PROXY=')) + 1];
+  assert.equal(noProxy, 'NO_PROXY=localhost,127.0.0.1,postgres,guestbook,filter-api');
+});
+
+// The probe connects to the sibling's address on the session network, read
+// from a labelled inspect while it runs: a name that no longer resolves on
+// that network would be looked up outside it, through the egress container.
+test('each sibling is awaited from the egress container, at its address on the session network, before the session starts', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const probes: string[] = [];
+  fake.execAnswer = (command) => {
+    if (command[0] === 'node') probes.push(command.slice(-2).join(':'));
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook, files.filter] }));
+  const address = (name: string) => `172.30.0.${fake.containers.findIndex((c) => c.name === sessionNames(SESSION).sibling(name)) + 2}`;
+  assert.deepEqual(probes, [`${address('guestbook')}:8793`, `${address('filter-api')}:8795`]);
+  const egress = fake.containers.find((c) => c.name === sessionNames(SESSION).egress)?.id;
+  for (const call of fake.calls.filter((c) => c.args[0] === 'exec' && c.args.includes('node'))) assert.equal(call.args[call.args.indexOf('--') + 1], egress);
+});
+
+test('a checkout whose package.json dependencies differ from the base makes the sibling a fake, with the reason', async () => {
+  const files = workspaceFiles('{"name":"guestbook","dependencies":{"pg":"9.0.0"}}');
+  const fake = new FakeDocker();
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [{ ...files.guestbook, contract: files.contract }] }));
+  assert.ok(!builds(fake).some((args) => args.includes('--network')), 'no ticket layer is built');
+  assert.deepEqual(started.siblings, [{ name: 'guestbook', container: sessionNames(SESSION).sibling('guestbook'), kind: 'fake', ready: true, reason: 'the ticket changes the package.json dependencies' }]);
+  assert.ok(byName(fake.containers, sessionNames(SESSION).sibling('guestbook')).args?.includes(FAKE_IMAGE));
+});
+
+test('with no contract to fake, a sibling whose ticket layer cannot be built runs the base layer', async () => {
+  const files = workspaceFiles('{"name":"guestbook","dependencies":{"pg":"9.0.0"}}');
+  const fake = new FakeDocker();
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] }));
+  assert.equal(started.siblings[0]?.kind, 'base');
+  assert.ok(byName(fake.containers, sessionNames(SESSION).sibling('guestbook')).args?.includes('cleared-v2-base-guestbook:cafe0b1ec7ed'));
+});
+
+test('a ticket layer that fails to build falls back to the fake', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.intercept = (args) => (args[0] === 'build' && args.includes('--network') ? { code: 1, stdout: '', stderr: 'ERROR: failed to solve: boom' } : undefined);
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [{ ...files.guestbook, contract: files.contract }] }));
+  assert.equal(started.siblings[0]?.kind, 'fake');
+  assert.match(started.siblings[0]?.reason ?? '', /the ticket layer could not be built: .*boom/);
+});
+
+test('a sibling that is not running is never probed, and is reported not ready', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const sibling = sessionNames(SESSION).sibling('guestbook');
+  // Its start leaves it created, as a container that exits at once would be.
+  fake.intercept = (args) => (args[0] === 'start' && fake.containers.find((c) => c.id === args.at(-1))?.name === sibling ? { code: 0, stdout: '', stderr: '' } : undefined);
+  const probes: string[] = [];
+  fake.execAnswer = (command) => {
+    if (command[0] === 'node') probes.push(command.join(' '));
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook], readyTimeoutMs: 0 }));
+  assert.equal(started.siblings[0]?.ready, false);
+  assert.deepEqual(probes, []);
+});
+
+test('the VOLUME paths of a sibling\'s image are tmpfs: no unlabelled anonymous volume is created', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.volumesOf = (tag) => (tag.includes('guestbook') ? ['/data', '/var/cache/app'] : []);
+  await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] }));
+  const args = byName(fake.containers, sessionNames(SESSION).sibling('guestbook')).args ?? [];
+  assert.ok(hasPair(args, '--tmpfs', '/data') && hasPair(args, '--tmpfs', '/var/cache/app'), args.join(' '));
+  assert.ok(!args.some((arg) => arg.startsWith('type=volume')));
+  // The base layer too, when it runs.
+  const base = new FakeDocker();
+  base.volumesOf = (tag) => (tag.startsWith('cleared-v2-base-') ? ['/data'] : []);
+  await startSession(new Docker(base.runner), runtimeSpec({ siblings: [{ ...files.guestbook, real: { ...files.guestbook.real, checkout: undefined } }] }));
+  assert.ok(hasPair(byName(base.containers, sessionNames(SESSION).sibling('guestbook')).args ?? [], '--tmpfs', '/data'));
+});
+
+test('a sibling that never answers is reported and does not hold the session back', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.execAnswer = (command) => ({ code: command[0] === 'node' ? 1 : 0, stdout: '', stderr: '' });
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook], readyTimeoutMs: 0 }));
+  assert.equal(started.siblings[0]?.ready, false);
+  assert.equal(byName(fake.containers, sessionNames(SESSION).container).state, 'running');
+});
+
+test('the project\'s skills are mounted read only where Claude Code reads its skills', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  await startSession(new Docker(fake.runner), runtimeSpec({ skills: files.skills }));
+  const session = byName(fake.containers, sessionNames(SESSION).container).args ?? [];
+  assert.equal(SKILLS_MOUNT, '/var/lib/cleared/claude-config/skills');
+  assert.ok(hasPair(session, '--mount', `type=bind,source=${files.skills},target=${SKILLS_MOUNT},readonly`), session.join(' '));
+  const without = new FakeDocker();
+  await startSession(new Docker(without.runner), runtimeSpec());
+  assert.ok(!(byName(without.containers, sessionNames(SESSION).container).args ?? []).some((arg) => arg.includes(SKILLS_MOUNT)));
+});
+
+test('stop removes the siblings and the ticket layer image; the shared base layer stays', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await startSession(docker, runtimeSpec({ siblings: [files.guestbook, files.filter] }));
+  assert.deepEqual(await stopSession(docker, SESSION), { containers: 5, networks: 2, images: 1 });
+  assert.deepEqual(fake.withLabel('cleared.session', SESSION).map((o) => o.name), [sessionNames(SESSION).volume]);
+  assert.deepEqual(fake.images.map((image) => image.name), ['cleared-v2-base-guestbook:cafe0b1ec7ed']);
+});
+
+test('a failed start removes the ticket layer image it built', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.intercept = (args) => (args[0] === 'create' && args.includes('cleared.role=egress') ? { code: 125, stdout: '', stderr: 'Error: boom' } : undefined);
+  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] })), /boom/);
+  assert.deepEqual(onlyVolume(fake), [sessionNames(SESSION).volume]);
+});
+
+test('a sibling named like a test service or a reserved name, a bad port or a relative path is refused before any docker call', async () => {
+  const files = workspaceFiles();
+  const cases: Partial<SessionRuntimeSpec>[] = [
+    { siblings: [{ ...files.filter, name: 'postgres' }] }, { siblings: [{ ...files.filter, name: 'egress' }] },
+    { siblings: [files.filter, files.filter] }, { siblings: [{ ...files.filter, name: 'Filter_API' }] },
+    { siblings: [{ ...files.filter, port: 0 }] }, { siblings: [{ ...files.filter, contract: 'contract.yaml' }] },
+    { siblings: [{ name: 'nothing', port: 80 }] },
+    { siblings: [{ ...files.guestbook, real: { ...files.guestbook.real, dockerfile: '../Dockerfile' } }] },
+    { siblings: [{ ...files.guestbook, real: { ...files.guestbook.real, checkout: 'work' } }] },
+    { siblings: [{ ...files.guestbook, real: { ...files.guestbook.real, tag: 'Bad Tag' } }] },
+    { skills: 'skills' },
+  ];
+  for (const overrides of cases) {
+    const fake = new FakeDocker();
+    await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec(overrides)), JSON.stringify(overrides));
+    assert.deepEqual(fake.calls, [], JSON.stringify(overrides));
+  }
+});
+
+// The one place the start input reaches the runtime: the Claude Code
+// adapter passes its siblings and skills to startSession as they are.
+test('the Claude Code adapter starts the siblings and mounts the skills its start input names', async () => {
+  const files = workspaceFiles();
+  const dir = scratch();
+  const fake = new FakeDocker();
+  const runner = () => {
+    const process = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), pid: 1, exitCode: null, kill: () => true });
+    return process as unknown as ChildProcessWithoutNullStreams;
+  };
+  const adapter = createClaudeCodeAdapter({
+    log: { append: () => 0, after: () => [] } as never, cleaner: () => createCleaner({}),
+    docker: new Docker(fake.runner, runner), newId: () => SESSION,
+    runtime: { stateDir: join(dir, 'state'), loginFile: join(dir, 'claude.token'), hostAddresses: [], user: '1000:1000', stopTimeoutMs: 10 },
+  });
+  const input: StartInput = {
+    project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'claude-code', model: 'claude-haiku-5-5', workdir: join(dir, 'work'),
+    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null },
+    policy: { role: 'author', base: 'main', workdir: '/workspace', scripts: [], credentialFile: '/run/cleared/claude.token', safeCommands: DEFAULT_SAFE_COMMANDS, allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [] },
+    prompt: 'x', service: 'guestbook', siblings: [files.filter], skills: files.skills,
+  };
+  await adapter.start(input);
+  const names = sessionNames(SESSION);
+  assert.ok(byName(fake.containers, names.sibling('filter-api')).args?.includes(FAKE_IMAGE));
+  assert.ok(hasPair(byName(fake.containers, names.container).args, '--mount', `type=bind,source=${files.skills},target=${SKILLS_MOUNT},readonly`));
 });
