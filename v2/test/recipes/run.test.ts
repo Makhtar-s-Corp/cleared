@@ -12,7 +12,7 @@ import { Recipes } from '../../src/recipes/service.ts';
 import { applyTables } from '../../src/store/db.ts';
 import { WORKSPACE_TABLES, recordWorkspace } from '../../src/tickets/local-store.ts';
 import type { ServiceConfig } from '../../src/workspace/config.ts';
-import { quickAuthor, setup, until } from '../flow/support.ts';
+import { quickAuthor, setup } from '../flow/support.ts';
 import { recordingLead } from '../lead/plans/support.ts';
 
 const svc = (name: string, extra: Partial<ServiceConfig> = {}): ServiceConfig => ({
@@ -87,10 +87,11 @@ test('a ticket recipe with two parameters runs as a one-item plan, approved by w
   const ticketId = plan.items[0]!.ticket!;
   const ticket = await t.tickets.get(ticketId);
   assert.equal(ticket?.title, 'Bump pg to 8.13.1');
-  assert.equal(ticket?.body, 'Bump pg to 8.13.1.\n\n- [ ] npm test passes\n');
+  assert.equal(ticket?.body, 'Bump pg to 8.13.1.\n\n- [ ] npm test passes', 'trimmed, as every plan item\'s body');
   assert.deepEqual([...(ticket?.labels ?? [])].sort(), [`plan:${run.plan}`, 'Quick', 'size:xs'].sort());
   assert.equal((await t.tickets.history(ticketId))[0]?.by.id, 'u1', 'the ticket is created by the approver');
-  await until(() => t.startedSessions.length === 1, 'the ticket\'s author started');
+  await t.plans.settled();
+  assert.equal(t.startedSessions[0]?.input.role, 'author', 'the ticket\'s author started');
   // The plan's own inbox item never waits: running the recipe is its approval.
   assert.equal(t.inbox.items().filter((item) => item.kind === 'plan' && item.state === 'waiting').length, 0);
   // The lead is told once, by one service line naming the recipe.
@@ -113,7 +114,7 @@ test('a missing parameter is refused before anything is written', async () => {
 test('a goal recipe sends an owner turn to the lead, as a goal, by who ran it', async () => {
   const t = await recipes({ 'tidy-docs': GOAL });
   const run = await t.recipes.run('tidy-docs', { section: 'Install' }, 'u1');
-  assert.deepEqual(run, { accepted: true, message: 42 });
+  assert.deepEqual(run, { accepted: true, message: 42, goal: 'goal-42' });
   assert.deepEqual(t.posts, [{ text: 'Make the Install section of the README clear.\n', user: 'u1', goal: true }]);
   assert.equal(t.plans.list().length, 0);
 });

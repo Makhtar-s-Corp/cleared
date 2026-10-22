@@ -2,7 +2,12 @@
 // section 6), each read at every tick:
 //
 //   the inbox     what waits for a person now: a release (approval), a
-//                 permission, a question (a team's, or the lead's), a plan
+//                 permission, a question (a team's, or the lead's), a plan;
+//                 a session plan waiting for its Go and a contract waiting
+//                 for its validation, told as a team's permission is (lib's
+//                 catalog has no kind of their own: "open it to allow or
+//                 deny" is what each asks); a knowledge item waits for the
+//                 owner's morning, untold
 //   v1's events   what the release watch (lib/release.mjs) wrote since the
 //                 last tick: a rollback, or a watch that failed (health)
 //
@@ -12,12 +17,17 @@
 // the flow itself reads for its rolled_back event (flow/ledger.ts), and
 // the release watch writes them whether or not the engine runs.
 //
-// Nothing of a permission's input, a question's text, a plan's summary or
-// a ledger row's detail is taken: a notification says its kind, the ticket,
-// a title and a health code, nothing more.
+// A schedule's run that failed is told by the scheduler, which adds the
+// occurrence scheduleOccurrence makes to the queue (decision 29).
+//
+// Nothing of a permission's input, a question's text, a plan's summary, a
+// session plan's steps, a contract's diff, a schedule's note or a ledger
+// row's detail is taken: a notification says its kind, the ticket, a title
+// and a health code, nothing more.
 import type { DatabaseSync } from 'node:sqlite';
-import type { InboxItem } from '../api/types.ts';
+import type { NextInboxItem } from '../api/types.ts';
 import { LEAD_TICKET } from '../lead/contract.ts';
+import type { ScheduleEvent } from '../schedules/scheduler.ts';
 import type { Kind, Occurrence } from './queue.ts';
 
 // The kinds that last as long as their inbox item waits.
@@ -27,14 +37,14 @@ export const INBOX_KINDS: readonly Kind[] = ['approval', 'permission', 'question
 const LEAD_GROUP = 'lead';
 const inboxLink = (id: string) => `/inbox#${encodeURIComponent(id)}`;
 
-export function inboxOccurrences(items: readonly InboxItem[]): Occurrence[] {
+export function inboxOccurrences(items: readonly NextInboxItem[]): Occurrence[] {
   const out: Occurrence[] = [];
   for (const item of items) {
     if (item.state !== 'waiting') continue;
     const base = { key: item.id, at: item.since, code: null, from: null };
     const team = { ...base, ticket: item.ticket, group: item.ticket, link: inboxLink(item.id) };
     if (item.kind === 'release') out.push({ ...team, kind: 'approval', title: item.title });
-    else if (item.kind === 'permission') out.push({ ...team, kind: 'permission', title: '' });
+    else if (item.kind === 'permission' || item.kind === 'session_plan' || item.kind === 'contract') out.push({ ...team, kind: 'permission', title: '' });
     else if (item.kind === 'question' && item.ticket === LEAD_TICKET) out.push({ ...base, kind: 'question', ticket: null, group: LEAD_GROUP, title: '', link: '/lead', from: 'lead' });
     else if (item.kind === 'question') out.push({ ...team, kind: 'question', title: '' });
     else if (item.kind === 'plan') out.push({ ...base, kind: 'plan', ticket: null, group: LEAD_GROUP, title: item.title, link: '/lead' });
@@ -79,4 +89,15 @@ export function ledgerOccurrences(db: DatabaseSync, cursor: number): Occurrence[
     if (ROLLBACK.includes(kind)) return { key: `rollback:${String(row.event_id)}`, kind: 'rollback', ticket, group: ticket ?? 'rollback:none', title, code: null, link: '/inbox', from: null, at };
     return { key: `health:${String(row.event_id)}`, kind: 'health', ticket, group: ticket ?? `health:${kind}`, title, code: kind, link: '/', from: null, at };
   });
+}
+
+// A schedule's run as a notification: one that failed is a health problem,
+// week_stop when the week skipped it (lib's catalog says that one), else
+// schedule_failed; one that ran is none, since what it started waits in the
+// inbox as any other ticket's work, and a health notification is urgent,
+// past the quiet hours.
+export function scheduleOccurrence(event: ScheduleEvent): Occurrence | null {
+  if (event.type !== 'schedule_failed') return null;
+  const code = event.reason === 'week' ? 'week_stop' : 'schedule_failed';
+  return { key: `schedule:${event.schedule}:${event.at}`, kind: 'health', ticket: null, group: `health:${code}`, title: '', code, link: '/', from: null, at: event.at };
 }

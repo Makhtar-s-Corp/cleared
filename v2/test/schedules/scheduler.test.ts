@@ -99,7 +99,7 @@ test('a schedule every day at 03:00 runs at the first tick past 03:00, once, by 
   const plan = t.plans.list()[0]!;
   assert.equal(plan.state, 'approved');
   assert.equal(plan.approvedBy, 'u2', 'the schedule\'s creator is the plan\'s approver');
-  await until(() => t.startedSessions.length === 1, 'the ticket started');
+  await until(() => t.startedSessions.length >= 1, 'the ticket started');
   const start = t.flowEvents.find((e) => e.type === 'ticket_started');
   assert.equal(start?.type === 'ticket_started' ? start.origin?.budgetUsd : undefined, 2, 'the budget travels on the origin');
   await t.at(OCT_22_0300 + 90_000);

@@ -17,7 +17,7 @@ test('a session plan and a contract waiting are told as a permission of their ti
   const contract = t.inbox.addContract({ ticket: 'LOCAL-2', project: 'guestbook', sessionId: 's-2', step: 'step-1', service: 'filter-api', path: 'contract/openapi.yaml', diff: '+  severity:' });
   const knowledge = t.inbox.addKnowledge({ ticket: 'LOCAL-3', project: 'guestbook', sessionId: 's-3', text: 'Sort with localeCompare.', level: 'workspace', service: null });
   const found = inboxOccurrences(t.inbox.list());
-  assert.deepEqual(found.map((o) => `${o.kind} ${o.ticket} ${o.group} ${o.link} ${o.title}`), [
+  assert.deepEqual(found.map((o) => `${o.kind} ${o.ticket} ${o.group} ${o.link} ${o.title}`).sort(), [
     `permission LOCAL-1 LOCAL-1 /inbox#${encodeURIComponent(plan.id)} `,
     `permission LOCAL-2 LOCAL-2 /inbox#${encodeURIComponent(contract.id)} `,
   ]);
