@@ -16,7 +16,8 @@
     "test": "node --test \"test/**/*.test.ts\" \"app/test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p app",
     "guard": "node scripts/guard.ts",
-    "doctor": "node scripts/doctor.ts"
+    "doctor": "node scripts/doctor.ts",
+    "notify": "node src/cli/notify.ts"
   },
   "devDependencies": {
     "@ag-ui/core": "1.0.3",
