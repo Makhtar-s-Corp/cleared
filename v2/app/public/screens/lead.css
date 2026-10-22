@@ -21,7 +21,6 @@
 .lead-line.lead-down::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
 .link-button { margin-left: auto; min-height: 32px; padding: 0; border: 0; background: none; color: var(--link); font-size: 12px; text-align: right; cursor: pointer; }
 .link-button:hover { text-decoration: underline; }
-.link-button[aria-expanded="true"] { color: var(--text); }
 
 #lead-memory:empty { display: none; }
 .memory { max-height: 55%; overflow-y: auto; padding: 14px 18px 16px; border-bottom: 1px solid var(--hairline); background: var(--surface-muted); font-size: 13px; }
@@ -46,6 +45,7 @@
 .lead-row { display: flex; gap: 10px; align-items: flex-start; }
 .lead-mark.small { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
 .bubble.lead { max-width: min(520px, calc(100% - 36px)); background: var(--sunken); }
+:root[data-theme="dark"] .bubble.lead:not(.waits) { box-shadow: var(--e-outline); }
 .bubble.question.waits { background: var(--awaiting-surface); box-shadow: 0 0 0 1px var(--awaiting-outline); }
 .q-text { white-space: pre-wrap; }
 .q-text + .q-text, .options + .q-text, .q-options + .q-text { margin-top: 10px; }
@@ -59,6 +59,7 @@
 .q-hint { margin-top: 8px; font-size: 12px; color: var(--text-faint); white-space: normal; }
 .waits .q-hint { color: var(--text-muted); }
 .bubble-link { display: inline-block; margin-top: 6px; font-size: 12px; white-space: normal; }
+.nowrap { white-space: nowrap; }
 .system-line { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-faint); text-align: center; }
 .system-line::before, .system-line::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 .time-line { font-size: 12px; color: var(--text-faint); text-align: center; }
@@ -84,7 +85,9 @@
 .other-plans { flex: none; padding: 14px 16px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); font-size: 13px; }
 .other-plans h2 { margin-bottom: 6px; font-size: 13px; font-weight: 600; }
 .other-plans ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.other-plans li { overflow-wrap: anywhere; }
+.other-plans li { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; overflow-wrap: anywhere; }
+.other-plans li .faint { flex: none; text-align: right; }
+.other-plans li .waits { color: var(--awaiting-text); }
 
 /* the plan panel, shared with the inbox */
 .plan-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
@@ -94,7 +97,7 @@
 .plan-panel.awaiting .plan-eyebrow { color: var(--awaiting-text); }
 .plan-head h2 { margin-bottom: 6px; font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .plan-summary { font-size: 13px; color: var(--text-secondary); }
-.plan-items { flex: 1 1 auto; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 4px 20px 8px; font-size: 13.5px; }
+.plan-items { flex: 1 1 auto; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 4px 20px 12px; font-size: 13.5px; }
 .plan-item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--hairline); }
 .plan-n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; box-shadow: var(--e-control); font-size: 12px; color: var(--text-secondary); }
 .plan-item-title { font-weight: 500; overflow-wrap: anywhere; }
@@ -110,32 +113,39 @@
 .lane.full { background: var(--surface-muted); color: var(--text-secondary); }
 .lane.fast { background: var(--ok-surface); color: var(--ok-text); }
 :root[data-theme="dark"] .lane.full { background: var(--sunken); }
-.plan-estimate { min-width: 92px; font-size: 12px; color: var(--text-faint); text-align: right; white-space: nowrap; }
+.plan-estimate { min-width: 92px; padding-top: 2px; font-size: 12px; color: var(--text-faint); text-align: right; white-space: nowrap; }
 .plan-facts { display: flex; gap: 6px 16px; list-style: none; margin: 0; padding: 12px 20px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--text-secondary); }
-.plan-fact { flex: 0 1 auto; min-width: 0; }
+.plan-fact { flex: 0 1 auto; }
 .plan-fact:last-child { margin-left: auto; }
 .plan-actions { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px 18px; }
 .plan-actions button { min-height: 44px; border-radius: 10px; font-size: 14px; cursor: pointer; }
-.plan-actions .plan-change { flex: 1; padding: 0 14px; }
+.plan-actions .plan-change, .plan-actions .plan-quiet { flex: 1; padding: 0 14px; }
 .plan-actions .plan-go { flex: 2; padding: 0 16px; border: 0; background: var(--ink); color: var(--on-ink); font-weight: 600; }
 .plan-actions .plan-go:hover { opacity: .88; }
 .plan-actions button:disabled { opacity: .5; cursor: default; }
 .plan-note { flex-basis: 100%; font-size: 13px; color: var(--text-secondary); }
 
 /* below 1024 px the panel goes under the thread */
+@media (min-width: 1024px) { .bubble-link.to-panel { display: none; } }
+/* Below 1024 px the page scrolls, not the thread: one scroll, and the
+   panel follows the thread. */
 @media (max-width: 1023px) {
   .lead-screen { grid-template-columns: minmax(0, 1fr); height: auto; }
-  .lead-card { height: min(72dvh, 680px); }
+  .lead-card { overflow: visible; }
+  .thread, .lead-card > #lead-memory { flex: none; max-height: none; overflow: visible; }
   .plan-items { overflow: visible; }
 }
 @media (max-width: 767px) {
   .lead-screen { gap: 16px; padding: 16px; }
-  .lead-card { height: min(78dvh, 640px); }
-  .lead-top { flex-wrap: wrap; padding: 12px 14px; }
-  .link-button { flex-basis: 100%; min-height: 44px; margin: -6px 0 -10px 40px; text-align: left; }
+  .lead-top { flex-wrap: wrap; row-gap: 0; padding: 12px 14px 4px; }
+  .link-button { flex-basis: 100%; min-height: 44px; margin: 0 0 0 40px; text-align: left; }
+  .bubble-link, .other-plans li { min-height: 44px; align-items: center; }
+  .bubble-link { display: inline-flex; margin-top: 0; }
   .thread { padding: 4px 14px 10px; }
   .reply { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
   .reply textarea, .goal-toggle, .reply .primary { min-height: 44px; }
+  .reply textarea { order: -1; flex-basis: 100%; }
+  .reply .primary { margin-left: auto; }
   .option { min-height: 44px; }
   .memory-close { min-height: 44px; }
   .plan-head { padding: 16px 16px 6px; }

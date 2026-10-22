@@ -85,7 +85,7 @@
   "plan_cost": "${amount}",
   "plan_work": "About {time} of work",
   "plan_week_total": "{n} % of the week",
-  "plan_cost_total": "About {amount}",
+  "plan_cost_total": "About\u00a0{amount}",
   "plan_parallel": "Up to {n} sessions at a time",
   "plan_parallel_one": "One session at a time",
   "plan_samples": "Estimates from {n} similar tickets",

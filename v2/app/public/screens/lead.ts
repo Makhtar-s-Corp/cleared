@@ -133,8 +133,11 @@ export function renderThread(view: LeadView, t: Translate): string {
     if (message.by === 'owner') return `${gap}<li class="owner-row"><p class="bubble owner">${esc(message.text)}</p></li>`;
     const question = message.kind === 'question';
     const waits = question && message.question?.state === 'waiting' && view.state.pendingQuestion?.requestId === message.question.requestId;
-    const link = message.kind === 'plan' && message.planId && message.planId !== shown
-      ? `<a class="bubble-link" href="/plans/${encodeURIComponent(message.planId)}">${esc(t('lead_see_plan'))}</a>` : '';
+    // The plan beside the thread is reached by its anchor where the panel
+    // goes under the thread (below 1024 px); another plan by its address.
+    const link = message.kind !== 'plan' || !message.planId ? ''
+      : message.planId === shown ? `<a class="bubble-link to-panel" href="#plan-title-${esc(message.planId)}">${esc(t('lead_see_plan'))}</a>`
+      : `<a class="bubble-link" href="/plans/${encodeURIComponent(message.planId)}">${esc(t('lead_see_plan'))}</a>`;
     return `${gap}<li class="lead-row"><span class="lead-mark small" aria-hidden="true">${esc(t('lead_initial'))}</span><div class="bubble lead${question ? ' question' : ''}${waits ? ' waits' : ''}">${question ? renderQuestion(message, view.state, t) : `<p class="bubble-text">${esc(message.text)}</p>`}${link}</div></li>`;
   }).join('');
 }
@@ -147,9 +150,9 @@ const modelName = (model: string) => (model.startsWith('claude-') ? `claude · $
 
 export function renderMemory(memory: LeadMemory, state: LeadState, now: Date, t: Translate, language: 'en' | 'fr' = 'en'): string {
   const stats = [
-    state.refreshCount === 0 ? t('lead_memory_refreshes_none') : state.refreshCount === 1 ? t('lead_memory_refreshes_one') : t('lead_memory_refreshes', { n: state.refreshCount }),
-    ...(state.highestPercent === null ? [] : [t('lead_memory_highest', { n: Math.round(state.highestPercent) })]),
-    ...(state.model ? [modelName(state.model)] : []),
+    esc(state.refreshCount === 0 ? t('lead_memory_refreshes_none') : state.refreshCount === 1 ? t('lead_memory_refreshes_one') : t('lead_memory_refreshes', { n: state.refreshCount })),
+    ...(state.highestPercent === null ? [] : [esc(t('lead_memory_highest', { n: Math.round(state.highestPercent) }))]),
+    ...(state.model ? [`<span class="nowrap">${esc(modelName(state.model))}</span>`] : []),
   ].join(' · ');
   const { handover } = memory;
   const last = handover === null ? `<p class="faint">${esc(t('lead_memory_no_handover'))}</p>`
@@ -167,7 +170,7 @@ export function renderMemory(memory: LeadMemory, state: LeadState, now: Date, t:
     const meta = c.note ? t('lead_memory_fulfilled_note', { time: when, note: c.note }) : t('lead_memory_fulfilled', { time: when });
     return `<li><p>${esc(c.text)}${c.ticket ? ` <span class="id">${esc(c.ticket)}</span>` : ''}</p><p class="memory-meta">${esc(meta)}</p></li>`;
   }).join('')}</ul>`;
-  return `<p class="memory-stats">${esc(stats)}</p>
+  return `<p class="memory-stats">${stats}</p>
 <h3>${esc(t('lead_memory_handover'))}</h3>${last}
 <h3>${esc(t('lead_memory_open'))}</h3>${openList}${doneList}`;
 }
@@ -206,7 +209,7 @@ export function renderSide(view: LeadView, t: Translate, options: SideOptions = 
   const rank = (plan: Plan) => ['proposed', 'approved', 'paused', 'done'].indexOf(plan.state);
   const others = view.plans.filter((plan) => plan !== shown && rank(plan) >= 0).sort((a, b) => rank(a) - rank(b) || newest(a, b));
   const list = others.length === 0 ? '' : `<section class="other-plans" aria-labelledby="other-plans-title"><h2 id="other-plans-title">${esc(t('lead_other_plans'))}</h2><ul>${others.map((plan) =>
-    `<li><a href="/plans/${encodeURIComponent(plan.id)}">${esc(plan.title)}</a> <span class="faint">${esc(planStateLine(plan, t))}</span></li>`).join('')}</ul></section>`;
+    `<li><a href="/plans/${encodeURIComponent(plan.id)}">${esc(plan.title)}</a> <span class="faint${plan.state === 'proposed' ? ' waits' : ''}">${esc(planStateLine(plan, t))}</span></li>`).join('')}</ul></section>`;
   return `${main}${list}`;
 }
 

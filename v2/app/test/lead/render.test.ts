@@ -103,8 +103,8 @@ test('without the week\'s share an estimate is in dollars, and below three sampl
   const { running } = otherPlans(FIXTURE_NOW);
   const html = renderPlanPanel(running, en);
   assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['12 min · $0.30', '12 min · $0.30', '5 min · $0.15', '5 min · $0.15', '30 min · $0.80']);
-  assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 42 min of work', 'About $1.70', 'Up to 2 sessions at a time', 'Default estimates: not enough history yet']);
-  assert.match(renderPlanPanel(running, fr, { language: 'fr' }), /12 min · 0,30 \$/);
+  assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 42 min of work', 'About\u00a0$1.70', 'Up to 2 sessions at a time', 'Default estimates: not enough history yet']);
+  assert.match(renderPlanPanel(running, fr, { language: 'fr' }), /12 min · 0,30\u00a0\$/);
   assert.match(renderPlanPanel({ ...running, maxParallel: 1 }, en), /<li class="plan-fact">One session at a time<\/li>/);
 });
 

@@ -114,8 +114,10 @@ export function renderPlanPanel(plan: Plan, t: Translate, options: PlanPanelOpti
   const id = `plan-title-${plan.id}`;
   const actions = options.actions === false ? [] : ACTIONS[plan.state];
   const disabled = options.busy ? ' disabled' : '';
-  const buttons = actions.map((action) => action === 'change'
-    ? `<button type="button" class="plain plan-change" data-plan-action="change"${disabled}>${esc(t(ACTION_KEYS[action]))}</button>`
+  // Ink for the gesture the plan waits for (approve, resume); Change and
+  // Pause are outlined, since a running plan needs nothing of the person.
+  const buttons = actions.map((action) => action === 'change' || action === 'pause'
+    ? `<button type="button" class="plain plan-${action === 'change' ? 'change' : 'quiet'}" data-plan-action="${action}"${disabled}>${esc(t(ACTION_KEYS[action]))}</button>`
     : `<button type="button" class="primary plan-go" data-plan-action="${action}"${disabled}>${esc(t(ACTION_KEYS[action]))}</button>`);
   const note = options.note ? `<p class="plan-note" role="status">${esc(options.note)}</p>` : '';
   return `<section class="plan-panel${plan.state === 'proposed' ? ' awaiting' : ''}" data-plan="${esc(plan.id)}" data-state="${plan.state}" aria-labelledby="${esc(id)}"${options.busy ? ' aria-busy="true"' : ''}>
