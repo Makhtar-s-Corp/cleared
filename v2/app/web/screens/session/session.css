@@ -188,19 +188,20 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .term-wrap { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; padding: 12px 16px; overflow-y: auto; }
 .takeover.web { position: static; margin: 0; box-shadow: var(--e-outline); }
 .takeover.web .takeover-title { margin-bottom: 2px; }
-.command-line { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; margin: 6px 0; }
-.command-line .command { flex: 1 1 320px; min-width: 0; margin: 0; padding: 6px 10px; }
+.command-line { display: grid; gap: 4px; margin: 8px 0 6px; }
+.command-line .command { margin: 0; padding: 6px 10px; }
 .term { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
-.term-host { flex: 1; min-height: 360px; padding: 8px 4px 8px 10px; border-radius: 8px; background: var(--ink); overflow: hidden; }
+.term-host { flex: 1; min-height: 260px; padding: 8px 4px 8px 10px; border-radius: 8px; background: var(--ink); overflow: hidden; }
 :root[data-theme="dark"] .term-host { background: var(--canvas); box-shadow: 0 0 0 1px var(--hairline); }
 .term-host .xterm { height: 100%; }
 .term-host .xterm-viewport { border-radius: 6px; }
 .term-foot { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
-.term-state { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; flex: 1 1 260px; font-size: 12.5px; color: var(--text-secondary); }
+.term-state { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: baseline; gap: 2px 8px; flex: 1 1 260px; font-size: 12.5px; color: var(--text-secondary); }
 .term-state .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--placeholder); }
-.term-state .dot.opening { background: var(--awaiting); }
-.term-state .dot.open { background: var(--success); }
-.term-detail { flex-basis: 100%; padding-left: 16px; color: var(--text-muted); }
+.term-state .dot[data-state="opening"] { background: var(--awaiting); }
+.term-state .dot[data-state="open"] { background: var(--success); }
+.term-state .dot { align-self: center; }
+.term-detail { grid-column: 2; color: var(--text-muted); }
 .term-detail.bad { color: var(--danger-text); }
 
 /* The editor (decision 33, lane 32): CodeMirror in the file's place, its
@@ -209,7 +210,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .editor-wait { margin-top: 8px; }
 .editing { display: flex; flex-direction: column; gap: 10px; }
 .cm-host { min-width: 0; }
-.cm-host .cm-editor { min-height: 320px; max-height: calc(100vh - 330px); }
+.cm-host .cm-editor { min-height: 280px; max-height: max(280px, calc(100vh - 420px)); }
 .editing-foot { display: flex; align-items: flex-start; gap: 8px 12px; flex-wrap: wrap; }
 .editor-state { flex: 1 1 280px; min-height: 20px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
 .editor-state.bad { color: var(--danger-text); }

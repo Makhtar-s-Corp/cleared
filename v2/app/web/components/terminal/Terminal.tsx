@@ -30,7 +30,7 @@ export function TerminalFrame({ t, status, host, note = '', onOpen }: {
       <div className="term-host" ref={host} />
       <div className="term-foot">
         <p className="term-state" role="status">
-          <span className={`dot ${status.kind}`} aria-hidden="true" />
+          <span className="dot" data-state={status.kind} aria-hidden="true" />
           <span>{line}</span>
           {closed?.detail ? <span className="term-detail">{closed.detail}</span> : null}
           {note ? <span className="term-detail bad">{note}</span> : null}
