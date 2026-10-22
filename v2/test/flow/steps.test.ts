@@ -282,3 +282,19 @@ test('a contract approved while its ticket is in Todo starts nothing; a contract
   await again.settled();
   await again.close();
 });
+
+test('a service\'s [merge] guarded_paths reach the release card as the config flag (issue 205, item 1)', async () => {
+  const t = await setup({
+    scripts: { author: quickAuthor },
+    effects: {
+      async settings() { return { verdict: 'no blocking issues', safeCommands: [], hosts: [], services: [], scripts: ['test'], guardedPaths: ['deploy/'] }; },
+      async changes() { return { files: ['deploy/run.sh'], diff: 'diff --git a/deploy/run.sh b/deploy/run.sh\n--- a/deploy/run.sh\n+++ b/deploy/run.sh\n@@ -1 +1 @@\n-a\n+b\n' }; },
+    },
+  });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release item', 5000);
+  await t.engine.settled();
+  const card = t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release');
+  assert.deepEqual(card?.flags?.find((f) => f.kind === 'config')?.files, ['deploy/run.sh']);
+  await t.engine.close();
+});
