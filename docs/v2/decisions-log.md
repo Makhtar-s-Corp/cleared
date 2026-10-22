@@ -2148,3 +2148,63 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 
 - Consequence: the screen is planned in [milestone-2-plan.md](milestone-2-plan.md), section 4.7, as a milestone 3 item with no lane yet. Matrix line O15 records it as `planned`, with no pull request or test yet.
 - Author: the owner, relayed on 2026-10-22; written in this log by Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-docs-consommation`.
+
+## 2026-10-22: knowledge proposed, approved in the inbox, landed in the skill (the author's choices, lane v2-j2-knowledge-skills)
+
+**Decision.** Lane 24 applies decision 27 of the [milestone 2 plan](milestone-2-plan.md). A handover's lessons and decisions become `knowledge` inbox items. Approve writes the entry into `lib/memory` at its level at once and queues it for the skill. Reject writes nothing. A Quick ticket per service asks for `.claude/skills/cleared-<service>/SKILL.md`, once a day or on "Update the skill now". The `knowledge` module is the ninth. Nothing under `lib/`, `flow/`, `inbox/store.ts` or `api/types.ts` changed. The lane's choices:
+
+1. **How the module hears of a handover.** The handover is captured by the flow (`flow/effects.ts`, lane 23's in this wave), after `author_done` is emitted, and a module's `provide` has no registry. So `workspace/handover.ts` gains a sink, `setHandoverSink`, which the knowledge module sets when it starts. Once the handover is stored, the sink is given the entry `lib/memory` stored and the service and contract its lessons were filed for. A sink that fails is logged, and the capture still answers the handover's id. With no knowledge module (the flow's own tests), nothing changes.
+2. **What a handover proposes.**
+   - The lessons sections are lane 19's (`## Lessons for the workspace`, `... the service`, `... the contract`). The decisions sections are this lane's: `## Decisions for the workspace`, `... the service`, `... the contract`. The handover has no heading for a decision otherwise.
+   - Each top-level list item of a section is one item, with its continuation lines. The text before a section's first item is one item too, and a section with no list is one item. The same text twice at one level is proposed once. An entry is cut at 4000 characters and says so.
+   - Every text goes through the cleaner before it is added, so the inbox never shows a secret.
+   - The level follows lane 19's filing. The service is the session's (the store's `sessions.service`, else the one its lessons were filed for, else the first service). The contract is the service's own, else the first one it consumes. A contract entry of a service with neither is the workspace's. The kind (lesson or decision) is kept in `knowledge_proposals`, since `KnowledgeItem` has no field for it.
+3. **Only the owner answers.** Approve, Reject and "Update the skill now" are answered for the signed-in user whose name is `[tracker] owner_id`. That is the one user `lib/memory` lets approve and the one the tickets' signatures name. Another user gets 403 with the owner's name. With no `owner_id`, the routes answer 503. The checks run in order: the app's proof (401), the knowledge set up (503), a known user (403), the owner (403), the item (404, or 409 once answered).
+4. **What Approve writes, and where.**
+   - The entry is written as a `decision`, proposed then approved, in a child process of its own (`knowledge/memory.ts`). `lib/memory` records the approval as its `memory_approved` event.
+   - `lib/memory` approves only for the human its tracker names. The service has already verified that human (the app's proof, then the owner's name), so the child's tracker answers that owner and the settings it compares name the same one.
+   - Why a decision: `lib/memory` briefs approved decisions that share words with the ticket (at most five) and never briefs a lesson row, only a committed lessons file. A lesson is therefore written as a decision whose text starts with `Lesson: `. So "the next briefing has it" holds for a ticket whose title or body shares a word with it, and no more.
+   - The level: the workspace's memory; a service's level, unless the service's checkout is the workspace's (the first service), whose memory it then is; a contract's level, beside the contract in its provider's checkout. That is where lane 19's briefing reads each.
+   - The entry is written first, then the item is handled. A memory that cannot be written leaves the item waiting, with nothing queued, for another try. A double click is answered once: the second gets 409 while the first writes.
+   - The proposals lane 19 files from the same handover stay as they are: proposed lesson rows that nothing briefs. Reject does not touch them.
+5. **The queue and the skill.**
+   - An approved entry is queued for every service's skill when it is the workspace's, for its service's when it is a service's, and for the provider's and each consumer's when it is a contract's. A consumer's sessions read the contract they call.
+   - The skill file is Cleared's. It is rendered whole from every approved entry of the service (`knowledge/skill.ts`): front matter `name: cleared-<service>` and `description` only, a line saying the file is rewritten, then `## The workspace`, `## The service <name>` and `## The contract of <provider>`, each with `### Decisions` before `### Lessons`, one list item per entry with its other lines indented, so an entry opens no section.
+   - The ticket carries the whole file in a fence longer than any backtick run in it, its path, and the rule to change nothing else. Its author copies; it decides nothing. A ticket that never lands loses nothing: the next one carries every approved entry.
+   - `checkSkill` validates the front matter: the two keys only, each once; the name is the service's skill name, in the standard format's characters; the description is not empty, at most 1024 characters, with no tag; the body is not empty.
+6. **The skill ticket.**
+   - It is labelled `Quick` (so its author is Haiku, unless the service is `full` or Haiku reviews it, lane 17's rule) and created in Todo by the flow's identity, on the workspace, naming its service when the workspace has several.
+   - **Daily:** from 03:00 in the server's time zone, at the first tick (every 10 minutes, and once at start), for each service with something queued and no skill ticket made that day. It is created and not started: the flow starts a ticket for a person, or for the plan runner on an approved plan, and the service never starts one by itself. It waits in Todo for the owner.
+   - **"Update the skill now"** (`POST /api/services/:name/skill`) makes the ticket at once, whatever the day, then starts it for the owner who asked. A start that fails leaves it in Todo. With nothing queued, it answers `ticket: null`.
+   - The ticket takes the queued entries in `knowledge_skill` and is recorded in `knowledge_skill_tickets` (service and day).
+7. **The registry.** `MODULE_NAMES` gains `knowledge` and `main.ts` imports it, the plan's one allowed edit of both. `assemble` also treats a module left out of the record as an empty one, so a test that assembles only the modules it needs (`test/flow/modules.test.ts`) still type-checks and runs.
+8. **Issue 206, items 6 and 7** (`workspace/handover.ts` is this lane's in wave 9).
+   - The sections are now read by `sectionsOf`: a fence of three or more backticks or tildes, indented by at most three spaces, is closed only by a line of the same character, at least as long, with nothing after it. `lessonsOf` reads the sections through it.
+   - A lesson filed twice in one ledger by one handover is filed once.
+
+**Consequences.**
+- **Tests first** (commit `af52c47`), each failing on `origin/v2` at `9e7d68e`, where `src/knowledge/` did not exist:
+  - `test/knowledge/proposals.test.ts`: two lessons and a decision give three items at their levels; list items, continuation lines and the paragraph before them; the fences of issue 206 for both `proposalsOf` and `lessonsOf`; the duplicate; the cut; the line endings.
+  - `test/knowledge/knowledge.test.ts`, on real `lib/memory` and two temporary repositories:
+    - a captured handover with two lessons and one decision gives three items;
+    - a planted key is masked;
+    - Approve writes the approved decision in the right ledger, and a real briefing of a ticket sharing its words has it;
+    - the queue per service;
+    - Reject leaves every ledger as it was;
+    - the owner only, once, a double click writing once;
+    - a failing memory leaving the item waiting;
+    - the daily ticket from 03:00, once per service per day, not with an empty queue, with the whole file in its body;
+    - a workspace entry making a ticket per service;
+    - "Update the skill now".
+  - `test/knowledge/skill.test.ts`: the front matter and its check, the sections, an entry of several lines, the ticket's fence.
+  - `test/knowledge/routes.test.ts`: 401, 403, 404, 409, 503, the answers, and the started ticket.
+  - `test/modules/registry.test.ts`: nine modules, and a module left out of the record assembles as empty.
+- **One line outside the lane's files.** `test/flow/modules.test.ts` pins `MODULE_NAMES`. Its line gains `knowledge`, since the ninth module is this lane's by the plan. The file is lane 23's in this wave, so a merge of the two takes both changes.
+- **Not closed by this lane, for the orchestrator:**
+  - **No author is told the decisions headings, and on a one-service workspace none is told the lessons headings either.** `renderBriefing` names the lessons headings only on a workspace of several services, and `workspace/briefing.ts` and `flow/prompts.ts` are not this lane's. So the 48-hour guestbook proof will likely see no knowledge item unless an author writes one of the six headings by itself. A small lane on the briefing's text, after wave 9, closes it. Section 8's unknown ("how many knowledge items a night produces") is measured by the proof all the same.
+  - **The skill ticket's write asks the owner.** `session/policy.ts` allows no edit under `.claude/`, so the author's write of the skill file becomes a permission request in the inbox, which the owner answers once (or "always in this project"). A row for that one path belongs to the policy's lane (lane 25 in this wave).
+  - **The skill is read by sessions** once lane 15's mount reaches Claude Code's skills, which needs the runner's `settingSources` to include `'user'` (issue 140, matrix line B5.5b).
+  - **The knowledge item raises no notification** (the notify sources skip a kind they do not know), and the inbox screen renders it from lane 27.
+- **The requirements matrix.** C2, O12 and M7 name this pull request. P27 records choices 1, 4 and 6.
+- **Checks.** `npm test`: 979 node tests (973 pass, 6 skipped) and the Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green. This is not an interface lane, so there are no captures.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-knowledge-skills`, at the orchestrator's request.
