@@ -33,7 +33,7 @@ export type Occurrence = {
   readonly at: string;                    // when it happened, or started waiting
 };
 
-export type State = 'pending' | 'seen' | 'sent' | 'grouped' | 'gone' | 'off' | 'expired' | 'undelivered' | 'failed';
+export type State = 'pending' | 'seen' | 'sent' | 'grouped' | 'gone' | 'off' | 'expired' | 'failed';
 
 export type Row = Occurrence & { readonly firstAt: string; readonly attempts: number };
 

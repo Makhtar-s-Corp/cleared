@@ -217,24 +217,47 @@ test('a kind turned off is never sent; an item older than a day is dropped unsen
   assert.deepEqual(late.dropped, ['permission:s-LOCAL-1:r1']);
 });
 
-test('with no adapter ready the occurrence is dropped as undelivered; three failed tries give it up', async () => {
+test('with no adapter ready the occurrence waits, and is sent once a device is subscribed, within its day', async () => {
   const t = setup();
   await t.dispatcher.tick();
   t.sender.outcome = () => [];
   t.permission('LOCAL-1', 'r1');
   const none = await t.dispatcher.tick();
-  assert.deepEqual(none.dropped, ['permission:s-LOCAL-1:r1']);
+  assert.deepEqual(none.held, ['permission:s-LOCAL-1:r1']);
+  assert.deepEqual(none.dropped, []);
+  t.advance(60);
+  await t.dispatcher.tick();
   t.sender.outcome = () => [{ adapter: 'webpush', result: 'sent' }];
   await t.dispatcher.tick();
-  assert.deepEqual(t.sender.sent, [], 'not kept for later');
+  assert.deepEqual(t.sender.sent.map((m) => m.ticket), ['LOCAL-1'], 'kept until a device can be told');
+  assert.equal(t.events('notification_failed').length, 0, 'nobody to tell is not a failure');
 
+  // Past its day, nobody is told of it.
   const u = setup();
   await u.dispatcher.tick();
-  let tries = 0;
-  u.sender.outcome = () => { tries += 1; return [{ adapter: 'webpush', result: 'failed', reason: 'push service refused' }]; };
+  u.sender.outcome = () => [];
   u.permission('LOCAL-1', 'r1');
-  for (let i = 0; i < 5; i += 1) { await u.dispatcher.tick(); u.advance(1); }
+  await u.dispatcher.tick();
+  u.advance(25 * 60);
+  u.sender.outcome = () => [{ adapter: 'webpush', result: 'sent' }];
+  const late = await u.dispatcher.tick();
+  assert.deepEqual([u.sender.sent.length, late.dropped], [0, ['permission:s-LOCAL-1:r1']]);
+});
+
+test('three failed tries give an occurrence up; what was folded into it is told after, not lost', async () => {
+  const t = setup();
+  await t.dispatcher.tick();
+  let tries = 0;
+  t.sender.outcome = (m) => {
+    if (m.kind === 'approval') { tries += 1; return [{ adapter: 'webpush', result: 'failed', reason: 'push service refused' }]; }
+    return [{ adapter: 'webpush', result: 'sent' }];
+  };
+  t.release('LOCAL-1', 'Rename the save button');
+  t.permission('LOCAL-1', 'r1');
+  for (let i = 0; i < 5; i += 1) { await t.dispatcher.tick(); t.advance(1); }
   assert.equal(tries, 3);
+  assert.deepEqual(t.sender.sent.map((m) => m.kind), ['permission'], 'the permission waited behind the approval, then was told');
+  assert.equal(t.events('notification_failed').length, 3);
 });
 
 test('what the deadline cut is still pending, not a try, and is sent at the next tick', async () => {

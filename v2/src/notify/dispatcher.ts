@@ -11,8 +11,9 @@
 //   - the quiet hours hold all but rollback and health;
 //   - an inbox item handled before it is sent is not sent; nothing older
 //     than a day is sent; a kind left out of [notify] events is never sent;
-//   - three failed tries give an occurrence up; what the deadline cut is
-//     tried again at the next tick, not counted as a try.
+//   - three failed tries give an occurrence up; what the deadline cut, or
+//     what came while no device could be told, is tried again at the next
+//     tick, not counted as a try (v1 dropped the latter).
 //
 // Each delivery is one notification_sent event in v1's events table
 // (kind, ticket, adapter, the seconds since it happened), each failure one
@@ -209,9 +210,9 @@ export class Dispatcher {
         continue;
       }
       if (outcomes.length === 0) {
-        // Nobody to tell (no device subscribed yet): not kept for later.
-        fold();
-        this.#drop(row.key, 'undelivered', at, done);
+        // Nobody to tell yet (no device subscribed, an adapter not ready):
+        // it waits, not a try, until a device can be told or its day ends.
+        done.held.push(row.key);
         continue;
       }
       if (outcomes.some((o) => o.result === 'sent')) {
@@ -220,7 +221,7 @@ export class Dispatcher {
         fold();
         done.sent.push(message);
       } else {
-        fold();
+        // Folded only into what was told: behind one given up, the others still wait their turn.
         if (this.#queue.failed(row.key) >= ATTEMPTS) this.#queue.finish(row.key, 'failed', at);
         done.failed.push(row.key);
       }
@@ -233,7 +234,7 @@ export class Dispatcher {
     return done;
   }
 
-  #drop(key: string, state: 'gone' | 'off' | 'expired' | 'undelivered' | 'grouped', at: string, done: TickResult): void {
+  #drop(key: string, state: 'gone' | 'off' | 'expired' | 'grouped', at: string, done: TickResult): void {
     this.#queue.finish(key, state, at);
     done.dropped.push(key);
   }

@@ -849,10 +849,15 @@ The choices the lane makes:
 **Consequences.**
 - A project whose `agents.conf` lists `[notify] events` itself gets neither `permission` nor `plan` until it adds them; one that lists none gets every kind. `lib/conf.mjs`'s v1 default list is unchanged, since v1 never makes them.
 - **Edit outside the lane's files:** `v2/test/modules/registry.test.ts` (lane 1's), lines 6 and 21. It asserted that the `notify` stub is empty, which filling the module ends. The import and the `notify` entry of that loop are removed; `lead` is still checked.
-- **The real check.** No browser on this server holds a real push subscription, and a fake push service would need https on port 443 or a tunnel, both ruled out. So delivery to a device is unmeasured. Measured, with a temporary `CLEARED_CONF` and a temporary 0700 directory (never `~/.config/cleared/notify`, which may hold subscriptions of the owner's devices):
-  - with no device, `npm run notify -- test` says `webpush: not ready (no_subscription)`;
-  - after the app's own `subscribe` of an endpoint on a push host that does not exist (allowed through `CLEARED_NOTIFY_PUSH_HOSTS`), it says `webpush: failed (push service refused)`. So the dispatcher's child reads the app's keys and subscriptions.
-  - The whole path, from an inbox item through the child to an adapter, is proven in a test with ntfy posting to a server the test runs on 127.0.0.1.
+- **The real check** (review round 1 of PR 166) was delivered on this server on 2026-10-22, at 04:27.
+  - The setup was Google Chrome, headed under `xvfb-run`, driven by Playwright with a persistent profile, and lane 3's app on `http://127.0.0.1:18792`, a free port, with a temporary `agents.conf`, a temporary 0700 private directory and a temporary user. The app already on 8792 could not be used: no password for it was at hand, and its store may hold subscriptions of the owner's devices.
+  - Signed in, then the bell's "Turn on notifications" gave a subscription on `fcm.googleapis.com`.
+  - `npm run notify -- test` answered `webpush: sent`, and the page's service worker showed the notification about one second later.
+  - What blocked lane 3's attempt: Playwright's default flags. With `--disable-background-networking`, `--disable-component-update` and `--disable-sync`, as in a plain `launch()`, Chromium 1243 and Chrome both answer "Registration failed - permission denied", headed or not.
+  - The temporary app, profile and directory were removed after the run.
+- **Two rules changed in review round 1:**
+  - An occurrence that came while no adapter was ready now waits, not counted as a try, until a device can be told or its day ends. v1 dropped it as `undelivered`, so an approval that waited while no device was subscribed was never told.
+  - The folded rows are finished only when the chosen notification is sent. Behind one given up after three tries, they are told in their turn.
 - **Interface lane: no.** No file of the app was touched, so there is no capture.
 - Issue 146 (the flaky VAPID test) is in `test/notify.test.mjs`, v1's, not this lane's file: still open.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-notify`.
