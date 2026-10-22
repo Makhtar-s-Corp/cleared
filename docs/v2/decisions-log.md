@@ -3037,6 +3037,7 @@ It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the l
 
 **Followups.**
 - "Always in this project" on a compound request saves the whole command as its pattern (`patternOf` in `flow/engine.ts`), and a compound command is matched part by part, so that answer never matches again. Saving the asking part instead needs the verdict to carry it and the engine to read it; `flow/engine.ts` is not this lane's file.
+- A reviewer's `2>/dev/null` is denied as `reviewer.edit`, now in any part of a list (`git merge-base main HEAD 2>/dev/null || ...`). It reaches no inbox, but the reviewer retries with a message about editing. `/dev/null` could be read as a sink that writes no file; that would reverse milestone 2's row for `ls src 2>/dev/null`, so it is left to the owner.
 - No real run: as the brief asked, no proof or rehearsal ran against the live service on 8791 and 8792, and nothing of the demo checkout was touched. The next review in a proof shows the change.
 
 **Checks.**
