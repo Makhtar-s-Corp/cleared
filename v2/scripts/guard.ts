@@ -137,8 +137,8 @@ try {
   if (base) {
     // Added and removed lines only (no context): what this change brings, not the text around it.
     // The lock file is left out of this strict pass: npm writes it (registry addresses, integrity
-    // hashes, version ranges), and the strict "assigned secret" rule reads a dependency named
-    // js-tokens with a range ("js-tokens": "^3.0.0 || ^4.0.0") as a secret. The tree pass above
+    // hashes, version ranges), and the strict "assigned secret" rule reads the dependency
+    // js-tokens, followed by its version range, as a secret. The tree pass above
     // still checks the whole lock file.
     const changes = join(work, 'changes.diff');
     writeFileSync(changes, git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`, '--', '.', ':(exclude)v2/package-lock.json']));

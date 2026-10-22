@@ -1386,7 +1386,7 @@ The choices the lane makes:
     - `npm test` builds first.
 11. **The guard.**
     - Its git calls get a 256 MB buffer: the lock file's diff passed Node's 1 MB.
-    - The strict diff pass leaves out `v2/package-lock.json`. There, the "assigned secret" rule reads `"js-tokens": "^3.0.0 || ^4.0.0"` (a dependency's version range) as a secret. The tree pass still checks the whole file.
+    - The strict diff pass leaves out `v2/package-lock.json`. There, the "assigned secret" rule reads the dependency js-tokens, followed by its version range, as a secret. The tree pass still checks the whole file.
 12. **Dependencies.** All are dev dependencies: the service and the app's server still have no runtime dependency, and the rest is types, tools or code Vite bundles. The pull request lists each with its licence and size. The 598 installed packages are MIT, ISC, Apache-2.0, BSD, MPL-2.0, 0BSD or Unlicense. Two have other forms, both open source. `@bufbuild/protobuf` (through AG-UI's client) is Apache-2.0 AND BSD-3-Clause. `khroma` declares no licence field, but its licence file is MIT; it comes in through CopilotKit's markdown renderer (streamdown, mermaid), which the headless entries do not bundle.
 
 **Consequences.**
