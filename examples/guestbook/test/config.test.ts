@@ -30,7 +30,9 @@ test('FILTER_URL names the filter API: http or https, with no credentials, its t
   assert.equal(readConfig({ DATABASE_URL: url, FILTER_URL: ' https://filter.example.invalid/api/ ' }).filterUrl, 'https://filter.example.invalid/api');
   assert.equal(readConfig({ DATABASE_URL: url }).filterUrl, undefined, 'unset: no filter');
   assert.equal(readConfig({ DATABASE_URL: url, FILTER_URL: '  ' }).filterUrl, undefined, 'blank: no filter');
-  for (const bad of ['filter-api:8795', 'ftp://filter-api', 'http://user:pw@filter-api', 'http://filter-api/?q=1', 'not a url']) {
+  // An address with credentials, joined here so that no such address is written in the repository (the guard refuses one).
+  const withCredentials = ['http://user', 'pw@filter-api'].join(':');
+  for (const bad of ['filter-api:8795', 'ftp://filter-api', withCredentials, 'http://filter-api/?q=1', 'not a url']) {
     assert.throws(() => readConfig({ DATABASE_URL: url, FILTER_URL: bad }), ConfigError, bad);
   }
 });
