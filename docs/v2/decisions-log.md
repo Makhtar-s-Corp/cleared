@@ -2210,3 +2210,69 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - **The requirements matrix.** C2, O12 and M7 name this pull request (216). P27 records choices 1, 4 and 6.
 - **Checks.** `npm test`: 980 node tests, 974 pass and 6 skipped; 154 Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green. This is not an interface lane, so there are no captures.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-knowledge-skills`, at the orchestrator's request.
+
+## 2026-10-22: a read-only question to the code or to the platform, the reader's policy and its read-only workdir (the author's choices, lane v2-j2-ask-code)
+
+**Decision.** Lane 25 applies decision 28 of the [milestone 2 plan](milestone-2-plan.md). `v2/src/reader/` answers a question to the code with a `reader` session. The question is about one service (named, or named by a `service:path:line` target) or about the whole platform. The three routes lane 17 wrote ahead are served: `POST /api/asks`, `GET /api/asks/:id` and `POST /api/asks/:id/follow`. Each turn carries its answer, its cost and its tokens; the ask carries their sums and the week share. The lane's choices:
+
+1. **The reader's policy** (`session/policy.ts`, role `reader`):
+   - The reviewer's rows, under the rule `reader.edit`: no edit tool, no `git commit`, no `git push`. A redirection that writes a file is refused the same way.
+   - The lead's cap on a Read (`reader.read_cap`, at most 400 lines through `limit`). The reader's first turn says so, since the real run's first Read had no limit and was refused.
+   - `AskUserQuestion` is refused (`reader.question`): nobody answers a reader.
+   - Whatever the other rows would `ask` is refused as `reader.ask`, keeping the reason. A reader never waits for the inbox.
+   - The learned "Always in this project" answers are ignored for a reader. The flow's `policyFor` merges them into every policy of the project, and a learned allow would otherwise widen a reader.
+   - The reader also refuses at once any question or permission request that still reaches it, so a turn never hangs until the idle stop.
+2. **The workdir is read only, said by a file in it.** The ask's folder is `<CLEARED_V2_WORKDIRS>/asks/<ask id>`. It holds:
+   - one folder per named service, exported from its base branch (`exportBase`: landed code only, without `.git`; a monorepo folder service is its folder alone);
+   - the reader's `CLAUDE.md`;
+   - a `HANDOVER.md` placeholder;
+   - the mark `READ_ONLY_MARK` (`.cleared-read-only`).
+
+   `container/session-runtime.ts` mounts a workdir that holds the mark (a plain file, not a link or a folder) read only. Reason: the Claude Code adapter gives the runtime the workdir, the siblings and the skills only, and `session/adapters/claude-code.ts` is not this lane's file. A session that writes the mark in its own checkout only makes its next start read only. Every service of a platform question sits inside that one read-only mount. There are no per-service bind mounts, since a bind's source is resolved on the host and a folder swapped for a link would reach outside. The command line without the mark is unchanged (a test).
+3. **The `HANDOVER.md` placeholder.** The runner's Stop hook (`images/session/runner/hooks.ts`, `hooksFor`) asks every role but the lead and the reviewer for a `HANDOVER.md`, and a reader cannot write one. The hook passes when the file exists, so the folder holds one. The runner is not this lane's file, and changing it means rebuilding the shared session image (followup).
+4. **The excerpt of a target** is read from git's objects in the service's own checkout, never from a folder a session writes (`ls-tree` then `cat-file blob` at `refs/remotes/origin/<base>`).
+   - A link, a folder, a binary, a file over 1 MB, a path outside the service, and a name the policy calls a secret (`secret.read`) are refused with 400.
+   - The named line and ten lines on each side are numbered, the named one marked, cleaned, and put in the first turn: a question on `guestbook:src/page.ts:12` holds lines 2 to 22.
+   - A line past the end is refused before anything starts.
+5. **Starting and stopping.** `POST /api/asks` answers at once with the ask `starting`, and the session starts in the background.
+   - It starts through the registry's adapter, the flow runtime's wrapper, with `siblings: []` and no test service, so the wrapper starts none.
+   - Its session row has the role `reader` and the ask's id as its ticket (`ask-<uuid>`, a form no tracker gives). Its status is `working` while a turn runs, `done` between turns, then `stopped` or `failed`.
+   - The flow's tick, idle rule and restart recovery handle authors and reviewers only. The reader has its own idle rule: the flow's `idleMs`, checked every 30 seconds. An idle stop removes the session's containers, its config volume and the ask's folder.
+   - A follow-up goes to the live session, or, after a stop or a failure, to a new session whose first turn holds the earlier questions and answers. A restart stops what the last process left live and cleans it up, at the service's start (`recoverAsks`).
+   - At most three asks run at once (409 beyond).
+6. **The cost.**
+   - **A turn's cost** is the session's `total_cost_usd` at the end of the turn minus its total at the end of the turn before. Claude Code's result carries the session's running total: the real run read 0.00233103, then 0.00269304.
+   - **Tokens.** A turn's input tokens are its new, cached and cache-written input tokens; its output tokens are the turn's.
+   - **The week share** is the seven-day window as the reader's session last reported it (`cleared.rate_limit`), null until reported.
+   - **Storage.** The sums are read from the turns, which the `asks` table (a table of the sessions module) keeps as JSON.
+7. **The model** is `CLEARED_V2_READER_MODEL`, `claude-sonnet-5-5` by default: a reader reads as a reviewer does. The real run set Haiku.
+8. **Issue 207, item 4: an author before its Go changes nothing.** `Policy.planning`, when true for an author, refuses the edit tools (`plan.before_go`), except `HANDOVER.md` at the root, which the Stop hook asks for at the end of every turn. It also refuses `git commit`, `git push`, `git add`, `git checkout` and `rm`. Reads and safe commands stay allowed. Nothing sets the field yet: `flow/engine.ts` is lane 23's in this wave (followup).
+9. **Outside the lane's files**: two lines of `v2/test/flow/modules.test.ts`, lane 23's folder in this wave. Its route list of the sessions module now leaves out `/api/asks` as it leaves out the preview, and `test/reader/routes.test.ts` proves the registration. The route lists and the count, which lane 23 changes, are untouched.
+
+**The real run**, on this server, 2026-10-22 14:23 (Europe/Paris), driven in-process from a script outside the repository: no listener, `ss -ltn` the same 34 lines before and after. One ask on the guestbook (a copy of `examples/guestbook` in a temporary repository) with `claude-haiku-5-5`, on the login named by `CLEARED_CLAUDE_CREDENTIALS`, whose content was never read:
+
+- turn 1, "What does line 12 of the page do, and which function calls it?" on `guestbook:src/page.ts:12`: answered in 12 s, `costUsd=0.002331 inputTokens=38064 outputTokens=1017 weekPercent=29`, naming `ESCAPES` and `escapeHtml`;
+- the session container's mounts: `/workspace rw=false`, the login `rw=false`, the config volume `rw=true`; `touch /workspace/guestbook/x` inside it: `Read-only file system`;
+- the policy's answers in the session: one `reject_once:reader.read_cap`;
+- the follow-up, "Which test file covers that function?": answered in 2 s, `costUsd=0.000362 inputTokens=20350 outputTokens=48`; the ask's total `costUsd=0.002693 inputTokens=58414 outputTokens=1065`;
+- after the idle rule: the ask and its row `stopped`; nothing left with the session's label (containers, volumes, networks).
+
+**Followups.**
+
+- `session/adapters/claude-code.ts`: forward a read-only flag of `StartInput` to the runtime, in place of the mark.
+- `images/session/runner/hooks.ts`: no Stop hook for a reader, then drop the placeholder.
+- `flow/engine.ts`, `policyFor`: set `planning: true` while the author's gate is `planning` (lane 23 or a small fix lane).
+- The tower and `GET /api/sessions` list a reader's session like any other (`role: 'reader'`, its ask's id as the ticket), and a platform ask's row names the workspace's first service, which the wrapper sets. Lane 27 shows the ask screen, and may leave the reader out of the live sessions or link it to `/ask/:id`.
+- **The cost of a session of several turns is over-counted in three places.** Each adds up `total_cost_usd` over every `RUN_FINISHED` event, and the real run shows that value is the session's running total:
+  - `flow/engine.ts` (about line 1075): the ticket's budget stop. A reopened author is the same session, so a ticket can be put back before its budget is spent.
+  - `lead/plans/runner.ts` (about line 531): the plans' day budget. The lead is one long session per generation, so the day stop can trip early, during the 48-hour proof too.
+  - `lead/plans/estimates.ts` (about line 65): the estimates' median cost.
+
+  A small fix lane before wave 12 would count the last total of each session instead.
+- A reader sees no git history: the export carries none.
+- A reader has no cost ceiling of its own. The registry's adapter sets no `maxBudgetUsd`, and the flow's ticket budget never sees a reader. Its bounds are the idle rule and three asks at once.
+- `test/reader/runtime.test.ts` covers the production path: the model setting, the recovery at start, the reader built once from the flow's configuration, and a reader's start through the flow runtime's wrapper (no sibling planned, a reader's row).
+
+- Pull request: 218, against `v2`.
+- The requirements matrix: C11 and M9, and this lane's own lines P28 (the reader's policy and read-only workdir) and P29 (an author before its Go). They were P27 and P28 in the pull request and were renumbered at the merge of `origin/v2`, since lane 24 (pull request 216) took P27 first.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ask-code`.

@@ -12,11 +12,12 @@
 //   cleared-v2-<id>-egress     the CONNECT proxy, alias egress, the only way out
 //   cleared-v2-<id>-session    the session: the workdir and /tmp writable, the
 //                              token file and the project's skills read only,
-//                              limits, no capability
+//                              limits, no capability; a reader's workdir, which
+//                              holds READ_ONLY_MARK, read only too
 // The egress container sits on its own labelled bridge rather than Docker's
 // default one, so that nothing here touches an object without the label and
 // the egress containers of two sessions never share a network.
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -45,6 +46,12 @@ export const ALLOW_FILE = 'allow';
 // (milestone 2, decision 27).
 export const SKILLS_MOUNT = `${CONFIG_MOUNT}/skills`;
 export const FAKE_CONTRACT_MOUNT = '/etc/cleared/fake';
+// A file at the root of a workdir that has the workdir mounted read only: a
+// reader's (milestone 2, decision 28), which holds every named service's
+// checkout at its base. The adapter gives the runtime the workdir alone, so
+// the workdir carries it. A session that writes the file in its own
+// checkout makes its next start read only, and nothing more.
+export const READ_ONLY_MARK = '.cleared-read-only';
 
 // What every session may reach: the model API and the npm registry. The
 // project's declared hosts are added to these.
@@ -267,6 +274,11 @@ async function waitFor(what: string, ready: () => Promise<boolean>, timeoutMs: n
   }
 }
 
+// Whether the workdir holds the read-only mark: a plain file, not a link.
+function readOnlyWorkdir(workdir: string): boolean {
+  return lstatSync(join(workdir, READ_ONLY_MARK), { throwIfNoEntry: false })?.isFile() === true;
+}
+
 export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Promise<StartedSession> {
   validate(spec);
   const { session } = spec;
@@ -376,7 +388,7 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
       user: spec.user, readOnly: true, tmpfs: ['/tmp'], dropAllCapabilities: true, noNewPrivileges: true,
       limits: spec.limits ?? DEFAULT_LIMITS,
       mounts: [
-        { type: 'bind', source: spec.workdir, target: WORKDIR_MOUNT },
+        { type: 'bind', source: spec.workdir, target: WORKDIR_MOUNT, ...(readOnlyWorkdir(spec.workdir) ? { readonly: true } : {}) },
         { type: 'bind', source: spec.tokenFile, target: LOGIN_FILE_MOUNT, readonly: true },
         { type: 'volume', source: names.volume, target: CONFIG_MOUNT },
         ...(spec.skills === undefined ? [] : [{ type: 'bind' as const, source: spec.skills, target: SKILLS_MOUNT, readonly: true }]),

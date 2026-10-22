@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Docker, LABEL } from '../../src/container/docker.ts';
 import { parseServices } from '../../src/container/services.ts';
 import {
-  ALLOW_FILE, DEFAULT_ALLOW_HOSTS, DEFAULT_LIMITS, EGRESS_IMAGE, FAKE_IMAGE, SESSION_IMAGE, SKILLS_MOUNT, buildBaseImages, removeSessionVolume,
+  ALLOW_FILE, DEFAULT_ALLOW_HOSTS, DEFAULT_LIMITS, EGRESS_IMAGE, FAKE_IMAGE, READ_ONLY_MARK, SESSION_IMAGE, SKILLS_MOUNT, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume,
   sessionImage, sessionNames, startSession, stopSession, writeAllowList, type SessionRuntimeSpec,
 } from '../../src/container/session-runtime.ts';
 import { FakeDocker, type FakeObject } from './fake-docker.ts';
@@ -517,4 +517,62 @@ test('the Claude Code adapter starts the siblings and mounts the skills its star
   const names = sessionNames(SESSION);
   assert.ok(byName(fake.containers, names.sibling('filter-api')).args?.includes(FAKE_IMAGE));
   assert.ok(hasPair(byName(fake.containers, names.container).args, '--mount', `type=bind,source=${files.skills},target=${SKILLS_MOUNT},readonly`));
+});
+
+// Milestone 2, decision 28 (lane 25): a reader's workdir, which holds every
+// service's checkout at its base, is mounted read only. The adapter gives
+// the runtime the workdir only, so the workdir says it: the reader writes
+// READ_ONLY_MARK in it before the start. Without the file, nothing changes.
+test('a workdir that holds the read-only mark is mounted read only, and any other as before', async () => {
+  const marked = runtimeSpec();
+  mkdirSync(join(marked.workdir, 'guestbook'), { recursive: true });
+  mkdirSync(join(marked.workdir, 'filter-api'), { recursive: true });
+  writeFileSync(join(marked.workdir, READ_ONLY_MARK), '');
+  const fake = new FakeDocker();
+  await startSession(new Docker(fake.runner), marked);
+  const session = byName(fake.containers, sessionNames(SESSION).container).args ?? [];
+  assert.ok(hasPair(session, '--mount', `type=bind,source=${marked.workdir},target=${WORKDIR_MOUNT},readonly`), session.join(' '));
+  const binds = session.filter((arg, i) => session[i - 1] === '--mount' && arg.startsWith('type=bind,'));
+  assert.deepEqual(binds.filter((arg) => !arg.endsWith(',readonly')), [], 'no writable bind mount: the services\' checkouts are inside the read-only workdir');
+
+  const plain = runtimeSpec();
+  mkdirSync(plain.workdir, { recursive: true });
+  const before = new FakeDocker();
+  await startSession(new Docker(before.runner), plain);
+  const args = byName(before.containers, sessionNames(SESSION).container).args ?? [];
+  assert.ok(hasPair(args, '--mount', `type=bind,source=${plain.workdir},target=${WORKDIR_MOUNT}`), 'an author\'s checkout stays writable');
+
+  // A folder or a link of that name is no mark: only a file the host wrote.
+  for (const make of [(path: string) => mkdirSync(path), (path: string) => symlinkSync('/etc/hostname', path)]) {
+    const odd = runtimeSpec();
+    mkdirSync(odd.workdir, { recursive: true });
+    make(join(odd.workdir, READ_ONLY_MARK));
+    const docker = new FakeDocker();
+    await startSession(new Docker(docker.runner), odd);
+    assert.ok(hasPair(byName(docker.containers, sessionNames(SESSION).container).args, '--mount', `type=bind,source=${odd.workdir},target=${WORKDIR_MOUNT}`));
+  }
+});
+
+test('the Claude Code adapter mounts a reader\'s workdir read only, from its mark alone', async () => {
+  const dir = scratch();
+  const workdir = join(dir, 'ask');
+  mkdirSync(join(workdir, 'guestbook'), { recursive: true });
+  writeFileSync(join(workdir, READ_ONLY_MARK), '');
+  const fake = new FakeDocker();
+  const runner = () => {
+    const process = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), pid: 1, exitCode: null, kill: () => true });
+    return process as unknown as ChildProcessWithoutNullStreams;
+  };
+  const adapter = createClaudeCodeAdapter({
+    log: { append: () => 0, after: () => [] } as never, cleaner: () => createCleaner({}),
+    docker: new Docker(fake.runner, runner), newId: () => SESSION,
+    runtime: { stateDir: join(dir, 'state'), loginFile: join(dir, 'claude.token'), hostAddresses: [], user: '1000:1000', stopTimeoutMs: 10 },
+  });
+  await adapter.start({
+    project: 'guestbook', ticket: 'ask-1', role: 'reader', harness: 'claude-code', model: 'claude-haiku-5-5', workdir,
+    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null },
+    policy: { role: 'reader', base: 'main', workdir: '/workspace', scripts: [], credentialFile: '/run/cleared/claude.token', safeCommands: DEFAULT_SAFE_COMMANDS, allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [] },
+    prompt: 'x', services: [], siblings: [],
+  });
+  assert.ok(hasPair(byName(fake.containers, sessionNames(SESSION).container).args, '--mount', `type=bind,source=${workdir},target=${WORKDIR_MOUNT},readonly`));
 });
