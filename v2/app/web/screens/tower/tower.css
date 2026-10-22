@@ -37,3 +37,40 @@
   .ask-services { gap: 8px; }
   .svc-toggle { min-height: 44px; padding: 0 16px; }
 }
+
+/* Lane 27: a live session's step names its service in its tag; the
+   schedules under the plans; the recipes' form under the bar. */
+.sub-title { margin: 16px 0 8px; padding-top: 14px; border-top: 1px solid var(--hairline); font-size: 13px; font-weight: 500; color: var(--text); }
+.schedules { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.schedule { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.schedule-name { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-line { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.schedule.off .schedule-name, .schedule.off .schedule-line { color: var(--text-faint); }
+
+.recipe-form { margin: 0 0 18px; padding: 16px 18px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
+.recipe-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.recipe-head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.recipe-close { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; }
+.recipe-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.recipe-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; box-shadow: var(--e-control); color: var(--text); font-size: 13px; cursor: pointer; }
+.recipe-toggle:hover { background: var(--tab-fill); }
+.recipe-toggle[aria-pressed="true"] { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--ink); font-weight: 500; }
+.recipe-service { color: var(--text-faint); font-size: 12px; font-weight: 400; }
+.recipe-kind, .recipe-none, .recipe-pick { margin: 12px 0 0; color: var(--text-muted); font-size: 13px; }
+.recipe-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; margin-top: 12px; }
+.recipe-param { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; }
+.param-name { display: flex; align-items: baseline; gap: 8px; color: var(--text); font-weight: 500; }
+.param-required { color: var(--text-faint); font-size: 12px; font-weight: 400; }
+.param-description { color: var(--text-muted); font-size: 12px; }
+.recipe-param input { min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); }
+.recipe-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.recipe-note { margin: 0; min-width: 0; color: var(--text-muted); font-size: 13px; }
+.recipe-bar .chip-button { flex: none; }
+
+@media (max-width: 767px) {
+  .recipe-form { padding: 14px; }
+  .recipe-toggle { min-height: 44px; padding: 0 16px; }
+  .recipe-param input { min-height: 44px; }
+  .recipe-bar { flex-direction: column; align-items: stretch; }
+  .recipe-bar .chip-button { min-height: 44px; }
+}

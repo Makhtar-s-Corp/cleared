@@ -12,7 +12,7 @@ import { FIXTURE_NOW, OWNER_ID, RECIPES, WORKSPACE, schedulesFixture, ticketStep
 import { translator } from '../web/lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../web/lib/screen.ts';
 import {
-  loadTower, needSentence, pickedFor, recipeBody, recipeDone, recipeProblem, runRecipe, scheduleLine, stepTag, towerModel, type TowerData,
+  loadTower, needSentence, needTitle, pickedFor, recipeBody, recipeDone, recipeProblem, runRecipe, scheduleLine, stepTag, towerModel, type TowerData,
 } from '../web/screens/tower/model.ts';
 import { signedIn, startApp } from './support.ts';
 
@@ -83,10 +83,11 @@ test('a contract and a knowledge item need the owner, with what each waits for, 
   const contract = model.needs.find((card) => card.kind === 'contract');
   assert.ok(contract);
   assert.equal(contract.href, `/inbox#${encodeURIComponent(contractItem(FIXTURE_NOW).id)}`);
-  assert.equal(contract.title, 'Contract of filter-api');
+  assert.equal(needTitle(contract, t), 'Contract of filter-api', 'a catalog title, the service in it');
+  assert.equal(needTitle(contract, fr), 'Contrat de filter-api');
   assert.equal(needSentence(contract, t), 'openapi.yaml changes; the steps after it wait for your validation.');
   const knowledge = model.needs.filter((card) => card.kind === 'knowledge');
-  assert.deepEqual(knowledge.map((card) => card.title), [knowledgeItem(FIXTURE_NOW).text, knowledgeItem(FIXTURE_NOW).text]);
+  assert.deepEqual(knowledge.map((card) => needTitle(card, t)), [knowledgeItem(FIXTURE_NOW).text, knowledgeItem(FIXTURE_NOW).text]);
   assert.deepEqual(knowledge.map((card) => needSentence(card, t)), ['Proposed for guestbook: approve it to keep it.', 'Proposed for the whole workspace: approve it to keep it.']);
   assert.equal(needSentence(knowledge[0]!, fr), 'Proposé pour guestbook : approuvez-le pour le garder.');
   assert.equal(t('need_contract', { age: '3 min' }), 'Contract · 3 min');
@@ -107,7 +108,7 @@ test('the schedules show in the plans card, the next run first, with its budget;
   const rows = towerModel({ ...TOWER_EMPTY, schedules: schedulesFixture(FIXTURE_NOW) }, FIXTURE_NOW).schedules;
   assert.deepEqual(rows.map((row) => row.name), ['dependency-update', 'weekly-review', 'Read the error log of the night and open a ticket for each new error']);
   assert.deepEqual(rows.map((row) => scheduleLine(row, FIXTURE_NOW, 'en', t)), ['Next run tomorrow at 03:00 · $0.50', 'Next run on Mon at 08:00 · $1.00', 'Off']);
-  assert.deepEqual(rows.map((row) => scheduleLine(row, FIXTURE_NOW, 'fr', fr)), ['Prochain passage demain à 03:00 · 0,50 $', 'Prochain passage lun. à 08:00 · 1,00 $', 'Désactivé']);
+  assert.deepEqual(rows.map((row) => scheduleLine(row, FIXTURE_NOW, 'fr', fr)), ['Prochain passage demain à 03:00 · 0,50\u00a0$', 'Prochain passage lun. à 08:00 · 1,00\u00a0$', 'Désactivé']);
   const today: Schedule = { ...schedulesFixture(FIXTURE_NOW)[0]!, nextRunAt: new Date(2026, 9, 21, 22, 15).toISOString() };
   assert.equal(scheduleLine(towerModel({ ...TOWER_EMPTY, schedules: [today] }, FIXTURE_NOW).schedules[0]!, FIXTURE_NOW, 'en', t), 'Next run at 22:15 · $0.50');
   const none: Schedule = { ...today, nextRunAt: null };

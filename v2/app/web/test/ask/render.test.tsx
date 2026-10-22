@@ -64,9 +64,10 @@ test('in French, and every word from the catalog or the data', () => {
   const markup = render(fr, askFixture(), { language: 'fr' });
   assert.match(markup, /guestbook · src\/page\.ts, ligne 12/);
   assert.match(markup, /semaine utilisée à 29 %/);
-  const known = new Set([...Object.values(loadCatalog('ask', 'fr')), ...Object.values(loadCatalog('shell', 'fr')), ...strings(askFixture())]);
-  for (const text of visibleText(render(fr, askFixture(), { language: 'fr' }))) {
-    assert.ok([...known].some((value) => value.includes(text) || text.includes(value.replace(/\{[a-z_]+\}/g, '').trim().slice(0, 6))), text);
-  }
-  assert.ok(visibleText(render(en)).includes(ASK_QUESTION));
+  assert.match(markup, />Demander<\/button>/);
+  // With a translator that names its keys, no word of the screen is left but the data's.
+  const sentinel: Translate = (key) => `«${key}»`;
+  const text = visibleText(render(sentinel, askFixture(FIXTURE_NOW, 'running'))).join('\n');
+  for (const word of ['Reader', 'You', 'Ask', 'Read only', 'In all', 'tokens', ', line', 'Wait for the answer', 'reading the code']) assert.ok(!text.includes(word), word);
+  assert.ok(text.includes(ASK_QUESTION) && text.includes(ASK_ANSWER), 'the data is shown as it is');
 });

@@ -26,6 +26,7 @@
   "signed_out": "Votre session a pris fin. Reconnectez-vous.",
   "load_failed": "Le service ne répond pas pour l'instant. Cette page réessaie d'elle-même.",
   "title_lead": "Lead",
+  "title_ask": "Question au code",
   "nav_plans": "Plans",
   "notify_label": "Notifications",
   "notify_label_on": "Notifications : activées sur cet appareil",

@@ -22,14 +22,14 @@ test('the app serves the ask\'s page for an ask\'s address, and nothing for anot
     assert.match(html, /<title>Cleared · Question to the code<\/title>/);
     for (const path of ['/ask', '/ask/', '/ask/a/b', `/ask/${'x'.repeat(65)}`]) assert.equal((await get(path)).status, 404, path);
     // Signed out, the page sends to the sign-in.
-    assert.equal((await fetch(`${app.base}/ask/${ASK_ID}`, { redirect: 'manual' })).status, 302);
+    assert.equal((await fetch(`${app.base}/ask/${ASK_ID}`, { redirect: 'manual' })).status, 303);
     const catalog = await (await get('/messages/ask.json')).json() as Record<string, string>;
     assert.equal(catalog.ask_title, 'Question to the code');
     const files = await pageFiles(app, `/ask/${ASK_ID}`, cookie);
     assert.ok(files.styles.length >= 2, 'the shell\'s sheet, then the ask\'s');
     assert.match(files.css, /\.ask-screen/);
     assert.doesNotMatch(files.css, /gradient/i);
-    assert.ok(files.js.includes('/follow'), 'the ask screen\'s chunk, preloaded with the page');
+    assert.ok(files.js.includes('follow-input'), 'the ask screen\'s chunk, preloaded with the page');
   } finally {
     await app.close();
   }

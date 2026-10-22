@@ -20,11 +20,11 @@ test('an item\'s steps in order, each with its kind, its service, what it waits 
   assert.deepEqual(steps.map((s) => s.position), [1, 2, 3, 4]);
   assert.deepEqual(steps.map((s) => stepText(s, en, 'en')), [
     'Contract · filter-api · 10 min · $0.15',
-    'Service · filter-api · after 1 · 15 min · $0.25',
-    'Service · guestbook · after 1 · 20 min · $0.30',
-    'Integration · guestbook · after 2 and 3 · 10 min · $0.20',
+    'Service · filter-api · waits for 1 · 15 min · $0.25',
+    'Service · guestbook · waits for 1 · 20 min · $0.30',
+    'Integration · guestbook · waits for 2 and 3 · 10 min · $0.20',
   ]);
-  assert.equal(stepText(steps[3]!, fr, 'fr'), 'Intégration · guestbook · après 2 et 3 · 10 min · 0,20 $');
+  assert.equal(stepText(steps[3]!, fr, 'fr'), 'Intégration · guestbook · attend 2 et 3 · 10 min · 0,20\u00a0$');
   // The other items have no steps, or one.
   for (const other of plan.items.filter((i) => i.position !== 2)) assert.deepEqual(planSteps(other), []);
   assert.deepEqual(planSteps({ ...item, steps: item.steps!.slice(0, 1) }), []);

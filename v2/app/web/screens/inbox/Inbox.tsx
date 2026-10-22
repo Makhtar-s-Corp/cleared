@@ -1,9 +1,10 @@
 // The inbox (inbox.png): what waits for the human, oldest first by kind, then
 // what was handled today, and the detail of the item chosen: a release to
 // approve or send back, a permission to allow or deny, a question to answer,
-// the lead's plan to approve, an author's session plan to Go or Change, and
-// the contract and knowledge items to read (model.ts says what each gesture
-// calls). A release of several services is a train (TrainBody).
+// the lead's plan to approve, an author's session plan to Go or Change, a
+// contract to validate or send back, and knowledge to approve or reject
+// (model.ts says what each gesture calls). A release of several services is
+// a train (TrainBody).
 import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CheckCircle, Circle, CircleNotch, LockSimple, WarningCircle } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TrainState, TrainStop } from '../../../../src/api/types.ts';
@@ -20,9 +21,10 @@ import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
 import {
-  CHANGE_MAX, CHECKS, GRACE_MS, REFRESH_MS, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approvePlan, changeMessage, chosen, clock,
-  decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle, kept, known, ordered, pausedLine,
-  planChange, planGo, planOf, readPlan, releaseSession, sameOrigin, sendBack, sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, target,
+  CHANGE_MAX, CHECKS, GRACE_MS, REFRESH_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
+  changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
+  kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
+  sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, target,
   ticketTitle, trainLine, stopState, undoApproval, verbOf, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
@@ -284,7 +286,7 @@ function PlanBody({ item, view, t }: { readonly item: PlanItemInbox; readonly vi
   const plan = planOf(view, item);
   const language = view.language ?? 'en';
   const head = <Eyebrow item={item} kind={plan ? planStateLine(plan, t) : t(item.state === 'waiting' ? 'plan_state_proposed' : 'kind_plan')} open={`/plans/${encodeURIComponent(item.planId)}`} openKey="open_plan" t={t} />;
-  if (plan) return <>{head}<PlanPanel plan={plan} t={t} options={{ language, actions: false }} /></>;
+  if (plan) return <>{head}<PlanPanel plan={plan} t={t} options={{ language, actions: false, services: true }} /></>;
   return (
     <>
       {head}
@@ -326,14 +328,18 @@ function SessionPlanBody({ item, view, t }: { readonly item: SessionPlanItem; re
   );
 }
 
-// The contract and knowledge items (lanes 23 and 24), for reading: lane 27
-// gives them Approve, Send back and Reject.
-function ContractBody({ item, t }: { readonly item: ContractItem; readonly t: Translate }) {
+// A contract step's change to its service's contract (decision 26): the
+// diff, validated with Approve or sent back with a message; the steps after
+// it wait for it. A knowledge item (decision 27): the text and its level,
+// approved into the memory or rejected.
+function ContractBody({ item, view, t }: { readonly item: ContractItem; readonly view: InboxView; readonly t: Translate }) {
+  const title = ticketTitle(view, item.ticket);
   return (
     <>
       <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_contract' : 'kind_contract')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
       <h2 className="d-title">{t('contract_of', { service: item.service })}</h2>
-      <p className="d-ticket"><code>{item.path}</code></p>
+      <p className="d-ticket"><code>{item.path}</code>{title ? <><span className="sep" aria-hidden="true">·</span>{title}</> : null}</p>
+      {item.state === 'waiting' ? <p className="decide-rule">{t('contract_rule')}</p> : null}
       <h3 className="d-sub">{t('contract_diff')}</h3>
       <pre className="diff"><code>{item.diff.split('\n').map((line, index) => (
         <span key={index} className={line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : undefined}>{line}{'\n'}</span>
@@ -350,6 +356,7 @@ function KnowledgeBody({ item, t }: { readonly item: KnowledgeItem; readonly t: 
       <h2 className="sr-only">{t('kind_knowledge')}</h2>
       <p className="announce knowledge-text">{item.text}</p>
       <dl className="facts"><Fact label={t('facts_level')}>{level}</Fact></dl>
+      {item.state === 'waiting' ? <p className="decide-rule">{t('knowledge_rule')}</p> : null}
     </>
   );
 }
@@ -376,8 +383,10 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
   if (local?.kind === 'plan_approved') return done(t('approved_plan', { time: clock(local.at) }));
   if (local?.kind === 'plan_go') return done(t('plan_go_done', { time: clock(local.at) }));
   if (local?.kind === 'plan_changed') return done(t('plan_changed_done', { time: clock(local.at) }));
+  if (local?.kind === 'decided' && (item.kind === 'contract' || item.kind === 'knowledge')) return done(decidedLine(local, item, t));
   if (item.state === 'handled') {
     if (item.kind === 'release' && item.train) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
+    if (item.kind === 'contract' || item.kind === 'knowledge') return done(outcomeLine(item, view, t));
     return done(item.kind === 'session_plan' && item.plan.go ? goLine(item.plan.go, view, t) : t('handled_note'));
   }
   if (item.kind === 'question' && isLead(item)) {
@@ -444,8 +453,22 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
         );
       }
       return <>{signed}<div className="d-buttons">{act('plan_change', t('plan_change_open'), false, busy)}{act('plan_go', t('plan_go'), true, busy, { 'aria-label': t('plan_go_label') })}</div>{status}</>;
-    case 'contract': case 'knowledge':
-      return done(t('reading_note'));
+    case 'contract':
+      // Send back asks what to change; the message reopens the contract step.
+      if (local?.kind === 'change' || (busy && message !== '')) {
+        return (
+          <>
+            <label className="change-field" htmlFor="contract-message"><span className="sr-only">{t('contract_send_back_field')}</span>
+              <Textarea id="contract-message" maxLength={SEND_BACK_MAX} rows={2} autoComplete="off" placeholder={t('contract_send_back_field')} disabled={busy} value={message} onChange={(event) => onMessage?.(event.target.value)} />
+            </label>
+            <div className="d-buttons">{act('contract_keep', t('plan_keep'), false, busy)}{act('contract_send_back_send', t('contract_send_back_send'), true, busy)}</div>
+            {status}
+          </>
+        );
+      }
+      return <>{signed}<div className="d-buttons">{act('contract_send_back', t('send_back'), false, busy)}{act('contract_approve', t('contract_approve'), true, busy)}</div>{status}</>;
+    case 'knowledge':
+      return <>{signed}<div className="d-buttons">{act('knowledge_reject', t('knowledge_reject'), false, busy)}{act('knowledge_approve', t('knowledge_approve'), true, busy)}</div>{status}</>;
   }
 }
 
@@ -474,7 +497,7 @@ export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMes
           : item.kind === 'permission' ? <PermissionBody item={item} view={view} t={t} />
           : item.kind === 'plan' ? <PlanBody item={item} view={view} t={t} />
           : item.kind === 'session_plan' ? <SessionPlanBody item={item} view={view} t={t} />
-          : item.kind === 'contract' ? <ContractBody item={item} t={t} />
+          : item.kind === 'contract' ? <ContractBody item={item} view={view} t={t} />
           : item.kind === 'knowledge' ? <KnowledgeBody item={item} t={t} />
           : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers} />}
       </div>
@@ -626,7 +649,7 @@ export default function Inbox() {
       const after = await run();
       change((next) => { if (after) next.set(item.id, after); else next.delete(item.id); });
       setNote('');
-      if (gesture === 'plan_change') setMessage('');
+      if (gesture === 'plan_change' || gesture === 'contract_send_back') setMessage('');
       context.inboxChanged();
       void load();                                   // the list shows the item handled at once
     } catch (error) {
@@ -642,7 +665,7 @@ export default function Inbox() {
       });
       setNote(t(key));
       // A Change whose plan no longer waits has nowhere to go: its text is dropped.
-      if (settled && gesture === 'plan_change') setMessage('');
+      if (settled && (gesture === 'plan_change' || gesture === 'contract_send_back')) setMessage('');
       if (settled) context.inboxChanged();
       if (settled || key === 'approve_conflict' || gesture === 'approve_plan') {
         await load();
@@ -703,6 +726,27 @@ export default function Inbox() {
         void act(item, 'plan_change', () => planChange(api, item, checked.message, context.now()));
         return;
       }
+      case 'contract_approve':
+        if (item.kind === 'contract') void act(item, 'contract_approve', () => approveContract(api, item, context.now()));
+        return;
+      case 'contract_send_back':
+        change((next) => next.set(item.id, { kind: 'change' }));
+        return;
+      case 'contract_keep':
+        change((next) => next.delete(item.id));
+        setMessage('');
+        setNote('');
+        return;
+      case 'contract_send_back_send': {
+        if (item.kind !== 'contract') return;
+        const checked = sendBackMessage(given.message);
+        if ('error' in checked) { setNote(t(checked.error, { n: SEND_BACK_MAX })); return; }
+        void act(item, 'contract_send_back', () => sendBackContract(api, item, checked.message, context.now()));
+        return;
+      }
+      case 'knowledge_approve': case 'knowledge_reject':
+        if (item.kind === 'knowledge') void act(item, name as 'knowledge_approve' | 'knowledge_reject', () => (name === 'knowledge_approve' ? approveKnowledge : rejectKnowledge)(api, item, context.now()));
+        return;
       case 'allow_once': case 'allow_always': case 'reject_once':
         if (item.kind === 'permission') void act(item, 'answer', () => answerRequest(api, item, decisionFor(name, given.reason, t)));
         return;

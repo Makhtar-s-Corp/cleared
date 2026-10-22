@@ -8,10 +8,12 @@
 //     read only (lane 32 makes it editable);
 //   Browser: the session's trial environment from the preview listener's
 //     own origin (decision 20), else milestone 1's "Screen so far".
+// The Plan tab also lists the ticket's steps across services (decision 26,
+// lane 27), this session's marked, once the ticket has two or more.
 //
 // The browser may only `import type` from v2/src, so the container's name
 // is copied here and a test keeps it equal to session-runtime.ts's.
-import type { SessionFile, SessionPlan, TakenOver } from '../../../../src/api/types.ts';
+import type { SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Role } from '../../../../src/session/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { clock, who } from './model.ts';
@@ -158,7 +160,46 @@ export function browserView(options: { readonly id: string; readonly previewKey:
 
 // ---------------------------------------------------------------- service
 
-// "on filter-api": the workspace service a session works on.
-export function serviceLine(service: string | undefined, t: Translate): string | undefined {
-  return service ? t('service_line', { name: service }) : undefined;
+// "on filter-api", and "on filter-api · step 2 of 4" for a session of a
+// ticket in steps: the workspace service a session works on, and its step.
+export function serviceLine(service: string | undefined, t: Translate, step?: Pick<StepsView, 'current' | 'total'> | null): string | undefined {
+  if (!service) return undefined;
+  return step && step.current !== null ? t('service_line_step', { name: service, n: step.current, total: step.total }) : t('service_line', { name: service });
+}
+
+// ------------------------------------------------------------------ steps
+
+export type StepRow = {
+  readonly position: number;
+  readonly kind: TicketStep['kind'];
+  readonly service: string;
+  readonly after: readonly number[];
+  readonly state: TicketStep['state'];
+  readonly costUsd: number | null;
+  readonly current: boolean;                                // this session's step
+};
+export type StepsView = { readonly rows: readonly StepRow[]; readonly current: number | null; readonly total: number };
+
+// The ticket's steps in order, this session's marked; none for a ticket of
+// one step (a one-service ticket), whose screen stays as it was.
+export function stepsView(steps: readonly TicketStep[] | null | undefined, session: string): StepsView | null {
+  if (!steps || steps.length < 2) return null;
+  const rows = [...steps].sort((a, b) => a.position - b.position).map((step): StepRow => ({
+    position: step.position, kind: step.kind, service: step.service, after: step.after, state: step.state, costUsd: step.costUsd, current: step.session === session,
+  }));
+  return { rows, current: rows.find((row) => row.current)?.position ?? null, total: rows.length };
+}
+
+const listOf = (after: readonly number[], t: Translate) => (after.length <= 1 ? after.join('') : `${after.slice(0, -1).join(', ')} ${t('ticket_step_and')} ${after.at(-1)}`);
+
+// "Integration · guestbook · after 2 and 3".
+export function stepLine(row: StepRow, t: Translate): string {
+  return [t(`ticket_step_${row.kind}`), row.service, ...(row.after.length ? [t('ticket_step_after', { list: listOf(row.after, t) })] : [])].join(' · ');
+}
+
+// What a step's sessions spent, once one ran.
+export function stepCost(row: StepRow, language: 'en' | 'fr', t: Translate): string | undefined {
+  if (row.costUsd === null) return undefined;
+  const amount = new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }).format(row.costUsd);
+  return t('ticket_step_cost', { amount });
 }

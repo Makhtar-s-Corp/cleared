@@ -73,7 +73,8 @@ test('a session plan that waits is a need with its confidence; a kind the tower 
     ...base.inbox,
     { kind: 'session_plan', id: 'session-plan-1', ticket: 'LOCAL-161', project: 'guestbook', since: minutesBefore(5), state: 'waiting', sessionId: 's', service: 'guestbook',
       plan: { steps: ['Group the entries by week'], files: ['src/page.ts'], confidence: 'medium', reason: 'Two ways to group by week.', proposedAt: minutesBefore(5), go: null } },
-    { kind: 'knowledge', id: 'knowledge-1', ticket: 'LOCAL-161', project: 'guestbook', since: minutesBefore(4), state: 'waiting', text: 'Dates are UTC.', level: 'workspace', service: null, sourceSession: 's', outcome: null } as unknown as NextInboxItem,
+    // A kind no lane draws yet (lane 27 draws the contract and knowledge items).
+    { kind: 'later_kind', id: 'later-1', ticket: 'LOCAL-161', project: 'guestbook', since: minutesBefore(4), state: 'waiting' } as unknown as NextInboxItem,
   ];
   const data: TowerData = { ...base, inbox: items as TowerData['inbox'] };
   const model = towerModel(data, FIXTURE_NOW, OWNER_ID);
@@ -82,7 +83,7 @@ test('a session plan that waits is a need with its confidence; a kind the tower 
   assert.equal(plan.title, 'Upcoming: group entries by week');
   assert.equal(plan.href, '/inbox#session-plan-1');
   assert.equal(needSentence(plan, t), 'Two ways to group by week. Medium confidence: the author waits for your Go.');
-  assert.ok(!model.needs.some((card) => (card.kind as string) === 'knowledge'));
+  assert.ok(!model.needs.some((card) => (card.kind as string) === 'later_kind'));
   assert.equal(model.needs.length, 4);
 });
 

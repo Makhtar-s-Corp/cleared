@@ -93,7 +93,7 @@ test('a handled item says what the owner did, by whom and when, a Send back with
   assert.equal(outcomeLine(knowledge({ decision: 'approve', by: ME, at }), view, en), 'Approved by you at 09:12: it is in the memory, and queued for the skill.');
   assert.equal(outcomeLine(knowledge({ decision: 'reject', by: ME, at }), view, en), 'Rejected by you at 09:12: nothing was written.');
   assert.equal(outcomeLine(contract({ decision: 'approve', by: ME, at }), view, fr), 'Validé par vous à 09:12.');
-  assert.equal(outcomeLine(contract(null), view, en), 'Handled.', 'a handled item the service gave no outcome');
+  assert.equal(outcomeLine(contract(null), view, en), en('handled_note'), 'a handled item the service gave no outcome');
   // What this page did, before the list catches up.
   assert.equal(decidedLine({ kind: 'decided', decision: 'approve', at }, contractItem(FIXTURE_NOW), en), 'Validated at 09:12. The next steps start.');
   assert.equal(decidedLine({ kind: 'decided', decision: 'send_back', at }, contractItem(FIXTURE_NOW), en), 'Sent back at 09:12. The contract step starts again with your message.');

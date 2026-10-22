@@ -61,7 +61,7 @@ test('each turn says its question, its answer or that it waits, and its cost', (
   assert.deepEqual(answered.map((turn) => turn.kind), ['answered', 'answered']);
   assert.equal(usageLine(answered[0]!.turn, 'en', t), `$0.0023 · ${group(38_064, 'en')} tokens in, ${group(1_017, 'en')} out`);
   assert.equal(usageLine(answered[1]!.turn, 'en', t), `$0.0004 · ${group(20_350, 'en')} tokens in, 48 out`);
-  assert.equal(usageLine(answered[0]!.turn, 'fr', fr), `0,0023 $ · ${group(38_064, 'fr')} jetons en entrée, ${group(1_017, 'fr')} en sortie`);
+  assert.equal(usageLine(answered[0]!.turn, 'fr', fr), `0,0023\u00a0$ · ${group(38_064, 'fr')} jetons en entrée, ${group(1_017, 'fr')} en sortie`);
   // A turn that runs waits for its answer; one whose reader stopped before answering lost it.
   assert.deepEqual(turnsOf(askFixture(FIXTURE_NOW, 'running')).map((turn) => turn.kind), ['answered', 'waiting']);
   const stopped = askFixture(FIXTURE_NOW, 'running');
@@ -74,7 +74,7 @@ test('each turn says its question, its answer or that it waits, and its cost', (
 test('the ask\'s total adds the week share only once it is measured', () => {
   assert.equal(totalLine(askFixture(), 'en', t), `$0.0027 · ${group(58_414, 'en')} tokens in, ${group(1_065, 'en')} out · week used at 29 %`);
   assert.equal(totalLine({ ...askFixture(), weekPercent: null }, 'en', t), `$0.0027 · ${group(58_414, 'en')} tokens in, ${group(1_065, 'en')} out`);
-  assert.equal(totalLine(askFixture(), 'fr', fr), `0,0027 $ · ${group(58_414, 'fr')} jetons en entrée, ${group(1_065, 'fr')} en sortie · semaine utilisée à 29 %`);
+  assert.equal(totalLine(askFixture(), 'fr', fr), `0,0027\u00a0$ · ${group(58_414, 'fr')} jetons en entrée, ${group(1_065, 'fr')} en sortie · semaine utilisée à 29 %`);
   assert.equal(totalLine(platformAsk(), 'en', t), undefined, 'nothing spent yet');
 });
 

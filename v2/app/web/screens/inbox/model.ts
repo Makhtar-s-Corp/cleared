@@ -29,8 +29,10 @@
 // services in landing order, each one's state and pull request, the
 // compatibility line or the block, decision 21), the intent groups and the
 // flags (decision 23), the author's session plan with Go and Change
-// (decision 22, lane 17's routes), and the contract and knowledge items,
-// shown for reading until lane 27 gives them their gestures. The screen
+// (decision 22, lane 17's routes), and the contract and knowledge items
+// (decisions 26 and 27): the contract's diff with Approve and Send back
+// (lane 23's routes), the knowledge's text with Approve and Reject (lane
+// 24's, the owner's only), each answered at once, with no grace. The screen
 // reads every kind GET /api/inbox answers (NextInboxItem): api/types.ts
 // belongs to no lane in wave 8, so InboxItem keeps its four kinds there.
 import type {
@@ -63,6 +65,9 @@ export const OTHER_CHANGES = 'Other changes';
 // The longest Change the plan's route accepts (MAX_CHANGE of
 // src/flow/plan-gate.ts; a test keeps the two equal).
 export const CHANGE_MAX = 2000;
+// The longest Send back of a contract the route accepts (MAX_SEND_BACK of
+// src/flow/steps.ts; a test keeps the two equal).
+export const SEND_BACK_MAX = 2000;
 
 // Every kind the inbox lists.
 export type Item = NextInboxItem;
@@ -76,10 +81,13 @@ export type Local =
   | { readonly kind: 'sent_back'; readonly at: string }
   | { readonly kind: 'answered'; readonly decision: Decision['kind'] }
   | { readonly kind: 'plan_approved'; readonly at: string }   // a plan has no grace: its tickets start
-  | { readonly kind: 'change' }                                // Change asked once: the field is open
+  | { readonly kind: 'change' }                                // Change, or a contract's Send back, asked once: the field is open
   | { readonly kind: 'plan_go'; readonly at: string }          // Go given to a session plan
   | { readonly kind: 'plan_changed'; readonly at: string }     // a Change sent to its author
+  | { readonly kind: 'decided'; readonly decision: Decided; readonly at: string }   // a contract or a knowledge item answered from this page
   | { readonly kind: 'settled' };                              // settled without the person
+
+export type Decided = 'approve' | 'send_back' | 'reject';
 
 export type InboxView = {
   readonly items: readonly Item[];
@@ -299,7 +307,59 @@ export function goLine(go: NonNullable<SessionPlan['go']>, view: InboxView, t: T
   return go.by === view.me.id ? t('go_by_you', { time }) : t('go_by_user', { who: go.by, time });
 }
 
-export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change';
+// --------------------------------------------- the contract and knowledge
+
+const contractPath = (item: ContractItem, action: 'approve' | 'sendback') => `/contracts/${encodeURIComponent(item.id)}/${action}`;
+const knowledgePath = (item: KnowledgeItem, action: 'approve' | 'reject') => `/knowledge/${encodeURIComponent(item.id)}/${action}`;
+
+// What a Send back says, as the route accepts it: some text, at most SEND_BACK_MAX characters.
+export function sendBackMessage(text: string): { readonly message: string } | { readonly error: 'contract_send_back_empty' | 'contract_send_back_long' } {
+  const message = text.trim();
+  if (message === '') return { error: 'contract_send_back_empty' };
+  return message.length > SEND_BACK_MAX ? { error: 'contract_send_back_long' } : { message };
+}
+
+// Approve: the contract is validated, and the ticket's next steps start on it.
+export async function approveContract(api: Api, item: ContractItem, now: Date): Promise<Local> {
+  await api(contractPath(item, 'approve'), { method: 'POST', body: null });
+  return { kind: 'decided', decision: 'approve', at: now.toISOString() };
+}
+
+// Send back: the contract step starts again with the message.
+export async function sendBackContract(api: Api, item: ContractItem, text: string, now: Date): Promise<Local> {
+  const checked = sendBackMessage(text);
+  if ('error' in checked) throw new Error(checked.error);
+  await api(contractPath(item, 'sendback'), { method: 'POST', body: { message: checked.message } });
+  return { kind: 'decided', decision: 'send_back', at: now.toISOString() };
+}
+
+// Approve writes the entry into the memory at its level, and queues it for the skill; Reject writes nothing.
+export async function approveKnowledge(api: Api, item: KnowledgeItem, now: Date): Promise<Local> {
+  await api(knowledgePath(item, 'approve'), { method: 'POST', body: null });
+  return { kind: 'decided', decision: 'approve', at: now.toISOString() };
+}
+
+export async function rejectKnowledge(api: Api, item: KnowledgeItem, now: Date): Promise<Local> {
+  await api(knowledgePath(item, 'reject'), { method: 'POST', body: null });
+  return { kind: 'decided', decision: 'reject', at: now.toISOString() };
+}
+
+// What a handled contract or knowledge item says the owner did (its `outcome`).
+export function outcomeLine(item: ContractItem | KnowledgeItem, view: InboxView, t: Translate): string {
+  const outcome = item.outcome;
+  if (!outcome) return t('handled_note');
+  const values = { who: outcome.by === view.me.id ? t('by_you') : outcome.by, time: clock(outcome.at) };
+  if (item.kind === 'contract') return outcome.decision === 'send_back' ? t('contract_sent_back_by', { ...values, message: outcome.message }) : t('contract_validated_by', values);
+  return t(outcome.decision === 'approve' ? 'knowledge_approved_by' : 'knowledge_rejected_by', values);
+}
+
+// What this page did, until the service's list says it.
+export function decidedLine(local: Extract<Local, { kind: 'decided' }>, item: ContractItem | KnowledgeItem, t: Translate): string {
+  return t(`decided_${item.kind}_${local.decision}`, { time: clock(local.at) });
+}
+
+export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change'
+  | 'contract_approve' | 'contract_send_back' | 'knowledge_approve' | 'knowledge_reject';
 
 // How a refusal of the service reads. An answer to a request that no longer
 // waits (404, or 409 for a session that stopped) was settled without the
@@ -330,6 +390,15 @@ export function failure(error: unknown, gesture: Gesture): { readonly key: strin
       if (status === 403) return { key: 'plan_user', settled: false };
       if (status === 503) return { key: 'plan_flow_off', settled: false };
       if (status === 400 && gesture === 'plan_change') return { key: 'plan_change_invalid', settled: false };
+      return { key: `${gesture}_failed`, settled: false };
+    // 404 or 409: answered already, elsewhere or by a double click; 403: a
+    // user the service does not know, or for knowledge anyone but the
+    // tracker's owner; 503: the flow or the knowledge module is off.
+    case 'contract_approve': case 'contract_send_back': case 'knowledge_approve': case 'knowledge_reject':
+      if (status === 404 || status === 409) return { key: 'decided_settled', settled: true };
+      if (status === 403) return { key: gesture.startsWith('knowledge') ? 'knowledge_owner' : 'decided_user', settled: false };
+      if (status === 503) return { key: 'decided_off', settled: false };
+      if (status === 400 && gesture === 'contract_send_back') return { key: 'contract_send_back_invalid', settled: false };
       return { key: `${gesture}_failed`, settled: false };
   }
 }

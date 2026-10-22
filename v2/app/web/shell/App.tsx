@@ -19,6 +19,7 @@ const SCREENS: Readonly<Record<ShellScreen, ComponentType>> = {
   session: lazy(() => import('@/screens/session/Session.tsx')),
   lead: lazy(() => import('@/screens/lead/Lead.tsx')),
   inbox: lazy(() => import('@/screens/inbox/Inbox.tsx')),
+  ask: lazy(() => import('@/screens/ask/Ask.tsx')),
 };
 
 export type ShellStart = {

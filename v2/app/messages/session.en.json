@@ -177,5 +177,19 @@
   "editor_lines": "The lines of {path}",
   "browser_frame_title": "The session's trial environment",
   "browser_note": "The session's own service, built from the ticket's branch, on an address of its own. A page there cannot act in Cleared.",
-  "browser_here_only": "The trial environment opens in a browser on this machine only: open Cleared at its local address on the server to see it."
+  "browser_here_only": "The trial environment opens in a browser on this machine only: open Cleared at its local address on the server to see it.",
+  "service_line_step": "on {name} · step {n} of {total}",
+  "ticket_step_contract": "Contract",
+  "ticket_step_service": "Service",
+  "ticket_step_integration": "Integration",
+  "ticket_step_after": "waits for {list}",
+  "ticket_step_and": "and",
+  "ticket_step_waiting": "Waiting",
+  "ticket_step_running": "Running",
+  "ticket_step_validating": "Waits for your validation",
+  "ticket_step_done": "Done",
+  "ticket_step_failed": "Failed",
+  "ticket_step_this": "This session",
+  "ticket_steps_title": "Steps of the ticket",
+  "ticket_step_cost": "${amount}"
 }

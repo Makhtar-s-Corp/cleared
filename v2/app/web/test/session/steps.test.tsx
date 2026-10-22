@@ -28,11 +28,11 @@ const steps = (session: string) => ticketSteps([{ ...(sessionFixture(FIXTURE_NOW
 
 test('the Plan tab lists the ticket\'s steps, this session\'s marked, each with its state and cost', () => {
   const markup = html(<PlanTab view={viewOf({ steps: steps(AUTHOR_ID) })} plan={null} t={en} />);
-  assert.match(markup, /<section class="card steps-card" aria-labelledby="steps-title">/);
+  assert.match(markup, /<section class="card steps-card" aria-labelledby="ticket-steps-title">/);
   const rows = [...markup.matchAll(/<li class="([^"]+)" data-step="(\d)" data-state="([a-z]+)"/g)].map((m) => [m[1], m[2], m[3]]);
   assert.deepEqual(rows, [['ticket-step', '1', 'done'], ['ticket-step current', '2', 'running'], ['ticket-step', '3', 'waiting'], ['ticket-step', '4', 'waiting']]);
   const text = visibleText(markup).join('\n');
-  for (const words of ['Steps of the ticket', 'Contract · filter-api', 'Integration · guestbook · after 2 and 3', 'This session', 'Done', 'Running', '$0.21']) assert.ok(text.includes(words), words);
+  for (const words of ['Steps of the ticket', 'Contract · filter-api', 'Integration · guestbook · waits for 2 and 3', 'This session', 'Done', 'Running', '$0.21']) assert.ok(text.includes(words), words);
   assert.doesNotMatch(markup, /\sstyle=/);
 });
 
@@ -50,6 +50,6 @@ test('the ticket card says which step this session is', () => {
 
 test('every word of the steps card is from the catalog, in both languages', () => {
   const text = visibleText(html(<PlanTab view={viewOf({ steps: steps(AUTHOR_ID) })} plan={null} t={sentinel} />)).join('\n');
-  for (const word of ['Steps of the ticket', 'Contract', 'Integration', 'This session', 'Running', 'after']) assert.ok(!text.includes(word), word);
+  for (const word of ['Steps of the ticket', 'Contract', 'Integration', 'This session', 'Running', 'waits for']) assert.ok(!text.includes(word), word);
   assert.match(html(<PlanTab view={viewOf({ steps: steps(AUTHOR_ID) })} plan={null} t={fr} />), /Étapes du ticket/);
 });

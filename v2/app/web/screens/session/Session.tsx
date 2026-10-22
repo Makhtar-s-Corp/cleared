@@ -11,7 +11,7 @@ import {
   ArrowRight, ArrowUpRight, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import type { SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver } from '../../../../src/api/types.ts';
+import type { SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { SessionState } from '../../../../src/session/events.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
@@ -29,7 +29,7 @@ import {
   type LocalAnswer, type QuestionRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverNotice, type EditorShown } from './Tabs.tsx';
-import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, tabOf, takeoverOf, type Tab } from './tabs.ts';
+import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import './session.css';
 
 // The timeline's marks, Phosphor's regular weight.
@@ -162,7 +162,7 @@ export function Timeline({ view, t, onAnswer, onQuestion }: { readonly view: Ses
 export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void }) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = view.thread.plan;
-  const service = serviceLine(view.summary.service, t);
+  const service = serviceLine(view.summary.service, t, stepsView(view.steps, view.summary.id));
   return (
     <>
       <section className="card" aria-labelledby="ticket-title">
@@ -359,13 +359,23 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   const [shown, setShown] = useState<EditorShown | undefined>(undefined);
   const [fileFailed, setFileFailed] = useState(false);
   const [mode, setMode] = useState<'diff' | 'file'>('diff');
+  const [steps, setSteps] = useState<readonly TicketStep[] | null>(null);
   const timeline = useRef<HTMLDivElement | null>(null);
   const atEnd = useRef(true);
   const id = loaded.summary.id;
 
+  // The ticket's steps across services (lane 23's route): a service
+  // without them, or a ticket of one step, shows none.
+  const readSteps = useCallback(async () => {
+    try { setSteps(await context.api<TicketStep[]>(`/tickets/${encodeURIComponent(loaded.summary.ticket)}/steps`)); }
+    catch { /* the next tick tries again */ }
+  }, [context, loaded.summary.ticket]);
+  useEffect(() => { void readSteps(); }, [readSteps]);
+
   // The reviewer's session appears once it starts; who took this one over
-  // follows the service; the clock moves on.
+  // follows the service; the steps move on; the clock moves on.
   useEvery(REFRESH_MS, async () => {
+    void readSteps();
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSiblings(all.filter((s) => s.ticket === loaded.summary.ticket));
@@ -376,9 +386,9 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   useEvery(TICK_MS, () => setNow(context.now()));
 
   const view: SessionView = useMemo(() => ({
-    summary: loaded.summary, ticket: loaded.ticket, siblings, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver,
+    summary: loaded.summary, ticket: loaded.ticket, siblings, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver, steps,
     thread: thread ?? { lastSeq: 0, lastAt: undefined, state: loaded.state, rows: [], pending: [], interrupts: [], steps: [], plan: null },
-  }), [loaded, siblings, context.me, now, busy, answers, thread, takenOver]);
+  }), [loaded, siblings, context.me, now, busy, answers, thread, takenOver, steps]);
   const ended = ENDED.has(phaseOf(view));
   const takeover = takeoverOf({ takenOver, me: view.me, role: loaded.summary.role, ended });
 

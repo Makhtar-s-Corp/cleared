@@ -434,6 +434,24 @@ export function inboxSource(fixture: InboxFixture, options: {
       } else items[index] = { ...item, state: 'handled', plan: { ...item.plan, go: { by: user, at: now().toISOString() } } };
       return sendJson(response, 200, { accepted: true });
     }
+    // Lane 23's and lane 24's routes (lane 27): a contract item validated or
+    // sent back with a message, a knowledge item approved or rejected, each
+    // answered once, named by its inbox id.
+    if ((collection === 'contracts' || collection === 'knowledge') && id && parts.length === 3) {
+      const index = items.findIndex((i) => i.id === decodeURIComponent(id) && i.kind === (collection === 'contracts' ? 'contract' : 'knowledge'));
+      const item = items[index];
+      if (!item || (item.kind !== 'contract' && item.kind !== 'knowledge')) return sendJson(response, 404, { error: `no item ${id}` });
+      if (item.state !== 'waiting') return sendJson(response, 409, { error: `item ${id} is answered` });
+      const at = now().toISOString();
+      if (item.kind === 'contract' && sub === 'sendback') {
+        const message = record.message;
+        if (typeof message !== 'string' || message.trim() === '' || message.length > 2000) return sendJson(response, 400, { error: 'message must be a non-empty text of at most 2000 characters' });
+        items[index] = { ...item, state: 'handled', outcome: { decision: 'send_back', message, by: user, at } };
+      } else if (item.kind === 'contract' && sub === 'approve') items[index] = { ...item, state: 'handled', outcome: { decision: 'approve', by: user, at } };
+      else if (item.kind === 'knowledge' && (sub === 'approve' || sub === 'reject')) items[index] = { ...item, state: 'handled', outcome: { decision: sub, by: user, at } };
+      else return sendJson(response, 404, { error: 'not in the fixtures' });
+      return sendJson(response, 200, { accepted: true });
+    }
     if (collection === 'plans' && id && sub === 'approve' && parts.length === 3) {
       const index = plans.findIndex((p) => p.id === id);
       const plan = plans[index];

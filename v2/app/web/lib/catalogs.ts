@@ -2,6 +2,8 @@
 // the shell and the screens draw at once. The language is the app's setting
 // (CLEARED_V2_APP_LANGUAGE), written by the server on <html lang>. As on the
 // server (src/catalog.ts), a key missing from French falls back to English.
+import askEn from '../../messages/ask.en.json';
+import askFr from '../../messages/ask.fr.json';
 import inboxEn from '../../messages/inbox.en.json';
 import inboxFr from '../../messages/inbox.fr.json';
 import leadEn from '../../messages/lead.en.json';
@@ -15,7 +17,7 @@ import towerFr from '../../messages/tower.fr.json';
 import type { Catalog } from './i18n.ts';
 
 export type Language = 'en' | 'fr';
-export type CatalogScreen = 'shell' | 'tower' | 'session' | 'inbox' | 'lead';
+export type CatalogScreen = 'shell' | 'tower' | 'session' | 'inbox' | 'lead' | 'ask';
 
 const FILES: Readonly<Record<CatalogScreen, Readonly<Record<Language, Catalog>>>> = {
   shell: { en: shellEn, fr: shellFr },
@@ -23,6 +25,7 @@ const FILES: Readonly<Record<CatalogScreen, Readonly<Record<Language, Catalog>>>
   session: { en: sessionEn, fr: sessionFr },
   inbox: { en: inboxEn, fr: inboxFr },
   lead: { en: leadEn, fr: leadFr },
+  ask: { en: askEn, fr: askFr },
 };
 
 export function catalogOf(screen: CatalogScreen, language: Language): Catalog {

@@ -33,11 +33,11 @@ test('the steps in order, this session\'s marked, with what each waits for', asy
   ]);
   assert.deepEqual(view.rows.map((row) => stepLine(row, en)), [
     'Contract · filter-api',
-    'Service · filter-api · after 1',
-    'Service · guestbook · after 1',
-    'Integration · guestbook · after 2 and 3',
+    'Service · filter-api · waits for 1',
+    'Service · guestbook · waits for 1',
+    'Integration · guestbook · waits for 2 and 3',
   ]);
-  assert.equal(stepLine(view.rows[3]!, fr), 'Intégration · guestbook · après 2 et 3');
+  assert.equal(stepLine(view.rows[3]!, fr), 'Intégration · guestbook · attend 2 et 3');
   for (const state of ['waiting', 'running', 'validating', 'done', 'failed']) for (const t of [en, fr]) assert.ok(t(`ticket_step_${state}`), state);
 });
 
@@ -46,7 +46,7 @@ test('a step\'s cost once its session ran, in the reader\'s numbers', async () =
   assert.ok(view);
   assert.equal(view.current, null, 'a session of none of the steps marks none');
   assert.deepEqual(view.rows.map((row) => stepCost(row, 'en', en)), ['$0.21', '$0.34', undefined, undefined]);
-  assert.equal(stepCost(view.rows[0]!, 'fr', fr), '0,21 $');
+  assert.equal(stepCost(view.rows[0]!, 'fr', fr), '0,21\u00a0$');
 });
 
 test('a ticket of one step, or whose steps were not read, shows no steps and says nothing new', async () => {

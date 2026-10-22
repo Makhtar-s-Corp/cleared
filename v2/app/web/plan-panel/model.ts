@@ -5,7 +5,7 @@
 // keys in PLAN_PANEL_KEYS, and each screen's catalog holds them
 // (messages/lead.* here, messages/inbox.* for lane 10). Every key is written
 // out whole, so a test can read the list from this file.
-import type { Plan, PlanItem, PlanState, ServiceSensitivity } from '../../../src/api/types.ts';
+import type { Plan, PlanItem, PlanState, PlanStep, ServiceSensitivity } from '../../../src/api/types.ts';
 import type { Translate } from '../lib/i18n.ts';
 
 export const PLAN_PANEL_KEYS = [
@@ -16,6 +16,7 @@ export const PLAN_PANEL_KEYS = [
   'plan_minutes', 'plan_hours', 'plan_hours_minutes', 'plan_estimate', 'plan_week_share', 'plan_cost',
   'plan_work', 'plan_week_total', 'plan_cost_total', 'plan_parallel', 'plan_parallel_one', 'plan_samples', 'plan_defaults',
   'plan_change', 'plan_approve', 'plan_pause', 'plan_resume',
+  'plan_steps_label', 'plan_step_contract', 'plan_step_service', 'plan_step_integration', 'plan_step_after',
 ] as const;
 
 // The services an item names, with their sensitivity (decisions 18 and 24,
@@ -141,4 +142,21 @@ export function facts(plan: Plan, t: Translate, language: 'en' | 'fr'): string[]
     plan.maxParallel === 1 ? t('plan_parallel_one') : t('plan_parallel', { n: plan.maxParallel }),
     totals.samples >= 3 ? t('plan_samples', { n: totals.samples }) : t('plan_defaults'),
   ];
+}
+
+// An item's steps across services (decision 26, lane 23's PlanItem.steps),
+// in their order: the contract, a step per service, the integration. An
+// item of one step, or none, shows none: it reads as before (lane 27).
+export function planSteps(item: PlanItem): PlanStep[] {
+  const steps = item.steps ?? [];
+  return steps.length < 2 ? [] : [...steps].sort((a, b) => a.position - b.position);
+}
+
+const STEP_KEYS: Readonly<Record<PlanStep['kind'], string>> = { contract: 'plan_step_contract', service: 'plan_step_service', integration: 'plan_step_integration' };
+
+// "Integration · guestbook · after 2 and 3 · 10 min · $0.20".
+export function stepText(step: PlanStep, t: Translate, language: 'en' | 'fr'): string {
+  const kind = Object.hasOwn(STEP_KEYS, step.kind) ? t(STEP_KEYS[step.kind]) : step.kind;
+  const after = step.after.length > 0 ? [t('plan_step_after', { list: positions(step.after, t) })] : [];
+  return [kind, step.service, ...after, formatDuration(step.estimate.minutes, t), share(step.estimate, t, language)].join(' · ');
 }

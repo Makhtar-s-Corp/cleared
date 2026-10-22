@@ -7,7 +7,7 @@
 // The browser may only `import type` from v2/src, so the names of the AG-UI
 // subset are copied here and a test keeps the copy equal to EVENT_TYPES.
 import type { Interrupt } from '@ag-ui/core';
-import type { SessionPlan, SessionSummary, TakenOver } from '../../../../src/api/types.ts';
+import type { SessionPlan, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
@@ -390,6 +390,7 @@ export type SessionView = {
   readonly busy?: ReadonlySet<string>;                    // request ids whose answer is on its way
   readonly answers?: ReadonlyMap<string, LocalAnswer>;     // what this tab knows of its questions' answers
   readonly takenOver?: TakenOver | null;                  // what this tab knows of the take over, newer than the summary's
+  readonly steps?: readonly TicketStep[] | null;          // the ticket's steps across services (lane 27); absent until read
 };
 
 // Who took the session over (decision 30, lane 20): what this tab knows,

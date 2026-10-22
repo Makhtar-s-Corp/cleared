@@ -326,6 +326,23 @@ export function towerSource(now: () => Date, rest?: DataSource): TowerSource {
     if (method === 'GET' && path === '/api/sessions') return sendJson(response, 200, fixture.sessions), true;
     if (method === 'GET' && path === '/api/inbox') return sendJson(response, 200, fixture.inbox), true;
     if (method === 'GET' && path === '/api/tickets') return sendJson(response, 200, fixture.tickets), true;
+    // Lane 27: the recipes and their run (a missing parameter refused as
+    // lane 26 refuses it), the schedules, and LOCAL-163's steps.
+    if (method === 'GET' && path === '/api/recipes') return sendJson(response, 200, RECIPES), true;
+    if (method === 'GET' && path === '/api/schedules') return sendJson(response, 200, schedulesFixture(now())), true;
+    const steps = /^\/api\/tickets\/([^/]+)\/steps$/.exec(path);
+    if (method === 'GET' && steps) return sendJson(response, 200, decodeURIComponent(steps[1] as string) === 'LOCAL-163' ? ticketSteps(fixture.sessions) : []), true;
+    const run = /^\/api\/recipes\/([^/]+)\/run$/.exec(path);
+    if (method === 'POST' && run) {
+      const body = await read(request) as { parameters?: Record<string, unknown> } | undefined;
+      calls.push({ method, path, body });
+      const recipe = RECIPES.find((r) => r.name === decodeURIComponent(run[1] as string));
+      if (!recipe) return sendJson(response, 404, { error: 'no such recipe' }), true;
+      const given = body?.parameters ?? {};
+      const missing = recipe.parameters.find((p) => p.required && (typeof given[p.name] !== 'string' || !(given[p.name] as string).trim()));
+      if (missing) return sendJson(response, 400, { error: `the parameter ${missing.name} is missing` }), true;
+      return sendJson(response, 200, recipe.kind === 'ticket' ? { accepted: true, plan: 'plan-recipe-1' } : { accepted: true, message: 1 }), true;
+    }
     if (method === 'POST' && path === '/api/tickets') {
       const body = await read(request) as CreateTicketBody | undefined;
       calls.push({ method, path, body });

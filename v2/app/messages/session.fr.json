@@ -177,5 +177,19 @@
   "editor_lines": "Les lignes de {path}",
   "browser_frame_title": "L'environnement d'essai de la session",
   "browser_note": "Le service de la session, construit depuis la branche du ticket, à une adresse à lui. Une page y tourne sans pouvoir agir dans Cleared.",
-  "browser_here_only": "L'environnement d'essai s'ouvre dans un navigateur de cette machine seulement : ouvrez Cleared à son adresse locale sur le serveur pour le voir."
+  "browser_here_only": "L'environnement d'essai s'ouvre dans un navigateur de cette machine seulement : ouvrez Cleared à son adresse locale sur le serveur pour le voir.",
+  "service_line_step": "sur {name} · étape {n} sur {total}",
+  "ticket_step_contract": "Contrat",
+  "ticket_step_service": "Service",
+  "ticket_step_integration": "Intégration",
+  "ticket_step_after": "attend {list}",
+  "ticket_step_and": "et",
+  "ticket_step_waiting": "En attente",
+  "ticket_step_running": "En cours",
+  "ticket_step_validating": "Attend votre validation",
+  "ticket_step_done": "Terminée",
+  "ticket_step_failed": "Échouée",
+  "ticket_step_this": "Cette session",
+  "ticket_steps_title": "Étapes du ticket",
+  "ticket_step_cost": "{amount} $"
 }

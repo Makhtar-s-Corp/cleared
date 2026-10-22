@@ -11,7 +11,7 @@ import type { ShellScreen } from '@/shell/Header.tsx';
 import { Login } from '@/shell/Login.tsx';
 import './styles/app.css';
 
-const SCREENS: readonly ShellScreen[] = ['tower', 'inbox', 'session', 'lead'];
+const SCREENS: readonly ShellScreen[] = ['tower', 'inbox', 'session', 'lead', 'ask'];
 const data = document.body.dataset;
 const lang = document.documentElement.lang;
 const language = isLanguage(lang) ? lang : 'en';
