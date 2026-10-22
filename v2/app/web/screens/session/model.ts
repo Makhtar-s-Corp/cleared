@@ -1,0 +1,513 @@
+// The session screen (session.png): a ticket's author or reviewer session,
+// live. The model adds the stored events up into rows, a state and a list of
+// what waits for the human; the wording functions say them. Both are pure,
+// so the tests run them under Node. agent.ts follows the service's stream
+// into the model for CopilotKit, and Session.tsx draws what the agent holds.
+//
+// The browser may only `import type` from v2/src, so the names of the AG-UI
+// subset are copied here and a test keeps the copy equal to EVENT_TYPES.
+import type { SessionSummary } from '../../../../src/api/types.ts';
+import type { Decision } from '../../../../src/session/contract.ts';
+import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
+import type { Verdict } from '../../../../src/session/policy.ts';
+import type { Ticket } from '../../../../src/tickets/contract.ts';
+import type { Translate } from '../../lib/i18n.ts';
+
+export const EVENT_NAMES = [
+  'RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR',
+  'STEP_STARTED', 'STEP_FINISHED',
+  'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END',
+  'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END', 'TOOL_CALL_RESULT',
+  'REASONING_START', 'REASONING_END',
+  'STATE_SNAPSHOT', 'STATE_DELTA',
+  'CUSTOM',
+] as const;
+
+// The message the plan's first user turn carries: the ticket, shown on the ticket card.
+const PROMPT_AUTHOR = 'cleared';
+
+// ---------------------------------------------------------------- the model
+
+export type RequestState = {
+  readonly requestId: string;
+  readonly suggestion: Verdict;
+  state: 'waiting' | 'answered';
+  decision?: Decision['kind'];
+  by?: string;
+  rule?: string;                                  // the rule that decided, when the policy did
+};
+
+export type ToolRow = {
+  readonly kind: 'tool';
+  readonly id: string;
+  readonly at: string;
+  readonly name: string;
+  input: ToolInput | undefined;
+  output: ToolOutput | undefined;
+  request?: RequestState;
+};
+export type MessageRow = { readonly kind: 'message'; readonly id: string; readonly at: string; readonly role: 'assistant' | 'user'; readonly by: string | undefined; text: string };
+export type QuestionRow = { readonly kind: 'question'; readonly id: string; readonly requestId: string; readonly at: string; readonly questions: readonly Question[]; answeredBy?: string };
+export type ReadRow = { readonly kind: 'read'; readonly at: string; readonly paths: readonly string[] };
+export type Row =
+  | ToolRow
+  | ReadRow
+  | MessageRow
+  | QuestionRow
+  | { readonly kind: 'denied'; readonly at: string; readonly requestId: string; readonly rule: string }
+  | { readonly kind: 'interrupted'; readonly at: string }
+  | { readonly kind: 'error'; readonly at: string; readonly message: string }
+  | { readonly kind: 'verdict'; readonly at: string; readonly verdict: 'pass' | 'changes_requested'; readonly round: number };
+
+export type Step = { name: SessionState['steps'][number]['name']; startedAt: string; finishedAt: string | null };
+
+// A step as the Checks card shows it: every span of that step added up. The
+// author works again after a review, and the wait for the human comes back
+// at each request, so a step can happen several times in one session.
+export type StepTotal = { readonly name: Step['name']; readonly startedAt: string; readonly ms: number; readonly count: number; readonly open: boolean };
+
+export type SessionModel = {
+  lastSeq: number;
+  lastAt: string | undefined;                       // the time of the last event seen
+  state: SessionState | undefined;
+  readonly rows: Exclude<Row, ReadRow>[];
+  pending: string[];                                // request ids (permissions and questions) that wait for the human
+  readonly steps: Step[];                           // from STEP_STARTED and STEP_FINISHED, each span
+  readonly tools: Map<string, ToolRow>;
+  readonly texts: Map<string, MessageRow>;
+  readonly requests: Map<string, ToolRow>;
+  readonly questions: Map<string, QuestionRow>;
+};
+
+export function emptyModel(): SessionModel {
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map() };
+}
+
+const record = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
+// The JSON object a string carries with a `kind`, as the cleaner writes tool inputs and outputs.
+function kindObject<T>(text: string): T | undefined {
+  try {
+    const value = record(JSON.parse(text));
+    return value && typeof value.kind === 'string' ? value as T : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// RFC 6902 for the operations the adapter emits (replace on a top-level key)
+// and the ones a state could ask for: add, replace and remove. A path that
+// leads nowhere is ignored.
+function patch(document: Record<string, unknown>, operation: JsonPatchOperation): void {
+  if (operation.op !== 'add' && operation.op !== 'replace' && operation.op !== 'remove') return;
+  const segments = operation.path.split('/').slice(1).map((s) => s.replace(/~1/g, '/').replace(/~0/g, '~'));
+  const last = segments.pop();
+  if (last === undefined) return;
+  let target: unknown = document;
+  for (const segment of segments) {
+    if (typeof target !== 'object' || target === null) return;
+    target = (target as Record<string, unknown>)[segment];
+  }
+  if (typeof target !== 'object' || target === null) return;
+  if (Array.isArray(target)) {
+    const index = last === '-' ? target.length : Number(last);
+    if (!Number.isInteger(index) || index < 0 || index > target.length) return;
+    if (operation.op === 'add') target.splice(index, 0, (operation as { value: unknown }).value);
+    else if (index === target.length) return;
+    else if (operation.op === 'replace') target[index] = (operation as { value: unknown }).value;
+    else target.splice(index, 1);
+    return;
+  }
+  const object = target as Record<string, unknown>;
+  if (operation.op === 'remove') delete object[last];
+  else object[last] = (operation as { value: unknown }).value;
+}
+
+// Adds one stored event; false when its seq was already seen (a reconnect that replays).
+export function applyEvent(model: SessionModel, stored: SessionEvent): boolean {
+  if (stored.seq <= model.lastSeq) return false;
+  model.lastSeq = stored.seq;
+  model.lastAt = stored.at;
+  const { at } = stored;
+  const event: AgUiEvent = stored.event;
+  switch (event.type) {
+    case 'TEXT_MESSAGE_START': {
+      const row: MessageRow = { kind: 'message', id: event.messageId, at, role: event.role, by: event.name, text: '' };
+      model.texts.set(event.messageId, row);
+      model.rows.push(row);
+      break;
+    }
+    case 'TEXT_MESSAGE_CONTENT': {
+      const row = model.texts.get(event.messageId);
+      if (row) row.text += event.delta;
+      break;
+    }
+    case 'TOOL_CALL_START': {
+      const row: ToolRow = { kind: 'tool', id: event.toolCallId, at, name: event.toolCallName, input: undefined, output: undefined };
+      model.tools.set(event.toolCallId, row);
+      model.rows.push(row);
+      break;
+    }
+    case 'TOOL_CALL_ARGS': {
+      const row = model.tools.get(event.toolCallId);
+      const input = kindObject<ToolInput>(event.delta);
+      if (row && input) row.input = input;
+      break;
+    }
+    case 'TOOL_CALL_RESULT': {
+      const row = model.tools.get(event.toolCallId);
+      const output = kindObject<ToolOutput>(event.content);
+      if (row && output) row.output = output;
+      break;
+    }
+    case 'STATE_SNAPSHOT':
+      model.state = structuredClone(event.snapshot) as SessionState;
+      break;
+    case 'STATE_DELTA':
+      if (model.state) for (const operation of event.delta) patch(model.state as unknown as Record<string, unknown>, operation);
+      break;
+    case 'STEP_STARTED':
+      model.steps.push({ name: event.stepName, startedAt: at, finishedAt: null });
+      break;
+    case 'STEP_FINISHED': {
+      const step = model.steps.findLast((s) => s.name === event.stepName && s.finishedAt === null);
+      if (step) step.finishedAt = at;
+      else model.steps.push({ name: event.stepName, startedAt: at, finishedAt: at });
+      break;
+    }
+    case 'RUN_FINISHED':
+      if (event.outcome.type === 'cancelled') model.rows.push({ kind: 'interrupted', at });
+      break;
+    case 'RUN_ERROR':
+      model.rows.push({ kind: 'error', at, message: event.message });
+      break;
+    case 'CUSTOM':
+      custom(model, at, event);
+      break;
+    default:
+      break;                                        // TEXT_MESSAGE_END, TOOL_CALL_END, REASONING_*: nothing to show
+  }
+  return true;
+}
+
+function custom(model: SessionModel, at: string, event: Extract<AgUiEvent, { type: 'CUSTOM' }>): void {
+  switch (event.name) {
+    case 'cleared.permission_request': {
+      const { requestId, toolCallId, tool, input, suggestion } = event.value;
+      let row = model.tools.get(toolCallId);
+      if (!row) {
+        row = { kind: 'tool', id: requestId, at, name: tool, input, output: undefined };
+        model.rows.push(row);
+      } else if (!row.input) row.input = input;
+      row.request = { requestId, suggestion, state: 'waiting' };
+      model.requests.set(requestId, row);
+      model.pending.push(requestId);
+      break;
+    }
+    case 'cleared.permission_answered': {
+      const { requestId, decision, by, rule } = event.value;
+      const row = model.requests.get(requestId);
+      if (row?.request) {
+        row.request.state = 'answered';
+        row.request.decision = decision;
+        row.request.by = by;
+        if (rule !== undefined) row.request.rule = rule;
+        model.pending = model.pending.filter((id) => id !== requestId);
+      } else if (by === 'policy' && (decision === 'reject_once' || decision === 'reject_always')) {
+        // A refusal by the policy has no request before it (the tool is
+        // checked before it runs): a row of its own. A policy allow is quiet.
+        model.rows.push({ kind: 'denied', at, requestId, rule: rule ?? '' });
+      }
+      break;
+    }
+    case 'cleared.question': {
+      const row: QuestionRow = { kind: 'question', id: event.value.requestId, requestId: event.value.requestId, at, questions: event.value.questions };
+      model.questions.set(row.requestId, row);
+      model.rows.push(row);
+      model.pending.push(row.requestId);
+      break;
+    }
+    case 'cleared.answered': {
+      const row = model.questions.get(event.value.requestId);
+      if (row) row.answeredBy = event.value.by;
+      model.pending = model.pending.filter((id) => id !== event.value.requestId);
+      break;
+    }
+    case 'cleared.review_verdict':
+      model.rows.push({ kind: 'verdict', at, verdict: event.value.verdict, round: event.value.round });
+      break;
+    default:
+      break;
+  }
+}
+
+// The number of events that were new.
+export function applyAll(model: SessionModel, events: readonly SessionEvent[]): number {
+  let added = 0;
+  for (const event of events) if (applyEvent(model, event)) added++;
+  return added;
+}
+
+// The rows as the screen shows them: the ticket's prompt and empty messages
+// left out, and consecutive reads that nobody was asked about as one row.
+export function timeline(model: SessionModel): Row[] {
+  const out: Row[] = [];
+  for (const row of model.rows) {
+    if (row.kind === 'message' && (row.by === PROMPT_AUTHOR || !row.text.trim())) continue;
+    const previous = out[out.length - 1];
+    if (row.kind === 'tool' && row.input?.kind === 'read' && !row.request) {
+      if (previous?.kind === 'read') out[out.length - 1] = { kind: 'read', at: previous.at, paths: [...previous.paths, row.input.path] };
+      else out.push({ kind: 'read', at: row.at, paths: [row.input.path] });
+      continue;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+export type ResultSummary = { readonly tone: 'ok' | 'error'; readonly key: 'passed' | 'failed' | 'done' | 'error'; readonly n?: number };
+
+// What a command or a tool printed, in one phrase: a test run says how many
+// passed or failed, anything else that exited well says it is done.
+export function resultSummary(output: ToolOutput | undefined): ResultSummary | undefined {
+  if (!output || output.kind === 'read') return undefined;
+  if (output.kind !== 'execute') return 'ok' in output && !output.ok ? { tone: 'error', key: 'error' } : undefined;
+  const text = output.output;
+  const number = (pattern: RegExp) => { const match = pattern.exec(text); return match ? Number(match[1]) : undefined; };
+  const failed = number(/^#\s*fail\s+(\d+)/m) ?? number(/(\d+) failed/);
+  if (failed) return { tone: 'error', key: 'failed', n: failed };
+  const passed = number(/^#\s*pass\s+(\d+)/m) ?? number(/(\d+) passed/);
+  if (passed !== undefined && !output.isError) return { tone: 'ok', key: 'passed', n: passed };
+  return output.isError ? { tone: 'error', key: 'error' } : { tone: 'ok', key: 'done' };
+}
+
+const CHECKLIST = /^\s*[-*]\s+\[([ xX])\]\s+(.*\S)\s*$/;
+
+// The criteria of a ticket are the checklist lines of its body; what is left
+// is its description, by paragraph.
+export function parseCriteria(body: string): { readonly description: string[]; readonly criteria: { readonly text: string; readonly done: boolean }[] } {
+  const criteria: { text: string; done: boolean }[] = [];
+  const rest: string[] = [];
+  for (const line of body.split('\n')) {
+    const match = CHECKLIST.exec(line);
+    if (match) criteria.push({ text: match[2] as string, done: match[1] !== ' ' });
+    else rest.push(line);
+  }
+  return { description: rest.join('\n').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean), criteria };
+}
+
+// The steps the screen shows, each the sum of its spans: the spans the STEP_*
+// events told, then those only the state has. A span both know is the
+// events', which are newer than a snapshot taken while it ran.
+export function stepsOf(model: { readonly steps: readonly Step[]; readonly state: SessionState | undefined }, now: number): readonly StepTotal[] {
+  const spans = new Map<string, Step>();
+  for (const step of model.steps) spans.set(`${step.name} ${step.startedAt}`, step);
+  for (const step of model.state?.steps ?? []) if (!spans.has(`${step.name} ${step.startedAt}`)) spans.set(`${step.name} ${step.startedAt}`, step);
+  const totals = new Map<string, { name: Step['name']; startedAt: string; ms: number; count: number; open: boolean }>();
+  for (const span of [...spans.values()].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))) {
+    const end = span.finishedAt === null ? now : Date.parse(span.finishedAt);
+    const total = totals.get(span.name) ?? { name: span.name, startedAt: span.startedAt, ms: 0, count: 0, open: false };
+    total.ms += Math.max(0, end - Date.parse(span.startedAt));
+    total.count += 1;
+    total.open ||= span.finishedAt === null;
+    totals.set(span.name, total);
+  }
+  return [...totals.values()];
+}
+
+// ------------------------------------------------------------------ thread
+
+// What the session's agent holds for the screen (agent.ts): the rows as the
+// timeline shows them, the state, what waits and the steps. Plain data, as
+// an AG-UI state snapshot carries it.
+export type SessionThread = {
+  readonly lastSeq: number;
+  readonly lastAt: string | undefined;
+  readonly state: SessionState | undefined;
+  readonly rows: readonly Row[];
+  readonly pending: readonly string[];
+  readonly steps: readonly Step[];
+};
+
+export function threadOf(model: SessionModel): SessionThread {
+  return { lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), pending: [...model.pending], steps: [...model.steps] };
+}
+
+// ------------------------------------------------------------------ wording
+
+export type SessionView = {
+  readonly summary: SessionSummary;
+  readonly thread: SessionThread;
+  readonly ticket: Ticket | undefined;
+  readonly siblings: readonly SessionSummary[];           // the sessions of the same ticket, this one included
+  readonly me: string;                                    // the signed-in user's id
+  readonly language: 'en' | 'fr';
+  readonly now: Date;
+  readonly busy?: ReadonlySet<string>;                    // request ids whose answer is on its way
+};
+
+export const ENDED: ReadonlySet<SessionPhase> = new Set(['done', 'stopped', 'failed']);
+const pad = (n: number) => String(n).padStart(2, '0');
+export const clock = (iso: string) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+
+export function family(model: string): string {
+  const match = /(opus|sonnet|haiku|fable)/i.exec(model);
+  return match ? (match[1] as string).charAt(0).toUpperCase() + (match[1] as string).slice(1).toLowerCase() : model;
+}
+
+export function duration(ms: number, t: Translate): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return t('seconds', { n: seconds });
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? t('minutes', { n: minutes }) : t('hours_minutes', { h: Math.floor(minutes / 60), m: pad(minutes % 60) });
+}
+
+// A catalog sentence for a key that may not exist (a rule the catalog has not met).
+export function known(t: Translate, key: string, values?: Record<string, string | number>): string | undefined {
+  try { return t(key, values); } catch { return undefined; }
+}
+
+export const phaseOf = (view: SessionView): SessionPhase => view.thread.state?.phase ?? view.summary.phase;
+
+export function statusTone(view: SessionView): 'waiting' | 'progress' | 'review' | 'ended' {
+  const phase = phaseOf(view);
+  if (ENDED.has(phase)) return 'ended';
+  if (phase === 'waiting_human' && view.thread.pending.length > 0) return 'waiting';
+  return phase === 'reviewing' ? 'review' : 'progress';
+}
+
+export function phrase(view: SessionView, t: Translate): string {
+  const phase = phaseOf(view);
+  const data = view.thread.state?.status || view.summary.status;
+  switch (phase) {
+    case 'waiting_human': return t(view.thread.pending.length > 0 ? 'status_waiting_human' : 'status_idle');
+    case 'starting': return t('status_starting');
+    case 'done': return t('status_done');
+    case 'stopped': return t('status_stopped');
+    case 'failed': return t('status_failed');
+    case 'reviewing': return data || t('status_reviewing');
+    default: return data || t('status_working');
+  }
+}
+
+// "18 min · 35,500 tokens": how long the session ran, and what it used.
+export function statusMeta(view: SessionView, t: Translate): string {
+  const ended = ENDED.has(phaseOf(view));
+  const end = ended ? Date.parse(view.thread.lastAt ?? view.summary.updatedAt) : view.now.getTime();
+  const time = duration(end - Date.parse(view.summary.startedAt), t);
+  const usage = view.thread.state?.usage ?? {};
+  const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  return tokens > 0 ? t('elapsed_usage', { time, tokens: tokens.toLocaleString(view.language) }) : t('elapsed_only', { time });
+}
+
+export function who(by: string | undefined, view: Pick<SessionView, 'me'>, t: Translate): string {
+  if (by === 'policy') return t('who_policy');
+  return by === view.me ? t('who_you') : t('who_other');
+}
+
+export function answerLine(request: RequestState, view: Pick<SessionView, 'me'>, t: Translate): string {
+  switch (request.decision) {
+    case 'allow_once': return t('answer_allow_once', { who: who(request.by, view, t) });
+    case 'allow_always': return t('answer_allow_always', { who: who(request.by, view, t) });
+    case 'reject_once': case 'reject_always': return t('answer_deny', { who: who(request.by, view, t) });
+    case 'cancelled': return t('answer_cancelled');
+    default: return '';
+  }
+}
+
+export function target(input: ToolInput | undefined): string {
+  if (!input) return '';
+  switch (input.kind) {
+    case 'read': case 'edit': case 'delete': case 'move': return input.path;
+    case 'execute': return input.command;
+    case 'search': return input.pattern;
+    case 'fetch': return input.target;
+    default: return '';
+  }
+}
+
+export function verb(input: ToolInput | undefined): string {
+  return input && input.kind !== 'think' && input.kind !== 'switch_mode' && input.kind !== 'other' ? input.kind : 'other';
+}
+
+// What a refusal by the policy says: the rule by its catalog name when the
+// catalog knows it, else by its own name.
+export function refusal(rule: string, t: Translate): string {
+  const key = `rule_${rule.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace('secret_read', 'read_private')}`;
+  const named = rule ? known(t, key) : undefined;
+  return named !== undefined ? t('refused', { rule: named }) : rule ? t('refused_rule', { rule }) : t('refused_plain');
+}
+
+// The decision an answer button sends.
+export function decisionOf(kind: string | undefined, t: Translate): Decision {
+  return kind === 'allow_once' ? { kind: 'allow_once' }
+    : kind === 'allow_always' ? { kind: 'allow_always', scope: 'project' }
+    : { kind: 'reject_once', message: t('deny_message') };
+}
+
+// The latest session of a role on the ticket, for the Author and Reviewer tabs.
+export function latestOf(siblings: readonly SessionSummary[], role: 'author' | 'reviewer'): SessionSummary | undefined {
+  return siblings.filter((s) => s.role === role).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+}
+
+// ------------------------------------------------------------------ stream
+
+// The part of EventSource the follower uses, so a test can stand in for it.
+export interface StreamLike {
+  addEventListener(name: string, listener: (event: { data: string }) => void): void;
+  close(): void;
+  onerror: (() => void) | null;
+}
+
+export type Follower = { stop(): void; lastSeq(): number };
+
+export const RETRY_MS = 1500;
+const RETRY_MAX_MS = 10_000;
+
+// Reads a session's stream from `after`. The service names each event by its
+// AG-UI type, so a listener per type. When the stream drops it is closed and
+// reopened after the last seq seen, never with the old `?after=`, and an
+// event whose seq was already seen is not delivered twice.
+export function follow(options: {
+  readonly url: (after: number) => string;
+  readonly after: number;
+  readonly open: (url: string) => StreamLike;
+  readonly later: (run: () => void, ms: number) => void;
+  readonly onEvent: (event: SessionEvent) => void;
+}): Follower {
+  let last = options.after;
+  let stopped = false;
+  let current: StreamLike | undefined;
+  let wait = RETRY_MS;
+
+  const connect = () => {
+    if (stopped) return;
+    const stream = options.open(options.url(last));
+    current = stream;
+    const hear = (message: { data: string }) => {
+      let event: SessionEvent;
+      try { event = JSON.parse(message.data) as SessionEvent; }
+      catch { return; }
+      if (typeof event.seq !== 'number' || event.seq <= last) return;
+      last = event.seq;
+      wait = RETRY_MS;
+      options.onEvent(event);
+    };
+    for (const name of EVENT_NAMES) stream.addEventListener(name, hear);
+    stream.onerror = () => {
+      stream.close();
+      if (stopped || current !== stream) return;
+      options.later(connect, wait);
+      wait = Math.min(wait * 2, RETRY_MAX_MS);
+    };
+  };
+  connect();
+  return {
+    stop() {
+      stopped = true;
+      current?.close();
+    },
+    lastSeq: () => last,
+  };
+}

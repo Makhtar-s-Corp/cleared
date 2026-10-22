@@ -5,7 +5,7 @@
 // app's setting (CLEARED_V2_APP_LANGUAGE); a key missing from French falls
 // back to English.
 import { readFileSync } from 'node:fs';
-import type { Catalog } from '../public/i18n.ts';
+import type { Catalog } from '../web/lib/i18n.ts';
 
 export const LANGUAGES = ['en', 'fr'] as const;
 export type Language = (typeof LANGUAGES)[number];

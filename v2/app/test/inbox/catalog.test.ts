@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog } from '../../src/catalog.ts';
-import { PLAN_PANEL_KEYS } from '../../public/plan-panel.ts';
+import { PLAN_PANEL_KEYS } from '../../web/plan-panel/model.ts';
 
 test('the inbox\'s catalog holds every key of the plan panel, as the lead\'s catalog says it', () => {
   for (const language of ['en', 'fr'] as const) {

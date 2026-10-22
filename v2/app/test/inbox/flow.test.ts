@@ -13,9 +13,9 @@ import assert from 'node:assert/strict';
 import type { InboxItem, Plan, PlanItemInbox, ReleaseItem } from '../../../src/api/types.ts';
 import { GRACE_MS, PLAN_ID, RELEASE_HEAD, inboxFixture, inboxSource } from '../../fixtures/inbox.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { ApiError, type ScreenContext } from '../../public/screen.ts';
-import { answerRequest, approve, approvePlan, failure, ordered, readPlan, sendBack, undoApproval } from '../../public/screens/inbox.ts';
-import { signedIn, startApp, type Running } from '../support.ts';
+import { ApiError, type ScreenContext } from '../../web/lib/screen.ts';
+import { answerRequest, approve, approvePlan, failure, ordered, readPlan, sendBack, undoApproval } from '../../web/screens/inbox/model.ts';
+import { pageFiles, signedIn, startApp, type Running } from '../support.ts';
 
 // The shell's api() as the browser runs it: same origin, the cookie, and the
 // anti-forgery token on a write.
@@ -172,10 +172,10 @@ test('the app serves the inbox page, its catalog, its stylesheet and its script'
     const catalog = await (await get('/messages/inbox.json')).json() as Record<string, string>;
     assert.equal(catalog.approve, 'Approve the release');
     assert.equal(catalog.plan_approve, 'Approve the plan and start', 'the plan panel\'s keys are in the inbox\'s catalog');
-    const css = await get('/screens/inbox.css');
-    assert.equal(css.status, 200);
-    assert.doesNotMatch(await css.text(), /gradient|prefers-color-scheme/i);
-    assert.match(await (await get('/screens/inbox.ts')).text(), /export function mount\(/);
+    const files = await pageFiles(app, '/inbox', cookie);
+    assert.doesNotMatch(files.css, /gradient|prefers-color-scheme/i);
+    assert.ok(files.css.indexOf('.plan-panel') < files.css.lastIndexOf('.inbox-list'), 'the lead\'s sheet (the plan panel) before the inbox\'s, which adapts it');
+    assert.ok(/approve_plan/.test(files.js), 'the inbox screen\'s chunk, preloaded with the page');
     const shot = await get('/api/service/captures/after-desktop.svg');
     assert.equal(shot.status, 200);
     assert.equal(shot.headers.get('content-type'), 'image/svg+xml');

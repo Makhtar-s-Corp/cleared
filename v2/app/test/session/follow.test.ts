@@ -6,9 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AUTHOR_ID, REQUEST_ID, sessionFixture, sessionSource } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { follow, type StreamLike } from '../../public/screens/session.ts';
+import { follow, type StreamLike } from '../../web/screens/session/model.ts';
 import type { SessionEvent } from '../../../src/session/events.ts';
-import { signedIn, startApp } from '../support.ts';
+import { pageFiles, signedIn, startApp } from '../support.ts';
 import { message, stored } from './support.ts';
 
 class FakeStream implements StreamLike {
@@ -71,11 +71,10 @@ test('the app serves the screen\'s page, catalog, stylesheet and script, and for
     assert.equal((await get('/sessions')).status, 200);
     const catalog = await (await get('/messages/session.json')).json() as Record<string, string>;
     assert.equal(catalog.allow_once, 'Allow once');
-    const css = await get('/screens/session.css');
-    assert.equal(css.status, 200);
-    assert.doesNotMatch(await css.text(), /gradient|prefers-color-scheme/i);
-    const code = await (await get('/screens/session.ts')).text();
-    assert.match(code, /export function mount\(/);
+    const files = await pageFiles(app, `/sessions/${AUTHOR_ID}`, cookie);
+    assert.doesNotMatch(files.css, /gradient|prefers-color-scheme/i);
+    assert.match(files.css, /\.timeline/);
+    assert.ok(/\/events\?after=/.test(files.js), 'the session screen\'s chunk, preloaded with the page');
 
     const detail = await (await get(`/api/service/sessions/${AUTHOR_ID}`)).json() as { state: { phase: string } };
     assert.equal(detail.state.phase, 'waiting_human');

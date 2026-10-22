@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import type { LeadMessage, LeadState, Plan } from '../../../src/api/types.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { leadFixture, leadSource, otherPlans } from '../../fixtures/lead.ts';
-import { signedIn, startApp } from '../support.ts';
+import { pageFiles, signedIn, startApp } from '../support.ts';
 
 test('the app serves the lead\'s pages, catalog, stylesheet and scripts, and its reads reach the lead and plan routes', async () => {
   const fixture = await leadFixture(FIXTURE_NOW);
@@ -23,13 +23,13 @@ test('the app serves the lead\'s pages, catalog, stylesheet and scripts, and its
     const catalog = await (await get('/messages/lead.json')).json() as Record<string, string>;
     assert.equal(catalog.plan_approve, 'Approve the plan and start');
     assert.equal(catalog.lead_remember, 'What does the lead remember?');
-    const css = await get('/screens/lead.css');
-    assert.equal(css.status, 200);
-    const sheet = await css.text();
-    assert.doesNotMatch(sheet, /gradient|prefers-color-scheme/i, 'flat colours, and the theme is the person\'s choice');
-    assert.match(sheet, /\[data-theme="dark"\]/);
-    assert.match(await (await get('/screens/lead.ts')).text(), /export function mount\(/);
-    assert.match(await (await get('/plan-panel.ts')).text(), /export function renderPlanPanel\(/);
+    const files = await pageFiles(app, '/lead', cookie);
+    assert.ok(files.styles.length >= 2, 'the shell\'s sheet, then the lead\'s');
+    assert.doesNotMatch(files.css, /gradient|prefers-color-scheme/i, 'flat colours, and the theme is the person\'s choice');
+    assert.match(files.css, /\.lead-screen/);
+    assert.match(files.css, /\[data-theme=(?:"dark"|dark)\]/);
+    assert.ok(/\/api\/service\/lead\/stream\?after=/.test(files.js), 'the lead screen\'s chunk, preloaded with the page');
+    assert.ok(files.js.includes('data-plan-action'), 'the plan panel, drawn by the lead screen');
 
     const api = (path: string) => get(`/api/service${path}`);
     assert.equal((await (await api('/lead')).json() as LeadState).generation, 3);

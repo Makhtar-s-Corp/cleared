@@ -1,14 +1,14 @@
 // The plan panel is shared with the inbox (lane 10), and a page loads only
 // the shell's catalog and its own, so the panel names its keys in one
 // exported list that each screen's catalog must hold. The repository's
-// catalog test reads screens/<screen>.ts only, so this one reads the panel.
+// catalog test reads a screen's own files only, so this one reads the panel.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadCatalog } from '../../src/catalog.ts';
-import { PLAN_PANEL_KEYS } from '../../public/plan-panel.ts';
+import { PLAN_PANEL_KEYS } from '../../web/plan-panel/model.ts';
 
-const code = readFileSync(new URL('../../public/plan-panel.ts', import.meta.url), 'utf8');
+const code = readFileSync(new URL('../../web/plan-panel/model.ts', import.meta.url), 'utf8');
 
 test('every key the plan panel names is in its exported list, and the list names no other', () => {
   const named = new Set([...code.matchAll(/'(plan_[a-z0-9_]+)'/g)].map((m) => m[1] as string));
@@ -27,7 +27,7 @@ test('the lead\'s catalog holds every key of the panel, in English and in French
 });
 
 test('every key the lead screen names, in a call or in one of its maps, is in its catalog', () => {
-  const screen = readFileSync(new URL('../../public/screens/lead.ts', import.meta.url), 'utf8');
+  const screen = ['model.ts', 'Lead.tsx', 'agent.ts'].map((file) => readFileSync(new URL(`../../web/screens/lead/${file}`, import.meta.url), 'utf8')).join('\n');
   const catalog = loadCatalog('lead', 'en');
   const named = [...new Set([...screen.matchAll(/'(lead_[a-z0-9_]+)'/g)].map((m) => m[1] as string))];
   assert.ok(named.length > 40);

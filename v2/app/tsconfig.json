@@ -1,10 +1,9 @@
 {
-  // The app's type check (tsc --noEmit -p app): the server, the tests and
-  // the browser code under public/, which the server serves with its types
-  // stripped. The browser code needs the DOM types; the rest of v2 does not.
+  // The app's type check (tsc --noEmit -p app): the server and its tests.
+  // The React front end under web/ has its own configuration
+  // (tsc --noEmit -p app/web); dist/ is what Vite builds from it.
   "extends": "../tsconfig.json",
-  "compilerOptions": {
-    "lib": ["es2024", "dom", "dom.iterable"]
-  },
-  "include": ["."]
+  "compilerOptions": { "lib": ["es2024", "dom", "dom.iterable"] },
+  "include": ["."],
+  "exclude": ["web", "dist"]
 }

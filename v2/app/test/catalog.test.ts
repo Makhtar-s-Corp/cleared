@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LANGUAGES, MESSAGES_DIR, SCREENS, loadCatalog } from '../src/catalog.ts';
-import { format, translator } from '../public/i18n.ts';
+import { format, translator } from '../web/lib/i18n.ts';
 
 const files = readdirSync(MESSAGES_DIR).filter((name) => name.endsWith('.json')).sort();
 const read = (name: string) => JSON.parse(readFileSync(join(MESSAGES_DIR, name), 'utf8')) as Record<string, unknown>;
@@ -47,9 +47,18 @@ test('every message key a screen names in its code is in its catalog or the shel
   const shell = read('shell.en.json');
   for (const screen of SCREENS.filter((s) => s !== 'shell')) {
     const own = read(`${screen}.en.json`);
-    const code = readFileSync(join(MESSAGES_DIR, '..', 'public', 'screens', `${screen}.ts`), 'utf8');
-    for (const [, key] of code.matchAll(/\bt\('([a-z0-9_]+)'/g)) {
-      assert.ok(Object.hasOwn(own, key as string) || Object.hasOwn(shell, key as string), `${screen}.ts names ${key}, which no catalog has`);
+    const dir = join(MESSAGES_DIR, '..', 'web', 'screens', screen);
+    const files = readdirSync(dir).filter((name) => /\.tsx?$/.test(name));
+    assert.ok(files.length > 1, `${screen}: its model and its component`);
+    for (const file of files) {
+      const code = readFileSync(join(dir, file), 'utf8');
+      for (const [, key] of code.matchAll(/\bt\('([a-z0-9_]+)'/g)) {
+        assert.ok(Object.hasOwn(own, key as string) || Object.hasOwn(shell, key as string), `${screen}/${file} names ${key}, which no catalog has`);
+      }
     }
+  }
+  const dir = join(MESSAGES_DIR, '..', 'web', 'shell');
+  for (const file of readdirSync(dir).filter((name) => /\.tsx?$/.test(name))) {
+    for (const [, key] of readFileSync(join(dir, file), 'utf8').matchAll(/\bt\('([a-z0-9_]+)'/g)) assert.ok(Object.hasOwn(shell, key as string), `shell/${file} names ${key}, which the shell's catalog has not`);
   }
 });

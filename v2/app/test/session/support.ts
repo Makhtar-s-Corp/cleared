@@ -1,7 +1,7 @@
 // Shared by the session screen's tests: the visible text of rendered HTML,
 // every string of a value, and a model built from events.
 import type { AgUiEvent, SessionEvent } from '../../../src/session/events.ts';
-import { applyAll, emptyModel, type SessionModel } from '../../public/screens/session.ts';
+import { applyAll, emptyModel, type SessionModel } from '../../web/screens/session/model.ts';
 
 // The text between tags, and the attributes a person reads or hears.
 export function visibleText(html: string): string[] {
