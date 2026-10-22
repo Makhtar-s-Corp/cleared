@@ -73,7 +73,7 @@ export function createLeadRoutes(deps: LeadRouteDeps): Route[] {
       try {
         if (!sameProof(header(request, SERVICE_PROOF_HEADER), deps.proof())) throw new HttpError(401, 'unauthorized');
         const lead = deps.lead(context.registry);
-        if (!lead) throw new HttpError(503, 'the lead is not running: see CLEARED_V2_PROJECT and CLEARED_V2_LEAD_ENABLED in v2/README.md');
+        if (!lead) throw new HttpError(503, 'the lead is not running: CLEARED_V2_PROJECT is unset, CLEARED_V2_LEAD_ENABLED is off, or the flow has no adapter');
         let user: UserId | undefined;
         if (write) {
           const given = header(request, SERVICE_USER_HEADER);

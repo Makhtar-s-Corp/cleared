@@ -851,6 +851,17 @@ The choices the lane makes:
     - `publishPlan(plan)` for a `plan` frame.
 
     `createLeadRuntime` takes the extensions.
+13. **Configuration**, from the service's environment. A setting that is set but wrong stops the service with exit code 64, as the flow's do.
+
+    | Variable | Default | Meaning |
+    | --- | --- | --- |
+    | `CLEARED_V2_LEAD_ENABLED` | on when `CLEARED_V2_PROJECT` is set | `off`, `0` or `false` turns the lead off. |
+    | `CLEARED_V2_LEAD_MODEL` | `claude-opus-5-5` | The lead's model, an explicit name (decision 13). |
+    | `CLEARED_V2_LEAD_CONTEXT_PERCENT` | 50 | The threshold: the running turn is interrupted, then the lead hands over. |
+    | `CLEARED_V2_LEAD_HANDOVER_PERCENT` | 40, or 80 % of the threshold when that is lower | The handover point: the lead hands over at the end of the turn. It must be below the threshold. |
+    | `CLEARED_V2_LEAD_BATCH_SECONDS` | 60 | How long the flow's events are batched into one event turn. |
+
+    The plan gives the handover point a fixed default of 40. The lane takes 80 % of the threshold when the threshold is 50 or lower, so that `CLEARED_V2_LEAD_CONTEXT_PERCENT=5` alone (the doctor's and the rehearsal's setting) is valid.
 
 **Consequences.**
 - **Gaps across lanes, named here and in the pull request; this lane did not edit the files involved:**
@@ -860,6 +871,12 @@ The choices the lane makes:
   - *Lazy start.* A module's `provide` has no registry, so the lead starts on the first request to a lead route, as the flow's engine does (lane 2's entry). A service that restarts at night does nothing until a browser asks; lane 9's 15-second poll of `GET /api/lead` starts it. A start hook for modules would be a change to `registry.ts` and `main.ts`, a lane of its own.
   - *Listings.* `GET /api/sessions` lists the lead's sessions (role `lead`, ticket `lead`). Lane 9 and the tower should leave them out or show them as the lead.
   - *The config volume.* The adapter's `stop()` keeps the session's config volume so that `resume` works (`claude-code.ts`, header). The plan wants it removed for a lead generation, which is never resumed. Removing it is lane 4's file.
+- **The answer cap (section 4.1) is only half proven.** The test of the 8 KB answer covers the host tools. The open point of lane 1's entry stays open: the policy does not cap a `Grep` in content mode or a git read that stands alone, and how much of a command's output Claude Code keeps was not measured. It needs lane 4's real run.
+- **What this lane makes live before lanes 9 and 10.** This lane is the first to create inbox items of the lead: a question with ticket `lead`. Until lanes 9 and 10 land:
+  - the milestone 1 inbox lists it with answer buttons, which get 409 from the session route (the first gap above);
+  - the shell's count and the tower count it;
+  - lane 6's dispatcher will notify it as a `question`.
+  Issue 163 called this "future"; it is now real.
 - **Edit outside the lane's files:** `v2/test/modules/registry.test.ts` lines 10 to 26, because the lead module is no longer empty. Lanes 7 and 8 of milestone 1 made the same kind of edit.
 - **The doctor's `lead` check** (`v2/scripts/doctor-lead.ts`) is written. It runs a real generation on the doctor's model: a commit, a refresh forced at 5 %, then the commitment asked of generation 2. **It was not run.** Lane 4's runner, which carries the host tools and the context line, is not in `v2` yet, and the check needs it. It runs once lane 4 is merged and `doctor.ts` imports the list.
 - **No screen changed:** the lane touches no file of the app, so no capture was made.

@@ -5,6 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
+import { LeadError } from '../../src/lead/engine.ts';
+import { exampleLeadScript } from '../../src/session/adapters/fake.ts';
 import type { SessionEvent } from '../../src/session/events.ts';
 import {
   call, context, flowEvent, handsOver, leadSetup, opening, question, say, sentTo, turn, until, type LeadSetup,
@@ -371,4 +373,52 @@ test('the stream says each thread message and each state change', async () => {
   stop();
   assert.ok(frames.includes('message:1') && frames.includes('message:2'));
   assert.ok(frames.includes('state'));
+});
+
+test('LeadEngine.answer answers the pending question as the session route would, and refuses another', async () => {
+  const t = await leadSetup({ lead: [[...opening(), ...turn('t1', question('q1', 'Pages of 20?'), say('r1', 'Pages of 20 then.'))]] });
+  await t.lead.post('Plan the list', 'u1');
+  await until(() => t.lead.state().pendingQuestion !== null, 'the question');
+  const gen1 = t.generations[0]?.id as string;
+  await assert.rejects(t.lead.answer(gen1, 'q2', { 'Pages of 20?': 'Yes' }, 'u1'), (error: unknown) => error instanceof LeadError && error.kind === 'not_found');
+  await t.lead.answer(gen1, 'q1', { 'Pages of 20?': 'Yes' }, 'u1');
+  await replied(t, 'Pages of 20 then.');
+  assert.equal(t.lead.state().pendingQuestion, null);
+  assert.deepEqual(threadTexts(t), ['owner:message:Plan the list', 'lead:question:Pages of 20?', 'owner:message:Yes', 'lead:message:Pages of 20 then.']);
+});
+
+test('a question an earlier generation asked: the owner\'s answer goes to the next one, quoting it, and the item is handled as system (section 3.3)', async () => {
+  const t = await leadSetup({ lead: [[...opening(), ...turn('t1', question('q1', 'Pages of 20?'))], [...opening(), ...turn('g2', say('g2r', 'Pages of 20, noted from the answer.'))]] });
+  await t.lead.post('Plan the list', 'u1');
+  await until(() => t.lead.state().pendingQuestion !== null, 'the question');
+  await t.lead.close();
+  const second = t.make();
+  await second.start();
+  await second.settled();
+  assert.equal(second.state().generation, 2);
+  assert.deepEqual(second.state().pendingQuestion, { sessionId: t.generations[0]?.id, requestId: 'q1' }, 'the question survives the generation');
+  await second.post('Yes, pages of 20', 'u1');
+  await until(() => second.messages().some((m) => m.text === 'Pages of 20, noted from the answer.'), 'the answer turn');
+  const sent = sentTo(t.store.events, t.generations[1]?.id as string);
+  assert.ok(sent.some((text) => text.includes('"Pages of 20?"') && text.includes('Yes, pages of 20')), 'the turn quotes the question and the answer');
+  const item = t.store.db.prepare("SELECT state, handled_by FROM flow_inbox WHERE kind = 'question'").get() as { state: string; handled_by: string };
+  assert.deepEqual({ ...item }, { state: 'handled', handled_by: 'system' });
+  assert.equal(second.messages().find((m) => m.kind === 'question')?.question?.state, 'handled');
+  assert.equal(second.state().pendingQuestion, null);
+  await second.close();
+});
+
+test('lane 1\'s scripted lead plays its goal turn through the engine: the question answered from the reply, the commit stored, the reply in the thread, 45 % reached', async () => {
+  const t = await leadSetup({ lead: [exampleLeadScript] });
+  await t.lead.settled();
+  assert.equal(t.lead.state().phase, 'idle', 'ready at its first measure, without an opening turn');
+  await t.lead.post('Make a long guestbook readable', 'u1', true);
+  await until(() => t.lead.state().pendingQuestion !== null, 'the question');
+  await t.lead.post('Pages of 20 (Recommended)', 'u1');
+  await until(() => t.lead.messages().some((m) => m.by === 'lead' && m.kind === 'message'), 'the reply');
+  await t.lead.settled();
+  assert.match(t.lead.messages().find((m) => m.by === 'lead' && m.kind === 'message')?.text ?? '', /Here is a plan in five tickets/);
+  assert.equal(t.lead.state().openCommitments, 1);
+  assert.equal(t.lead.state().highestPercent, 45);
+  assert.match(sentTo(t.store.events, t.generations[0]?.id as string).at(-1) ?? '', /handover/, 'past the handover point, the next turn asks for it');
 });
