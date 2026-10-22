@@ -244,3 +244,85 @@ test('a message from the lead or from cleared is attributed to it', withStore(as
   const names = store.events.after('s').flatMap(({ event }) => (event.type === 'TEXT_MESSAGE_START' ? [event.name] : []));
   assert.deepEqual(names, ['lead', 'cleared']);
 }));
+
+// Lane 5 interrupts the lead mid turn when its share crosses the threshold,
+// and may stop it while a host call is still being answered.
+test('an interrupt while a host call is answered ends the turn there: the call writes nothing after it', withStore(async (store) => {
+  let release = () => {};
+  let called = () => {};
+  const calling = new Promise<void>((resolve) => { called = resolve; });
+  const slow: HostTool = {
+    name: 'state', description: 'the state', inputSchema: { type: 'object', properties: {} },
+    handle: () => { called(); return new Promise((resolve) => { release = () => resolve('late'); }); },
+  };
+  const handle = await createFakeAdapter({
+    log: store.events, newId: () => 's',
+    script: [
+      { awaitMessage: true },
+      { emit: { type: 'RUN_STARTED', threadId: 's', runId: 'r1' } },
+      { hostCall: { toolCallId: 'h1', name: 'state', input: {} } },
+      { emit: { type: 'STEP_FINISHED', stepName: 'author' } },
+      { awaitMessage: true },
+      { emit: { type: 'RUN_STARTED', threadId: 's', runId: 'r2' } },
+      { awaitMessage: true },
+    ],
+  }).start({ ...input, role: 'lead', ticket: 'lead', tools: [slow] });
+  const sending = handle.send({ text: 'go', by: 'u1' });
+  await calling;
+  await handle.interrupt();
+  release();
+  await sending;
+  let events = store.events.after('s');
+  const last = events.at(-1)?.event;
+  assert.ok(last?.type === 'RUN_FINISHED' && last.outcome.type === 'cancelled', JSON.stringify(last));
+  assert.ok(!events.some(({ event }) => event.type === 'TOOL_CALL_RESULT' || event.type === 'STEP_FINISHED' || (event.type === 'CUSTOM' && event.name === 'cleared.host_call')));
+  await handle.send({ text: 'next', by: 'u1' });
+  events = store.events.after('s');
+  assert.ok(events.at(-1)?.event.type === 'RUN_STARTED');
+  assert.equal((events.at(-1)?.event as { runId: string }).runId, 'r2', 'the next message starts the next turn');
+}));
+
+test('a stop while a host call is answered writes nothing after the stop', withStore(async (store) => {
+  let release = () => {};
+  const slow: HostTool = {
+    name: 'state', description: 'the state', inputSchema: { type: 'object', properties: {} },
+    handle: () => new Promise((resolve) => { release = () => resolve('late'); }),
+  };
+  const handle = await createFakeAdapter({
+    log: store.events, newId: () => 's',
+    script: [{ awaitMessage: true }, { hostCall: { toolCallId: 'h1', name: 'state', input: {} } }, { emit: { type: 'STEP_FINISHED', stepName: 'author' } }],
+  }).start({ ...input, role: 'lead', ticket: 'lead', tools: [slow] });
+  const sending = handle.send({ text: 'go', by: 'u1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await handle.stop();
+  const count = store.events.after('s').length;
+  release();
+  await sending;
+  assert.equal(store.events.after('s').length, count);
+}));
+
+test('a reader sees a context share before the turn goes on, and can interrupt the turn there', withStore(async (store) => {
+  const handle = await createFakeAdapter({
+    log: store.events, newId: () => 's',
+    script: [
+      { awaitMessage: true },
+      { emit: { type: 'RUN_STARTED', threadId: 's', runId: 'r1' } },
+      { context: { totalTokens: 110_000, maxTokens: 200_000, percent: 55, isAutoCompactEnabled: true } },
+      { emit: { type: 'STEP_FINISHED', stepName: 'author' } },
+      { awaitMessage: true },
+    ],
+  }).start({ ...input, role: 'lead', ticket: 'lead' });
+  const watching = (async () => {
+    for await (const { event } of handle.events()) {
+      if (event.type === 'CUSTOM' && event.name === 'cleared.context_usage' && event.value.percent >= 50) {
+        await handle.interrupt();
+        return;
+      }
+    }
+  })();
+  await handle.send({ text: 'go', by: 'u1' });
+  await watching;
+  const events = store.events.after('s');
+  assert.ok(!events.some(({ event }) => event.type === 'STEP_FINISHED'), 'the turn stopped at the measure');
+  assert.equal(events.at(-1)?.event.type, 'RUN_FINISHED');
+}));
