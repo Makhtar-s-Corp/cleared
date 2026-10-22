@@ -2211,4 +2211,5 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - A reader has no cost ceiling of its own. The registry's adapter sets no `maxBudgetUsd`, and the flow's ticket budget never sees a reader. Its bounds are the idle rule and three asks at once.
 - `test/reader/runtime.test.ts` covers the production path: the model setting, the recovery at start, the reader built once from the flow's configuration, and a reader's start through the flow runtime's wrapper (no sibling planned, a reader's row).
 
+- Pull request: 218, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ask-code`.
