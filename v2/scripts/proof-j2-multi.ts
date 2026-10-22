@@ -52,6 +52,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { NextInboxItem, ReleaseItem, SessionDetail, SessionSummary, TicketStep, Workspace } from '../src/api/types.ts';
 import { Docker, commandRunner } from '../src/container/docker.ts';
 import { RELAY } from '../src/container/preview.ts';
+import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
 import { sessionNames, siblingAddress } from '../src/container/session-runtime.ts';
 import type { Ticket } from '../src/tickets/contract.ts';
 import { answerFor } from './proof-inbox.ts';
@@ -246,7 +247,9 @@ async function fakeCalls(session: string): Promise<{ total: number; operations: 
   const address = await siblingAddress(docker, session, 'filter-api');
   if (!address) return undefined;
   const workspace = await api<Workspace>('/workspace');
-  const port = workspace.services.find((s) => s.name === 'filter-api')?.run?.port ?? 8795;
+  // Where the fake listens: the service's run port, as the runtime plans it
+  // (container/services.ts planSiblings), else its default.
+  const port = workspace.services.find((s) => s.name === 'filter-api')?.run?.port ?? DEFAULT_FAKE_PORT;
   const result = await docker.exec(session, sessionNames(session).egress, ['node', '-e', RELAY, `http://${address}:${port}/__fake/calls`, '65536', '5000'], { timeoutMs: 20_000 });
   const relayed = JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}') as { status?: number; body?: string };
   if (relayed.status !== 200 || !relayed.body) return undefined;
@@ -312,10 +315,21 @@ if (validated) {
     // the Browser tab, not a failure of this step.
     await page.goto(`${APP}/sessions/${encodeURIComponent(detail.id)}#browser`);
     await page.locator('#tab-browser-button').click();
+    // The guestbook's own page, as its heading says (examples/guestbook/src/page.ts;
+    // the rehearsal's stand-in page carries the same heading).
     const frame = page.frameLocator('iframe[sandbox]');
-    await frame.locator('body').filter({ hasText: /answered/ }).waitFor({ timeout: 60_000 });
-    times.fake_first_answer_at = now();
-    const counted = await fakeCalls(guestbook);
+    await frame.locator('h1').filter({ hasText: /^Guestbook$/ }).waitFor({ timeout: 60_000 });
+    // The fake's own count, read until it answered once or for a minute: the
+    // real guestbook calls the filter only on an entry's post, which the
+    // preview does not relay, so 0 calls is a possible, honest reading.
+    let counted: Awaited<ReturnType<typeof fakeCalls>>;
+    const until_ = Date.now() + 60_000;
+    for (;;) {
+      counted = await fakeCalls(guestbook).catch(() => undefined);
+      if ((counted?.total ?? 0) >= 1) { times.fake_first_answer_at = now(); break; }
+      if (Date.now() > until_) break;
+      await sleep(3_000);
+    }
     fake = counted ? { calls: counted.total, operations: counted.operations } : null;
     const list = await until('both service steps to end', async () => {
       const now = await stepsOf(first);
@@ -328,7 +342,7 @@ if (validated) {
     const spans = ledger((db) => db.prepare('SELECT s.created_at AS a, s.updated_at AS b FROM ticket_steps t JOIN sessions s ON s.id = t.session WHERE t.ticket = ? AND t.kind = ?').all(first, 'service') as { a: string; b: string }[]) ?? [];
     if (spans.length === 2 && spans[0] && spans[1] && spans[0].a < spans[1].b && spans[1].a < spans[0].b) parallel = Math.max(parallel, 2);
     const times_ = list.filter((s) => s.kind === 'service').map((s) => `${s.service} ${took.get(s.position) ?? '?'} min`).join(', ');
-    return `the guestbook's Browser tab shows the trial environment; the fake answered ${fake?.calls ?? '?'} calls; at most ${parallel} service steps running at once; ${times_}`;
+    return `the guestbook's Browser tab shows the trial environment; the fake answered ${fake?.calls ?? 'unread'} calls; at most ${parallel} service steps running at once; ${times_}`;
   });
   await step(5, 'integration', async () => {
     const done = await until('the integration step', async () => (await stepsOf(first)).find((s) => s.kind === 'integration' && (s.state === 'done' || s.state === 'failed')));

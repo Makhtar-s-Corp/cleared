@@ -2867,6 +2867,8 @@ The lane's choices:
 - **Not proven here:**
   - **The real runs.** These need a model, the forge, the real brokers and watches, the deployments, real containers and siblings, a real fake image, and a login cut. They are the orchestrator's, after this wave: the 48-hour proof first, then the multi-service proof.
   - **The parts the rehearsal's stand-ins replace,** listed under "What the rehearsal replaced" in each `durations.md`.
+  - **Step 4 on the real guestbook.** The check is the guestbook's own heading in the Browser tab's frame, which the real page and the stand-in share. The real guestbook calls the filter only on an entry's post, which the preview does not relay, so the real run may read 0 calls from the fake. The step records that count; it does not fail on it.
+  - **Step 11's real path assumes** a live author that edits `src/page.ts`, so the file is in the Editor's list before its turn ends, and that the owner's saved line reaches the ticket's card. The rehearsal forces the last part with `reopenCommits`; in the real run it depends on the model committing after the notice. These are assumptions for the orchestrator's run.
   - **Section 8's open unknowns,** for the proof to close: when the author proposes, how long the gate adds in a real night, how many knowledge items a night makes, and how a save during a turn fares.
 - **Real run settings.**
   - **The 48-hour proof:** as lane 11's entry says. `PROOF_NOTIFICATIONS` stays `skipped` by default.
@@ -2886,6 +2888,7 @@ The lane's choices:
 - **Review round 1 (2026-10-22), CHANGES, taken:**
   - the merge of `origin/v2` with pull request 230 (`61b6795`) is pushed; it resolves the conflicts in this log and the matrix, adapts the stand-in and step 11 to the harness-first terminal, and renumbers this lane's matrix lines P44 and P45, which B6.2p and B6.2m cite;
   - both rehearsals ran again on the merged head, and the `durations.md` the pull request quotes are those runs';
+  - after the round, step 4 checks the guestbook's own heading in the frame rather than the stand-in's words, reads the fake's count until it answered once or for a minute (0 is recorded, not a failure), and takes the fake's port as the runtime plans it;
   - step 11 says whether Take over attached to the harness or found it unsupported (the fake adapter, said as such), then the Shell with `git status` and `npm test`, the editor's save and Give back;
   - "What the rehearsal replaced" says the live-harness path (Take over attached to Claude Code, then the Shell) is the real run's only;
   - the "Working" label after Give back is issue 233.
