@@ -48,6 +48,16 @@ test('[session] plan_go_minutes is the delay of a session plan\'s Go, when the s
   for (const wrong of ['soon', '0', '-5']) assert.throws(() => read(`[session]\nplan_go_minutes = ${wrong}\n`), (error: unknown) => error instanceof FlowConfigError && /plan_go_minutes/.test(error.message), wrong);
 });
 
+test('[session] service_urls and [merge] guarded_paths reach the settings when the service sets them (lane 23)', () => {
+  const read = (conf: string) => projectSettings(parseConf(`[merge]\nverdict = ok\n${conf}`));
+  assert.deepEqual(read('[session]\nservice_urls = filter-api:FILTER_URL, notes:NOTES_URL\n').serviceUrls, { 'filter-api': 'FILTER_URL', notes: 'NOTES_URL' });
+  assert.deepEqual(read('[merge]\nverdict = ok\nguarded_paths = deploy/, migrations/\n').guardedPaths, ['deploy/', 'migrations/']);
+  assert.equal('serviceUrls' in read(''), false);
+  assert.equal('guardedPaths' in read(''), false);
+  for (const wrong of ['filter-api', 'filter-api:filter_url', 'Filter:FILTER_URL', 'filter-api:PATH'])
+    assert.throws(() => read(`[session]\nservice_urls = ${wrong}\n`), (error: unknown) => error instanceof FlowConfigError && /service_urls/.test(error.message), wrong);
+});
+
 test('without a verdict phrase the project cannot pass a review', () => {
   assert.throws(() => projectSettings(parseConf('[merge]\ntooling_paths = x\n')), FlowConfigError);
 });
@@ -62,6 +72,7 @@ test('loadFlowConfig reads the environment and refuses what is missing or unsafe
   assert.equal(config?.maxReviewRounds, 2);
   assert.equal(config?.budgetUsd, undefined);
   assert.equal(config?.workdirRoot, '/state/work');
+  assert.equal(config?.steps, true, 'a ticket runs in steps (lane 23)');
   assert.equal(loadFlowConfig({ ...env, CLEARED_V2_BUDGET_USD: '7.5' })?.budgetUsd, 7.5);
   assert.equal(loadFlowConfig({}), undefined, 'not configured: the flow does not start');
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_BUDGET_USD: 'lots' }), FlowConfigError);
