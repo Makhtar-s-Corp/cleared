@@ -33,13 +33,6 @@ test('the module stubs are empty and assemble into the in-memory defaults', asyn
   await app.registry.approvalWriter.approve({ ticket: 'LOCAL-1', by: 'u1', requestedAt: '2026-10-21T10:00:00.000Z', heads: [{ pr: 3, head: 'abc' }] });
 });
 
-test('a module left out of the record assembles as an empty one', () => {
-  // A test that builds the record of the modules it needs (test/flow/modules.test.ts) keeps working when a module is added.
-  const { knowledge: _left, ...eight } = stubs;
-  const app = assemble(eight, deps);
-  assert.deepEqual([app.tables, app.routes], [[], []]);
-});
-
 const route = (method: Route['method'], path: string, name: string): Route => ({
   method,
   path,

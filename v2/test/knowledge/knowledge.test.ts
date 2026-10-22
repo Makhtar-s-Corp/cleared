@@ -11,6 +11,11 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { KnowledgeItem } from '../../src/api/types.ts';
 import { InboxStore, INBOX_TABLE } from '../../src/inbox/store.ts';
+import approvalModule from '../../src/modules/approval.ts';
+import { createKnowledgeModule } from '../../src/modules/knowledge.ts';
+import ticketsModule from '../../src/modules/tickets.ts';
+import usersModule from '../../src/modules/users.ts';
+import { applyTables, openStore } from '../../src/store/db.ts';
 import { KNOWLEDGE_TABLES } from '../../src/knowledge/store.ts';
 import { Knowledge, KnowledgeError, SKILL_HOUR, type KnowledgeDeps, type MemoryWrite } from '../../src/knowledge/service.ts';
 import { checkSkill, skillOfTicket } from '../../src/knowledge/skill.ts';
@@ -23,6 +28,7 @@ import { LESSON_HEADINGS, captureHandover, setHandoverSink } from '../../src/wor
 import { AGENTS_CONF, plantedKey, remote, tempDir } from '../workspace/git.ts';
 
 const SESSION = '7a1d3c5e-2b4f-4e6a-8c0d-1e2f3a4b5c6d';
+const LATER = '0b2e4d6f-8a1c-4e3b-9d5f-7a9c1e3b5d7f';
 const OWNER = { id: 'u1', name: 'owner' };
 const OTHER = { id: 'u2', name: 'someone' };
 const HANDOVER = ['## Done', 'The severity answer.', '## Tried and failed, and why', 'Nothing.', '## Left to do', 'The page.',
@@ -294,4 +300,56 @@ test('"Update the skill now" makes the ticket at once, even after the daily one;
   const comments = await t.tickets.comments(now);
   assert.match(comments.map((c) => c.body).join('\n'), /Asked by owner \("Update the skill now"\)/);
   assert.deepEqual(t.knowledge.queued('filter-api'), []);
+});
+
+test('a ticket\'s later handover does not propose again what an earlier one proposed, waiting or answered', async () => {
+  const t = await two({ write: async () => 'm1' });
+  const content = `${HANDOVER}${LESSON_HEADINGS.service}\n- Keep words.txt sorted.\n- The list is read once at start.\n`;
+  const first = t.knowledge.propose({ ticket: 'DEMO-8', sessionId: SESSION, content, service: 'filter-api' });
+  assert.equal(first.length, 2);
+  await t.knowledge.approve((first[0] as KnowledgeItem).id, OWNER);
+  // The author reopened after a review writes its handover again, with one lesson more.
+  const again = t.knowledge.propose({ ticket: 'DEMO-8', sessionId: LATER, content: `${content}- Words are matched whole.\n`, service: 'filter-api' });
+  assert.deepEqual(again.map((i) => i.text), ['Words are matched whole.']);
+  // The same lesson at another level, or from another ticket, is proposed.
+  assert.equal(t.knowledge.propose({ ticket: 'DEMO-8', sessionId: LATER, content: `${HANDOVER}${LESSON_HEADINGS.workspace}\nKeep words.txt sorted.\n` }).length, 1);
+  assert.equal(t.knowledge.propose({ ticket: 'DEMO-9', sessionId: LATER, content, service: 'filter-api' }).length, 2);
+});
+
+test('the configured module listens to the stored handovers and lets the owner of the settings approve', async () => {
+  const t = await two();
+  const conf = join(t.root, 'agents.conf');
+  writeFileSync(conf, `${AGENTS_CONF}[tracker]\nowner_id = owner\n`);
+  const env: NodeJS.ProcessEnv = {
+    HOME: join(t.root, 'home'), CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: t.guestbook,
+    CLEARED_V2_REPO_URL: 'https://example.invalid/guestbook.git', CLEARED_V2_REPO: 'example-org/cleared-example-guestbook',
+    CLEARED_V2_STATE_DIR: join(t.root, 'v2-state'), CLEARED_CONF: conf, CLEARED_STATE_DIR: t.state, ORCH_LEDGER: join(t.state, 'ledger.db'),
+  };
+  const store = openStore(':memory:');
+  applyTables(store.db, [INBOX_TABLE, ...KNOWLEDGE_TABLES, ...usersModule.tables, ...ticketsModule.tables, ...approvalModule.tables]);
+  const module = createKnowledgeModule({ env, intervalMs: 3_600_000 });
+  const logged: string[] = [];
+  const error = console.error;
+  console.error = (line: string) => { logged.push(line); };
+  try { assert.deepEqual(module.provide({ store }), {}); }
+  finally { console.error = error; }
+  const knowledge = module.knowledge();
+  assert.ok(knowledge);
+  try {
+    const dir = join(t.root, 'w-guestbook');
+    await ticketCheckout({ project: t.guestbook, workdir: dir, base: 'main', branch: 'cleared/DEMO-8' });
+    writeFileSync(join(dir, 'HANDOVER.md'), `${HANDOVER}${LESSON_HEADINGS.workspace}\nRun every service's tests before a release.\n`);
+    await captureHandover({ project: t.guestbook, env, workdir: dir, role: 'author', model: 'claude-opus-5-5', ticket: 'DEMO-8', sessionId: SESSION });
+    const [item, ...more] = new InboxStore(store.db).knowledge();
+    assert.ok(item);
+    assert.deepEqual(more, []);
+    assert.deepEqual([item.project, item.ticket, item.level, item.text], ['guestbook', 'DEMO-8', 'workspace', "Run every service's tests before a release."]);
+    await assert.rejects(knowledge.approve(item.id, OTHER), (e: unknown) => e instanceof KnowledgeError && e.kind === 'forbidden');
+    await knowledge.approve(item.id, OWNER);
+    assert.deepEqual(rows(ledgers(t).workspace).filter((r) => r.type === 'decision').map((r) => [r.content, r.status, r.source_who]),
+      [["Lesson: Run every service's tests before a release.", 'approved', 'human:owner']]);
+  } finally {
+    setHandoverSink(undefined);
+    knowledge.stop();
+  }
 });

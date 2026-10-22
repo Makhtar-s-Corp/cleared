@@ -103,10 +103,15 @@ export class Knowledge {
 
   // The knowledge items of a stored handover, added to the inbox; the
   // session's service is the store's, else the one its lessons were filed
-  // for, else the workspace's first.
+  // for, else the workspace's first. What a handover of the same ticket
+  // already proposed at the same level, waiting or answered, is not proposed
+  // again: an author reopened after a review writes its handover anew.
   propose(handover: CapturedHandover): KnowledgeItem[] {
     const proposals = proposalsOf(handover.content);
     if (proposals.length === 0) return [];
+    const key = (level: KnowledgeLevel, service: string | null, text: string) => JSON.stringify([level, service, text]);
+    const known = new Set([...this.#deps.inbox.knowledge({ ticket: handover.ticket }), ...this.#deps.inbox.knowledge({ ticket: handover.ticket, state: 'handled' })]
+      .map((item) => key(item.level, item.service, item.text)));
     const name = this.#deps.serviceOf?.(handover.sessionId) ?? handover.service ?? this.#deps.workspace.services[0]?.name;
     const own = name ? this.#service(name) : undefined;
     const contract = this.#contractOf(own);
@@ -117,10 +122,10 @@ export class Knowledge {
       if (level === 'service' && own) service = own.name;
       else if (level === 'contract' && contract) service = contract.name;
       else level = 'workspace';
-      const item = this.#deps.inbox.addKnowledge({
-        ticket: handover.ticket, project: this.#deps.workspace.id, sessionId: handover.sessionId,
-        text: this.#deps.clean(proposal.text), level, service,
-      });
+      const text = this.#deps.clean(proposal.text);
+      if (known.has(key(level, service, text))) continue;
+      known.add(key(level, service, text));
+      const item = this.#deps.inbox.addKnowledge({ ticket: handover.ticket, project: this.#deps.workspace.id, sessionId: handover.sessionId, text, level, service });
       this.#store.setKind(item.id, proposal.kind);
       items.push(item);
     }

@@ -124,16 +124,14 @@ export type App = {
 // each module's slots over the defaults. Two modules filling one slot, or
 // declaring one route, is a mistake of the lanes: it stops the service.
 // The modules' tables must exist before this runs (main.ts creates them).
-// A module left out of the record is an empty one, so a test that assembles
-// the modules it needs keeps working when a module is added.
-export function assemble(modules: Readonly<Partial<Record<ModuleName, Module>>>, deps: ModuleDeps): App {
+export function assemble(modules: Readonly<Record<ModuleName, Module>>, deps: ModuleDeps): App {
   const slots: Record<string, unknown> = { ...defaultRegistry() };
   const slotOwner = new Map<string, ModuleName>();
   const routeOwner = new Map<string, ModuleName>();
   const tables: string[] = [];
   const routes: Route[] = [];
   for (const name of MODULE_NAMES) {
-    const module = modules[name] ?? emptyModule;
+    const module = modules[name];
     tables.push(...module.tables);
     for (const route of module.routes) {
       const key = `${route.method} ${route.path}`;
