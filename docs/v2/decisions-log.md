@@ -2895,3 +2895,24 @@ The lane's choices:
 - **Checks on the merged head:** `npm test` (1224 node tests, 1216 pass and 8 skipped; 184 Vitest tests pass), `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
 - Pull request: 232, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-scripts-m2`.
+
+## 2026-10-22: the guestbook's heading in step 4 of the multi-service proof, and the rehearsal's stand-in in the counted form (the author's choices, lane v2-j2-proof-step4-heading)
+
+**Decision.** Step 4 reads the guestbook's heading with one matcher, `/^Guestbook\b/`, which takes the bare "Guestbook" and the counted "Guestbook (N entries)" (`v2/scripts/proof-guestbook-heading.ts`, with `guestbookHeading(n)` for the counted form). The rehearsal's stand-in prints the counted form for an empty guestbook, "Guestbook (0 entries)", so the rehearsal runs the format that the count (ticket 4) adds.
+
+**Consequences.**
+- Step 4 no longer fails on the counted heading. The old matcher `/^Guestbook$/` matched only the bare form.
+- The rehearsal now carries the counted heading, so an exact-match regression in step 4 would fail the rehearsal.
+- What the repository shows, which the run's failure does not confirm:
+  - At HEAD, `examples/guestbook/src/page.ts` prints a bare `<h1>Guestbook</h1>`.
+  - The counted form appears in the count demo's spec (`v2/scripts/proof-j1.ts`) and in ticket 4 of the rehearsal (`proof-rehearsal-multi.ts`). Ticket 4 runs after step 4, so the repository does not show which heading the failed run's guestbook carried. The matcher change covers both forms; the cause of the step 04 timeout is not confirmed.
+- Other text matches in `proof-j2-multi.ts` and `proof-j2.ts` were checked:
+  - `proof-j2-multi.ts`: "Rolled back, 2 of 2" (the app's card), "On branch|branch" (the real `git status` output in the terminal), and `src/page.ts` (the guestbook's page, `examples/guestbook/src/page.ts`). None is an exact match against an example page, so none changed.
+  - `proof-j2.ts`: "Recommended|Recommandé" and "Undo|Annuler" (the app's own labels). No example-page match.
+- The stand-in for the heading is the one place that changed in `proof-rehearsal-multi.ts`.
+
+**Checks.**
+- `npm test`: 1227 node tests, 1219 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), 0 fail; 184 Vitest tests pass.
+- `npm run typecheck` is green.
+
+**Author.** Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-proof-step4-heading`.

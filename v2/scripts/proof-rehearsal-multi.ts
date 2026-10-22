@@ -37,6 +37,7 @@ import { RELAY } from '../src/container/preview.ts';
 import type { FakeStep } from '../src/session/adapters/fake.ts';
 import type { RehearsalScript } from '../src/session/adapters/index.ts';
 import { END_TERMINAL, GIVE_PROGRAM, READ_PROGRAM, SHELL_COMMAND, TAKE_PROGRAM, WRITE_PROGRAM, terminalCommand } from '../src/terminal/container.ts';
+import { guestbookHeading } from './proof-guestbook-heading.ts';
 import { buildApp, freePort, listening, plannedAuthor, startBroker, writeGhStub } from './proof-rehearsal.ts';
 
 const V2 = fileURLToPath(new URL('../', import.meta.url));
@@ -313,7 +314,7 @@ function startTrial(options: { readonly ledger: string; readonly workdirs: strin
     }
     // The guestbook's page, which checks a sample entry with the filter, as the guestbook does before it stores one.
     const checked = fake.handle('POST', '/check');
-    const html = `<!doctype html><meta charset="utf-8"><title>Guestbook</title><h1>Guestbook</h1>
+    const html = `<!doctype html><meta charset="utf-8"><title>Guestbook</title><h1>${guestbookHeading(0)}</h1>
 <p>The trial environment of this session: the rehearsal's stand-in for the guestbook built from the ticket branch.</p>
 <p>A sample entry was checked by the filter API, a fake built from ${source}: it answered ${checked.status}, <code>${JSON.stringify(checked.body).replace(/[<>&]/g, '')}</code>.</p>`;
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html);
