@@ -34,11 +34,41 @@ export type StartInput = {
   readonly policy: Policy;                                 // section 5
   readonly prompt: string;                                 // the first user turn: the ticket and its criteria
   readonly services?: readonly ServiceSpec[];              // the project's test services, run beside the session
+  readonly tools?: readonly HostTool[];                    // milestone 2: the host's tools, the lead's (lead/contract.ts)
 };
 
 export type UserMessage = {
   readonly text: string;
-  readonly by: UserId;                                     // every message is attached to a user (brief 5.9)
+  // Every message is attached to a user (brief 5.9), or to the lead writing
+  // to a team, or to the flow itself ('cleared': the reopen message).
+  readonly by: UserId | 'lead' | 'cleared';
+};
+
+// The JSON Schema subset a host tool's input is written in: what the runner
+// can turn into the SDK's schema (milestone 2 plan, section 3.1). No other
+// keyword: no integer, no length or count bounds, no map type.
+export type JsonSchema =
+  | { readonly type: 'object'; readonly properties: Readonly<Record<string, JsonSchema>>; readonly required?: readonly string[]; readonly description?: string }
+  | { readonly type: 'array'; readonly items: JsonSchema; readonly description?: string }
+  | { readonly type: 'string'; readonly enum?: readonly string[]; readonly description?: string }
+  | { readonly type: 'number'; readonly description?: string }
+  | { readonly type: 'boolean'; readonly description?: string };
+
+// What a host tool's handler is told of the call.
+export type HostCallContext = { readonly sessionId: SessionId; readonly turn: string };
+
+// A tool the host gives a session: the model sees its name (as
+// mcp__cleared__<name>), its description and its schema; the runner relays
+// each call to the host, which runs `handle` and answers with its result
+// (text, or a value the host writes as JSON). A handler that refuses throws
+// HostToolRefused, whose message is the answer the model reads and the
+// `message` of the cleared.host_call event (outcome 'refused'); any other
+// error is outcome 'failed', and its message stays on the host.
+export type HostTool = {
+  readonly name: string;                                   // [a-z_]+
+  readonly description: string;
+  readonly inputSchema: JsonSchema & { readonly type: 'object' };
+  handle(input: unknown, context: HostCallContext): Promise<unknown>;
 };
 
 // What answers a permission request or a question. The first four are ACP's
@@ -85,4 +115,9 @@ export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 // What a later milestone brings, asked for too early.
 export class NotImplemented extends Error {
   override name = 'NotImplemented';
+}
+
+// A host tool's refusal: what the lead may not do, said to the model.
+export class HostToolRefused extends Error {
+  override name = 'HostToolRefused';
 }

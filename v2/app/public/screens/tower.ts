@@ -3,7 +3,7 @@
 // phrase, the lead and plans in their milestone 1 state, and what landed
 // today with its duration. towerModel and renderTower are pure, so the
 // tests run them without a browser; mount wires them to the service.
-import type { InboxItem, SessionSummary } from '../../../src/api/types.ts';
+import type { InboxItem, PlanItemInbox, SessionSummary } from '../../../src/api/types.ts';
 import type { Harness, Role } from '../../../src/session/contract.ts';
 import type { SessionPhase } from '../../../src/session/events.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
@@ -74,7 +74,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 // The catalog names a release's checks by colour.
 const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
-function need(item: InboxItem, now: Date): NeedCard {
+function need(item: Exclude<InboxItem, PlanItemInbox>, now: Date): NeedCard {
   const base = { kind: item.kind, id: item.id, ticket: item.ticket, minutes: minutesSince(item.since, now) };
   switch (item.kind) {
     case 'release': {
@@ -99,7 +99,8 @@ function need(item: InboxItem, now: Date): NeedCard {
 
 export function towerModel(data: TowerData, now: Date): TowerModel {
   const titles = new Map(data.tickets.map((ticket) => [ticket.id, ticket.title]));
-  const needs = data.inbox.filter((item) => item.state === 'waiting')
+  // A plan item (milestone 2) is the plan card of lane 9; until then it is not a need.
+  const needs = data.inbox.filter((item): item is Exclude<InboxItem, PlanItemInbox> => item.state === 'waiting' && item.kind !== 'plan')
     .map((item) => need(item, now))
     .sort((a, b) => b.minutes - a.minutes);
   const live = data.sessions.filter((s) => LIVE_PHASES.has(s.phase)).map((s): LiveCard => ({

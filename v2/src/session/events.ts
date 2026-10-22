@@ -35,6 +35,12 @@ export const CUSTOM_NAMES = [
   'cleared.answered',
   'cleared.review_verdict',
   'cleared.handover_captured',
+  // Milestone 2 (docs/v2/milestone-2-plan.md, section 3.1).
+  'cleared.host_call',
+  'cleared.context_usage',
+  'cleared.compacted',
+  'cleared.rate_limit',
+  'cleared.lead_refreshed',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -76,7 +82,11 @@ export type SessionState = {
   readonly files: readonly { readonly path: string; readonly added: number; readonly removed: number }[];
   readonly checks: readonly { readonly name: string; readonly state: 'pending' | 'passed' | 'failed' }[];
   readonly usage: Usage;
+  readonly context?: ContextShare;                         // milestone 2: the last measure of the session's context
 };
+
+// How much of its context window a session uses, as the harness measures it.
+export type ContextShare = { readonly percent: number; readonly totalTokens: number; readonly maxTokens: number };
 
 // RFC 6902, as AG-UI's STATE_DELTA carries it.
 export type JsonPatchOperation =
@@ -99,6 +109,19 @@ export type CustomValue = {
   'cleared.answered': { readonly requestId: string; readonly by: UserId };
   'cleared.review_verdict': { readonly session: SessionId; readonly verdict: 'pass' | 'changes_requested'; readonly round: number };
   'cleared.handover_captured': { readonly path: string };
+  // A call of a host tool (session/contract.ts, HostTool), its input cleaned.
+  // `message` is the refusal said to the model, or a generic line for a failure.
+  'cleared.host_call': { readonly toolCallId: string; readonly name: string; readonly input: unknown; readonly outcome: 'ok' | 'refused' | 'failed'; readonly message?: string };
+  // The harness's measure after a turn or a tool call: tokens in the
+  // context, the window (rawMaxTokens before the harness's own reserve), the
+  // share in percent, and where and whether the harness compacts on its own.
+  'cleared.context_usage': ContextShare & { readonly rawMaxTokens?: number; readonly autoCompactThreshold?: number; readonly isAutoCompactEnabled: boolean };
+  // The harness compacted its context on its own; recorded, never relied on.
+  'cleared.compacted': { readonly trigger: 'manual' | 'auto'; readonly preTokens: number; readonly postTokens?: number };
+  // A usage window the harness reports (the seven-day one is the week share).
+  'cleared.rate_limit': { readonly window: 'five_hour' | 'seven_day'; readonly usedPercent: number; readonly resetsAt: string | null };
+  // On the old generation's session: the lead goes on in a new one.
+  'cleared.lead_refreshed': { readonly generation: number; readonly reason: 'handover_point' | 'threshold' | 'restart' | 'failed'; readonly handoverId: string };
 };
 
 type Base = { readonly timestamp?: number };

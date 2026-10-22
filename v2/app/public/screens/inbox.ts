@@ -17,13 +17,18 @@
 // row of its own. What the inbox handles is a request settled without the
 // person while it was on screen: the answer route then says nothing waits,
 // and the screen says so instead of offering buttons that cannot work.
-import type { ApproveBody, InboxItem, PermissionItem, QuestionItem, ReleaseItem, SessionSummary } from '../../../src/api/types.ts';
+import type { ApproveBody, InboxItem as ServiceItem, PermissionItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../src/api/types.ts';
 import type { Decision } from '../../../src/session/contract.ts';
 import type { Question, ToolInput } from '../../../src/session/events.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import { esc } from '../html.ts';
 import type { Translate } from '../i18n.ts';
 import { ApiError, type ScreenContext } from '../screen.ts';
+
+// The kinds of milestone 1: the plan item of milestone 2 is lane 10's, and
+// until then the list leaves it out.
+type InboxItem = Exclude<ServiceItem, PlanItemInbox>;
+const listed = (item: ServiceItem): item is InboxItem => item.kind !== 'plan';
 
 // The local tracker's default name of the state a ticket is sent back to
 // (DEFAULT_STATES.todo of src/tickets/contract.ts, which the browser cannot
@@ -45,7 +50,7 @@ export type Local =
   | { readonly kind: 'settled' };                              // settled without the person
 
 export type InboxView = {
-  readonly items: readonly InboxItem[];
+  readonly items: readonly ServiceItem[];
   readonly tickets: readonly Ticket[];
   readonly sessions: readonly SessionSummary[];
   readonly selected: string | undefined;                       // the item the address names
@@ -64,7 +69,8 @@ const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
 // What waits, releases first, then permissions, then questions, each oldest
 // first; then what was handled, in the service's order (latest first).
-export function ordered(items: readonly InboxItem[]): { readonly waiting: InboxItem[]; readonly handled: InboxItem[] } {
+export function ordered(all: readonly ServiceItem[]): { readonly waiting: InboxItem[]; readonly handled: InboxItem[] } {
+  const items = all.filter(listed);
   const waiting = items.filter((item) => item.state === 'waiting')
     .sort((a, b) => RANK[a.kind] - RANK[b.kind] || Date.parse(a.since) - Date.parse(b.since));
   return { waiting, handled: items.filter((item) => item.state === 'handled') };
@@ -72,7 +78,7 @@ export function ordered(items: readonly InboxItem[]): { readonly waiting: InboxI
 
 // The item shown: the one the address names, else the first that waits.
 export function chosen(view: InboxView): InboxItem | undefined {
-  if (view.selected !== undefined) return view.items.find((item) => item.id === view.selected);
+  if (view.selected !== undefined) return view.items.filter(listed).find((item) => item.id === view.selected);
   const { waiting, handled } = ordered(view.items);
   return waiting[0] ?? handled[0];
 }
@@ -514,7 +520,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   const load = async () => {
     try {
       const [items, tickets, sessions] = await Promise.all([
-        api<InboxItem[]>('/inbox'), api<Ticket[]>('/tickets').catch(() => []), api<SessionSummary[]>('/sessions').catch(() => []),
+        api<ServiceItem[]>('/inbox'), api<Ticket[]>('/tickets').catch(() => []), api<SessionSummary[]>('/sessions').catch(() => []),
       ]);
       if (stopped) return;
       // A grace whose release is gone from the list ended elsewhere.

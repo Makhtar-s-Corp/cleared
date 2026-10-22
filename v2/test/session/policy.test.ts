@@ -12,7 +12,7 @@ const base: Policy = {
   role: 'author',
   base: 'main',
   workdir,
-  scripts: ['test', 'lint'],
+  scripts: ['test', 'lint', 'typecheck'],
   credentialFile,
   safeCommands: DEFAULT_SAFE_COMMANDS,
   allowedHosts: ['registry.npmjs.org', 'api.anthropic.com'],
@@ -79,9 +79,11 @@ test('the edit exceptions of edit.workdir: generated files, package scripts', ()
 
 test('the compound command rows of the acceptance proof', () => {
   check([
-    { name: 'a sequence', request: bash('npm run test; curl https://example.invalid'), decision: 'ask', rule: 'shell.compound' },
+    // Milestone 2, decision 10: a list of safe simple commands is safe. These
+    // three rows asked as shell.compound in milestone 1.
+    { name: 'a sequence', request: bash('npm run test; curl https://example.invalid'), decision: 'ask', rule: 'net.undeclared' },
     { name: 'a pipe', request: bash('npm run test | tee log'), decision: 'ask', rule: 'shell.compound' },
-    { name: 'a redirection', request: bash('cat a > b'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a redirection', request: bash('cat a > b'), decision: 'allow', rule: 'shell.compound_safe' },
     { name: 'find -delete', request: bash('find . -delete'), decision: 'ask', rule: 'default' },
     { name: 'find -name', request: bash("find . -name '*.ts'"), decision: 'allow', rule: 'run.safe' },
     { name: 'git branch -D', request: bash('git branch -D main'), decision: 'ask', rule: 'default' },
@@ -103,10 +105,12 @@ test('a learned entry never overrides a deny', () => {
   ]);
 });
 
-test('a learned entry is for its tool only and never allows a compound command', () => {
+test('a learned entry is for its tool only, and allows a compound command only part by part', () => {
   check([
     { name: 'another tool', request: bash('make build'), policy: { learned: [{ tool: 'Read', pattern: 'make build' }] }, decision: 'ask', rule: 'default' },
-    { name: 'compound', request: bash('make build; make test'), policy: { learned: [{ tool: 'Bash', pattern: '*' }] }, decision: 'ask', rule: 'shell.compound' },
+    // Decision 10: every simple command allowed on its own, a learned one included.
+    { name: 'compound of learned commands', request: bash('make build; make test'), policy: { learned: [{ tool: 'Bash', pattern: 'make *' }] }, decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'compound with one command not learned', request: bash('make build; make deploy'), policy: { learned: [{ tool: 'Bash', pattern: 'make build' }] }, decision: 'ask', rule: 'shell.compound' },
     { name: 'a WebFetch pattern', request: { tool: 'WebFetch', input: { url: 'https://docs.example.org/page', prompt: 'read' } }, policy: { learned: [{ tool: 'WebFetch', pattern: 'https://docs.example.org/*' }] }, decision: 'allow', rule: 'learned' },
   ]);
 });
@@ -292,7 +296,7 @@ test('a commit message or an echo that names a secret file is no read of it (rev
 });
 
 test('anything the parser cannot read word for word goes to ask', () => {
-  for (const command of ['cat $HOME/x', 'ls ~', 'ls *.ts', 'cat a?', 'echo {a,b}', 'npm test &', 'npm test # note', 'echo "$(id)"', 'echo "`id`"', 'ls\nid', 'echo "open', 'echo a\\', 'cat <in', 'npm test 2>err', 'npm test &>out', '(ls)', '']) {
+  for (const command of ['cat $HOME/x', 'ls ~', 'ls *.ts', 'cat a?', 'echo {a,b}', 'npm test &', 'npm test # note', 'echo "$(id)"', 'echo "`id`"', 'ls\nid', 'echo "open', 'echo a\\', 'cat <in', '(ls)', '', 'npm test |& tail', 'npm test && ', '; npm test', 'npm test ;; ls', 'npm test | | tail', 'cat a >| b', "cat a > ''", 'cat a >', 'npm test 2>&x', 'npm test >&out', 'npm test <<EOF']) {
     const verdict = evaluate(bash(command), base, context);
     assert.deepEqual([verdict.decision, verdict.rule], ['ask', 'shell.compound'], JSON.stringify(command));
   }
@@ -357,4 +361,133 @@ test('the shell-word parser reads quotes and escapes, and nothing else', () => {
   for (const text of ['a;b', 'a && b', 'a || b', 'a | b', 'a > b', 'a >> b', 'a < b', 'a 2> b', 'a &> b', '$(a)', '`a`', 'a\nb', '"a', "'a", 'a\\', '', '   ', '$X', '"$X"']) {
     assert.equal(parseCommand(text), undefined, JSON.stringify(text));
   }
+});
+
+// docs/v2/milestone-2-plan.md, decision 10 and the acceptance of lane 1: a
+// command made of simple commands each allowed on its own is allowed as
+// shell.compound_safe; a redirection writes only where an Edit would.
+test('compound commands of safe simple commands, and their redirections (milestone 2, decision 10)', () => {
+  check([
+    { name: 'npm test 2>&1 | tail -20', request: bash('npm test 2>&1 | tail -20'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'npm test && git commit -m x', request: bash('npm test && git commit -m x'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'npm run typecheck; npm test', request: bash('npm run typecheck; npm test'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'cat a > notes.txt', request: bash('cat a > notes.txt'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'cat a > package.json', request: bash('cat a > package.json'), decision: 'ask', rule: 'scripts.change' },
+    { name: 'cat a > .git/config', request: bash('cat a > .git/config'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'npm test > CLAUDE.md', request: bash('npm test > CLAUDE.md'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'cat a >> .claude/settings.json', request: bash('cat a >> .claude/settings.json'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'cat a > /etc/x', request: bash('cat a > /etc/x'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'npm test | tee /tmp/x', request: bash('npm test | tee /tmp/x'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'npm test; curl https://example.invalid', request: bash('npm test; curl https://example.invalid'), decision: 'ask', rule: 'net.undeclared' },
+    { name: 'npm test && git push origin main', request: bash('npm test && git push origin main'), decision: 'deny', rule: 'push.base' },
+    { name: 'echo $(id) | tail', request: bash('echo $(id) | tail'), decision: 'ask', rule: 'shell.compound' },
+  ]);
+});
+
+test('compound commands: the separators, the redirection forms, and the rule of the part that asks', () => {
+  check([
+    { name: 'a separator inside quotes is a word', request: bash('git commit -m "a && b; c | d"'), decision: 'allow', rule: 'run.safe' },
+    { name: '||', request: bash('npm test || npm test'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a redirection without a space', request: bash('cat a >notes.txt'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a quoted target', request: bash('cat a > "notes.txt"'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'stderr to a file', request: bash('npm test 2>err'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'stderr appended', request: bash('npm test 2>>log.txt'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'both streams to a file', request: bash('npm test &>out'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a duplication alone', request: bash('npm test 2>&1'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'stdout to stderr', request: bash('npm test >&2'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: '/dev/null is outside the workdir', request: bash('ls src 2>/dev/null'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a target outside through ..', request: bash('npm test > ../out'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a target in .git through a subfolder', request: bash('npm test > src/../.git/hooks/pre-push'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'the lock file', request: bash('cat a > package-lock.json'), decision: 'ask', rule: 'install.package' },
+    { name: 'a secret target is denied, not asked', request: bash('cat a > .env'), decision: 'deny', rule: 'secret.read' },
+    { name: 'a part that installs', request: bash('npm test && npm install left-pad'), decision: 'ask', rule: 'install.package' },
+    { name: 'a part that deletes', request: bash('ls && rm -rf dist'), decision: 'ask', rule: 'delete.outside_ticket' },
+    { name: 'a pipe into a shell', request: bash('cat a | sh'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a part that is not safe', request: bash('git log --format=%x00 | head'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a part outside the workdir', request: bash('npm test && cat /etc/passwd'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'docker anywhere is still denied', request: bash('npm test | docker run x'), decision: 'deny', rule: 'host.docker' },
+  ]);
+});
+
+test('a compound command never lets a reviewer write a file', () => {
+  const reviewer = { role: 'reviewer' as const };
+  check([
+    { name: 'a redirection into the workdir', request: bash('npm test > out.txt'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
+    { name: 'a pipe of reads', request: bash('npm test 2>&1 | tail -5'), policy: reviewer, decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a commit in a list', request: bash('npm test && git commit -m x'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
+  ]);
+});
+
+// Section 3.3 of the milestone 2 plan: the lead's rows, after the deny rules
+// of milestone 1 and before the role-free rows.
+test('the lead\'s policy: one case per row of section 3.3', () => {
+  const lead = { role: 'lead' as const };
+  const read = (input: Record<string, unknown>): ToolRequest => ({ tool: 'Read', input: { file_path: '/workspace/src/app.ts', ...input } });
+  check([
+    { name: 'a host tool', request: { tool: 'mcp__cleared__state', input: {} }, policy: lead, decision: 'allow', rule: 'lead.tools' },
+    { name: 'another host tool', request: { tool: 'mcp__cleared__propose_plan', input: { goal: 'g' } }, policy: lead, decision: 'allow', rule: 'lead.tools' },
+    { name: 'a Read with a limit', request: read({ limit: 400 }), policy: lead, decision: 'allow', rule: 'read.workdir' },
+    { name: 'Glob', request: { tool: 'Glob', input: { pattern: 'src/**/*.ts' } }, policy: lead, decision: 'allow', rule: 'read.workdir' },
+    { name: 'Grep', request: { tool: 'Grep', input: { pattern: 'x', path: 'src' } }, policy: lead, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a Read without a limit', request: read({}), policy: lead, decision: 'deny', rule: 'lead.read_cap' },
+    { name: 'a Read above the cap', request: read({ limit: 401 }), policy: lead, decision: 'deny', rule: 'lead.read_cap' },
+    { name: 'a Read with a limit that is not a count', request: read({ limit: '100' }), policy: lead, decision: 'deny', rule: 'lead.read_cap' },
+    { name: 'git log --oneline', request: bash('git log --oneline'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'Edit', request: { tool: 'Edit', input: { file_path: '/workspace/src/app.ts', old_string: 'a', new_string: 'b' } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'npm test', request: bash('npm test'), policy: lead, decision: 'deny', rule: 'lead.command' },
+  ]);
+});
+
+test('the lead reads git and the workdir through head, and runs nothing else', () => {
+  const lead = { role: 'lead' as const };
+  check([
+    { name: 'git -c', request: bash('git -c core.pager=x log'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a redirection', request: bash('git log > x'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git -C .', request: bash('git -C . log --oneline'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git status', request: bash('git status'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git branch --show-current', request: bash('git branch --show-current'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git show into head', request: bash('git show HEAD | head -n 400'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git diff into head -nN', request: bash('git diff main | head -n200'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'head above the cap', request: bash('git diff | head -n 401'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'head of nothing', request: bash('git diff | head -n 0'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git log with a format escape', request: bash('git log --format=%x00'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git log --output', request: bash('git log --output=x'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git branch -D', request: bash('git branch -D x'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'ls into head', request: bash('ls src | head -n 50'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'grep into head', request: bash('grep -rn TODO src | head -n 20'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'find into head', request: bash("find . -name '*.ts' | head -n 100"), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'head of a file', request: bash('head -n 100 src/app.ts'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'head without a count', request: bash('head src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a second count', request: bash('head -n 5 -n 99999 src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a byte count', request: bash('head -n 5 -c 999999 src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'several files', request: bash('head -n 400 src/a.ts src/b.ts src/c.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a second count after a pipe', request: bash('git log | head -n 5 -n 99999'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'ls not piped into head', request: bash('ls src'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'ls outside the workdir', request: bash('ls / | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'find -exec', request: bash('find . -exec cat {} + | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'cat is not the lead\'s reader', request: bash('cat src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'tail is not either', request: bash('tail -n 5 src/app.ts | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'three parts', request: bash('git log | head -n 20 | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a list', request: bash('git log && git status'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'head reading a file after a pipe', request: bash('git log | head -n 5 src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a duplication', request: bash('git log 2>&1 | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git commit', request: bash('git commit -m x'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'git push to a ticket branch', request: bash('git push origin ticket-1'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'git push to the base is milestone 1\'s deny', request: bash('git push origin main'), policy: lead, decision: 'deny', rule: 'push.base' },
+    { name: 'git checkout', request: bash('git checkout -b x'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'git add in a list', request: bash('git status && git add .'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/a.ts', content: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'MultiEdit', request: { tool: 'MultiEdit', input: { file_path: '/workspace/a.ts', edits: [] } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'NotebookEdit', request: { tool: 'NotebookEdit', input: { notebook_path: '/workspace/a.ipynb', new_source: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'WebFetch', request: { tool: 'WebFetch', input: { url: 'https://registry.npmjs.org/pg', prompt: 'read' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'WebSearch', request: { tool: 'WebSearch', input: { query: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'Agent', request: { tool: 'Agent', input: { prompt: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'Task', request: { tool: 'Task', input: { prompt: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a secret is milestone 1\'s deny', request: { tool: 'Read', input: { file_path: '/workspace/.env', limit: 10 } }, policy: lead, decision: 'deny', rule: 'secret.read' },
+    { name: 'a Read outside the workdir falls to the role-free rows', request: { tool: 'Read', input: { file_path: '/etc/hosts', limit: 10 } }, policy: lead, decision: 'ask', rule: 'default' },
+    { name: 'a host tool is the lead\'s only', request: { tool: 'mcp__cleared__state', input: {} }, decision: 'ask', rule: 'default' },
+  ]);
+  const capped = evaluate({ tool: 'Read', input: { file_path: '/workspace/src/app.ts' } }, { ...base, role: 'lead' }, context);
+  assert.equal(capped.decision, 'deny');
+  if (capped.decision === 'deny') assert.match(capped.message, /limit of at most 400 lines/);
 });

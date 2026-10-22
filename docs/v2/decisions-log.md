@@ -655,6 +655,78 @@ The choices the lane makes:
 - The plan is [milestone-2-plan.md](milestone-2-plan.md). Its lanes are authored by Opus 5.5 or Haiku 5.5 and reviewed by a different model, as the model rule says.
 - The decisions the plan takes (its section 2) are copied into this log, with their consequences, when the lane that implements each one lands.
 
+## 2026-10-22: the contracts of milestone 2 (lane 1)
+
+**Decision.** Lane `v2-j2-contracts` fixes what the other lanes of milestone 2 code against: `HostTool` and `StartInput.tools`, the new custom events and `SessionState.context`, the lead and plan API types and routes, the lead's tool contract (`src/lead/contract.ts`), the policy rows of decision 10 and of section 3.3, the `lead` and `notify` module slots (decision 14), the fake adapter's scripted lead, the lead fixture, and the empty `scripts/doctor-lead.ts`. The lane's choices:
+
+1. **Compound commands (decision 10).** `parseList` splits the text at `&&`, `||`, `;` and `|` outside quotes, and each part is read by milestone 1's `parseCommand`, unchanged.
+   - Output redirections are taken out of a part: `>`, `>>`, `N>`, `N>>`, `&>`, `&>>` with one word as the target, and the duplications `N>&M` (`2>&1`), which write no file.
+   - Still refused, so asked as `shell.compound`: a lone `&`, `|&`, `>|`, `>&file`, an empty part, an input redirection, a here-document, a newline, `$(`, a backtick.
+   - A target gets the verdict a `Write` of that path, without content, gets. Only `edit.workdir` keeps the command allowed. A deny stays a deny: a reviewer's redirection is `reviewer.edit`, `> .env` is `secret.read`. An ask keeps its own rule: `scripts.change` for `package.json`, `install.package` for the lock file. Any other target asks as `shell.compound`.
+   - `/dev/null` is outside the workdir, so `2>/dev/null` asks, as decision 10 says. Allowing it (writing there changes nothing, and it is common) is proposed to the owner in the pull request, not decided here.
+   - The first part that is not allowed gives the verdict. It keeps its rule when it has one of its own (`net.undeclared`, `install.package`, `delete.outside_ticket`). A part that only reaches `default` is reported as `shell.compound`, with a reason that names the part.
+   - A learned command counts as allowed on its own.
+   - Milestone 1 rows that changed, in `test/session/policy.test.ts`:
+     - `cat a > b` asked; it allows.
+     - `npm run test; curl https://example.invalid` asked as `shell.compound`; it asks as `net.undeclared`.
+     - `npm run test | tee log` still asks as `shell.compound`, and the reason names `tee`.
+     - `npm test 2>err` and `npm test &>out` left the parser-refusal list; they allow.
+     - "A learned entry never allows a compound command" became "allows it part by part".
+2. **The lead's rows (section 3.3)** run after milestone 1's denies and before the compound check. `shell.compound_safe` never applies to the lead.
+   - A git read (`git log *`, `git show *`, `git diff *`, `git status`, `git branch --show-current`, milestone 1's conditions on the words) may stand alone, as the acceptance's `git log --oneline` does, or be piped into `head`.
+   - `ls`, `grep` and `find` must be piped into `head`.
+   - `head -n N file` alone is allowed: head is the lead's reader and caps itself.
+   - `head` is `-n N` or `-nN`, with N from 1 to 400, and nothing else: a standalone head reads exactly one file, and the piped head reads none. A second count, a byte count or several files would lift the cap, so they deny.
+   - Any redirection, a duplication included, denies as `lead.command`.
+   - `git commit`, `push`, `checkout` or `add` anywhere in the text is `lead.edit`.
+   - A `Read` with a limit but outside the workdir goes on to the role-free rows: it asks as `default`.
+3. **Host tools.**
+   - The schema subset is the `JsonSchema` type of `session/contract.ts`: object (`properties`, `required`), array (`items`), string (`enum`), number and boolean, each with an optional `description`.
+   - A handler refuses by throwing `HostToolRefused`. Its message is the answer the model reads and the event's `message`. Any other error is `failed`, and the event carries a generic line, never the error.
+   - `answer_question.answers` is a list of `{ question, answer }`, since the subset has no map.
+   - The outputs are typed (`LeadToolOutput`).
+   - `bindLeadTools` joins handlers to the contract by name and cuts the answers of `state` (2 KB) and of `ticket`, `session` and `search_memory` (8 KB) with `capAnswer`. The cut is in UTF-8 bytes, on a character boundary, with a last line `[cleared: N bytes cut]`.
+   - `propose_plan.goal` is the id the goal turn gives the lead; lane 5 chooses its form.
+4. **Events.**
+   - `cleared.rate_limit.resetsAt` is an ISO time or null.
+   - `cleared.context_usage` carries an optional `rawMaxTokens`, which lane 4's doctor names.
+   - The fake's `STATE_DELTA` for the context is an `add` on `/context`.
+5. **API.**
+   - `PlanItemInbox` is in `InboxItem`, with `ticket` set to `LEAD_TICKET`.
+   - `LeadState` adds `highestPercent`, beyond section 7.1's list, because step 8 of the proof reads the highest share on the lead screen. Its `phase` is one of `starting`, `idle`, `working`, `refreshing` and `down`; `down` is the danger pill.
+   - `LeadMessage` carries an optional `question` (with its state), a `planId` and the `generation` of a refresh line.
+   - The lead stream has three frames, written by `leadFrame`. A `message` frame carries the thread seq as its id, which a reconnect sends back. A `state` frame and a `plan` frame carry the whole value and no id.
+   - `MILESTONE_2_ROUTES` lists the lead module's routes.
+   - `NotificationStatus` keeps v1's reasons without the passkey one (`off`, `insecure`, `no_subject`, `store`). The three notification routes are typed in `NotificationRoutes` and are not in `API_ROUTES`, since they are the app's own (lane 3).
+6. **The fake adapter** plays `hostCall`, `context` and `question` steps.
+   - Its `run` now awaits the host tools, so after `await start()`, `answer()` or `send()` every call is answered.
+   - An interrupt or a stop that comes while a host call is answered ends the turn there: the call writes nothing after it, and the next message starts the next turn.
+   - After a `context` step the fake yields once, so a reader sees the measure before the turn goes on and can interrupt it there, as lane 5's threshold does.
+   - A question is settled by `cleared.answered`, as the Claude Code mapper does.
+   - `exampleLeadScript` and `examplePlanInput` are the scripted lead of lanes 5, 7 and 11.
+7. **The lead fixture** (`app/fixtures/lead.ts`) plays that script into a store, with host tools that record what lanes 5 and 7 will store. The thread, the plan, the commitments and the context are read back from it.
+   - The share ends at 45 % (the acceptance), not the capture's 31 %.
+   - `totals.minutes` is 120, the critical path 1, 2, 3 with two at a time, as section 5.2 says; the capture's "2 h 15" is the sum.
+   - The estimates and week shares are the capture's numbers, with 23 samples.
+   - The content is the guestbook's, with the capture's shape: 2 after 1, 3 after 2, two fast lane items.
+   - A refresh line, the handover of generation 2 and one done commitment are seeded, so the memory panel has both states.
+   - The fixture source serves the lead's session by its id (detail and events). It is left out of `/api/sessions`, so the tower keeps its four sessions.
+
+**Consequences.**
+- **Edits outside the lane's files**, each the smallest the new types needed:
+  - `test/flow/api.test.ts` line 45: the flow does not declare `MILESTONE_2_ROUTES`.
+  - `test/flow/modules.test.ts` lines 32 and 38: eight module names.
+  - `app/public/screens/tower.ts`, `need()` and its filter: a plan item is no need until lane 9 draws the plan card.
+  - `app/public/screens/inbox.ts`: a local type and the `listed` filter leave plan items out of the list until lane 10.
+  - `app/fixtures/inbox.ts` line 194: the answer route matches permissions and questions only.
+- **Interface lane: no**, and the lane has no screen of its own. It did touch the tower and the inbox, so both were captured in fixtures mode at 1440, 1280, 768 and 390, light and dark, as `/tmp/cleared-captures/j2/{tower,inbox}-<width>-<theme>.png`. They render as before, without the plan item. The shell's inbox count (`app/public/app.ts`, lane 3's) counts every waiting item, so in fixtures mode it says 3 while the inbox lists 2. The count is right for milestone 2, since the plan waits for the owner; lane 10's list catches up with it.
+- **Open on the answer cap (section 4.1).** The policy does not cap a `Grep` in content mode or a git read that stands alone. Whether and where Claude Code cuts a command's output was not measured here. Lanes 4 and 5 measure it against the plan's margin of about 4 000 tokens per answer.
+- **Not done here.**
+  - Issue 145, item 4 (a tool id on a policy refusal's `cleared.permission_answered`) needs lane 4's mapper.
+  - Issue 132's lexical path checks apply to redirection targets too: a symlink in the workdir that points outside is not resolved.
+  - A learned entry recorded from a compound request keeps the whole text as its pattern, so it never matches a part. A whole-text match belongs to decision 11 (lane 2) if it is wanted.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-contracts`.
+
 ## 2026-10-22: the landing follow-through, the event bus and the policy per evaluation (milestone 2, lane 2)
 
 **Decision.** Lane `v2-j2-flow-landing` implements decisions 11 and 12 of the [milestone 2 plan](milestone-2-plan.md) in `v2/src/flow/` and `v2/src/session/adapters/index.ts`, with these choices made by the lane:
@@ -681,7 +753,7 @@ The choices the lane makes:
 
 **Consequences.**
 - `FlowConfig` gains `mergeRetryMs` (`CLEARED_V2_MERGE_RETRY_SECONDS`, a positive whole number, 60 by default). `FlowDeps.store` gains `db`: the flow reads v1's `events` and `releases` tables and the inbox's release items with its own read-only queries. A ledger without the v1 tables reads as "nothing happened yet".
-- **A new allow rule, `delete.ticket`, in `v2/src/session/policy.ts`** (lane 1's file, edited at the orchestrator's request after review round 1 of PR 161). An author's `rm` of files its ticket changed is allowed: plain `rm`, `-f` or `--force` and `--` at most, every operand inside the workdir and in `ticketFiles`. It comes after the deny rules, the safe commands and the learned answers. Anything else still asks: `-r` and every other option, a file the ticket did not change, one such file among ticket files, a path outside the workdir, a glob. A reviewer never gets it. The milestone 1 row "rm of a ticket file asks as default" in `v2/test/session/policy.test.ts` now expects `allow delete.ticket`, and an `rm -r` row was added.
+- **A new allow rule, `delete.ticket`, in `v2/src/session/policy.ts`** (lane 1's file, edited at the orchestrator's request after review round 1 of PR 161). An author's `rm` of files its ticket changed is allowed: plain `rm`, `-f` or `--force` and `--` at most, every operand inside the workdir and in `ticketFiles`. It comes after the deny rules, the safe commands and the learned answers, in the verdict of one simple command (`simple()`, lane 1's since the merge of its pull request 160), so a compound list whose every part is allowed on its own (decision 10) may hold it. Anything else still asks: `-r` and every other option, a file the ticket did not change, one such file among ticket files, a path outside the workdir, a glob. A reviewer never gets it. The milestone 1 row "rm of a ticket file asks as default" in `v2/test/session/policy.test.ts` now expects `allow delete.ticket`, and an `rm -r` row was added.
 - A ticket the milestone 1 proof landed within the last two days is read once by the first tick of the new service: its `watch` step and its `release_merged` and `release_landed` events are written then.
 - `ORCH_FROM_QUEUE` reaches merge-pr.sh only when the service calls the broker as the service account (`serve/release-broker.mjs` line 134, `allow_shared_uid`, as in milestone 1's lane 8 entry). Under another account merge-pr.sh writes v1's `merge-queue/` file again, which is harmless but unread: the proof checks the account.
 - The containers, networks and config volumes of the sessions a stopped service leaves behind are not removed by the recovery: the adapter's runtime (lane 4's files) owns them. Still open, as the inbox screen's entry says.
