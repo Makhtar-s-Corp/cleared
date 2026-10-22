@@ -131,8 +131,22 @@ function said(store: Store, id: string, fromSeq: number): string {
   return rows.map(({ event }) => (event.type === 'TEXT_MESSAGE_CONTENT' && assistant.has(event.messageId) ? event.delta : '')).join('');
 }
 
-async function turnEnds(store: Store, id: string, count: number): Promise<void> {
-  await until(`turn ${count} of ${id.slice(0, 8)} to end`, () => ended(store, id).length >= count || undefined, 240_000);
+// A turn's end, each request on the way allowed once, as the doctor does:
+// the author's Stop hook sends a turn without HANDOVER.md back once
+// (images/session/runner/hooks.ts), and the file is then written.
+async function turnEnds(store: Store, handle: SessionHandle, count: number): Promise<void> {
+  const id = handle.id;
+  const answered = new Set<string>();
+  await until(`turn ${count} of ${id.slice(0, 8)} to end`, async () => {
+    for (const { event } of store.events.after(id)) {
+      if (event.type !== 'CUSTOM' || event.name !== 'cleared.permission_request') continue;
+      const { requestId } = event.value as { requestId: string };
+      if (answered.has(requestId)) continue;
+      answered.add(requestId);
+      await handle.answer(requestId, { decision: { kind: 'allow_once' }, by: 'test' });
+    }
+    return ended(store, id).length >= count || undefined;
+  }, 240_000);
   const last = ended(store, id).at(-1)?.event;
   assert.equal(last?.type, 'RUN_FINISHED', `turn ${count} finished, not ${JSON.stringify(last).slice(0, 200)}`);
 }
@@ -160,8 +174,11 @@ const RESUMED = 'for p in /proc/[0-9]*; do tr "\\0" " " < $p/cmdline 2>/dev/null
 async function cleanUp(rig: Rig, handle: SessionHandle | undefined, id: string | undefined): Promise<void> {
   if (handle) await handle.stop().catch(() => undefined);
   if (!id) return;
-  assert.deepEqual(await rig.docker.containers(id), [], 'nothing with the session\'s label is left');
+  const left = await rig.docker.containers(id);
+  // What a failed stop left, removed by the session's label, so no run leaves a container behind.
+  if (left.length > 0) await rig.docker.removeSession(id);
   await removeSessionVolume(rig.docker, id);
+  assert.deepEqual(left, [], 'stop leaves nothing with the session\'s label');
 }
 
 // ---- the legs -------------------------------------------------------------------------------
@@ -212,13 +229,15 @@ async function harnessLeg(rig: Rig, handle: SessionHandle, id: string): Promise<
   assert.equal(again, handle, 'the same handle: the runner reloaded in its container');
   const from = rig.store.events.after(id).at(-1)?.seq ?? 0;
   await handle.send({ text: 'Which number did you give in your previous answer, the one the person at the terminal asked for? Reply with the number only.', by: 'cleared' });
-  await turnEnds(rig.store, id, turns + 1);
+  await turnEnds(rig.store, handle, turns + 1);
   assert.match(said(rig.store, id, from), /\b42\b/, 'the reloaded runner read what the human did with the harness');
 }
 
+// The author also writes the handover its Stop hook asks for; a reviewer cannot write.
+const HANDOVER = 'Write the file HANDOVER.md with these five headings and nothing under them: ## Done, ## Tried and failed, and why, ## Left to do, ## Where the artifacts are (screenshots, logs, branches), ## Open questions. Use no other tool.';
 async function start(rig: Rig, role: Role): Promise<{ handle: SessionHandle; id: string }> {
-  const handle = await rig.adapter.start(rig.input(role, 'Remember the word PLUM. Do not use any tool. Reply with the single word: ready.'));
-  await turnEnds(rig.store, handle.id, 1);
+  const handle = await rig.adapter.start(rig.input(role, `Remember the word PLUM. ${role === 'author' ? HANDOVER : 'Do not use any tool.'} Then reply with the single word: ready.`));
+  await turnEnds(rig.store, handle, 1);
   return { handle, id: handle.id };
 }
 

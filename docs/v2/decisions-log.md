@@ -2984,3 +2984,64 @@ The owner took three more decisions at the same time. They are recorded here as 
 
 - Pull request: 238, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.
+
+## 2026-10-22: Owner decision of 21:58: Take over attaches the real harness
+
+**Decision.** On 2026-10-22 at 21:58 (Europe/Paris), the owner asked for a lane outside the [milestone 2 plan](milestone-2-plan.md)'s lane list, as a follow-up of the request of 17:26 (pull request 230). In the real multi-service proof (step 11, ticket LOCAL-14, real Claude Code adapter), Take over said "Claude Code cannot be resumed here", with "The claude-code harness cannot be resumed in a terminal yet: open the Shell instead", so only the Shell worked. Take over must attach the web terminal to `claude --resume <session id>` inside the session's container with the real adapter, the login mounted read only. The lane also fixes step 11 of `v2/scripts/proof-j2-multi.ts` (wait for "On branch" after `git status` before `npm test`), looks into why the guestbook's `npm test` failed in the session's Shell, and adds an integration test on the real adapter's path. Give back must still exit cleanly.
+
+**Consequences.** The lane `v2-j2-takeover-real-harness` implements it and cites this entry. The requirements matrix records the decision as O18, and the author's choices as P47 and P48 (the entry below the next one).
+
+## 2026-10-22: Owner decision of 22:01: Take over works on the reviewer's session too
+
+**Decision.** On 2026-10-22 at 22:01 (Europe/Paris), the owner extended the scope of the lane above: Take over must also work on the reviewer's session, and on a session of any role of a ticket's flow (author, reviewer, integration), through the same adapter path. The real-adapter integration test covers the reviewer too.
+
+**Consequences.** This changes lane 20's rule (decision 30, pull request 212) that only an author's session is taken over. The requirements matrix records it as O19.
+
+## 2026-10-22: the runtime keeps the harness's interactive resume, Take over on the reviewer, and step 11 one line at a time (the author's choices, lane v2-j2-takeover-real-harness)
+
+**Decision.** The lane applies the owner's decisions of 21:58 and 22:01 (the two entries above). Its choices:
+
+1. **Why it said "cannot be resumed"** (`v2/src/flow/runtime.ts`).
+   - The sentence is `interactiveResume`'s for an adapter with no `interactive` method. The Claude Code adapter has one, but the registry never sees it: the sessions module gives the registry `runtime.adapters()`, and `withWorkspace` wrapped each adapter with `harness`, `start` and `resume` only.
+   - Pull request 230 did not see it: its tests put their adapter straight into the registry, and its labelled run called `createClaudeCodeAdapter` directly. Neither went through the runtime.
+   - **The fix:** the wrapper passes `interactive` through when the adapter has one (bound to it), and still changes only `start`.
+   - **What was checked and found right:** the session image in use (`cleared-v2-session:2.1.306`, built at 17:57) holds this branch's runner, byte for byte (the three files' hashes), so its `release` and `reload` are there; the session id is the transcript's (the runner's `sessionId`, then `resume`); `HOME` is `/tmp` and `CLAUDE_CONFIG_DIR` is the session's config volume, in the runner and in the terminal's `docker exec` alike (the container's environment); the cwd is `/workspace` for both, so `claude --resume` finds the transcript in the project folder Claude Code derives from it (`projects/-workspace/<id>.jsonl`), which the real-adapter test checks by its line count.
+   - **What the live service needs:** a restart, since the fix is in the service's process. No image rebuild.
+2. **Take over on the reviewer** (`v2/src/flow/{engine,takeover}.ts`, `v2/app/web/screens/session/tabs.ts`, `v2/app/fixtures/source.ts`).
+   - The engine takes over an author's or a reviewer's live session. A step's session (the contract's, a service's, the integration's) is an author's, so it was already covered; the lead's is not the flow's and is still refused.
+   - The reviewer's interrupted turn is no verdict: the engine leaves a paused session's end of turn alone, as lane 20 made it for the author.
+   - **Give back** puts a reviewer back in `reviewing` (an author in `working`, as before), and tells it `GIVEN_BACK_REVIEW`: carry on with the review and end it with the report and the verdict line its first message asked for. Its report is then read as any review's.
+   - **The screen** offers Take over on a reviewer's live session too (`takeoverOf`). The Editor stays read only there: lane 31's rule that a save is refused while the review runs is unchanged, and so is the screen's (`sessionOpen`, an author's).
+   - **What a human changes in a reviewer's terminal.** The reviewer works in the ticket's checkout, as the author does, so Give back finds those changes and journals them as `cleared.human_edit` on the reviewer's session, and tells the reviewer. The reviewer does not commit, so such a change is not on the branch until an author commits it, and the review's list of a human's edits (lane 23's call) reads the authors' sessions only. Said, not changed.
+3. **Step 11, one line at a time** (`v2/scripts/proof-terminal.ts`, new, and `proof-j2-multi.ts`).
+   - **What failed.** The real run typed `npm test` 1.5 s after `git status`, then looked for "On branch". The tests' output had scrolled it out of the 21-row terminal, so the wait timed out after 30 s.
+   - **Now** each line is typed once the one before has answered: the shell's prompt back on the terminal's last row, and "On branch" on the screen for `git status`.
+   - **The lines** are `git status`, `npm ci`, `npm test`. Only `git status` must answer. The step records what `npm ci` did (installed, failed) and what `npm test` said (node's `ℹ pass` and `ℹ fail` counts, or that some failed and the summary scrolled out, since node prints the failing tests after its summary). A red install or test is the author's work in progress, not the proof's.
+   - **The rehearsal's stand-in shell** says it installs nothing for `npm ci`, as it says it runs no test for `npm test`.
+4. **Why the guestbook's `npm test` failed in the Shell.**
+   - `DATABASE_URL` was set: the session container of LOCAL-14 had it from the postgres service (names of its environment read, no value).
+   - Both files failed at `1:1` because `pg` could not be imported: the ticket's checkout had no `node_modules`. Reproduced in a labelled container with no network (`Cannot find package 'pg' imported from /workspace/test/helpers/db.ts`).
+   - A fresh ticket checkout never has them. The guestbook's `.devcontainer/devcontainer.json` declares no install command, and the author had not run `npm ci` yet. The other failure on that screen, an assertion in a page test, was the author's change in progress.
+   - **The fix is the proof's,** which typed `npm test` in a checkout nobody had installed: step 11 types `npm ci` first. Cleared installs nothing on the host: an install runs the branch's scripts, which only the container may run.
+5. **The integration test on the real adapter** (`v2/test/terminal/real-harness.test.ts`, new).
+   - **Its path is the service's:** `createRuntime(...).adapters()` with the real Claude Code adapter, so the wrapper of choice 1 is in it. Then the real session container on a temporary clone of `examples/guestbook/` (a one-service workspace, the postgres service as the guestbook's `agents.conf` names it), the login mounted read only, the terminal's real program through `dockerContainer`, and Haiku 5.5 with a 0.5 USD budget per session.
+   - **For each role, author then reviewer:**
+     - the first turn ends;
+     - the transcript is where `claude --resume` looks (its line count only);
+     - `interactiveResume` answers Claude Code with `claude --resume` on the session's own id;
+     - the terminal shows the resumed conversation, and a line typed to the harness is answered by the model;
+     - the close takes less than 8 s and leaves no `claude --resume` process, and the transcript has grown;
+     - `resume()` returns the same handle, and the reloaded runner answers what the human asked the harness;
+     - nothing with the session's label is left after the stop, and the volume is removed.
+   - **The author's Shell:** `DATABASE_URL` is set and no login is in the shell's environment; `npm ci && npm test` installs and runs the guestbook's tests with no `Cannot find package 'pg'`.
+   - **The gate.** It spends a little quota and starts containers, so it runs only with `CLEARED_V2_REAL_HARNESS=1`, a login file (its path and mode checked, never read by the test), docker answering and the labelled session image. Every other `npm test` skips it, so other lanes on this server do not start sessions on the login. Every docker command goes through the wrapper, under the label rule.
+
+**Files.** The lane is not in the plan's lane list, so it names its own: `v2/src/flow/{runtime,engine,takeover}.ts`, `v2/app/web/screens/session/tabs.ts`, `v2/app/fixtures/source.ts`, `v2/scripts/{proof-j2-multi,proof-rehearsal-multi,proof-terminal}.ts`; the tests `v2/test/flow/{runtime-interactive,takeover}.test.ts`, `v2/test/scripts/proof-terminal.test.ts`, `v2/test/terminal/real-harness.test.ts`, `v2/app/test/session/{tabs,fixture-human}.test.ts`, `v2/app/web/test/session/tabs.test.tsx`; this log and `docs/v2/requirements-matrix.md`.
+
+**Tests first.** Commit `0d51b73` holds them alone. On `origin/v2` at `d0e5e0e`:
+- the runtime's test fails (the wrapper's methods are `resume` and `start`);
+- the reviewer's takeover answers 409 ("only an author's session is taken over");
+- `takeoverOf` refuses the reviewer;
+- `proof-terminal.ts` is missing;
+- the real-adapter test, run with its gate open, answers "The claude-code harness cannot be resumed in a terminal yet: open the Shell instead.", the real run's sentence.
+The fixture source's reviewer case (`fixture-human.test.ts`) was added after that commit; it failed on the old source with its 409 before the source changed.
