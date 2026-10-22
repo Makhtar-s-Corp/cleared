@@ -229,6 +229,18 @@ test('an image is found by its tag among the labelled images, with its working f
   assertLog(fake.calls);
 });
 
+test('a labelled image is removed by its tag; an unlabelled one never is', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'node:24-slim', labels: {} });
+  assert.equal(await docker.removeImage('cleared-v2-base-api:cafe0b1ec7ed'), true);
+  assert.equal(await docker.removeImage('node:24-slim'), false);
+  assert.equal(await docker.removeImage('cleared-v2-base-api:cafe0b1ec7ed'), false, 'already gone');
+  assert.deepEqual(fake.images.map((image) => image.name), ['node:24-slim']);
+  assertLog(fake.calls);
+});
+
 test('a session id that could be read as an option or a pattern is refused', async () => {
   for (const id of ['', '--all', 'a b', 'ABC', 'x'.repeat(65), '../etc', 'a=b']) assert.throws(() => assertSessionId(id), id);
   assert.doesNotThrow(() => assertSessionId(SESSION));

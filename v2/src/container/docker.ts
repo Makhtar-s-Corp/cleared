@@ -361,6 +361,14 @@ export class Docker {
     return (await this.imageRows(['--filter', LABEL_FILTER, '--filter', `reference=${tag}`]))[0];
   }
 
+  // Removes a labelled image by its tag: false when there is none.
+  async removeImage(tag: string): Promise<boolean> {
+    const row = await this.image(tag);
+    if (!row) return false;
+    await this.must(['image', 'rm', '--force', '--', row.id], new Set([row.id]));
+    return true;
+  }
+
   // The id of the session's container with this name, from a labelled list.
   private async owned(session: string, name: string): Promise<{ id: string; owned: ReadonlySet<string> }> {
     const row = (await this.containers(session)).find((c) => c.name === name || c.name === `/${name}`);
