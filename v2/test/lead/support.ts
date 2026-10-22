@@ -25,6 +25,10 @@ export const LEAD_CONFIG: LeadConfig = {
 export const context = (percent: number): FakeStep => ({
   context: { totalTokens: Math.round(percent * 2000), maxTokens: 200_000, rawMaxTokens: 200_000, percent, isAutoCompactEnabled: true },
 });
+// A measure in tokens, with the whole-number percent Claude Code reports.
+export const tokens = (totalTokens: number, maxTokens: number): FakeStep => ({
+  context: { totalTokens, maxTokens, rawMaxTokens: maxTokens, percent: Math.round(totalTokens / maxTokens * 100), isAutoCompactEnabled: true },
+});
 export const say = (id: string, text: string): FakeStep[] => [
   { emit: { type: 'TEXT_MESSAGE_START', messageId: id, role: 'assistant' } },
   { emit: { type: 'TEXT_MESSAGE_CONTENT', messageId: id, delta: text } },
@@ -38,7 +42,7 @@ const runFinished = (runId: string): FakeStep => ({
 
 // The turn the adapter plays at start (the generation's opening prompt),
 // with the share its briefing takes.
-export const opening = (percent = 8): FakeStep[] => [runStarted('opening'), context(percent), runFinished('opening')];
+export const opening = (measure: number | FakeStep = 8): FakeStep[] => [runStarted('opening'), typeof measure === 'number' ? context(measure) : measure, runFinished('opening')];
 // One turn: it waits for the next message, then plays its steps.
 export const turn = (runId: string, ...steps: (FakeStep | FakeStep[])[]): FakeStep[] => [{ awaitMessage: true }, runStarted(runId), ...steps.flat(), runFinished(runId)];
 // The answer to the handover request.
