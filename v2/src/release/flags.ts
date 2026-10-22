@@ -14,9 +14,10 @@
 //   The flags, each a chip with its files: schema (a file in a migration
 //   folder, or a .sql file), dependency (a line of a dependencies block of
 //   package.json, or a lock file), config (.github/, .cleared/ and the
-//   guarded paths given), secret_shape (an added line the guard would flag:
-//   named by its kind, never by its text), contract (a contract file given
-//   by the compatibility check), large (more than 400 lines added over the
+//   guarded paths given), secret_shape (an added line one of the guard's
+//   patterns flags, named by its kind, never by its text: a line the guard
+//   at publish let through), contract (a contract file given by the
+//   compatibility check), large (more than 400 lines added over the
 //   whole change). A chip is never a block: when a hunk of package.json
 //   does not show which block it is in, its lines are flagged.
 //
@@ -200,7 +201,7 @@ export function flags(input: FlagsInput): FlagsResult {
     if (contracts.has(path)) raise('contract', path, 'Changes a contract another service may consume.');
   }
   const secret = found.get('secret_shape');
-  if (secret) secret.detail = `Adds a line shaped like a secret (${[...secrets].sort().join(', ')}): the guard refuses to publish it.`;
+  if (secret) secret.detail = `Adds a line one of the guard's patterns flags (${[...secrets].sort().join(', ')}): read it before approving.`;
   if (added > LARGE_LINES) for (const file of files) if (file.added.length > 0) raise('large', file.path, `A large change: ${lines(added)} added, more than ${LARGE_LINES}.`);
   const order: readonly ReleaseFlagKind[] = ['schema', 'dependency', 'config', 'secret_shape', 'contract', 'large'];
   return {
