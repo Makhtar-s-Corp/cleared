@@ -3260,5 +3260,5 @@ The browser test itself, on the full Chromium build the CI installs and in CI mo
 
 **Checks.** On this server: `npm run typecheck`; `npm test` (1285 node tests: 1272 pass, 13 skipped, 0 fail; 184 Vitest tests pass); the browser job's eleven tests with `CLEARED_V2_PLAYWRIGHT` and the full Chromium build (11 pass, 0 skipped); `npm run guard -- --base origin/v2` (462 files, nothing refused); the capture script with `--via load` and `--via click`, 40 files each, no page error, no request off the origin, every file the same as its "before". French: the five screens drawn in fr show no marked key.
 
-- Pull request: against `v2`, its number in the next commit of the lane.
+- Pull request: 248, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-foundation`.
