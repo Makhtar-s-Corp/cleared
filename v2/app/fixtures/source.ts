@@ -176,7 +176,8 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       }
       if (await human.handle(request, response, { method, url, parts, user, taken })) return;
       if (method === 'POST' && sub === 'takeover' && parts.length === 3) {
-        if (session.role !== 'author') return sendJson(response, 409, { error: 'only an author\'s session is taken over' });
+        // An author's or a reviewer's, as the service (owner decision of 2026-10-22 22:01).
+        if (session.role !== 'author' && session.role !== 'reviewer') return sendJson(response, 409, { error: 'only an author\'s or a reviewer\'s session is taken over' });
         if (taken) return sendJson(response, 409, { error: `session ${id} is already taken over` });
         takenOver.set(id, { by: user, at: now().toISOString() });
         return sendJson(response, 200, { accepted: true, by: user });
