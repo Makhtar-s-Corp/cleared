@@ -1391,7 +1391,8 @@ export class FlowEngine {
     }
     if (event.type !== 'RUN_FINISHED') return;
 
-    const budget = this.config.budgetUsd;
+    // A schedule's plan gives its tickets the schedule's budget (lane 26).
+    const budget = this.#origins.get(session.ticket)?.budgetUsd ?? this.config.budgetUsd;
     const spent = this.#spent(session.ticket);
     if (budget !== undefined && spent > budget) {
       await this.#stopTicket(live, 'budget', `The ticket's budget of $${budget} is spent.`,
