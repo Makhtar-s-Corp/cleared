@@ -103,6 +103,13 @@ export class TrainStore {
     return this.get(item) as Train;
   }
 
+  // A ticket published again replaces its trains not over yet: they are
+  // halted, so the owner's approval of the new card never lands an older one.
+  haltActive(ticket: TicketId): void {
+    this.#db.prepare(`UPDATE release_trains SET state = 'halted', updated_at = ? WHERE ticket = ? AND state IN (${ACTIVE.map(() => '?').join(', ')})`)
+      .run(this.#now().toISOString(), ticket, ...ACTIVE);
+  }
+
   // The approval route keeps who approved a waiting train, and forgets it on Undo.
   setApprover(item: string, by: UserId | null): void {
     this.#db.prepare("UPDATE release_trains SET approver = ?, updated_at = ? WHERE item = ? AND state = 'waiting'").run(by, this.#now().toISOString(), item);

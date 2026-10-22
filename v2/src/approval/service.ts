@@ -283,7 +283,8 @@ export class TrainApprovals {
     try {
       const row = this.#options.db.prepare("SELECT 1 FROM flow_inbox WHERE id = ? AND state = 'waiting'").get(train.item);
       return row ? train : undefined;
-    } catch {
+    } catch (error) {
+      console.error(`cleared-v2: the release item of the train of ${ticket} could not be read (${error instanceof Error ? error.message : typeof error})`);
       return undefined;
     }
   }

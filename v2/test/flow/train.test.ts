@@ -368,3 +368,23 @@ test('a one-service ticket\'s session names no service of its own, and its JSON 
   assert.equal(detail && 'previewKey' in detail, false);
   await t.engine.close();
 });
+
+test('a ticket published again halts its older train: one approval never lands two trains', async () => {
+  const { t, ticket, calls, item, trains } = await train();
+  const first = item();
+  // Sent back from the inbox and started again before any tick saw it out of the validate state.
+  await t.tickets.move(ticket.id, 'Todo', { kind: 'human', id: 'u1' });
+  await t.engine.start(ticket.id, 'u1');
+  t.clock.now += 1000;
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.ticket === ticket.id && i.id !== first.id && i.state === 'waiting'), 'the second release item', 5000);
+  await t.engine.settled();
+  assert.equal(trains.get(first.id)?.state, 'halted', 'the older train is over');
+  const second = item();
+  trains.setApprover(second.id, 'u1');
+  t.clock.now += 60_000;
+  await t.tickets.recordApproval(ticket.id, { kind: 'human', id: 'u1' });
+  await tick(t, 1000);
+  await tick(t, 1000);
+  assert.deepEqual(calls.filter((c) => c.what === 'release').map((c) => c.service), ['filter-api'], 'the new train alone lands');
+  await t.engine.close();
+});

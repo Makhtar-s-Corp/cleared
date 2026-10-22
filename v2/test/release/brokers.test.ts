@@ -44,7 +44,7 @@ const ANNOUNCEMENT = 'Ticket LOCAL-1: Held for review\n\nAn entry the filter fla
 const said = (label: string, run: { status: number | null; stdout: string; stderr: string }) =>
   console.log(`[${label}] exit ${run.status}\n${run.stdout.trim()}\n${run.stderr.trim()}`.trim());
 
-test('two brokers on one shared ledger: each finds the ticket and its own review, the train lands them in order, and request_rollback is accepted from the service account but reads the ticket\'s newest release', { timeout: 120_000 }, async () => {
+test('two brokers on one shared ledger: each finds the ticket and its own review, the train lands them in order, and request_rollback from the service account reverts the provider\'s own merge after the consumer\'s', { timeout: 120_000 }, async () => {
   const provider = lockBox({ socket: true });                    // the filter API
   const consumer = lockBox({ socket: true });                    // the guestbook
   const ledger = join(provider.state, 'ledger.db');
@@ -175,20 +175,36 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     assert.doesNotMatch(none.message, /Only the configured human account|not an authorized/, 'the broker accepts the service account as its human account');
     assert.match(none.message, /No Cleared release recorded for LOCAL-1/, 'it reached lib/release.mjs rollback');
 
-    // The fake gh gives no merge commit, so no watch started. With the rows
-    // lib/release.mjs writes for the two merges, the guestbook's reverted by
-    // its own watch, the provider's request_rollback reads the ticket's
-    // newest row, on the shared ledger: the guestbook's. The lock as it is
-    // cannot roll the provider back after its consumer (the known gap the
-    // train reports as "could not be rolled back").
+    // The fake gh merges nothing on the forge, so no watch started. The
+    // merges are made on each repository's base as the forge would, and the
+    // rows lib/release.mjs writes for them are written: the filter API's,
+    // then the guestbook's, which its own watch reverted. On the shared
+    // ledger the ticket's newest row is the guestbook's; the filter API's
+    // broker reverts the filter API's own merge (lib/release.mjs ownRelease).
+    const mergeOnBase = (box: typeof provider): string => {
+      box.git(box.repo, 'checkout', '-q', 'main');
+      box.git(box.repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #7', 'cleared/LOCAL-1');
+      box.git(box.repo, 'push', '-q', 'origin', 'main');
+      return box.git(box.repo, 'rev-parse', 'HEAD').trim();
+    };
+    const providerMerge = mergeOnBase(provider);
+    const consumerMerge = mergeOnBase(consumer);
     const insert = db.prepare("INSERT INTO releases (ticket, pr, merge_sha, title, merged_at, status, rollback_sha, ended_at) VALUES (?, 7, ?, 'Held for review', ?, ?, ?, ?)");
-    insert.run(ticket.id, provider.head(), new Date(Date.now() - 1_200_000).toISOString(), 'complete', null, new Date(Date.now() - 300_000).toISOString());
-    insert.run(ticket.id, consumer.head(), new Date(Date.now() - 200_000).toISOString(), 'rolled_back', 'f'.repeat(40), new Date().toISOString());
+    insert.run(ticket.id, providerMerge, new Date(Date.now() - 1_200_000).toISOString(), 'complete', null, new Date(Date.now() - 300_000).toISOString());
+    insert.run(ticket.id, consumerMerge, new Date(Date.now() - 200_000).toISOString(), 'rolled_back', 'f'.repeat(40), new Date().toISOString());
     console.log(`[releases rows] ${JSON.stringify(db.prepare('SELECT ticket, pr, merge_sha, status, rollback_sha FROM releases ORDER BY id').all())}`);
     const rolled = await filterLock.rollback({ ticket: ticket.id });
     console.log(`[filter-api request_rollback, after the guestbook's own rollback] ${JSON.stringify(rolled)}`);
-    assert.equal(rolled.ok, false);
-    assert.match(rolled.message, /This release was already rolled back/, 'the provider\'s broker picked the guestbook\'s release');
+    assert.equal(rolled.ok, true, rolled.message);
+    assert.match(rolled.message, new RegExp(`Merge to revert: ${providerMerge}`), 'the filter API\'s own merge, not the ticket\'s newest row');
+    const reverted = db.prepare('SELECT merge_sha, status, rollback_sha FROM releases WHERE merge_sha = ?').get(providerMerge) as { status: string; rollback_sha: string | null };
+    console.log(`[the filter API's release after it] ${JSON.stringify(reverted)}`);
+    assert.ok(reverted.rollback_sha, 'its revert is recorded on its own row');
+    provider.git(provider.repo, 'fetch', '-q', 'origin', 'main');
+    assert.equal(provider.git(provider.repo, 'rev-parse', 'origin/main').trim(), reverted.rollback_sha, 'the revert is on the filter API\'s base');
+    assert.equal(provider.git(provider.repo, 'ls-tree', '--name-only', 'origin/main', 'src/check.ts').trim(), '', 'its change is undone');
+    consumer.git(consumer.repo, 'fetch', '-q', 'origin', 'main');
+    assert.equal(consumer.git(consumer.repo, 'rev-parse', 'origin/main').trim(), consumerMerge, 'the guestbook\'s base is untouched');
   } finally {
     for (const broker of brokers) await stop(broker);
     db.close();

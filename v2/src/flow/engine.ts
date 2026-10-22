@@ -1194,6 +1194,7 @@ export class FlowEngine {
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
       sessions: this.#releaseSessions(id, round), train: view({ ...train, item: '', approver: null }), groups: card.groups, flags: card.flags,
     }, reviewer.id);
+    this.#trains.haltActive(id);
     this.#trains.add({ ...train, item: item.id });
     this.#active.delete(id);
     this.#step(session, 'STEP_FINISHED', 'release');
