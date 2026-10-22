@@ -45,7 +45,7 @@ body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--tex
 ::selection { background: var(--select); }
 h1, h2, h3, p { margin: 0; }
 a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
-button, input { font: inherit; color: inherit; }
+button, input, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .muted { color: var(--text-muted); } .faint { color: var(--text-faint); } .small { font-size: 12px; }
 .id { font: 400 12px/1.4 var(--mono); color: var(--text-faint); white-space: nowrap; }
@@ -67,7 +67,7 @@ button, input { font: inherit; color: inherit; }
 .views span[aria-disabled] { color: var(--text-faint); cursor: default; }
 .count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--awaiting); color: var(--count-ink); font-size: 11px; font-weight: 600; }
 .count[hidden] { display: none; }
-.right { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.right { position: relative; margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; }
 .source-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 13px; border-radius: 999px; background: var(--awaiting-pill); color: var(--awaiting-text); font-weight: 500; box-shadow: 0 0 0 1px rgba(245,166,35,.45); white-space: nowrap; }
 .source-pill + .right { margin-left: 0; }
 .source-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--awaiting); flex: none; }
@@ -82,6 +82,19 @@ button, input { font: inherit; color: inherit; }
 .me summary { list-style: none; cursor: pointer; } .me summary::-webkit-details-marker { display: none; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--on-ink); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
 .menu { position: absolute; right: 0; top: 40px; min-width: 200px; padding: 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-card), 0 12px 32px -12px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 10px; }
+/* The notifications button: a bell, filled when this device is told; its menu hangs from the right of the header's group, so it stays on screen on a phone. */
+.notify summary { list-style: none; } .notify summary::-webkit-details-marker { display: none; }
+.notify svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.notify svg { width: 18px; height: 18px; }
+.notify.on summary, .notify[open] summary { color: var(--text); } .notify[open] summary { background: var(--tab-fill); } .notify.on svg path:first-child { fill: currentColor; }
+.notify .menu { width: 300px; max-width: calc(100vw - 32px); z-index: 1; }
+.notify .menu p { font-size: 13px; line-height: 1.45; text-wrap: pretty; }
+.notify-state { font-weight: 500; }
+.notify .menu .plain { min-height: 36px; }
+.notify .menu .primary { min-height: 36px; border: 0; border-radius: 8px; background: var(--ink); color: var(--on-ink); font-weight: 500; cursor: pointer; }
+.notify .menu .primary:hover { opacity: .88; }
+.notify .menu button:disabled { opacity: .5; cursor: default; }
+.notify-error { color: var(--danger-text); }
 .plain { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); cursor: pointer; }
 .plain:hover { background: var(--tab-fill); }
 
@@ -155,6 +168,13 @@ button, input { font: inherit; color: inherit; }
 .landed li { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; font-size: 13px; }
 .landed .time, .landed .took { color: var(--text-faint); }
 .landed .took { white-space: nowrap; }
+/* The lead's screen until lane 8 of milestone 2 fills it. */
+.lead-stub { display: flex; flex-direction: column; gap: 16px; max-width: 720px; padding: 32px 28px; }
+.lead-stub h1 { font-size: 24px; font-weight: 600; letter-spacing: -.035em; }
+.lead-stub .note { margin-bottom: 14px; }
+.lead-draft { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.lead-draft label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+.lead-draft textarea { padding: 10px 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: vertical; }
 .stub { padding: 40px 28px; display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
 .stub h1 { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
 
@@ -200,6 +220,12 @@ button, input { font: inherit; color: inherit; }
   .open { padding: 13px 0; margin: -13px 0; }
   .icon { width: 44px; height: 44px; }
   .stub { padding: 32px 16px; }
+  .lead-stub { padding: 20px 16px 32px; }
+  .notify .menu .primary, .notify .menu .plain { min-height: 44px; }
+  /* On a phone the menu spans the gutters, under the header's first row. */
+  .right, .notify { position: static; }
+  .notify .menu { left: 16px; right: 16px; top: 56px; width: auto; max-width: none; }
+  .me summary { width: 44px; height: 44px; border: 7px solid transparent; background-clip: padding-box; margin-right: -7px; }   /* a 30 px circle with a 44 px target */
 }
 @media (max-width: 479px) { .brand .name, .slash { display: none; } .source-pill { font-size: 12px; padding: 4px 10px; } }
 @media (prefers-reduced-motion: reduce) { .live { animation: none; } .need { transition: none; } }

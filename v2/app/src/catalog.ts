@@ -9,7 +9,7 @@ import type { Catalog } from '../public/i18n.ts';
 
 export const LANGUAGES = ['en', 'fr'] as const;
 export type Language = (typeof LANGUAGES)[number];
-export const SCREENS = ['shell', 'tower', 'session', 'inbox'] as const;
+export const SCREENS = ['shell', 'tower', 'session', 'inbox', 'lead'] as const;
 export type Screen = (typeof SCREENS)[number];
 export const MESSAGES_DIR = new URL('../messages/', import.meta.url).pathname;
 

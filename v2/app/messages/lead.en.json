@@ -1,0 +1,11 @@
+{
+  "lead_initial": "L",
+  "lead_heading": "Lead",
+  "lead_intro": "The lead plans the work from a goal and keeps the machine busy. Its screen is being built and the lead does not run yet.",
+  "lead_draft_goal": "Your goal",
+  "lead_draft_message": "Your message",
+  "lead_draft_kept": "Your text is kept here: copy it, and send it once the lead runs.",
+  "lead_plan": "Plan",
+  "lead_plan_later": "Plan {id} will show here once plans run.",
+  "lead_back": "Back to the tower"
+}

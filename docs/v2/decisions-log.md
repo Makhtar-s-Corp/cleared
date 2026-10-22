@@ -727,6 +727,60 @@ The choices the lane makes:
   - A learned entry recorded from a compound request keeps the whole text as its pattern, so it never matches a part. A whole-text match belongs to decision 11 (lane 2) if it is wanted.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-contracts`.
 
+## 2026-10-22: the app's notifications, the Plans tab and the lead stub (milestone 2, lane 3)
+
+**Decision.**
+1. **The routes.** `GET /api/notifications`, `POST /api/notifications/subscribe` and `POST /api/notifications/unsubscribe` are the app's own (`v2/app/src/notifications.ts`), not forwarded to the service.
+   - They need the password session. A write also needs the anti-forgery token and the app's origin, as every write does. There is no passkey (decisions log, "app login by password, no passkeys").
+   - The subscriptions go to `lib/notify/store.mjs`'s private directory, the one v1 used, through `notifyStore` and `validSubscription` unchanged. That gives the 0700 rule, the refusal of a looser directory, the ten devices with the oldest pushed out, and the known push hosts plus `CLEARED_NOTIFY_PUSH_HOSTS`.
+   - The status answers `{ available, reason, publicKey, devices }`. `reason` is `off`, `insecure`, `no_subject`, `config` or `store`; v1's `no_passkey` is gone.
+   - A device is stored as its user and platform only (`alex · iPhone`), never the full user agent.
+2. **The settings are v1's.** They are read through `notifySettings` of `lib/notify/contract.mjs`:
+   - `[notify] adapters`, `secrets_dir` and `vapid_subject`, from the project's `agents.conf` (`CLEARED_CONF`, else `<CLEARED_REPO>/.cleared/agents.conf`, parsed with `parseSections` of `v2/src/approval/conf.ts`);
+   - `CLEARED_NOTIFY_LINK_BASE` and `CLEARED_NOTIFY_PUSH_HOSTS`, from the app's environment.
+
+   `lib/notify` is loaded on the first request, not when the app starts. `lib/conf.mjs`, which `store.mjs` imports, copies every `CLEARED_*` variable to `ORCH_*` when it is imported, and the other lanes' app tests never touch a notification directory this way. The settings are read once: the app is restarted after a change.
+3. **Insecure** means the browser's address is neither `https` nor `http` on `127.0.0.1`, `localhost` or `[::1]`. The address is `CLEARED_V2_APP_ORIGIN` when the request names its host, else the app's own. A subscribe from such an address is refused with 409.
+4. **`v2/app/main.ts` is not edited.** It is not in the lane's files. `createAppHandler` builds the notifications from `process.env` when it is given none, and does so lazily.
+5. **The button** is a bell left of the clock, a `<details>` menu like the signed-in person's. It is hidden when the status cannot be read or the service sends no Web Push. Otherwise its menu says:
+   - the state for this device;
+   - how many devices are told;
+   - either the button that turns it on or off, or why there is none: iPhone or iPad outside the Home Screen, a browser without push, notifications blocked, an insecure address, no subject, unreadable settings, a refused directory.
+
+   The bell is filled when this device is on. The menu hangs from the right of the header's group, so it stays on screen at 390 px. Its view is a pure function (`notifyView`, `renderNotifyMenu` in `v2/app/public/notify.ts`), tested under Node. A failed confirmation notification on the device does not undo a subscription.
+6. **Installable.** `manifest.webmanifest`, `sw.js` and the three icons are served without a session, and every page links the manifest and the Apple icon. The icons are v1's (`app/public/icons/`), byte for byte. The worker is v1's, adapted: it shows what is pushed, opens only addresses of the app, and caches nothing. A `.png` is served only for those three names.
+7. **The guard** leaves out exactly `v2/app/public/icons/{icon-192,icon-512,apple-touch-icon}.png`, as it does the fonts, and says how many. A copy of an icon under another name (`icons/icon-193.png`) and one in `fonts/` were planted on 2026-10-22 and refused.
+8. **The Plans tab** comes after Tickets, as in the capture, and opens `/lead`. `/lead` and `/plans/<id>` mount the `lead` screen (`'lead'` added to `SCREENS` in `v2/app/src/catalog.ts`).
+9. **The lead stub.** It shows the lead card, a sentence saying the lead does not run yet, and the draft in a field the person can copy. It has no Send button, because nothing on it can send.
+10. **The tower bar.** New goal opens `/lead?goal=1&draft=<text>` and Ask the lead opens `/lead?draft=<text>`, with the bar's title, then its description when one is written, as the draft. The draft is cut at 2000 characters, so a long description cannot make the address exceed the server's header limit; the stub reads at most 2000. The two keys `later_goal` and `later_lead` are removed from `tower.{en,fr}.json`.
+
+**Consequences.**
+- **The headless check.** Headless Chromium 1243 and Chrome on this server refuse a push registration ("Registration failed - permission denied", even with the permission granted), checked on 2026-10-22. So `v2/app/test/notify/browser.test.ts` replaces the page's `PushManager` with an init script. The fake subscription points at `https://push.example.invalid/send/<uuid>`, with real-shaped keys, and is accepted only because the test sets `CLEARED_NOTIFY_PUSH_HOSTS=push.example.invalid`. The service worker, the permission and the button are the browser's own. The test runs only with `CLEARED_V2_PLAYWRIGHT` (the folder of an installed `playwright-core`) and optionally `CLEARED_V2_CHROME`; CI skips it.
+- **For lane 6.** No browser on this server holds a real push subscription, so `npm run notify -- test` cannot deliver to "the browser subscribed in lane 3's loopback check". Lane 6 can either:
+  - post to a fake push endpoint it serves itself; `pushHostAllowed` refuses a port, so that needs `https` on 443, which is not allowed here, or a test transport injected into `webpushAdapter`;
+  - or wait for the owner's own browser over the https address of plan question 2.
+- **Two readers of `[notify]`.** The app reads `[notify]` from the working tree's `agents.conf`, as the approval does. The plan has lane 6's dispatcher read it at the base branch. If the two differ on `secrets_dir` or `vapid_subject`, the app and the dispatcher would use different stores or subjects. Lane 6 should read the same file, or say which one wins.
+- **Edits outside the plan's file list but inside the wave's folders:**
+  - `v2/app/src/catalog.ts`: `'lead'` in `SCREENS`, without which `/messages/lead.json` answers 404 and the catalog test fails;
+  - `v2/app/public/style.css`: the bell, its menu and the stub.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the header at 1440 and 390 in both themes. Taken:
+  - the avatar's target is 44 px on a phone, with its circle kept at 30 px through a transparent border;
+  - on a phone, the menu spans the 16 px gutters under the header's first row;
+  - an 18 px bell, so the filled "on" state reads;
+  - both menu buttons are 36 px on a computer;
+  - an open state on the bell;
+  - `text-wrap: pretty` in the menu.
+
+  Not taken:
+  - A static header on the phone, and hiding the clock there: both are milestone 1's shell, and the clock's place is the capture's.
+  - Scroll padding on the tab strip: the strip is milestone 1's, and lane 9 adds to the header next.
+  - The menu's radius and shadow: they are the existing `.menu` of the signed-in person's menu, kept the same.
+  - Renaming the stub's heading "Plans": the screen is the lead and plan screen, and lane 8 owns its words.
+- **Captures** are in `/tmp/cleared-captures/j2/`, none committed:
+  - the tower, the lead stub and a plan page at 1440, 1280, 768 and 390, light and dark, with no horizontal overflow;
+  - the menu off, on, and with the iPhone note.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-app-shell-notify`.
+
 ## 2026-10-22: the landing follow-through, the event bus and the policy per evaluation (milestone 2, lane 2)
 
 **Decision.** Lane `v2-j2-flow-landing` implements decisions 11 and 12 of the [milestone 2 plan](milestone-2-plan.md) in `v2/src/flow/` and `v2/src/session/adapters/index.ts`, with these choices made by the lane:
