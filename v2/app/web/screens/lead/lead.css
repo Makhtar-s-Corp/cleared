@@ -1,5 +1,5 @@
-/* The lead and plan screen (lead-and-plan.png). Loaded by the screen itself,
-   on top of ../style.css: same tokens, flat colours, nothing inline. The
+/* The lead and plan screen (lead-and-plan.png). Loaded with the screen's chunk,
+   on top of styles/app.css: same tokens, flat colours, nothing inline. The
    plan panel's rules (.plan-*, .lane, .item-state) are not scoped, so the
    inbox can show the same panel with this sheet (lane 10); every other rule
    is under .lead-screen, so it cannot reach the inbox's own classes. */

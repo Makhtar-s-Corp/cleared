@@ -3,6 +3,11 @@
 // /api/service/*, handed to the data source (proxy.ts) for the signed-in
 // user. It holds no key and signs nothing (plan, section 7).
 //
+// The pages are React, bundled by Vite into dist/ (npm run build): the
+// server writes each page's HTML (its language, title and screen, the
+// bundle's file names from dist/.vite/manifest.json) and serves dist/ as
+// files. The service and this server are not built: Node runs them.
+//
 // Every write needs the session cookie, the session's anti-forgery token in
 // X-CSRF-Token, an Origin equal to the app's own address (or
 // CLEARED_V2_APP_ORIGIN) and, when the browser sends it,
@@ -15,15 +20,15 @@
 // a browser of the signed-in person asks to be told, with the same checks
 // as any write. The manifest, the service worker and the icons are served
 // without a session, so the app can be added to a Home Screen.
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { stripTypeScriptTypes } from 'node:module';
 import { extname, join } from 'node:path';
 import type { User } from '../../src/modules/registry.ts';
 import { sameProof } from '../../src/modules/users.ts';
 import { requestPath } from '../../src/server.ts';
 import type { UserId } from '../../src/session/contract.ts';
-import { translator, type Translate } from '../public/i18n.ts';
+import { translator, type Translate } from '../web/lib/i18n.ts';
 import { isScreen, loadCatalog, type Language, type Screen } from './catalog.ts';
 import { deviceName, notificationsFrom, NotifyError, type Notifications } from './notifications.ts';
 import { sendJson, type DataSource } from './proxy.ts';
@@ -38,11 +43,11 @@ export type AppOptions = {
   readonly language: Language;
   readonly project: string;
   readonly publicOrigin?: string | undefined;
-  readonly publicDir?: string;
+  readonly distDir?: string;                         // default: app/dist, Vite's build
   readonly notifications?: Notifications;            // default: from the environment, read on first use
 };
 
-export const PUBLIC_DIR = new URL('../public/', import.meta.url).pathname;
+export const DIST_DIR = new URL('../dist/', import.meta.url).pathname;
 
 const SECURITY_HEADERS = {
   'content-security-policy': "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
@@ -53,10 +58,9 @@ const SECURITY_HEADERS = {
 
 const TYPES: Readonly<Record<string, string>> = {
   '.css': 'text/css; charset=utf-8',
-  '.ts': 'text/javascript; charset=utf-8',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',             // the service worker, which a browser registers by its own address
+  '.js': 'text/javascript; charset=utf-8',             // the bundle, the theme script and the service worker
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
@@ -74,9 +78,48 @@ const PAGES: readonly { readonly path: RegExp; readonly screen: Exclude<Screen, 
 
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-const LOGO = '<svg class="logo" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z"/></svg>';
+// What a page needs from Vite's build: the entry's script and sheet, and
+// each screen's chunk with its sheet, preloaded on that screen's page.
+export type Bundle = {
+  readonly script: string;
+  readonly styles: readonly string[];
+  readonly screens: Readonly<Record<string, { readonly script: string; readonly styles: readonly string[] }>>;
+};
 
-function head(language: Language, title: string): string {
+type ManifestChunk = { readonly file: string; readonly css?: readonly string[]; readonly imports?: readonly string[]; readonly isEntry?: boolean; readonly src?: string };
+
+export class BuildMissing extends Error {
+  override name = 'BuildMissing';
+}
+
+export function readBundle(distDir: string = DIST_DIR): Bundle {
+  let manifest: Record<string, ManifestChunk>;
+  try {
+    manifest = JSON.parse(readFileSync(join(distDir, '.vite', 'manifest.json'), 'utf8')) as Record<string, ManifestChunk>;
+  } catch {
+    throw new BuildMissing(`the web app is not built: run npm run build in v2/ (no ${join(distDir, '.vite', 'manifest.json')})`);
+  }
+  const entry = Object.values(manifest).find((chunk) => chunk.isEntry);
+  if (!entry) throw new BuildMissing('the web app\'s build has no entry: run npm run build in v2/');
+  // A chunk's sheets in the order the cascade needs: the chunks it imports
+  // first (the lead's sheet, which the inbox adapts), then its own.
+  const sheets = (chunk: ManifestChunk, seen: Set<ManifestChunk> = new Set()): string[] => {
+    if (seen.has(chunk)) return [];
+    seen.add(chunk);
+    const imported = (chunk.imports ?? []).flatMap((key) => { const next = manifest[key]; return next && !next.isEntry ? sheets(next, seen) : []; });
+    return [...imported, ...(chunk.css ?? []).map((file) => `/${file}`)];
+  };
+  const screens: Record<string, { script: string; styles: readonly string[] }> = {};
+  for (const chunk of Object.values(manifest)) {
+    const screen = /^screens\/([a-z]+)\/[A-Z]/.exec(chunk.src ?? '')?.[1];
+    if (screen) screens[screen] = { script: `/${chunk.file}`, styles: [...new Set(sheets(chunk))] };
+  }
+  return { script: `/${entry.file}`, styles: (entry.css ?? []).map((file) => `/${file}`), screens };
+}
+
+function head(language: Language, title: string, bundle: Bundle, screen?: string): string {
+  const own = screen ? bundle.screens[screen] : undefined;
+  const sheets = [...bundle.styles, ...(own?.styles ?? [])].map((href) => `<link rel="stylesheet" href="${escape(href)}">`).join('\n');
   return `<!doctype html>
 <html lang="${language}">
 <head>
@@ -86,70 +129,31 @@ function head(language: Language, title: string): string {
 <meta name="theme-color" content="#FAFAFA">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/style.css">
-<script src="/theme.ts"></script>
+${sheets}
+<script src="/theme.js"></script>
+<script type="module" src="${escape(bundle.script)}"></script>${own ? `\n<link rel="modulepreload" href="${escape(own.script)}">` : ''}
 </head>`;
 }
 
-export function loginPage(t: Translate, language: Language, message?: string): string {
-  return `${head(language, t('login_title'))}
-<body class="login-page">
-<main class="login">
-<div class="login-brand">${LOGO}<span class="name">${escape(t('app_name'))}</span></div>
-<form class="login-card" method="post" action="/login">
-<h1>${escape(t('login_title'))}</h1>
-${message ? `<p class="login-error" role="alert">${escape(message)}</p>` : ''}
-<label for="name">${escape(t('login_name'))}</label>
-<input id="name" name="name" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="32" autofocus>
-<label for="password">${escape(t('login_phrase'))}</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024">
-<button class="primary" type="submit">${escape(t('login_submit'))}</button>
-</form>
-</main>
+// The sign-in page: the form is drawn by the bundle (web/shell/Login.tsx)
+// and posts here. The server's sentence (a wrong password, the throttle, a
+// form from elsewhere) rides on the body, since the page runs no inline script.
+export function loginPage(t: Translate, language: Language, bundle: Bundle, message?: string): string {
+  return `${head(language, t('login_title'), bundle)}
+<body class="login-page" data-screen="login"${message ? ` data-error="${escape(message)}"` : ''}>
+<div id="root"></div>
 </body>
 </html>
 `;
 }
 
-export function shellPage(t: Translate, language: Language, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind'] }): string {
-  const tab = (screen: Exclude<Screen, 'shell'>, href: string, label: string, extra = '') =>
-    `<a href="${href}"${options.screen === screen ? ' aria-current="page"' : ''}>${escape(label)}${extra}</a>`;
-  const initial = options.user.name.slice(0, 1).toUpperCase();
-  return `${head(language, `${t('app_name')} · ${t(`title_${options.screen}`)}`)}
-<body data-screen="${options.screen}" data-source="${options.source}">
-<a class="skip" href="#screen">${escape(t('skip_to_content'))}</a>
-<header class="top">
-<div class="bar">
-<a class="brand" href="/">${LOGO}<span class="name">${escape(t('app_name'))}</span></a>
-${options.project ? `<span class="slash" aria-hidden="true">/</span><span class="project">${escape(options.project)}</span>` : ''}
-<nav class="views" aria-label="${escape(t('nav_label'))}">
-${tab('tower', '/', t('nav_tower'))}
-${tab('inbox', '/inbox', t('nav_inbox'), `<span class="count" id="inbox-count" hidden></span>`)}
-${tab('session', '/sessions', t('nav_sessions'))}
-<span aria-disabled="true" title="${escape(t('nav_tickets_later'))}">${escape(t('nav_tickets'))}</span>
-${tab('lead', '/lead', t('nav_plans'))}
-</nav>
-${options.source === 'fixtures' ? `<span class="source-pill">${escape(t('source_fixtures'))}</span>` : ''}
-<div class="right">
-<a class="lead-pill" id="lead-pill" href="/lead" hidden>${escape(t('lead_pill'))}</a>
-<details class="notify" id="notify" hidden>
-<summary class="icon" id="notify-summary" aria-label="${escape(t('notify_label'))}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></summary>
-<div class="menu" id="notify-menu"></div>
-</details>
-<time class="clock" id="clock"></time>
-<button class="icon theme" id="theme" type="button" aria-label="${escape(t('theme_dark'))}" data-dark="${escape(t('theme_dark'))}" data-light="${escape(t('theme_light'))}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path class="moon" d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/><circle class="sun" cx="12" cy="12" r="4.5"/><path class="sun" d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1"/></svg></button>
-<details class="me">
-<summary class="avatar" aria-label="${escape(t('signed_in_as', { name: options.user.name }))}">${escape(initial)}</summary>
-<div class="menu">
-<p>${escape(t('signed_in_as', { name: options.user.name }))}</p>
-<button class="plain" id="sign-out" type="button">${escape(t('sign_out'))}</button>
-</div>
-</details>
-</div>
-</div>
-</header>
-<main id="screen" class="screen"></main>
-<script type="module" src="/app.ts"></script>
+// A screen's page: the shell and the screen are drawn by the bundle
+// (web/shell/App.tsx); the body says which screen, and what the header
+// shows before /api/me answers.
+export function shellPage(t: Translate, language: Language, bundle: Bundle, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind'] }): string {
+  return `${head(language, `${t('app_name')} · ${t(`title_${options.screen}`)}`, bundle, options.screen)}
+<body data-screen="${options.screen}" data-source="${options.source}" data-project="${escape(options.project)}" data-user="${escape(options.user.name)}">
+<div id="root"></div>
 </body>
 </html>
 `;
@@ -172,9 +176,11 @@ function readBody(request: IncomingMessage, limit: number): Promise<string | und
 }
 
 export function createAppHandler(options: AppOptions): (request: IncomingMessage, response: ServerResponse) => void {
-  const publicDir = options.publicDir ?? PUBLIC_DIR;
+  const distDir = options.distDir ?? DIST_DIR;
   const shellT = translator(loadCatalog('shell', options.language));
-  const stripped = new Map<string, string>();
+  // Read once, at the first page: a server started before the build says so on every page.
+  let bundle: Bundle | undefined;
+  const built = (): Bundle => (bundle ??= readBundle(distDir));
 
   const send = (response: ServerResponse, status: number, body: string, type = 'text/html; charset=utf-8', headers: Record<string, string> = {}) => {
     response.writeHead(status, { 'content-type': type, 'content-length': String(Buffer.byteLength(body)), 'cache-control': 'no-store', ...headers });
@@ -250,7 +256,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   }
 
   async function signIn(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!sameOrigin(request)) return send(response, 403, loginPage(shellT, options.language, shellT('login_refused')));
+    if (!sameOrigin(request)) return send(response, 403, loginPage(shellT, options.language, built(), shellT('login_refused')));
     const body = await readBody(request, 4096);
     const form = new URLSearchParams(body ?? '');
     const name = (form.get('name') ?? '').trim();
@@ -260,35 +266,31 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     const attempt = options.throttle.start(peer, name);
     if (attempt.succeeded === undefined) {
       const minutes = Math.max(1, Math.ceil(attempt.wait / 60));
-      return send(response, 429, loginPage(shellT, options.language, shellT('login_throttled', { minutes })), undefined, { 'retry-after': String(attempt.wait) });
+      return send(response, 429, loginPage(shellT, options.language, built(), shellT('login_throttled', { minutes })), undefined, { 'retry-after': String(attempt.wait) });
     }
     const user = body === undefined ? undefined : await options.users.verify(name, password);
-    if (!user) return send(response, 401, loginPage(shellT, options.language, shellT('login_wrong')));
+    if (!user) return send(response, 401, loginPage(shellT, options.language, built(), shellT('login_wrong')));
     attempt.succeeded();
     const made = options.sessions.create(user.id);
     redirect(response, '/', { 'set-cookie': sessionCookie(made.id) });
   }
 
+  // dist/ as files: Vite's hashed assets under /assets/ (kept a year: a
+  // new build has new names), and app/public/ as Vite copied it.
   async function serveFile(request: IncomingMessage, response: ServerResponse, path: string): Promise<boolean> {
     const parts = path.split('/').slice(1);
     if (parts.length === 0 || parts.length > 2 || !parts.every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part))) return false;
     const type = TYPES[extname(path)];
     if (!type || (type === 'image/png' && !ICONS.test(path))) return false;
-    let body: Buffer | string;
+    let body: Buffer;
     try {
-      const file = join(publicDir, ...parts);
-      if (extname(path) === '.ts') {
-        let code = stripped.get(file);
-        if (code === undefined) {
-          code = stripTypeScriptTypes(await readFile(file, 'utf8'));
-          stripped.set(file, code);
-        }
-        body = code;
-      } else body = await readFile(file);
+      body = await readFile(join(distDir, ...parts));
     } catch {
       return false;
     }
-    response.writeHead(200, { 'content-type': type, 'content-length': String(Buffer.byteLength(body)), 'cache-control': type === 'font/woff2' || type === 'image/png' ? 'public, max-age=86400' : 'no-cache' });
+    const cache = parts[0] === 'assets' && parts.length === 2 ? 'public, max-age=31536000, immutable'
+      : type === 'font/woff2' || type === 'image/png' ? 'public, max-age=86400' : 'no-cache';
+    response.writeHead(200, { 'content-type': type, 'content-length': String(body.length), 'cache-control': cache });
     response.end(request.method === 'HEAD' ? undefined : body);
     return true;
   }
@@ -303,7 +305,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
       if (method === 'POST') return signIn(request, response);
       if (!read) return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'GET, HEAD, POST' });
       if (await session(request)) return redirect(response, '/');
-      return send(response, 200, loginPage(shellT, options.language));
+      return send(response, 200, loginPage(shellT, options.language, built()));
     }
 
     if (path.startsWith('/api/')) {
@@ -348,7 +350,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     if (page) {
       const mine = await session(request);
       if (!mine) return redirect(response, '/login');
-      return send(response, 200, shellPage(shellT, options.language, { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind }));
+      return send(response, 200, shellPage(shellT, options.language, built(), { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind }));
     }
 
     if (await serveFile(request, response, path)) return;
@@ -359,6 +361,10 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.setHeader(name, value);
     if (!hostAllowed(request)) return send(response, 421, 'this server does not answer for that host name', 'text/plain; charset=utf-8');
     route(request, response).catch((error: unknown) => {
+      if (error instanceof BuildMissing) {
+        console.error(`cleared-v2-app: ${error.message}`);
+        if (!response.headersSent) return send(response, 503, error.message, 'text/plain; charset=utf-8');
+      }
       console.error(`cleared-v2-app: ${request.method} failed (${error instanceof Error ? error.name : typeof error})`);
       if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });
       else response.destroy();

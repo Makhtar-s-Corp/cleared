@@ -1,4 +1,4 @@
-/* The inbox (inbox.png). Loaded by the screen itself, on top of ../style.css:
+/* The inbox (inbox.png). Loaded with the screen's chunk, on top of styles/app.css:
    same tokens, flat colours, nothing inline. Computer: the list and the
    detail side by side. Below 1024 px: the list, and the detail as a page of
    its own with a back link and its buttons at the bottom (DESIGN.md, 4). */

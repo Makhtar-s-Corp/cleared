@@ -11,7 +11,7 @@ import type { SessionPhase, SessionState } from '../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
-import type { TowerData } from '../public/screens/tower.ts';
+import type { TowerData } from '../web/screens/tower/model.ts';
 
 export const FIXTURE_PROJECT = 'guestbook';
 

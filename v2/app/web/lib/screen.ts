@@ -1,5 +1,7 @@
-// What the shell (app.ts) gives a screen: each screen module exports
-// mount(root, context) and returns what stops it (timers, streams).
+// What the shell gives a screen (shell/App.tsx): who is signed in, the
+// translator, the clock, the address and the service's API. A screen
+// component reads it with useScreen(); its model functions take the parts
+// they need, so the tests run them without a browser.
 import type { Translate } from './i18n.ts';
 
 export type Me = {
@@ -29,5 +31,3 @@ export type ScreenContext = {
   api<T>(path: string, init?: { readonly method?: 'GET' | 'POST'; readonly body?: unknown }): Promise<T>;
   inboxChanged(): void;                                    // asks the shell to recount the inbox
 };
-
-export type Mount = (root: HTMLElement, context: ScreenContext) => () => void;

@@ -19,7 +19,7 @@ import { createCleaner } from '../../src/session/clean.ts';
 import type { AgUiEvent, SessionEvent, SessionState } from '../../src/session/events.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
-import { emptyModel, applyAll } from '../public/screens/session.ts';
+import { emptyModel, applyAll } from '../web/screens/session/model.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { FIXTURE_NOW, FIXTURE_PROJECT } from './tower.ts';
 

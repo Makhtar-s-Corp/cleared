@@ -1,5 +1,5 @@
-/* The session screen (session.png). Loaded by the screen itself, on top of
-   ../style.css: same tokens, flat colours, nothing inline. */
+/* The session screen (session.png). Loaded with the screen's chunk, on top of
+   styles/app.css: same tokens, flat colours, nothing inline. */
 .session { --ok-text: #15803D; }
 :root[data-theme="dark"] .session { --ok-text: var(--success); }
 
@@ -54,6 +54,8 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: 8px; padding: 6px 0; }
 .row time { padding-top: 1px; font-size: 12px; color: var(--text-faint); }
 .glyph { color: var(--text-faint); text-align: center; }
+/* The timeline's marks and the criteria's are Phosphor icons, set on the text's baseline as the glyphs were. */
+.glyph svg, .criteria .mark svg { display: inline-block; vertical-align: -2px; }
 .what { min-width: 0; overflow-wrap: anywhere; }
 .what code, .request code { font-family: var(--mono); font-size: 12.5px; padding: 1px 5px; border-radius: 4px; background: var(--tab-fill); overflow-wrap: anywhere; }
 .sub { margin-top: 2px; font-size: 12px; color: var(--text-faint); }

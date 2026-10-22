@@ -1,18 +1,37 @@
-/* Cleared v2 app. Tokens and fonts carried over from app/public/style.css, roles from app/DESIGN.md; sizes of the tower from tower.png. Every colour is flat. */
+/* Cleared v2 app. Tokens and fonts carried over from app/public/style.css of v1, roles from app/DESIGN.md; sizes of the tower from tower.png. Every colour is flat.
+   The theme is shadcn/ui's set of CSS variables (--background, --card, --primary, ...), with the colours of the kit;
+   the kit's own roles (--canvas, --surface, --ink, ...) are read from them, so the screens' sheets keep their names.
+   Tailwind brings its theme and its utilities, in layers, without its preflight: the rules below, unlayered, keep the kit's look. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+/* Dark is chosen with the button (data-theme on <html>), never by the system. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @font-face { font-family: Geist; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 :root {
-  --canvas: #FAFAFA; --surface: #FFFFFF; --surface-muted: #F4F4F4; --sunken: #F7F7F7; --hairline: #EAEAEA; --outline: rgba(0,0,0,.08);
-  --text: #171717; --text-secondary: #4D4D4D; --text-muted: #666666; --text-faint: #707070; --placeholder: #8F8F8F;
-  --ink: #171717; --on-ink: #FFFFFF; --count-ink: #1A1305;
+  /* shadcn/ui's variables, with the kit's colours */
+  --background: #FAFAFA; --foreground: #171717;
+  --card: #FFFFFF; --card-foreground: #171717;
+  --popover: #FFFFFF; --popover-foreground: #171717;
+  --primary: #171717; --primary-foreground: #FFFFFF;
+  --secondary: #F4F4F4; --secondary-foreground: #171717;
+  --muted: #F7F7F7; --muted-foreground: #666666;
+  --accent: rgba(0,0,0,.05); --accent-foreground: #171717;
+  --destructive: #EE0000;
+  --border: #EAEAEA; --input: rgba(0,0,0,.12); --ring: #0070F3;
+  --radius: 8px;
+  /* the kit's roles that shadcn/ui has no name for */
+  --outline: rgba(0,0,0,.08);
+  --text-secondary: #4D4D4D; --text-faint: #707070; --placeholder: #8F8F8F; --count-ink: #1A1305;
   --awaiting: #F5A623; --awaiting-text: #AB570A; --awaiting-surface: #FFFBF2; --awaiting-pill: #FFF8EB;
-  --success: #16A34A; --danger: #EE0000; --danger-text: #C40000; --link: #0070F3;
+  --success: #16A34A; --danger-text: #C40000; --link: #0070F3;
   --stage-progress: #0070F3; --stage-review: #0A9DB0;
   --harness-claude: #D97757; --harness-codex: #10A37F; --harness-other: #8F8F8F;
-  --dashed: #D4D4D4; --select: rgba(0,112,243,.16); --tab-fill: rgba(0,0,0,.05);
+  --dashed: #D4D4D4; --select: rgba(0,112,243,.16);
   --sans: Geist, -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
   --e-outline: 0 0 0 1px rgba(0,0,0,.08);
-  --e-control: 0 0 0 1px rgba(0,0,0,.12);
+  --e-control: 0 0 0 1px var(--input);
   --e-card: 0 0 0 1px rgba(0,0,0,.08), 0 2px 2px rgba(0,0,0,.04);
   --e-bar: 0 0 0 1px rgba(0,0,0,.1), 0 4px 14px -8px rgba(0,0,0,.15);
   --e-awaiting: 0 0 0 1.5px #F5A623, 0 8px 22px -12px rgba(245,166,35,.6);
@@ -23,15 +42,22 @@
 }
 /* Dark is the second plane: same roles, other values. Chosen with the button; never imposed by the system. */
 :root[data-theme="dark"] {
-  --canvas: #0A0A0A; --surface: #171717; --surface-muted: #101010; --sunken: #232323; --hairline: #2E2E2E; --outline: rgba(255,255,255,.14);
-  --text: #EDEDED; --text-secondary: #B8B8B8; --text-muted: #A1A1A1; --text-faint: #8F8F8F; --placeholder: #7A7A7A;
-  --ink: #EDEDED; --on-ink: #0A0A0A;
+  --background: #0A0A0A; --foreground: #EDEDED;
+  --card: #171717; --card-foreground: #EDEDED;
+  --popover: #171717; --popover-foreground: #EDEDED;
+  --primary: #EDEDED; --primary-foreground: #0A0A0A;
+  --secondary: #101010; --secondary-foreground: #EDEDED;
+  --muted: #232323; --muted-foreground: #A1A1A1;
+  --accent: rgba(255,255,255,.08); --accent-foreground: #EDEDED;
+  --destructive: #FF4D4D;
+  --border: #2E2E2E; --input: rgba(255,255,255,.16); --ring: #52A8FF;
+  --outline: rgba(255,255,255,.14);
+  --text-secondary: #B8B8B8; --text-faint: #8F8F8F; --placeholder: #7A7A7A;
   --awaiting-text: #F7B955; --awaiting-surface: #1C1708; --awaiting-pill: #231A07;
-  --success: #3DD068; --danger: #FF4D4D; --danger-text: #FF6B6B; --link: #52A8FF;
+  --success: #3DD068; --danger-text: #FF6B6B; --link: #52A8FF;
   --stage-progress: #52A8FF; --stage-review: #3DC6D8;
-  --dashed: #3A3A3A; --select: rgba(82,168,255,.3); --tab-fill: rgba(255,255,255,.08);
+  --dashed: #3A3A3A; --select: rgba(82,168,255,.3);
   --e-outline: 0 0 0 1px rgba(255,255,255,.12);
-  --e-control: 0 0 0 1px rgba(255,255,255,.16);
   --e-card: 0 0 0 1px rgba(255,255,255,.14);
   --e-bar: 0 0 0 1px rgba(255,255,255,.16);
   --e-awaiting: 0 0 0 1.5px #F5A623, 0 8px 24px -10px rgba(245,166,35,.3);
@@ -39,8 +65,32 @@
   --halo-progress: rgba(82,168,255,.18); --halo-review: rgba(61,198,216,.18);
   color-scheme: dark;
 }
+/* The kit's names, read from shadcn/ui's: the screens' sheets use these. */
+:root, :root[data-theme="dark"] {
+  --canvas: var(--background); --surface: var(--card); --surface-muted: var(--secondary); --sunken: var(--muted); --hairline: var(--border);
+  --text: var(--foreground); --text-muted: var(--muted-foreground);
+  --ink: var(--primary); --on-ink: var(--primary-foreground); --tab-fill: var(--accent); --danger: var(--destructive);
+}
+/* Tailwind's names for the same variables, for the components under components/ui. */
+@theme inline {
+  --color-background: var(--background); --color-foreground: var(--foreground);
+  --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+  --color-awaiting: var(--awaiting); --color-awaiting-text: var(--awaiting-text); --color-link: var(--link);
+  --color-faint: var(--text-faint); --color-secondary-text: var(--text-secondary); --color-placeholder: var(--placeholder);
+  --font-sans: var(--sans); --font-mono: var(--mono);
+  --radius-sm: 6px; --radius-md: var(--radius); --radius-lg: 10px; --radius-xl: 12px;
+  --shadow-control: var(--e-control); --shadow-outline: var(--e-outline); --shadow-card: var(--e-card);
+}
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+/* React's root adds no box: the page lays out as if the shell were the body's own. */
+#root { display: contents; }
 body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--text); font: 400 14px/1.45 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
 ::selection { background: var(--select); }
 h1, h2, h3, p { margin: 0; }
@@ -68,7 +118,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--awaiting); color: var(--count-ink); font-size: 11px; font-weight: 600; }
 .count[hidden] { display: none; }
 .right { position: relative; margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; }
-/* "Lead · always on": shown by app.ts while a generation of the lead is live. */
+/* "Lead · always on": shown by the shell while a generation of the lead is live. */
 .lead-pill { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; border-radius: 999px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: 13px; white-space: nowrap; }
 .lead-pill:hover { text-decoration: none; background: var(--tab-fill); }
 .lead-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex: none; }
@@ -79,26 +129,21 @@ button, input, textarea { font: inherit; color: inherit; }
 .clock { color: var(--text-faint); min-width: 38px; }
 .icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .icon:hover { background: var(--tab-fill); color: var(--text); }
-.theme svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-.theme .moon { fill: currentColor; stroke: none; }
-:root[data-theme="dark"] .theme .moon { display: none; }
-:root:not([data-theme="dark"]) .theme .sun { display: none; }
+.icon svg { flex: none; }
 .me { position: relative; }
-.me summary { list-style: none; cursor: pointer; } .me summary::-webkit-details-marker { display: none; }
+.avatar { padding: 0; border: 0; cursor: pointer; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--on-ink); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
-.menu { position: absolute; right: 0; top: 40px; min-width: 200px; padding: 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-card), 0 12px 32px -12px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 10px; }
-/* The notifications button: a bell, filled when this device is told; its menu hangs from the right of the header's group, so it stays on screen on a phone. */
-.notify summary { list-style: none; } .notify summary::-webkit-details-marker { display: none; }
-.notify svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.notify svg { width: 18px; height: 18px; }
-.notify.on summary, .notify[open] summary { color: var(--text); } .notify[open] summary { background: var(--tab-fill); } .notify.on svg path:first-child { fill: currentColor; }
-.notify .menu { width: 300px; max-width: calc(100vw - 32px); z-index: 1; }
-.notify .menu p { font-size: 13px; line-height: 1.45; text-wrap: pretty; }
+.menu { z-index: 20; min-width: 200px; padding: 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-card), 0 12px 32px -12px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 10px; }
+/* The notifications button: a bell, bold when this device is told. Its menu, like the avatar's, is a popover that
+   hangs from the button's right edge and keeps 16 px from the screen's edges, so it stays on screen on a phone. */
+.notify.on .icon, .notify .icon[data-state="open"] { color: var(--text); } .notify .icon[data-state="open"] { background: var(--tab-fill); }
+.notify-menu { width: 300px; max-width: calc(100vw - 32px); }
+.notify-menu p { font-size: 13px; line-height: 1.45; text-wrap: pretty; }
 .notify-state { font-weight: 500; }
-.notify .menu .plain { min-height: 36px; }
-.notify .menu .primary { min-height: 36px; border: 0; border-radius: 8px; background: var(--ink); color: var(--on-ink); font-weight: 500; cursor: pointer; }
-.notify .menu .primary:hover { opacity: .88; }
-.notify .menu button:disabled { opacity: .5; cursor: default; }
+.notify-menu .plain { min-height: 36px; }
+.notify-menu .primary { min-height: 36px; border: 0; border-radius: 8px; background: var(--ink); color: var(--on-ink); font-weight: 500; cursor: pointer; }
+.notify-menu .primary:hover { opacity: .88; }
+.notify-menu button:disabled { opacity: .5; cursor: default; }
 .notify-error { color: var(--danger-text); }
 .plain { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); cursor: pointer; }
 .plain:hover { background: var(--tab-fill); }
@@ -245,11 +290,10 @@ button, input, textarea { font: inherit; color: inherit; }
   .icon { width: 44px; height: 44px; }
   .stub { padding: 32px 16px; }
   .lead-stub { padding: 20px 16px 32px; }
-  .notify .menu .primary, .notify .menu .plain { min-height: 44px; }
-  /* On a phone the menu spans the gutters, under the header's first row. */
-  .right, .notify { position: static; }
-  .notify .menu { left: 16px; right: 16px; top: 56px; width: auto; max-width: none; }
-  .me summary { width: 44px; height: 44px; border: 7px solid transparent; background-clip: padding-box; margin-right: -7px; }   /* a 30 px circle with a 44 px target */
+  .notify-menu .primary, .notify-menu .plain { min-height: 44px; }
+  /* On a phone the notifications menu spans the gutters. */
+  .notify-menu { width: calc(100vw - 32px); }
+  .me .avatar { width: 44px; height: 44px; border: 7px solid transparent; background-clip: padding-box; margin-right: -7px; }   /* a 30 px circle with a 44 px target */
 }
 @media (max-width: 479px) { .brand .name, .slash { display: none; } .source-pill { font-size: 12px; padding: 4px 10px; } }
 @media (prefers-reduced-motion: reduce) { .live { animation: none; } .need { transition: none; } }

@@ -2,15 +2,14 @@
 // needs the human (a plan the lead proposes among it), the live sessions
 // with their current phrase, the lead's card with its state and last line,
 // the plans under way, and what landed today with its duration.
-// towerModel and renderTower are pure, so the tests run them without a
-// browser; loadTower reads the service, and mount wires them together.
-import type { InboxItem, LeadMessage, LeadPhase, LeadState, Plan, PlanItemInbox, PlanItemState, SessionSummary } from '../../../src/api/types.ts';
-import type { Harness, Role } from '../../../src/session/contract.ts';
-import type { SessionPhase } from '../../../src/session/events.ts';
-import type { Ticket } from '../../../src/tickets/contract.ts';
-import { esc } from '../html.ts';
-import type { Translate } from '../i18n.ts';
-import { ApiError, type ScreenContext } from '../screen.ts';
+// towerModel and the wording functions are pure, so the tests run them
+// without a browser; loadTower reads the service, and Tower.tsx draws it.
+import type { InboxItem, LeadMessage, LeadPhase, LeadState, Plan, PlanItemInbox, PlanItemState, SessionSummary } from '../../../../src/api/types.ts';
+import type { Harness, Role } from '../../../../src/session/contract.ts';
+import type { SessionPhase } from '../../../../src/session/events.ts';
+import type { Ticket } from '../../../../src/tickets/contract.ts';
+import type { Translate } from '../../lib/i18n.ts';
+import type { ScreenContext } from '../../lib/screen.ts';
 
 export type TowerData = {
   readonly sessions: readonly SessionSummary[];
@@ -208,16 +207,16 @@ export function towerModel(data: TowerData, now: Date): TowerModel {
 }
 
 // "18 min", "1 h 24".
-function duration(minutes: number, t: Translate): string {
+export function duration(minutes: number, t: Translate): string {
   if (minutes < 60) return t('minutes', { n: minutes });
   return t('hours_minutes', { h: Math.floor(minutes / 60), m: pad(minutes % 60) });
 }
 
-function heading(count: number, t: Translate): string {
+export function heading(count: number, t: Translate): string {
   return count <= 5 ? t(`needs_${count}`) : t('needs_many', { n: count });
 }
 
-const plural = (n: number, key: string, t: Translate) => t(n === 1 ? `${key}_one` : `${key}_other`, { n });
+export const plural = (n: number, key: string, t: Translate) => t(n === 1 ? `${key}_one` : `${key}_other`, { n });
 
 // "40 min", "2 h", "2 h 15": a plan's estimate, already rounded by the service.
 function about(minutes: number, t: Translate): string {
@@ -228,24 +227,11 @@ function about(minutes: number, t: Translate): string {
 // A number with the catalog's decimal mark.
 const decimal = (value: string, t: Translate) => value.replace('.', t('decimal_mark'));
 
-function planDetail(values: Readonly<Record<string, string>>, t: Translate): string {
+export function planDetail(values: Readonly<Record<string, string>>, t: Translate): string {
   const n = Number(values.n);
   const time = about(Number(values.minutes), t);
   const key = `plan_proposes_${values.week === undefined ? 'cost' : 'week'}_${n === 1 ? 'one' : 'other'}`;
   return t(key, { n, time, week: decimal(values.week ?? '', t), cost: decimal(values.cost ?? '', t) });
-}
-
-export function renderBar(t: Translate): string {
-  return `<form class="ask" id="ask" autocomplete="off">
-<input id="ask-input" name="title" maxlength="200" placeholder="${esc(t('bar_placeholder'))}" aria-label="${esc(t('bar_label'))}">
-<div class="ask-actions">
-<button class="chip-button" type="button" data-lead="goal">${esc(t('bar_new_goal'))}</button>
-<button class="chip-button" type="button" data-lead="lead">${esc(t('bar_ask_lead'))}</button>
-<button class="chip-button primary" type="submit">${esc(t('bar_new_ticket'))}</button>
-</div>
-<textarea id="ask-body" name="body" maxlength="20000" rows="5" placeholder="${esc(t('bar_body_placeholder'))}" aria-label="${esc(t('bar_body_label'))}"></textarea>
-</form>
-<p class="ask-note" id="ask-note" role="status"></p>`;
 }
 
 // Where New goal and Ask the lead go: the lead's screen, with what was
@@ -268,28 +254,23 @@ export function newTicket(title: string, body: string, project: string): { title
   return { title: title.trim(), project, ...(text ? { body: text } : {}) };
 }
 
-function needCard(card: NeedCard, t: Translate): string {
+// What a need's card says under its title: the item's own words, then the catalog's sentence.
+export function needSentence(card: NeedCard, t: Translate): string {
   const sentence = card.kind === 'plan' ? planDetail(card.detailValues, t) : card.detailKey ? t(card.detailKey, card.detailValues) : '';
-  const detail = [card.detail ? esc(card.detail) : '', esc(sentence)].filter(Boolean).join(' ');
-  const id = card.kind === 'plan' ? t('need_goal') : card.owner === 'lead' ? t('need_lead') : card.ticket;
-  return `<li><a class="need" href="${esc(card.href)}">
-<span class="need-head"><span class="wait-line">${esc(t(`need_${card.kind}`, { age: duration(card.minutes, t) }))}</span><span class="id">${esc(id)}</span></span>
-<span class="need-title">${esc(card.title)}</span>
-<span class="need-detail">${detail}</span>
-</a></li>`;
+  return [card.detail, sentence].filter(Boolean).join(' ');
 }
 
-function liveCard(card: LiveCard, t: Translate): string {
-  const square = card.harness === 'claude-code' ? 'claude' : card.harness === 'codex' ? 'codex' : 'other';
-  return `<li class="session-card">
-<span class="session-head"><span class="live${card.phase === 'waiting_human' ? ' waiting' : card.role === 'reviewer' ? ' review' : ''}" aria-hidden="true"></span><span class="role">${esc(t(`role_${card.role}`))}</span><span class="id">${esc(card.ticket)}</span></span>
-<span class="session-title">${esc(card.title)}</span>
-<span class="phrase">${esc(card.status)}</span>
-<span class="session-foot"><span class="model"><span class="sq ${square}" aria-hidden="true"></span>${esc(formatModel(card.harness, card.model))}</span><span class="elapsed">${esc(duration(card.minutes, t))}</span><a class="open" href="/sessions/${esc(card.id)}">${esc(t('open_session'))}</a></span>
-</li>`;
+export function needId(card: NeedCard, t: Translate): string {
+  return card.kind === 'plan' ? t('need_goal') : card.owner === 'lead' ? t('need_lead') : card.ticket;
 }
 
-function leadState(lead: LeadCard | null, t: Translate): { readonly text: string; readonly kind: string } {
+export const harnessSquare = (harness: Harness): 'claude' | 'codex' | 'other' => (harness === 'claude-code' ? 'claude' : harness === 'codex' ? 'codex' : 'other');
+
+export function liveDot(phase: SessionPhase, role: Role): string {
+  return phase === 'waiting_human' ? 'live waiting' : role === 'reviewer' ? 'live review' : 'live';
+}
+
+export function leadState(lead: LeadCard | null, t: Translate): { readonly text: string; readonly kind: string } {
   if (!lead || lead.phase === 'down') return { text: t('lead_down'), kind: 'down' };
   if (lead.phase === 'starting') return { text: t('lead_starting'), kind: 'starting' };
   if (lead.phase === 'refreshing') return { text: t('lead_refreshing'), kind: 'refreshing' };
@@ -299,19 +280,7 @@ function leadState(lead: LeadCard | null, t: Translate): { readonly text: string
   return { text: parts.join(' · '), kind: 'on' };
 }
 
-function leadCard(lead: LeadCard | null, t: Translate): string {
-  const state = leadState(lead, t);
-  const line = lead?.line ? `<p class="note lead-line"><q>${esc(lead.line)}</q></p>` : `<p class="note faint">${esc(t('lead_no_line'))}</p>`;
-  return `<section class="side-card" aria-labelledby="lead-title">
-<div class="lead-head"><span class="lead-mark" aria-hidden="true">${esc(t('lead_initial'))}</span><div><h2 id="lead-title"><a href="/lead">${esc(t('lead_title'))}</a></h2><p class="lead-state ${state.kind}">${esc(state.text)}</p></div></div>
-${line}
-<form class="lead-ask" id="lead-ask" autocomplete="off">
-<input id="lead-ask-input" name="text" maxlength="${DRAFT_MAX}" placeholder="${esc(t('lead_message_placeholder'))}" aria-label="${esc(t('lead_message_label'))}">
-</form>
-</section>`;
-}
-
-function planProgress(row: PlanRow, t: Translate): { readonly bar: string; readonly line: string } {
+export function planProgress(row: PlanRow, t: Translate): { readonly bar: string; readonly line: string } {
   // The bar's label says every colour it shows; the line adds what comes next.
   const counts = [t('plan_landed', { n: row.landed, m: row.total })];
   if (row.running) counts.push(t('plan_running', { n: row.running }));
@@ -321,67 +290,16 @@ function planProgress(row: PlanRow, t: Translate): { readonly bar: string; reado
   return { bar: counts.join(' · '), line: [...(row.paused ? [t('plan_paused')] : []), ...counts, ...next].join(' · ') };
 }
 
-function plansCard(plans: readonly PlanRow[], t: Translate): string {
-  const body = plans.length === 0
-    ? `<p class="faint small">${esc(t('plans_empty'))}</p>`
-    : `<ul class="plans">${plans.map((row) => {
-      const { bar, line } = planProgress(row, t);
-      return `<li><a class="plan-row" href="/plans/${esc(encodeURIComponent(row.id))}">
-<span class="plan-title">${esc(row.title)}</span>
-<span class="plan-bar" role="img" aria-label="${esc(bar)}">${row.segments.map((s) => `<span class="seg ${s}"></span>`).join('')}</span>
-<span class="plan-line">${esc(line)}</span>
-</a></li>`;
-    }).join('')}</ul>`;
-  return `<section class="side-card" aria-labelledby="plans-title">
-<h2 id="plans-title">${esc(t('plans_title'))}</h2>
-${body}
-</section>`;
-}
-
-export function renderTowerBody(model: TowerModel, t: Translate): string {
-  const summary = [
+export function towerSummary(model: TowerModel, t: Translate): string {
+  return [
     plural(model.live.length, 'sessions_running', t),
     ...(model.plans.length ? [plural(model.plans.length, 'plans_in_progress', t)] : []),
     plural(model.landed.length, 'landed_today_count', t),
     ...(model.weekLeft === null ? [] : [t('week_left', { n: Math.round(model.weekLeft) })]),
   ].join(' · ');
-  const needs = model.needs.length === 0
-    ? `<p class="empty">${esc(t('needs_empty'))}</p>`
-    : `<ul class="needs">${model.needs.map((card) => needCard(card, t)).join('')}</ul>`;
-  const live = model.live.length === 0
-    ? `<p class="empty">${esc(t('live_empty'))}</p>`
-    : `<ul class="sessions">${model.live.map((card) => liveCard(card, t)).join('')}</ul>`;
-  const landed = model.landed.length === 0
-    ? `<p class="faint">${esc(t('landed_empty'))}</p>`
-    : `<ul class="landed">${model.landed.map((row) => `<li><span class="time">${esc(row.time)}</span><span class="what">${esc(row.title)}</span><span class="took">${esc(duration(row.minutes, t))}</span></li>`).join('')}</ul>`;
-  return `<div class="tower">
-<div class="tower-main">
-<div class="hello"><h1>${esc(heading(model.needs.length, t))}</h1><p class="muted">${esc(summary)}</p></div>
-<section class="block" aria-labelledby="needs-title">
-<div class="block-head"><span class="dot awaiting" aria-hidden="true"></span><h2 id="needs-title">${esc(t('needs_title'))}</h2><a class="more" href="/inbox">${esc(t('open_inbox'))}</a></div>
-${needs}
-</section>
-<section class="block" aria-labelledby="live-title">
-<div class="block-head"><span class="dot progress" aria-hidden="true"></span><h2 id="live-title">${esc(t('live_title'))}</h2><span class="n">${esc(model.live.length)}</span></div>
-${live}
-</section>
-</div>
-<aside class="tower-side">
-${leadCard(model.lead, t)}
-${plansCard(model.plans, t)}
-<section class="side-card" aria-labelledby="landed-title">
-<h2 id="landed-title">${esc(t('landed_title'))}</h2>
-${landed}
-</section>
-</aside>
-</div>`;
 }
 
-export function renderTower(model: TowerModel, t: Translate): string {
-  return `${renderBar(t)}<div id="tower-body">${renderTowerBody(model, t)}</div>`;
-}
-
-const REFRESH_MS = 10_000;
+export const REFRESH_MS = 10_000;
 
 // The tower's data. Sessions, inbox and tickets are the tower's own and a
 // failure to read one fails the read; the lead, its thread and the plans
@@ -398,84 +316,4 @@ export async function loadTower(api: ScreenContext['api'], thread: LeadThread): 
   ]);
   const next = lastLeadLine(messages, thread);
   return { data: { sessions, inbox, tickets, lead, leadLine: next.line, plans, weekLeft: null }, thread: next };
-}
-
-export function mount(root: HTMLElement, context: ScreenContext): () => void {
-  const { t } = context;
-  root.innerHTML = `${renderBar(t)}<div id="tower-body" aria-busy="true"></div>`;
-  const body = root.querySelector<HTMLElement>('#tower-body')!;
-  const form = root.querySelector<HTMLFormElement>('#ask')!;
-  const input = root.querySelector<HTMLInputElement>('#ask-input')!;
-  const description = root.querySelector<HTMLTextAreaElement>('#ask-body')!;
-  const note = root.querySelector<HTMLElement>('#ask-note')!;
-  let stopped = false;
-  let thread: LeadThread = { after: 0, line: null };
-
-  const say = (text: string, kind: 'ok' | 'error') => {
-    note.textContent = text;
-    note.dataset.kind = kind;
-  };
-
-  const refresh = async () => {
-    try {
-      const loaded = await loadTower(context.api, thread);
-      if (stopped) return;
-      thread = loaded.thread;
-      // A redraw keeps what is being typed to the lead.
-      const typing = body.querySelector<HTMLInputElement>('#lead-ask-input');
-      const draft = typing?.value ?? '';
-      const focused = typing !== null && document.activeElement === typing;
-      const selection = typing ? [typing.selectionStart, typing.selectionEnd] as const : null;
-      body.innerHTML = renderTowerBody(towerModel(loaded.data, context.now()), t);
-      const field = body.querySelector<HTMLInputElement>('#lead-ask-input');
-      if (field && draft) field.value = draft;
-      if (field && focused) {
-        field.focus();
-        if (selection) field.setSelectionRange(selection[0], selection[1]);
-      }
-    } catch (error) {
-      if (stopped) return;
-      body.innerHTML = `<p class="empty error">${esc(t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed'))}</p>`;
-    } finally {
-      body.removeAttribute('aria-busy');
-    }
-  };
-
-  // The lead card's field opens the lead's screen with what was typed; the
-  // message is sent from there, where its answer shows.
-  body.addEventListener('submit', (event) => {
-    const target = event.target as HTMLElement;
-    if (target.id !== 'lead-ask') return;
-    event.preventDefault();
-    const field = body.querySelector<HTMLInputElement>('#lead-ask-input');
-    location.assign(leadHref('lead', field?.value ?? ''));
-  });
-  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-lead]')) {
-    button.addEventListener('click', () => location.assign(leadHref(button.dataset.lead === 'goal' ? 'goal' : 'lead', input.value, description.value)));
-  }
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const title = input.value.trim();
-    if (!title) {
-      say(t('ticket_needs_title'), 'error');
-      input.focus();
-      return;
-    }
-    try {
-      const ticket = await context.api<Ticket>('/tickets', { method: 'POST', body: newTicket(title, description.value, context.me.project) });
-      input.value = '';
-      description.value = '';
-      say(t('ticket_created', { id: ticket.id, status: ticket.status }), 'ok');
-      void refresh();
-    } catch {
-      say(t('ticket_failed'), 'error');
-    }
-  });
-
-  void refresh();
-  const timer = setInterval(() => void refresh(), REFRESH_MS);
-  return () => {
-    stopped = true;
-    clearInterval(timer);
-  };
 }
