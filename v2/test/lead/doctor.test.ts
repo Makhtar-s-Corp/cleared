@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { leadChecks } from '../../scripts/doctor-lead.ts';
-import { leadSetup } from './support.ts';
+import { context, leadSetup, opening, say, turn } from './support.ts';
 
 test('the lead section has its one real check', () => {
   assert.equal(leadChecks.length, 1);
