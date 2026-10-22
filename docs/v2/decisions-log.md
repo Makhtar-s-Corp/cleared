@@ -1241,7 +1241,20 @@ The choices the lane makes:
    - then the releases whose checks passed, oldest first, each approved once and not again while its 60-second grace runs;
    - a question is left to the owner.
    With `PROOF_OWNER_APPROVES=1` the proof only watches.
-6. **Issue 157, item 4.** A request is allowed once only when every simple command in it is work inside the checkout: `npm test`, `npm run`, `npm ci`, `node`, `npx tsc`, git without push, fetch or config, and the shell's readers and writers on relative paths or `/workspace`. Anything else is denied: an install, the network, `$(...)`, a way up, a home, an absolute path elsewhere. `proof-j1.ts` now judges the command from the screens' code chip, not the whole row.
+6. **Issue 157, item 4.** A request is allowed once only when every simple command in it is work inside the checkout. Anything else is denied, and the rule denies when unsure, since the proof answers alone through a night. The list was narrowed in review round 1 (B2).
+   - **Allowed:**
+     - `npm test`, `npm run` and `npm ci`;
+     - `node --test` and nothing else of `node`;
+     - git without push, fetch or `-c`;
+     - `sed -n` with line ranges only;
+     - `find` without `-exec`, `-execdir`, `-ok` or `-delete`;
+     - the shell's readers and writers, on relative paths or `/workspace`;
+     - a few variables that change nothing that runs, such as `NODE_ENV` and `CI`.
+   - **How a command is split:** on `&&`, `||`, `;`, `|`, a single `&` and a newline. `2>&1` and `&>` are first set aside as redirections.
+   - **Always denied:** `$(...)`, backticks, `${...}`, `$NAME`, `<(...)` and `>(...)`.
+   - **A second check on the whole text:** the first rule's names of programs that install, fetch or reach another machine (`curl`, `wget`, `ssh`, `npx`, `pip`, `npm install` and the like).
+   - **Its limit (F1):** `npm test`, `npm run` and `node --test` run the project's own code, which can reach whatever the session's network allows. That is the work a ticket asks for, and the egress proxy and the policy bound it, not this rule.
+   `proof-j1.ts` now judges the command from the screens' code chip, not the whole row.
 7. **The fake adapter behind a setting.** `CLEARED_V2_ADAPTER=fake` with `CLEARED_V2_FAKE_SCRIPT` (a JSON file) registers the fake adapter under the `claude-code` name, which the flow and the lead start sessions with. The service refuses it with exit code 64 unless the ledger's folder, and `CLEARED_V2_STATE_DIR`, `CLEARED_V2_WORKDIRS` and `CLEARED_V2_PROJECT_DIR` when set, are inside the temporary folder (paths resolved, links followed). So no rehearsal can write fake sessions into a real ledger.
 8. **A lead that answers each turn by rule.** The number and order of a night's event turns cannot be known in advance, so a fixed script would play the wrong turn. The rehearsal's lead answers each turn with the acts of the first rule whose regular expression matches the turn's text:
    - The acts are: say, ask through AskUserQuestion, or call a host tool.
@@ -1258,7 +1271,7 @@ The choices the lane makes:
     - HOME is the temporary folder, so the notifier's private folder and no file of the account's own are used.
     `durations.md` lists these under "What the rehearsal replaced", since the rehearsal does not prove them. The ports are two free ones from 9700 to 9799, checked with `ss -ltn` and never a reserved one, on `127.0.0.1`. An interrupted rehearsal stops its service and app.
 11. **Notifications are skipped in the real run (the owner's update of 2026-10-22).** Plan question 2, the https address for the Mac, has no answer, so the 48-hour proof runs without Mac notifications, on the inbox only. `PROOF_NOTIFICATIONS` is `skipped` by default for a real run. Step 3 then does not wait for the plan's notification. A step `3 notifications` is recorded as skipped, with the reason, not failed. `durations.md` says "Skipped", reads the waits from the inbox, and still gives the count the service recorded. The rehearsal counts them by default through its e-mail stand-in. `PROOF_NOTIFICATIONS=counted` brings the count back for a real run once the address exists.
-12. **Login cuts (question 1, option b: the owner's entry above).** The runner keeps the host login. On an authentication error it waits for the login file to change, then relaunches the session in the same container with `resume` (lane 4, `images/session/runner/main.ts`). The adapter shows the cut as the status "Waiting for a new login" (`claude-code/map.ts`). The proof report counts each cut from the ledger: when it began, the session's role and ticket, when the session's next turn started (the relaunch), and how long it lasted. In the real mapper, the resumed query's first frame starts a run (`begin()` in `claude-code/map.ts`), so the next `RUN_STARTED` is the relaunch. A cut never relaunched says so, and says when the session ended instead (a lead whose generation was replaced). The relaunch itself is lane 4's code, which this lane does not edit.
+12. **Login cuts (question 1, option b: the owner's entry above).** The runner keeps the host login. On an authentication error it waits for the login file to change, then relaunches the session in the same container with `resume` (lane 4, `v2/images/session/runner/main.ts`). The adapter shows the cut as the status "Waiting for a new login" (`claude-code/map.ts`). The proof report counts each cut from the ledger: when it began, the session's role and ticket, when the session's next turn started (the relaunch), and how long it lasted. In the real mapper, the resumed query's first frame starts a run (`begin()` in `claude-code/map.ts`), so the next `RUN_STARTED` is the relaunch. A cut never relaunched says so, and says when the session ended instead (a lead whose generation was replaced). The relaunch itself is lane 4's code, which this lane does not edit.
 
 **Consequences.**
 - **Rehearsals on this server, 2026-10-22, on the fake adapter, 4-minute nights:**
@@ -1279,13 +1292,24 @@ The choices the lane makes:
 - **No screen changed**, so the lane ran no visual loop.
 - **Not proven here:**
   - The real run: a model, the real lock and release watch, the forge, a deployment, a login cut. That is the milestone proof, by the orchestrator, after wave 4.
-  - A login cut was not simulated: the count is tested on ledger rows of the adapter's shape.
+  - A real login cut: the rehearsal's cuts are events of the adapter's shape played by the fake adapter (F3).
   - The inbox's plan approval (lane 10) is in `morningAction`, but the rehearsal approves the plan from the lead screen, as section 8 says.
 - **Real run settings:**
   - `PROOF_PASSWORD_FILE`, `PROOF_PLAYWRIGHT`, `PROOF_CHROME`, and `PROOF_LEDGER` (the service's `ledger.db`) for the counts.
   - `PROOF_MORNING` if the morning is not the next 08:00.
   - `PROOF_OWNER_APPROVES=1` if the owner approves in the morning.
   - `CLEARED_V2_LEAD_CONTEXT_PERCENT` for the threshold the report prints.
+- **Review round 1 of PR 181 (changes asked).** Each blocking point now has a test that fails on the code before it.
+  - **B1.** The lead's generation 1 starts with the service, before the goal. It was left out of the lead's cost, turns, highest share, compactions and login cuts, because only sessions created after the goal were read. A lead session now counts when it has any event after the goal. The highest share is the larger of the ledger's and the lead's own record (`highestShare`), not the first one known.
+  - **B2.** The checkout rule (choice 6). The review's three commands, a newline before `curl`, `& curl` and `find -exec curl`, are now denied with many more like them.
+  - **F2.** Each reading counts the notifications alone (`notificationCount`), so the whole ledger is read once, at the end, not every few seconds for 48 hours.
+  - **F3.** The rehearsal scripts two login cuts: one on the lead's generation 1, in the turn that takes the plan's approval, and one on the second author. Each is relaunched by its next turn, so the count is read from a real ledger. The scripted lead gained an `emit` act for this.
+  - **F4.** The script exits with 1 when a step failed; a skipped step leaves 0.
+  - **F5, F6, F7.** The report says how a cut is read and its blind spot after a restart; comments name `v2/images/session/runner/main.ts`; with notifications skipped, the count the service still recorded is said to be for the record only, not a pass or a fail.
+  - **Rehearsal 6**, after these fixes, notifications skipped: 9 steps ok, 1 skipped, none failed.
+    - The lead's figures now include generation 1: 3 generations live after the goal, 15 turns, $0.60 (15 times the script's $0.04). Before, they were 8 turns and $0.32.
+    - The two scripted cuts were counted and relaunched, the lead's with the role `lead` (generation 1) and the author's.
+    - Both planted commitments were done and every "after" was kept.
 - **Files.** Section 8 names `proof-j2.ts` and `proof-inbox.ts`. Section 9 gives this wave `v2/scripts/proof-*.ts`, and the lane used that room:
   - `proof-report.ts` and `proof-rehearsal.ts` are new;
   - `proof-j1.ts` gained one change: it judges the command chip with the narrowed rule.

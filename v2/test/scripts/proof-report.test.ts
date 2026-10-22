@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { LeadCommitment } from '../../src/api/types.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { RUNS_TABLES } from '../../src/approval/review.ts';
-import { LOGIN_WAIT, changes, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track, PLANTED, type ProofResult, type Snapshot } from '../../scripts/proof-report.ts';
+import { LOGIN_WAIT, changes, highestShare, notificationCount, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track, PLANTED, type ProofResult, type Snapshot } from '../../scripts/proof-report.ts';
 
 const lead = { generation: 1, phase: 'idle', percent: 3, highestPercent: 3, refreshCount: 0, openCommitments: 2 };
 const items = (states: string[]) => states.map((state, i) => ({ position: i + 1, title: `Item ${i + 1}`, state, ticket: state === 'waiting' ? null : `LOCAL-${i + 1}`, after: i === 2 ? [2] : [] }));
@@ -140,6 +140,49 @@ test('the ledger facts: notifications by kind, the lead\'s turns, cost and highe
   // A ledger without the v1 events table yet has no notifications.
   const bare = openStore(':memory:');
   assert.deepEqual(ledgerFacts(bare.db, since).notifications, { count: 0, byKind: {}, firstAt: {} });
+});
+
+test('the lead\'s generation 1, started before the goal, counts in the cost, turns, highest share, compactions and login cuts (review 1, B1)', () => {
+  const store = openStore(':memory:');
+  const since = '2026-10-22T21:00:00.000Z';
+  const lead = (id: string, created: string, status = 'working') => store.sessions.put({ id, project: 'guestbook', ticket: 'lead', role: 'lead', harness: 'claude-code', model: 'm', status, createdAt: created, updatedAt: created });
+  const at = (sessionId: string, when: string, event: unknown) => store.events.append({ at: when, sessionId, ticket: 'lead', project: 'guestbook', event: event as never });
+  const finished = (cost: number) => ({ type: 'RUN_FINISHED', threadId: 't', runId: 'r', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: cost } });
+  const share = (percent: number) => ({ type: 'CUSTOM', name: 'cleared.context_usage', value: { percent, totalTokens: 1, maxTokens: 100, isAutoCompactEnabled: true } });
+  // Generation 1 started with the service, before the goal; it takes the evening.
+  lead('g1', '2026-10-22T20:30:00.000Z');
+  at('g1', '2026-10-22T20:31:00.000Z', finished(5));                     // its opening turn, before the goal: not counted
+  at('g1', '2026-10-22T21:05:00.000Z', finished(0.4));
+  at('g1', '2026-10-22T21:06:00.000Z', share(38));
+  at('g1', '2026-10-22T21:07:00.000Z', { type: 'CUSTOM', name: 'cleared.compacted', value: { trigger: 'auto', preTokens: 9 } });
+  at('g1', '2026-10-22T21:10:00.000Z', { type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/status', value: LOGIN_WAIT }] });
+  at('g1', '2026-10-22T21:12:00.000Z', { type: 'RUN_STARTED', threadId: 't', runId: 'r2' });
+  // An older lead session, of another run, with nothing after the goal: left out.
+  lead('old', '2026-10-20T08:00:00.000Z', 'stopped');
+  at('old', '2026-10-20T09:00:00.000Z', finished(7));
+  lead('g2', '2026-10-22T22:00:00.000Z');
+  at('g2', '2026-10-22T22:05:00.000Z', finished(0.1));
+  at('g2', '2026-10-22T22:06:00.000Z', share(12));
+  const facts = ledgerFacts(store.db, since);
+  assert.deepEqual(facts.lead, { generations: 2, turns: 2, costUsd: 0.5, highestPercent: 38, compactions: 1 });
+  assert.deepEqual(facts.loginCuts, [{ session: 'g1', role: 'lead', ticket: 'lead', at: '2026-10-22T21:10:00.000Z', relaunchedAt: '2026-10-22T21:12:00.000Z', seconds: 120, ended: false }]);
+});
+
+test('the highest share is the larger of the ledger\'s and the lead\'s own record, not the first one known (review 1, B1)', () => {
+  // The ledger read only later generations: the lead's record, which has generation 1, is higher.
+  assert.equal(highestShare(12, 38), 38);
+  assert.equal(highestShare(41, 38), 41);
+  assert.equal(highestShare(null, 38), 38);
+  assert.equal(highestShare(undefined, null), null);
+});
+
+test('each reading counts the notifications alone, without reading the sessions (review 1, F2)', () => {
+  const store = openStore(':memory:');
+  assert.equal(notificationCount(store.db, '2026-10-22T21:00:00.000Z'), 0);   // no events table yet
+  applyTables(store.db, [...RUNS_TABLES]);
+  const sent = (at: string) => store.db.prepare("INSERT INTO events (at, kind, detail, source) VALUES (?, 'notification_sent', '{}', 'notify')").run(at);
+  sent('2026-10-22T20:00:00.000Z'); sent('2026-10-22T22:00:00.000Z'); sent('2026-10-22T23:00:00.000Z');
+  assert.equal(notificationCount(store.db, '2026-10-22T21:00:00.000Z'), 2);
 });
 
 test('the most tickets live at once, from the sessions\' first start to their last update', () => {

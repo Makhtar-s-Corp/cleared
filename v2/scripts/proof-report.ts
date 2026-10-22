@@ -149,9 +149,9 @@ export function morningSummary(snap: Snapshot, messages: readonly LeadMessage[],
 // ---- the ledger ------------------------------------------------------------
 
 // The status the Claude Code adapter gives a session whose runner waits for a
-// new login after an authentication error (session/adapters/claude-code/map.ts).
+// new login after an authentication error (v2/src/session/adapters/claude-code/map.ts).
 // The runner relaunches the session in the same container once the login
-// file holds a new token (images/session/runner/main.ts): its next turn
+// file holds a new token (v2/images/session/runner/main.ts): its next turn
 // starts. The owner chose this (plan question 1, option b); the proof counts each cut.
 export const LOGIN_WAIT = 'Waiting for a new login';
 
@@ -182,6 +182,12 @@ function rows(db: DatabaseSync, sql: string, ...args: (string | number)[]): Row[
   }
 }
 
+// The notifications sent since `since`: the one figure each reading of the
+// night needs; the rest of the ledger is read once, at the end.
+export function notificationCount(db: DatabaseSync, since: string): number {
+  return Number(rows(db, "SELECT count(*) AS n FROM events WHERE kind = 'notification_sent' AND at >= ?", since)[0]?.n ?? 0);
+}
+
 // What the ledger says since `since` (the goal): read only, by the proof
 // itself, to count what the screens do not show (brief rule 12).
 export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
@@ -195,7 +201,10 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
     byKind[kind] = (byKind[kind] ?? 0) + 1;
     firstAt[kind] ??= String(row.at);
   }
-  const sessions = rows(db, 'SELECT id, ticket, role, status, created_at, updated_at FROM sessions WHERE created_at >= ? ORDER BY created_at', since);
+  // The run's sessions: those created since the goal, and the lead's that
+  // were live after it. The lead's generation 1 starts with the service,
+  // before the goal, and takes the whole evening (review 1 of PR 181, B1).
+  const sessions = rows(db, "SELECT id, ticket, role, status, created_at, updated_at FROM sessions WHERE created_at >= ? OR (role = 'lead' AND id IN (SELECT DISTINCT session_id FROM session_events WHERE at >= ?)) ORDER BY created_at", since, since);
   const events = (types: string) => rows(db, `SELECT session_id, type, event FROM session_events WHERE at >= ? AND type IN (${types})`, since);
   const role = new Map(sessions.map((s) => [String(s.id), { ticket: String(s.ticket), role: String(s.role), status: String(s.status) }]));
   const lead = { generations: sessions.filter((s) => s.role === 'lead').length, turns: 0, costUsd: 0, highestPercent: null as number | null, compactions: 0 };
@@ -248,6 +257,14 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
     }
   }
   return { notifications: { count: sent, byKind, firstAt }, lead, tickets, maxLive, loginCuts };
+}
+
+// The highest context share the run reached: the ledger's (every generation
+// live after the goal) and the lead's own record (lead_generations), the
+// larger of the two, so neither hides a higher one.
+export function highestShare(ledger: number | null | undefined, lead: number | null | undefined): number | null {
+  const known = [ledger, lead].filter((n): n is number => typeof n === 'number');
+  return known.length > 0 ? Math.max(...known) : null;
 }
 
 // ---- the result and its table ---------------------------------------------
@@ -332,7 +349,7 @@ export function renderDurations(r: ProofResult): string {
     row('---', '---'),
     row('refreshes', r.lead.refreshCount),
     row('highest context share', `${r.lead.highestPercent ?? 'not read'} %${r.lead.threshold !== null ? ` (threshold ${r.lead.threshold} %)` : ''}`),
-    row('generations started after the goal', r.lead.generations ?? 'not read'),
+    row('generations live after the goal', r.lead.generations ?? 'not read'),
     row('turns', r.lead.turns ?? 'not read'),
     row('cost', dollars(r.lead.costUsd)),
     row('compactions by Claude Code', r.lead.compactions ?? 'not read'),
@@ -347,7 +364,7 @@ export function renderDurations(r: ProofResult): string {
     '## Notifications',
     '',
     r.notificationsSkipped
-      ? `Skipped: ${r.notificationsSkipped}. The waits are read from the inbox.${r.notifications ? ` The service still recorded ${r.notifications.count} sent.` : ''}`
+      ? `Skipped: ${r.notificationsSkipped}. The waits are read from the inbox.${r.notifications ? ` The service still recorded ${r.notifications.count} sent, for the record only: it is not a pass or a fail (the dispatcher's first tick sends nothing).` : ''}`
       : r.notifications ? `${r.notifications.count} sent.` : 'The ledger was not read: no count.',
     '',
     row('Kind', 'Sent'),
@@ -373,6 +390,8 @@ export function renderDurations(r: ProofResult): string {
   else {
     out.push(`${r.loginCuts.length} login cuts, ${r.loginCuts.filter((c) => c.relaunchedAt).length} relaunched.`, '', row('Cut at', 'Role', 'Ticket', 'Relaunched at', 'Lasted'), row('---', '---', '---', '---', '---'));
     for (const c of r.loginCuts) out.push(row(c.at, c.role, c.ticket, c.relaunchedAt ?? (c.ended ? 'not relaunched: the session ended' : 'not relaunched'), c.relaunchedAt ? duration(c.at, c.relaunchedAt) : ''));
+    // How a cut is read, and its one known blind spot (review 1, F5).
+    out.push('', 'A cut runs from the session\'s first "Waiting for a new login" to its next turn. After a service restart, a snapshot that repeats that status with no turn after it reads as a cut still open.');
     out.push('');
   }
   if (r.morning) {

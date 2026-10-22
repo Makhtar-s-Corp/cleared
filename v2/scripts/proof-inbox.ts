@@ -6,27 +6,57 @@
 // the permissions the night left, then the plan, then the releases.
 
 // Work inside the checkout is allowed once; anything else is denied (issue
-// 157, item 4: the proof allowed once almost every request). The session's
-// checkout is /workspace in its container (session/adapters/claude-code/map.ts).
+// 157, item 4: the proof allowed once almost every request). The proof
+// answers alone through a whole night, so when the rule is unsure it denies.
+// The session's checkout is /workspace in its container
+// (session/adapters/claude-code/map.ts).
+//
+// Its limit (review 1 of PR 181, F1): `npm test`, `npm run <script>` and
+// `node --test <file>` run the project's own code, which can reach whatever
+// the session's network allows. That is the work a ticket asks for, and the
+// egress proxy and the policy, not this rule, are what bound it. The rule
+// only keeps the proof from allowing a command that starts another program
+// itself.
 const CHECKOUT = '/workspace';
-// The programs that read or change the checkout and reach nothing else.
-const LOCAL = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'sed', 'awk', 'wc', 'sort', 'uniq', 'cut', 'tr', 'diff', 'echo', 'printf',
-  'mkdir', 'touch', 'rm', 'mv', 'cp', 'true', 'test', 'cd', 'pwd', 'node', 'tsc']);
+// The programs that read or change files of the checkout and start nothing.
+const LOCAL = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'rg', 'wc', 'sort', 'uniq', 'cut', 'tr', 'diff', 'echo', 'printf',
+  'mkdir', 'touch', 'rm', 'mv', 'cp', 'true', 'test', 'cd', 'pwd']);
 const NPM = new Set(['test', 'run', 'ci', 't']);
 const GIT = new Set(['status', 'diff', 'log', 'show', 'add', 'commit', 'rm', 'mv', 'restore', 'branch']);
+// Variables a command may set before it: none that changes what runs.
+const VARIABLES = new Set(['NODE_ENV', 'CI', 'TZ', 'LANG', 'LC_ALL', 'FORCE_COLOR', 'NO_COLOR', 'DEBUG']);
+// What the first rule denied anywhere in the text, kept as a second check:
+// the names of programs that install, fetch or reach another machine.
+const NETWORK = /\b(apt-get|apt|apk|brew|sudo|su|pip3?|pipx|curl|wget|ssh|scp|sftp|rsync|nc|ncat|netcat|socat|telnet|ftp|npx|pnpm|yarn|bunx?|deno|docker|podman|kubectl|gh|python3?|perl|ruby|php|embedded-postgres)\b|\bnpm\s+(i|install|add|view|exec|x|publish|login|adduser|dlx|create|init)\b/;
+
+// Each program's words beyond the ones above: what is safe to pass.
+function argumentsInside(program: string, words: readonly string[]): boolean {
+  // node runs a test file of the checkout, and nothing given on the line.
+  if (program === 'node') return words[0] === '--test' && words.slice(1).every((w) => !w.startsWith('-'));
+  // sed only prints lines: -n and a range such as 1,40p.
+  if (program === 'sed') return words.every((w) => w === '-n' || /^\d+(,\d+)?p$/.test(w) || (!w.startsWith('-') && !/^\d/.test(w)))
+    && words.includes('-n') && words.some((w) => /^\d+(,\d+)?p$/.test(w));
+  // find without the options that run a program or delete.
+  if (program === 'find') return !words.some((w) => /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)/.test(w));
+  return true;
+}
 
 // One simple command: its words, and where it reads or writes.
 function simpleInside(command: string): boolean {
   const words = command.trim().split(/\s+/).filter(Boolean).map((word) => word.replace(/^['"]|['"]$/g, ''));
-  while (words[0] !== undefined && /^[A-Z_][A-Z0-9_]*=/.test(words[0])) words.shift();   // NAME=value before the program
+  while (words[0] !== undefined && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
+    if (!VARIABLES.has(words[0].slice(0, words[0].indexOf('=')))) return false;
+    words.shift();
+  }
   const [program, sub] = words;
   if (program === undefined) return false;
-  const known = LOCAL.has(program) || (program === 'npm' && sub !== undefined && NPM.has(sub)) || (program === 'npx' && sub === 'tsc') || (program === 'git' && sub !== undefined && GIT.has(sub));
-  if (!known) return false;
+  const known = LOCAL.has(program) || program === 'node' || program === 'sed' || program === 'find'
+    || (program === 'npm' && sub !== undefined && NPM.has(sub)) || (program === 'git' && sub !== undefined && GIT.has(sub));
+  if (!known || !argumentsInside(program, words.slice(1))) return false;
   // Every path it names stays in the checkout: no absolute path elsewhere
   // (/dev/null aside), no way up, no home.
   return words.every((word) => {
-    const path = word.replace(/^\d*[<>]+&?/, '');
+    const path = word.replace(/^\d*[<>]+/, '');
     if (path === '' || /^\d+$/.test(path) || path === '/dev/null') return true;
     if (path.startsWith('~')) return false;
     if (path.split('/').includes('..')) return false;
@@ -36,9 +66,12 @@ function simpleInside(command: string): boolean {
 }
 
 export function insideCheckout(command: string): boolean {
-  // What the shell computes cannot be judged from the text.
-  if (!command.trim() || /\$\(|`|\$\{/.test(command)) return false;
-  return command.split(/&&|\|\||[;|]/).every(simpleInside);
+  // What the shell computes, or runs beside the command, cannot be judged from the text.
+  if (!command.trim() || /\$\(|`|\$\{|<\(|>\(|\$[A-Za-z_]/.test(command) || NETWORK.test(command)) return false;
+  // A file descriptor copied (2>&1) and both outputs sent to a file (&>)
+  // are not a command run in the background; every other & is.
+  const plain = command.replace(/\d*>&\d+/g, ' ').replace(/&>>?/g, '>');
+  return plain.split(/&&|\|\||[;|&\r\n]/).every(simpleInside);
 }
 
 export function answerFor(command: string): 'allow_once' | 'reject_once' {

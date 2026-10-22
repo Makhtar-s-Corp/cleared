@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { FakeStep } from '../src/session/adapters/fake.ts';
 import type { RehearsalScript } from '../src/session/adapters/index.ts';
-import { PLANTED } from './proof-report.ts';
+import { LOGIN_WAIT, PLANTED } from './proof-report.ts';
 
 const run = promisify(execFile);
 const V2 = fileURLToPath(new URL('../', import.meta.url));
@@ -67,6 +67,9 @@ const started = (run: string): FakeStep => ({ emit: { type: 'RUN_STARTED', threa
 const finished = (run: string, cost: number, model: string): FakeStep => ({
   emit: { type: 'RUN_FINISHED', threadId: 'rehearsal', runId: run, outcome: { type: 'success' }, usage: [{ model, inputTokens: 20_000, outputTokens: 1_500 }], result: { stopReason: 'end_turn', total_cost_usd: cost } },
 });
+// A login cut as the Claude Code adapter maps it (claude-code/map.ts): the
+// session's status says it waits for a new login; its next turn is the relaunch.
+const LOGIN_CUT = { type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/status', value: LOGIN_WAIT }] } as const;
 const author = (run: string, extra: FakeStep[] = []): FakeStep[] => [started(run), ...text(`${run}-a`, 'I made the change and its test, and committed it.'), ...extra, finished(run, 0.3, 'claude-opus-5-5')];
 // The guestbook's verdict phrase, in the shape the flow reads (flow/prompts.ts).
 const REVIEW = 'I read the change and ran the tests.\n\nVerdict: “no blocking issues”\nDefects: none\nTo verify: nothing\nQuestions for the user: None.';
@@ -90,6 +93,9 @@ export function rehearsalScript(options: { readonly due: string }): RehearsalScr
             { say: 'Here is a plan in five tickets. The page work starts once the trimmed names are live; the README section goes through the fast lane. I need your go on the plan; you will still approve each release.' },
           ],
         },
+        // The turn that takes the plan's approval, in generation 1: a login cut,
+        // relaunched by the next turn, so the report's count is read from a real ledger.
+        { when: '^Cleared, for the owner: The owner approved plan', once: true, acts: [{ emit: LOGIN_CUT }, { say: 'Understood: the first tickets start now.' }] },
         { when: `(?:^|\\n)${landing.text.split(',')[0]}`, acts: [{ call: 'commit', input: { text: 'When the first ticket of the plan lands, tell the owner how long it took from start to live.' }, as: 'first_landing' }, { say: 'I will tell you as soon as the first ticket is live.' }] },
         { when: `(?:^|\\n)${reminder.text.split(',')[0]}`, acts: [{ call: 'commit', input: { text: 'At 08:00, remind the owner to check the texts of the page.', due: options.due }, as: 'reminder' }, { say: 'I will remind you at 08:00.' }] },
       ],
@@ -103,7 +109,8 @@ export function rehearsalScript(options: { readonly due: string }): RehearsalScr
     author: { steps: author('author'), file: { path: 'notes/{ticket}.md', text: '# {ticket}\n\n{title}: written by the rehearsal of the milestone 2 proof.\n' } },
     // The third author to start asks to run a command outside the checkout: a
     // permission that waits through the night, denied in the morning.
-    authors: [author('author-1'), author('author-2'), author('author-3', [
+    // The second author's login is cut, then its session is relaunched.
+    authors: [author('author-1'), [started('author-2'), { emit: LOGIN_CUT }, started('author-2-relaunched'), ...author('author-2').slice(1)], author('author-3', [
       { permission: { requestId: 'rehearsal-permission-1', toolCallId: 'rehearsal-run-1', tool: 'Bash', input: { kind: 'execute', command: 'npm view embedded-postgres version' }, suggestion: { decision: 'ask', rule: 'default', reason: 'no rule allows this request' } } },
       ...text('author-3-b', 'Without it, then: the change does not need that package.'),
     ])],

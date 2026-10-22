@@ -46,7 +46,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { InboxItem, LeadMemory, LeadMessage, LeadState, Plan, SessionSummary } from '../src/api/types.ts';
 import { morningAction, type InboxEntry } from './proof-inbox.ts';
 import {
-  PLANTED, changes, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track,
+  PLANTED, changes, commitmentOutcomes, highestShare, notificationCount, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track,
   type LedgerFacts, type Morning, type Outcome, type ProofResult, type Snapshot, type Step,
 } from './proof-report.ts';
 import { REHEARSAL_GOAL, startRehearsal, type World } from './proof-rehearsal.ts';
@@ -187,14 +187,15 @@ const LIVE = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
 async function readState(): Promise<Snapshot> {
   const [lead, plans, inbox, sessions] = await Promise.all([api<LeadState>('/lead'), api<Plan[]>('/plans'), api<InboxItem[]>('/inbox'), api<SessionSummary[]>('/sessions')]);
   plan = plans.find((p) => p.id === planId) ?? plan;
-  const f = facts();
+  // Only the count each reading: the whole ledger is read at the end (review 1, F2).
+  const sent = ledger((db) => notificationCount(db, times.goal_sent_at ?? startedAt.toISOString()));
   return {
     at: now(),
     lead: { generation: lead.generation, phase: lead.phase, percent: lead.context?.percent ?? null, highestPercent: lead.highestPercent, refreshCount: lead.refreshCount, openCommitments: lead.openCommitments },
     plan: plan ? { id: plan.id, state: plan.state, items: plan.items.map((i) => ({ position: i.position, title: i.title, state: i.state, ticket: i.ticket, after: i.after })) } : null,
     inbox: inbox.filter((i) => i.state === 'waiting').map((i) => ({ id: i.id, kind: i.kind, ticket: i.ticket })),
     sessions: sessions.filter((s) => s.role !== 'lead' && LIVE.has(s.phase)).map((s) => ({ id: s.id, ticket: s.ticket, role: s.role, phase: s.phase })),
-    notifications: f ? f.notifications.count : null,
+    notifications: sent ?? null,
   };
 }
 
@@ -502,7 +503,7 @@ const result: ProofResult = {
   plan: plan ? { id: plan.id, title: plan.title, items: plan.items.map((i) => ({ position: i.position, title: i.title, lane: i.lane, after: i.after, minutes: i.estimate.minutes, costUsd: i.estimate.costUsd })), totals: plan.totals } : null,
   items: timeline.items, maxRunning: timeline.maxRunning, waits: timeline.waits, morning,
   lead: {
-    refreshCount: leadState?.refreshCount ?? 0, highestPercent: f?.lead.highestPercent ?? leadState?.highestPercent ?? null,
+    refreshCount: leadState?.refreshCount ?? 0, highestPercent: highestShare(f?.lead.highestPercent, leadState?.highestPercent),
     threshold: REHEARSAL ? 5 : Number(env.CLEARED_V2_LEAD_CONTEXT_PERCENT ?? 50), generations: f?.lead.generations ?? null, turns: f?.lead.turns ?? null,
     costUsd: f?.lead.costUsd ?? null, compactions: f?.lead.compactions ?? null,
   },
@@ -522,3 +523,5 @@ if (world) {
 }
 const counted = (status: Step['status']) => steps.filter((s) => s.status === status).length;
 log(`done: ${counted('ok')} steps ok, ${counted('skipped')} skipped, ${counted('failed')} failed; ${durations}`);
+// A run started in the background says by its exit whether a step failed; a skipped step does not (review 1, F4).
+process.exitCode = counted('failed') > 0 ? 1 : 0;

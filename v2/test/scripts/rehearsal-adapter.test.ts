@@ -160,6 +160,17 @@ test('the next generation of the lead starts from the first share again and keep
   assert.equal(texts(store, second.id).at(-1), 'Noted.');
 });
 
+test('a lead act can play an event as the adapter would map it: the status of a login cut (review 1, F3)', async () => {
+  const store = openStore(':memory:');
+  const cut = { type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/status', value: 'Waiting for a new login' }] } as const;
+  const adapter = createRehearsalAdapter({ log: store.events, script: { ...SCRIPT, lead: { ...SCRIPT.lead, rules: [{ when: 'cut', acts: [{ emit: cut }, { say: 'Back.' }] }] } } });
+  const lead = await adapter.start(input('lead', hostTools([])));
+  await lead.send({ text: 'cut', by: 'u1' });
+  const played = events(store, lead.id);
+  assert.deepEqual(played.find((e) => e.type === 'STATE_DELTA' && JSON.stringify(e).includes('new login')), cut);
+  assert.ok(!played.some((e) => e.type === 'CUSTOM' && e.name === 'cleared.host_call'), 'no host call is made for it');
+});
+
 // ------------------------------------------------------- authors, reviewers
 
 function checkout(): string {

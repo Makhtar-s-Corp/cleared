@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { Harness, HostTool, SessionAdapter, SessionHandle, SessionId, StartInput } from '../contract.ts';
 import type { Cleaner } from '../clean.ts';
-import type { CustomValue, EventLog, Question } from '../events.ts';
+import type { AgUiEvent, CustomValue, EventLog, Question } from '../events.ts';
 import type { Policy } from '../policy.ts';
 import { ledgerPath, LedgerPathError } from '../../store/db.ts';
 import { createClaudeCodeAdapter } from './claude-code.ts';
@@ -84,10 +84,12 @@ export function adapterSetting(env: NodeJS.ProcessEnv): AdapterSetting {
 // ------------------------------------------------------ the script file
 
 // What the lead does in a turn: says a text, asks the owner through
-// AskUserQuestion, or calls a host tool. `as` names the id the tool
+// AskUserQuestion, calls a host tool, or plays an event as the real adapter
+// would map it (the status of a login cut). `as` names the id the tool
 // answers with (commit's), for a later act to give as `${name}`.
 export type LeadAct =
   | { readonly say: string }
+  | { readonly emit: AgUiEvent }
   | { readonly ask: readonly Question[] }
   | { readonly call: string; readonly input: unknown; readonly as?: string };
 
@@ -223,6 +225,7 @@ export function createRehearsalAdapter(options: RehearsalOptions): SessionAdapte
             { emit: { type: 'TEXT_MESSAGE_END', messageId: id } },
           ];
           if ('ask' in act) return [{ question: { requestId: id, questions: act.ask } }];
+          if ('emit' in act) return [{ emit: act.emit }];
           if (act.as && isObject(act.input)) named.set(act.input, act.as);
           return [{ hostCall: { toolCallId: id, name: act.call, input: act.input } }];
         });

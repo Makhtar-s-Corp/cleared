@@ -8,7 +8,8 @@ import { HANDOVER_REQUEST, commitmentDue, eventTurn, goalTurn } from '../../src/
 import { validatePlan } from '../../src/lead/plans/tools.ts';
 import { parseVerdict } from '../../src/flow/prompts.ts';
 import { parseRehearsalScript, type LeadRule } from '../../src/session/adapters/index.ts';
-import { PLANTED } from '../../scripts/proof-report.ts';
+import { LOGIN_WAIT, PLANTED } from '../../scripts/proof-report.ts';
+import { serviceTurn } from '../../src/lead/prompts.ts';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +44,18 @@ test('the scripted lead answers the engine\'s own texts: the goal, the planted c
   assert.equal(rule(eventTurn(['06:10 LOCAL-1: pull request #101 is live (healthy).'], ''))?.once, true);
   assert.deepEqual(calls(rule(eventTurn([commitmentDue('c2', reminder.text, DUE)], ''))), ['tell_owner', 'fulfil']);
   assert.deepEqual(calls(rule(HANDOVER_REQUEST)), ['handover']);
+});
+
+test('the rehearsal scripts a login cut on the lead\'s generation 1 and on an author, each relaunched by its next turn (review 1, F3)', () => {
+  const approved = rule(serviceTurn('The owner approved plan plan-1 ("Ready for a small team"): its 5 tickets are created and start in order, at most 2 at a time.'));
+  const leadCut = approved?.acts.find((a) => 'emit' in a);
+  assert.ok(leadCut && JSON.stringify(leadCut).includes(LOGIN_WAIT), 'the approval turn plays the cut');
+  assert.equal(approved?.once, true);
+  const second = script.authors?.[1] ?? [];
+  const at = second.findIndex((step) => 'emit' in step && JSON.stringify(step.emit).includes(LOGIN_WAIT));
+  assert.ok(at > 0, 'the second author waits for a new login');
+  const next = second[at + 1];
+  assert.ok(next && 'emit' in next && next.emit.type === 'RUN_STARTED', 'then its next turn starts: the relaunch');
 });
 
 test('an event turn whose state lists the commitments does not record them again', () => {
