@@ -976,3 +976,66 @@ The choices the lane makes:
 - **For plan question 1.** The bind mount finding weighs for answer (a), a `setup-token` token: with the host login, a refresh by rename is invisible to a running session.
 - No screen changed: lane 4 is not an interface lane, so there was no visual loop and no capture.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-runner-host-tools`.
+
+## 2026-10-22: the tower of milestone 2, against tower.png (milestone 2, lane 9)
+
+**Decision.** Lane `v2-j2-tower-m2` gives the tower its milestone 2 state (plan, section 7.2) in `v2/app/public/screens/tower.ts`, with the "Lead · always on" pill in the shell's header. The lane's choices:
+
+1. **What the tower reads.** Sessions, inbox and tickets are still required: if one fails, the tower says it cannot reach the service, as in milestone 1. `GET /api/lead`, the thread and `GET /api/plans` are read apart (`loadTower`), and a failure gives no lead and no plans. So a service with the lead off, or without lane 7's plan routes, still shows milestone 1's tower.
+2. **The lead card.**
+   - The state line is "Always on · context N % · refreshed N min ago" for `idle` and `working`. The share is left out before the first measure. "refreshed" is left out for a first generation (`refreshCount` 0). It is "refreshed", not the plan's "refreshed from memory", because the longer form wrapped to two lines in the 360 px column; the capture says "refreshed".
+   - `starting` reads "Starting" and `refreshing` reads "Refreshing from memory". `down`, and a lead the tower could not read, read "Not running" in the danger colour.
+   - The last line is the lead's last thread line to the owner: a message, a plan or a question, never the owner's line nor a refresh. It is quoted with `<q>`, so the browser uses the page's language for the quotation marks, and clamped to three lines.
+   - The thread is read whole once, then with `?after=<last seq>` at each 10-second refresh, so a 48-hour thread is not fetched again and again.
+   - "Message the lead…" opens `/lead?draft=<text>`, as Ask the lead does. The tower sends nothing to the lead itself: the reply shows on the lead's screen, and lane 8's screen is where a message is sent. A redraw keeps what is typed in the field.
+3. **The plans card** lists the plans `approved` or `paused`. Proposed plans are cards under Needs you, and done, rejected and superseded plans are not shown.
+   - Each plan has a bar with one segment per item, in position order: green landed, blue running, amber waiting for approval, red held, grey still to start (`waiting`, `ready`, `put_back`). A cancelled item has no segment and is not counted.
+   - The segments are equal flex items with classes, not widths, because the page runs with no inline style.
+   - The line reads "3 of 6 landed · 1 running · 1 to approve · 1 held · next: <title>", with "Paused" first when paused and zero counts left out. "next" is the item still to start with the lowest position. The plan's "next tonight" would need a schedule nothing computes.
+   - The bar's `aria-label` names every coloured count.
+   - Each plan links to `/plans/<id>`.
+4. **The plan card under Needs you** reads "Plan · <age>", with "Goal" in the id slot, the plan's title and "The lead proposes N tickets, about 2 h of work and 4 % of the week." Without the week share it reads "…, about $3.90." (plan, section 5.2), and one ticket is in the singular. "about 2 h" comes from `totals.minutes`: whole hours have no minutes, otherwise it reads "2 h 15". The French catalog writes decimals with a comma (`decimal_mark`).
+   - **Order:** what the teams wait for comes first, oldest first, then the plans, as the capture orders them. A plan waits for a decision; it holds no session.
+   - **Link:** the plan card links to `/plans/<id>`, the lead's screen for that plan, because lane 10's inbox detail is not there yet.
+5. **The lead's items and session** (issues 163 and 168, lane 5's entry).
+   - A question whose ticket is `lead` shows "Lead" in the id slot, never the sentinel. It says "The lead waits for your answer on its screen." and links to `/lead`, where it is answered (the session answer route still refuses it; lane 5's entry).
+   - Sessions of role `lead` are left out of Live sessions and their count: the lead is its card.
+   - The browser cannot import `LEAD_TICKET`, so `tower.ts` repeats the constant, as it does `DONE_STATE`.
+6. **The grey line** gains "N plans in progress" (approved and paused) when there is one, and "Claude N % left" when the week is measured. **No route reports the week left yet.** `LeadState` has no week share, and `cleared.rate_limit` lives only in session events. So `TowerData.weekLeft` is always null in `loadTower`. It is rendered and tested with a value, and a route that carries it is a change to `src/api/types.ts`, a lane of its own (plan, section 10).
+7. **The pill.**
+   - The server renders `<a class="lead-pill" id="lead-pill" href="/lead" hidden>` first in the header's right group, as in the capture. `app.ts` reads `GET /api/lead` on the inbox count's 15-second poll, on every page, and shows the pill for `idle`, `working` and `refreshing`. A refresh is part of being always on, and hiding the pill for it would make it flicker. The pill is hidden for `starting`, for `down` and on any error.
+   - That read also starts the lead after a service restart (lane 5's lazy start), so the lead does not wait for its screen to be opened.
+   - `leadPillShown` is exported from `app.ts` for the tests. `app.ts` now starts the page only when a `document` exists, so Node can import it.
+8. **`DRAFT_MAX` lives in `tower.ts`** (issue 164): the tower no longer imports `screens/lead.ts`, which lane 8 rewrites in this wave. It is still 2000, what the lead's screen reads.
+
+**Consequences.**
+- **The fixture** (`app/fixtures/tower.ts`) adds the capture's milestone 2 data, with guestbook content:
+  - a lead at 31 %, refreshed 10 minutes ago;
+  - its line about LOCAL-161 and LOCAL-163;
+  - a plan under way ("Entries on desktop", 3 of 6 landed, 1 running);
+  - a proposed plan of 5 items waiting for 25 minutes, about 2 h and 4 % of the week.
+
+  The rendering tests read it.
+- **In fixtures mode** the lead and the proposed plan come from lane 1's lead fixture, so the tower and the lead's screen agree. The tower adds its plan under way. Against the capture, the plan card is then 6 minutes old and the share 45 %.
+- **Edits outside the lane's files**, each named in the pull request:
+  - `v2/app/fixtures/source.ts`, lines 50 to 52, 69, 84 and 85: `/api/plans` serves the tower's plan under way after the lead fixture's, and `/api/inbox` leaves out the tower fixture's own plan item, so the proposal is not listed twice.
+  - `v2/app/test/fixtures.test.ts`: two plans, one plan item.
+  - `v2/app/public/style.css`: the pill, the lead card, the plans card, and the art director's items. The tower's rules already lived there.
+  - When lane 8 adds its running and done plans to `fixtures/lead.ts`, fixtures mode will show two plans under way. The merge can drop the tower's one from `source.ts`.
+- **The visual loop:**
+  - It ran on the app in fixtures mode on `127.0.0.1:18893` (checked free), with a temporary state folder and user.
+  - Captures are `/tmp/cleared-captures/j2/tower-{1440,1280,768,390}-{light,dark}.png`, with no horizontal overflow at any width. They replace lane 1's captures of the tower, which issue 164 said were stale.
+  - The art director's pass was run once, by Sonnet 5.5 in a fresh session.
+  - Taken:
+    - at 768 the side cards no longer stretch to the same height;
+    - an odd last card under Needs you spans the row at two columns;
+    - the bar's label names approvals and held items;
+    - `text-wrap: pretty` on the plan line;
+    - a two-line clamp on a plan's title;
+    - still-to-start segments in `--dashed`, which reads in dark.
+  - Not taken:
+    - **The placeholder colour (`--placeholder`, 3.2:1 in light).** It is milestone 1's token, shared with the bar, and a change belongs to a design fix for every field.
+    - **Moving the lead card above Live sessions below 1100 px.** That is milestone 1's layout and the capture's order.
+    - **Smaller polish:** the field's radius, and a focus check the global rule already covers.
+- **Not done:** the week share (item 6); answering the lead's question from the tower.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-tower-m2`.

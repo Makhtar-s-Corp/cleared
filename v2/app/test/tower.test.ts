@@ -23,12 +23,13 @@ function strings(value: unknown, into: Set<string> = new Set()): Set<string> {
   return into;
 }
 
-test('the fixture is the capture\'s data that milestone 1 has: two waiting items, four live sessions, two landed today', async () => {
+test('the fixture is the capture\'s data: three waiting items, the plan last, four live sessions, two landed today', async () => {
   const data = await towerFixture(FIXTURE_NOW);
   const model = towerModel(data, FIXTURE_NOW);
   assert.deepEqual(model.needs.map((n) => [n.kind, n.ticket, n.minutes, n.title]), [
     ['release', 'LOCAL-158', 12, '“Comings and goings” replaces “Departures and arrivals”'],
     ['permission', 'LOCAL-161', 3, 'Install date-fns to group dates by week'],
+    ['plan', '', 25, 'Make the guestbook readable on desktop'],
   ]);
   assert.deepEqual(model.live.map((s) => [s.role, s.ticket, s.title, s.status, formatModel(s.harness, s.model), s.minutes]), [
     ['author', 'LOCAL-161', 'Upcoming: group entries by week', 'Waiting for your permission to install date-fns', 'claude · opus-5.5', 18],
@@ -56,12 +57,13 @@ test('every word on the tower comes from the catalog or from the data', async ()
   }
 });
 
-test('the English tower reads as the capture, in milestone 1\'s words', async () => {
+test('the English tower reads as the capture', async () => {
   const t = translator(loadCatalog('tower', 'en'));
   const html = renderTower(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), t);
   const text = visibleText(html).join('\n');
   for (const expected of [
-    'Two things need you.', '4 sessions running · 2 landed today', 'Needs you', 'Open inbox', 'Release · 12 min', 'Permission · 3 min',
+    'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Needs you', 'Open inbox', 'Release · 12 min', 'Permission · 3 min', 'Plan · 25 min', 'Goal',
+    'The lead proposes 5 tickets, about 2 h of work and 4 % of the week.', 'Always on · context 31 % · refreshed 10 min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Network access and a new dependency. The author is paused until you answer.',
     'Live sessions', 'Author', 'Reviewer', 'Open session', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
