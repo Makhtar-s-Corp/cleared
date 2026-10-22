@@ -2696,5 +2696,6 @@ The lane's choices:
   - **Lane 29 (the proof's step 11):** the selectors are `[data-terminal-state]` with `data-reason`, `.term-host` (click it to type), `[data-act="terminal_open"]`, and `[data-act]` set to `editor_edit`, `editor_save`, `editor_reload`, `editor_confirm` or `editor_close`, with `[data-editor-state]`. The terminal needs the loopback address.
   - **Issue 200, items 1 and 4,** in `style-nonce.ts`, for its own small lane.
   - **A save that changes nothing** is still a save (the route writes and journals it). The editor's Save is disabled until the text differs from what it loaded.
-- **The requirements matrix.** B5.10f, D4, O9, O10 and C1 name lane 32 and stay `partial` only for the live run (proof j2-multi steps 4 and 11). O14 and P17 are `done`. The new lines are P39 (the terminal, choices 1 to 3), P40 (the editor, choices 4 to 6) and P41 (the nonce, choice 7).
+- **The requirements matrix.** B5.10f, D4, O9, O10 and C1 name this pull request (228) and stay `partial` only for the live run (proof j2-multi steps 4 and 11). O14 and P17 are `done`. The new lines are P39 (the terminal, choices 1 to 3), P40 (the editor, choices 4 to 6) and P41 (the nonce, choice 7).
+- Pull request: 228, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-terminal-editor-screens`.
