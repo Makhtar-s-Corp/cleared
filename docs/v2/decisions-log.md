@@ -2502,4 +2502,5 @@ A visual reference exists outside the repository. It is inspiration only; nothin
   - **Lane 32** reads `Me.terminal`, mounts the terminal on the stream and the posts, and the editor on the `PUT`, with `FileWriteRefusal.confirmable` for the confirmation.
 - **Checks**, after the merge of `origin/v2` at 92793d5: `npm test` runs 1116 node tests, 1110 pass and 6 are skipped as before, and 154 Vitest tests pass; `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
 - **The requirements matrix.** B5.10f, D4, O9, O10 and C1 name this pull request and stay `partial` for lane 32's screens. P12 and P13 are `done`. The new lines P35 (the terminal's process) and P36 (what a human changed and how the session is told) record choices 1 and 6 (P32 to P34 are lane 26's, merged first as pull request 222).
+- Pull request: 224, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-terminal-editor-service`.
