@@ -14,7 +14,7 @@ import { dispatch, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
 import type { SessionAdapter, SessionId } from '../../src/session/contract.ts';
-import { fakeEffects, finished, permission, setup, started, text, until, type Setup, type SetupOptions } from './support.ts';
+import { fakeEffects, finished, permission, REPORT_PASS, setup, started, text, until, type Setup, type SetupOptions } from './support.ts';
 
 const PROOF = 'f'.repeat(64);
 const HOUR = 3600_000;
@@ -188,15 +188,57 @@ test('the idle rule counts from the Give back, not from the take over', async ()
   }
 });
 
-test('a reviewer\'s session is not taken over, nor an ended one', async () => {
+// The owner's scope extension of 2026-10-22 22:01: Take over works on the
+// reviewer's session too. Its interrupted turn is no verdict; Give back
+// tells it to carry on with the review, and its report is read as before.
+test('a reviewer\'s session is taken over, left alone while paused, and given back to finish its review', async () => {
+  // The fake adapter resumes a session with the `reopen` script: there the
+  // reviewer takes the Give back's words, then reports.
+  const reviewer: readonly FakeStep[] = [started, ...text('r1', 'I read the diff.'), permission, { awaitMessage: true }, finished(0.1)];
+  const reopen: readonly FakeStep[] = [{ awaitMessage: true }, started, ...text('r2', REPORT_PASS), finished(0.1)];
+  const h = await harness({ scripts: { author: [started, finished(0.2)], reviewers: [reviewer], reopen } });
+  try {
+    await h.engine.start(h.ticket.id, 'u1');
+    await until(() => { const r = h.startedSessions.find((s) => s.input.role === 'reviewer'); return !!r && h.inbox.waitingFor(r.id) > 0; }, 'the reviewer\'s permission');
+    await h.engine.settled();
+    const id = h.startedSessions.find((s) => s.input.role === 'reviewer')!.id;
+    assert.deepEqual(await post(h, `/api/sessions/${id}/takeover`, as('u1')), { status: 200, json: { accepted: true, by: 'u1' } });
+    await h.engine.settled();
+    assert.equal(detail(h, id).takenOver?.by, 'u1');
+    assert.equal(h.inbox.waitingFor(id), 0, 'the reviewer\'s request was settled as cancelled');
+
+    for (let minutes = 0; minutes < 61; minutes += 5) {
+      h.clock.now += 5 * 60_000;
+      await h.engine.tick();
+      await h.engine.settled();
+    }
+    assert.ok(detail(h, id).takenOver, 'still taken over an hour later');
+    assert.ok(!events(h, id).some((e) => e.type === 'CUSTOM' && e.name === 'cleared.review_verdict'), 'the interrupted turn is no verdict');
+    assert.equal((await h.tickets.get(h.ticket.id))?.status, 'In Review');
+
+    // The statuses the reviewer's row takes from the Give back on.
+    const statuses: string[] = [];
+    const put = h.store.sessions.put.bind(h.store.sessions);
+    h.store.sessions.put = (row) => { if (row.id === id) statuses.push(row.status); return put(row); };
+    assert.deepEqual(await post(h, `/api/sessions/${id}/giveback`, as('u1')), { status: 200, json: { accepted: true } });
+    assert.deepEqual(h.resumed, [id], 'resumed under its own id');
+    assert.ok(events(h, id).some((e) => e.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(e.delta) && /review/.test(e.delta) && !/Carry on with the ticket/.test(e.delta)), 'told to carry on with its review');
+    await until(() => events(h, id).some((e) => e.type === 'CUSTOM' && e.name === 'cleared.review_verdict'), 'the verdict');
+    await h.engine.settled();
+    assert.equal(statuses[0], 'reviewing', `a reviewer given back is reviewing (${statuses.join(', ')})`);
+    assert.ok(!statuses.includes('working'), `never working (${statuses.join(', ')})`);
+  } finally {
+    await h.close();
+  }
+});
+
+test('an ended session is not taken over', async () => {
   const h = await harness({ scripts: { author: [started, finished(0.2)], reviewers: [[started, { awaitMessage: true }, finished(0.1)]] } });
   try {
     await h.engine.start(h.ticket.id, 'u1');
     await until(() => h.startedSessions.some((s) => s.input.role === 'reviewer'), 'the review');
     await h.engine.settled();
     const author = h.startedSessions[0]!.id;
-    const reviewer = h.startedSessions.find((s) => s.input.role === 'reviewer')!.id;
-    assert.equal((await post(h, `/api/sessions/${reviewer}/takeover`, as('u1'))).status, 409, 'a reviewer');
     assert.equal((await post(h, `/api/sessions/${author}/takeover`, as('u1'))).status, 409, 'an author whose turn ended');
   } finally {
     await h.close();

@@ -72,12 +72,13 @@ export type TakeoverView =
   | { readonly kind: 'mine'; readonly at: string }
   | { readonly kind: 'other'; readonly at: string };
 
-// Take over is an author's live session's (the service refuses the rest);
-// an ended session is nobody's any more.
+// Take over is an author's or a reviewer's live session's (the reviewer's
+// by the owner's decision of 2026-10-22 22:01; the service refuses the
+// rest); an ended session is nobody's any more.
 export function takeoverOf(options: { readonly takenOver: TakenOver | null | undefined; readonly me: string; readonly role: Role; readonly ended: boolean }): TakeoverView {
   if (options.ended) return { kind: 'free', can: false };
   if (options.takenOver) return options.takenOver.by === options.me ? { kind: 'mine', at: options.takenOver.at } : { kind: 'other', at: options.takenOver.at };
-  return { kind: 'free', can: options.role === 'author' };
+  return { kind: 'free', can: options.role === 'author' || options.role === 'reviewer' };
 }
 
 // ----------------------------------------------------------------- editor

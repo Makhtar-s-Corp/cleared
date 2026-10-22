@@ -85,7 +85,7 @@ import { PLAN_GO_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } f
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
-import { GIVEN_BACK, TAKEN_OVER } from './takeover.ts';
+import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
@@ -1936,13 +1936,16 @@ export class FlowEngine {
     return this.#inputs.get(id)?.input.workdir;
   }
 
-  // The owner takes the author's session over: paused first, so that the
-  // end of the interrupted turn is not taken for the end of the work; then
-  // the turn interrupted, and what still waits for the human settled as
-  // cancelled. A session plan waiting for its Go stays in the inbox.
+  // The owner takes an author's or a reviewer's session over (a step's
+  // session, the contract's, a service's or the integration's, is an
+  // author's; the reviewer's by the owner's decision of 2026-10-22 22:01):
+  // paused first, so that the end of the interrupted turn is not taken for
+  // the end of the work or for a verdict; then the turn interrupted, and
+  // what still waits for the human settled as cancelled. A session plan
+  // waiting for its Go stays in the inbox.
   async takeOver(id: SessionId, by: UserId): Promise<TakenOver> {
     const live = this.#liveSession(id);
-    if (live.input.role !== 'author') throw new FlowError('conflict', `session ${id} is the ${live.input.role}'s: only an author's session is taken over`);
+    if (live.input.role !== 'author' && live.input.role !== 'reviewer') throw new FlowError('conflict', `session ${id} is the ${live.input.role}'s: only an author's or a reviewer's session is taken over`);
     if (this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is already taken over`);
     const taken: TakenOver = { by, at: this.#at() };
     this.#paused.set(id, taken);
@@ -2001,10 +2004,11 @@ export class FlowEngine {
       this.#snapshot(id, live.input.ticket);
       return;
     }
-    this.#setPhase(current, 'working');
+    const reviewer = live.input.role === 'reviewer';
+    this.#setPhase(current, reviewer ? 'reviewing' : 'working');
     this.#snapshot(id, live.input.ticket);
     try {
-      await current.handle.send({ text: GIVEN_BACK, by: FLOW_USER });
+      await current.handle.send({ text: reviewer ? GIVEN_BACK_REVIEW : GIVEN_BACK, by: FLOW_USER });
     } catch (error) {
       await this.#stopTicket(current, 'error', `The session could not be told it was given back: ${name(error)}`, `The session was given back, but it could not be resumed: ${name(error)}`, 'failed', 'failed');
     }
