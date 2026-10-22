@@ -814,3 +814,44 @@ The choices the lane makes:
 - **The engine is built on the first API request**, as in milestone 1 (`runtime.ts` builds it lazily, and a module's `provide` has no registry). So after a restart, the recovery, the idle stop and the landing tick start only when the app first asks the service something. A service restarted at night with no browser open does nothing until then. Lane 5's module, which subscribes to the flow at start, needs the engine built at start too: a follow-up for it.
 - The real merge through the lock, against GitHub, was not run by this lane: it is outward facing, and the milestone proof runs it.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-flow-landing`.
+
+## 2026-10-22: the v2 notification dispatcher (milestone 2, lane 6)
+
+**Decision.** Lane `v2-j2-notify` implements section 6 of the [milestone 2 plan](milestone-2-plan.md): the dispatcher in `v2/src/notify/`, the `notify` module, `npm run notify -- test`, the kinds `permission` and `plan` in `lib/notify/contract.mjs` and `lib/i18n/{en,fr}.json`, and a v2 section in [notifications.md](../notifications.md). The lane's choices:
+
+1. **lib/notify runs in a child process.** Its import is not free of side effects: `lib/conf.mjs`, which `contract.mjs` imports, copies every `CLEARED_*` variable of the process to `ORCH_*`. So, as the plan says for that case, the service never imports it.
+   - `v2/src/cli/notify.ts` has three commands. `test` is the person's. `settings` and `send` are the dispatcher's: `send` reads the facts of each message on stdin, renders them with `render` and prints, per adapter, `sent`, `failed` with its short code, or `abandoned` at the deadline.
+   - The child refuses a message the dispatcher would not make: an unknown kind (`blocked` included), a link that is not `/`, `/inbox`, `/lead` with an item after `#`, a group of free text, a `from` other than `lead`.
+   - `isQuiet` is ported to TypeScript (eight lines). Everything else of the rules comes from the child: `URGENT` and the new `URGENCY` list are printed by `settings`.
+   - The settings are read only when something is to be sent, and kept five minutes. A quiet night starts no process.
+2. **The sources are the inbox and v1's `events` table, not `FlowEngine.subscribe`.** This departs from the plan's "one event bus" (section 10).
+   - The flow's engine is built on the first request to the API (lane 2's entry), and nothing outside `flow/runtime.ts` can tell when it exists. A notify module that waits for it would miss a rollback after a night restart with no browser open.
+   - What waits for a person is polled from the inbox (`InboxStore.list()`, whose constructor writes nothing, unlike the engine's).
+   - Rollbacks and the release watch's failures are read after a cursor from the `events` rows that `lib/release.mjs` writes and the flow itself reads for `rolled_back` (`flow/ledger.ts`): `rollback_pushed`, `prod_revert`, and the six failure kinds v1 already notified.
+   - `release_unhealthy` is therefore not mapped: the rows it is built from are.
+   - If the bus is wanted later, the one-line change is a getter or an `onEngine` hook in `v2/src/flow/runtime.ts`, not this lane's file.
+3. **The settings file is the app's.** Both read `CLEARED_CONF`, else `<CLEARED_REPO>/.cleared/agents.conf`, with `parseSections`, so `secrets_dir` and `vapid_subject` cannot differ (lane 3's open point). A test subscribes through the app's `notificationsFrom` and has the dispatcher's child find that subscription. The plan's "at the base branch" holds as far as the service's own checkout of the project is on the base branch.
+4. **Links, groups and titles.**
+   - Links: `/inbox#<item id, encoded>` for approval, permission and a team's question; `/lead` for a plan and the lead's question; `/inbox` for a rollback; `/` for health. The child sets `url` from `CLEARED_NOTIFY_LINK_BASE` and the link, in place of v1's `#ticket=` porthole.
+   - The lead's items (`LEAD_TICKET`) have no ticket in the message, so the subject is never "lead · …". Their group is `lead`, so a plan and a lead question are one notification per window.
+   - `render` takes a new fact, `from: 'lead'`, which gives a question the sentences "The lead asks you a question" and "Open the lead to answer." v1 never passes it.
+   - The title is a release's (the inbox item) or a plan's; a rollback's is the `releases` row's, as v1. A permission and a question carry none: the module has no ticket store, and the ticket's identifier is said.
+5. **Where it is recorded.**
+   - The queue is `v2_notify_queue`; its row `cursor` holds the last `event_id` read, and its absence is the first run. v1's `notify_queue` and `notify_state` are left to `lib/notify.mjs`.
+   - Each delivery is a `notification_sent` row in v1's `events` table and each failure a `notification_failed` row, the shapes of v1. The approval module creates that table at every start (lane 8's `RUNS_TABLES`), and `npm run notify -- test` applies the same statements before writing its row.
+   - A row that cannot be written is said by its kind and changes nothing.
+   - Keys are the inbox item's id, `rollback:<event_id>` or `health:<event_id>`, so a restarted service sends nothing twice.
+6. **Health from other modules.** `reportHealth(db, { code, ticket?, at? })` in `v2/src/notify/queue.ts` queues a health problem. Two codes are added to `HEALTH_CODES` with their sentences: `lead_start_failed` (lane 5) and `week_stop` (lane 7). Nothing calls it yet.
+7. **The module** starts the dispatcher in `provide` when `CLEARED_V2_PROJECT` is set: a tick at once (the first run, which sends nothing and starts no process), then every 30 seconds, the timer unreferenced, a tick never over another one.
+8. **`lib/notify/contract.mjs` stays `.mjs`, an exception to "converted when touched"**, as the plan foresaw: v1's `lib/notify.mjs`, `app/lib/notifications.mjs` and `test/notify.test.mjs` import it until milestone 4 removes them. Its changes are additive: two kinds at the end of `KINDS`, `URGENCY`, two health codes, the `from` fact. v1's 39 tests in `test/notify.test.mjs` pass unchanged, and v1's own dispatcher never makes the new kinds.
+
+**Consequences.**
+- A project whose `agents.conf` lists `[notify] events` itself gets neither `permission` nor `plan` until it adds them; one that lists none gets every kind. `lib/conf.mjs`'s v1 default list is unchanged, since v1 never makes them.
+- **Edit outside the lane's files:** `v2/test/modules/registry.test.ts` (lane 1's), lines 6 and 21. It asserted that the `notify` stub is empty, which filling the module ends. The import and the `notify` entry of that loop are removed; `lead` is still checked.
+- **The real check.** No browser on this server holds a real push subscription, and a fake push service would need https on port 443 or a tunnel, both ruled out. So delivery to a device is unmeasured. Measured, with a temporary `CLEARED_CONF` and a temporary 0700 directory (never `~/.config/cleared/notify`, which may hold subscriptions of the owner's devices):
+  - with no device, `npm run notify -- test` says `webpush: not ready (no_subscription)`;
+  - after the app's own `subscribe` of an endpoint on a push host that does not exist (allowed through `CLEARED_NOTIFY_PUSH_HOSTS`), it says `webpush: failed (push service refused)`. So the dispatcher's child reads the app's keys and subscriptions.
+  - The whole path, from an inbox item through the child to an adapter, is proven in a test with ntfy posting to a server the test runs on 127.0.0.1.
+- **Interface lane: no.** No file of the app was touched, so there is no capture.
+- Issue 146 (the flaky VAPID test) is in `test/notify.test.mjs`, v1's, not this lane's file: still open.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-notify`.

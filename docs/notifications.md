@@ -137,3 +137,35 @@ The dispatcher keeps its own queue and cursor in two tables of the ledger's data
 - The settings are in the configuration file, not in the app.
 - A notification given up at the deadline after its carrier did receive it is sent again at the next wake (a rare double).
 - The title filter is for accidents, not for a writer who wants a name through: a ticket's author can still spell a host out in words.
+
+## Version 2: the dispatcher in the service
+
+Cleared v2 ([milestone 2 plan](v2/milestone-2-plan.md), section 6) keeps the adapters, the private directory, the catalog and the rules above. What changed, on 2026-10-22:
+
+- **The dispatcher runs in the v2 service**, not at the end of a wake. `v2/src/notify/dispatcher.ts` ticks when the service starts and every 30 seconds after, as soon as a project is set (`CLEARED_V2_PROJECT`). It needs no browser open and no request to the service's API.
+- **Where it looks.** The inbox (`flow_inbox`), for what waits for a person now, and v1's `events` table, for what the release watch wrote since the last tick (`rollback_pushed`, `prod_revert`, and the watch's failures listed under `health` above). The board snapshot and the `blocked` kind are v1's only.
+- **Two new kinds**, `permission` and `plan`. The order of urgency is rollback, health, approval, plan, question, permission (`URGENCY` in `lib/notify/contract.mjs`).
+
+| Kind | Sent when | The link opens |
+| --- | --- | --- |
+| `approval` | A release waits in the inbox for your approval. | `/inbox#<item>` |
+| `permission` | A team asks for a permission the policy left to you. | `/inbox#<item>` |
+| `question` | A team asks a question, or the lead does ("The lead asks you a question"). | `/inbox#<item>`, or `/lead` for the lead |
+| `plan` | The lead proposes a plan. | `/lead` |
+| `rollback` | The release watch reverted a release. | `/inbox` |
+| `health` | The release watch failed; the lead could not start (`lead_start_failed`); the usage limit stops new tickets (`week_stop`). | `/` |
+
+- **Groups.** One notification per ticket every `coalesce_minutes`, as above. The lead's plan and question have no ticket: they are one group, `lead`, told at most once per window.
+- **What a notification says.** The kind, the ticket's identifier, a title and a health code, through the catalog. The title is a release's or a plan's; a permission and a question carry none, only the ticket. Nothing of a permission's command, a question's text, a plan's summary or a ledger row's detail is ever read for it.
+- **Subscribing** is in the v2 app with the password session, the anti-forgery token and the app's origin. There is no passkey in v2 ([the decisions log](v2/decisions-log.md), "app login by password, no passkeys"), so the first point of the security model above does not hold in v2: any signed-in person can subscribe a device.
+- **The settings** are read from the same file as the app's: `CLEARED_CONF`, else `<CLEARED_REPO>/.cleared/agents.conf`, and `CLEARED_NOTIFY_*` from the service's environment. So the app, which keeps the subscriptions, and the dispatcher, which sends to them, use one private directory and one key pair. The dispatcher reads them again at most every five minutes, and only when something is to be sent. A project that lists `[notify] events` itself must add `permission` and `plan` to its list to receive them; a project that lists none receives every kind.
+- **lib/notify runs in a child process.** Importing it copies every `CLEARED_*` variable of the process to `ORCH_*` (`lib/conf.mjs`), which the service must not do. So the dispatcher hands the facts of each notification to `node v2/src/cli/notify.ts send` on its standard input, and that process makes the text, sends it and says per adapter what happened. It refuses a message the dispatcher would not make: an unknown kind, a link outside the app's pages, a group of free text.
+- **The deadline** (`CLEARED_NOTIFY_DEADLINE_SECONDS`) holds for each batch: what is still on its way is given up and tried at the next tick, not counted as a try. The child is killed ten seconds after it.
+- **Queue and measure.** The queue is the `v2_notify_queue` table of the ledger; the first run takes note of what waits and sends nothing. Each delivery is a `notification_sent` row in the `events` table and each failure a `notification_failed` row, as in v1, so the query of "The ledger: when you were told" works for v2 too. A plan's or a lead question's row has no ticket.
+- **Check the setup** from `v2/`, as the service account: `npm run notify -- test`. It sends the fixed test message to every configured adapter and says, per adapter, `sent`, `not ready (reason)` or `failed (code)`.
+
+Limits of the v2 dispatcher:
+
+- The flow's events (`FlowEngine.subscribe`) are not read. The flow's engine is built at the first request to the service's API, so a service restarted at night with no browser open would never hear of a rollback; the release watch's rows are written in any case.
+- The lead's health (`lead_start_failed`) and the usage stop (`week_stop`) are sent when the lead engine and the plan runner report them (`reportHealth` in `v2/src/notify/queue.ts`); until those land, nothing reports them.
+- Web Push to a real device was not delivered by a test on this server: no browser here holds a subscription to a real push service.
