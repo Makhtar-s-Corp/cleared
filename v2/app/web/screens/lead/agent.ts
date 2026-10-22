@@ -5,12 +5,14 @@
 // AG-UI messages. The screen's own gestures (a reply, a plan's approval)
 // are folded in with update() as soon as the service answers them.
 import type { Message } from '@ag-ui/client';
-import type { LeadMessage, LeadState, LeadStreamFrame, Plan } from '../../../../src/api/types.ts';
+import type { LeadMessage, LeadState, LeadStreamFrame, NextInboxItem, Plan } from '../../../../src/api/types.ts';
 import { batched, ThreadAgent, type Publish } from '../../copilot/agent.ts';
 import type { ScreenContext } from '../../lib/screen.ts';
-import { followLead, mergeMessages, mergePlan, NO_LEAD, type StreamLike } from './model.ts';
+import { followLead, mergeMessages, mergePlan, NO_LEAD, trainLines, type StreamLike, type TrainLine } from './model.ts';
 
-export type LeadThread = { readonly lead: LeadState; readonly messages: readonly LeadMessage[]; readonly plans: readonly Plan[] };
+// trains: the release trains, read from the inbox by the screen (readTrains,
+// lane 22) once the thread is there and at each tick; none until then.
+export type LeadThread = { readonly lead: LeadState; readonly messages: readonly LeadMessage[]; readonly plans: readonly Plan[]; readonly trains: readonly TrainLine[] };
 
 export const LEAD_AGENT = 'lead';
 
@@ -49,6 +51,12 @@ export class LeadAgent extends ThreadAgent<LeadThread> {
     this.publish?.(this.thread, messagesOf(this.thread));
   }
 
+  // The trains as the inbox says them now; a failed read keeps the last ones.
+  async readTrains(): Promise<void> {
+    const items = await this.options.api<NextInboxItem[]>('/inbox').catch(() => undefined);
+    if (items) this.update((thread) => ({ ...thread, trains: trainLines(items) }));
+  }
+
   protected override follow(publish: Publish<LeadThread>): () => void {
     const { api } = this.options;
     let stopped = false;
@@ -63,7 +71,7 @@ export class LeadAgent extends ThreadAgent<LeadThread> {
         api<Plan[]>('/plans').catch(() => [] as Plan[]),
       ]);
       if (stopped) return;
-      this.thread = { lead, messages, plans };
+      this.thread = { lead, messages, plans, trains: [] };
       send();
       stop = followLead({
         url: (after) => `/api/service/lead/stream?after=${after}`,

@@ -1887,6 +1887,54 @@ The choices the lane makes:
 - Consequence: lane 32 installs both functions of the shim, `installStyleNonce` and `installStyleAttributeCssom`, as that entry says. Matrix line O14 records the decision; P14's note on a refusal of that part no longer applies, and P17 names the validation.
 - Author: the owner, relayed on 2026-10-22 11:27 (Europe/Paris); written in this log.
 
+## 2026-10-22: the plan panel's services, the tower's workspace line and the lead's train lines (the author's choices, lane v2-j2-plan-flags-screens)
+
+**Decision.** Lane 22 (pull request 209) applies the lead and tower parts of decisions 18 and 24, and the tower's part of decision 30, of the [milestone 2 plan](milestone-2-plan.md). It edits only the plan panel, the lead and tower screens, their catalogs and fixtures, and their tests. The lane's choices:
+
+1. **The plan panel's chips** (`app/web/plan-panel/`).
+   - Each item names the services its body names, from lane 18's `PlanItem.sensitivity`. A service of normal sensitivity is a quiet tag. `full`, `reviewer:<model>` and `human:<user>` read "full review", "reviewed by Opus" and "approved by <user>", with a shield, in ink, never in amber, which stays for what waits for a person.
+   - **When they show.** Once the plan names two services, or one item names a service that is not of normal sensitivity. A plan of a one-service workspace shows no chip, so it reads as before.
+   - **A sensitivity this screen does not know** reads as written ("guestbook · audit:weekly"), never as an unknown key.
+   - **Opt-in, for the inbox's sake.** The chips' keys (`PLAN_SERVICE_KEYS`) are not in `PLAN_PANEL_KEYS`, which the inbox's catalog must hold. The inbox's catalog is lane 21's file in this wave, and the translator throws on a missing key, so a chip in the inbox's plan item would blank it. The lead screen asks for the chips with `services: true`; the inbox draws the panel as before until its catalog holds the five keys and it passes the option. That is a followup for the inbox's lane (21, or 27 in wave 10).
+   - **Issue 177, item 2.** A plan or item state the maps do not know reads as the service wrote it, instead of throwing.
+2. **The tower's workspace line** (`app/web/screens/tower/`).
+   - It shows only for a workspace of two services or more, read from `GET /api/workspace` apart from the tower's own reads: a service without the route, or a workspace of one service, shows milestone 1's tower, byte for byte (a test compares the markup).
+   - Each service shows its live sessions (from `SessionSummary.service`) and one train: a landing in progress on it (the first stop of a `landing` train that is not yet healthy), else a train rolled back in the inbox's day (handled release items stay listed a day). Only the rollback is in red.
+   - In such a workspace each live session names its service beside its ticket.
+3. **A session taken over** (decision 30, lane 16's shape).
+   - It stays among the live sessions when `takenOver` is set or when its phase is `paused` (lane 20's phase), and reads "Taken over by you · 6 min" in place of its phrase, with a still ink dot.
+   - **Who.** `takenOver.by` is a user id, and no route maps an id to a name. The tower says "you" when the id is the signed-in user's, else "another account". In milestone 2 only the owner account takes over (decision 32), so the owner reads "you".
+4. **The services of a new ticket.** A chip per service in the bar, shown with the description once a title is typed, as a Radix toggle (`aria-pressed`). The body carries `services` only when some are picked, since the service takes a non-empty list or nothing (lane 14).
+5. **A session plan in Needs you.** Lane 17's `session_plan` items reach `GET /api/inbox` since pull request 204, and the tower put an `undefined` card in its needs for them (the render then fails on `card.kind`). It now draws them: the ticket's title, the plan's reason and its confidence ("Medium confidence: the author waits for your Go."), linked to the inbox. A kind the tower does not draw yet (a contract, a knowledge item: lane 27) is left out instead.
+6. **A blocked train in Needs you** says the block's reason and "It cannot be approved as it is; its card proposes how.", never "Your approval ships it."
+7. **The lead's train and block lines** (`app/web/screens/lead/`).
+   - No thread message says a train: `LeadMessage` has no kind for one, the lead hears of landings and rollbacks in its event turns only, and `src/api/types.ts` belongs to no lane in wave 8. So the screen reads the trains from the inbox's release items that carry `train`, waiting or handled in the last day, and places each line among the lead's messages at the time its train last moved (the latest of the item's time and its stops' times).
+   - A line says where the train is, each service in landing order with its pull request and state, a block's reason and proposal, and links to the card. A block or a train waiting for approval is amber; a rollback or a halt is red.
+   - The screen reads the inbox once the thread is there and at each 30-second tick (`LeadAgent.readTrains`). The agent's start keeps its three reads, which `web/test/copilot.test.tsx` pins.
+   - A thread line written by the service, so the lead's own account and the screen agree, is a followup for a lane that owns the lead's types.
+8. **Issue 173, item 5.** A test pins the tower's `DRAFT_MAX` to the lead screen's.
+9. **Fixtures.** The capture's data is unchanged. New values sit beside it: `WORKSPACE`, `trainItems`, `workspaceFixture` and `towerSource` in `fixtures/tower.ts`; `servicePlan` in `fixtures/lead.ts`, and `leadSource` answering the inbox with release items. `fixtures/source.ts`, lane 20's in this wave, does not answer `/api/workspace` yet; `towerSource` stands in for the tests and the visual loop, and lane 20 can serve `WORKSPACE` from it.
+
+**Consequences.**
+- **Tests first.** The tests were written and run before any change to the screens: on the code of `origin/v2` at 26fafbd plus the lane's new fixture values (data only), every new test failed (3 of 3 node test files at import, 10 of 13 Vitest tests), and the old `towerModel` returned `["release","permission","plan",undefined]` for an inbox with a session plan. Commit 30d4ecb holds the code with them, and the pull request quotes the red runs. The new files: `app/test/lead/services.test.ts`, `app/test/lead/trains.test.ts`, `app/test/tower-workspace.test.ts` (models, `node --test`); `app/web/test/lead/services.test.tsx`, `app/web/test/lead/trains.test.tsx`, `app/web/test/tower-workspace.test.tsx` (components, Vitest). Among them: creating a ticket with two services posts both, with a stubbed api and through the app to `towerSource`.
+- **Checks.** `npm test`: 905 node tests, 902 pass and 3 skipped as before (883 before the lane); 130 Vitest tests pass (117 before). `npm run typecheck` and `npm run guard` are green.
+- **The visual loop.**
+  - The app ran on an ephemeral `127.0.0.1` port (after `ss -ltn`) with `towerSource`, `leadSource` and the fixture source, a fixed clock at the fixtures' time, in headless Chromium.
+  - Captures, none committed, mode 644: `/tmp/cleared-captures/j2/lane22-<screen>-<width>-<theme>.png` for `tower`, `tower-bar` (a title typed, both services picked), `tower-plain` (one service), `lead` (the plan across two services, the three trains) and `lead-plain`, at 1440, 1280, 768 and 390, light and dark; and `lane22-reference-tower.png`, `lane22-reference-lead-and-plan.png`, rendered from `/tmp/cleared-reference/`.
+  - All 40: no horizontal overflow, no page error, no `securitypolicyviolation`, no request off the app's origin.
+  - In the same browser, the bar's picks reach the route: with both services picked (one picked, unpicked and picked again), `towerSource` received `services: ["guestbook","filter-api"]`, the chips were reset after the creation, and a second ticket with none picked was posted with no `services`.
+  - The browser tests run with `CLEARED_V2_PLAYWRIGHT`: both of `app/test/choices-browser.test.ts` pass, the lead's question answered by its option included. `app/test/notify/browser.test.ts` times out waiting for the notifications toggle, on this branch and on `origin/v2` at 26fafbd alike, in this server's headless Chromium: it does not come from this lane.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the captures, the references and `app/DESIGN.md`.
+  - Taken: the service chips of the bar outlined in ink with a check when picked, never the ink fill of the bar's actions, 28 px on a computer and 44 px on a phone; the live session's service tag in Geist, rounded, muted; the workspace line tied to the greeting; the landing dot in ink instead of the reviewer's teal; the taken-over line's icon at 16 px in ink; a shield instead of a square on a sensitive service, a lighter outline; the train's stops wrapping as rounded boxes on a phone; the block's reason and proposal at 13 px.
+  - Not taken: the ticket ids inside the workspace line in mono (they sit inside a translated sentence); the plan item's chips and "After" on one line on a phone (the item's grid is lane 8's layout); the first bubble cut under the thread's header on a computer (the thread scrolls to its end, as lane 8 built it).
+  - Not a regression: `tower-plain` matches the reference.
+- **Open, for other lanes:**
+  - The inbox's plan item shows no service chip until the inbox's catalog holds `PLAN_SERVICE_KEYS` and its panel passes `services: true` (lanes 21 or 27).
+  - The fixture source answers `/api/workspace` in lane 20 (`WORKSPACE` is exported for it).
+  - A thread line for a train written by the service, as above.
+  - The tower names another account's takeover "another account" until a route maps a user id to a name.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-plan-flags-screens`.
+
 ## 2026-10-22: the release card as a train, the groups and flags, and the session plan in the inbox (the author's choices, lane v2-j2-inbox-train)
 
 **Decision.** Lane 21 applies the inbox's part of decisions 21, 22, 23 and 24 of the [milestone 2 plan](milestone-2-plan.md) (complement item 10, multi-repository item 5), on the React port, in the lane's files only: `v2/app/web/screens/inbox/**`, the `inbox` catalogs, `v2/app/fixtures/inbox.ts`, `v2/app/test/inbox/**` and `v2/app/web/test/inbox/**`. The lane's choices:
@@ -1976,7 +2024,7 @@ The choices the lane makes:
   - C8 and C9 name this pull request (208) and its tests. They stay `partial` for the session screen's Plan tab (lane 20).
   - C10 names it too, `partial` until lane 23 passes `contracts` and `guarded`.
   - M5 names it too, `partial` until the multi-service proof's steps 6 to 10.
-  - The new line P23 records choices 1 and 3.
+  - The new line P24 records choices 1 and 3 (P23 is lane 22's, merged first as pull request 209).
   - Lanes 20 and 22, beside this one, may also add P lines; the orchestrator renumbers at merge.
 - **Review round 1 (Sonnet 5.5), taken on 2026-10-22: the Blocked chip.**
   - **The blocking item.** The list's Blocked chip had the class `blocked`, the train's state, so it took the detail's blocked panel rule: its padding, its ring and its margin. It is now `train-chip-<state>`, and the panel rule is scoped to `.d-body .blocked`.
