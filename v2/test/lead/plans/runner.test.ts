@@ -252,7 +252,7 @@ test('the week stop: at 85 % of the seven-day window nothing new starts, the lea
   await t.settle();
 });
 
-test('without a week measure, the day budget stops new starts once today\'s sessions cost more', async () => {
+test('the day budget stops new starts once today\'s sessions cost more', async () => {
   const t = await plans({ plan: { dayBudgetUsd: 1.5, maxParallel: 1 } });
   const finished = (cost: number) => ({ type: 'RUN_FINISHED', threadId: 't', runId: 'r', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: cost } }) as const;
   t.store.events.append({ at: iso(t.clock.now - 3 * 86_400_000), sessionId: 'old', ticket: 'LOCAL-1', project: 'guestbook', event: finished(5) });
@@ -293,4 +293,59 @@ test('a new flow engine over a store with a proposed plan and the lead\'s questi
   assert.equal(state['question:author-dead:q2'], 'handled');
   assert.equal(state['permission:author-dead:p1'], 'handled');
   assert.equal(state['permission:lead-session-1:p2'], 'handled', 'a permission of a dead lead generation cannot be answered either');
+});
+
+test('a week measure whose window has already reset does not stop the plans', async () => {
+  const t = await plans();
+  t.store.events.append({ at: iso(t.clock.now - 7_200_000), sessionId: 'author-old', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 90, resetsAt: iso(t.clock.now - 3_600_000) } } });
+  const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
+  await t.runner.approve(plan, 'u1');
+  await t.settle();
+  assert.notEqual(await t.status(t.itemsOf(plan)[0]!.ticket), 'Todo', 'the window reset an hour ago');
+  assert.equal(t.lead.events.filter((e) => /seven-day/.test(e.text)).length, 0);
+});
+
+test('the day budget applies whenever it is set, beside the week measure', async () => {
+  const t = await plans({ plan: { dayBudgetUsd: 1 } });
+  t.store.events.append({ at: iso(t.clock.now), sessionId: 'author-old', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 20, resetsAt: null } } });
+  t.store.events.append({ at: iso(t.clock.now), sessionId: 'today', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'RUN_FINISHED', threadId: 't', runId: 'r', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 2 } } });
+  const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
+  await t.runner.approve(plan, 'u1');
+  await t.settle();
+  assert.equal(await t.status(t.itemsOf(plan)[0]!.ticket), 'Todo');
+  assert.equal(t.lead.events.filter((e) => /budget/.test(e.text)).length, 1);
+});
+
+test('an approval during ticks creates each ticket once', async () => {
+  const t = await plans({ plan: { maxParallel: 0 } });
+  const { plan } = await t.runner.propose(NIGHT);
+  await Promise.all([t.runner.tick(), t.runner.approve(plan, 'u1'), t.runner.tick(), t.runner.tick()]);
+  await t.settle();
+  assert.equal((await t.tickets.list({ project: 'guestbook' })).length, 1 + NIGHT.items.length);
+  assert.equal(new Set(t.itemsOf(plan).map((i) => i.ticket)).size, NIGHT.items.length);
+});
+
+test('a put back the tick reads before the flow says it counts once', async () => {
+  const t = await plans({ plan: { maxParallel: 0 } });
+  const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
+  await t.runner.approve(plan, 'u1');
+  const ticket = t.itemsOf(plan)[0]!.ticket!;
+  t.store.db.prepare("UPDATE plan_items SET state = 'running'").run();
+  await t.runner.tick();
+  t.runner.onFlowEvent({ type: 'ticket_put_back', at: iso(t.clock.now), project: 'guestbook', ticket, reason: 'failed', note: 'The session failed: the runner died' });
+  assert.equal(t.itemsOf(plan)[0]!.state, 'put_back');
+  assert.equal(t.itemsOf(plan)[0]!.putBacks, 1);
+  assert.match(t.itemsOf(plan)[0]!.note ?? '', /the runner died/, 'the flow\'s note replaces the tick\'s');
+});
+
+test('an item already held is not announced twice', async () => {
+  const t = await plans({ plan: { maxParallel: 0 } });
+  const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
+  await t.runner.approve(plan, 'u1');
+  const ticket = t.itemsOf(plan)[0]!.ticket!;
+  t.store.db.prepare("UPDATE plan_items SET state = 'needs_approval'").run();
+  const unhealthy = { type: 'release_unhealthy', at: iso(t.clock.now), project: 'guestbook', ticket, pr: 102, note: 'HTTP 503' } as const;
+  t.runner.onFlowEvent(unhealthy);
+  t.runner.onFlowEvent(unhealthy);
+  assert.equal(t.lead.events.filter((e) => /not healthy/.test(e.text)).length, 1);
 });

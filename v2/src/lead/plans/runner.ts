@@ -21,8 +21,8 @@
 //      is a put back; a release live but not healthy holds its item.
 //   4. Paused, a plan starts nothing; its running tickets go on.
 //   5. At the week stop (the seven-day window at CLEARED_V2_WEEK_STOP_PERCENT)
-//      or, without that measure, past CLEARED_V2_DAY_BUDGET_USD spent since
-//      midnight, nothing new starts, and the lead and the owner are told once.
+//      or past CLEARED_V2_DAY_BUDGET_USD spent since midnight, when it is
+//      set, nothing new starts, and the lead and the owner are told once.
 //   6. A plan is done when every item has landed or is cancelled.
 //
 // What happens to a ticket is heard on the flow's bus (onFlowEvent). The bus
@@ -47,7 +47,7 @@ import { validatePlan } from './tools.ts';
 export type PlanConfig = {
   readonly maxParallel: number;              // a plan's tickets running at once
   readonly weekStopPercent: number;          // CLEARED_V2_WEEK_STOP_PERCENT: nothing new starts at this share of the seven-day window
-  readonly dayBudgetUsd: number | undefined; // CLEARED_V2_DAY_BUDGET_USD: without a week measure, nothing new starts past this cost since midnight
+  readonly dayBudgetUsd: number | undefined; // CLEARED_V2_DAY_BUDGET_USD: nothing new starts past this cost since midnight
 };
 
 export const DEFAULT_PLAN_CONFIG: PlanConfig = { maxParallel: 2, weekStopPercent: 85, dayBudgetUsd: undefined };
@@ -256,11 +256,12 @@ export class PlanRunner {
     if (!plan) throw new PlanError('not_found', `unknown plan ${id}`);
     if (!this.store.move(id, ['proposed'], 'approved', user)) throw new PlanError('conflict', `plan ${id} is ${this.store.get(id)?.state ?? plan.state}: only a proposed plan is approved`);
     this.#deps.inbox.handle(`plan:${id}`, user);
-    await this.#createTickets(this.store.get(id) as StoredPlan);
+    // The tick creates the tickets, one tick at a time: a timer's tick
+    // during the approval cannot create them twice.
+    await this.tick();
     const n = plan.items.length;
     this.#deps.lead.serviceLine(`The owner approved plan ${id} ("${plan.title}"): ${n === 1 ? 'its ticket is' : `its ${n} tickets are`} created and start in order, at most ${plan.maxParallel} at a time.`);
     this.#publish(id);
-    await this.tick();
     return this.plan(id);
   }
 
@@ -331,6 +332,7 @@ export class PlanRunner {
   }
 
   #hold(plan: StoredPlan, item: StoredItem, note: string, told: string, putBack = false): void {
+    if (item.state === 'held') return;
     this.#set(plan, item, 'held', { note, putBack });
     this.#deps.lead.enqueue(told, true);
   }
@@ -340,6 +342,12 @@ export class PlanRunner {
   #putBack(plan: StoredPlan, item: StoredItem, note: string, counts: boolean, rollback = false): void {
     if (item.state === 'cancelled' || item.state === 'held') return;
     if (item.state === 'landed' && !rollback) return;
+    // The tick may read the ticket in Todo before the flow says why: the
+    // flow's word then only replaces the note.
+    if (item.state === 'put_back') {
+      this.#set(plan, item, 'put_back', { note });
+      return;
+    }
     if (counts && item.putBacks + 1 >= 2) {
       this.#hold(plan, item, note,
         `Item ${item.position} of plan ${plan.id} (${item.ticket}) went back to Todo a second time and is held: ${note} Decide: start it again with start_ticket, or ask the owner.`, true);
@@ -502,20 +510,20 @@ export class PlanRunner {
   // ---- the week stop -----------------------------------------------------------
 
   // The seven-day window at or above the stop, from the harness's last
-  // report; without that measure, the cost of the project's sessions since
-  // midnight (the server's time) past the day budget.
+  // report while that window runs (the mapper reports a change only, and
+  // nothing runs to report the reset of a window that stopped the plans);
+  // or, when the day budget is set, the cost of the project's sessions
+  // since midnight (the server's time) past it.
   #stop(): Stop | undefined {
     const db = this.#deps.store.db;
     const project = this.#deps.project;
-    const week = db.prepare(`SELECT json_extract(event, '$.value.usedPercent') AS used FROM session_events
+    const week = db.prepare(`SELECT json_extract(event, '$.value.usedPercent') AS used, json_extract(event, '$.value.resetsAt') AS resets FROM session_events
       WHERE project = ? AND type = 'CUSTOM' AND json_extract(event, '$.name') = 'cleared.rate_limit' AND json_extract(event, '$.value.window') = 'seven_day'
-      ORDER BY at DESC, rowid DESC LIMIT 1`).get(project) as { used: number | null } | undefined;
+      ORDER BY at DESC, rowid DESC LIMIT 1`).get(project) as { used: number | null; resets: string | null } | undefined;
     const limit = this.#deps.config.weekStopPercent;
-    if (week && typeof week.used === 'number') {
-      return week.used >= limit
-        ? { kind: 'week', text: `The seven-day window of the subscription is at ${week.used} %: the plans start nothing new until it falls below ${limit} %.` }
-        : undefined;
-    }
+    const running = !week?.resets || Date.parse(week.resets) > this.#now().getTime();
+    if (week && typeof week.used === 'number' && running && week.used >= limit)
+      return { kind: 'week', text: `The seven-day window of the subscription is at ${week.used} %: the plans start nothing new until it falls below ${limit} %.` };
     const budget = this.#deps.config.dayBudgetUsd;
     if (budget === undefined) return undefined;
     const midnight = new Date(this.#now());
