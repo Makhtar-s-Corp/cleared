@@ -2,16 +2,17 @@
 // thin call to the workspace modules of lane 5 or to the lock's own client;
 // the flow's tests replace all of them (FlowEffects in engine.ts).
 import { execFile, spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readApprovalRecord } from '../approval/record.ts';
 import { stateDirectory } from '../approval/service.ts';
-import { readBriefing, writeBriefing } from '../workspace/briefing.ts';
+import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type MemoryContext, type MemoryLevel } from '../workspace/briefing.ts';
 import { git, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
 import type { ServiceConfig } from '../workspace/config.ts';
-import { parseConf, projectSettings, type FlowConfig } from './config.ts';
+import type { Ticket } from '../tickets/contract.ts';
+import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
 // The repository's root, which holds release-request.mjs, the lock's client.
@@ -48,6 +49,41 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   const refresh = async (service?: ServiceConfig) => {
     const { dir, url, base } = of(service);
     return projectCheckout({ url, dir, base, env: (await forge(service)).git });
+  };
+
+  // The memory levels (decision 25). The workspace's memory is milestone 1's,
+  // read on the workspace's checkout (its first service's); a session's
+  // service has its own level unless its checkout is that one, so a page is
+  // never briefed twice; then the contracts it is briefed on: its service's
+  // own, those of the services it consumes, then those of the ticket's other
+  // services, each once.
+  const workspace = workspaceOf(config);
+  const memory: MemoryContext = { project: config.projectDir, env };
+  const named = (name: string) => workspace.services.find((s) => s.name === name);
+  const sessionService = (service?: ServiceConfig) => service ?? (workspace.services[0] as ServiceConfig);
+  const providers = (own: ServiceConfig, ticket?: Ticket) => {
+    const seen = new Set<string>();
+    return [own, ...own.consumes.map(named), ...(ticket?.services ?? []).map((s) => named(s.name))]
+      .filter((s): s is ServiceConfig => !!s?.contract && !seen.has(s.name) && !!seen.add(s.name));
+  };
+  // Where `## Lessons for the contract` goes: the service's own contract,
+  // else the first one it consumes, as the briefing tells the author.
+  const lessonContract = (own: ServiceConfig) => [own, ...own.consumes.map(named)].find((s): s is ServiceConfig => !!s?.contract);
+  const serviceLevel = (own: ServiceConfig) => levelContext(memory, { kind: 'service', name: own.name, project: own.dir });
+  const contractLevel = (provider: ServiceConfig) =>
+    levelContext(memory, { kind: 'contract', name: provider.name, project: provider.dir, contract: provider.contract?.path as string });
+  // A service whose checkout is the workspace's has no level of its own:
+  // its page is the workspace's, and its lessons are filed there, so every
+  // filed lesson is in a ledger a briefing reads.
+  const ownLevel = (own: ServiceConfig) => (resolve(own.dir) === resolve(config.projectDir) ? undefined : serviceLevel(own));
+  const levelsOf = (own: ServiceConfig, ticket: Ticket): MemoryLevel[] => {
+    const level = ownLevel(own);
+    return [...(level ? [level] : []), ...providers(own, ticket).map(contractLevel)];
+  };
+  // The service of a checkout <workdirs>/<ticket>/<service>, else the first.
+  const serviceOfWorkdir = (workdir: string, ticket: string) => {
+    const parts = relative(config.workdirRoot, workdir).split(sep);
+    return (parts.length === 2 && parts[0] === ticket ? named(parts[1] as string) : undefined) ?? (workspace.services[0] as ServiceConfig);
   };
 
   // Runs the lock's client with `args`, `input` on its stdin; its exit code
@@ -94,18 +130,31 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     // works in the checkout that exists. A service of a workspace of several
     // has its checkout under <workdirs>/<ticket>/<service>, on the same branch
     // as the ticket's other services.
+    // The author's call also fetches the providers of the contracts it is
+    // briefed on, so a consumer's session reads the contract's page as its
+    // base has it; a provider that cannot be fetched is left out of the
+    // briefing, never in the way of the session.
     async prepareWorkdir({ ticket, role, service }) {
       if (role === 'author') await refresh(service);
       const { dir, base } = of(service);
       const workdir = service ? join(config.workdirRoot, ticket.id, service.name) : join(config.workdirRoot, ticket.id);
       await ticketCheckout({ project: dir, workdir, base, branch: ticketBranch(ticket.id) });
-      const briefing = await readBriefing({ project: dir, env, role, ticket: { id: ticket.id, title: ticket.title, body: ticket.body } });
-      await writeBriefing({ project: dir, base, workdir }, briefing);
-      return { workdir, briefing };
+      const own = sessionService(service);
+      // The workspace's memory reads the first service's checkout, which a
+      // session on another service may be the first to need.
+      if (role === 'author' && resolve(own.dir) !== resolve(config.projectDir)) await refresh().catch(() => undefined);
+      if (role === 'author') for (const provider of providers(own, ticket)) if (provider.dir !== own.dir) await refresh(provider).catch(() => undefined);
+      const read = await readLeveledBriefing({ ...memory, role, ticket: { id: ticket.id, title: ticket.title, body: ticket.body }, levels: levelsOf(own, ticket) });
+      const lessons = workspace.services.length > 1 ? { service: ownLevel(own) ? own.name : null, contract: lessonContract(own)?.name ?? null } : undefined;
+      await writeBriefing({ project: dir, base, workdir }, read.workspace, { levels: read.levels, ...(lessons ? { lessons } : {}) });
+      return { workdir, briefing: flatBriefing(read) };
     },
 
     async captureHandover(input) {
-      return captureHandover({ project: config.projectDir, env, ...input });
+      const own = serviceOfWorkdir(input.workdir, input.ticket);
+      const level = ownLevel(own);
+      const contract = lessonContract(own);
+      return captureHandover({ ...memory, ...input, ...(level ? { service: level } : {}), ...(contract ? { contract: contractLevel(contract) } : {}) });
     },
 
     async publish(input) {

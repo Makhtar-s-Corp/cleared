@@ -10,14 +10,17 @@
 //
 // Also the effects behind it: the lead's workdir, a fresh clone of the base
 // at each generation, and lib/memory in a child process (lib/conf.mjs copies
-// every CLEARED_* variable into ORCH_* when it is imported).
+// every CLEARED_* variable into ORCH_* when it is imported). The lead's
+// memory is the workspace's level; after it come the first line of each
+// other service's page, read in that service's level (decision 25, lane 19).
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { LeadCommitment, LeadMessage } from '../api/types.ts';
+import { loadFlowConfig } from '../flow/config.ts';
 import { ensureExcluded, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
-import { BriefingError, REFERENCE_LINE, type MemoryEntry } from '../workspace/briefing.ts';
+import { BriefingError, REFERENCE_LINE, ensureLevel, levelContext, type MemoryEntry } from '../workspace/briefing.ts';
 import { forgeEnvironments } from '../workspace/publish.ts';
 import { LEAD_TICKET, capAnswer } from './contract.ts';
 import { LEAD_RULES } from './prompts.ts';
@@ -33,8 +36,12 @@ export type MemoryHit = { readonly id: string; readonly type: string; readonly s
 // cut; the commit tool keeps their number and length bounded instead.
 export const HANDOVER_LIMITS = { summary: 4096, messages: 6144 } as const;
 
-// lib/memory's budget for the lead's part of the briefing, in bytes.
+// lib/memory's budget for the lead's part of the briefing, in bytes. The
+// services' lines come out of it, each cut to SERVICE_LINE bytes and all of
+// them to SERVICE_LINES.
 export const MEMORY_BUDGET = 12_000;
+export const SERVICE_LINE = 160;
+export const SERVICE_LINES = 2_000;
 
 // One piece of data, each line quoted as lib/memory quotes it.
 function block(content: string): string {
@@ -77,7 +84,10 @@ export type LeadBriefingInput = {
   readonly memoryError?: string;
 };
 
-const MEMORY_HEADINGS: Readonly<Record<string, string>> = { project: 'Project', glossary: 'Glossary', lesson: 'Lessons for the lead', decision: 'Decisions', handover: 'Earlier handover in memory' };
+const MEMORY_HEADINGS: Readonly<Record<string, string>> = {
+  project: 'Project', glossary: 'Glossary', lesson: 'Lessons for the lead', decision: 'Decisions', handover: 'Earlier handover in memory',
+  services: "The services' pages, first lines",
+};
 
 export function renderLeadBriefing(input: LeadBriefingInput): string {
   let text = `${LEAD_RULES}\n## This generation\n\nYou are generation ${input.generation} of the lead, started at ${input.at}. Below are your open commitments, the last handover record and the project's memory. When the lead's own account and the structured parts of the record disagree, the structured parts win: the service wrote them from its tables.\n\n${REFERENCE_LINE}\n`;
@@ -103,7 +113,8 @@ export function renderLeadBriefing(input: LeadBriefingInput): string {
 const MEMORY_MODULE = new URL('../../../lib/memory/contract.mjs', import.meta.url).href;
 
 // One request on stdin, one JSON answer on stdout. `briefing` is the lead
-// role's selection within its budget; `search` the entries that match.
+// role's selection within its budget; `search` the entries that match;
+// `page` the committed page of the checkout, or null.
 const MEMORY_PROGRAM = `
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -115,6 +126,7 @@ try {
     let result = null;
     if (request.command === 'briefing') result = memory.briefing({ role: 'lead', ticket: { id: request.ticket, title: '', body: '' }, budget: request.budget }).entries.map((e) => ({ type: e.type, content: e.content }));
     else if (request.command === 'search') result = memory.search(request.query, { limit: request.limit }).map((e) => ({ id: e.id, type: e.type, status: e.status, content: e.content }));
+    else if (request.command === 'page') result = memory.briefing({ role: 'lead', ticket: { id: request.ticket, title: '', body: '' }, budget: 1000000 }).entries.find((e) => e.type === 'project')?.content ?? null;
     else throw new Error('unknown memory command');
     process.stdout.write(JSON.stringify(result));
   } finally { memory.db.close(); }
@@ -149,7 +161,7 @@ function runLeadMemory(project: string, env: NodeJS.ProcessEnv, request: Record<
 export type LeadEffects = {
   prepareWorkdir(): Promise<string>;                                   // the lead's workdir, a fresh clone of the base
   writeBriefing(workdir: string, text: string): Promise<void>;         // CLAUDE.md in it
-  memory(): Promise<readonly MemoryEntry[]>;                           // the lead's memory within MEMORY_BUDGET
+  memory(): Promise<readonly MemoryEntry[]>;                           // the lead's memory within MEMORY_BUDGET, the services' lines last
   searchMemory(query: string): Promise<readonly MemoryHit[]>;
 };
 
@@ -159,7 +171,31 @@ export type LeadEffectsConfig = {
   readonly base: string;
   readonly workdir: string;             // <workdirs>/lead
   readonly env?: NodeJS.ProcessEnv;
+  // The workspace's services, in its order; by default those the
+  // environment's workspace names, none when it cannot be read.
+  readonly services?: readonly { readonly name: string; readonly dir: string }[];
 };
+
+// A service's line: its name and the first line of its page, a heading's
+// marks taken off, cut on a character to SERVICE_LINE bytes.
+function serviceLine(name: string, page: string): string | null {
+  const first = page.split(/\r?\n/).map((line) => line.replace(/^#+\s*/, '').replace(/\s+/g, ' ').trim()).find(Boolean);
+  if (!first) return null;
+  let line = `${name}: ${first}`;
+  while (Buffer.byteLength(line) > SERVICE_LINE) line = line.slice(0, -1);
+  return line;
+}
+
+// The lines while they fit in SERVICE_LINES, then how many did not.
+function serviceLines(lines: readonly string[]): string[] {
+  if (Buffer.byteLength(lines.join('\n')) <= SERVICE_LINES) return [...lines];
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (Buffer.byteLength([...kept, line, `and ${lines.length - kept.length - 1} more services.`].join('\n')) > SERVICE_LINES) break;
+    kept.push(line);
+  }
+  return [...kept, `and ${lines.length - kept.length} more services.`];
+}
 
 export function realLeadEffects(config: LeadEffectsConfig): LeadEffects {
   const env = config.env ?? process.env;
@@ -191,10 +227,28 @@ export function realLeadEffects(config: LeadEffectsConfig): LeadEffects {
       }
       ensureExcluded(workdir);
     },
+    // The other services' lines first, since the workspace's memory gets
+    // what they leave of the budget. A service whose checkout is the
+    // workspace's (the first) has the workspace's page; one whose checkout
+    // is not on this server, or whose page cannot be read, has no line.
     async memory() {
-      const entries = await runLeadMemory(config.projectDir, env, { command: 'briefing', ticket: LEAD_TICKET, budget: MEMORY_BUDGET });
+      const listed = config.services ?? (() => {
+        try { return loadFlowConfig(env)?.workspace?.services ?? []; } catch { return []; }
+      })();
+      const others = listed.filter((s) => resolve(s.dir) !== resolve(config.projectDir) && existsSync(s.dir));
+      const pages = await Promise.all(others.map(async (s) => {
+        try {
+          const level = levelContext({ project: config.projectDir, env }, { kind: 'service', name: s.name, project: s.dir });
+          ensureLevel(level);
+          const page = await runLeadMemory(s.dir, { ...env, ...level.env }, { command: 'page', ticket: LEAD_TICKET });
+          return typeof page === 'string' ? serviceLine(s.name, page) : null;
+        } catch { return null; }
+      }));
+      const lines = serviceLines(pages.filter((line): line is string => line !== null));
+      const text = lines.join('\n');
+      const entries = await runLeadMemory(config.projectDir, env, { command: 'briefing', ticket: LEAD_TICKET, budget: MEMORY_BUDGET - Buffer.byteLength(text) });
       if (!Array.isArray(entries)) throw new BriefingError('memory: the briefing is not a list of entries');
-      return entries as MemoryEntry[];
+      return lines.length ? [...entries as MemoryEntry[], { type: 'services', content: text }] : entries as MemoryEntry[];
     },
     async searchMemory(query) {
       const hits = await runLeadMemory(config.projectDir, env, { command: 'search', query, limit: 20 });

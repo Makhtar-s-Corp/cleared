@@ -70,3 +70,61 @@ test('a memory that cannot be read leaves the generation briefed without it', as
   assert.equal(t.lead.state().generation, 1);
   assert.match(t.briefings[0] ?? '', /memory could not be read/i);
 });
+
+// ---- the service pages' first lines (decision 25, lane 19) --------------------
+
+async function leadMemory(services: number, line: string) {
+  const { mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { projectCheckout } = await import('../../src/workspace/checkout.ts');
+  const { realLeadEffects } = await import('../../src/lead/briefing.ts');
+  const { AGENTS_CONF, remote, tempDir } = await import('../workspace/git.ts');
+  const root = tempDir('lead-levels');
+  const workspace = await projectCheckout({ url: remote({ 'docs/project.md': `# Guestbook\n${'w'.repeat(10_500)}\n` }), dir: join(root, 'guestbook'), base: 'main' });
+  const filter = await projectCheckout({ url: remote({ '.cleared/agents.conf': AGENTS_CONF, 'docs/project.md': `\n# ${line}\nThe rest of the page.\n` }), dir: join(root, 'filter-api'), base: 'main' });
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
+  delete env.ORCH_LEDGER;
+  mkdirSync(join(root, 'state'), { recursive: true });
+  const list = [{ name: 'guestbook', dir: workspace.dir }, { name: 'billing', dir: join(root, 'billing') },
+    ...Array.from({ length: services }, (_v, i) => ({ name: i === 0 ? 'filter-api' : `filter-${i}`, dir: filter.dir }))];
+  const effects = realLeadEffects({ projectDir: workspace.dir, repoUrl: 'unused', base: 'main', workdir: join(root, 'lead'), env, services: list });
+  return effects.memory();
+}
+
+test('the lead\'s memory ends with the first line of each other service\'s page, the workspace\'s own page not repeated', async () => {
+  const memory = await leadMemory(1, 'Filter API: it checks the words of an entry.');
+  assert.match(memory[0]?.content ?? '', /^# Guestbook/);
+  const services = memory.filter((entry) => entry.type === 'services');
+  assert.deepEqual(services.map((entry) => entry.content), ['filter-api: Filter API: it checks the words of an entry.']);
+  const text = renderLeadBriefing({ generation: 1, at: 'now', commitments: [], handover: null, memory });
+  assert.match(text, /\n### The services' pages, first lines\n--- BEGIN MEMORY DATA ---\n {4}\| filter-api: Filter API: it checks the words of an entry\.\n/);
+  assert.ok(!text.includes('billing'), 'a service whose checkout is not on this server has no line');
+});
+
+test('with a full list of services, the lead\'s memory stays in its budget and the briefing under 20 KB', async () => {
+  const memory = await leadMemory(15, `Filter API ${'x'.repeat(300)}`);
+  const bytes = memory.reduce((n, entry) => n + Buffer.byteLength(entry.content), 0);
+  assert.ok(bytes <= 12_000, `${bytes} bytes of memory`);
+  const services = memory.find((entry) => entry.type === 'services')?.content ?? '';
+  assert.ok(services.split('\n').every((line) => Buffer.byteLength(line) <= 160), 'each line is cut');
+  assert.match(services, /and \d+ more services\.$/);
+  const text = renderLeadBriefing({ generation: 1, at: 'now', commitments: [], handover: null, memory });
+  assert.ok(Buffer.byteLength(text) < 20 * 1024, `${Buffer.byteLength(text)} bytes`);
+});
+
+test('the briefing of a refreshed generation, every part at its cap, stays near the 35 KB the lane 5 entry states (issue 168, item 4)', async () => {
+  const full = (n: number, char: string) => char.repeat(n);
+  const commitments = Array.from({ length: 20 }, (_v, i) => ({ id: `c${i + 1}`, text: full(300, 'c'), ticket: `LOCAL-${i + 1}`, due: '2026-10-22T06:00:00.000Z', state: 'open' as const, createdAt: '2026-10-21T20:00:00.000Z', fulfilledAt: null, note: null }));
+  const messages = Array.from({ length: 10 }, (_v, i) => ({ seq: i + 1, at: '2026-10-22T07:00:00.000Z', by: 'owner' as const, text: full(1000, 'm'), kind: 'message' as const }));
+  // The memory at its cap: the services' lines, and the workspace's entries filling the rest of the 12 000 bytes.
+  const services = (await leadMemory(15, `Filter API ${'x'.repeat(300)}`)).filter((entry) => entry.type === 'services');
+  const memory = [{ type: 'project', content: full(12_000 - Buffer.byteLength(services[0]?.content ?? ''), 'p') }, ...services];
+  const text = renderLeadBriefing({
+    generation: 7, at: '2026-10-22T08:01:00.000Z', commitments,
+    handover: { ...record, summary: full(9000, 's'), parts: `## Live sessions\n${Array.from({ length: 20 }, (_v, i) => `- LOCAL-${i + 1} author working`).join('\n')}`, messages },
+    memory,
+  });
+  assert.ok(text.includes(full(4000, 's')) && !text.includes(full(4097, 's')), 'the summary at its cap');
+  assert.equal(memory.reduce((n, entry) => n + Buffer.byteLength(entry.content), 0), 12_000);
+  assert.ok(Buffer.byteLength(text) < 36 * 1024, `${Buffer.byteLength(text)} bytes`);
+});
