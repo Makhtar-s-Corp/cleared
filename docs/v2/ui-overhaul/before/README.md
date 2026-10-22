@@ -22,4 +22,4 @@ Taken on 2026-10-22 between 22:10 and 22:20 (Europe/Paris) for [../../ui-overhau
 - `live-session-reviewer-{1440-light,1440-dark,390-dark}.png`: the reviewer's session after the crumbs' link (a full page load).
 - `live-lead-{1440-light,1440-dark,390-dark}.png`: the lead screen.
 - `demo-login-{1440-dark,1440-light,390-dark}.png`.
-- `wave8-inbox-1440-light.png`, `wave8-session-terminal-1440-light.png`, `wave8-lead-1440-light.png`, `takeover-harness-1440-dark.png`, `proofmulti-inbox-full-page.png`.
+- `wave8-session-terminal-1440-light.png`, `wave8-lead-1440-light.png`, `takeover-harness-1440-dark.png`, `proofmulti-inbox-full-page.png`.

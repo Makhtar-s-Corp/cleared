@@ -56,7 +56,7 @@
   },
   {
     "label": "session",
-    "href": "/sessions/8256bb5b-a89c-4794-8ece-cf76e6a647ca",
+    "href": "/sessions/<id>",
     "via": "goto-fallback-goto",
     "ttfb": 3,
     "dcl": 33,
@@ -95,7 +95,7 @@
   },
   {
     "label": "author-to-reviewer",
-    "href": "/sessions/207a3fd8-c455-46e1-b7c2-26ffd390f6d7",
+    "href": "/sessions/<id>",
     "via": "click",
     "contentMs": 216,
     "requests": 25
@@ -157,7 +157,7 @@
   },
   {
     "label": "session",
-    "href": "/sessions/8256bb5b-a89c-4794-8ece-cf76e6a647ca",
+    "href": "/sessions/<id>",
     "via": "goto-fallback-goto",
     "ttfb": 2,
     "dcl": 25,
@@ -196,7 +196,7 @@
   },
   {
     "label": "author-to-reviewer",
-    "href": "/sessions/207a3fd8-c455-46e1-b7c2-26ffd390f6d7",
+    "href": "/sessions/<id>",
     "via": "click",
     "contentMs": 217,
     "requests": 25
@@ -258,7 +258,7 @@
   },
   {
     "label": "session",
-    "href": "/sessions/8256bb5b-a89c-4794-8ece-cf76e6a647ca",
+    "href": "/sessions/<id>",
     "via": "goto-fallback-goto",
     "ttfb": 3,
     "dcl": 36,
@@ -297,7 +297,7 @@
   },
   {
     "label": "author-to-reviewer",
-    "href": "/sessions/207a3fd8-c455-46e1-b7c2-26ffd390f6d7",
+    "href": "/sessions/<id>",
     "via": "click",
     "contentMs": 247,
     "requests": 25
