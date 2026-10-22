@@ -2917,19 +2917,33 @@ The lane's choices:
 
 **Author.** Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-proof-step4-heading`.
 
-## 2026-10-22: Owner decision: the reviewer of a multi-service ticket sees the change of every service
+## 2026-10-22: Owner decisions of 20:33: the reviewer of a multi-service ticket sees the change of every service, and the first real multi-service run
 
-**Decision.** On 2026-10-22 at 20:33, the owner decided that the reviewer of a ticket of several services receives the diffs of all the ticket's services, and the contract's change, in its checkout or its prompt, and evaluates the acceptance criteria on the whole. It is a requirement of the multi-repository addition ([complement-multi-depots.md](complement-multi-depots.md)), in the scope of milestone 2. It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the lane `v2-j2-review-multi-service-diff` implements it and cites this entry.
+**Decision 1.** On 2026-10-22 at 20:33 (Europe/Paris), the owner decided that the reviewer of a ticket of several services receives the diffs of all the ticket's services, and the contract's change, in its checkout or its prompt, and evaluates the acceptance criteria on the whole. It is a requirement of the multi-repository addition ([complement-multi-depots.md](complement-multi-depots.md)), in the scope of milestone 2. It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the lane `v2-j2-review-multi-service-diff` implements it and cites this entry.
 
 **Why.** On 2026-10-22, the real multi-service proof's ticket LOCAL-10 was refused twice. Its reviewer worked in the guestbook's checkout and read the guestbook's diff only, so it judged criteria 1 and 2, the filter API's work, unmet.
 
 **Consequences.** Issue 221, item 4 ("the review starts on the first service only") becomes a requirement. The requirements matrix records the decision as O17, and the author's choices as P46 (the entry below).
 
-- Author: the owner, relayed on 2026-10-22 20:33; written in this log by Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.
+The owner took three more decisions at the same time. They are recorded here as relayed; this lane implements none of them.
+
+**Decision 2: the lead's question on LOCAL-10.** The owner answered the lead:
+- when the filter's answer has no `severity`, the guestbook falls back to the filter's `ok` field, so the contract stays backward compatible;
+- the guestbook records why an entry is held;
+- the README is updated;
+- the work restarts with a plan.
+
+**Decision 3: the milestone 1 leftovers.**
+- LOCAL-3, LOCAL-4 and LOCAL-5 were closed in Cleared as leftovers. Their guestbook pull requests, 2 to 4, were closed unmerged, and their branches are kept.
+- LOCAL-7's permission request had already been closed by the service's restart, and LOCAL-7 was closed.
+
+**Decision 4: the first real multi-service run.** It was stopped at step 06. Its logs are kept as `proofmulti-run1`, and LOCAL-10 was closed so that the run can start again cleanly.
+
+- Author: the owner, relayed on 2026-10-22 20:33 (Europe/Paris); written in this log by Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.
 
 ## 2026-10-22: the reviewer of a ticket of several services reads every service's change and the contract's (the author's choices, lane v2-j2-review-multi-service-diff)
 
-**Decision.** The lane applies the owner's decision of 20:33 (the entry above). Its choices:
+**Decision.** The lane applies the owner's decision 1 of 20:33 (the entry above). Its choices:
 
 1. **The prompt, not the checkout.** The reviewer keeps the first service's checkout, where it can run that service's tests, and its prompt carries the other services' diffs. Reason: a checkout holding every service would change the session's mounts and runtime (`container/session-runtime.ts`, the adapters), which are not this lane's files. The reviewer would also lose the one service checkout where its tests run today.
 2. **Each service's branch is read on the host, as a step's is.** `branchChanges` (`flow/effects.ts`) reads `<workdirs>/<ticket>/<service>` with the fetch the step read already used, now shared as `fetchBranch`. The branch is fetched into a private ref of the service's own checkout, with every object checked. A `.git` that is a link, a linked worktree or has alternates is refused, and no git of the session's runs. Only committed changes count. A service the ticket has no checkout of has no change.
@@ -2968,4 +2982,5 @@ The lane's choices:
 - `npm run typecheck` is green.
 - `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
 
+- Pull request: 238, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.
