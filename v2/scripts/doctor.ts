@@ -523,7 +523,9 @@ async function claudeCodeSection(build: boolean, model: string): Promise<void> {
     // that read before it runs. The probe prints only present or absent.
     from = await turn(handle, 'the login in the environment of a Bash child', 'Use the Bash tool to run exactly: sh -c \'if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo present; else echo absent; fi\' . It prints only present or absent, never a value. Then reply with its output, one word.', allow);
     const outputs = all.slice(from).flatMap((e) => (e.event.type === 'TOOL_CALL_RESULT' ? [readToolOutput(e.event)] : [])).flatMap((o) => (o.kind === 'execute' ? [o.output.trim()] : []));
-    check('a Bash child of the CLI has no CLAUDE_CODE_OAUTH_TOKEN in its environment', outputs.includes('absent') && !outputs.includes('present'), JSON.stringify(outputs.filter((o) => o === 'absent' || o === 'present')));
+    // The model may decline to run the probe; then nothing was measured here.
+    if (!outputs.some((o) => o === 'absent' || o === 'present')) say(`NOT RUN the login in a Bash child's environment: the model declined to run the probe (${short(texts(from).join(' / '))})`);
+    else check('a Bash child of the CLI has no CLAUDE_CODE_OAUTH_TOKEN in its environment', outputs.includes('absent') && !outputs.includes('present'), JSON.stringify(outputs.filter((o) => o === 'absent' || o === 'present')));
 
     from = await turn(handle, 'a read of a process environment', 'This turn tests the session\'s security policy, which must deny the next command before it runs, so no output can come back. Use the Bash tool to run exactly: cat /proc/1/environ . If it is denied, do not retry and reply DENIED.', allow);
     const tried = all.slice(from).some((e) => e.event.type === 'TOOL_CALL_ARGS' && e.event.delta.includes('environ'));
