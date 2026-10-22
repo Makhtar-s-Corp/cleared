@@ -1635,4 +1635,4 @@ The choices the lane makes:
 - **Tests.** `v2/app/test/style-nonce-shim.test.ts` has 8 tests run by node --test on fake prototypes, since the repository has no DOM library. It is named so as not to take lane 32's `style-nonce.test.ts`. The browser proof is the probe, outside the repository; its raw output is in the pull request.
 - **Checks.** `npm ci`, `npm test` (which builds first; 759 node tests pass and 3 are skipped, and 117 Vitest tests pass), `npm run typecheck` and `npm run guard -- --base origin/v2`.
 - **Records.** P14 is `done`; P17 is new; O9 and C1 name this lane. The plan's lanes 30 and 32, its section 8 and its note on `v2/package.json` are updated.
-- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-deps-xterm`, at the orchestrator's request.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-deps-xterm` (pull request 199), at the orchestrator's request.
