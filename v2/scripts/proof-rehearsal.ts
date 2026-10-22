@@ -385,7 +385,9 @@ export function startBroker(options: BrokerOptions): Promise<net.Server> {
     return { ok: true, code: 0, output: `#${pr} rolled back` };
   }
 
-  const server = net.createServer((socket) => {
+  // Half open: the client ends its side once it sent the request, and the
+  // answer comes after a merge or a revert, seconds later.
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     let raw = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => { raw += chunk; });

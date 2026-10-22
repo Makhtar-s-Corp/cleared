@@ -208,7 +208,10 @@ async function openItem(id: string): Promise<void> {
   const link = page.locator(`a.item[data-item="${id}"]`);
   await link.waitFor();
   await link.click();
-  await page.locator('#d-actions button, #d-actions [data-blocked], #detail [data-blocked]').first().waitFor();
+  // The item shown: a waiting one with its buttons, a handled one (a train
+  // rolled back) with its line only.
+  await page.locator(`a.item[data-item="${id}"][aria-current="true"]`).waitFor();
+  await page.locator('#d-actions').waitFor({ state: 'attached' });
 }
 
 // Creates ticket `n` of the proof from the tower bar, naming its services.
@@ -318,6 +321,10 @@ if (validated) {
       return now.filter((s) => s.kind === 'service').every((s) => s.state === 'done') ? now : undefined;
     });
     const took = minutesOf(first);
+    // Readings every few seconds miss two short steps that overlap: the
+    // ledger's sessions of the two service steps say whether they ran at once.
+    const spans = ledger((db) => db.prepare('SELECT s.created_at AS a, s.updated_at AS b FROM ticket_steps t JOIN sessions s ON s.id = t.session WHERE t.ticket = ? AND t.kind = ?').all(first, 'service') as { a: string; b: string }[]) ?? [];
+    if (spans.length === 2 && spans[0] && spans[1] && spans[0].a < spans[1].b && spans[1].a < spans[0].b) parallel = Math.max(parallel, 2);
     const times_ = list.filter((s) => s.kind === 'service').map((s) => `${s.service} ${took.get(s.position) ?? '?'} min`).join(', ');
     return `the guestbook's Browser tab shows the trial environment; the fake answered ${fake?.calls ?? '?'} calls; at most ${parallel} service steps running at once; ${times_}`;
   });
@@ -470,6 +477,38 @@ if (signedIn) {
     const facts = ledger((db) => humanFacts(db, session.id, times.give_back_at ?? null));
     return `taken over, ${facts?.lines ?? '?'} lines journaled, ${saves.length} save(s), given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
   });
+}
+
+// ---- the screens as the proof left them ------------------------------------------------
+// The visual loop's widths and themes, on the four screens the proof drove,
+// in the state it left them: /tmp/cleared-captures/j2/proof-multi-<screen>-<width>-<theme>.png
+// (PROOF_SCREENS=0 leaves them out; the real run takes them too).
+if (signedIn && env.PROOF_SCREENS !== '0') {
+  const shots = '/tmp/cleared-captures/j2';
+  mkdirSync(shots, { recursive: true });
+  const session = (human as { session: string } | null)?.session;
+  const screens: [string, string][] = [['tower', '/'], ['inbox', '/inbox'], ['lead', '/lead'], ...(session ? [['session', `/sessions/${encodeURIComponent(session)}`] as [string, string]] : [])];
+  try {
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.evaluate(([key, value]: string[]) => { try { localStorage.setItem(key as string, value as string); } catch { /* no storage */ } }, ['cleared-v2-theme', theme]);
+      for (const width of [1440, 1280, 768, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        for (const [name, path] of screens) {
+          await page.goto(`${APP}${path}`);
+          await page.locator('#screen > *').first().waitFor().catch(() => undefined);
+          await sleep(500);
+          await page.mouse.move(2, 2).catch(() => undefined);
+          const file = join(shots, `proof-multi-${name}-${width}-${theme}.png`);
+          await page.screenshot({ path: file, fullPage: true });
+          chmodSync(file, 0o644);
+        }
+      }
+    }
+    log(`the screens at four widths, light and dark: ${shots}/proof-multi-*.png`);
+  } catch (error) {
+    log(`the screens' captures stopped: ${(error as Error).message.split('\n')[0]}`);
+  }
 }
 
 // ---- the report ----------------------------------------------------------------------

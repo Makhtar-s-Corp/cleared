@@ -383,7 +383,8 @@ export function createRehearsalAdapter(options: RehearsalOptions): SessionAdapte
       async send(message) {
         if (!done) {
           done = true;
-          await git(input, 'add', '--all', '--', '.', ':!HANDOVER.md', ':!CLAUDE.md');
+          // The tracked files the human changed: the briefing and a handover stay out.
+          await git(input, 'add', '--update');
           await commitStaged(input, `${input.ticket}: the changes the owner made`);
         }
         await handle.send(message);
