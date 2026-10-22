@@ -1555,3 +1555,60 @@ The choices the lane makes:
   - The base layers of old commits are kept, labelled; nothing prunes them yet.
 - The rows of [requirements-matrix.md](requirements-matrix.md) this lane delivers: P9 done; B5.5b, M3 and P8 partial (the skills' loading, the Browser tab and lane 20's isolation test remain); B4.6 names `doctor workspace`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-workspace-runtime`.
+
+## 2026-10-22: the clickable answers on the React screens (milestone 2, lane 13)
+
+**Decision.** Lane `v2-j2-choices` applies decision 17 of the [milestone 2 plan](milestone-2-plan.md) on the React port. A question a session or the lead asks is shown as buttons, multi-select when it says so, the recommendation marked, with a free answer, on the session screen, the lead screen and the inbox's question detail. The on-hold branch of the same name, built on the old front end, was not merged: its model, its tests, its catalog keys and the lead's rule were ported. The lane's choices:
+
+1. **One component.** `app/web/components/choices/` holds the pure model (`model.ts`, under `node --test`), the component (`Choices.tsx`) and its sheet (`choices.css`). Each screen's sheet sets only its size: the inbox keeps its 18 px question and 44 px fields, and the lead's bubble keeps the question in the lead's regular weight with its header as a small amber line.
+   - Two modes. `inline` (the session and the lead): a click on the only choice of one question answers at once; otherwise the clicks toggle and Send answers. `bar` (the inbox): the clicks only pick, and the inbox's bar sends, as before.
+   - The states: waiting, busy (the buttons wait while the answer is on its way), answered (by whom, and with what when this tab sent it), cancelled (the turn was interrupted), settled (the answer came after the question stopped waiting: 404 or 409), ended (the session ended before an answer), and read (shown only).
+2. **The thread's interrupt, without `useInterrupt`.** The session's thread state gains `interrupts`: one AG-UI `Interrupt` per question that waits, its id the request's, `reason: 'cleared.question'`, and the AskUserQuestion questions kept as asked in its `metadata`. The screen reads it through `useAgent`, as it reads the rest of the thread. CopilotKit's `useInterrupt` was not used, for two reasons read in its 1.77.2 source:
+   - it sets its pending interrupt only when a run finalizes, and the screen's agent keeps one run open for the screen's life (the React port's choice), so it would never fire;
+   - its `resolve` and `cancel` call `copilotkit.runAgent`, which the agents refuse, since decision 17 sends the answer through the app's routes.
+   The lead's question is read from `LeadState.pendingQuestion` and the thread's question message, as lane 8 did.
+3. **The routes.** A session's answer posts `{ decision: { kind: 'answer', answers } }` to the session answer route, keyed by the question's text, each label as written ("(Recommended)" kept). It has its own handler: the permission buttons' `decisionOf` would read an option's label as a denial. The lead's answer goes through `POST /api/lead/messages` (lane 8's choice, issue 168, item 3).
+   - One question sends its answer as it is.
+   - Several questions of one ask, now answered by picks then Send, send one text with one line per question, named by its header. The lead engine gives that one text to every question of the ask, as it does for a typed reply.
+   - The lead's reply field stays the free answer: the bubble has no field of its own. That field keeps its 20,000-character limit: nothing downstream of `POST /api/lead/messages` caps an answer, so no cap was invented.
+4. **The 2000-character limit** (what the session answer route accepts per answer) applies to the composed value of each question: the free answer, or the picks joined with ", ". Over it, the component says so and Send stays off. The inbox's `answersFor` now delegates to the component's, so the inbox refuses too.
+5. **A defect fixed, test first.** A question cancelled by an interrupt stayed pending in the session model forever. The adapters cancel it with `cleared.permission_answered` (`decision: 'cancelled'`, by the policy), which the model only read for permissions. Before the fix, `pending` still held the request after the cancel (run recorded in the pull request). The question now leaves `pending` and its row says cancelled.
+6. **"With what" is this tab's knowledge.** `cleared.answered` carries the request and who answered, not the answer, and the Claude Code adapter stores the answer nowhere else in the session's events. So "Answered by you: <label>" shows in the tab that sent it until a reload, and "Answered by you" after it. On the lead screen the owner's answer is the next bubble anyway, and a handled question reads as a line of the lead, as in the capture.
+7. **Selectors.** Every option carries `data-answer` with its label as written, the attribute proof-j2 reads in `#thread .bubble.question [data-answer]`. On the session screen, options sit under `[data-row="question"]` and the permission buttons under `[data-row="request"]`, which is the scope proof-j1 uses, so the two never mix. The inbox's options had `data-option`; they now carry `data-answer`, which no script read.
+8. **One wording.** "Recommended" on the three screens, where the inbox said "Recommended by the team": the asker is a team or the lead, and the component is shared. The session's `question_open` and `question_answered`, the lead's `lead_question_recommended` and `lead_question_several`, and the inbox's `recommended` and `free_answer` were replaced by the `choice_*` keys, which the session, lead and inbox catalogs hold alike in English and French (a test checks it).
+9. **The lead's rule.** "Give options whenever the question allows it: two to four options, each a short label the owner's screen shows as buttons, with a description when the label alone is not enough. Put your recommendation first and end its label with "(Recommended)". Add no "Other" option: the owner can always answer in their own words." The rules stay under 5 KB (4612 bytes).
+
+**Consequences.**
+- **Tests.**
+  - `app/test/choices.test.ts`: the model and the three catalogs.
+  - `app/test/session/choices.test.ts`: the interrupts, the cancel and the answer body.
+  - `app/test/choices-app.test.ts`: the three pages load the component's rules, and the fixture sources receive what a click sends.
+  - `app/web/test/choices.test.tsx` and `app/web/test/{session,lead}/choices.test.tsx`: the component and its states, both languages, the escaping.
+  - `test/lead/prompts.test.ts`: the lead's rule.
+  - `app/test/choices-browser.test.ts`: a click in headless Chromium on the session screen and on the lead screen, asserting the route each one called. It is skipped unless `CLEARED_V2_PLAYWRIGHT` names a `playwright-core`, as `notify/browser.test.ts` is. It passed here against Chrome 153, with no page error and no request off the app's origin.
+  - `npm test`: 706 under `node --test` (703 pass, 3 skipped: the two browser tests and the notify one) and 117 under Vitest. `npm run typecheck` and the guard pass.
+- **The fixture** (`app/fixtures/session.ts`) gains `sessionFixture(now, { question: true })`: the author asks the month question through AskUserQuestion, with three options, and its inbox item is a question. Its source now answers a question with `cleared.answered` instead of a permission answer, answers 404 for a request that no longer waits, and cancels what waits on an interrupt, as the adapters do. The lead fixture is not this lane's: the tests and the captures give `leadSource` a three-option question.
+- **Captures**, none committed, in `/tmp/cleared-captures/j2/`. They replace the stale `choices-*` files of the on-hold attempt.
+  - `choices-<scenario>-<width>-<theme>.png` for `session`, `session-typed`, `session-answered`, `lead` and `inbox`, at 1440, 1280, 768 and 390, light and dark: 40 files, mode 644, the pointer away from every button.
+  - `choices-reference-{session,lead-and-plan,inbox}.png`, rendered from `/tmp/cleared-reference/`.
+  - The app ran on an ephemeral `127.0.0.1` port with the fixture sources. There was no page error, no request off the origin, and no horizontal overflow.
+  - The references have no question with options. The comparison was against `origin/v2`'s own question renderings, captured the same way, and the tokens of the reference's request card. The lead's and the inbox's questions keep their earlier look, apart from the descriptions, which the lead now shows. A question that no longer waits on the session screen loses its amber.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on these captures and the references. Taken:
+  - the enabled Send drew its label in its own fill's colour, so it was unreadable: the ink fill and its label are now set by the component;
+  - the question's header pill, invisible on the amber surface, now has the highlight fill;
+  - a 14 px question on the session screen, and a 12 px gap above the options;
+  - in the answered state, the check hangs in the gutter so the labels share one edge, and the answered line is quieter, under a hairline;
+  - one field ring for the free answer on every screen;
+  - a readable disabled Send in dark;
+  - a hairline frame for a settled question in dark;
+  - plain wrapping for the lead's question in its bubble.
+  Not taken:
+  - "Recommended" as a filled tag: it keeps the underlined mark of lane 10's inbox;
+  - quieter option rings in the lead's bubble: the options are the gesture the bubble waits for;
+  - a narrower inbox column and the question outside the amber card: both are lane 10's design, unchanged here;
+  - the inbox bar's own Send: it is the bar's, not the component's.
+- **Left as it was:** answering the lead's question from the inbox (issue 168, item 3): the inbox still sends the person to the lead's screen. That is the inbox's bar, outside this lane's question detail.
+- **For lane 29.** On `v2` before this lane, a lead question that was single but multi-select was answered by one click, which sent its label. Now its clicks toggle, and `[data-choice-send]` sends, as for an ask of several questions. Proof-j2's step 2 clicks one `[data-answer]` and waits for the question to clear, so against such a question it would wait out its two minutes. `scripts/proof-j2.ts` is lane 29's file and was not edited.
+- **Edits beyond the question detail**, mechanical: in the inbox, the bar's Send says when an answer is over the limit (`Inbox.tsx`), the model's `answersFor` delegates to the component's, and `.deny-reason input` keeps its rules in `inbox.css`, which it shared with the removed `.free input`.
+- **The branch.** This lane's branch is `v2-j2-choices-react`. The local name `v2-j2-choices` belongs to the on-hold worktree, which was left untouched.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-choices`.

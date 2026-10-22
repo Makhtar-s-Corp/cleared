@@ -14,7 +14,7 @@
 // tickets, which is reversible, so there is no grace (decision 6).
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react';
 import type { LeadMemory, LeadMessage, LeadState, Plan } from '../../../../src/api/types.ts';
-import type { Question } from '../../../../src/session/events.ts';
+import { OwnChoices } from '@/components/choices/Choices.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
@@ -27,7 +27,7 @@ import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
 import { isLeadThread, LEAD_AGENT, LeadAgent, type LeadThread } from './agent.ts';
 import {
-  GAP_MS, RECOMMENDED, SEND, TEXT_MAX, TICK_MS, choosePlan, clockOf, composerMode, draftFrom, gestureFailure, headerLine, memoryStats, mergeMessages, mergePlan, otherPlans,
+  GAP_MS, SEND, TEXT_MAX, TICK_MS, choiceReply, choosePlan, clockOf, composerMode, draftFrom, gestureFailure, headerLine, memoryStats, mergeMessages, mergePlan, otherPlans,
   placeholderKey, planFrom, planGesture, replyFor, sendReply, waitsOn, type ComposerMode, type LeadDraft, type LeadView, type Reply, type StreamLike,
 } from './model.ts';
 
@@ -36,47 +36,22 @@ export function HeaderLine({ state, now, t }: { readonly state: LeadState; reado
   return <p className={line.tone === 'down' ? 'lead-line lead-down' : 'lead-line'} id="lead-line">{line.text}</p>;
 }
 
-function Option({ label, t, onAnswer }: { readonly label: string; readonly t: Translate; readonly onAnswer?: (text: string) => void }) {
-  return (
-    <Button className="option" data-answer={label} onClick={() => onAnswer?.(label)}>
-      <span>{label.replace(RECOMMENDED, '')}</span>
-      {RECOMMENDED.test(label) ? <span className="recommended">{t('lead_question_recommended')}</span> : null}
-    </Button>
-  );
-}
-
-// A question that waits shows its header, its options and how to answer;
-// once settled it reads as the lead's other lines, as in the capture, the
-// owner's answer following it.
-function QuestionBody({ message, state, t, onAnswer }: { readonly message: LeadMessage; readonly state: LeadState; readonly t: Translate; readonly onAnswer?: (text: string) => void }) {
+// A question that waits shows its options as the clickable answers, the
+// reply field below being its free answer; once settled it reads as the
+// lead's other lines, as in the capture, the owner's answer following it.
+function QuestionBody({ message, state, t, busy = false, onAnswer }: { readonly message: LeadMessage; readonly state: LeadState; readonly t: Translate; readonly busy?: boolean; readonly onAnswer?: (reply: Reply) => void }) {
   const asked = message.question;
   if (!asked || !waitsOn(message, state)) return <p className="bubble-text">{asked ? asked.questions.map((q) => q.question).join('\n\n') : message.text}</p>;
-  // One text answers every question of an ask (the lead engine's rule), so
-  // options are buttons only when the ask has one question.
-  const buttons = asked.questions.length === 1;
   return (
     <>
-      {asked.questions.map((question: Question, index) => {
-        const options = question.options ?? [];
-        return (
-          <Fragment key={index}>
-          <p className="q-text">{question.header ? <span className="q-header">{question.header}</span> : null}<span>{question.question}</span></p>
-          {options.length === 0 ? null
-            : buttons ? <div className="options">{options.map((option) => <Option key={option.label} label={option.label} t={t} onAnswer={onAnswer} />)}</div>
-            : (
-              <ul className="q-options">
-                {options.map((option) => <li key={option.label}>{option.label.replace(RECOMMENDED, '')}{RECOMMENDED.test(option.label) ? <>{' '}<span className="recommended">{t('lead_question_recommended')}</span></> : null}</li>)}
-              </ul>
-            )}
-          </Fragment>
-        );
-      })}
-      <p className="q-hint">{t(buttons ? 'lead_question_answer_below' : 'lead_question_several')}</p>
+      <OwnChoices key={asked.requestId} questions={asked.questions} t={t} requestId={asked.requestId} free={false} busy={busy}
+        onAnswer={(answers) => onAnswer?.(choiceReply(asked.questions, answers))} />
+      <p className="q-hint">{t('lead_question_answer_below')}</p>
     </>
   );
 }
 
-export function Thread({ view, t, onAnswer }: { readonly view: LeadView; readonly t: Translate; readonly onAnswer?: (text: string) => void }) {
+export function Thread({ view, t, busy = false, onAnswer }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly onAnswer?: (reply: Reply) => void }) {
   if (view.messages.length === 0) return <li className="thread-empty">{t('lead_thread_empty')}</li>;
   const shown = choosePlan(view.plans, view.planId)?.id;
   let previous: number | undefined;
@@ -105,7 +80,7 @@ export function Thread({ view, t, onAnswer }: { readonly view: LeadView; readonl
           <Fragment key={message.seq}>{gap}<li className="lead-row">
             <span className="lead-mark small" aria-hidden="true">{t('lead_initial')}</span>
             <div className={`bubble lead${question ? ' question' : ''}${waits ? ' waits' : ''}`}>
-              {question ? <QuestionBody message={message} state={view.state} t={t} onAnswer={onAnswer} /> : <p className="bubble-text">{message.text}</p>}
+              {question ? <QuestionBody message={message} state={view.state} t={t} busy={busy} onAnswer={onAnswer} /> : <p className="bubble-text">{message.text}</p>}
               {link}
             </div>
           </li></Fragment>
@@ -356,7 +331,7 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
         </div>
         <div id="lead-memory"><MemoryPanel view={view} t={t} onClose={() => { setMemory(null); remember.current?.focus(); }} /></div>
         <ol className="thread" id="thread" aria-label={t('lead_thread_label')} ref={threadRef} onScroll={onScroll}>
-          <Thread view={view} t={t} onAnswer={(answer) => { if (view.state.pendingQuestion) void deliver({ kind: 'answer', body: { text: answer } }); }} />
+          <Thread view={view} t={t} busy={sending} onAnswer={(reply) => { if (view.state.pendingQuestion) void deliver(reply); }} />
         </ol>
         <ReplyForm mode={mode} changing={changing} text={text} sending={sending} note={note} t={t} fieldRef={field} onText={setText}
           onGoal={() => { setGoal((current) => !current); setChanging(false); field.current?.focus(); }} onSubmit={submit} onKeyDown={keyDown} />

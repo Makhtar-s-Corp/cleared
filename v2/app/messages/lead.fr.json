@@ -36,9 +36,7 @@
   "lead_refresh_line": "Rechargé depuis la mémoire · génération {generation} · {time}",
   "lead_system_line": "{text} · {time}",
   "lead_see_plan": "Voir le plan",
-  "lead_question_recommended": "Recommandé",
   "lead_question_answer_below": "Ou écrivez votre réponse ci-dessous.",
-  "lead_question_several": "Répondez à toutes dans le champ ci-dessous, en un seul message.",
   "lead_reply_label": "Votre message au lead",
   "lead_placeholder": "Écrire au lead…",
   "lead_placeholder_goal": "Décrivez l'objectif…",
@@ -93,5 +91,14 @@
   "plan_change": "Modifier le plan",
   "plan_approve": "Approuver le plan et démarrer",
   "plan_pause": "Mettre en pause",
-  "plan_resume": "Reprendre"
+  "plan_resume": "Reprendre",
+  "choice_recommended": "Recommandé",
+  "choice_free": "Ou répondez avec vos mots",
+  "choice_send": "Envoyer la réponse",
+  "choice_too_long": "Une réponse fait au plus {n} caractères.",
+  "choice_answered": "Répondu par {who}",
+  "choice_answered_with": "Répondu par {who} : {answer}",
+  "choice_cancelled": "Annulé quand le tour a été interrompu",
+  "choice_settled": "Cette question a été réglée sans vous.",
+  "choice_ended": "La session s'est terminée avant une réponse."
 }

@@ -119,7 +119,7 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   const html = renderInbox(viewOf({ items, selected: question.id, open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Question from the lead', 'Lead', 'Answer on the lead\'s screen', LEAD_QUESTION_TEXT, 'Only the visible ones', 'Recommended by the team',
+    'Question from the lead', 'Lead', 'Answer on the lead\'s screen', LEAD_QUESTION_TEXT, 'Only the visible ones', 'Recommended',
     'All of them, with a hidden flag', 'The lead waits for your answer on its screen.',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the lead\'s session');
@@ -127,7 +127,8 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   assert.match(html, /<a href="\/lead" class="btn">Answer on the lead&#39;s screen<\/a>/);
   assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the lead\'s screen, in the bar');
   assert.match(html, /class="questions waits read"/);
-  for (const option of html.matchAll(/<button[^>]*data-option=[^>]*>/g)) assert.match(option[0], /disabled/);
+  assert.doesNotMatch(html, /<button[^>]*data-answer=/, 'its choices are lines, not buttons');
+  assert.match(html, /data-choices-state="read"/);
   const handled: QuestionItem = { ...question, state: 'handled' };
   assert.equal(lineOf(renderInbox(viewOf({ items: [handled] }), en), handled.id), 'Lead · no longer waits for you');
 });

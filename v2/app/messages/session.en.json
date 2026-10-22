@@ -64,8 +64,6 @@
   "answer_allow_always": "Allowed in this project by {who}",
   "answer_deny": "Denied by {who}",
   "answer_cancelled": "Cancelled when the turn was interrupted",
-  "question_open": "Answer it in the inbox",
-  "question_answered": "Answered by {who}",
   "refused": "Blocked by the rules: {rule}.",
   "refused_rule": "Blocked by the rules ({rule}).",
   "refused_plain": "Blocked by the rules.",
@@ -110,5 +108,14 @@
   "open_session": "Open session",
   "index_title": "Sessions",
   "index_empty": "No session yet. Move a ticket to Todo and one starts.",
-  "load_failed": "The session could not be loaded."
+  "load_failed": "The session could not be loaded.",
+  "choice_recommended": "Recommended",
+  "choice_free": "Or answer in your own words",
+  "choice_send": "Send the answer",
+  "choice_too_long": "An answer is at most {n} characters.",
+  "choice_answered": "Answered by {who}",
+  "choice_answered_with": "Answered by {who}: {answer}",
+  "choice_cancelled": "Cancelled when the turn was interrupted",
+  "choice_settled": "This question was settled without you.",
+  "choice_ended": "The session ended before an answer."
 }
