@@ -8,6 +8,7 @@ import { filesRoutes } from '../../src/flow/files.ts';
 import { planGateRoutes } from '../../src/flow/plan-gate.ts';
 import { stepRoutes } from '../../src/flow/steps.ts';
 import { takeoverRoutes } from '../../src/flow/takeover.ts';
+import { terminalRoutes } from '../../src/terminal/routes.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
@@ -46,11 +47,13 @@ async function call(method: string, path: string, headers: Record<string, string
 test('the service declares every route of the API but the approval, which is lane 8\'s', () => {
   // The flow's API: the routes of api/routes.ts, the session plan's Go and
   // Change (lane 17, flow/plan-gate.ts), and the Editor tab's files and Take
-  // over and Give back (lane 20, flow/files.ts and flow/takeover.ts), which
-  // the flow module registers. A file's route is one route per depth, since
-  // the registry matches a fixed number of segments: it is files/* here.
-  const deps = { engine: () => t.engine, proof: () => PROOF };
-  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps)];
+  // over and Give back (lane 20, flow/files.ts and flow/takeover.ts), the
+  // web terminal and the editor's save (lane 31, terminal/routes.ts and
+  // flow/files.ts), which the flow module registers. A file's route is one
+  // route per depth, since the registry matches a fixed number of segments:
+  // it is files/* here.
+  const deps = { engine: () => t.engine, proof: () => PROOF, human: () => undefined };
+  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps), ...terminalRoutes(deps)];
   const declared = [...new Set(routes.map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
   // The preview is lane 15's (container/preview.ts). The ticket's steps and
   // the contract item's Approve and Send back are lane 23's (flow/steps.ts).
@@ -58,12 +61,12 @@ test('the service declares every route of the API but the approval, which is lan
   // items and the skill, lane 24's (knowledge/); the questions to the code,
   // lane 25's (reader/); the recipes and the schedules, lane 26's
   // (recipes/, schedules/), each of which rewrites this comment to name its
-  // module; the web terminal and the editor's save, served by lane 31
-  // (terminal/, flow/files.ts), which removes them from here.
-  const ahead = [...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES];
+  // module.
+  const ahead = [...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES];
   assert.ok(SESSION_PLAN_ROUTES.every((route) => declared.includes(route)), 'lane 17 serves the Go and the Change');
   assert.ok(SESSION_TABS_ROUTES.every((route) => declared.includes(route)), 'lane 20 serves the files, the take over and the give back');
   assert.ok(STEP_ROUTES.every((route) => declared.includes(route)), 'lane 23 serves the steps and the contract item');
+  assert.ok(TERMINAL_ROUTES.every((route) => declared.includes(route)), 'lane 31 serves the web terminal and the editor\'s save');
   const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r) && !ahead.includes(r)).sort();
   assert.deepEqual(declared, wanted);
 });
