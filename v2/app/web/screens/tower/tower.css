@@ -1,0 +1,37 @@
+/* The tower's parts of a workspace of several services (lane 22), on top of
+   styles/app.css, which holds the tower's other rules: the services' line,
+   a session taken over, and the bar's chips. Same tokens, flat colours. */
+
+/* the services' line under the greeting: a dot by state, the name, the state */
+.workspace-line { display: flex; flex-wrap: wrap; gap: 8px 18px; list-style: none; margin: -8px 0 0; padding: 0; font-size: 13px; }
+.workspace-line .svc { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.workspace-line .svc::before { content: ""; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--dashed); flex: none; }
+.workspace-line .svc[data-state="live"]::before { background: var(--stage-progress); }
+.workspace-line .svc[data-state="landing"]::before { background: var(--stage-review); }
+.workspace-line .svc[data-state="rolled_back"]::before { background: var(--danger); }
+.workspace-line .svc-name { font-weight: 500; }
+.workspace-line .svc-state { color: var(--text-muted); }
+.workspace-line .svc[data-state="rolled_back"] .svc-state { color: var(--danger-text); }
+
+/* a live session's service, beside its ticket */
+.session-head .svc-tag { padding: 0 6px; border-radius: 4px; background: var(--sunken); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-head .svc-tag { margin-left: auto; min-width: 0; }
+.session-head .svc-tag + .id { margin-left: 0; }
+
+/* a session taken over: still, in ink, its phrase says who has it */
+.live.taken { background: var(--ink); box-shadow: 0 0 0 3px var(--outline); animation: none; }
+.phrase.taken-line { display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 500; }
+.phrase.taken-line svg { flex: none; }
+
+/* the services a new ticket names, shown with the description */
+.ask-services { display: none; flex-basis: 100%; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--hairline); }
+.ask:has(#ask-input:not(:placeholder-shown)) .ask-services { display: flex; }
+.ask textarea + .ask-services { border-top: 0; padding-top: 2px; }
+.svc-toggle { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; box-shadow: var(--e-control); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.svc-toggle:hover { background: var(--tab-fill); }
+.svc-toggle[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); box-shadow: none; font-weight: 500; }
+
+@media (max-width: 767px) {
+  .workspace-line { flex-direction: column; gap: 6px; margin-top: -10px; }
+  .svc-toggle { min-height: 44px; padding: 0 14px; }
+}

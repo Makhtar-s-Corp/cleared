@@ -75,5 +75,18 @@
   "plan_next": "next: {title}",
   "plan_paused": "Paused",
   "landed_title": "Landed today",
-  "landed_empty": "Nothing landed yet today."
+  "landed_empty": "Nothing landed yet today.",
+  "services_title": "Services",
+  "service_live_one": "{n} live session",
+  "service_live_other": "{n} live sessions",
+  "service_landing": "landing {ticket}",
+  "service_rolled_back": "rolled back {ticket}",
+  "service_quiet": "quiet",
+  "bar_services_label": "Services this ticket touches",
+  "taken_over_you": "Taken over by you · {age}",
+  "taken_over_other": "Taken over by another account · {age}",
+  "need_session_plan": "Session plan · {age}",
+  "session_plan_low": "Low confidence: the author waits for your Go.",
+  "session_plan_medium": "Medium confidence: the author waits for your Go.",
+  "session_plan_high": "High confidence: the author waits for your Go."
 }
