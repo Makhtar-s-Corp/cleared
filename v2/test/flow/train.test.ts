@@ -311,3 +311,17 @@ test('the author works in the checkout of its first service, and every service o
   assert.equal(t.startedSessions[0]?.input.workdir, `/work/${ticket.id}/guestbook`);
   await t.engine.close();
 });
+
+test('a merge its lock made while the last process stopped is read from the ledger: the lock is not asked again', async () => {
+  const { t, ticket, calls, item, approve, trains } = await train({ outcomes: { 'filter-api': ['queued'] } });
+  await approve();
+  assert.deepEqual(calls.filter((c) => c.what === 'release').map((c) => c.service), ['filter-api']);
+  // The lock merged it in the meantime (the call that queued it went on, or a process died during the call).
+  ledgerRow(t.store, { kind: 'merged_by_script', ticket: ticket.id, pr: 7, at: iso(t.clock.now + 5_000) });
+  await tick(t, 60_000);
+  assert.equal(calls.filter((c) => c.what === 'release').length, 1, 'not asked again');
+  assert.equal(item().train?.services[0]?.state, 'merged');
+  assert.equal(trains.get(item().id)?.stops[0]?.mergedAt, iso(t.clock.now - 60_000 + 5_000));
+  assert.deepEqual(of(t, 'release_merged').map((e) => e.service), ['filter-api']);
+  await t.engine.close();
+});

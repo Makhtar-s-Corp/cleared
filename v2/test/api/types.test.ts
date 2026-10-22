@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PREVIEW_ROUTE, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace } from '../../src/api/types.ts';
+import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace } from '../../src/api/types.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import type { SessionEvent } from '../../src/session/events.ts';
 
@@ -33,11 +33,20 @@ test('the API lists every route the app lanes build against, once', () => {
     // Milestone 2 replanned, lane 14: the workspace, and the preview route lane 15 serves.
     'GET /api/workspace',
     'GET /api/sessions/:id/preview/*',
+    // Lane 16, for waves 7 and 8: the session plan's Go and Change (lane 17), the Editor tab and the takeover (lane 20).
+    'POST /api/sessions/:id/plan/go',
+    'POST /api/sessions/:id/plan/change',
+    'GET /api/sessions/:id/files',
+    'GET /api/sessions/:id/files/*',
+    'POST /api/sessions/:id/takeover',
+    'POST /api/sessions/:id/giveback',
   ].sort());
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 25);
+  assert.equal(keys.length, 31);
+  assert.deepEqual([...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES].filter((route) => !API_ROUTES.includes(route)), []);
+  assert.ok([...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES].every((route) => !MILESTONE_2_ROUTES.includes(route)));
   assert.equal(SESSION_PREVIEW_ROUTE, 'GET /api/sessions/:id/preview/*');
   assert.ok(!MILESTONE_2_ROUTES.includes(SESSION_PREVIEW_ROUTE) && !MILESTONE_2_ROUTES.includes('GET /api/workspace'), 'the lead module\'s routes only');
   assert.deepEqual([...MILESTONE_2_ROUTES].sort(), API_ROUTES.filter((route) => /\/api\/(lead|plans)/.test(route)).sort());

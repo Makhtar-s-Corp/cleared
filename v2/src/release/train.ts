@@ -123,7 +123,18 @@ export class TrainRunner {
       }
       current = this.#stop(train, index, { signed: true });
     }
+    // Kept before the call: a process that stops during it leaves the time,
+    // and the next one reads the ledger before asking again.
     const askedAt = stop.askedAt ?? this.#at();
+    if (!stop.askedAt) current = this.#stop(current, index, { askedAt });
+    else {
+      const landing = landingOf(this.#deps.db, { ticket: train.ticket, pr: stop.pr.number, since: askedAt });
+      if (landing.state !== 'waiting') {
+        current = this.#stop(current, index, { state: 'merged', at: landing.mergedAt, mergedAt: landing.mergedAt, next: null });
+        this.#deps.emit({ type: 'release_merged', at: landing.mergedAt, project: train.project, ticket: train.ticket, pr: stop.pr.number, service: stop.service });
+        return this.#notDone(current, index);
+      }
+    }
     let merge: MergeOutcome;
     try {
       merge = await lock.release({ ticket: train.ticket, pr: stop.pr.number, announcement: train.announcement });
