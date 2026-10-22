@@ -312,13 +312,13 @@ ${line}
 }
 
 function planProgress(row: PlanRow, t: Translate): { readonly bar: string; readonly line: string } {
+  // The bar's label says every colour it shows; the line adds what comes next.
   const counts = [t('plan_landed', { n: row.landed, m: row.total })];
   if (row.running) counts.push(t('plan_running', { n: row.running }));
-  const bar = counts.join(' · ');
   if (row.approval) counts.push(t('plan_approval', { n: row.approval }));
   if (row.held) counts.push(t('plan_held', { n: row.held }));
-  if (row.next) counts.push(t('plan_next', { title: row.next }));
-  return { bar, line: [...(row.paused ? [t('plan_paused')] : []), ...counts].join(' · ') };
+  const next = row.next ? [t('plan_next', { title: row.next })] : [];
+  return { bar: counts.join(' · '), line: [...(row.paused ? [t('plan_paused')] : []), ...counts, ...next].join(' · ') };
 }
 
 function plansCard(plans: readonly PlanRow[], t: Translate): string {

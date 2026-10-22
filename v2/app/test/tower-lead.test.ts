@@ -144,6 +144,7 @@ test('a plan in progress counts its approvals, held items and pause; proposed, d
   const words = text(renderTowerBody(model, en));
   assert.ok(words.includes('Paused · 1 of 4 landed · 1 to approve · 1 held · next: Next one'), words);
   assert.match(words, /0 sessions running · 1 plan in progress · 0 landed today/);
+  assert.match(renderTowerBody(model, en), /class="plan-bar" role="img" aria-label="1 of 4 landed · 1 to approve · 1 held"/, 'the label names the amber and red segments too');
 });
 
 test('a proposed plan is a card under Needs you, after what the teams wait for, linked to its plan', async () => {
