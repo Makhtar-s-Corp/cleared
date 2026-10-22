@@ -43,6 +43,7 @@ type Session = {
   step: number;
   pending: string | undefined;                    // the request id the script waits for
   turn: string;                                   // the runId of the last RUN_STARTED
+  epoch: number;                                  // counts interrupts: a wait that sees it move stops playing
   closed: boolean;
   messages: number;
   readonly wake: Set<() => void>;
@@ -64,14 +65,21 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
     for (const wake of session.wake) wake();
   }
 
+  // Whether the script may go on after a wait: not once the session is
+  // stopped, nor once an interrupt ended the turn (it moved the step).
+  const goesOn = (session: Session, epoch: number) => !session.closed && session.epoch === epoch;
+
   // A host tool call as the runner relays it: the call's events, the
   // handler's answer, and the cleared.host_call record of its outcome.
-  async function call(session: Session, step: Extract<FakeStep, { hostCall: unknown }>['hostCall']): Promise<void> {
+  // False when an interrupt or a stop came while the host answered: then
+  // nothing more is written for it.
+  async function call(session: Session, step: Extract<FakeStep, { hostCall: unknown }>['hostCall']): Promise<boolean> {
     const { toolCallId, name, input } = step;
     emit(session, { type: 'TOOL_CALL_START', toolCallId, toolCallName: `mcp__cleared__${name}` });
     emit(session, toolArgs(toolCallId, { kind: 'other' }));
     emit(session, { type: 'TOOL_CALL_END', toolCallId });
     const tool = session.tools.get(name);
+    const epoch = session.epoch;
     let outcome: 'ok' | 'refused' | 'failed' = 'ok';
     let message: string | undefined;
     if (!tool) {
@@ -84,9 +92,11 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
         outcome = error instanceof HostToolRefused ? 'refused' : 'failed';
         message = error instanceof HostToolRefused ? error.message : 'the host could not run this tool';
       }
+      if (!goesOn(session, epoch)) return false;
     }
     emit(session, toolResult(`${toolCallId}-result`, toolCallId, outcome === 'ok' ? { kind: 'other', ok: true } : { kind: 'other', ok: false, error: message as string }));
     emit(session, { type: 'CUSTOM', name: 'cleared.host_call', value: message === undefined ? { toolCallId, name, input, outcome } : { toolCallId, name, input, outcome, message } });
+    return true;
   }
 
   // Plays steps until one waits, or until the script ends (which ends the session).
@@ -103,11 +113,17 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
         else emit(session, { type: 'CUSTOM', name: 'cleared.question', value: step.question });
         return;
       }
-      if ('hostCall' in step) await call(session, step.hostCall);
-      else if ('context' in step) {
+      if ('hostCall' in step) {
+        if (!await call(session, step.hostCall)) return;
+      } else if ('context' in step) {
         const { percent, totalTokens, maxTokens } = step.context;
         emit(session, { type: 'CUSTOM', name: 'cleared.context_usage', value: step.context });
         emit(session, { type: 'STATE_DELTA', delta: [{ op: 'add', path: '/context', value: { percent, totalTokens, maxTokens } }] });
+        // The readers see the measure before the turn goes on, so a reader
+        // that interrupts at a threshold stops the turn here.
+        const epoch = session.epoch;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (!goesOn(session, epoch)) return;
       } else {
         if (step.emit.type === 'RUN_STARTED') session.turn = step.emit.runId;
         emit(session, step.emit);
@@ -173,6 +189,7 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
       },
       async interrupt() {
         open();
+        session.epoch++;
         if (session.pending !== undefined) {
           emit(session, { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: session.pending, decision: 'cancelled', by: 'policy' } });
           session.pending = undefined;
@@ -201,7 +218,7 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
       const session: Session = {
         id: options.newId?.() ?? randomUUID(), ticket: input.ticket, project: input.project,
         cleaner: options.cleaner?.() ?? createCleaner(), tools: new Map((input.tools ?? []).map((tool) => [tool.name, tool])),
-        step: 0, pending: undefined, turn: '', closed: false, messages: 0, wake: new Set(),
+        step: 0, pending: undefined, turn: '', epoch: 0, closed: false, messages: 0, wake: new Set(),
       };
       sessions.set(session.id, session);
       await run(session);

@@ -667,8 +667,6 @@ function compound(request: ToolRequest, command: string, policy: Policy, context
     if (verdict.decision === 'ask')
       return verdict.rule === GENERIC ? ask('shell.compound', `${part.words.join(' ')} is not a command the policy allows on its own`) : verdict;
     for (const target of part.writes) {
-      // Writing to /dev/null changes nothing.
-      if (target === '/dev/null') continue;
       const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
       if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
       if (edit.decision === 'deny') return edit;
@@ -699,8 +697,10 @@ function capped(words: readonly string[]): readonly string[] | undefined {
 }
 
 // The lead's shell reads: a git read alone or piped into head, ls, grep or
-// find piped into head, or head itself reading files, all under the
-// workdir and under milestone 1's conditions on their words.
+// find piped into head, or head itself reading one file, all under the
+// workdir and under milestone 1's conditions on their words. A head takes
+// its one count and nothing else: a second count, a byte count or several
+// files would lift the cap.
 function leadRead(command: string, policy: Policy): boolean {
   const list = parseList(command);
   if (!list || list.length > 2 || list.some((part) => part.redirected)) return false;
@@ -713,7 +713,7 @@ function leadRead(command: string, policy: Policy): boolean {
   }
   if (words[0] === 'head') {
     const files = capped(words);
-    return files !== undefined && files.length > 0 && !unsafeWords(words, policy);
+    return files?.length === 1 && !(files[0] as string).startsWith('-') && !unsafeWords(words, policy);
   }
   return pipe !== undefined && (words[0] === 'ls' || words[0] === 'grep' || words[0] === 'find') && !unsafeWords(words, policy);
 }
