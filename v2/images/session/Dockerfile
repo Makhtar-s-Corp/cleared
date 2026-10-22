@@ -18,15 +18,20 @@ RUN npm install --global --no-audit --no-fund --allow-scripts=@anthropic-ai/clau
  && claude --version \
  && npm cache clean --force
 
-# The runner and its dependencies: main.ts (lane 4) next to hooks.ts (lane 5).
-# The service starts it as node /opt/cleared/runner/main.ts.
+# The runner and its dependencies: main.ts (lane 4) next to hooks.ts (lane 5)
+# and schema.ts (milestone 2, lane 4). The service starts it as
+# node /opt/cleared/runner/main.ts. zod is the SDK's peer dependency, which
+# npm installed unpinned until milestone 2; the runner now builds the host
+# tools' schemas with it (schema.ts), so it is pinned to the version npm
+# resolved on 2026-10-22.
 WORKDIR /opt/cleared/runner
 RUN npm init --yes > /dev/null \
  && npm pkg set type=module \
- && npm install --save-exact --no-audit --no-fund @anthropic-ai/claude-agent-sdk@0.3.306 \
+ && npm install --save-exact --no-audit --no-fund @anthropic-ai/claude-agent-sdk@0.3.306 zod@4.6.7 \
  && npm ls --all --depth=1 \
  && npm cache clean --force
 COPY runner/hooks.ts ./hooks.ts
+COPY runner/schema.ts ./schema.ts
 COPY runner/main.ts ./main.ts
 
 # The config volume is created from this folder: writable whatever uid the

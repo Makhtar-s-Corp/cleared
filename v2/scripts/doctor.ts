@@ -1,7 +1,7 @@
 // Checks this server can run v2 sessions, with real objects, labelled
 // cleared.dev=v2 only. One section per lane that needs a real run
 // (milestone 1 plan, section 10); `cleared doctor` will run it in milestone 5.
-//   node scripts/doctor.ts [docker] [claude-code] [--no-build] [--model <id>]
+//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [--no-build] [--model <id>]
 //
 // docker (lane 2): builds the two images, starts a session with a postgres:16
 // service, proves from inside the session container what it can and cannot
@@ -14,9 +14,16 @@
 // claude-code (lane 4): a real Claude Code session through the adapter, with
 // the service's login file (CLEARED_CLAUDE_CREDENTIALS, or the token file in
 // the state folder). It spends model usage, so it runs only when named.
+//
+// host-tools (milestone 2, lane 4): the lead's host tools, the context
+// measure, the hooks by role, the commit identity and the login's failing
+// half, with real sessions; run only when named, as claude-code.
+//
+// lead (milestone 2, lane 5): the checks of scripts/doctor-lead.ts, run
+// only when named.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { connect, isIP } from 'node:net';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -30,12 +37,17 @@ import {
 import { createHealthServer } from '../src/server.ts';
 import { claudeCodeRuntime, createClaudeCodeAdapter } from '../src/session/adapters/claude-code.ts';
 import { createCleaner } from '../src/session/clean.ts';
-import type { Answer, SessionHandle, StartInput } from '../src/session/contract.ts';
+import type { Answer, HostTool, SessionHandle, StartInput } from '../src/session/contract.ts';
 import { readToolOutput, type SessionEvent } from '../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../src/session/policy.ts';
+import { LEAD_TICKET } from '../src/lead/contract.ts';
+import { HANDOVER_HEADINGS } from '../images/session/runner/hooks.ts';
+import { leadChecks } from './doctor-lead.ts';
 
 const V2 = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SERVICE_PORT = 8791;
+// The Claude Code version the session image pins (issue 145, item 6).
+const CLAUDE_CODE_VERSION = /@anthropic-ai\/claude-code@(\S+)/.exec(readFileSync(join(V2, 'images', 'session', 'Dockerfile'), 'utf8'))?.[1] ?? 'unknown';
 
 // Values replaced in everything printed: the checkout and the home folder
 // first (the build contexts are absolute paths), then what the run adds.
@@ -496,7 +508,7 @@ async function claudeCodeSection(build: boolean, model: string): Promise<void> {
     check('the touch was escalated by the policy (rule default) and allowed from the inbox', rule(from).includes('default') && custom(from, 'cleared.permission_answered').some((v) => v.by === 'doctor' && v.decision === 'allow_once'));
     check('after allow_once the file exists in the workdir', existsSync(join(workdir, 'allowed.txt')));
     const init = raw.find((line) => (line.message as { subtype?: string } | undefined)?.subtype === 'init')?.message as Record<string, unknown> | undefined;
-    check(`the session runs Claude Code 2.1.306 with ${model}, logged in without an API key`, init?.claude_code_version === '2.1.306' && init?.model === model && init?.apiKeySource === 'none', JSON.stringify({ version: init?.claude_code_version, model: init?.model, apiKeySource: init?.apiKeySource }));
+    check(`the session runs Claude Code ${CLAUDE_CODE_VERSION} with ${model}, logged in without an API key`, init?.claude_code_version === CLAUDE_CODE_VERSION && init?.model === model && init?.apiKeySource === 'none', JSON.stringify({ version: init?.claude_code_version, model: init?.model, apiKeySource: init?.apiKeySource }));
 
     from = await turn(handle, 'a rm -r the inbox denies', 'Use the Bash tool to run exactly: rm -r olddir . If it is denied, do not retry and reply DENIED.', (): Answer => ({ decision: { kind: 'reject_once', message: 'Denied from the doctor inbox.' }, by: 'doctor' }));
     check('the rm -r was escalated (rule delete.outside_ticket) and reject_once stopped it', rule(from).includes('delete.outside_ticket') && existsSync(join(workdir, 'olddir', 'keep.txt')));
@@ -594,11 +606,305 @@ async function claudeCodeSection(build: boolean, model: string): Promise<void> {
   check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
 }
 
+// The checks both real sections below run on a session: the events the
+// adapter stores (printed as they come), the runner's raw lines, the CLI's
+// stderr lines that the runner wrote itself, and a way to write a raw line
+// to the runner (the doctor's `measure`).
+function liveRun() {
+  const all: SessionEvent[] = [];
+  const raw: Record<string, unknown>[] = [];
+  const runnerLog: string[] = [];
+  let stdin: NodeJS.WritableStream | undefined;
+  const print = (args: readonly string[]) => say(`$ docker ${args.map((arg) => (/[\s'"{}]/.test(arg) ? `'${arg}'` : arg)).join(' ')}`);
+  const docker = new Docker(async (args, options) => { print(args); return cliRunner(args, options); }, (args) => {
+    print(args);
+    const child = cliSpawner(args);
+    stdin = child.stdin;
+    createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => {
+      try { raw.push(JSON.parse(line) as Record<string, unknown>); } catch { /* not a runner line */ }
+    });
+    createInterface({ input: child.stderr, crlfDelay: Infinity }).on('line', (line) => { if (line.startsWith('cleared-runner:')) runnerLog.push(line); });
+    return child;
+  });
+  const log = {
+    append(entry: Omit<SessionEvent, 'seq'>): SessionEvent {
+      const event = { ...entry, seq: all.length + 1 };
+      all.push(event);
+      say(`event ${event.seq} ${event.event.type === 'CUSTOM' ? event.event.name : event.event.type} ${short(JSON.stringify(event.event))}`);
+      return event;
+    },
+    after: (sessionId: string, seq = 0) => all.filter((event) => event.sessionId === sessionId && event.seq > seq),
+  };
+  const custom = (from: number, name: string) => all.slice(from).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === name ? [e.event.value as Record<string, unknown>] : []));
+  const texts = (from: number) => {
+    const ids = new Set(all.slice(from).flatMap((e) => (e.event.type === 'TEXT_MESSAGE_START' && e.event.role === 'assistant' ? [e.event.messageId] : [])));
+    return all.slice(from).flatMap((e) => (e.event.type === 'TEXT_MESSAGE_CONTENT' && ids.has(e.event.messageId) ? [e.event.delta] : []));
+  };
+  const ends = (from: number) => all.slice(from).filter((e) => e.event.type === 'RUN_FINISHED' || e.event.type === 'RUN_ERROR');
+  const lines = (from: number, type: string) => raw.slice(from).filter((line) => line.type === type);
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function until(check: () => boolean, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && !check()) await sleep(200);
+    return check();
+  }
+  // Plays one turn: allows what waits, and waits for the turn's end.
+  async function turn(handle: SessionHandle, label: string, text: string | undefined, timeoutMs = 180_000): Promise<{ from: number; rawFrom: number }> {
+    const from = all.length;
+    const rawFrom = raw.length;
+    say(`-- turn: ${label}`);
+    if (text !== undefined) await handle.send({ text, by: 'doctor' });
+    const answered = new Set<string>();
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && ends(from).length === 0) {
+      for (const value of [...custom(from, 'cleared.permission_request'), ...custom(from, 'cleared.question')]) {
+        const requestId = String(value.requestId);
+        if (answered.has(requestId)) continue;
+        answered.add(requestId);
+        await handle.answer(requestId, { decision: { kind: 'allow_once' }, by: 'doctor' });
+      }
+      await sleep(200);
+    }
+    if (ends(from).length === 0) say(`    the turn did not end within ${timeoutMs} ms`);
+    return { from, rawFrom };
+  }
+  return { all, raw, runnerLog, docker, log, custom, texts, ends, lines, sleep, until, turn, write: (line: unknown) => stdin?.write(JSON.stringify(line) + '\n') };
+}
+
+// The login file's owner and mode, from stat only: the doctor never reads it.
+function loginReady(runtime: ReturnType<typeof claudeCodeRuntime>): boolean {
+  const login = process.env.CLEARED_CLAUDE_CREDENTIALS ? 'the Claude Code credentials file named by CLEARED_CLAUDE_CREDENTIALS' : 'the token file in the state folder';
+  replacements.unshift([runtime.loginFile, '<login file>'], [runtime.stateDir, '<state>']);
+  for (const address of runtime.hostAddresses) addressLabels.set(address, '<host address>');
+  try {
+    const stat = statSync(runtime.loginFile);
+    const ok = stat.isFile() && stat.uid === process.getuid?.() && (stat.mode & 0o077) === 0 && stat.size > 0;
+    check(`the login file (${login}) is a file of the service's account that only it can read`, ok, `mode ${(stat.mode & 0o777).toString(8)}`);
+    return ok;
+  } catch (error) {
+    check(`the login file (${login}) exists`, false, `${(error as NodeJS.ErrnoException).code ?? (error as Error).message}: set CLEARED_CLAUDE_CREDENTIALS, or write a setup-token token to <state>/claude.token (docs/adapters.md)`);
+    return false;
+  }
+}
+
+const median = (values: readonly number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted.length === 0 ? Number.NaN : sorted.length % 2 ? sorted[(sorted.length - 1) / 2] as number : ((sorted[sorted.length / 2 - 1] as number) + (sorted[sorted.length / 2] as number)) / 2;
+};
+
+// host-tools (milestone 2, lane 4): real sessions through the Claude Code
+// adapter, run only when named (model usage).
+//   1. A lead with one host tool, ping, whose answer is a code and about
+//      4 KB of text: the model calls mcp__cleared__ping, the host answers,
+//      and the model reads the code. The context lines after the tool call
+//      and after each turn; ten timed getContextUsage() calls of each detail
+//      (summary and full) and the experimental usage call once, through the
+//      runner's `measure` line; the rate_limit_event frames' fields; no Stop
+//      hook (no HANDOVER.md request); the keys the CLI gives a host call.
+//   2. An author: a commit in the container carries the runner's identity,
+//      and the Stop hook still has it write HANDOVER.md.
+//   3. The login's failing half, with an invalid token in a file the doctor
+//      owns: the runner reports the error and waits; a rewrite of the file
+//      in place is seen and resumes the session, a rename over it is not.
+//      The recovering half needs a setup-token token in the service's token
+//      file, which only the owner writes: without one it is not measured.
+async function hostToolsSection(build: boolean, model: string): Promise<void> {
+  say('== host-tools (milestone 2, lane 4)');
+  const before = listening();
+  say(`ss -ltn before: ${before.length} listening sockets`);
+  const runtime = { ...claudeCodeRuntime(), maxBudgetUsd: 1, stopTimeoutMs: 20_000 };
+  if (!loginReady(runtime)) return;
+  const run = liveRun();
+  if (build) await run.docker.build({ context: join(V2, 'images', 'session'), tag: SESSION_IMAGE });
+
+  const scratch = mkdtempSync(join(tmpdir(), 'cleared-doctor-ht-'));
+  replacements.push([scratch, '<scratch>']);
+  const cleaner = () => createCleaner({ servicePaths: [runtime.stateDir, homedir(), scratch] });
+  const sessions: string[] = [];
+  const policyOf = (role: 'lead' | 'author'): Policy => ({
+    role, base: 'main', workdir: WORKDIR_MOUNT, scripts: [], credentialFile: LOGIN_FILE_MOUNT,
+    safeCommands: DEFAULT_SAFE_COMMANDS, allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [],
+  });
+  const briefing = { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null };
+  try {
+    // 1. The lead.
+    const leadDir = join(scratch, 'lead');
+    mkdirSync(leadDir);
+    const code = `CODE-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const filler = Array.from({ length: 64 }, (_, i) => `line ${String(i + 1).padStart(2, '0')}: the guestbook keeps its entries in order, newest first.`).join('\n');
+    const answer = `${code}\n${filler}`;
+    say(`    the ping answer: ${Buffer.byteLength(answer)} bytes, its first line a fresh code`);
+    const pings: unknown[] = [];
+    const ping: HostTool = {
+      name: 'ping', description: 'Answers a code on its first line, then text to ignore.',
+      inputSchema: { type: 'object', properties: { word: { type: 'string', description: 'Any word.' } }, required: ['word'] },
+      async handle(input) { pings.push(input); return answer; },
+    };
+    const adapter = createClaudeCodeAdapter({ log: run.log, docker: run.docker, runtime, cleaner });
+    const lead: StartInput = {
+      project: 'doctor', ticket: LEAD_TICKET, role: 'lead', harness: 'claude-code', model, workdir: leadDir, briefing, policy: policyOf('lead'),
+      prompt: 'Reply with the single word READY.', tools: [ping],
+    };
+    const startedAt = Date.now();
+    const handle = await adapter.start(lead);
+    sessions.push(handle.id);
+    replacements.push([handle.id, '<session>']);
+    say(`lead session started in ${Date.now() - startedAt} ms`);
+    let at = await run.turn(handle, 'the prompt', undefined);
+    const init = run.raw.find((line) => (line.message as { subtype?: string } | undefined)?.subtype === 'init')?.message as Record<string, unknown> | undefined;
+    say(`<< system/init ${JSON.stringify({ claude_code_version: init?.claude_code_version, model: init?.model, mcp_servers: init?.mcp_servers, cleared_tools: (init?.tools as string[] | undefined)?.filter((t) => t.startsWith('mcp__cleared__')) })}`);
+    check('the CLI lists the in-process MCP server cleared as connected, with mcp__cleared__ping', JSON.stringify(init?.mcp_servers ?? []).includes('"cleared"') && ((init?.tools as string[] | undefined) ?? []).includes('mcp__cleared__ping'));
+    const firstTurn = run.lines(at.rawFrom, 'context').filter((line) => line.after === 'turn');
+    for (const line of run.lines(at.rawFrom, 'context')) say(`<< ${JSON.stringify(line)}`);
+
+    at = await run.turn(handle, 'a host tool call', 'Call the mcp__cleared__ping tool once, with the word plum. The first line of its answer is a code. Reply with that code only.');
+    const calls = run.custom(at.from, 'cleared.host_call');
+    const started = run.all.slice(at.from).flatMap((e) => (e.event.type === 'TOOL_CALL_START' && e.event.toolCallName === 'mcp__cleared__ping' ? [e.event.toolCallId] : []));
+    for (const line of run.lines(at.rawFrom, 'host_call')) say(`<< ${short(JSON.stringify(line))}`);
+    check('the model called mcp__cleared__ping and the host ran the handler once, with the model\'s input', pings.length === 1 && JSON.stringify(pings[0]) === '{"word":"plum"}', JSON.stringify(pings));
+    check('the call is journaled as cleared.host_call ok, under the tool call\'s own id', calls.length === 1 && calls[0]?.outcome === 'ok' && calls[0]?.name === 'ping' && started.includes(String(calls[0]?.toolCallId)), short(JSON.stringify({ calls, started })));
+    check('the model read the host\'s answer', run.texts(at.from).some((t) => t.includes(code)), short(run.texts(at.from).join(' / ')));
+    const asked = run.custom(at.from, 'cleared.permission_request').filter((v) => String(v.tool).startsWith('mcp__cleared__'));
+    const answered = run.custom(at.from, 'cleared.permission_answered');
+    say(`OBSERVED the host tool's permission: ${asked.length ? `asked (${JSON.stringify(asked.map((v) => v.suggestion))})` : 'not asked by the CLI'}; policy answers in the turn: ${JSON.stringify(answered.map((v) => [v.decision, v.rule]))}`);
+    for (const line of run.runnerLog) say(`<< stderr ${line}`);
+
+    const contextLines = run.lines(at.rawFrom, 'context');
+    for (const line of contextLines) say(`<< ${JSON.stringify(line)}`);
+    const usage = run.custom(0, 'cleared.context_usage');
+    check('the context is measured after the tool call and after the turn, as cleared.context_usage with a percentage and rawMaxTokens', contextLines.some((l) => l.after === 'tool') && contextLines.some((l) => l.after === 'turn') && usage.length > 0 && usage.every((v) => typeof v.percent === 'number' && typeof v.rawMaxTokens === 'number'), `${usage.length} events`);
+    const baseline = Number(firstTurn.at(-1)?.totalTokens);
+    const afterTool = contextLines.filter((l) => l.after === 'tool').map((l) => Number(l.totalTokens));
+    const afterTurn = Number(contextLines.filter((l) => l.after === 'turn').at(-1)?.totalTokens);
+    say(`OBSERVED the summary measure around a ${Buffer.byteLength(answer)}-byte tool answer: ${baseline} tokens after the first turn, ${afterTool.join(', ') || 'none'} after the tool call, ${afterTurn} after the turn`);
+
+    // The measures, while the lead waits between turns.
+    const measureFrom = run.raw.length;
+    run.write({ type: 'measure' });
+    await run.until(() => run.lines(measureFrom, 'measure').length > 0, 120_000);
+    const measured = run.lines(measureFrom, 'measure')[0];
+    say(`<< ${JSON.stringify(measured)}`);
+    const summaryMs = (measured?.summaryMs as number[] | undefined) ?? [];
+    const fullMs = (measured?.fullMs as number[] | undefined) ?? [];
+    check('getContextUsage() timed over ten calls of each detail', summaryMs.length === 10 && fullMs.length === 10, `summary: median ${median(summaryMs)} ms, max ${Math.max(...summaryMs)} ms; full: median ${median(fullMs)} ms, max ${Math.max(...fullMs)} ms`);
+    const summary = measured?.summary as Record<string, unknown> | undefined;
+    const full = measured?.full as Record<string, unknown> | undefined;
+    say(`OBSERVED summary and full after the turn: ${summary?.totalTokens} and ${full?.totalTokens} tokens, ${summary?.percentage} % and ${full?.percentage} %; autoCompactThreshold ${summary?.autoCompactThreshold}, isAutoCompactEnabled ${summary?.isAutoCompactEnabled}, maxTokens ${summary?.maxTokens}, rawMaxTokens ${summary?.rawMaxTokens}`);
+    say(`OBSERVED the experimental usage call: ${JSON.stringify(measured?.usage ?? measured?.error)}`);
+
+    const rates = run.raw.flatMap((line) => {
+      const message = line.message as Record<string, unknown> | undefined;
+      return line.type === 'sdk' && message?.type === 'rate_limit_event' ? [message.rate_limit_info as Record<string, unknown>] : [];
+    });
+    say(`OBSERVED rate_limit_event frames: ${rates.length}`);
+    for (const info of rates.slice(-2)) say(`<< rate_limit_info keys ${Object.keys(info ?? {}).join(',')}: ${JSON.stringify(info)}`);
+    for (const value of run.custom(0, 'cleared.rate_limit')) say(`    cleared.rate_limit ${JSON.stringify(value)}`);
+    const compactions = run.raw.filter((line) => (line.message as { subtype?: string } | undefined)?.subtype === 'compact_boundary');
+    say(`OBSERVED compact_boundary frames: ${compactions.length}`);
+
+    const handovers = run.all.some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && e.event.delta.includes('HANDOVER.md'));
+    check('the lead\'s turns ended without the Stop hook asking for HANDOVER.md', !existsSync(join(leadDir, 'HANDOVER.md')) && !handovers && run.ends(0).length === 2, `${run.ends(0).length} turn ends`);
+    say('    the lead\'s proxy decisions:');
+    for (const line of egressSummary(await run.docker.logs(handle.id, sessionNames(handle.id).egress))) say(`      ${line}`);
+    await handle.stop();
+
+    // 2. An author: the commit identity, and the handover.
+    const authorDir = join(scratch, 'author');
+    mkdirSync(authorDir);
+    const author: StartInput = {
+      project: 'doctor', ticket: 'DOCTOR-2', role: 'author', harness: 'claude-code', model, workdir: authorDir, briefing, policy: policyOf('author'),
+      prompt: 'Use the Bash tool to run exactly: git init -q && git commit -q --allow-empty -m probe && git log -1 --format=identity:%an/%ae/%cn/%ce . Then reply with its output.',
+    };
+    const authorHandle = await adapter.start(author);
+    sessions.push(authorHandle.id);
+    replacements.push([authorHandle.id, '<session>']);
+    at = await run.turn(authorHandle, 'a commit, then the end of the turn', undefined, 240_000);
+    const outputs = run.all.slice(at.from).flatMap((e) => (e.event.type === 'TOOL_CALL_RESULT' ? [readToolOutput(e.event)] : [])).flatMap((o) => (o.kind === 'execute' ? [o.output.trim()] : []));
+    const identity = outputs.find((o) => o.startsWith('identity:'));
+    check('a commit in the session carries the runner\'s identity: Cleared, no address', identity === 'identity:Cleared//Cleared/', JSON.stringify(outputs));
+    const written = existsSync(join(authorDir, 'HANDOVER.md'));
+    check('an author still writes HANDOVER.md, asked by the Stop hook', written, written ? HANDOVER_HEADINGS.filter((h) => readFileSync(join(authorDir, 'HANDOVER.md'), 'utf8').includes(h)).length + ' of 5 headings' : 'no file');
+    await authorHandle.stop();
+
+    // 3. The login's failing half.
+    const loginDir = join(scratch, 'login');
+    mkdirSync(join(loginDir, 'work'), { recursive: true });
+    const tokenFile = join(loginDir, 'claude.token');
+    const invalid = (n: number) => `invalid-token-written-by-the-doctor-${n}-${randomUUID()}\n`;
+    writeFileSync(tokenFile, invalid(1), { mode: 0o600 });
+    const failing = createClaudeCodeAdapter({ log: run.log, docker: run.docker, runtime: { ...runtime, loginFile: tokenFile }, cleaner });
+    const loginFrom = run.raw.length;
+    const eventsFrom = run.all.length;
+    const loginHandle = await failing.start({ ...author, ticket: 'DOCTOR-3', workdir: join(loginDir, 'work'), prompt: 'Reply with the single word OK.' });
+    sessions.push(loginHandle.id);
+    replacements.push([loginHandle.id, '<session>']);
+    const logins = () => run.lines(loginFrom, 'login').map((line) => line.state);
+    const exited = () => run.lines(loginFrom, 'exit').length > 0;
+    await run.until(() => logins().includes('failed') || exited(), 120_000);
+    for (const line of run.raw.slice(loginFrom).filter((l) => l.type !== 'tool_check')) {
+      const message = line.message as Record<string, unknown> | undefined;
+      if (line.type !== 'sdk') say(`<< ${short(JSON.stringify(line))}`);
+      else if (message?.type === 'assistant' || message?.type === 'result' || (message?.type === 'system' && message.subtype !== 'init')) say(`<< sdk ${short(JSON.stringify({ type: message.type, subtype: message.subtype, error: message.error, is_error: message.is_error, result: message.result, error_status: message.error_status, text: (message.message as { content?: { text?: string }[] } | undefined)?.content?.[0]?.text }))}`);
+    }
+    check('with an invalid token, the runner reports the login error and the turn ends as cancelled, not failed', logins().includes('failed') && !run.all.slice(eventsFrom).some((e) => e.event.type === 'RUN_ERROR'), JSON.stringify(logins()));
+    await run.sleep(15_000);
+    const status = run.all.slice(eventsFrom).flatMap((e) => (e.event.type === 'STATE_DELTA' ? e.event.delta.filter((op) => op.path === '/status').map((op) => (op as { value?: unknown }).value) : [])).at(-1);
+    check('15 s later the runner still waits, and the session says it waits for a new login', !exited() && status === 'Waiting for a new login', `status ${JSON.stringify(status)}, exited ${exited()}`);
+    // A rename over the file: the bind mount keeps the old inode.
+    const renamed = join(loginDir, 'claude.token.new');
+    writeFileSync(renamed, invalid(2), { mode: 0o600 });
+    renameSync(renamed, tokenFile);
+    await run.sleep(25_000);
+    say(`OBSERVED a rename over the login file (a new inode), 25 s later: ${logins().includes('renewed') ? 'seen by the runner' : 'not seen by the runner: the bind mount still shows the old file'}`);
+    // A rewrite in place: the same inode, seen through the mount.
+    writeFileSync(tokenFile, invalid(3));
+    await run.until(() => logins().includes('renewed') || exited(), 40_000);
+    await run.until(() => logins().filter((s) => s === 'failed').length >= 2 || exited(), 120_000);
+    for (const line of run.raw.slice(loginFrom).filter((l) => l.type === 'login' || l.type === 'error' || l.type === 'exit')) say(`<< ${short(JSON.stringify(line))}`);
+    check('a rewrite of the file in place is read: the runner resumes the session in the same container with the new token (which fails again, being invalid)', logins().join(',').startsWith('failed') && logins().includes('renewed') && logins().filter((s) => s === 'failed').length >= 2 && !exited(), JSON.stringify(logins()));
+    await loginHandle.stop();
+    const serviceToken = join(runtime.stateDir, 'claude.token');
+    say(`NOT MEASURED the recovering half (a valid token after a failure): ${existsSync(serviceToken) ? 'the service\'s token file exists, but only the owner may put a token into a file a session reads; the proof observes a natural refresh' : 'no setup-token token in the service\'s token file (plan question 1); the proof observes a natural refresh'}`);
+
+  } finally {
+    for (const id of sessions) {
+      if ((await run.docker.containers(id)).length + (await run.docker.networks(id)).length > 0) await stopSession(run.docker, id);
+      await removeSessionVolume(run.docker, id);
+      rmSync(join(runtime.stateDir, 'egress', id), { recursive: true, force: true });
+    }
+    const left = (await Promise.all(sessions.map(async (id) => (await run.docker.containers(id)).length + (await run.docker.networks(id)).length + (await run.docker.volumes(id)).length))).reduce((a, b) => a + b, 0);
+    check('nothing with the sessions\' labels remains (containers, networks, volumes)', left === 0, `${left} objects`);
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  const afterMap = sockets();
+  const added = [...afterMap.keys()].filter((address) => !before.includes(address));
+  const ours = added.filter((address) => (afterMap.get(address) ?? '').includes(`pid=${process.pid},`));
+  check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
+}
+
+// lead (milestone 2, lanes 4 and 5): the checks of scripts/doctor-lead.ts,
+// which lane 5 writes; this file only runs them.
+async function leadSection(build: boolean, model: string): Promise<void> {
+  say('== lead (milestone 2, lane 5)');
+  if (leadChecks.length === 0) {
+    say('NOT RUN lead: scripts/doctor-lead.ts has no checks yet');
+    return;
+  }
+  for (const lead of leadChecks) {
+    try {
+      const outcome = await lead.run({ model, build, say });
+      check(lead.name, outcome.ok, outcome.detail ?? '');
+    } catch (error) {
+      check(lead.name, false, `${(error as Error).name}: ${(error as Error).message}`);
+    }
+  }
+}
+
 const args = process.argv.slice(2);
 const modelAt = args.indexOf('--model');
 const model = modelAt >= 0 ? args[modelAt + 1] ?? '' : 'claude-haiku-5-5';
 const sections = args.filter((arg, index) => !arg.startsWith('--') && (modelAt < 0 || index !== modelAt + 1));
-const known = ['docker', 'claude-code'];
+const known = ['docker', 'claude-code', 'host-tools', 'lead'];
 const unknown = sections.filter((section) => !known.includes(section));
 if (unknown.length > 0) {
   console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build] [--model <id>]; unknown: ${unknown.join(', ')}`);
@@ -606,5 +912,7 @@ if (unknown.length > 0) {
 }
 if (sections.length === 0 || sections.includes('docker')) await dockerSection(!args.includes('--no-build'));
 if (sections.includes('claude-code')) await claudeCodeSection(!args.includes('--no-build'), model);
+if (sections.includes('host-tools')) await hostToolsSection(!args.includes('--no-build'), model);
+if (sections.includes('lead')) await leadSection(!args.includes('--no-build'), model);
 say(failures === 0 ? 'doctor: all checks passed' : `doctor: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);
