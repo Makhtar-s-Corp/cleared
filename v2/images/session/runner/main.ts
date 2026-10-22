@@ -503,12 +503,14 @@ export async function run(deps: RunnerDeps): Promise<number> {
     };
   };
 
-  // A new token in the login file, or undefined once the session stops.
+  // A new token in the login file, or undefined once the session stops or
+  // its harness is handed to a human.
+  let wakeLoginWait: () => void = () => {};
   async function renewedLogin(): Promise<string | undefined> {
     for (;;) {
-      if (stopping) return undefined;
-      await sleep(LOGIN_POLL_MS);
-      if (stopping) return undefined;
+      if (stopping || released) return undefined;
+      await Promise.race([sleep(LOGIN_POLL_MS), new Promise<void>((resolve) => { wakeLoginWait = resolve; })]);
+      if (stopping || released) return undefined;
       const next = loginToken(deps.readFile(LOGIN_FILE));
       if (next !== undefined && next !== token) return next;
     }
@@ -538,6 +540,16 @@ export async function run(deps: RunnerDeps): Promise<number> {
   // resumes the session in a new query.
   const relaying = (async () => {
     let resume = start.resume;
+    // Released: says so, waits for the reload (false: the session ended
+    // meanwhile), then resumes the session, the login file read again.
+    const reclaim = async (): Promise<boolean> => {
+      out({ type: 'released' });
+      if (!(await park())) return false;
+      released = false;
+      resume = true;
+      token = loginToken(deps.readFile(LOGIN_FILE)) ?? token;
+      return true;
+    };
     for (;;) {
       const query = deps.query({ prompt: turns.iterable, options: optionsFor(resume) });
       current = query;
@@ -562,17 +574,18 @@ export async function run(deps: RunnerDeps): Promise<number> {
         if (!released) throw error;               // a closed query may end its iteration with an error
       }
       if (released && !stopping) {
-        out({ type: 'released' });
-        if (!(await park())) return 'ended' as const;
-        released = false;
-        resume = true;
+        if (!(await reclaim())) return 'ended' as const;
         continue;
       }
       if (!failed || stopping) return 'ended' as const;
       turns.reset();
       query.close();
       const next = await renewedLogin();
-      if (next === undefined) return 'ended' as const;
+      if (next === undefined) {
+        // A session whose login was cut can be taken over too.
+        if (released && !stopping && await reclaim()) continue;
+        return 'ended' as const;
+      }
       token = next;
       out({ type: 'login', state: 'renewed' });
       resume = true;
@@ -596,10 +609,10 @@ export async function run(deps: RunnerDeps): Promise<number> {
       else if (line.type === 'measure') void measureAll();
       else if (line.type === 'interrupt') void current?.interrupt().catch((error: Error) => out({ type: 'error', message: `interrupt failed: ${error.message}` }));
       else if (line.type === 'release') {
-        if (!released) { released = true; reloadAsked = false; turns.reset(); current?.close(); }
+        if (!released) { released = true; reloadAsked = false; turns.reset(); current?.close(); wakeLoginWait(); }
         else if (parked) out({ type: 'released' });  // asked again: still released
       } else if (line.type === 'reload') { if (released) unpark(true); }
-      else if (line.type === 'stop') { stopping = true; current?.close(); unpark(false); stopped(); return; }
+      else if (line.type === 'stop') { stopping = true; current?.close(); unpark(false); wakeLoginWait(); stopped(); return; }
     }
     inputEnded = true;
     unpark(false);

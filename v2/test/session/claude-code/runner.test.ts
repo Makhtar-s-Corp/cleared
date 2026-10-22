@@ -751,3 +751,44 @@ test('a reload with nothing released changes nothing; stop while released, and t
   input.end();
   assert.equal(await ended, 0);
 });
+
+test('a session waiting for a new login is released too, and a reload starts its harness again with the login file read again', async () => {
+  const renewed = ['sk', 'ant', 'oat01', 'R3l0adKd0Qm2Zx7Lp1Vb8Nc3Ws6Ty'].join('-');
+  let file = token;
+  const options: Options[] = [];
+  let queries = 0;
+  const query: QueryFn = (args) => {
+    queries++;
+    const own = queries;
+    options.push(args.options as Options);
+    return fakeQuery(async function* () {
+      if (own === 1) {
+        yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Failed to authenticate.' }] }, error: 'authentication_failed' };
+        yield { type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate.' };
+        return;
+      }
+      yield result('back after the take over');
+    }).query(args);
+  };
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(query, source.lines, out, {
+    readFile: (path) => (path === LOGIN_FILE ? file : undefined),
+    sleep: () => new Promise((r) => setTimeout(r, 5)),
+  }));
+  source.send(start);
+  source.send({ type: 'user', uuid: 'u-1', text: 'Work.' });
+  await until(() => out.some((line) => line.type === 'login' && line.state === 'failed'));
+  source.send({ type: 'release' });
+  await until(() => out.some((line) => line.type === 'released'));
+  assert.ok(!out.some((line) => line.type === 'exit'));
+  file = `${renewed}\n`;
+  source.send({ type: 'reload' });
+  source.send({ type: 'user', uuid: 'u-2', text: 'Carry on.' });
+  await until(() => answered(out, 'back after the take over'));
+  assert.equal(queries, 2);
+  assert.equal(options[1]?.resume, start.sessionId);
+  assert.equal((options[1]?.env as Record<string, string>).CLAUDE_CODE_OAUTH_TOKEN, renewed, 'the login file read again');
+  source.end();
+  assert.equal(await done, 0);
+});
