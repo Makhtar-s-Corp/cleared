@@ -3006,7 +3006,7 @@ It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the l
 **Decision.** The lane applies the owner's decision of 22:03 (the entry above). The policy already split a compound command into its parts (milestone 2, decision 10, this log's entry of lane `v2-j2-contracts`): the capture asked because two of its parts were not allowed on their own, not because it was compound. Its choices:
 
 1. **The reviewer's reads are its own rows.** `REVIEWER_READS` in `session/policy.ts` (`git show`, `git merge-base`, `git rev-parse`, `rg`, `wc`), rule `reviewer.read`, checked after `run.safe` for the reviewer only. Milestone 1's safe commands already held `git log`, `git diff`, `git status`, `grep`, `cat`, `head`, `tail`, `ls`, `find` and `npm test`, and `npm run` of a script the base branch declares; they keep their rule `run.safe`. Reason: `DEFAULT_SAFE_COMMANDS` is shared by the author and the reader (`reader/service.ts`), and issue 219 (finding F2) already notes that the reader's Bash reads go around its 400-line cap. Adding the new reads there would widen both roles.
-2. **What still asks in the new reads**, by the same word rules as milestone 1's:
+2. **What still asks in the new reads** (as first pushed; review round 1 replaced these word rules by allowlists, see below):
    - `rg --pre` (it runs a program on every file it searches), `--pre-glob`, `--hostname-bin` (it runs a program), `--ignore-file`, `-f` and `--file` (they read a file);
    - `wc --files0-from` (it reads a list of files);
    - a path outside the workdir. The pattern is not taken for a path, except when `-e` or `--regexp` names it, or `rg --files` has none: every operand is then a path;
@@ -3044,6 +3044,19 @@ It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the l
 - `npm test`: 1249 node tests, 1241 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), 0 fail; 184 Vitest tests pass.
 - `npm run typecheck` is green.
 - `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+
+**Review round 1: CHANGES, two blockers and four followups, all taken.**
+- **B1: `--` before a pattern that starts with a dash.** `rg -- -x /etc/passwd` was allowed: the operands were the words that do not start with `-`, so `--` and the pattern `-x` were dropped and `/etc/passwd` was taken for the pattern. `grep` had the same hole, since milestone 1. Now `--` ends the options, every later word is an operand, and the first operand is the pattern unless `-e`, `--regexp` or `rg --files` was given.
+- **B2: an abbreviated long option.** GNU programs (`getopt_long`) and git's parse-options take any unambiguous prefix of a long option, so `wc --files0=/etc/passwd` was `--files0-from` and read a file outside the workdir. The fix is the reviewer's own: each read's options are an allowlist, not a list of the dangerous ones (`READ_OPTIONS` in `session/policy.ts`), for `cat`, `head`, `tail`, `ls`, `wc`, `grep`, `rg`, `git merge-base` and `git rev-parse`.
+  - A long option matches only by its whole name, so any abbreviation asks, the harmless ones included (`head --lin=5`).
+  - Short options are read as a group: a flag, or a value option that takes the rest of the group or the next word. A value is then never taken for an operand.
+  - An option not in the list asks. Left out on purpose: `tail -f`, `-F` and `--pid` (a tail that never ends), `rg -z` and `--search-zip` (decompression programs), `rg --type-add`, `grep --exclude-from`, `git rev-parse --git-path`.
+- **`find`** reads its start points and then its expression word by word, from an allowlist of tests and of actions that only print. find takes no abbreviation of a primary. This closes two older holes of the safe commands: `-files0-from` (start points read from a file) and `-newer`, `-anewer`, `-cnewer`, `-samefile` naming a file outside the workdir.
+- **git `log`, `show` and `diff`** have hundreds of options, so they keep milestone 1's refusals, now with every prefix of a dangerous long option: `--output*`, `--no-index`, `--ext-diff` and `--orderfile`, plus `-O` (F2: an order file read). git 2.47 refuses an abbreviation in these three commands (`git log --outp=x` exits 128, checked by the lane), so the prefixes are a second guard. `--no-ind` and `--orderfile` were older holes of `git diff`, which every role ran.
+- **F1, rg's abbreviations:** answered by the allowlist, whatever ripgrep's version does. ripgrep is not installed on this server, so its behaviour was not checked.
+- **F3, tests:** `test/session/reviewer-policy.test.ts` gains a table of 52 probes: the review's own, `--` for each read, abbreviations, unlisted options, and allowed forms that must stay allowed (`head -n -5`, `head -20`, `find -L src ... -print`, `rg -tts -g ... --max-count=3`). On the code first pushed, 28 of the 52 give the wrong verdict; none do now. No row of `test/session/policy.test.ts` changed.
+- **F4, docs:** this paragraph, and P47.
+- Checks after the round: `npm test`, 1250 node tests, 1242 pass, 8 skipped, 0 fail, and 184 Vitest tests pass; `npm run typecheck` and the guard are green.
 
 - Pull request: 240, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-reviewer-policy`.
