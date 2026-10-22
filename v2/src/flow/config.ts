@@ -35,7 +35,18 @@ export type FlowConfig = {
   // configuration written without it reads as its one-service workspace
   // (workspaceOf).
   readonly workspace?: WorkspaceConfig;
+  // The author's host tools (decisions 22 and 23, lane 17): its session plan
+  // proposed before the code and held until a Go, and its report of its
+  // changes by intent. loadFlowConfig always sets it; a configuration
+  // written without it (milestone 1's, the tests' literals) runs the flow
+  // as milestone 1 did, with no tool and no gate.
+  readonly authorTools?: boolean;
 };
+
+// How long a high-confidence session plan waits for a Go before it starts
+// by itself, and a session that proposed none before it is put back, when
+// the service's [session] plan_go_minutes does not say (decision 22).
+export const PLAN_GO_MINUTES = 10;
 
 export type ProjectSettings = {
   readonly verdict: string;                 // [merge] verdict: the phrase a passing review ends with
@@ -43,6 +54,7 @@ export type ProjectSettings = {
   readonly hosts: readonly string[];        // [session] hosts, added to the model API
   readonly services: readonly ServiceSpec[]; // [session] services, started beside each session
   readonly scripts: readonly string[];      // the scripts of package.json on the base branch
+  readonly planGoMinutes?: number;          // [session] plan_go_minutes, when set: the session plan's delay (PLAN_GO_MINUTES otherwise)
 };
 
 const list = (value: string | undefined): string[] => (value ?? '').split(',').map((word) => word.trim()).filter(Boolean);
@@ -59,7 +71,11 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
     if (error instanceof ServiceError) throw new FlowConfigError(`[session] services: ${error.message}`);
     throw error;
   }
-  return { verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts };
+  const planGoMinutes = positive(sections.session?.plan_go_minutes, '[session] plan_go_minutes', false);
+  return {
+    verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts,
+    ...(planGoMinutes === undefined ? {} : { planGoMinutes }),
+  };
 }
 
 function positive(value: string | undefined, name: string, integer: boolean): number | undefined {
@@ -100,6 +116,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     budgetUsd: positive(env.CLEARED_V2_BUDGET_USD, 'CLEARED_V2_BUDGET_USD', false),
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
     workspace,
+    authorTools: true,
   };
 }
 

@@ -48,7 +48,7 @@ async function call(path: string, headers: Record<string, string>, body?: unknow
   return { status: response.status, json: text ? JSON.parse(text) : undefined };
 }
 
-const waiting = () => t.inbox.list().find((item) => item.kind === 'session_plan' && item.state === 'waiting');
+const waiting = () => t.inbox.items().find((item) => item.kind === 'session_plan' && item.state === 'waiting');
 
 test('the Go and the Change refuse a request without the proof, a write without a known user, and an unknown session', async () => {
   for (const path of ['/api/sessions/s1/plan/go', '/api/sessions/s1/plan/change']) {

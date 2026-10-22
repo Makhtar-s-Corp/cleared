@@ -5,6 +5,7 @@
 // the JSON of a typed value in it, read back with readToolInput and
 // readToolOutput. Nothing here depends on @ag-ui/core at run time; a test
 // checks every type name against its EventType.
+import type { ChangesReport, HumanEdit, SessionPlan } from '../api/types.ts';
 import type { Decision, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
 import type { Verdict } from './policy.ts';
 
@@ -24,8 +25,10 @@ export function isSubsetType(type: string): type is EventTypeName {
   return SUBSET.has(type);
 }
 
-// The measured steps of the proof (section 1).
-export const STEP_NAMES = ['workspace', 'author', 'waiting_human', 'review', 'approval', 'release', 'watch'] as const;
+// The measured steps of the proof (section 1). `plan_gate`: the author's
+// session plan waiting for its Go, between two `author` steps, so that it
+// is counted apart from the working time (milestone 2 replanned, decision 22).
+export const STEP_NAMES = ['workspace', 'author', 'waiting_human', 'review', 'approval', 'release', 'watch', 'plan_gate'] as const;
 export type StepName = (typeof STEP_NAMES)[number];
 
 export const CUSTOM_NAMES = [
@@ -41,6 +44,16 @@ export const CUSTOM_NAMES = [
   'cleared.compacted',
   'cleared.rate_limit',
   'cleared.lead_refreshed',
+  // The replanned milestone 2 (docs/v2/milestone-2-plan.md, lane 17): the
+  // author's session plan and its report of its changes (decisions 22 and
+  // 23), journaled by the flow; the web terminal and the human's edits
+  // (decisions 32 and 33), which lane 31 emits.
+  'cleared.session_plan',
+  'cleared.changes',
+  'cleared.terminal_opened',
+  'cleared.terminal_input',
+  'cleared.terminal_closed',
+  'cleared.human_edit',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -122,6 +135,21 @@ export type CustomValue = {
   'cleared.rate_limit': { readonly window: 'five_hour' | 'seven_day'; readonly usedPercent: number; readonly resetsAt: string | null };
   // On the old generation's session: the lead goes on in a new one.
   'cleared.lead_refreshed': { readonly generation: number; readonly reason: 'handover_point' | 'threshold' | 'restart' | 'failed'; readonly handoverId: string };
+  // The author's session plan as proposed (`go` null), then again when it
+  // gets its Go, with who and when: the last one is the plan.
+  'cleared.session_plan': SessionPlan;
+  // The author's report of its changes by intent, as report_changes kept it
+  // (the files no group named under "Other changes").
+  'cleared.changes': ChangesReport;
+  // The web terminal of a session taken over (decision 32): who opened it
+  // and its size; each line typed, at its Enter or at the close, through the
+  // cleaner as a whole; why it closed and how many bytes it wrote. The
+  // output itself is never stored.
+  'cleared.terminal_opened': { readonly by: UserId; readonly cols: number; readonly rows: number };
+  'cleared.terminal_input': { readonly by: UserId; readonly line: string };
+  'cleared.terminal_closed': { readonly by: UserId | 'system'; readonly reason: 'give_back' | 'idle' | 'closed' | 'exit'; readonly outputBytes: number };
+  // A file a human changed in the checkout (decision 33): never its content.
+  'cleared.human_edit': Omit<HumanEdit, 'at'>;
 };
 
 type Base = { readonly timestamp?: number };

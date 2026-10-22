@@ -25,7 +25,7 @@ test('a contract item is added, listed, handled once with its outcome, and refus
   assert.equal(item.step, 'step-1');
   assert.equal(item.outcome, null);
   assert.deepEqual(inbox.contracts().map((i) => i.id), [item.id]);
-  assert.deepEqual(inbox.list().map((i) => i.kind), ['contract']);
+  assert.deepEqual(inbox.items().map((i) => i.kind), ['contract']);
   // The same step's diff proposed again is the same item.
   assert.equal(inbox.addContract({ ...base, sessionId: 's1', step: 'step-1', service: 'filter-api', path: 'contract/openapi.yaml', diff: 'x' }).id, item.id);
   clock.now += 60_000;

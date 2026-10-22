@@ -2,7 +2,19 @@
 // stored events: the steps with their times, the files changed with counts,
 // the checks, the usage and the status phrase. The phase comes from the
 // flow, which knows what the session waits for.
+import type { SessionPlan } from '../api/types.ts';
 import { readToolInput, readToolOutput, type SessionEvent, type SessionPhase, type SessionState, type StepName, type ToolInput, type Usage } from '../session/events.ts';
+
+// The author's session plan (decision 22, lane 17): the last
+// `cleared.session_plan` the flow journaled, the proposal or its Go; null
+// for a session that proposed none.
+export function sessionPlanOf(events: readonly SessionEvent[]): SessionPlan | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = (events[i] as SessionEvent).event;
+    if (event.type === 'CUSTOM' && event.name === 'cleared.session_plan') return event.value;
+  }
+  return null;
+}
 
 const PHRASES: Record<SessionPhase, string> = {
   starting: 'Starting',

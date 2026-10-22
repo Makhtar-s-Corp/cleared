@@ -47,8 +47,8 @@ async function gated(scripts: Scripts, minutes?: number): Promise<Setup> {
 }
 
 const waitingPlan = (t: Setup): SessionPlanItem | undefined =>
-  t.inbox.list().find((item): item is SessionPlanItem => item.kind === 'session_plan' && item.state === 'waiting');
-const planItems = (t: Setup) => t.inbox.list().filter((item): item is SessionPlanItem => item.kind === 'session_plan');
+  t.inbox.items().find((item): item is SessionPlanItem => item.kind === 'session_plan' && item.state === 'waiting');
+const planItems = (t: Setup) => t.inbox.items().filter((item): item is SessionPlanItem => item.kind === 'session_plan');
 const events = (t: Setup): SessionEvent[] => t.startedSessions.flatMap((s) => t.store.events.after(s.id));
 const customs = (t: Setup, name: string) => events(t).flatMap(({ event }) => (event.type === 'CUSTOM' && event.name === name ? [event.value as unknown] : []));
 const userTexts = (t: Setup, session: string) => {
@@ -121,7 +121,7 @@ test('a high confidence with no Go for 10 minutes of fake time starts by itself,
   await t.engine.settled();
   const plan = planOf(t, author);
   assert.deepEqual(plan?.go, { by: 'delay', at: new Date(t.clock.now).toISOString() });
-  assert.equal(t.inbox.list().find((i) => i.id === item.id)?.state, 'handled');
+  assert.equal(t.inbox.items().find((i) => i.id === item.id)?.state, 'handled');
   assert.deepEqual(stepLines(t.store.events.after(author)), ['+workspace', '-workspace', '+author', '-author', '+plan_gate', '-plan_gate', '+author', '-author']);
   // The Go is journaled as the plan again, with who and when.
   const journaled = customs(t, 'cleared.session_plan') as SessionPlan[];
@@ -152,7 +152,7 @@ test('a medium confidence still waits at 11 minutes and two hours later, never i
   await t.engine.planGo(author, 'u1');
   await until(() => t.startedSessions.length === 2, 'the review after the work');
   assert.deepEqual(planOf(t, author)?.go, { by: 'u1', at: new Date(t.clock.now).toISOString() });
-  assert.equal(t.inbox.list().find((i) => i.id === item.id)?.state, 'handled');
+  assert.equal(t.inbox.items().find((i) => i.id === item.id)?.state, 'handled');
   await assert.rejects(t.engine.planGo(author, 'u1'), (error: unknown) => error instanceof FlowError && error.kind === 'conflict', 'a second Go');
   await t.engine.close();
 });
@@ -174,7 +174,7 @@ test('a Change reopens the author with the message, and the next proposal replac
   await t.engine.planChange(author, 'Test the empty list too.', 'u1');
   await until(() => waitingPlan(t) !== undefined && waitingPlan(t)?.id !== first.id, 'the second proposal');
   await t.engine.settled();
-  assert.equal(t.inbox.list().find((i) => i.id === first.id)?.state, 'handled');
+  assert.equal(t.inbox.items().find((i) => i.id === first.id)?.state, 'handled');
   assert.match(userTexts(t, author).at(-1) ?? '', /Test the empty list too\./);
   const second = waitingPlan(t) as SessionPlanItem;
   assert.deepEqual(second.plan.steps, ['Sort the entries newest first', 'Test the empty list']);
@@ -214,7 +214,7 @@ test('an author reopened after a review proposes nothing: the call is refused, a
     reopen: [{ awaitMessage: true }, started, proposal('high', 'plan-again'), ...text('a2', 'Fixed.'), finished(0.2)],
   });
   await t.engine.start(t.ticket.id, 'u1', { plan: 'p1', item: 1 });
-  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release after two rounds', 5000);
+  await until(() => t.inbox.items().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release after two rounds', 5000);
   const calls = customs(t, 'cleared.host_call') as { name: string; outcome: string; toolCallId: string }[];
   assert.equal(calls.find((c) => c.toolCallId === 'plan-again')?.outcome, 'refused');
   assert.equal(customs(t, 'cleared.session_plan').length, 2, 'the proposal and its Go, nothing after the review');
@@ -229,7 +229,7 @@ test('a new author started after a review because the old one could not resume i
     reopen: 'throw',
   });
   await t.engine.start(t.ticket.id, 'u1', { plan: 'p1', item: 1 });
-  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release', 5000);
+  await until(() => t.inbox.items().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release', 5000);
   const second = t.startedSessions.filter((s) => s.input.role === 'author')[1]!;
   assert.doesNotMatch(second.input.prompt, /propose_session_plan/);
   assert.match(second.input.prompt, /report_changes/);
@@ -311,7 +311,7 @@ test('a session plan of a session that stops leaves the inbox with it', async ()
   // restart is the end: a new engine closes what the last process left waiting.
   const { FlowEngine } = await import('../../src/flow/engine.ts');
   const again = new FlowEngine(t.deps);
-  assert.equal(t.inbox.list().find((i) => i.id === item.id)?.state, 'handled');
+  assert.equal(t.inbox.items().find((i) => i.id === item.id)?.state, 'handled');
   await again.recover();
   assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
   await again.close();
