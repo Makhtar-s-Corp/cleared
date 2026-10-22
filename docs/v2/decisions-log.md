@@ -2316,5 +2316,6 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - The cost over-count of a session of several turns (lane 25's followup), now also in the step's cost.
 - The card's groups read the last author's report only (`#report`), which is the integration step's: what the contract and service steps committed falls under "Other changes". Merge each author session's last `cleared.changes`.
 
+- Pull request: 220, against `v2`.
 - The requirements matrix: M2, C10, O10 and this lane's own lines P30 and P31.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ticket-steps`.
