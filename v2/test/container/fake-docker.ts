@@ -62,8 +62,9 @@ export class FakeDocker {
   readonly volumes: FakeObject[] = [];
   readonly images: FakeObject[] = [];
   readonly calls: Call[] = [];
-  // The working folder `image inspect` reports, by tag.
+  // The working folder and the VOLUME paths `image inspect` reports, by tag.
   workdirOf: (tag: string) => string = () => '/app';
+  volumesOf: (tag: string) => readonly string[] = () => [];
   // Return a result to replace the normal answer, for failure injection.
   intercept: (args: readonly string[]) => DockerResult | undefined = () => undefined;
   // Answer of `exec`, by command.
@@ -131,7 +132,13 @@ export class FakeDocker {
       case 'image inspect': {
         const found = targets(args).map((id) => this.images.find((image) => image.id === id));
         if (found.some((image) => !image)) return fail('Error: No such image');
-        return ok(JSON.stringify(found.map((image) => ({ Id: image?.id, RepoTags: [image?.name], Config: { Labels: Object.keys(image?.labels ?? {}).length ? image?.labels : null, WorkingDir: this.workdirOf(image?.name ?? '') } }))));
+        return ok(JSON.stringify(found.map((image) => {
+          const volumes = this.volumesOf(image?.name ?? '');
+          return {
+            Id: image?.id, RepoTags: [image?.name],
+            Config: { Labels: Object.keys(image?.labels ?? {}).length ? image?.labels : null, WorkingDir: this.workdirOf(image?.name ?? ''), Volumes: volumes.length ? Object.fromEntries(volumes.map((path) => [path, {}])) : null },
+          };
+        })));
       }
       case 'image rm':
         return this.remove(this.images, targets(args), 'id');
@@ -186,7 +193,14 @@ export class FakeDocker {
         return this.execAnswer(targets(args).slice(1));
       case 'inspect': {
         const container = this.containers.find((c) => c.id === targets(args)[0]);
-        return container ? ok(JSON.stringify([{ Id: container.id, Name: `/${container.name}`, Config: { Labels: container.labels } }])) : fail('Error: No such object');
+        if (!container) return fail('Error: No such object');
+        // Each network of its create line, with an address made from its position.
+        const at = this.containers.indexOf(container);
+        const networks = (container.args ?? []).flatMap((arg, i, all) => (all[i - 1] === '--network' ? [arg.split(',')[0]?.replace(/^name=/, '') ?? ''] : []));
+        return ok(JSON.stringify([{
+          Id: container.id, Name: `/${container.name}`, Config: { Labels: container.labels }, State: { Running: container.state === 'running' },
+          NetworkSettings: { Networks: Object.fromEntries(networks.map((name) => [name, { IPAddress: `172.30.0.${at + 2}` }])) },
+        }]));
       }
       case 'network inspect': {
         const network = this.networks.find((n) => n.id === targets(args)[0]);

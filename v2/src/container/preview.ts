@@ -6,8 +6,10 @@
 // on the host, and publishes nothing: the service reaches it through the
 // session's egress container (Cleared's own image, on that network), with
 // a one-shot `node` fetch run by `docker exec` on the id a labelled list
-// returned. The body comes back as base64, so bytes stay bytes. No request
-// header of the app goes to the sibling: only the path and the query.
+// returned, to the sibling's address on that network while it runs (never
+// its name, which the egress container could resolve outside). The body
+// comes back as base64, so bytes stay bytes. No request header of the app
+// goes to the sibling: only the path and the query.
 //
 // Every answer carries `Content-Security-Policy: sandbox allow-scripts
 // allow-forms` (a page the session wrote runs with an opaque origin) and no
@@ -22,7 +24,7 @@ import { SERVICE_PROOF_HEADER } from '../api/types.ts';
 import type { Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
 import { DockerError, type Docker } from './docker.ts';
-import { sessionNames } from './session-runtime.ts';
+import { sessionNames, siblingAddress } from './session-runtime.ts';
 
 export const PREVIEW_POLICY = 'sandbox allow-scripts allow-forms';
 // The routes match a fixed number of segments: a path of the sibling has
@@ -83,14 +85,17 @@ async function handle(deps: PreviewDeps, depth: number, { request, response, par
   const path = Array.from({ length: depth }, (_, i) => segment(params[`p${i}`] ?? '')).join('/');
   const at = (request.url ?? '').indexOf('?');
   const query = at < 0 ? '' : (request.url ?? '').slice(at);
-  const base = `http://${target.alias}:${target.port}`;
+  let relayed: Relayed;
+  const docker = deps.docker();
+  const address = await siblingAddress(docker, target.session, target.alias);
+  if (address === undefined) return sendJson(response, 502, { error: 'the preview is not running' });
+  const base = `http://${address}:${target.port}`;
   const url = `${base}/${path}${query}`;
   let parsed: URL | undefined;
   try { parsed = new URL(url); } catch { parsed = undefined; }
   if (parsed?.origin !== base) return sendJson(response, 400, { error: 'not a path of the preview' });
-  let relayed: Relayed;
   try {
-    const result = await deps.docker().exec(target.session, sessionNames(target.session).egress, ['node', '-e', RELAY, url, String(PREVIEW_MAX_BYTES), String(PREVIEW_TIMEOUT_MS)], { timeoutMs: PREVIEW_TIMEOUT_MS + 10_000 });
+    const result = await docker.exec(target.session, sessionNames(target.session).egress, ['node', '-e', RELAY, url, String(PREVIEW_MAX_BYTES), String(PREVIEW_TIMEOUT_MS)], { timeoutMs: PREVIEW_TIMEOUT_MS + 10_000 });
     relayed = result.code === 0 ? JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}') as Relayed : { error: 'exit' };
   } catch (error) {
     if (!(error instanceof DockerError) && !(error instanceof SyntaxError)) throw error;
@@ -103,12 +108,13 @@ async function handle(deps: PreviewDeps, depth: number, { request, response, par
   for (const [name, value] of relayed.headers ?? []) {
     const key = name.toLowerCase();
     if (!DROPPED.has(key)) headers[key] = value;
-    // A redirect to the sibling itself is kept as its path, which the app's
-    // preview listener maps; one that leaves the sibling is dropped.
+    // A redirect to the sibling itself (its address, or its name on the
+    // session network) is kept as its path, which the app's preview listener
+    // maps; one that leaves the sibling is dropped.
     if (key === 'location') {
       let to: URL | undefined;
       try { to = new URL(value, base); } catch { to = undefined; }
-      if (to?.origin === base) headers.location = `${to.pathname}${to.search}`;
+      if (to && [base, `http://${target.alias}:${target.port}`].includes(to.origin)) headers.location = `${to.pathname}${to.search}`;
     }
   }
   response.writeHead(relayed.status, { ...headers, ...FIXED, 'content-length': String(body.length) });

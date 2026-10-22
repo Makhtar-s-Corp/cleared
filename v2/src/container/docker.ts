@@ -176,7 +176,8 @@ export type ContainerSpec = {
 export type ContainerRow = { readonly id: string; readonly name: string; readonly state: string; readonly labels: Readonly<Record<string, string>> };
 export type NetworkRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>> };
 export type VolumeRow = { readonly name: string; readonly labels: Readonly<Record<string, string>> };
-export type ImageRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>>; readonly workdir: string };
+// workdir and volumes: the image's working folder and its VOLUME paths.
+export type ImageRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>>; readonly workdir: string; readonly volumes: readonly string[] };
 
 // `docker ... --format '{{json .}}'` prints labels as "k=v,k=v".
 function parseLabels(text: unknown): Record<string, string> {
@@ -344,8 +345,12 @@ export class Docker {
     const out = await this.must(['image', 'ls', '--no-trunc', ...filters, '--format', '{{json .}}']);
     const ids = [...new Set(jsonLines(out).map((row) => String(row.ID)))];
     if (ids.length === 0) return [];
-    const inspected = JSON.parse(await this.must(['image', 'inspect', '--', ...ids], new Set(ids))) as { Id?: string; RepoTags?: string[] | null; Config?: { Labels?: Record<string, string> | null; WorkingDir?: string } }[];
-    const rows = inspected.map((image) => ({ id: String(image.Id), name: image.RepoTags?.[0] ?? '<none>', labels: { ...(image.Config?.Labels ?? {}) }, workdir: image.Config?.WorkingDir ?? '' }));
+    type Inspected = { Id?: string; RepoTags?: string[] | null; Config?: { Labels?: Record<string, string> | null; WorkingDir?: string; Volumes?: Record<string, unknown> | null } };
+    const inspected = JSON.parse(await this.must(['image', 'inspect', '--', ...ids], new Set(ids))) as Inspected[];
+    const rows = inspected.map((image) => ({
+      id: String(image.Id), name: image.RepoTags?.[0] ?? '<none>', labels: { ...(image.Config?.Labels ?? {}) },
+      workdir: image.Config?.WorkingDir ?? '', volumes: Object.keys(image.Config?.Volumes ?? {}),
+    }));
     return labelled(rows, 'image', (row) => row.name);
   }
 

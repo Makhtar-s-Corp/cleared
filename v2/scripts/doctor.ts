@@ -44,7 +44,7 @@ import { Docker, cliRunner, cliSpawner, type DockerResult } from '../src/contain
 import { PREVIEW_POLICY, RELAY, previewRoutes } from '../src/container/preview.ts';
 import { parseServices, planSiblings } from '../src/container/services.ts';
 import {
-  CONFIG_MOUNT, LOGIN_FILE_MOUNT, SESSION_IMAGE, SKILLS_MOUNT, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, startSession, stopSession,
+  CONFIG_MOUNT, LOGIN_FILE_MOUNT, SESSION_IMAGE, SKILLS_MOUNT, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, siblingAddress, startSession, stopSession,
 } from '../src/container/session-runtime.ts';
 import { defaultRegistry } from '../src/modules/registry.ts';
 import { exportBase, projectCheckout, ticketBranch, ticketCheckout } from '../src/workspace/checkout.ts';
@@ -1049,7 +1049,10 @@ async function workspaceSection(build: boolean): Promise<void> {
     const skillWrite = await run(['sh', '-c', `touch ${SKILLS_MOUNT}/doctor-was-here`]);
     check('the project\'s skills are read only', skillWrite.code !== 0, shown(skillWrite));
 
-    type Inspected = { HostConfig?: { CapDrop?: string[]; PortBindings?: unknown; ReadonlyRootfs?: boolean; SecurityOpt?: string[] }; NetworkSettings?: { Networks?: Record<string, unknown> }; Config?: { Labels?: Record<string, string> } };
+    type Inspected = {
+      HostConfig?: { CapDrop?: string[]; PortBindings?: unknown; ReadonlyRootfs?: boolean; SecurityOpt?: string[] }; NetworkSettings?: { Networks?: Record<string, unknown> };
+      Config?: { Labels?: Record<string, string> }; Mounts?: { Type?: string; Destination?: string; RW?: boolean }[];
+    };
     for (const name of [names.sibling('guestbook'), names.sibling('filter-api')]) {
       const inspected = await docker.inspect(session, name) as Inspected;
       const networks = Object.keys(inspected.NetworkSettings?.Networks ?? {});
@@ -1057,12 +1060,16 @@ async function workspaceSection(build: boolean): Promise<void> {
       check(`${name.replace(session, '<session>')} is labelled, on the session network only, without capability or published port`,
         inspected.Config?.Labels?.['cleared.dev'] === 'v2' && inspected.Config.Labels['cleared.session'] === session && networks.length === 1 && networks[0] === names.network
         && (inspected.HostConfig?.CapDrop ?? []).includes('ALL') && Object.keys((inspected.HostConfig?.PortBindings ?? {}) as object).length === 0);
+      const mounts = (inspected.Mounts ?? []).map((m) => ({ Type: m.Type, Destination: m.Destination, RW: m.RW }));
+      check(`${name.replace(session, '<session>')} has no volume mount (no unlabelled anonymous volume)`, !mounts.some((m) => m.Type === 'volume'), `Mounts ${JSON.stringify(mounts)}`);
     }
     const images = await docker.images(session);
     say(`    images with the session label: ${images.map((image) => image.name.replace(session, '<session>')).join(', ')}`);
 
     // The preview: what the relay brings back as it is, then the route's answer.
-    const raw = await docker.exec(session, names.egress, ['node', '-e', RELAY, 'http://guestbook:8793/', '1000000', '10000']);
+    const address = await siblingAddress(docker, session, 'guestbook');
+    say(`    the guestbook sibling's address on the session network: ${address ?? 'none'}`);
+    const raw = await docker.exec(session, names.egress, ['node', '-e', RELAY, `http://${address}:8793/`, '1000000', '10000']);
     const rawHeaders = (JSON.parse(raw.stdout.trim() || '{}') as { status?: number; headers?: [string, string][] });
     say(`    relayed from the guestbook sibling: status ${rawHeaders.status}, headers ${JSON.stringify((rawHeaders.headers ?? []).map(([name]) => name))}`);
     const key = randomUUID();

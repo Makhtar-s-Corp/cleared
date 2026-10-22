@@ -42,7 +42,10 @@ function call(route: Route, params: Record<string, string>, options: { proof?: s
 // A fake docker whose egress container answers the relay with `answer`.
 function setup(answer: (url: string) => object = () => ({ status: 200, headers: [['content-type', 'text/html']], body: Buffer.from('<p>hi</p>').toString('base64') })) {
   const fake = new FakeDocker();
-  fake.containers.push({ id: 'e'.repeat(64), name: sessionNames(SESSION).egress, labels: { 'cleared.dev': 'v2', 'cleared.session': SESSION }, state: 'running' });
+  const labels = { 'cleared.dev': 'v2', 'cleared.session': SESSION };
+  fake.containers.push({ id: 'e'.repeat(64), name: sessionNames(SESSION).egress, labels, state: 'running' });
+  // The guestbook's sibling, second on the list: 172.30.0.3 on the session network.
+  fake.containers.push({ id: 'd'.repeat(64), name: sessionNames(SESSION).sibling('guestbook'), labels, state: 'running', args: ['create', '--network', `name=${sessionNames(SESSION).network},alias=guestbook`] });
   const urls: string[] = [];
   fake.execAnswer = (command) => {
     const url = command[3] ?? '';
@@ -105,7 +108,7 @@ test('the sibling\'s answer comes back sandboxed, with no cookie and none of its
   assert.equal(answer.headers['content-length'], String(png.length));
   assert.equal(answer.headers['x-app'], 'kept');
   assert.equal(answer.headers['cache-control'], 'no-store');
-  assert.deepEqual(urls, ['http://guestbook:8793/static/logo.png?v=2&x=a%20b']);
+  assert.deepEqual(urls, ['http://172.30.0.3:8793/static/logo.png?v=2&x=a%20b'], 'the sibling\'s address on the session network, never its name');
   // From the session's own egress container, found by a labelled list.
   const exec = fake.calls.find((c) => c.args[0] === 'exec');
   assert.equal(exec?.args[exec.args.indexOf('--') + 1], 'e'.repeat(64));
@@ -116,7 +119,7 @@ test('a segment that decodes to a slash or to dots stays one segment of the sibl
   const { at, urls } = setup();
   await call(at(2), { id: SESSION, key: KEY, p0: '..', p1: '../../etc/passwd' }, { proof: PROOF });
   await call(at(1), { id: SESSION, key: KEY, p0: '@evil.example:80' }, { proof: PROOF, url: '/x?next=http://evil.example/' });
-  assert.deepEqual(urls, ['http://guestbook:8793/%2E%2E/..%2F..%2Fetc%2Fpasswd', 'http://guestbook:8793/%40evil.example%3A80?next=http://evil.example/']);
+  assert.deepEqual(urls, ['http://172.30.0.3:8793/%2E%2E/..%2F..%2Fetc%2Fpasswd', 'http://172.30.0.3:8793/%40evil.example%3A80?next=http://evil.example/']);
 });
 
 test('a sibling that does not answer, or a stopped session, is a 502 with no detail of the host', async () => {
@@ -129,6 +132,11 @@ test('a sibling that does not answer, or a stopped session, is a 502 with no det
   const gone = await call(stopped.at(0), { id: SESSION, key: KEY }, { proof: PROOF });
   assert.equal(gone.status, 502);
   assert.doesNotMatch(gone.body.toString(), /cleared-v2-|docker/);
+  // A sibling that exited is not asked by its name: nothing is relayed.
+  const exited = setup();
+  (exited.fake.containers[1] as { state?: string }).state = 'exited';
+  assert.equal((await call(exited.at(0), { id: SESSION, key: KEY }, { proof: PROOF })).status, 502);
+  assert.deepEqual(exited.urls, []);
 });
 
 // ---------------------------------------------------------- the runtime
@@ -247,7 +255,7 @@ test('siblings the flow gives are used as they are, and none is planned for them
 });
 
 test('a redirect to the sibling keeps its path; one that leaves it is dropped', async () => {
-  for (const [location, kept] of [['/entries?page=2', '/entries?page=2'], ['http://guestbook:8793/a', '/a'], ['https://evil.example/', undefined], ['//evil.example/x', undefined]] as const) {
+  for (const [location, kept] of [['/entries?page=2', '/entries?page=2'], ['http://guestbook:8793/a', '/a'], ['http://172.30.0.3:8793/b?c=1', '/b?c=1'], ['http://guestbook:9999/a', undefined], ['https://evil.example/', undefined], ['//evil.example/x', undefined]] as const) {
     const { at } = setup(() => ({ status: 302, headers: [['location', location]], body: '' }));
     const answer = await call(at(0), { id: SESSION, key: KEY }, { proof: PROOF });
     assert.equal(answer.status, 302);

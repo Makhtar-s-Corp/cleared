@@ -185,6 +185,25 @@ const TAG = /^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 export const SIBLING_PROBE = `const [h,p]=process.argv.slice(1);const s=require('net').connect({host:h,port:+p,timeout:2000});
 s.on('connect',()=>process.exit(0));s.on('timeout',()=>process.exit(1));s.on('error',()=>process.exit(1));`;
 
+// The address of a running sibling on the session network, from a labelled
+// inspect, or undefined when it is not running. The probe and the preview
+// connect to it, never to the name: a name that no longer resolves on the
+// session network would be looked up outside it, through the egress
+// container's other network.
+export async function siblingAddress(docker: Docker, session: string, service: string): Promise<string | undefined> {
+  const names = sessionNames(session);
+  type Inspected = { State?: { Running?: boolean }; NetworkSettings?: { Networks?: Record<string, { IPAddress?: string }> } };
+  let inspected: Inspected;
+  try {
+    inspected = await docker.inspect(session, names.sibling(service)) as Inspected;
+  } catch (error) {
+    if (error instanceof DockerError) return undefined;
+    throw error;
+  }
+  const address = inspected.NetworkSettings?.Networks?.[names.network]?.IPAddress ?? '';
+  return inspected.State?.Running === true && isIP(address) === 4 ? address : undefined;
+}
+
 type SiblingImage = { readonly image: string; readonly kind: StartedSibling['kind']; readonly reason?: string; readonly built?: string };
 
 // The image a sibling runs, building its layers (decision 20). Its ticket
@@ -298,8 +317,11 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     // network only, with the test services' variables (its database).
     const servicesEnv: Record<string, string> = Object.assign({}, ...spec.services.map((service) => service.sessionEnv));
     for (const { spec: sibling, container: name, image } of siblings) {
+      // An image's VOLUME paths are tmpfs: Docker would otherwise create an
+      // anonymous volume for each, without Cleared's label.
+      const volumes = (await docker.image(image.image))?.volumes ?? [];
       const common = {
-        name, session, networks: [{ name: names.network, aliases: [sibling.name] }], dropAllCapabilities: true, noNewPrivileges: true,
+        name, session, networks: [{ name: names.network, aliases: [sibling.name] }], dropAllCapabilities: true, noNewPrivileges: true, tmpfs: volumes,
       };
       if (image.kind === 'fake') {
         const contract = sibling.contract as string;
@@ -337,8 +359,11 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     // not hold the session back: it is reported, and the session can fix it.
     for (const sibling of siblings) {
       const ready = await answers(
-        async () => (await docker.exec(session, names.egress, ['node', '-e', SIBLING_PROBE, sibling.spec.name, String(sibling.spec.port)])).code === 0,
-        async () => !(await docker.containers(session)).some((row) => row.name.replace(/^\//, '') === sibling.container && row.state === 'running'),
+        async () => {
+          const address = await siblingAddress(docker, session, sibling.spec.name);
+          return address !== undefined && (await docker.exec(session, names.egress, ['node', '-e', SIBLING_PROBE, address, String(sibling.spec.port)])).code === 0;
+        },
+        async () => (await siblingAddress(docker, session, sibling.spec.name)) === undefined,
         timeoutMs, pollMs,
       );
       startedSiblings.push({ name: sibling.spec.name, container: sibling.container, kind: sibling.image.kind, ready, ...(sibling.image.reason === undefined ? {} : { reason: sibling.image.reason }) });

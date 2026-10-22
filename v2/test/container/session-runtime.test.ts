@@ -359,7 +359,10 @@ test('a sibling runs labelled on the session network under its name, without pri
   assert.equal(noProxy, 'NO_PROXY=localhost,127.0.0.1,postgres,guestbook,filter-api');
 });
 
-test('each sibling is awaited from the egress container on its name and port before the session starts', async () => {
+// The probe connects to the sibling's address on the session network, read
+// from a labelled inspect while it runs: a name that no longer resolves on
+// that network would be looked up outside it, through the egress container.
+test('each sibling is awaited from the egress container, at its address on the session network, before the session starts', async () => {
   const files = workspaceFiles();
   const fake = new FakeDocker();
   const probes: string[] = [];
@@ -368,7 +371,8 @@ test('each sibling is awaited from the egress container on its name and port bef
     return { code: 0, stdout: '', stderr: '' };
   };
   await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook, files.filter] }));
-  assert.deepEqual(probes, ['guestbook:8793', 'filter-api:8795']);
+  const address = (name: string) => `172.30.0.${fake.containers.findIndex((c) => c.name === sessionNames(SESSION).sibling(name)) + 2}`;
+  assert.deepEqual(probes, [`${address('guestbook')}:8793`, `${address('filter-api')}:8795`]);
   const egress = fake.containers.find((c) => c.name === sessionNames(SESSION).egress)?.id;
   for (const call of fake.calls.filter((c) => c.args[0] === 'exec' && c.args.includes('node'))) assert.equal(call.args[call.args.indexOf('--') + 1], egress);
 });
@@ -399,10 +403,41 @@ test('a ticket layer that fails to build falls back to the fake', async () => {
   assert.match(started.siblings[0]?.reason ?? '', /the ticket layer could not be built: .*boom/);
 });
 
+test('a sibling that is not running is never probed, and is reported not ready', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const sibling = sessionNames(SESSION).sibling('guestbook');
+  // Its start leaves it created, as a container that exits at once would be.
+  fake.intercept = (args) => (args[0] === 'start' && fake.containers.find((c) => c.id === args.at(-1))?.name === sibling ? { code: 0, stdout: '', stderr: '' } : undefined);
+  const probes: string[] = [];
+  fake.execAnswer = (command) => {
+    if (command[0] === 'node') probes.push(command.join(' '));
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook], readyTimeoutMs: 0 }));
+  assert.equal(started.siblings[0]?.ready, false);
+  assert.deepEqual(probes, []);
+});
+
+test('the VOLUME paths of a sibling\'s image are tmpfs: no unlabelled anonymous volume is created', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.volumesOf = (tag) => (tag.includes('guestbook') ? ['/data', '/var/cache/app'] : []);
+  await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] }));
+  const args = byName(fake.containers, sessionNames(SESSION).sibling('guestbook')).args ?? [];
+  assert.ok(hasPair(args, '--tmpfs', '/data') && hasPair(args, '--tmpfs', '/var/cache/app'), args.join(' '));
+  assert.ok(!args.some((arg) => arg.startsWith('type=volume')));
+  // The base layer too, when it runs.
+  const base = new FakeDocker();
+  base.volumesOf = (tag) => (tag.startsWith('cleared-v2-base-') ? ['/data'] : []);
+  await startSession(new Docker(base.runner), runtimeSpec({ siblings: [{ ...files.guestbook, real: { ...files.guestbook.real, checkout: undefined } }] }));
+  assert.ok(hasPair(byName(base.containers, sessionNames(SESSION).sibling('guestbook')).args ?? [], '--tmpfs', '/data'));
+});
+
 test('a sibling that never answers is reported and does not hold the session back', async () => {
   const files = workspaceFiles();
   const fake = new FakeDocker();
-  fake.execAnswer = (command) => ({ code: command[0] === 'node' && command.includes('guestbook') ? 1 : 0, stdout: '', stderr: '' });
+  fake.execAnswer = (command) => ({ code: command[0] === 'node' ? 1 : 0, stdout: '', stderr: '' });
   const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook], readyTimeoutMs: 0 }));
   assert.equal(started.siblings[0]?.ready, false);
   assert.equal(byName(fake.containers, sessionNames(SESSION).container).state, 'running');
