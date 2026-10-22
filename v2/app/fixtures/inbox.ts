@@ -191,7 +191,7 @@ export function inboxSource(fixture: InboxFixture, options: {
     const record = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
 
     if (collection === 'sessions' && sub === 'requests' && action === 'answer' && requestId) {
-      const item = items.find((i) => i.kind !== 'release' && i.sessionId === id && i.requestId === requestId);
+      const item = items.find((i) => (i.kind === 'permission' || i.kind === 'question') && i.sessionId === id && i.requestId === requestId);
       if (!item || item.state !== 'waiting') return sendJson(response, 404, { error: `no request ${requestId} is waiting in session ${id}` });
       const kind = (record.decision as { kind?: unknown } | undefined)?.kind;
       if ((item.kind === 'question') !== (kind === 'answer')) return sendJson(response, 400, { error: 'the decision does not fit the request' });

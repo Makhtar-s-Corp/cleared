@@ -1,5 +1,5 @@
 // How the service is put together (docs/v2/milestone-1-plan.md, section 10).
-// Six modules, one file each under src/modules/, each declaring its tables,
+// Eight modules, one file each under src/modules/, each declaring its tables,
 // its routes and the registry slots it fills. main.ts assembles them; a lane
 // fills its own module and never edits main.ts or another module. Every
 // slot has an in-memory default, so a module that is still a stub leaves
@@ -81,7 +81,8 @@ export type Module = {
   readonly provide: (deps: ModuleDeps) => Partial<Registry>;
 };
 
-export const MODULE_NAMES = ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox'] as const;
+// lead and notify: milestone 2 (docs/v2/milestone-2-plan.md, decision 14).
+export const MODULE_NAMES = ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify'] as const;
 export type ModuleName = (typeof MODULE_NAMES)[number];
 
 export const emptyModule: Module = { tables: [], routes: [], provide: () => ({}) };
