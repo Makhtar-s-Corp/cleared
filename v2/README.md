@@ -8,7 +8,9 @@ The core of Cleared v2, rewritten as a Node service in TypeScript. This folder h
 
 ## Requirements
 
-Node.js 24 or later. Node runs the `.ts` files directly through its type stripping: there is no build step and no emitted JavaScript. Only syntax Node can erase is allowed (no `enum`, no `namespace`, no constructor parameter properties); `tsc` enforces it with `erasableSyntaxOnly`. Relative imports name the `.ts` file.
+Node.js 24 or later. Node runs the service's and the app server's `.ts` files directly through its type stripping: no build step and no emitted JavaScript for them. Only syntax Node can erase is allowed (no `enum`, no `namespace`, no constructor parameter properties); `tsc` enforces it with `erasableSyntaxOnly`. Relative imports name the `.ts` file.
+
+The one exception is the app's front end (`app/web/`, React): Vite builds it into `app/dist/`, which the app serves (the owner's decision of 2026-10-22, in the [decisions log](../docs/v2/decisions-log.md)). `npm run app` and `npm test` build it first.
 
 ## Commands
 
@@ -16,12 +18,13 @@ Run from `v2/`:
 
 | Command | What it does |
 | --- | --- |
-| `npm ci` | Installs the pinned dev dependencies (TypeScript and Node types only; the service has no runtime dependency). |
+| `npm ci` | Installs the pinned dev dependencies. The service and the app's server have no runtime dependency: every package is either a type, a test or build tool, or code that Vite bundles into the page. `.npmrc` runs no install script (CopilotKit pulls in `@scarf/scarf`, whose install script reports installs), and `package.json` turns Scarf off too (`scarfSettings`). |
+| `npm run build` | Builds the front end with Vite (`app/web/vite.config.ts`) into `app/dist/`. |
 | `npm start` | Starts the service (`node src/main.ts`). |
 | `npm run app` | Starts the app (`node app/main.ts`), see [The app](#the-app). |
 | `npm run user -- add <name>` | Adds a person who signs in to the app (the `cleared-v2 user add <name>` command). |
-| `npm test` | Runs the unit tests with `node --test`: `test/` and `app/test/`. |
-| `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks `app/` with `tsc --noEmit -p app`, which `npm test` runs too. |
+| `npm test` | Builds the front end, runs the unit tests with `node --test` (`test/` and `app/test/`), then the components' tests with Vitest (`app/web/test/`, rendered to HTML under Node). |
+| `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks the app's server with `tsc --noEmit -p app` and the front end with `tsc --noEmit -p app/web`; `npm test` runs both through `app/test/static.test.ts`. |
 | `npm run guard` | Runs the repository's private terms and secrets guard (`lib/guard/codex-guard.mjs`) on every v2 file and the v2 workflow. `-- --base origin/v2` also checks the lines changed since that ref, in the guard's `--strict` diff mode. |
 
 ## Settings
@@ -68,7 +71,16 @@ Sign-in and writes:
 - A request for another host name gets `421`.
 - The pages load nothing inline and nothing from another site.
 
-Each screen is `app/public/screens/<screen>.ts`, with its words in `app/messages/<screen>.en.json` and `.fr.json`. The browser gets the TypeScript with its types stripped. The lead screen (`/lead` and `/plans/<id>`, the Plans tab) is a stub until lane 8 of milestone 2 fills it: it keeps the draft that the tower's New goal and Ask the lead send as `?draft=` (and `?goal=1`), and sends nothing.
+### The front end
+
+The pages are React (strict TypeScript) under `app/web/`, built by Vite into `app/dist/`:
+
+- **Each screen** is `app/web/screens/<screen>/`: `model.ts`, its rules as pure functions (the tests run them under Node), `<Screen>.tsx`, the component, and its sheet. Its words are in `app/messages/<screen>.en.json` and `.fr.json`, bundled into the page; the language is `CLEARED_V2_APP_LANGUAGE`, and a key missing from French falls back to English.
+- **The shell** (`app/web/shell/`) draws the header and the sign-in page. The server writes each page's HTML: its language, its title, the screen and what the header shows first on `<body>`, and the bundle's files from `dist/.vite/manifest.json`. The sign-in form posts to `/login` as before; a refusal comes back with the server's sentence on `<body data-error>`.
+- **The components** are shadcn/ui's (`app/web/components/ui/`, Radix plus Tailwind), copied in and restyled to the kit. The theme is shadcn/ui's CSS variables with the kit's colours (`app/web/styles/app.css`), light and dark, chosen with the button (`data-theme`, never the system's setting). Tailwind is loaded without its preflight, so the kit's sheets keep the look. The icons are Phosphor's (`@phosphor-icons/react`), regular weight; the bell is bold while this device is told.
+- **CopilotKit** holds the session's and the lead's threads, open source and local only: the headless React entries of `@copilotkit/react-core`, with no runtime, no Copilot Cloud, no public API key and no license key. Each thread is an AG-UI agent (`app/web/copilot/agent.ts`) that reads the app's own stream and publishes the thread as AG-UI state and message snapshots; the screens draw what CopilotKit holds, and the person's answers go through the app's routes as before. CopilotKit's inspector is replaced by an empty module at build time, and `app/web/test/copilot.test.tsx` checks that CopilotKit sends no request of its own. The page's Content-Security-Policy (`default-src 'self'`) would refuse one anyway.
+
+The lead screen (`/lead` and `/plans/<id>`, the Plans tab) reads the draft that the tower's New goal and Ask the lead send as `?draft=` (and `?goal=1`), then drops it from the address.
 
 ### Notifications
 
@@ -83,11 +95,11 @@ The bell in the header turns this browser's notifications on or off, and says ho
 
 ## The guard
 
-The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`.
+The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`. The lines changed since `--base` leave out `package-lock.json`, which npm writes: the strict mode reads a dependency named `js-tokens` with a version range as an assigned secret. The tree check still reads the whole lock file. `app/dist/` is not checked: it is built, and git ignores it.
 
 ## CI
 
-`.github/workflows/v2.yml` runs on pull requests to `v2`: `npm ci`, `npm test`, `npx tsc --noEmit`, then the guard with `--base` set to the pull request's base branch.
+`.github/workflows/v2.yml` runs on pull requests to `v2`: `npm ci`, `npm run typecheck` (the service, the app's server and the front end), `npm run build` (Vite), `npm test`, then the guard with `--base` set to the pull request's base branch. The job sets every opt-out of the front end's packages: `SCARF_ANALYTICS=false`, `DO_NOT_TRACK=1` and `COPILOTKIT_TELEMETRY_DISABLED=true`.
 
 ## Docker
 

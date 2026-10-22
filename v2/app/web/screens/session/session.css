@@ -109,6 +109,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 }
 @media (max-width: 767px) {
   .session-top { padding: 12px 16px; }
+  .crumbs a { padding: 13px 0; margin: -13px 0; }   /* a 44 px target, the look unchanged */
   .tabs { margin-left: 0; width: 100%; }
   .tab { flex: 1; justify-content: center; min-height: 44px; }
   .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 0 16px 28px; }
