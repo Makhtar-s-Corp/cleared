@@ -167,6 +167,7 @@ export function trainRelease(now: Date = FIXTURE_NOW, state: TrainState['state']
     requestedAt: since,
     captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
     sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 34 }, { role: 'reviewer', model: 'claude-sonnet-5-5', minutes: 9, rounds: 1 }],
+    train,
     groups: blocked ? [{ intent: 'The verdict carries a severity', files: ['openapi.yaml', 'src/check.ts', 'test/check.test.ts'] }] : [
       { intent: 'The filter answers a severity', files: ['openapi.yaml', 'src/check.ts'] },
       { intent: 'A flagged entry is held for a moderator', files: ['migrations/004_held.sql', 'src/entries.ts', 'views/moderate.html'] },

@@ -5,7 +5,7 @@
 import { test } from 'vitest';
 import { renderInbox } from '../render.tsx';
 import assert from 'node:assert/strict';
-import type { InboxItem, Plan, PlanItemInbox, QuestionItem } from '../../../../src/api/types.ts';
+import type { InboxItem, NextInboxItem, Plan, PlanItemInbox, QuestionItem } from '../../../../src/api/types.ts';
 import { LEAD_TICKET as SERVICE_LEAD_TICKET } from '../../../../src/lead/contract.ts';
 import { LEAD_QUESTION_TEXT, PLAN_ID, PLAN_TITLE, inboxFixture, leadQuestion, planItemOf, proposedPlan } from '../../../fixtures/inbox.ts';
 import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
@@ -113,7 +113,7 @@ test('an approved plan leaves the waiting list; its line says how it runs, and i
 
 test('the lead\'s question is shown, with its choices, and sends the person to the lead\'s screen to answer it', () => {
   const question = leadQuestion(FIXTURE_NOW);
-  const items: InboxItem[] = [...inboxFixture(FIXTURE_NOW).items, question];
+  const items: NextInboxItem[] = [...inboxFixture(FIXTURE_NOW).items, question];
   const list = renderInbox(viewOf({ items }), en);
   assert.equal(lineOf(list, question.id), 'Lead · waits for your answer on its screen');
   const html = renderInbox(viewOf({ items, selected: question.id, open: true }), en);
@@ -135,7 +135,7 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
 
 test('the lead\'s sentinel ticket is never on screen', () => {
   const question = leadQuestion(FIXTURE_NOW);
-  const items: InboxItem[] = [...inboxFixture(FIXTURE_NOW).items, question, { ...question, id: 'handled-lead-question', state: 'handled' }];
+  const items: NextInboxItem[] = [...inboxFixture(FIXTURE_NOW).items, question, { ...question, id: 'handled-lead-question', state: 'handled' }];
   for (const selected of [`plan:${PLAN_ID}`, question.id, 'handled-lead-question']) {
     for (const plans of [viewOf().plans, new Map<string, Plan>()]) {
       const shown = visibleText(renderInbox(viewOf({ items, selected, plans }), en));
@@ -172,7 +172,7 @@ test('a failed approval of a plan that the service did write reads as a plan tha
 test('every word of the plan and the lead\'s question comes from the catalog or from the data, with no inline style', () => {
   const fixture = inboxFixture(FIXTURE_NOW);
   const question = leadQuestion(FIXTURE_NOW);
-  const items: InboxItem[] = [...fixture.items, question];
+  const items: NextInboxItem[] = [...fixture.items, question];
   const allowed = strings([items, fixture.plans]);
   allowed.add('demo').add('Only the visible ones');
   for (const n of [1, 2, 3, 4, 5]) allowed.add(String(n));
@@ -196,7 +196,7 @@ test('the plan and the lead\'s question in French have no English sentence left'
   const enCatalog = { ...loadCatalog('inbox', 'en') };
   const frCatalog = loadCatalog('inbox', 'fr');
   const question = leadQuestion(FIXTURE_NOW);
-  const items: InboxItem[] = [...inboxFixture(FIXTURE_NOW).items, question];
+  const items: NextInboxItem[] = [...inboxFixture(FIXTURE_NOW).items, question];
   for (const selected of [`plan:${PLAN_ID}`, question.id]) {
     for (const plans of [viewOf().plans, new Map<string, Plan>()]) {
       const html = renderInbox(viewOf({ items, selected, open: true, plans, language: 'fr' }), fr);

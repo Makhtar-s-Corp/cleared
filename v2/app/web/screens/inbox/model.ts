@@ -24,7 +24,19 @@
 // starting a ticket is reversible (decision 6). The lead's question is
 // answered on the lead's screen: the session answer route refuses the lead's
 // session (issue 168, item 3), so the inbox shows it and links there.
-import type { ApproveBody, InboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../../src/api/types.ts';
+//
+// The replanned milestone 2 (lane 21) adds the release card as a train (the
+// services in landing order, each one's state and pull request, the
+// compatibility line or the block, decision 21), the intent groups and the
+// flags (decision 23), the author's session plan with Go and Change
+// (decision 22, lane 17's routes), and the contract and knowledge items,
+// shown for reading until lane 27 gives them their gestures. The screen
+// reads every kind GET /api/inbox answers (NextInboxItem): api/types.ts
+// belongs to no lane in wave 8, so InboxItem keeps its four kinds there.
+import type {
+  ApproveBody, ContractItem, InboxItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseFlag, ReleaseFlagKind,
+  ReleaseItem, SessionPlan, SessionPlanItem, SessionSummary, TrainState, TrainStop,
+} from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { Question, ToolInput } from '../../../../src/session/events.ts';
 import { answersFor as choiceAnswers } from '../../components/choices/model.ts';
@@ -45,6 +57,15 @@ export const LEAD_TICKET = 'lead';
 // when its answer gives no `dueAt`.
 export const GRACE_MS = 60_000;
 export const RECOMMENDED = /\s*\(Recommended\)\s*$/i;
+// The group the service gives the changed files no intent names
+// (OTHER_CHANGES of src/release/flags.ts; a test keeps the two equal).
+export const OTHER_CHANGES = 'Other changes';
+// The longest Change the plan's route accepts (MAX_CHANGE of
+// src/flow/plan-gate.ts; a test keeps the two equal).
+export const CHANGE_MAX = 2000;
+
+// Every kind the inbox lists.
+export type Item = NextInboxItem;
 
 // What a gesture of this page left on an item until the service's list catches up.
 export type Local =
@@ -55,10 +76,13 @@ export type Local =
   | { readonly kind: 'sent_back'; readonly at: string }
   | { readonly kind: 'answered'; readonly decision: Decision['kind'] }
   | { readonly kind: 'plan_approved'; readonly at: string }   // a plan has no grace: its tickets start
+  | { readonly kind: 'change' }                                // Change asked once: the field is open
+  | { readonly kind: 'plan_go'; readonly at: string }          // Go given to a session plan
+  | { readonly kind: 'plan_changed'; readonly at: string }     // a Change sent to its author
   | { readonly kind: 'settled' };                              // settled without the person
 
 export type InboxView = {
-  readonly items: readonly InboxItem[];
+  readonly items: readonly Item[];
   readonly tickets: readonly Ticket[];
   readonly sessions: readonly SessionSummary[];
   readonly selected: string | undefined;                       // the item the address names
@@ -74,20 +98,28 @@ export type InboxView = {
 // ---------------------------------------------------------------- the model
 
 // The capture's order: a release, a permission, the lead's plan, a question.
-const RANK: Readonly<Record<InboxItem['kind'], number>> = { release: 0, permission: 1, plan: 2, question: 3 };
+// A session plan holds its session as a permission does, so it comes after
+// the permissions; a contract and a knowledge item come last.
+const RANK: Readonly<Record<Item['kind'], number>> = { release: 0, permission: 1, session_plan: 2, plan: 3, question: 4, contract: 5, knowledge: 6 };
 // The catalog names a release's checks by colour, as the tower's does.
 export const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
 // What waits, releases first, then permissions, plans and questions, each
 // oldest first; then what was handled, in the service's order (latest first).
-export function ordered(items: readonly InboxItem[]): { readonly waiting: InboxItem[]; readonly handled: InboxItem[] } {
+export function ordered(items: readonly Item[]): { readonly waiting: Item[]; readonly handled: Item[] } {
   const waiting = items.filter((item) => item.state === 'waiting')
     .sort((a, b) => RANK[a.kind] - RANK[b.kind] || Date.parse(a.since) - Date.parse(b.since));
   return { waiting, handled: items.filter((item) => item.state === 'handled') };
 }
 
+// What the service answered, without the kinds this screen does not know:
+// a later kind is left out rather than drawn as a row with no words.
+export function known(values: readonly unknown[]): Item[] {
+  return values.filter((value): value is Item => typeof value === 'object' && value !== null && Object.hasOwn(RANK, (value as { kind?: unknown }).kind as string));
+}
+
 // The item shown: the one the address names, else the first that waits.
-export function chosen(view: InboxView): InboxItem | undefined {
+export function chosen(view: InboxView): Item | undefined {
   if (view.selected !== undefined) return view.items.find((item) => item.id === view.selected);
   const { waiting, handled } = ordered(view.items);
   return waiting[0] ?? handled[0];
@@ -97,12 +129,16 @@ export function chosen(view: InboxView): InboxItem | undefined {
 // free answer being typed is not lost to a refresh. A release's checks are
 // part of what it shows: the owner waits for them to turn green.
 // A plan's detail follows the plan read for it: read or not, and how it runs.
+// A train's follows each service as it lands; a session plan's, its Go; a
+// contract's or a knowledge item's, what the owner did with it.
 export function detailKey(v: InboxView): string {
   const item = chosen(v);
   const checks = item?.kind === 'release' ? item.pr.checks : undefined;
   const plan = item?.kind === 'plan' ? planOf(v, item) : undefined;
   const moved = plan ? [plan.state, plan.items.map((i) => [i.state, i.ticket])] : undefined;
-  return JSON.stringify([v.items.length === 0, item?.id, item?.state, checks, moved, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
+  const train = item?.kind === 'release' && item.train ? [item.train.state, item.train.services.map((s) => [s.state, s.at, s.note ?? null])] : undefined;
+  const after = item?.kind === 'session_plan' ? item.plan.go : item?.kind === 'contract' || item?.kind === 'knowledge' ? item.outcome : undefined;
+  return JSON.stringify([v.items.length === 0, item?.id, item?.state, checks, moved, train, after, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
 }
 
 // ------------------------------------------------------------------ plans
@@ -129,7 +165,7 @@ export function readPlan(value: unknown): Plan | undefined {
 }
 
 export const planOf = (view: InboxView, item: PlanItemInbox): Plan | undefined => view.plans?.get(item.planId);
-export const isLead = (item: InboxItem) => item.ticket === LEAD_TICKET;
+export const isLead = (item: Item) => item.ticket === LEAD_TICKET;
 
 export function itemFromHash(hash: string): string | undefined {
   const raw = hash.replace(/^#/, '');
@@ -171,7 +207,7 @@ export const sentence = (text: string) => text.charAt(0).toUpperCase() + text.sl
 // ---------------------------------------------------------------- gestures
 
 type Api = ScreenContext['api'];
-const ticketPath = (item: InboxItem) => `/tickets/${encodeURIComponent(item.ticket)}`;
+const ticketPath = (item: Item) => `/tickets/${encodeURIComponent(item.ticket)}`;
 const requestPath = (item: PermissionItem | QuestionItem) =>
   `/sessions/${encodeURIComponent(item.sessionId)}/requests/${encodeURIComponent(item.requestId)}/answer`;
 
@@ -230,7 +266,40 @@ export function answersFor(questions: readonly Question[], picks: readonly (read
   return choiceAnswers(questions, { picks, free });
 }
 
-export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan';
+// ------------------------------------------------------- the session plan
+
+const planPath = (item: SessionPlanItem, action: 'go' | 'change') => `/sessions/${encodeURIComponent(item.sessionId)}/plan/${action}`;
+
+// Go: the author starts writing. lane 17's route takes no body.
+export async function planGo(api: Api, item: SessionPlanItem, now: Date): Promise<Local> {
+  await api(planPath(item, 'go'), { method: 'POST', body: null });
+  return { kind: 'plan_go', at: now.toISOString() };
+}
+
+// What a Change says, as the route accepts it: some text, at most CHANGE_MAX characters.
+export function changeMessage(text: string): { readonly message: string } | { readonly error: 'plan_change_empty' | 'plan_change_long' } {
+  const message = text.trim();
+  if (message === '') return { error: 'plan_change_empty' };
+  return message.length > CHANGE_MAX ? { error: 'plan_change_long' } : { message };
+}
+
+// Change: the message reopens the author, whose next proposal replaces this one.
+export async function planChange(api: Api, item: SessionPlanItem, text: string, now: Date): Promise<Local> {
+  const checked = changeMessage(text);
+  if ('error' in checked) throw new Error(checked.error);
+  await api(planPath(item, 'change'), { method: 'POST', body: { message: checked.message } });
+  return { kind: 'plan_changed', at: now.toISOString() };
+}
+
+// Who let the plan start, and when (SessionPlan.go).
+export function goLine(go: NonNullable<SessionPlan['go']>, view: InboxView, t: Translate): string {
+  const time = clock(go.at);
+  if (go.by === 'delay') return t('go_by_delay', { time });
+  if (go.by === 'lead') return t('go_by_lead', { time });
+  return go.by === view.me.id ? t('go_by_you', { time }) : t('go_by_user', { who: go.by, time });
+}
+
+export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change';
 
 // How a refusal of the service reads. An answer to a request that no longer
 // waits (404, or 409 for a session that stopped) was settled without the
@@ -254,6 +323,14 @@ export function failure(error: unknown, gesture: Gesture): { readonly key: strin
       if (status === 409) return { key: 'approve_plan_conflict', settled: false };
       if (status === 404) return { key: 'approve_plan_gone', settled: false };
       return { key: status === 503 ? 'approve_plan_lead_off' : 'approve_plan_failed', settled: false };
+    // 409: no plan waits any more for its Go (it started by the delay or the
+    // lead, or the session ended); 403: a user the service does not know.
+    case 'plan_go': case 'plan_change':
+      if (status === 404 || status === 409) return { key: 'plan_settled', settled: true };
+      if (status === 403) return { key: 'plan_user', settled: false };
+      if (status === 503) return { key: 'plan_flow_off', settled: false };
+      if (status === 400 && gesture === 'plan_change') return { key: 'plan_change_invalid', settled: false };
+      return { key: `${gesture}_failed`, settled: false };
   }
 }
 
@@ -279,12 +356,16 @@ export function target(input: ToolInput): string {
   }
 }
 
-export function itemTitle(item: InboxItem): string {
+// A session plan is named by its ticket's title, else by its first step.
+export function itemTitle(item: Item, view?: InboxView): string {
   switch (item.kind) {
     case 'release': return item.title;
     case 'permission': return item.input.kind === 'execute' && item.input.description ? item.input.description : target(item.input) || item.tool;
     case 'question': return item.questions[0]?.question ?? '';
     case 'plan': return item.title;
+    case 'session_plan': return (view && ticketTitle(view, item.ticket)) ?? item.plan.steps[0] ?? item.ticket;
+    case 'contract': return item.path;
+    case 'knowledge': return item.text;
   }
 }
 
@@ -307,7 +388,9 @@ export function planLine(item: PlanItemInbox, view: InboxView, t: Translate): st
   return t(item.itemCount === 1 ? 'list_plan_one' : 'list_plan_other', { n: item.itemCount, time: formatDuration(totals.minutes, t), share });
 }
 
-export function itemLine(item: InboxItem, view: InboxView, t: Translate): string {
+export function itemLine(item: Item, view: InboxView, t: Translate): string {
+  // A train says where it is, waiting or handled: the owner follows it here.
+  if (item.kind === 'release' && item.train && item.train.state !== 'waiting') return t('train_line', { ticket: item.ticket, text: trainLine(item.train, t) });
   if (isLead(item)) {
     const plan = item.kind === 'plan' ? planOf(view, item) : undefined;
     if (plan && plan.state !== 'proposed') return t('lead_line', { text: planStateLine(plan, t) });
@@ -318,8 +401,10 @@ export function itemLine(item: InboxItem, view: InboxView, t: Translate): string
     case 'release': {
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
       const checks = CHECKS[item.pr.checks];
-      // The ticket first, as the other kinds: two releases can share a title.
-      return reviewer ? t(`release_reviewed_${checks}`, { ticket: item.ticket, model: family(reviewer.model) }) : t(`release_unreviewed_${checks}`, { ticket: item.ticket });
+      // The ticket first, as the other kinds: two releases can share a title;
+      // a train names its number of services after it.
+      const ticket = item.train ? t('train_ticket', { ticket: item.ticket, n: item.train.services.length }) : item.ticket;
+      return reviewer ? t(`release_reviewed_${checks}`, { ticket, model: family(reviewer.model) }) : t(`release_unreviewed_${checks}`, { ticket });
     }
     case 'permission': {
       const role = sessionOf(view, item.sessionId)?.role;
@@ -333,7 +418,72 @@ export function itemLine(item: InboxItem, view: InboxView, t: Translate): string
     }
     case 'plan':
       return planLine(item, view, t);
+    case 'session_plan': {
+      const n = item.plan.steps.length;
+      return t('session_plan_line', { ticket: item.ticket, confidence: t(`confidence_${item.plan.confidence}`), steps: t(n === 1 ? 'steps_one' : 'steps_other', { n }) });
+    }
+    case 'contract':
+      return t('contract_line', { ticket: item.ticket, service: item.service });
+    case 'knowledge':
+      return item.level === 'workspace' || !item.service ? t('knowledge_line_workspace', { ticket: item.ticket })
+        : t(`knowledge_line_${item.level}`, { ticket: item.ticket, service: item.service });
   }
+}
+
+// ------------------------------------------------------------- the train
+
+// Only a release with no train, or whose train waits for the owner, can be
+// approved: a blocked train waits for a step on its consumer (the approval
+// route answers 409), and a train that lands or landed was approved already.
+export const approvable = (item: ReleaseItem) => !item.train || item.train.state === 'waiting';
+
+const landedStops = (train: TrainState) => train.services.filter((s) => s.state === 'healthy').length;
+
+// Where a train is, in a few words: the list's line and the card's head.
+export function trainLine(train: TrainState, t: Translate): string {
+  const total = train.services.length;
+  switch (train.state) {
+    case 'waiting': return t(total === 1 ? 'train_waiting_one' : 'train_waiting_other', { n: total });
+    case 'blocked': return t('train_blocked');
+    case 'landing': return t('train_landing', { n: landedStops(train), total });
+    case 'landed': return t('train_landed', { n: landedStops(train), total });
+    case 'rolled_back': return t('train_rolled_back', { n: train.services.filter((s) => s.state === 'reverted').length, total });
+    case 'halted': return t('train_halted', { n: landedStops(train), total });
+  }
+}
+
+// A service's place in the train: while the train waits, every service
+// waits for the owner's approval; while it lands, the first that waits
+// lands next.
+export function stopLine(stop: TrainStop, train: TrainState, t: Translate): string {
+  let key: string = `stop_${stop.state}`;
+  if (stop.state === 'waiting') {
+    if (train.state === 'waiting' || train.state === 'blocked') key = 'stop_waiting_approval';
+    else if (train.state === 'landing' && train.services.find((s) => s.state === 'waiting') === stop) key = 'stop_next';
+  }
+  const text = t(key);
+  return stop.at ? t('stop_at', { text, time: clock(stop.at) }) : text;
+}
+
+// ------------------------------------------------------- groups and flags
+
+export const FLAG_KINDS: readonly ReleaseFlagKind[] = ['schema', 'dependency', 'config', 'secret_shape', 'contract', 'large'];
+
+// The groups as the card shows them: the service's "Other changes" in the
+// reader's language, and each file with the flags that name it.
+export function groupsOf(item: ReleaseItem, t: Translate): { readonly intent: string; readonly key: string; readonly files: { readonly path: string; readonly flags: readonly ReleaseFlagKind[] }[] }[] {
+  const flags = item.flags ?? [];
+  return (item.groups ?? []).map((group) => ({
+    key: group.intent,
+    intent: group.intent === OTHER_CHANGES ? t('other_changes') : group.intent,
+    files: group.files.map((path) => ({ path, flags: flags.filter((flag) => flag.files.includes(path)).map((flag) => flag.kind) })),
+  }));
+}
+
+// The flags in the service's order, each kind once, with what it means in
+// the reader's language; a kind this screen does not know is left out.
+export function flagsOf(item: ReleaseItem): readonly ReleaseFlag[] {
+  return FLAG_KINDS.flatMap((kind) => (item.flags ?? []).filter((flag) => flag.kind === kind).slice(0, 1));
 }
 
 // Only an http(s) address is a link; anything else is shown as its label.
@@ -349,7 +499,7 @@ export function sessionsLine(item: ReleaseItem, t: Translate): string {
 }
 
 // Who asks, and for how long its session has been paused; a handled request pauses nothing.
-export function pausedLine(item: InboxItem, session: SessionSummary, now: Date, t: Translate): string {
+export function pausedLine(item: Item, session: SessionSummary, now: Date, t: Translate): string {
   const model = family(session.model);
   if (item.state === 'handled') return t(`session_${session.role}_plain`, { model });
   const minutes = (now.getTime() - Date.parse(item.since)) / 60_000;

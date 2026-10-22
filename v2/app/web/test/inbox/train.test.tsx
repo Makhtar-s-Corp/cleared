@@ -59,10 +59,11 @@ test('a train landing: the first service landed and healthy, the second merged a
   assert.ok(!acts(renderActions({ ...item, state: 'waiting' }, viewOf([{ ...item, state: 'waiting' }]), en)).includes('approve'));
 });
 
-test('a train landed: both services healthy', () => {
+test('a train landed: both services healthy, and the bar says where the train is', () => {
   const html = detailOf(trainRelease(FIXTURE_NOW, 'landed'));
   assert.deepEqual(stops(html), ['filter-api:healthy', 'guestbook:healthy']);
   assert.ok(shown(html).includes('Landed, 2 of 2'));
+  assert.match(html, /<p class="d-done">Landed, 2 of 2\. Nothing to approve now\.<\/p>/);
 });
 
 test('a train rolled back: the card says "Rolled back, 2 of 2", each service reverted with its note', () => {
@@ -137,7 +138,7 @@ test('the session plan waiting for its Go: the steps, the files, the confidence 
   assert.match(html, /data-confidence="medium"/);
   const text = shown(html);
   for (const expected of [
-    'Session plan to start', 'LOCAL-165', 'Moderation: a held entry waits for a moderator', 'on guestbook',
+    'Session plan to start', 'LOCAL-165', 'Moderation: a held entry waits for a moderator', 'Service: guestbook',
     'Medium confidence', PLAN_REASON, 'Steps', 'Keep a held entry out of the public list', 'Files', 'views/moderate.html',
     'Open the session',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
@@ -150,14 +151,14 @@ test('the session plan waiting for its Go: the steps, the files, the confidence 
 
 test('Change opens a field for what to change, with Keep the plan and Send the change', () => {
   const item = sessionPlanItem(FIXTURE_NOW);
-  const html = renderActions(item, viewOf([item], { local: new Map<string, Local>([[item.id, { kind: 'change' }]]) }), en);
+  const html = detailOf(item, en, { local: new Map<string, Local>([[item.id, { kind: 'change' }]]) });
   assert.match(html, /<textarea[^>]*id="plan-change"[^>]*maxlength="2000"/);
   assert.deepEqual(acts(html), ['plan_keep', 'plan_change_send']);
 });
 
 test('after Go, after Change, and once the plan started: what the bar says', () => {
   const item = sessionPlanItem(FIXTURE_NOW);
-  const after = (local: Local) => shown(renderActions(item, viewOf([item], { local: new Map([[item.id, local]]) }), en));
+  const after = (local: Local) => shown(detailOf(item, en, { local: new Map([[item.id, local]]) }));
   assert.match(after({ kind: 'plan_go', at: FIXTURE_NOW.toISOString() }), /Go given at \d\d:\d\d\. The author starts writing\./);
   assert.match(after({ kind: 'plan_changed', at: FIXTURE_NOW.toISOString() }), /Change sent at \d\d:\d\d\. The author reworks its plan\./);
   const started = { ...item, state: 'handled' as const, plan: { ...item.plan, go: { by: 'delay' as const, at: FIXTURE_NOW.toISOString() } } };
@@ -185,7 +186,7 @@ test('the list with every new kind: each has its chip, in the order of the kinds
   const text = shown(html);
   for (const chip of ['Release', 'Session plan', 'Contract', 'Knowledge']) assert.ok(text.includes(chip), chip);
   assert.ok(text.includes(`${TRAIN_TICKET} · 2 services · Reviewed by Sonnet, checks green`));
-  assert.ok(text.includes('7 waiting'));
+  assert.ok(text.includes('8 waiting'));
 });
 
 test('every text of the new parts comes from the catalog, in both languages', () => {
@@ -197,7 +198,7 @@ test('every text of the new parts comes from the catalog, in both languages', ()
     const view = viewOf(items, { selected: item.id });
     // With the sentinel translator, no English word of the screen is left: only the data.
     const text = shown(renderInbox(view, sentinel));
-    for (const word of ['Landing order', 'Waits for your approval', 'Blocked before approval', 'What changes', 'Session plan', 'confidence', 'Steps', 'Files'])
+    for (const word of ['Landing order', 'Waits for your approval', 'Blocked before approval', 'What changes', 'Session plan to start', 'Low confidence', 'Steps', 'Files'])
       assert.ok(!text.includes(word), `${item.kind} ${'train' in item ? item.train?.state : ''}: "${word}" is not from the catalog`);
     // The French catalog has every key it names (the translator throws on a missing one).
     assert.ok(shown(renderInbox(view, fr)).length > 0);
