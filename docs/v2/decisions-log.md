@@ -1889,7 +1889,7 @@ The choices the lane makes:
 
 ## 2026-10-22: the plan panel's services, the tower's workspace line and the lead's train lines (the author's choices, lane v2-j2-plan-flags-screens)
 
-**Decision.** Lane 22 applies the lead and tower parts of decisions 18 and 24, and the tower's part of decision 30, of the [milestone 2 plan](milestone-2-plan.md). It edits only the plan panel, the lead and tower screens, their catalogs and fixtures, and their tests. The lane's choices:
+**Decision.** Lane 22 (pull request 209) applies the lead and tower parts of decisions 18 and 24, and the tower's part of decision 30, of the [milestone 2 plan](milestone-2-plan.md). It edits only the plan panel, the lead and tower screens, their catalogs and fixtures, and their tests. The lane's choices:
 
 1. **The plan panel's chips** (`app/web/plan-panel/`).
    - Each item names the services its body names, from lane 18's `PlanItem.sensitivity`. A service of normal sensitivity is a quiet tag. `full`, `reviewer:<model>` and `human:<user>` read "full review", "reviewed by Opus" and "approved by <user>", with a shield, in ink, never in amber, which stays for what waits for a person.
