@@ -38,7 +38,7 @@ export class FakeBroker {
   async requestRelease(request: ReleaseBrokerRequest) { this.requests.push(request); return this.answer; }
 }
 
-export async function service(options: { broker?: FakeBroker | null; withKey?: boolean; realClock?: boolean; proof?: string } = {}) {
+export async function service(options: { broker?: FakeBroker | null; withKey?: boolean; realClock?: boolean; proof?: string; ownerId?: string } = {}) {
   const box = lockBox();
   const db = new DatabaseSync(join(box.state, 'ledger.db'));
   db.exec('PRAGMA busy_timeout = 5000');
@@ -46,6 +46,7 @@ export async function service(options: { broker?: FakeBroker | null; withKey?: b
   const users = new MemoryUsers();
   users.users.set('u-owner', { id: 'u-owner', name: OWNER });
   users.users.set('u-guest', { id: 'u-guest', name: 'guest' });
+  users.users.set('u-alice', { id: 'u-alice', name: 'alice' });
   const timers = new FakeTimers();
   const broker = options.broker === undefined ? new FakeBroker() : options.broker;
   let clock = Date.UTC(2026, 9, 21, 10, 0, 0);
@@ -53,7 +54,7 @@ export async function service(options: { broker?: FakeBroker | null; withKey?: b
   const advance = (ms: number) => { clock += ms; };
   const signer = options.withKey === false ? undefined : ApprovalSigner.load(box.keyFile);
   const parts = createApproval({
-    db, users, stateDir: box.state, ownerId: OWNER, publicKey: box.keys.publicKey, ...(signer ? { signer } : {}),
+    db, users, stateDir: box.state, ownerId: options.ownerId ?? OWNER, publicKey: box.keys.publicKey, ...(signer ? { signer } : {}),
     proof: options.proof ?? PROOF, verdict: 'no blocking issues', timers, broker, ...(options.realClock ? {} : { now }),
   });
   const store = parts.ticketStore;
