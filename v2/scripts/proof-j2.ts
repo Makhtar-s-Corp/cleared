@@ -8,6 +8,14 @@
 // screens read them) and, when the ledger is given, from the ledger itself,
 // read only, for what no screen shows (notifications, costs).
 //
+// Lane 29 runs it on the React screens and the replanned milestone 2: the
+// rehearsal builds the app first (npm run build) and serves the pages from
+// the build's manifest; a question of several choices is answered with its
+// Send; every author proposes a session plan, and the morning gives its Go
+// to one that waits (a medium or low confidence holds its ticket until
+// then); a knowledge item is left to the owner and counted; each release
+// card's intent groups and flags are read before it is approved.
+//
 //   node scripts/proof-j2.ts                       the real run, against the running app
 //   PROOF_REHEARSAL=1 node scripts/proof-j2.ts     the rehearsal: scripts/proof-rehearsal.ts
 //                                                  starts a service and an app of its own on
@@ -32,10 +40,11 @@
 //   PROOF_WATCH_MINUTES    the night watch's interval (default 5; the rehearsal: 10 seconds)
 //   PROOF_OWNER_APPROVES=1 the owner approves the releases and answers the permissions in
 //                          the morning; the proof only watches and measures
-//   PROOF_NOTIFICATIONS    skipped (the real run's default: the owner left plan question 2,
-//                          the https address for the Mac, unanswered, so the proof runs on
-//                          the inbox only and records the notifications as skipped, not
-//                          failed) or counted (the rehearsal's default: its e-mail stand-in)
+//   PROOF_NOTIFICATIONS    skipped (the real run's default: the owner decided on 2026-10-22,
+//                          question 2 of the replan, option (b), that the proof sends no
+//                          notification to the Mac, so it runs on the inbox only and records
+//                          the step as skipped, not failed) or counted (the rehearsal's
+//                          default: its e-mail stand-in)
 //   PROOF_NIGHT_MINUTES    the rehearsal's night (default 4)
 //   PROOF_TIMEOUT_MINUTES  the rehearsal's whole run at most (default 30)
 // No trace and no video are recorded: a trace keeps what is typed, the password included.
@@ -43,11 +52,11 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { InboxItem, LeadMemory, LeadMessage, LeadState, Plan, SessionSummary } from '../src/api/types.ts';
-import { morningAction, type InboxEntry } from './proof-inbox.ts';
+import type { LeadMemory, LeadMessage, LeadState, NextInboxItem, Plan, SessionSummary } from '../src/api/types.ts';
+import { leftForOwner, morningAction, type InboxEntry } from './proof-inbox.ts';
 import {
-  PLANTED, changes, commitmentOutcomes, highestShare, notificationCount, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track,
-  type LedgerFacts, type Morning, type Outcome, type ProofResult, type Snapshot, type Step,
+  NOTIFICATIONS_SKIPPED_NOTE, PLANTED, changes, commitmentOutcomes, highestShare, notificationCount, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, sessionPlanFacts, track,
+  type LedgerFacts, type Morning, type Outcome, type ProofResult, type ReleaseCard, type Snapshot, type Step,
 } from './proof-report.ts';
 import { REHEARSAL_GOAL, startRehearsal, type World } from './proof-rehearsal.ts';
 
@@ -79,7 +88,7 @@ const GOAL = env.PROOF_GOAL ?? REHEARSAL_GOAL;
 const ANSWERS = (env.PROOF_ANSWERS ?? 'recommended').split('||').map((a) => a.trim()).filter(Boolean);
 const NOTIFICATIONS = env.PROOF_NOTIFICATIONS ?? (REHEARSAL ? 'counted' : 'skipped');
 if (NOTIFICATIONS !== 'counted' && NOTIFICATIONS !== 'skipped') { console.error('proof: PROOF_NOTIFICATIONS is counted or skipped'); process.exit(64); }
-const NOTIFICATIONS_SKIPPED = NOTIFICATIONS === 'skipped' ? 'no https address for the Mac (plan question 2 has no answer), so the proof runs on the inbox only' : null;
+const NOTIFICATIONS_SKIPPED = NOTIFICATIONS === 'skipped' ? NOTIFICATIONS_SKIPPED_NOTE : null;
 const OUT = env.PROOF_OUT ?? `/tmp/cleared-captures/j2/${REHEARSAL ? 'rehearsal' : 'proof'}`;
 
 const log = (line: string) => console.log(`proof: ${line}`);
@@ -118,6 +127,8 @@ const planted: Record<string, string[]> = {};
 let planId = '';
 let plan: Plan | undefined;
 let morning: Morning | null = null;
+const cards: ReleaseCard[] = [];
+let left = { knowledge: 0, contract: 0 };
 let last: Snapshot | undefined;
 let captures = 0;
 const now = () => new Date().toISOString();
@@ -185,7 +196,7 @@ const facts = (): LedgerFacts | undefined => ledger((db) => ledgerFacts(db, time
 
 const LIVE = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
 async function readState(): Promise<Snapshot> {
-  const [lead, plans, inbox, sessions] = await Promise.all([api<LeadState>('/lead'), api<Plan[]>('/plans'), api<InboxItem[]>('/inbox'), api<SessionSummary[]>('/sessions')]);
+  const [lead, plans, inbox, sessions] = await Promise.all([api<LeadState>('/lead'), api<Plan[]>('/plans'), api<NextInboxItem[]>('/inbox'), api<SessionSummary[]>('/sessions')]);
   plan = plans.find((p) => p.id === planId) ?? plan;
   // Only the count each reading: the whole ledger is read at the end (review 1, F2).
   const sent = ledger((db) => notificationCount(db, times.goal_sent_at ?? startedAt.toISOString()));
@@ -285,6 +296,10 @@ if (goalSent) {
         const button = (await recommended.count()) > 0 ? recommended.first() : options.first();
         const label = (await button.getAttribute('data-answer')) ?? '';
         await button.click();
+        // A question of several choices, or one that takes several answers,
+        // toggles its options and sends them with its own button (lane 13).
+        const send = page.locator('#thread .bubble.question [data-choice-send]');
+        if (await send.count() > 0) await send.first().click();
         answers.push({ at: now(), text: label });
       } else {
         await page.locator('#reply-text').fill(wanted);
@@ -383,10 +398,11 @@ if (approved) {
 }
 
 // ---- 7. The inbox, until the plan is done -----------------------------------------
-const toEntry = (item: InboxItem): InboxEntry => ({
+const toEntry = (item: NextInboxItem): InboxEntry => ({
   id: item.id, kind: item.kind, ticket: item.ticket,
   ...(item.kind === 'permission' && item.input.kind === 'execute' ? { command: item.input.command } : {}),
   ...(item.kind === 'release' ? { checks: item.pr.checks } : {}),
+  ...(item.kind === 'session_plan' ? { session: item.sessionId, confidence: item.plan.confidence } : {}),
 });
 
 async function openItem(id: string): Promise<void> {
@@ -408,7 +424,8 @@ if (approved) {
     while (Date.now() < end) {
       const snap = await watch('morning');
       if (snap.plan?.state === 'done') { planDoneAt = snap.at; break; }
-      const waiting = (await api<InboxItem[]>('/inbox')).filter((i) => i.state === 'waiting');
+      const waiting = (await api<NextInboxItem[]>('/inbox')).filter((i) => i.state === 'waiting');
+      left = leftForOwner(waiting.map(toEntry));
       const fresh = waiting.filter((i) => Date.now() - (approvedAt.get(i.id) ?? 0) > 5 * 60_000);
       const action = morningAction(fresh.map(toEntry), { releases: !OWNER_APPROVES, plan: !OWNER_APPROVES });
       if (action.kind === 'wait') {
@@ -422,10 +439,20 @@ if (approved) {
       if (action.kind === 'permission') {
         await page.locator(`#detail [data-act="${action.decision}"]`).click();
         gesture(`${action.decision} for ${action.id}`);
+      } else if (action.kind === 'session_plan') {
+        await page.locator('#detail [data-act="plan_go"]').click();
+        gesture(`gave the Go to the session plan ${action.id} in the inbox`);
       } else if (action.kind === 'plan') {
-        await page.locator('#detail [data-plan-action="approve"]').click();
+        await page.locator('#detail [data-act="approve_plan"]').click();
         gesture(`approved the plan from the inbox (${action.id})`);
       } else {
+        // The card as it is shown: its intent groups and its flags (decision 23).
+        const item = waiting.find((i) => i.id === action.id);
+        if (item?.kind === 'release') {
+          const shown = { groups: await page.locator('#detail [data-group]').count(), flags: await page.locator('#detail [data-flag]').count() };
+          cards.push({ ticket: item.ticket, item: item.id, at: now(), groups: (item.groups ?? []).map((g) => ({ intent: g.intent, files: g.files.length })), flags: (item.flags ?? []).map((f) => f.kind), shown });
+          log(`morning: the card of ${item.ticket} shows ${shown.groups} groups and ${shown.flags} flags`);
+        }
         await page.locator('#detail [data-act="approve"]').click();
         gesture(`approved ${action.id}`);
         approvedAt.set(action.id, Date.now());
@@ -438,7 +465,7 @@ if (approved) {
       // The readings go on meanwhile, so no landing is seen late.
       await until('the item to leave the inbox', async () => {
         await watch('morning');
-        return !(await api<InboxItem[]>('/inbox')).some((i) => i.id === action.id && i.state === 'waiting');
+        return !(await api<NextInboxItem[]>('/inbox')).some((i) => i.id === action.id && i.state === 'waiting');
       }, 3 * 60_000, 2_000).catch(() => undefined);
     }
     if (!planDoneAt) throw new Error(`the plan is not done: ${JSON.stringify(last?.plan?.items.map((i) => `${i.position}:${i.state}`))}`);
@@ -510,6 +537,7 @@ const result: ProofResult = {
   commitments: commitmentOutcomes(memory?.commitments ?? [], planted), order: orders(), notifications: f?.notifications ?? null, tickets: f?.tickets ?? {},
   gestures, planDoneAt, stand_ins: world?.standIns ?? [],
   notificationsSkipped: NOTIFICATIONS_SKIPPED, loginCuts: f?.loginCuts ?? null,
+  sessionPlans: ledger((db) => sessionPlanFacts(db, times.goal_sent_at ?? startedAt.toISOString())) ?? [], cards, leftForOwner: left,
 };
 const durations = join(OUT, 'durations.md');
 writeFileSync(durations, renderDurations(result));

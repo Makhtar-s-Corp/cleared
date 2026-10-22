@@ -8,7 +8,11 @@ import { DatabaseSync } from 'node:sqlite';
 import type { LeadCommitment } from '../../src/api/types.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { RUNS_TABLES } from '../../src/approval/review.ts';
-import { LOGIN_WAIT, changes, highestShare, notificationCount, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, track, PLANTED, type ProofResult, type Snapshot } from '../../scripts/proof-report.ts';
+import {
+  LOGIN_WAIT, NOTIFICATIONS_SKIPPED_NOTE, changes, highestShare, humanFacts, notificationCount, commitmentOutcomes, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, renderMultiDurations,
+  sessionPlanFacts, track, trainFacts, PLANTED, type MultiResult, type ProofResult, type Snapshot,
+} from '../../scripts/proof-report.ts';
+import { TrainStore } from '../../src/release/store.ts';
 
 const lead = { generation: 1, phase: 'idle', percent: 3, highestPercent: 3, refreshCount: 0, openCommitments: 2 };
 const items = (states: string[]) => states.map((state, i) => ({ position: i + 1, title: `Item ${i + 1}`, state, ticket: state === 'waiting' ? null : `LOCAL-${i + 1}`, after: i === 2 ? [2] : [] }));
@@ -241,6 +245,7 @@ test('the durations table names every step with its time, the lead, the commitme
     stand_ins: ['a bare copy of the guestbook as the forge'],
     notificationsSkipped: null,
     loginCuts: [{ session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510, ended: false }, { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null, ended: false }, { session: 'l0', role: 'lead', ticket: 'lead', at: '2026-10-23T01:00:00.000Z', relaunchedAt: null, seconds: null, ended: true }],
+    sessionPlans: [], cards: [], leftForOwner: { knowledge: 0, contract: 0 },
   };
   const text = renderDurations(result);
   for (const expected of [
@@ -256,3 +261,115 @@ test('the durations table names every step with its time, the lead, the commitme
   assert.ok(skipped.includes('No login cut.'));
   assert.ok(!skipped.includes('plan proposed → plan notification sent'));
 });
+
+// ---- lane 29: the React screens, the owner's decisions and the multi-service proof
+
+test('the skipped notification step says the owner\'s decision, in the steps and in the notifications section (lane 29)', () => {
+  assert.equal(NOTIFICATIONS_SKIPPED_NOTE, 'skipped: no Mac notifications in this proof (owner decision)');
+  const text = renderDurations(baseResult({
+    steps: [{ n: 3, name: 'notifications', status: 'skipped', seenAt: '2026-10-22T21:02:00.000Z', note: NOTIFICATIONS_SKIPPED_NOTE }],
+    notificationsSkipped: NOTIFICATIONS_SKIPPED_NOTE,
+  }));
+  assert.ok(text.includes('| 3 | notifications | skipped | 2026-10-22T21:02:00.000Z | skipped: no Mac notifications in this proof (owner decision) |'), text);
+  assert.ok(text.includes('Skipped: no Mac notifications in this proof (owner decision). The waits are read from the inbox.'), text);
+});
+
+test('each session plan: its confidence, who gave the Go and when, and how long the gate held it (lane 29)', () => {
+  const store = openStore(':memory:');
+  const put = (id: string, ticket: string, service: string | null) => store.sessions.put({ id, project: 'guestbook', ticket, role: 'author', harness: 'claude-code', model: 'm', status: 'working', createdAt: '2026-10-22T21:01:00.000Z', updatedAt: '2026-10-22T21:01:00.000Z', service });
+  const plan = (sessionId: string, ticket: string, at: string, confidence: string, go: unknown) => store.events.append({ at, sessionId, ticket, project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.session_plan', value: { steps: ['x'], files: ['src/a.ts'], confidence, reason: 'r', proposedAt: '2026-10-22T21:02:00.000Z', go } } as never });
+  put('a1', 'LOCAL-1', null); put('a4', 'LOCAL-4', 'guestbook'); put('a5', 'LOCAL-5', null);
+  plan('a1', 'LOCAL-1', '2026-10-22T21:02:00.000Z', 'high', null);
+  plan('a1', 'LOCAL-1', '2026-10-22T21:02:01.000Z', 'high', { by: 'lead', at: '2026-10-22T21:02:01.000Z' });
+  plan('a4', 'LOCAL-4', '2026-10-22T21:02:00.000Z', 'medium', null);
+  plan('a4', 'LOCAL-4', '2026-10-23T06:00:30.000Z', 'medium', { by: 'owner', at: '2026-10-23T06:00:30.000Z' });
+  plan('a5', 'LOCAL-5', '2026-10-22T21:02:00.000Z', 'low', null);
+  assert.deepEqual(sessionPlanFacts(store.db, '2026-10-22T21:00:00.000Z'), [
+    { session: 'a1', ticket: 'LOCAL-1', service: null, confidence: 'high', proposedAt: '2026-10-22T21:02:00.000Z', go: { by: 'lead', at: '2026-10-22T21:02:01.000Z' }, heldSeconds: 1 },
+    { session: 'a4', ticket: 'LOCAL-4', service: 'guestbook', confidence: 'medium', proposedAt: '2026-10-22T21:02:00.000Z', go: { by: 'owner', at: '2026-10-23T06:00:30.000Z' }, heldSeconds: 32_310 },
+    { session: 'a5', ticket: 'LOCAL-5', service: null, confidence: 'low', proposedAt: '2026-10-22T21:02:00.000Z', go: null, heldSeconds: null },
+  ]);
+  const text = renderDurations(baseResult({ sessionPlans: sessionPlanFacts(store.db, '2026-10-22T21:00:00.000Z') }));
+  for (const expected of ['## Session plans', '| LOCAL-1 | a1 | high | lead | 2026-10-22T21:02:01.000Z | 1 s |', '| LOCAL-4 | a4 | medium | owner | 2026-10-23T06:00:30.000Z | 8 h 58 |', '| LOCAL-5 | a5 | low | no Go |  |  |'])
+    assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
+});
+
+test('each release card as the owner saw it: its intent groups and its flags; and what was left to the owner (lane 29)', () => {
+  const text = renderDurations(baseResult({
+    cards: [{ ticket: 'LOCAL-1', item: 'release:LOCAL-1:101', at: '2026-10-23T06:05:00.000Z', groups: [{ intent: 'The JSON route', files: 2 }, { intent: 'Other changes', files: 1 }], flags: ['large'], shown: { groups: 2, flags: 1 } }],
+    leftForOwner: { knowledge: 1, contract: 0 },
+  }));
+  for (const expected of ['## Release cards', '| LOCAL-1 | release:LOCAL-1:101 | The JSON route (2 files); Other changes (1 file) | large | 2 groups, 1 flag on screen |', 'Left to the owner: 1 knowledge item, 0 contract items.'])
+    assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
+});
+
+test('the trains read from the ledger: each service in landing order with its merge, its verdict and the gap (lane 29)', () => {
+  const store = openStore(':memory:');
+  const trains = new TrainStore(store.db, () => new Date('2026-10-23T10:00:00.000Z'));
+  const stop = (service: string, pr: number, state: string, at: string | null, mergedAt: string | null, note: string | null = null) => ({ service, pr: { number: pr, url: `https://forge.invalid/${pr}` }, head: 'h', requestedAt: '2026-10-23T09:00:00.000Z', state, at, note, signed: true, askedAt: mergedAt, mergedAt, next: null }) as never;
+  trains.add({ item: 'release:LOCAL-1:101', ticket: 'LOCAL-1', project: 'guestbook', state: 'landed', compatibility: 'the guestbook consumes the filter API and is changed in this ticket', blocked: null, announcement: 'a',
+    stops: [stop('filter-api', 101, 'healthy', '2026-10-23T09:10:20.000Z', '2026-10-23T09:10:00.000Z'), stop('guestbook', 102, 'healthy', '2026-10-23T09:11:30.000Z', '2026-10-23T09:11:00.000Z')] });
+  trains.add({ item: 'release:LOCAL-2:103', ticket: 'LOCAL-2', project: 'guestbook', state: 'rolled_back', compatibility: null, blocked: null, announcement: 'a',
+    stops: [stop('filter-api', 103, 'reverted', '2026-10-23T09:31:00.000Z', '2026-10-23T09:20:00.000Z'), stop('guestbook', 104, 'reverted', '2026-10-23T09:30:00.000Z', '2026-10-23T09:22:00.000Z', 'health failing twice')] });
+  trains.add({ item: 'release:LOCAL-3:105', ticket: 'LOCAL-3', project: 'guestbook', state: 'blocked', compatibility: null, blocked: { reason: 'the contract changes', proposal: 'extend the ticket' }, announcement: 'a',
+    stops: [stop('filter-api', 105, 'waiting', null, null)] });
+  const facts = trainFacts(store.db);
+  assert.deepEqual(facts.map((t) => [t.ticket, t.state, t.stops.map((s) => `${s.service}:${s.state}`)]), [
+    ['LOCAL-1', 'landed', ['filter-api:healthy', 'guestbook:healthy']], ['LOCAL-2', 'rolled_back', ['filter-api:reverted', 'guestbook:reverted']], ['LOCAL-3', 'blocked', ['filter-api:waiting']],
+  ]);
+  assert.equal(facts[0]?.gapSeconds, 40, 'from the filter API healthy to the guestbook merged');
+  assert.deepEqual(facts[1]?.revertOrder, ['guestbook', 'filter-api'], 'newest first: the guestbook reverted before the filter API');
+  assert.deepEqual(facts[2]?.blocked, { reason: 'the contract changes', proposal: 'extend the ticket' });
+  // No trains table yet: none.
+  assert.deepEqual(trainFacts(openStore(':memory:').db), []);
+});
+
+test('step 11 read from the ledger: the terminal\'s lines, its close, the human\'s edits and the session\'s next turn (lane 29)', () => {
+  const store = openStore(':memory:');
+  store.sessions.put({ id: 's11', project: 'guestbook', ticket: 'LOCAL-4', role: 'author', harness: 'claude-code', model: 'm', status: 'working', createdAt: '2026-10-23T10:00:00.000Z', updatedAt: '2026-10-23T10:00:00.000Z' });
+  const at = (when: string, event: unknown) => store.events.append({ at: when, sessionId: 's11', ticket: 'LOCAL-4', project: 'guestbook', event: event as never });
+  const custom = (name: string, value: unknown) => ({ type: 'CUSTOM', name, value });
+  at('2026-10-23T10:01:00.000Z', custom('cleared.terminal_opened', { by: 'owner', cols: 120, rows: 32 }));
+  at('2026-10-23T10:01:05.000Z', custom('cleared.terminal_input', { by: 'owner', line: 'git status' }));
+  at('2026-10-23T10:01:09.000Z', custom('cleared.terminal_input', { by: 'owner', line: 'npm test' }));
+  at('2026-10-23T10:02:00.000Z', custom('cleared.human_edit', { path: 'src/page.ts', by: 'owner', added: 1, removed: 1, before: 'a', after: 'b', via: 'editor' }));
+  at('2026-10-23T10:03:00.000Z', custom('cleared.terminal_closed', { by: 'owner', reason: 'give_back', outputBytes: 2048 }));
+  at('2026-10-23T10:03:02.000Z', { type: 'RUN_STARTED', threadId: 't', runId: 'notice' });
+  at('2026-10-23T09:59:00.000Z', { type: 'RUN_STARTED', threadId: 't', runId: 'before' });
+  const facts = humanFacts(store.db, 's11', '2026-10-23T10:02:30.000Z');
+  assert.deepEqual(facts, {
+    openedAt: '2026-10-23T10:01:00.000Z', lines: 2, closed: { at: '2026-10-23T10:03:00.000Z', reason: 'give_back', outputBytes: 2048 },
+    edits: [{ path: 'src/page.ts', via: 'editor', added: 1, removed: 1, at: '2026-10-23T10:02:00.000Z' }], noticeTurnAt: '2026-10-23T10:03:02.000Z',
+  });
+});
+
+test('the multi-service durations: the steps, the steps of each ticket, the trains, the fake\'s calls and step 11 (lane 29)', () => {
+  const result: MultiResult = {
+    mode: 'rehearsal', app: 'http://127.0.0.1:9700', startedAt: '2026-10-23T09:00:00.000Z',
+    steps: [{ n: 1, name: 'ticket', status: 'ok', seenAt: '2026-10-23T09:00:10.000Z', note: 'LOCAL-1 created' }, { n: 9, name: 'rollback', status: 'ok', seenAt: '2026-10-23T09:32:00.000Z', note: 'Rolled back, 2 of 2' }],
+    times: { ticket_created_at: '2026-10-23T09:00:05.000Z', steps_proposed_at: '2026-10-23T09:00:07.000Z', contract_shown_at: '2026-10-23T09:02:00.000Z', contract_validated_at: '2026-10-23T09:02:30.000Z', approved_at: '2026-10-23T09:09:00.000Z', fake_first_answer_at: '2026-10-23T09:04:00.000Z', take_over_at: '2026-10-23T09:40:00.000Z', terminal_open_at: '2026-10-23T09:40:02.000Z', save_at: '2026-10-23T09:41:00.000Z', give_back_at: '2026-10-23T09:42:00.000Z' },
+    tickets: { 1: 'LOCAL-1', 2: 'LOCAL-2', 3: 'LOCAL-3', 4: 'LOCAL-4' },
+    ticketSteps: { 'LOCAL-1': [{ position: 1, kind: 'contract', service: 'filter-api', state: 'done', costUsd: 0.2, minutes: 2 }, { position: 2, kind: 'service', service: 'filter-api', state: 'done', costUsd: 0.3, minutes: 3 }] },
+    trains: [{ ticket: 'LOCAL-1', item: 'release:LOCAL-1:101', state: 'landed', compatibility: 'the guestbook consumes the filter API', blocked: null, gapSeconds: 40, revertOrder: [],
+      stops: [{ service: 'filter-api', pr: 101, state: 'healthy', mergedAt: '2026-10-23T09:10:00.000Z', at: '2026-10-23T09:10:20.000Z', note: null }, { service: 'guestbook', pr: 102, state: 'healthy', mergedAt: '2026-10-23T09:11:00.000Z', at: '2026-10-23T09:11:30.000Z', note: null }] }],
+    fake: { calls: 3, operations: { check: 3 } },
+    human: { openedAt: '2026-10-23T09:40:02.000Z', lines: 2, closed: { at: '2026-10-23T09:42:00.000Z', reason: 'give_back', outputBytes: 900 }, edits: [{ path: 'src/page.ts', via: 'editor', added: 1, removed: 1, at: '2026-10-23T09:41:00.000Z' }], noticeTurnAt: '2026-10-23T09:42:03.000Z' },
+    saves: [{ at: '2026-10-23T09:41:00.000Z', status: 200, kept: true }],
+    sessionPlans: [], gestures: [{ at: '2026-10-23T09:00:05.000Z', what: 'created LOCAL-1' }], stand_ins: ['the containers: a docker stand-in'], proposal: 'Extend the ticket to the guestbook, or keep the contract backward compatible.',
+  };
+  const text = renderMultiDurations(result);
+  for (const expected of [
+    '# Milestone 2 multi-service proof: durations (rehearsal)', '| 9 | rollback | ok |', 'ticket created → steps proposed | 2 s', 'contract shown → validated | 30 s',
+    '| LOCAL-1 | 1 | contract | filter-api | done | $0.20 | 2 min |', '| LOCAL-1 | landed | filter-api #101: merged 2026-10-23T09:10:00.000Z, healthy 2026-10-23T09:10:20.000Z; guestbook #102: merged 2026-10-23T09:11:00.000Z, healthy 2026-10-23T09:11:30.000Z | 40 s |',
+    'The fake answered 3 calls (check 3); its first answer at 2026-10-23T09:04:00.000Z.', 'take over → terminal open | 2 s', 'give back → the notice\'s turn | 3 s', 'lines typed, journaled | 2',
+    '| src/page.ts | editor | +1 -1 |', 'saves: 1, answered 200: 1, 409: 0, refused: 0; kept after Give back: 1', 'Extend the ticket to the guestbook, or keep the contract backward compatible.', 'the containers: a docker stand-in',
+  ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
+});
+
+function baseResult(over: Partial<ProofResult> = {}): ProofResult {
+  return {
+    mode: 'rehearsal', app: 'http://127.0.0.1:9700', goal: 'g', startedAt: '2026-10-22T21:00:00.000Z', steps: [], times: {}, answers: [], plan: null, items: {}, maxRunning: 0, waits: {},
+    morning: null, lead: { refreshCount: 0, highestPercent: null, threshold: 5, generations: null, turns: null, costUsd: null, compactions: null }, commitments: [], order: { state: 'open', note: '' },
+    notifications: null, tickets: {}, gestures: [], planDoneAt: null, stand_ins: [], notificationsSkipped: null, loginCuts: [], sessionPlans: [], cards: [], leftForOwner: { knowledge: 0, contract: 0 }, ...over,
+  };
+}

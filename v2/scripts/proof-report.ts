@@ -3,7 +3,11 @@
 // of the state, the timeline the night watch keeps from them, the check of
 // the planted commitments and of "3 after 2", the facts read from the
 // ledger (notifications, the lead's turns and cost, each ticket's sessions),
-// and the durations table the run writes.
+// and the durations table the run writes. Lane 29 adds what the replanned
+// milestone 2 shows: each session plan and its Go, the release cards'
+// groups and flags, what the morning leaves to the owner, and for the
+// multi-service proof (scripts/proof-j2-multi.ts) the trains, the fake's
+// calls and step 11's terminal and editor, with their own table.
 import type { DatabaseSync } from 'node:sqlite';
 import type { LeadCommitment, LeadMessage } from '../src/api/types.ts';
 
@@ -267,6 +271,216 @@ export function highestShare(ledger: number | null | undefined, lead: number | n
   return known.length > 0 ? Math.max(...known) : null;
 }
 
+// ---- lane 29: the session plans, the cards, the trains, step 11 -------------
+
+// The skipped notification step's note (plan section 2.1, the owner's
+// answer to question 2 of the replan).
+export const NOTIFICATIONS_SKIPPED_NOTE = 'skipped: no Mac notifications in this proof (owner decision)';
+
+// A session plan as the gate kept it (decision 22): the last
+// `cleared.session_plan` event of its session, whose `go` says who started
+// it and when; `heldSeconds` from the proposal to the Go.
+export type SessionPlanFact = {
+  readonly session: string; readonly ticket: string; readonly service: string | null; readonly confidence: string; readonly proposedAt: string;
+  readonly go: { readonly by: string; readonly at: string } | null; readonly heldSeconds: number | null;
+};
+
+export function sessionPlanFacts(db: DatabaseSync, since: string): SessionPlanFact[] {
+  const plans = new Map<string, SessionPlanFact>();
+  for (const r of rows(db, "SELECT e.session_id, e.event, s.ticket, s.service FROM session_events e JOIN sessions s ON s.id = e.session_id WHERE e.at >= ? AND e.type = 'CUSTOM' ORDER BY e.at, e.seq", since)) {
+    const event = JSON.parse(String(r.event)) as { name?: string; value?: { confidence?: string; proposedAt?: string; go?: { by: string; at: string } | null } };
+    if (event.name !== 'cleared.session_plan' || !event.value) continue;
+    const { confidence = '?', proposedAt = '', go = null } = event.value;
+    const session = String(r.session_id);
+    const held = go ? Math.round((Date.parse(go.at) - Date.parse(proposedAt)) / 1000) : null;
+    // Map keeps the first insertion's place: a session stays where its first proposal put it.
+    plans.set(session, { session, ticket: String(r.ticket), service: r.service === null || r.service === undefined ? null : String(r.service), confidence, proposedAt, go: go ? { by: go.by, at: go.at } : null, heldSeconds: held !== null && Number.isFinite(held) ? held : null });
+  }
+  return [...plans.values()];
+}
+
+// A release card as the morning approved it (step 7): its intent groups
+// with their file counts and its flags, from the item; what the screen
+// showed of them, counted on the card.
+export type ReleaseCard = {
+  readonly ticket: string; readonly item: string; readonly at: string;
+  readonly groups: readonly { readonly intent: string; readonly files: number }[]; readonly flags: readonly string[];
+  readonly shown: { readonly groups: number; readonly flags: number };
+};
+
+// A train as the ledger keeps it (release_trains, decision 21): each
+// service in landing order; the gap from the first service's healthy
+// verdict to the next one's merge; the services reverted, oldest revert first.
+export type TrainFact = {
+  readonly ticket: string; readonly item: string; readonly state: string; readonly compatibility: string | null;
+  readonly blocked: { readonly reason: string; readonly proposal: string } | null;
+  readonly stops: readonly { readonly service: string; readonly pr: number; readonly state: string; readonly mergedAt: string | null; readonly at: string | null; readonly note: string | null }[];
+  readonly gapSeconds: number | null;
+  readonly revertOrder: readonly string[];
+};
+
+export function trainFacts(db: DatabaseSync): TrainFact[] {
+  return rows(db, 'SELECT * FROM release_trains ORDER BY created_at, rowid').map((r) => {
+    type Stop = { service: string; pr: { number: number }; state: string; mergedAt: string | null; at: string | null; note: string | null };
+    const stops = (JSON.parse(String(r.stops)) as Stop[]).map((stop) => ({ service: stop.service, pr: stop.pr.number, state: stop.state, mergedAt: stop.mergedAt, at: stop.at, note: stop.note }));
+    const [first, second] = stops;
+    const gap = first?.state === 'healthy' && first.at && second?.mergedAt ? Math.round((Date.parse(second.mergedAt) - Date.parse(first.at)) / 1000) : null;
+    const reverted = stops.filter((stop) => stop.state === 'reverted' && stop.at).sort((a, b) => Date.parse(a.at as string) - Date.parse(b.at as string));
+    return {
+      ticket: String(r.ticket), item: String(r.item), state: String(r.state), compatibility: r.compatibility === null ? null : String(r.compatibility),
+      blocked: r.blocked === null ? null : JSON.parse(String(r.blocked)) as TrainFact['blocked'], stops, gapSeconds: gap, revertOrder: reverted.map((stop) => stop.service),
+    };
+  });
+}
+
+// Step 11 as the session's journal holds it (decisions 32 and 33): the
+// terminal opened, the lines typed (each one journaled, never the
+// output), its close, the human's edits, and the session's first turn
+// after Give back, which carries the notice.
+export type HumanFacts = {
+  readonly openedAt: string | null; readonly lines: number;
+  readonly closed: { readonly at: string; readonly reason: string; readonly outputBytes: number } | null;
+  readonly edits: readonly { readonly path: string; readonly via: string; readonly added: number; readonly removed: number; readonly at: string }[];
+  readonly noticeTurnAt: string | null;
+};
+
+export function humanFacts(db: DatabaseSync, session: string, givenBackAt: string | null): HumanFacts {
+  let openedAt: string | null = null;
+  let lines = 0;
+  let closed: HumanFacts['closed'] = null;
+  let noticeTurnAt: string | null = null;
+  const edits: HumanFacts['edits'][number][] = [];
+  for (const r of rows(db, "SELECT at, type, event FROM session_events WHERE session_id = ? AND type IN ('CUSTOM', 'RUN_STARTED') ORDER BY at, seq", session)) {
+    const at = String(r.at);
+    if (r.type === 'RUN_STARTED') {
+      if (givenBackAt && noticeTurnAt === null && Date.parse(at) >= Date.parse(givenBackAt)) noticeTurnAt = at;
+      continue;
+    }
+    const event = JSON.parse(String(r.event)) as { name?: string; value?: Record<string, unknown> };
+    const value = event.value ?? {};
+    if (event.name === 'cleared.terminal_opened') openedAt ??= at;
+    else if (event.name === 'cleared.terminal_input') lines++;
+    else if (event.name === 'cleared.terminal_closed') closed = { at, reason: String(value.reason), outputBytes: Number(value.outputBytes ?? 0) };
+    else if (event.name === 'cleared.human_edit') edits.push({ path: String(value.path), via: String(value.via), added: Number(value.added ?? 0), removed: Number(value.removed ?? 0), at });
+  }
+  return { openedAt, lines, closed, edits, noticeTurnAt };
+}
+
+// The multi-service proof's result (scripts/proof-j2-multi.ts, section 2.2).
+export type MultiResult = {
+  readonly mode: 'real' | 'rehearsal';
+  readonly app: string;
+  readonly startedAt: string;
+  readonly steps: readonly Step[];
+  readonly times: Record<string, string>;                   // ticket_created_at, steps_proposed_at, contract_shown_at, contract_validated_at, ...
+  readonly tickets: Record<number, string>;                 // the proof's ticket 1 to 4, by id
+  readonly ticketSteps: Record<string, readonly { readonly position: number; readonly kind: string; readonly service: string; readonly state: string; readonly costUsd: number | null; readonly minutes: number | null }[]>;
+  readonly trains: readonly TrainFact[];
+  readonly fake: { readonly calls: number; readonly operations: Record<string, number> } | null;
+  readonly human: HumanFacts | null;
+  readonly saves: readonly { readonly at: string; readonly status: number; readonly kept: boolean | null }[];
+  readonly sessionPlans: readonly SessionPlanFact[];
+  readonly gestures: readonly { readonly at: string; readonly what: string }[];
+  readonly stand_ins: readonly string[];
+  readonly proposal: string | null;                         // the blocked card's proposal (step 10)
+};
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function sessionPlanLines(plans: readonly SessionPlanFact[]): string[] {
+  const out = ['## Session plans', ''];
+  if (plans.length === 0) return [...out, 'No session plan was read: the ledger was not read, or no author proposed one.', ''];
+  out.push(row('Ticket', 'Session', 'Confidence', 'Go by', 'Go at', 'Held'), row('---', '---', '---', '---', '---', '---'));
+  for (const p of plans) out.push(row(p.ticket, p.session, p.confidence, p.go?.by ?? 'no Go', p.go?.at ?? '', p.heldSeconds === null ? '' : seconds(p.heldSeconds)));
+  return [...out, ''];
+}
+
+const seconds = (n: number): string => duration(new Date(0).toISOString(), new Date(n * 1000).toISOString());
+
+function stopText(stop: TrainFact['stops'][number]): string {
+  const parts = [stop.mergedAt ? `merged ${stop.mergedAt}` : null, stop.state === 'waiting' && !stop.mergedAt ? 'not landed' : stop.state === 'merged' ? null : `${stop.state}${stop.at ? ` ${stop.at}` : ''}`];
+  return `${stop.service} #${stop.pr}: ${parts.filter(Boolean).join(', ')}`;
+}
+
+export function renderMultiDurations(r: MultiResult): string {
+  const t = r.times;
+  const steps = Object.entries(r.ticketSteps).flatMap(([ticket, list]) => list.map((s) => row(ticket, s.position, s.kind, s.service, s.state, dollars(s.costUsd), s.minutes === null ? '' : `${Math.round(s.minutes * 10) / 10} min`)));
+  const saves = (status: (n: number) => boolean) => r.saves.filter((s) => status(s.status)).length;
+  const out: string[] = [
+    `# Milestone 2 multi-service proof: durations (${r.mode})`,
+    '',
+    `Run from ${r.startedAt} against ${r.app}. The proof's tickets: ${Object.entries(r.tickets).map(([n, id]) => `${n} ${id}`).join(', ') || 'none created'}.`,
+    '',
+    '## Steps',
+    '',
+    row('Step', 'Name', 'Status', 'Seen at', 'Note'),
+    row('---', '---', '---', '---', '---'),
+    ...r.steps.map((s) => row(s.n, s.name, s.status, s.seenAt, s.note)),
+    '',
+    '## Measured',
+    '',
+    row('Between', 'Time'),
+    row('---', '---'),
+    row('ticket created → steps proposed', duration(t.ticket_created_at, t.steps_proposed_at)),
+    row('contract shown → validated', duration(t.contract_shown_at, t.contract_validated_at)),
+    row('contract validated → fake\'s first answer', duration(t.contract_validated_at, t.fake_first_answer_at)),
+    row('release approved → first merge', duration(t.approved_at, r.trains[0]?.stops[0]?.mergedAt)),
+    row('second approval → first failing probe', duration(t.second_approved_at, t.first_failing_at)),
+    row('block shown at', t.block_shown_at ?? 'not seen'),
+    '',
+    '## The steps of each ticket',
+    '',
+    row('Ticket', 'Step', 'Kind', 'Service', 'State', 'Cost', 'Time'),
+    row('---', '---', '---', '---', '---', '---', '---'),
+    ...steps,
+    '',
+    '## The trains',
+    '',
+    row('Ticket', 'State', 'Services in landing order', 'Gap between the landings'),
+    row('---', '---', '---', '---'),
+    ...r.trains.map((train) => row(train.ticket, train.state, train.stops.map(stopText).join('; '), train.gapSeconds === null ? '' : seconds(train.gapSeconds))),
+    '',
+    ...r.trains.filter((train) => train.revertOrder.length > 0).map((train) => `${train.ticket} was rolled back in this order: ${train.revertOrder.join(', then ')}.`),
+    ...r.trains.filter((train) => train.blocked).map((train) => `${train.ticket} was blocked before approval: ${train.blocked?.reason ?? ''}`),
+    ...(r.proposal ? [`The proposal shown: ${r.proposal}`] : []),
+    '',
+    '## The fake of the trial environment',
+    '',
+    r.fake ? `The fake answered ${plural(r.fake.calls, 'call')}${Object.keys(r.fake.operations).length ? ` (${Object.entries(r.fake.operations).map(([op, n]) => `${op} ${n}`).join(', ')})` : ''}; its first answer at ${t.fake_first_answer_at ?? 'not seen'}.` : 'The fake\'s calls were not read.',
+    '',
+    '## Step 11: take over, type, save, give back',
+    '',
+    row('Between', 'Time'),
+    row('---', '---'),
+    row('take over → terminal open', duration(t.take_over_at, t.terminal_open_at)),
+    row('terminal open → save', duration(t.terminal_open_at, t.save_at)),
+    row('save → give back', duration(t.save_at, t.give_back_at)),
+    row('give back → the notice\'s turn', duration(t.give_back_at, r.human?.noticeTurnAt)),
+    row('lines typed, journaled', r.human ? r.human.lines : 'not read'),
+    row('terminal closed', r.human?.closed ? `${r.human.closed.reason}, ${r.human.closed.outputBytes} bytes of output (never stored)` : 'not seen'),
+    '',
+    row('File', 'Via', 'Lines'),
+    row('---', '---', '---'),
+    ...(r.human?.edits ?? []).map((e) => row(e.path, e.via, `+${e.added} -${e.removed}`)),
+    '',
+    `saves: ${r.saves.length}, answered 200: ${saves((n) => n === 200)}, 409: ${saves((n) => n === 409)}, refused: ${saves((n) => n !== 200 && n !== 409)}; kept after Give back: ${r.saves.filter((s) => s.kept === true).length}`,
+    '',
+    ...sessionPlanLines(r.sessionPlans),
+    '## The owner',
+    '',
+    row('Measure', 'Value'),
+    row('---', '---'),
+    row('owner gestures', r.gestures.length),
+    '',
+    ...r.gestures.map((g) => `- ${g.at}: ${cell(g.what)}`),
+  ];
+  if (r.stand_ins.length > 0) {
+    out.push('', '## What the rehearsal replaced', '', 'These were stand-ins, so the rehearsal does not prove them:', '');
+    for (const s of r.stand_ins) out.push(`- ${s}`);
+  }
+  return `${out.join('\n')}\n`;
+}
+
 // ---- the result and its table ---------------------------------------------
 
 export type Step = { readonly n: number; readonly name: string; readonly status: 'ok' | 'failed' | 'skipped'; readonly seenAt: string; readonly note: string; readonly capture?: string };
@@ -294,6 +508,9 @@ export type ProofResult = {
   readonly stand_ins: readonly string[];                   // what the rehearsal replaced, and so does not prove
   readonly notificationsSkipped: string | null;            // why the notifications were not part of the run, when they were not
   readonly loginCuts: readonly LoginCut[] | null;          // null: the ledger was not read
+  readonly sessionPlans: readonly SessionPlanFact[];       // read from the ledger: empty when it was not
+  readonly cards: readonly ReleaseCard[];                  // each release card the morning approved, as it was shown
+  readonly leftForOwner: { readonly knowledge: number; readonly contract: number };
 };
 
 export function duration(from: string | undefined | null, to: string | undefined | null): string {
@@ -364,7 +581,7 @@ export function renderDurations(r: ProofResult): string {
     '## Notifications',
     '',
     r.notificationsSkipped
-      ? `Skipped: ${r.notificationsSkipped}. The waits are read from the inbox.${r.notifications ? ` The service still recorded ${r.notifications.count} sent, for the record only: it is not a pass or a fail (the dispatcher's first tick sends nothing).` : ''}`
+      ? `Skipped: ${r.notificationsSkipped.replace(/^skipped:\s*/i, '')}. The waits are read from the inbox.${r.notifications ? ` The service still recorded ${r.notifications.count} sent, for the record only: it is not a pass or a fail (the dispatcher's first tick sends nothing).` : ''}`
       : r.notifications ? `${r.notifications.count} sent.` : 'The ledger was not read: no count.',
     '',
     row('Kind', 'Sent'),
@@ -384,6 +601,15 @@ export function renderDurations(r: ProofResult): string {
     ...Object.values(r.waits).map((w) => row(w.kind, w.ticket, w.seenAt, w.goneAt ?? 'still waiting', w.goneAt ? duration(w.seenAt, w.goneAt) : '')),
     '',
   ];
+  out.push(...sessionPlanLines(r.sessionPlans));
+  out.push('## Release cards', '');
+  if (r.cards.length === 0) out.push('No release card was approved by the proof.', '');
+  else {
+    out.push(row('Ticket', 'Item', 'Groups', 'Flags', 'Seen on the card'), row('---', '---', '---', '---', '---'));
+    for (const c of r.cards) out.push(row(c.ticket, c.item, c.groups.map((g) => `${g.intent} (${plural(g.files, 'file')})`).join('; '), c.flags.join(', '), `${plural(c.shown.groups, 'group')}, ${plural(c.shown.flags, 'flag')} on screen`));
+    out.push('');
+  }
+  out.push(`Left to the owner: ${plural(r.leftForOwner.knowledge, 'knowledge item')}, ${plural(r.leftForOwner.contract, 'contract item')}.`, '');
   out.push('## Login cuts', '');
   if (r.loginCuts === null) out.push('The ledger was not read: no count.', '');
   else if (r.loginCuts.length === 0) out.push('No login cut.', '');

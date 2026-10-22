@@ -219,3 +219,97 @@ test('authors take the per-start scripts first, reviewers theirs, and a reopened
   await assert.rejects(adapter.resume('unknown'), /unknown/);
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ------------------------------------------- lane 29: the replanned milestone 2
+
+const go = 'Go: your session plan is approved by the owner.\nCarry it out now.';
+const plannedSteps = (files: string[]): RehearsalScript['author']['steps'] => [
+  { emit: { type: 'RUN_STARTED', threadId: 't', runId: 'plan' } },
+  { hostCall: { toolCallId: 'p1', name: 'propose_session_plan', input: { steps: ['Do it'], files, confidence: 'high', reason: 'Small.' } } },
+  { emit: { type: 'RUN_FINISHED', threadId: 't', runId: 'plan', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.1 } } },
+  { awaitMessage: true },
+  { emit: { type: 'RUN_STARTED', threadId: 't', runId: 'work' } },
+  { emit: { type: 'RUN_FINISHED', threadId: 't', runId: 'work', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.2 } } },
+];
+
+test('an author that proposes its session plan commits only at the Go, not before (lane 29)', async () => {
+  const store = openStore(':memory:');
+  const dir = checkout();
+  // The owner asks for a change: the author proposes again, then waits for the Go.
+  const steps = [...plannedSteps(['notes/LOCAL-1.md']).slice(0, 4), ...plannedSteps(['notes/LOCAL-1.md'])];
+  const adapter = createRehearsalAdapter({ log: store.events, script: { ...SCRIPT, author: { ...SCRIPT.author, steps } } });
+  const author = await adapter.start(input('author', [], { workdir: dir, ticket: 'LOCAL-1', prompt: 'Ticket LOCAL-1: Entries as JSON' }));
+  assert.equal(log(dir), '', 'nothing is committed while the plan waits for its Go');
+  await author.send({ text: 'The owner asks for a change to your session plan.', by: 'u1' });
+  assert.equal(log(dir), '', 'a Change is not a Go');
+  await author.send({ text: go, by: 'cleared' });
+  assert.equal(log(dir), 'LOCAL-1: Entries as JSON|Cleared\n\nnotes/LOCAL-1.md');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('the author rules: the first whose prompt and service match gives the files, a change of a line, the steps and a handover (lane 29)', async () => {
+  const store = openStore(':memory:');
+  const dir = checkout();
+  writeFileSync(join(dir, 'config.ts'), 'export const PROOF_BREAK_HEALTH: boolean = false;\n');
+  execFileSync('git', ['add', 'config.ts'], { cwd: dir });
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=', 'commit', '--quiet', '-m', 'config'], { cwd: dir });
+  const handover = '## Done\nx\n## Tried and failed, and why\nx\n## Left to do\nx\n## Where the artifacts are (screenshots, logs, branches)\nx\n## Open questions\nx\n## Lessons for the workspace\nThe page reads the entries once.\n';
+  const script: RehearsalScript = {
+    ...SCRIPT,
+    authorRules: [
+      { when: 'the contract step', service: 'filter-api', files: [], steps: plannedSteps([]) },
+      { when: '^Ticket \\S+: Casino', service: 'guestbook', files: [{ path: 'config.ts', replace: ['boolean = false;', 'boolean = true;'] }, { path: 'notes/{ticket}.md', text: '{title}\n' }], steps: plannedSteps(['config.ts']), handover },
+    ],
+  };
+  assert.deepEqual(parseRehearsalScript(JSON.stringify(script)), script);
+  const adapter = createRehearsalAdapter({ log: store.events, script });
+  // The contract rule names another service: not this one. The second matches.
+  const author = await adapter.start(input('author', [], { workdir: dir, ticket: 'LOCAL-2', service: 'guestbook', prompt: 'Ticket LOCAL-2: Casino\n\nYou do step 3, the step of guestbook.' }));
+  await author.send({ text: go, by: 'cleared' });
+  assert.equal(readFileSync(join(dir, 'config.ts'), 'utf8'), 'export const PROOF_BREAK_HEALTH: boolean = true;\n');
+  // The newest commit is the rule's (the one below it set the test up).
+  assert.ok(log(dir).startsWith('LOCAL-2: Casino|Cleared\n\nconfig.ts\nnotes/LOCAL-2.md\n'), log(dir));
+  // The handover is left in the checkout for the flow to capture, never committed.
+  assert.equal(readFileSync(join(dir, 'HANDOVER.md'), 'utf8'), handover);
+  assert.equal(execFileSync('git', ['status', '--porcelain', '--', 'HANDOVER.md'], { cwd: dir, encoding: 'utf8' }).trim(), '?? HANDOVER.md');
+  // A rule whose line is not in the file is an error of the script, said at the Go.
+  const wrong = createRehearsalAdapter({ log: store.events, script: { ...script, authorRules: [{ when: 'Casino', files: [{ path: 'config.ts', replace: ['nowhere', 'somewhere else'] }], steps: plannedSteps([]) }] } });
+  const second = await wrong.start(input('author', [], { workdir: dir, ticket: 'LOCAL-2', prompt: 'Ticket LOCAL-2: Casino' }));
+  await assert.rejects(second.send({ text: go, by: 'cleared' }), /nowhere/);
+  // A rule's path stays inside the checkout.
+  assert.throws(() => parseRehearsalScript(JSON.stringify({ ...script, authorRules: [{ when: 'x', files: [{ path: '../out', text: 'x' }], steps: [] }] })), /inside the checkout/);
+  assert.throws(() => parseRehearsalScript(JSON.stringify({ ...script, authorRules: [{ when: '(', files: [], steps: [] }] })), /when/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a reopened author commits what the human changed in its checkout when the script says so (lane 29)', async () => {
+  const store = openStore(':memory:');
+  const dir = checkout();
+  const adapter = createRehearsalAdapter({ log: store.events, script: { ...SCRIPT, reopenCommits: true, reopen: [{ awaitMessage: true }, { emit: { type: 'RUN_STARTED', threadId: 't', runId: 'again' } }] } });
+  const first = await adapter.start(input('author', [], { workdir: dir, ticket: 'LOCAL-4', prompt: 'Ticket LOCAL-4: The count' }));
+  writeFileSync(join(dir, 'README.md'), 'guestbook, changed by the owner\n');
+  const reopened = await adapter.resume(first.id);
+  await reopened.send({ text: 'owner changed these files: README.md (+1, -1). Read them again before editing them.', by: 'cleared' });
+  assert.equal(log(dir).split('\n').filter((line) => line.includes('|'))[0], 'LOCAL-4: the changes the owner made|Cleared');
+  assert.match(log(dir), /README\.md/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a workspace file whose checkouts or brokers are outside the temporary folder refuses the fake adapter (lane 29)', () => {
+  const state = temp();
+  const script = join(state, 'script.json');
+  const file = join(state, 'workspace.conf');
+  const ok = { CLEARED_V2_ADAPTER: 'fake', CLEARED_STATE_DIR: state, CLEARED_V2_FAKE_SCRIPT: script, CLEARED_V2_WORKSPACE: file };
+  const conf = (dir: string, brokerState: string, socket: string) => `[workspace]\nid = guestbook\nname = W\n[service guestbook]\nkind = repository\nrepository = rehearsal/guestbook\nurl = ${state}/origin.git\nbase = main\ndir = ${dir}\nbroker_socket = ${socket}\nbroker_state = ${brokerState}\n`;
+  writeFileSync(file, conf(join(state, 'gb'), join(state, 'broker'), join(state, 'broker', 'b.sock')));
+  assert.deepEqual(adapterSetting(ok), { kind: 'fake', script });
+  writeFileSync(file, conf('/srv/guestbook', join(state, 'broker'), join(state, 'broker', 'b.sock')));
+  assert.throws(() => adapterSetting(ok), /dir.*temporary|temporary.*\/srv\/guestbook/);
+  writeFileSync(file, conf(join(state, 'gb'), '/var/lib/cleared-v2/brokers/guestbook', join(state, 'b.sock')));
+  assert.throws(() => adapterSetting(ok), /temporary/);
+  writeFileSync(file, conf(join(state, 'gb'), join(state, 'broker'), '/run/user/1000/cleared-v2/guestbook/broker.sock'));
+  assert.throws(() => adapterSetting(ok), /temporary/);
+  // The file itself outside: refused too.
+  assert.throws(() => adapterSetting({ ...ok, CLEARED_V2_WORKSPACE: '/etc/cleared/workspace.conf' }), /temporary/);
+  rmSync(state, { recursive: true, force: true });
+});

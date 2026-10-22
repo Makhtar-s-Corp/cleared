@@ -3,7 +3,8 @@
 // message asked for may come after another request of the same session,
 // which pauses it: the owner answers that one from the inbox too, then waits
 // for the next. The morning of the milestone 2 proof (scripts/proof-j2.ts):
-// the permissions the night left, then the plan, then the releases.
+// the permissions the night left, then the session plans' Go, then the
+// plan, then the releases.
 
 // Work inside the checkout is allowed once; anything else is denied (issue
 // 157, item 4: the proof allowed once almost every request). The proof
@@ -100,36 +101,52 @@ export function inboxAction(items: readonly { readonly detail: string; readonly 
 // An inbox item as GET /api/inbox gives it, reduced to what decides.
 export type InboxEntry = {
   readonly id: string;
-  readonly kind: 'release' | 'permission' | 'question' | 'plan';
+  readonly kind: 'release' | 'permission' | 'question' | 'plan' | 'session_plan' | 'contract' | 'knowledge';
   readonly ticket: string;
   readonly command?: string;                                  // a permission to run a command
   readonly checks?: 'pending' | 'passed' | 'failed';         // a release's pull request checks
+  readonly session?: string;                                  // a session plan's session
+  readonly confidence?: 'low' | 'medium' | 'high';           // a session plan's confidence
 };
 
 export type MorningAction =
   | { readonly kind: 'permission'; readonly id: string; readonly decision: 'allow_once' | 'reject_once' }
+  | { readonly kind: 'session_plan'; readonly id: string; readonly session: string }
   | { readonly kind: 'plan'; readonly id: string }
   | { readonly kind: 'release'; readonly id: string }
   // Nothing to do now; `left` says what still waits and why.
   | { readonly kind: 'wait'; readonly left: readonly string[] };
 
 // The next gesture on the waiting items, in the inbox's own order (oldest
-// first): a permission pauses a session, so it comes first; the plan next;
-// then a release once its checks passed (the lock queues one whose checks
-// still run). `releases` and `plan` false leave those to the owner
-// (PROOF_OWNER_APPROVES=1). A question is the owner's.
+// first): a permission pauses a session, so it comes first; then a session
+// plan's Go (lane 29: a medium or low confidence holds its ticket until the
+// morning, and the plan would otherwise never end); the plan next; then a
+// release once its checks passed (the lock queues one whose checks still
+// run). `releases` and `plan` false leave those, and the Go, to the owner
+// (PROOF_OWNER_APPROVES=1). A question is the owner's; so is a knowledge
+// item, which the run counts (leftForOwner); a contract item is validated
+// by the multi-service proof at its step 3 only, never here.
 export function morningAction(entries: readonly InboxEntry[], options: { readonly releases: boolean; readonly plan: boolean }): MorningAction {
   const permission = entries.find((entry) => entry.kind === 'permission');
   // A permission that is not a command (an edit outside, a fetch) is denied.
   if (permission) return { kind: 'permission', id: permission.id, decision: permission.command === undefined ? 'reject_once' : answerFor(permission.command) };
+  const held = entries.find((entry) => entry.kind === 'session_plan' && entry.session !== undefined);
+  if (held && options.plan) return { kind: 'session_plan', id: held.id, session: held.session as string };
   const plan = entries.find((entry) => entry.kind === 'plan');
   if (plan && options.plan) return { kind: 'plan', id: plan.id };
   const ready = entries.find((entry) => entry.kind === 'release' && entry.checks === 'passed');
   if (ready && options.releases) return { kind: 'release', id: ready.id };
   const why = (entry: InboxEntry): string => {
     if (entry.kind === 'question') return 'a question, for the owner';
-    if (entry.kind === 'plan' || (entry.kind === 'release' && !options.releases)) return 'the owner approves';
+    if (entry.kind === 'knowledge') return 'knowledge, for the owner';
+    if (entry.kind === 'contract') return 'a contract, validated in the multi-service proof only';
+    if (entry.kind === 'plan' || entry.kind === 'session_plan' || (entry.kind === 'release' && !options.releases)) return 'the owner approves';
     return `checks ${entry.checks ?? 'pending'}`;
   };
   return { kind: 'wait', left: entries.map((entry) => `${entry.id} (${why(entry)})`) };
+}
+
+// What the morning leaves to the owner and the report counts.
+export function leftForOwner(entries: readonly InboxEntry[]): { readonly knowledge: number; readonly contract: number } {
+  return { knowledge: entries.filter((e) => e.kind === 'knowledge').length, contract: entries.filter((e) => e.kind === 'contract').length };
 }

@@ -2787,3 +2787,111 @@ The lane's choices:
 - **The requirements matrix.** O16 (the owner's request, `partial` until the proof's step 11 runs a real turn), P42 (the adapter's interactive resume) and P43 (the terminal's modes and the screen) are new. B5.10f, D4, O9 and C1 name this pull request. P39 says the server command it kept was removed.
 - Pull request: 230, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-takeover-harness-direct`.
+
+## 2026-10-22: the proof scripts on the React screens and the replanned milestone 2, and the multi-service proof's driver (the author's choices, lane v2-j2-proof-scripts-m2)
+
+**Decision.** Lane 29 adapts the 48-hour proof of pull request 181 (`v2/scripts/proof-j2.ts`) to the React screens and to what waves 5 to 11 added, and writes `v2/scripts/proof-j2-multi.ts`, the driver of section 2.2 of the [milestone 2 plan](milestone-2-plan.md), each with a rehearsal on the fake adapter. It does not start either real run: both are the orchestrator's, after this wave. The lane's choices:
+
+1. **The 48-hour proof, on the built app.**
+   - **The build first.** The rehearsal runs `npm run build` before it starts the app, so the pages come from the manifest of the code it rehearses. The real run is against the app the orchestrator built and started.
+   - **The selectors the port kept** still drive steps 0 to 8. One changed: the inbox's plan approval is `[data-act="approve_plan"]`, not the old panel's button.
+   - **A question of several choices** (lane 13's note) is answered by its option, then its `[data-choice-send]`.
+   - **The preview listener.** The rehearsal's app gets `CLEARED_V2_PREVIEW_PORT` on a free port, as lane 20 asked. 8794 and 8795 join the ports a rehearsal never takes.
+2. **The morning rule** (`proof-inbox.ts`).
+   - **A session plan gets its Go** after the permissions and before the plan and the releases. A medium or low confidence holds its ticket until the morning, and step 7 would otherwise wait forever.
+   - **A knowledge item is left to the owner and counted.** `durations.md` says how many.
+   - **A contract item is never answered by the 48-hour proof.** The multi-service proof validates one at its step 3.
+   - **The owner who approves** (`PROOF_OWNER_APPROVES=1`) gives the Go too.
+3. **Step 7 reads each card before it approves it:** its intent groups with their file counts and its flags, from the item, and what the screen shows of them (`[data-group]`, `[data-flag]`). `durations.md` lists the cards, the session plans (confidence, who gave the Go, how long the gate held) and what was left to the owner.
+4. **The skipped step's note** is "skipped: no Mac notifications in this proof (owner decision)", in the steps table and in the notifications section. The header comment says the owner decided it, not that the question is open.
+5. **The rehearsal's authors propose a session plan first** (decision 22). This closes the break lane 17 logged.
+   - A plan proposed with `propose_session_plan` ends the first turn. The fake adapter commits the author's files at the Go, the first message that starts with "Go:", not when the session starts, so a Change commits nothing.
+   - The work turn shows an Edit per file, as the Claude Code adapter maps one, then `report_changes`.
+   - Most rehearsal authors are high: the lead's Go starts them "by the plan". The third is medium: it waits through the night, takes the morning's Go, then asks the permission that is denied.
+   - Every default author leaves a `HANDOVER.md` with a lesson, so the knowledge module proposes items.
+6. **The fake adapter's author rules** (`src/session/adapters/index.ts`, `authorRules`). The first rule whose regular expression matches the start's prompt, and whose service, when it names one, is the start's, gives the files to commit (whole, or one line replaced), the steps and the handover. `{ticket}` is filled in the steps too. A reopened author can commit what its checkout holds (`reopenCommits`): the human's change after Give back. A one-service ticket in a workspace of several gets the author's prompt alone, with no step text (`flow/engine.ts` `start`), so its rule matches the ticket only.
+7. **The rehearsal never reaches a real folder or remote.** The fake adapter, already refused unless the state folders are temporary, now also refuses `CLEARED_V2_REPO_URL`, the workspace file, and each service's `dir`, `url`, `broker_socket` and `broker_state`, unless each one is an absolute path inside the temporary folder. A network address is never one. So the committed `examples/workspace.conf` (127.0.0.1:8793, the server's brokers) cannot be given to a rehearsal; it writes its own copy (`rehearsalWorkspace`).
+8. **The multi-service proof's driver** (`proof-j2-multi.ts`) takes section 2.2's eleven steps through the browser.
+   - **The tickets.** It creates the four tickets from the tower bar, with each one's service chips. Tickets 1 to 3 are the guestbook README's; ticket 4, step 11's, is on the guestbook alone: "The page says how many entries it holds".
+   - **The Go.** It gives each of its tickets' session plans its Go from the inbox, as the owner, while it waits. Section 2.2 names no Go, but every author now proposes a plan, and an owner-made ticket has no lead's Go.
+   - **The checks of each step:**
+     - the steps' kinds and order;
+     - the contract's diff naming `severity`;
+     - the Browser tab's frame;
+     - the integration step done;
+     - the landing order and the compatibility line;
+     - the ticket Done after the landing;
+     - "Rolled back, 2 of 2", with the guestbook reverted before the filter API;
+     - the blocked card with no Approve, and its proposal;
+     - the terminal on the session's own harness (pull request 230), or the reason it cannot be resumed, recorded; then the Shell beside it, where the two lines are typed; the editor's save, Give back, and the owner's file on the ticket's next card.
+   - **The trial environment.** Step 4 loads the guestbook's root page only. Its form posts to `/entries`, which leaves the preview address, and the preview relays no write: a known limit of the Browser tab (issue 213, item 5), not a failure of the step.
+   - **The fake's calls** are read through the docker wrapper under its label rule. The session's egress container asks the fake's `/__fake/calls` with the preview's own relay, as the preview asks the page. The real run's only docker commands are these, through the wrapper, which lists by the label and acts on what the list returned.
+   - **Each save and its answer are recorded,** and whether the branch carries it. That is the rate issue 226 (item 7) asks the real run's step 11 for.
+   - **Its own table,** `renderMultiDurations` in `proof-report.ts`, covers the measured gaps, the steps of each ticket (their cost, and their time from the ledger's `ticket_steps`), the trains in landing order with the gap and the order of the reverts (`trainFacts`, from `release_trains`), the fake's calls, step 11 from the session's journal (`humanFacts`: the lines journaled, the close and its output bytes, the edits, the notice's turn), the saves, the session plans, the owner's gestures and the stand-ins.
+   - **The screens.** The proof captures the screens it drove, at 1440, 1280, 768 and 390, light and dark, in the state it left them.
+9. **The multi-service rehearsal** (`proof-rehearsal-multi.ts`) runs the real service and app on the fake adapter, on a two-service workspace of its own. It adds three stand-ins to lane 11's:
+   - **The locks.** Two stand-in brokers, one socket and one state folder each, both writing the one temporary ledger. The guestbook's watch fails twice when the merged `src/config.ts` turns `PROOF_BREAK_HEALTH` on, then reverts its merge and writes `rollback_pushed`, as the real watch would on `/health`. A `request_rollback` reverts the ticket's newest merge of its repository.
+   - **The containers.** `docker` is a stand-in on `PATH`. It answers only these:
+     - the labelled lists of a session's containers;
+     - their inspection;
+     - the service's own programs (the editor's read and save, the checkout at Take over and Give back), run on the session's checkout here;
+     - the preview's relay, sent to the trial stand-in;
+     - the terminal's Shell (`terminalCommand(SHELL_COMMAND)`), given a stand-in shell, and its end. A harness resumed in the terminal is refused: the fake adapter has none, and its scripted sessions answer that they cannot be resumed.
+     It refuses anything else, a run, a build, a push and any other program included, and never runs the real docker. The stand-in shell answers `pwd`, runs `git status` on the checkout, says it does not run `npm test`, and refuses a push for want of a credential. The terminal's real shell script, whose pid file is in the container's `/tmp` and whose end is a `pkill -s`, never runs on this machine.
+   - **The trial environment.** A loopback server stands for a session's siblings: the guestbook's page, which checks a sample entry with the filter API's fake at each load, and the fake itself. The fake is `images/fake/fake.ts`, built from the contract the owner validated (`ticket_steps.contract`), one per session.
+   - **The forge.** The gh stand-in keeps each pull request's repository: the services of a ticket share their branch name, and the numbers run across the forge, so `pr view`, which names no repository, finds the right one.
+
+**Consequences.**
+- **Tests first.** Commit `22e0b27` holds them alone, and each failed on `origin/v2` at `309aea5`: three files at import (`leftForOwner`, `NOTIFICATIONS_SKIPPED_NOTE`, `proof-rehearsal-multi.ts` missing), and the gh stand-in, the reserved ports, the rollback request, the commit at the Go, the author rules and the workspace check in the others. The new file is `test/scripts/proof-rehearsal-multi.test.ts`. `proof-inbox`, `proof-report`, `proof-rehearsal` and `rehearsal-adapter` gained cases.
+- **The rehearsal before this lane** (run 0, on `origin/v2`): steps 0 to 6 passed on the React screens with the selectors of pull request 181. The night then held every author without a plan, as lane 17 foresaw: `item 4: ready → put_back → held`.
+- **Rehearsals on this server, 2026-10-22, on the fake adapter:**
+  - **The 48-hour proof, 3-minute night, notifications skipped:** 9 steps ok, 1 skipped (the notifications, with the owner's note), none failed, the plan done 11 minutes after the goal (on the merged head with pull request 230).
+    - The session plans: four high, with the lead's Go at once, and one medium, held 2 min 37 s until the morning's Go.
+    - The night left 2 releases, 1 session plan and 2 knowledge items. The morning gave the Go, denied the permission that followed, and approved the 5 cards, each with 1 group.
+    - 5 knowledge items were left to the owner.
+    - 2 refreshes, highest share 4.5 % (threshold 5 %). Both planted commitments were done, and every "after" was kept.
+    - The two scripted login cuts were counted and relaunched.
+  - **The multi-service proof, first run:** steps 0 to 8 and 10 passed; 9 and 11 failed. Each failure found a fault, fixed since:
+    - **The lock stand-in closed its side of the socket** as soon as the request ended, so an answer written after a git merge or revert never reached the client: `approval/broker.ts` read "invalid release broker reply". The merges still landed, because the train reads the ledger before it asks again (lane 16), which hid the fault since lane 11. The filter API's rollback was refused, and the card said "Rolled back, 1 of 2". The server is now half open.
+    - **The proof waited for buttons on a handled card.** It now waits for the item to be shown.
+    - **The reopened author's commit named `CLAUDE.md`, which git ignores, in an exclusion,** so the notice's turn failed. It now adds the tracked files the human changed (`git add --update`).
+  - **The multi-service proof, final run on the merged head (`bf709b1`):** 12 steps ok (0 to 11), none failed, in about 14 minutes.
+    - Ticket 1's steps: the contract, then each service, then the integration. The contract's diff with `severity` was validated 8 s after it was shown. The two service steps ran at once (read from the ledger's sessions). The Browser tab showed the trial page, whose fake answered 1 call.
+    - The card: two pull requests, the filter API first, the compatibility line, the `contract` flag. The train landed the filter API, then the guestbook, 45 s apart, each healthy.
+    - Ticket 2: the guestbook's watch failed twice, it reverted, then the filter API was rolled back. The card says "Rolled back, 2 of 2" and the ticket is in Todo.
+    - Ticket 3: the card was blocked with the proposal and had no Approve.
+    - Ticket 4: taken over. The terminal opened on the harness and said it cannot be resumed ("Claude Code cannot be resumed here": the fake adapter's scripted session has no interactive harness, said as such in the step). The Shell button opened the Shell, where `git status` and `npm test` were typed and both journaled; one line of `src/page.ts` saved (200), given back. The notice's turn came 1 s after Give back, and `src/page.ts` was on the ticket's next card.
+- **The merge of `origin/v2` with pull request 230** (the web terminal on the session's own harness, Shell beside it). Take over now opens the harness by default, so step 11 records what the terminal showed, then opens the Shell for its two lines; the docker stand-in recognises the Shell by `terminalCommand(SHELL_COMMAND)`, which replaced `TERMINAL_SHELL`. The adaptation is in the merge commit with the matrix's renumbering (this lane's lines became P44 and P45). Both rehearsals were run again after it.
+- **Captures and results.** `/tmp/cleared-captures/j2/rehearsal/` and `/tmp/cleared-captures/j2/multi-rehearsal/` hold each step's capture, `result.json` and `durations.md`, mode 644, with the pointer off the buttons. Each rehearsal's folder (`/tmp/cleared-j2-rehearsal-*`, `/tmp/cleared-j2-multi-*`) is kept for reading, its password file removed.
+- **The visual loop.** No screen file changed. The multi-service proof captured the tower, the inbox, the lead screen and step 11's session, in the state it left them, at 1440, 1280, 768 and 390, light and dark: `/tmp/cleared-captures/j2/proof-multi-<screen>-<width>-<theme>.png`, 32 files, mode 644. They are a record, not a design pass, and no art director's pass was run.
+- **Not proven here:**
+  - **The real runs.** These need a model, the forge, the real brokers and watches, the deployments, real containers and siblings, a real fake image, and a login cut. They are the orchestrator's, after this wave: the 48-hour proof first, then the multi-service proof.
+  - **The parts the rehearsal's stand-ins replace,** listed under "What the rehearsal replaced" in each `durations.md`.
+  - **Step 4 on the real guestbook.** The check is the guestbook's own heading in the Browser tab's frame, which the real page and the stand-in share. The real guestbook calls the filter only on an entry's post, which the preview does not relay, so the real run may read 0 calls from the fake. The step records that count; it does not fail on it.
+  - **Step 11's real path assumes** a live author that edits `src/page.ts`, so the file is in the Editor's list before its turn ends, and that the owner's saved line reaches the ticket's card. The rehearsal forces the last part with `reopenCommits`; in the real run it depends on the model committing after the notice. These are assumptions for the orchestrator's run.
+  - **Section 8's open unknowns,** for the proof to close: when the author proposes, how long the gate adds in a real night, how many knowledge items a night makes, and how a save during a turn fares.
+- **Real run settings.**
+  - **The 48-hour proof:** as lane 11's entry says. `PROOF_NOTIFICATIONS` stays `skipped` by default.
+  - **The multi-service proof:** `PROOF_PLAYWRIGHT`, `PROOF_CHROME`, `PROOF_PASSWORD_FILE` and `PROOF_LEDGER`. `PROOF_APP_URL` must be the app's loopback address, since the web terminal opens there only. The service runs with the server's copy of `examples/workspace.conf`.
+  - **What the real run's step 11 types:** in the session's real container, `npm test` runs the guestbook's tests.
+- **Followups.**
+  - **Recipes, schedules and asks.** The matrix lines C7, C11 and M9 say "the live run: lane 29". Section 4.6 gives this lane neither a recipe, nor a schedule, nor an ask, and neither proof drives them, so their live run is still open. The orchestrator decides whether a step joins a proof.
+  - **The session screen at 390** after Give back reads "Working" while the review has started. It is visible in `proof-multi-session-390-dark.png`, and not this lane's file: issue 233.
+- **Files.** All are of the lane's list: `v2/scripts/proof-*.ts` (`proof-j2-multi.ts` and `proof-rehearsal-multi.ts` new), `v2/src/session/adapters/index.ts`, and the tests under `v2/test/scripts/`. Beyond them, only this entry and `docs/v2/requirements-matrix.md`:
+  - B6.2p, B6.2m, O8, C2, C8, C10, M2, M3, M5, B5.10f and O1 name this pull request (232).
+  - They stay `partial` or `planned` until the real runs.
+  - The new lines are P44 (choices 1 to 6 and 8) and P45 (choices 7 and 9); P42 and P43 are pull request 230's, merged first.
+- **Checks.**
+  - `npm test`: 1204 node tests, 1196 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
+  - `npm run typecheck` is green.
+  - `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+- **Review round 1 (2026-10-22), CHANGES, taken:**
+  - the merge of `origin/v2` with pull request 230 (`61b6795`) is pushed; it resolves the conflicts in this log and the matrix, adapts the stand-in and step 11 to the harness-first terminal, and renumbers this lane's matrix lines P44 and P45, which B6.2p and B6.2m cite;
+  - both rehearsals ran again on the merged head, and the `durations.md` the pull request quotes are those runs';
+  - after the round, step 4 checks the guestbook's own heading in the frame rather than the stand-in's words, reads the fake's count until it answered once or for a minute (0 is recorded, not a failure), and takes the fake's port as the runtime plans it;
+  - step 11 says whether Take over attached to the harness or found it unsupported (the fake adapter, said as such), then the Shell with `git status` and `npm test`, the editor's save and Give back;
+  - "What the rehearsal replaced" says the live-harness path (Take over attached to Claude Code, then the Shell) is the real run's only;
+  - the "Working" label after Give back is issue 233.
+- **Checks on the merged head:** `npm test` (1224 node tests, 1216 pass and 8 skipped; 184 Vitest tests pass), `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
+- Pull request: 232, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-scripts-m2`.
