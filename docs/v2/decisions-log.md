@@ -1201,6 +1201,29 @@ The choices the lane makes:
 - This entry is the only change outside the lane's files.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-inbox-plan`.
 
+## 2026-10-22: Owner decision on plan question 1: the current Claude login, read-only, for the example project only
+
+**Decision.** On 2026-10-22 at 05:05 (Europe/Paris), in reply to plan question 1 (section 11), the owner chose option (b): the sessions use the current Claude Code login, read-only, for the example project only. During the 48-hour proof, the runner is relaunched when the login reports a revoked token, and each cut is counted in the proof report. Issue 147 stays open, as an accepted risk scoped to the example project.
+
+- Author: the owner, relayed on 2026-10-22 05:05 (Europe/Paris); written in this log.
+
+## 2026-10-22: Owner note for milestone 3: a Cursor harness next to Codex
+
+**Note.** Milestone 3 adds a Cursor harness next to Codex. The owner's Codex account is paused, so real trials run with Cursor, and Codex is tested without an account.
+
+- Author: the owner, relayed on 2026-10-22 05:05 (Europe/Paris); written in this log.
+
+## 2026-10-22: how the two owner entries above are applied (the author's choices and proposals)
+
+**Decision.** These are the author's choices and proposals for applying the two owner entries above, not the owner's decisions.
+
+- **The login (choices).** The login is mounted read-only into the session containers. Its content is never read, printed, copied, logged or committed by the runner, `doctor.ts` or a lane. `CLEARED_CLAUDE_CREDENTIALS` names the host's login file. Without it, the runner falls back to a token file in the state folder (option (a), a setup-token token), which nothing creates. The open policy question on a claude.ai login in third-party products is not settled by this choice. The policy already denies tool calls that name `/proc/*/environ`, and `printenv` (`v2/src/session/policy.ts`).
+- **Milestone 3 (proposals).**
+  - Cursor's real trials use the same arrangement as Claude Code: the host's existing login, read-only.
+  - The Cursor and Codex harnesses follow the session adapter contract (plan, section 6), with the harness named in `StartInput.harness`.
+  - Until a harness is named, the default stays `claude-code`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-fix-doctor-window`.
+
 ## 2026-10-22: the milestone 2 proof script and its rehearsal (milestone 2, lane 11)
 
 **Decision.** Lane `v2-j2-proof-script` writes `v2/scripts/proof-j2.ts`, the driver of section 1 of the [milestone 2 plan](milestone-2-plan.md), with its pure parts in `scripts/proof-report.ts`, its rehearsal in `scripts/proof-rehearsal.ts`, the morning's inbox rules in `scripts/proof-inbox.ts`, and the `CLEARED_V2_ADAPTER=fake` setting in `src/session/adapters/index.ts`. The lane's choices:
@@ -1232,7 +1255,7 @@ The choices the lane makes:
     - HOME is the temporary folder, so the notifier's private folder and no file of the account's own are used.
     `durations.md` lists these under "What the rehearsal replaced", since the rehearsal does not prove them. The ports are two free ones from 9700 to 9799, checked with `ss -ltn` and never a reserved one, on `127.0.0.1`. An interrupted rehearsal stops its service and app.
 11. **Notifications are skipped in the real run (the owner's update of 2026-10-22).** Plan question 2, the https address for the Mac, has no answer, so the 48-hour proof runs without Mac notifications, on the inbox only. `PROOF_NOTIFICATIONS` is `skipped` by default for a real run. Step 3 then does not wait for the plan's notification. A step `3 notifications` is recorded as skipped, with the reason, not failed. `durations.md` says "Skipped", reads the waits from the inbox, and still gives the count the service recorded. The rehearsal counts them by default through its e-mail stand-in. `PROOF_NOTIFICATIONS=counted` brings the count back for a real run once the address exists.
-12. **Login cuts (question 1, option b, the owner's update of 2026-10-22).** The runner keeps the host login. On an authentication error it waits for the login file to change, then relaunches the session in the same container with `resume` (lane 4, `images/session/runner/main.ts`). The adapter shows the cut as the status "Waiting for a new login" (`claude-code/map.ts`). The proof report counts each cut from the ledger: when it began, the session's role and ticket, when the session's next turn started (the relaunch), and how long it lasted. A cut never relaunched says so. The relaunch itself is lane 4's code, which this lane does not edit.
+12. **Login cuts (question 1, option b: the owner's entry above).** The runner keeps the host login. On an authentication error it waits for the login file to change, then relaunches the session in the same container with `resume` (lane 4, `images/session/runner/main.ts`). The adapter shows the cut as the status "Waiting for a new login" (`claude-code/map.ts`). The proof report counts each cut from the ledger: when it began, the session's role and ticket, when the session's next turn started (the relaunch), and how long it lasted. A cut never relaunched says so. The relaunch itself is lane 4's code, which this lane does not edit.
 
 **Consequences.**
 - **Rehearsals on this server, 2026-10-22, on the fake adapter, 4-minute nights:**
