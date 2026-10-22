@@ -14,7 +14,7 @@ import { Docker, LABEL, SESSION_LABEL } from '../../../src/container/docker.ts';
 import { parseServices } from '../../../src/container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../../../src/container/session-runtime.ts';
 import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../../../src/session/adapters/claude-code.ts';
-import { INTERACTIVE_LAUNCH, LOGIN_TOKEN_PROGRAM } from '../../../src/session/adapters/claude-code/interactive.ts';
+import { CONFIG_PROGRAM, INTERACTIVE_LAUNCH, LOGIN_TOKEN_PROGRAM } from '../../../src/session/adapters/claude-code/interactive.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
 import { HostToolRefused, NotImplemented, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
@@ -456,7 +456,7 @@ test('interactive hands the runner\'s harness over and gives Claude Code resumed
     const resume = await asking;
     assert.deepEqual(resume, {
       supported: true, name: 'Claude Code',
-      command: ['sh', '-c', INTERACTIVE_LAUNCH, 'claude-code', SESSION, 'claude-haiku-5-5', LOGIN_TOKEN_PROGRAM, LOGIN_FILE_MOUNT],
+      command: ['sh', '-c', INTERACTIVE_LAUNCH, 'claude-code', SESSION, 'claude-haiku-5-5', LOGIN_TOKEN_PROGRAM, LOGIN_FILE_MOUNT, CONFIG_PROGRAM],
     });
     // The launcher resumes the same session (no fork), on the session's model.
     assert.match(INTERACTIVE_LAUNCH, /exec claude --resume "\$1" --model "\$2"/);

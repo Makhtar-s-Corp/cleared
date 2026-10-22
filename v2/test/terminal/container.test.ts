@@ -54,8 +54,9 @@ test('the terminal\'s program writes its id where the close finds it, and the cl
   assert.deepEqual(terminalCommand(['claude', '--resume', 'id']), ['sh', '-c', TERMINAL_WRAP, 'sh', 'claude', '--resume', 'id']);
   assert.deepEqual(SHELL_COMMAND, ['bash', '-l']);
   assert.equal(END_TERMINAL[0], 'sh');
-  // A hang-up first, as a closed terminal sends: up to 5 seconds for the harness to leave and keep its transcript, then a kill.
-  assert.match(END_TERMINAL[2], /pkill -HUP -s "\$p"; i=0; while \[ \$i -lt 50 \] && pgrep -s "\$p" >\/dev\/null; do sleep 0\.1; i=\$\(\(i\+1\)\); done; pkill -KILL -s "\$p"/);
+  // A hang-up first, as a closed terminal sends: up to 5 seconds for the program itself (the harness) to leave and
+  // keep its transcript, a zombie counting as gone, then a kill of what is left of its session.
+  assert.match(END_TERMINAL[2], /pkill -HUP -s "\$p"; i=0; while \[ \$i -lt 50 \] && \[ "\$\(sed 's\/\.\*\) \/\/' \/proc\/\$p\/stat 2>\/dev\/null \| cut -c1\)" \!= Z \] && \[ -e \/proc\/\$p \]; do sleep 0\.1; i=\$\(\(i\+1\)\); done; pkill -KILL -s "\$p"/);
   assert.match(END_TERMINAL[2], /\*\[!0-9\]\*\) exit 0/, 'a pid file that is not a number ends nothing');
 });
 

@@ -34,11 +34,12 @@ export const TERMINAL_WRAP = `echo $$ > ${TERMINAL_PID_FILE}; exec "$@"`;
 export const terminalCommand = (command: readonly string[]): string[] => ['sh', '-c', TERMINAL_WRAP, 'sh', ...command];
 
 // Ends the terminal's program and every process of its session (pkill -s):
-// a hang-up first, as a closed terminal sends, then up to 5 seconds for a
-// harness to leave and keep its transcript, then a kill.
+// a hang-up first, as a closed terminal sends, then up to 5 seconds for the
+// program itself (a harness) to leave and keep its transcript (a zombie is
+// gone: nothing in the container reaps it), then a kill of the rest.
 export const END_TERMINAL = [
   'sh', '-c',
-  `p=$(cat ${TERMINAL_PID_FILE} 2>/dev/null); case "$p" in ''|*[!0-9]*) exit 0;; esac; pkill -HUP -s "$p"; i=0; while [ $i -lt 50 ] && pgrep -s "$p" >/dev/null; do sleep 0.1; i=$((i+1)); done; pkill -KILL -s "$p"; rm -f ${TERMINAL_PID_FILE}; exit 0`,
+  `p=$(cat ${TERMINAL_PID_FILE} 2>/dev/null); case "$p" in ''|*[!0-9]*) exit 0;; esac; pkill -HUP -s "$p"; i=0; while [ $i -lt 50 ] && [ "$(sed 's/.*) //' /proc/$p/stat 2>/dev/null | cut -c1)" != Z ] && [ -e /proc/$p ]; do sleep 0.1; i=$((i+1)); done; pkill -KILL -s "$p"; rm -f ${TERMINAL_PID_FILE}; exit 0`,
 ] as const;
 
 // The checks both file programs share: the checkout's real path, the real
