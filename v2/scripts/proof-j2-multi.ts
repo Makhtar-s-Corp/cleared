@@ -55,6 +55,7 @@ import { RELAY } from '../src/container/preview.ts';
 import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
 import { sessionNames, siblingAddress } from '../src/container/session-runtime.ts';
 import type { Ticket } from '../src/tickets/contract.ts';
+import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
 import { answerFor } from './proof-inbox.ts';
 import { humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type MultiResult, type Step } from './proof-report.ts';
 import { MULTI_TICKETS, startMultiRehearsal, type MultiWorld } from './proof-rehearsal-multi.ts';
@@ -316,9 +317,9 @@ if (validated) {
     await page.goto(`${APP}/sessions/${encodeURIComponent(detail.id)}#browser`);
     await page.locator('#tab-browser-button').click();
     // The guestbook's own page, as its heading says (examples/guestbook/src/page.ts;
-    // the rehearsal's stand-in page carries the same heading).
+    // the rehearsal's stand-in page carries the same heading format).
     const frame = page.frameLocator('iframe[sandbox]');
-    await frame.locator('h1').filter({ hasText: /^Guestbook$/ }).waitFor({ timeout: 60_000 });
+    await frame.locator('h1').filter({ hasText: GUESTBOOK_HEADING }).waitFor({ timeout: 60_000 });
     // The fake's own count, read until it answered once or for a minute: the
     // real guestbook calls the filter only on an entry's post, which the
     // preview does not relay, so 0 calls is a possible, honest reading.
