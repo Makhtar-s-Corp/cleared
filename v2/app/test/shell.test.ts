@@ -5,9 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadCatalog } from '../src/catalog.ts';
-import { translator, type Translate } from '../public/i18n.ts';
-import { draftFrom, planFrom, renderLeadStub } from '../public/screens/lead.ts';
+import type { Translate } from '../public/i18n.ts';
+import { draftFrom, planFrom } from '../public/screens/lead.ts';
 import { leadHref, renderBar } from '../public/screens/tower.ts';
 import { signedIn, startApp } from './support.ts';
 
@@ -123,22 +122,3 @@ test('the lead screen reads the draft and the plan from its address', () => {
   assert.equal(planFrom('/lead'), null);
 });
 
-test('the lead stub keeps the draft and says the lead is not running yet, with no button that pretends to send', () => {
-  const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
-  const goal = renderLeadStub({ text: 'Make the <b>guestbook</b> ready', goal: true }, null, t);
-  assert.match(goal, /<h1[^>]*>Lead<\/h1>/);
-  assert.match(goal, /Make the &lt;b&gt;guestbook&lt;\/b&gt; ready<\/textarea>/);
-  assert.match(goal, /<label for="lead-draft">Your goal<\/label>/);
-  assert.doesNotMatch(goal, /<button/);
-  const ask = renderLeadStub({ text: 'What landed?', goal: false }, null, t);
-  assert.match(ask, /<label for="lead-draft">Your message<\/label>/);
-  const empty = renderLeadStub({ text: '', goal: false }, null, t);
-  assert.doesNotMatch(empty, /<textarea/);
-  const plan = renderLeadStub({ text: '', goal: false }, 'plan-<7>', t);
-  assert.match(plan, /plan-&lt;7&gt;/);
-  const keys = new Set<string>();
-  const record: Translate = (key) => { keys.add(key); return key; };
-  for (const [draft, id] of [[{ text: 'x', goal: true }, 'p'], [{ text: 'x', goal: false }, null], [{ text: '', goal: false }, null]] as const) renderLeadStub(draft, id, record);
-  const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('lead', 'fr') });
-  for (const key of keys) assert.doesNotThrow(() => fr(key, { id: 'p' }), key);
-});

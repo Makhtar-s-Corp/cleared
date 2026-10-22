@@ -6,12 +6,14 @@
 // Names are neutral: the project is the example guestbook, and the plan is
 // the capture's shape (2 after 1, 3 after 2, two fast lane items) with the
 // guestbook's content.
-import type { Estimate, LeadCommitment, LeadMemory, LeadMessage, LeadState, Plan, PlanItem, PlanItemInbox, SessionSummary } from '../../src/api/types.ts';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { leadFrame, type Estimate, type LeadCommitment, type LeadMemory, type LeadMessage, type LeadState, type Plan, type PlanItem, type PlanItemInbox, type SessionSummary } from '../../src/api/types.ts';
 import { LEAD_TICKET, bindLeadTools } from '../../src/lead/contract.ts';
 import { createFakeAdapter, exampleLeadScript } from '../../src/session/adapters/fake.ts';
 import type { CustomValue, SessionPhase } from '../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
+import { sendJson, type DataSource } from '../src/proxy.ts';
 import { FIXTURE_PROJECT } from './tower.ts';
 
 export const LEAD_OWNER = 'owner';
@@ -148,4 +150,174 @@ export async function leadFixture(now: Date, options: { readonly project?: strin
     planId: plan.id, title: plan.title, summary: plan.summary, itemCount: plan.items.length, totals: plan.totals,
   }));
   return { state, messages, memory, plans, inbox, session, store };
+}
+
+// ------------------------------------------------- lane 8: the screen's other states
+
+// The lead screen's other states (milestone 2, lane 8), beside what lane 1
+// plays above: a plan running overnight, the same plan paused, and one done
+// the day before, with the guestbook's content of the plan's question 5; and
+// the thread while the lead's question still waits. They are separate values,
+// so the fixture source keeps serving lane 1's single proposed plan.
+const OTHER_ITEMS: readonly (Omit<PlanItem, 'estimate' | 'ticket' | 'state'> & { readonly minutes: number; readonly costUsd: number })[] = [
+  { position: 1, title: 'A GET /entries.json route that lists the entries', body: 'List the entries as JSON, newest first.\n\nAcceptance criteria\n- [ ] the route answers the entries\n- [ ] a test', lane: 'full', size: 's', after: [], minutes: 12, costUsd: 0.30 },
+  { position: 2, title: 'Names and messages trimmed before they are stored', body: 'Trim the spaces around a name and a message.\n\nAcceptance criteria\n- [ ] both fields trimmed\n- [ ] a test', lane: 'full', size: 's', after: [], minutes: 12, costUsd: 0.30 },
+  { position: 3, title: 'The port and the database host in the log at start', body: 'Write the port and the database host when the app starts.\n\nAcceptance criteria\n- [ ] one line at start\n- [ ] a test', lane: 'full', size: 'xs', after: [], minutes: 5, costUsd: 0.15 },
+  { position: 4, title: 'A Troubleshooting section for a database that does not answer', body: 'Say what to check when the database does not answer.\n\nAcceptance criteria\n- [ ] the section in the README', lane: 'fast', size: 'xs', after: [], minutes: 5, costUsd: 0.15 },
+  { position: 5, title: 'The time each entry was written, on the page', body: 'Show when each entry was written.\n\nAcceptance criteria\n- [ ] the time beside each entry\n- [ ] a test', lane: 'full', size: 'm', after: [1, 2, 3, 4], minutes: 30, costUsd: 0.80 },
+];
+const RUNNING_STATES: readonly PlanItem['state'][] = ['landed', 'needs_approval', 'running', 'ready', 'waiting'];
+
+export const RUNNING_PLAN_ID = 'plan-2';
+export const DONE_PLAN_ID = 'plan-0';
+
+export function otherPlans(now: Date, owner = LEAD_OWNER): { readonly running: Plan; readonly paused: Plan; readonly done: Plan } {
+  const items: PlanItem[] = OTHER_ITEMS.map(({ minutes, costUsd, ...item }, index) => ({
+    ...item, estimate: { minutes, costUsd, weekPercent: null, samples: 2 }, ticket: `LOCAL-${201 + index}`, state: RUNNING_STATES[index] ?? 'waiting',
+  }));
+  const running: Plan = {
+    id: RUNNING_PLAN_ID, goal: 'goal-12', title: 'Make the guestbook ready for a small team',
+    summary: 'A JSON route, trimmed entries, the port in the log, a Troubleshooting section, then the time of each entry.',
+    items, maxParallel: 2, totals: { minutes: 42, costUsd: 1.70, weekPercent: null, samples: 2 }, state: 'approved',
+    proposedAt: minutesBefore(now, 760).toISOString(), approvedAt: minutesBefore(now, 755).toISOString(), approvedBy: owner,
+  };
+  const done: Plan = {
+    id: DONE_PLAN_ID, goal: 'goal-4', title: 'Newest entries first',
+    summary: 'The list shows the newest entry first, and the README says so.',
+    items: [
+      { position: 1, title: 'The list shows the newest entry first', body: 'Order the entries newest first.\n\nAcceptance criteria\n- [ ] newest first\n- [ ] a test', lane: 'full', size: 's', after: [], estimate: { minutes: 12, costUsd: 0.30, weekPercent: null, samples: 0 }, ticket: 'LOCAL-158', state: 'landed' },
+      { position: 2, title: 'The README says the newest entry comes first', body: 'One sentence in the README.\n\nAcceptance criteria\n- [ ] the sentence', lane: 'fast', size: 'xs', after: [1], estimate: { minutes: 5, costUsd: 0.15, weekPercent: null, samples: 0 }, ticket: 'LOCAL-159', state: 'landed' },
+    ],
+    maxParallel: 2, totals: { minutes: 17, costUsd: 0.45, weekPercent: null, samples: 0 }, state: 'done',
+    proposedAt: minutesBefore(now, 1500).toISOString(), approvedAt: minutesBefore(now, 1495).toISOString(), approvedBy: owner,
+  };
+  return { running, paused: { ...running, state: 'paused' }, done };
+}
+
+// The thread and the state while the lead's question waits: lane 1's
+// thread up to the question, the question still waiting, and the state
+// naming it as pending.
+export function waitingForAnswer(fixture: LeadFixture): { readonly state: LeadState; readonly messages: readonly LeadMessage[] } {
+  const messages = fixture.messages.slice(0, 3).map((m) => (m.question ? { ...m, question: { ...m.question, state: 'waiting' as const } } : m));
+  const asked = messages.find((m) => m.question)?.question;
+  return {
+    messages,
+    state: { ...fixture.state, phase: 'working', pendingQuestion: asked ? { sessionId: asked.sessionId, requestId: asked.requestId } : null },
+  };
+}
+
+// A stand-in for the lead's and the plans' routes, as the service answers
+// them once lanes 5 and 7 run: the tests and the visual loop hand it to the
+// app as its DataSource (fixtures/source.ts, lane 1's, refuses every write).
+// An owner's message is added to the thread and answers the pending question
+// unless it is a goal, as lane 5's engine does; approve, pause, resume and
+// reject move the plan as lane 7's routes do, and a gesture the plan's state
+// does not allow is a 409. What was asked is kept in `calls`.
+export type LeadCall = { readonly method: string; readonly path: string; readonly user: string; readonly body: unknown };
+export type LeadSource = DataSource & { readonly calls: LeadCall[]; readonly plans: Plan[]; state(): LeadState; messages(): readonly LeadMessage[] };
+
+function readBody(request: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve) => {
+    let text = '';
+    request.on('data', (chunk: Buffer) => { text += chunk.toString('utf8'); });
+    request.on('end', () => { try { resolve(text ? JSON.parse(text) : null); } catch { resolve(undefined); } });
+    request.on('error', () => resolve(undefined));
+  });
+}
+
+export function leadSource(start: {
+  readonly state: LeadState;
+  readonly messages: readonly LeadMessage[];
+  readonly memory: LeadMemory;
+  readonly plans: readonly Plan[];
+  readonly inbox?: readonly PlanItemInbox[];
+}, options: { readonly now?: () => Date } = {}): LeadSource {
+  const now = options.now ?? (() => new Date());
+  const calls: LeadCall[] = [];
+  const plans = start.plans.map((plan) => ({ ...plan }));
+  let state = start.state;
+  const messages = start.messages.map((m) => ({ ...m }));
+  const add = (message: Omit<LeadMessage, 'seq'>): LeadMessage => {
+    const added = { seq: (messages.at(-1)?.seq ?? 0) + 1, ...message };
+    messages.push(added);
+    return added;
+  };
+  const after = (request: IncomingMessage, url: URL): number => {
+    const from = Number(url.searchParams.get('after') ?? request.headers['last-event-id'] ?? 0);
+    return Number.isInteger(from) && from >= 0 ? from : 0;
+  };
+  const move = (plan: Plan, to: Plan['state']): Plan => {
+    const items = to !== 'approved' || plan.state !== 'proposed' ? plan.items : plan.items.map((item, index) => {
+      const ticket = `LOCAL-${301 + index}`;
+      const started = item.after.length === 0 && plan.items.slice(0, index).filter((i) => i.after.length === 0).length < plan.maxParallel;
+      return { ...item, ticket, state: started ? 'running' as const : 'waiting' as const };
+    });
+    const moved: Plan = { ...plan, items, state: to, ...(plan.state === 'proposed' && to === 'approved' ? { approvedAt: now().toISOString(), approvedBy: LEAD_OWNER } : {}) };
+    plans[plans.indexOf(plan)] = moved;
+    return moved;
+  };
+  const allowed: Readonly<Record<string, { readonly from: Plan['state']; readonly to: Plan['state'] }>> = {
+    approve: { from: 'proposed', to: 'approved' }, reject: { from: 'proposed', to: 'rejected' },
+    pause: { from: 'approved', to: 'paused' }, resume: { from: 'paused', to: 'approved' },
+  };
+
+  async function handle(request: IncomingMessage, response: ServerResponse, method: string, url: URL, user: string): Promise<void> {
+    const parts = url.pathname.split('/').slice(2);              // after '/api'
+    const [collection, id, action] = parts;
+    if (method === 'GET') {
+      if (collection === 'inbox' && parts.length === 1) return sendJson(response, 200, (start.inbox ?? []).map((item) => ({ ...item, state: plans.find((p) => p.id === item.planId)?.state === 'proposed' ? 'waiting' : 'handled' })));
+      if (collection === 'lead' && parts.length === 1) return sendJson(response, 200, state);
+      if (collection === 'lead' && id === 'messages' && parts.length === 2) return sendJson(response, 200, messages.filter((m) => m.seq > after(request, url)));
+      if (collection === 'lead' && id === 'memory' && parts.length === 2) return sendJson(response, 200, start.memory);
+      if (collection === 'lead' && id === 'stream' && parts.length === 2) {
+        const from = after(request, url);
+        response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+        for (const message of messages) if (message.seq > from) response.write(leadFrame({ kind: 'message', message }));
+        response.write(leadFrame({ kind: 'state', state }));
+        return void response.end();
+      }
+      if (collection === 'plans' && parts.length === 1) return sendJson(response, 200, plans);
+      if (collection === 'plans' && parts.length === 2) {
+        const plan = plans.find((p) => p.id === id);
+        return plan ? sendJson(response, 200, plan) : sendJson(response, 404, { error: 'no such plan' });
+      }
+      return sendJson(response, 404, { error: 'not in the fixtures' });
+    }
+    if (method !== 'POST') return sendJson(response, 405, { error: 'method not allowed' });
+    const body = await readBody(request);
+    calls.push({ method, path: url.pathname, user, body });
+    const record = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    if (collection === 'lead' && id === 'messages' && parts.length === 2) {
+      if (typeof record.text !== 'string' || !record.text.trim()) return sendJson(response, 400, { error: 'text must be a non-empty text' });
+      if (record.goal !== undefined && record.goal !== true) return sendJson(response, 400, { error: 'goal is true or absent' });
+      const pending = record.goal === true ? null : state.pendingQuestion;
+      if (pending) {
+        const asked = messages.findIndex((m) => m.question?.requestId === pending.requestId);
+        const question = messages[asked];
+        if (question?.question) messages[asked] = { ...question, question: { ...question.question, state: 'handled' } };
+        state = { ...state, pendingQuestion: null };
+      }
+      return sendJson(response, 200, add({ at: now().toISOString(), by: 'owner', user, text: record.goal === true ? `Goal: ${record.text}` : record.text, kind: 'message' }));
+    }
+    if (collection === 'plans' && id && action && parts.length === 3 && allowed[action]) {
+      const plan = plans.find((p) => p.id === id);
+      if (!plan) return sendJson(response, 404, { error: 'no such plan' });
+      const rule = allowed[action] as { from: Plan['state']; to: Plan['state'] };
+      if (plan.state !== rule.from) return sendJson(response, 409, { error: `the plan is ${plan.state}` });
+      return sendJson(response, 200, move(plan, rule.to));
+    }
+    sendJson(response, 404, { error: 'not in the fixtures' });
+  }
+
+  return {
+    kind: 'fixtures', calls, plans,
+    state: () => state,
+    messages: () => messages,
+    forward(request, response, forward) {
+      handle(request, response, forward.method, new URL(forward.path, 'http://fixtures'), forward.user.id).catch(() => {
+        if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });
+        else response.destroy();
+      });
+    },
+  };
 }
