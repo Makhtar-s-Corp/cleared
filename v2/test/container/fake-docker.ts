@@ -1,5 +1,5 @@
-// A fake `docker` CLI for the container tests: it keeps containers, networks
-// and volumes in memory, honours `--filter label=...` the way the CLI does,
+// A fake `docker` CLI for the container tests: it keeps containers, networks,
+// volumes and images in memory, honours `--filter label=...` the way the CLI does,
 // and records every argument list it receives. No test here needs Docker.
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
@@ -39,6 +39,7 @@ function matches(object: FakeObject, args: readonly string[]): boolean {
   return args.every((arg, index) => {
     if (arg !== '--filter') return true;
     const filter = args[index + 1] ?? '';
+    if (filter.startsWith('reference=')) return object.name === filter.slice('reference='.length);
     if (!filter.startsWith('label=')) throw new Error(`fake docker: unsupported filter ${filter}`);
     const pair = filter.slice('label='.length);
     const at = pair.indexOf('=');
@@ -59,7 +60,11 @@ export class FakeDocker {
   readonly containers: FakeObject[] = [];
   readonly networks: FakeObject[] = [];
   readonly volumes: FakeObject[] = [];
+  readonly images: FakeObject[] = [];
   readonly calls: Call[] = [];
+  // The working folder and the VOLUME paths `image inspect` reports, by tag.
+  workdirOf: (tag: string) => string = () => '/app';
+  volumesOf: (tag: string) => readonly string[] = () => [];
   // Return a result to replace the normal answer, for failure injection.
   intercept: (args: readonly string[]) => DockerResult | undefined = () => undefined;
   // Answer of `exec`, by command.
@@ -87,7 +92,7 @@ export class FakeDocker {
   }
 
   all(): FakeObject[] {
-    return [...this.containers, ...this.networks, ...this.volumes];
+    return [...this.containers, ...this.networks, ...this.volumes, ...this.images];
   }
 
   withLabel(key: string, value: string): FakeObject[] {
@@ -110,12 +115,33 @@ export class FakeDocker {
 
   private answer(args: readonly string[]): DockerResult {
     const [first, second] = args;
-    const verb = first === 'network' || first === 'volume' ? `${first} ${second}` : first;
+    const verb = first === 'network' || first === 'volume' || first === 'image' ? `${first} ${second}` : first;
     switch (verb) {
       case 'version':
         return ok('{"Client":{"Version":"29.8.1"},"Server":{"Version":"29.8.1"}}\n');
-      case 'build':
+      case 'build': {
+        // The tag names the image; a second build of a tag replaces it.
+        const tag = args[args.indexOf('--tag') + 1] ?? '';
+        const at = this.images.findIndex((image) => image.name === tag);
+        if (at >= 0) this.images.splice(at, 1);
+        this.images.push({ id: `sha256:${this.id()}`, name: tag, labels: labelsOf(args), args: [...args] });
         return ok('');
+      }
+      case 'image ls':
+        return this.list(this.images, args, (image) => ({ ID: image.id, Repository: image.name.split(':')[0], Tag: image.name.split(':')[1] ?? 'latest' }));
+      case 'image inspect': {
+        const found = targets(args).map((id) => this.images.find((image) => image.id === id));
+        if (found.some((image) => !image)) return fail('Error: No such image');
+        return ok(JSON.stringify(found.map((image) => {
+          const volumes = this.volumesOf(image?.name ?? '');
+          return {
+            Id: image?.id, RepoTags: [image?.name],
+            Config: { Labels: Object.keys(image?.labels ?? {}).length ? image?.labels : null, WorkingDir: this.workdirOf(image?.name ?? ''), Volumes: volumes.length ? Object.fromEntries(volumes.map((path) => [path, {}])) : null },
+          };
+        })));
+      }
+      case 'image rm':
+        return this.remove(this.images, targets(args), 'id');
       case 'network create': {
         const name = args[args.length - 1] ?? '';
         if (this.networks.some((n) => n.name === name)) return fail(`Error: network with name ${name} already exists`);
@@ -167,7 +193,14 @@ export class FakeDocker {
         return this.execAnswer(targets(args).slice(1));
       case 'inspect': {
         const container = this.containers.find((c) => c.id === targets(args)[0]);
-        return container ? ok(JSON.stringify([{ Id: container.id, Name: `/${container.name}`, Config: { Labels: container.labels } }])) : fail('Error: No such object');
+        if (!container) return fail('Error: No such object');
+        // Each network of its create line, with an address made from its position.
+        const at = this.containers.indexOf(container);
+        const networks = (container.args ?? []).flatMap((arg, i, all) => (all[i - 1] === '--network' ? [arg.split(',')[0]?.replace(/^name=/, '') ?? ''] : []));
+        return ok(JSON.stringify([{
+          Id: container.id, Name: `/${container.name}`, Config: { Labels: container.labels }, State: { Running: container.state === 'running' },
+          NetworkSettings: { Networks: Object.fromEntries(networks.map((name) => [name, { IPAddress: `172.30.0.${at + 2}` }])) },
+        }]));
       }
       case 'network inspect': {
         const network = this.networks.find((n) => n.id === targets(args)[0]);
