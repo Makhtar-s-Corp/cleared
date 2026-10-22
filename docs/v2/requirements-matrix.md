@@ -146,7 +146,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 | Id | Requirement | Milestone | Delivered by | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
 | C1 | A workspace with four tabs, Plan, Terminal, Editor, Browser, with Take over and Give back | 1 (catch-up in 2) | lane 20 | lane 20's tab and takeover tests; proof j2-multi step 4 | planned |
-| C2 | Proposed knowledge with Approve and Reject in the inbox, replacing approvals by comment | 2 | lanes 24, 27 | lane 24's tests; proof j2 step 6 (the knowledge items of the night) | planned |
+| C2 | Proposed knowledge with Approve and Reject in the inbox, replacing approvals by comment | 2 | lanes 17 (the inbox kind), 24, 27 | lane 24's tests make the line green; proof j2 step 6 records how many knowledge items the night produced, whatever the count | planned |
 | C3 | Linear and GitHub delegation (Slack later) | 4 | | | later |
 | C4 | A `.devcontainer` setup session | 5 | | | later |
 | C5 | The project page kept up to date | 4 | | | later |
@@ -173,7 +173,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 | --- | --- | --- | --- | --- | --- |
 | M0 | Principle: a workspace is several services (repositories or monorepo folders); a ticket belongs to the workspace and can touch several; a one-service workspace changes nothing | 2 | lane 14 | lane 14's migration and configuration tests (the one-service case equal to today) | planned |
 | M1 | The workspace and services model with a config per service; three-level memory (workspace, service, contracts) | 1 (catch-up in 2) | lanes 14, 19 | lane 14's tests; lane 19's briefing tests | planned |
-| M2 | A ticket in steps: the contract first (OpenAPI, protobuf, JSON Schema or an event, validated by the human), steps per service with a fake service, then end-to-end integration; a plan with dependencies, order and cost per step | 2 | lanes 23, 27 (OpenAPI 3); protobuf, JSON Schema and events deferred by the plan's question 5 | lane 23's tests; proof j2-multi steps 2 to 5 | partial / open (question 5: the default moves the other formats to milestone 3) |
+| M2 | A ticket in steps: the contract first (OpenAPI, protobuf, JSON Schema or an event, validated by the human), steps per service with a fake service, then end-to-end integration; a plan with dependencies, order and cost per step | 2 | lanes 17 (the inbox kind), 23, 27 (OpenAPI 3); protobuf, JSON Schema and events deferred by the plan's question 5 | lane 23's tests; proof j2-multi steps 2 to 5 | partial / open (question 5: the default moves the other formats to milestone 3) |
 | M3 | A set of branches with the same name, sibling containers, a fake service when one cannot be launched, a trial environment per ticket (the Browser tab) | 1 (catch-up in 2) | lanes 15, 20 | lane 15's tests and `doctor workspace`; lane 20's preview isolation test; proof j2-multi step 4 | planned |
 | M4 | Notes between the sessions of a ticket; a contract change reopens the contract step with the human's approval; the handover files knowledge in the contract's memory | 3 | | | later (the contract memory level itself: lane 19) |
 | M5 | One release card as a train: the landing order, health between landings, rollback in reverse order, compatibility verified before approval (an untouched consumer blocks; propose an extension or backward compatibility) | 1 (catch-up in 2) | lanes 16, 21 | lane 16's train tests; proof j2-multi steps 6 to 10 | planned |
@@ -188,7 +188,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 | Id | Requirement | Milestone | Delivered by | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
 | P1 | The store is migrated by versioned, tested, reversible migrations (replan decision 19) | 2 | lane 14 | `test/store/migrations.test.ts` | planned |
-| P8 | A page built by a session (the trial environment) runs on another origin than the app, sandboxed, without the owner's credentials, so it can approve nothing (replan decision 20) | 2 | lanes 15, 20 | lane 20's preview isolation test; lane 15's header test | planned |
+| P8 | A page built by a session (the trial environment) runs on another origin than the app, sandboxed, without the owner's credentials, behind an unguessable per-session address, so it can approve nothing (replan decision 20) | 2 | lanes 15, 20 | lane 20's preview isolation test; lane 15's header test | planned |
 | P9 | No instruction written by a session runs during a sibling's build, and the ticket layer is built with no network (replan decision 20) | 2 | lane 15 | lane 15's build command-line test | planned |
 | P2 | The front end's build never reaches a CopilotKit host; the telemetry switches are off (owner decision of 2026-10-22 06:29) | 2 | lane 12 | lane 12's request-watch test | in progress |
 | P3 | The lead's context cycle, commitments as rows, the handover record, the event turns (first plan, decisions 3, 4; sections 4.1 to 4.3) | 2 | 167, 169, 176 | `test/lead/engine.test.ts`, `test/lead/property.test.ts`, `doctor lead` | done |
