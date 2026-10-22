@@ -88,5 +88,6 @@
   "need_session_plan": "Session plan · {age}",
   "session_plan_low": "Low confidence: the author waits for your Go.",
   "session_plan_medium": "Medium confidence: the author waits for your Go.",
-  "session_plan_high": "High confidence: the author waits for your Go."
+  "session_plan_high": "High confidence: the author waits for your Go.",
+  "release_blocked": "It cannot be approved as it is; its card proposes how."
 }

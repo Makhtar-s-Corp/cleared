@@ -16,8 +16,8 @@ const fr = translator(loadCatalog('tower', 'fr'));
 test('the workspace line names each service, its live sessions and its train', async () => {
   const markup = renderTowerBody(towerModel(await workspaceFixture(FIXTURE_NOW), FIXTURE_NOW, OWNER_ID), en);
   assert.match(markup, /<ul class="workspace-line" aria-label="Services">/);
-  assert.match(markup, /<li class="svc" data-service="guestbook" data-state="landing"><span class="svc-name">guestbook<\/span> <span class="svc-state">3 live sessions · landing LOCAL-169<\/span><\/li>/);
-  assert.match(markup, /<li class="svc" data-service="filter-api" data-state="rolled_back"><span class="svc-name">filter-api<\/span> <span class="svc-state">2 live sessions · rolled back LOCAL-168<\/span><\/li>/);
+  assert.match(markup, /<li class="svc" data-service="guestbook" data-state="landing"><span class="svc-name">guestbook<\/span> <span class="svc-state">3 live sessions · <span class="svc-train">landing LOCAL-169<\/span><\/span><\/li>/);
+  assert.match(markup, /<li class="svc" data-service="filter-api" data-state="rolled_back"><span class="svc-name">filter-api<\/span> <span class="svc-state">2 live sessions · <span class="svc-train">rolled back LOCAL-168<\/span><\/span><\/li>/);
   assert.doesNotMatch(markup, /\sstyle=/);
 });
 
@@ -51,7 +51,7 @@ test('in French, and every word from the catalog or the data', async () => {
   const data = await workspaceFixture(FIXTURE_NOW);
   const markup = renderTowerBody(towerModel(data, FIXTURE_NOW, OWNER_ID), fr);
   assert.match(markup, /Repris en main par vous · 6 min/);
-  assert.match(markup, /3 sessions en cours · atterrit LOCAL-169/);
+  assert.match(markup, /3 sessions en cours · <span class="svc-train">atterrit LOCAL-169<\/span>/);
   const sentinel: Translate = (key) => `«${key}»`;
   const model = towerModel(data, FIXTURE_NOW, OWNER_ID);
   const allowed = strings(data);

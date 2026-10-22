@@ -11,7 +11,7 @@
 .workspace-line .svc[data-state="rolled_back"]::before { background: var(--danger); }
 .workspace-line .svc-name { font-weight: 500; }
 .workspace-line .svc-state { color: var(--text-muted); }
-.workspace-line .svc[data-state="rolled_back"] .svc-state { color: var(--danger-text); }
+.workspace-line .svc[data-state="rolled_back"] .svc-train { color: var(--danger-text); }
 
 /* a live session's service, beside its ticket */
 .session-head .svc-tag { padding: 0 6px; border-radius: 4px; background: var(--sunken); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

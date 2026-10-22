@@ -86,6 +86,14 @@ test('a session plan that waits is a need with its confidence; a kind the tower 
   assert.equal(model.needs.length, 4);
 });
 
+test('a release blocked before approval says why and that it cannot be approved, never that the approval ships it', async () => {
+  const model = towerModel(await workspaceFixture(FIXTURE_NOW), FIXTURE_NOW, OWNER_ID);
+  const blocked = model.needs.find((card) => card.ticket === 'LOCAL-171');
+  assert.ok(blocked);
+  assert.equal(needSentence(blocked, t), 'The ticket changes contract/openapi.yaml of the filter API, and the guestbook, which consumes it, has no step. It cannot be approved as it is; its card proposes how.');
+  assert.doesNotMatch(needSentence(blocked, fr), /ships|livre/);
+});
+
 test('a new ticket names the services picked, and none when none is picked', () => {
   assert.deepEqual(newTicket(' A ', '', 'guestbook', ['guestbook', 'filter-api']), { title: 'A', project: 'guestbook', services: ['guestbook', 'filter-api'] });
   assert.deepEqual(newTicket('A', ' b ', 'guestbook', []), { title: 'A', project: 'guestbook', body: 'b' });

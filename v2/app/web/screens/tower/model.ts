@@ -142,6 +142,8 @@ function need(item: InboxItem | SessionPlanItem, now: Date, titles: ReadonlyMap<
   } as const;
   switch (item.kind) {
     case 'release': {
+      // A train blocked before approval (decision 21) cannot be approved as it is.
+      if (item.train?.state === 'blocked') return { ...base, title: item.title, detail: item.train.blocked?.reason ?? '', detailKey: 'release_blocked', detailValues: {} };
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
       const checks = CHECKS[item.pr.checks];
       const key = reviewer ? `release_reviewed_${checks}` : `release_unreviewed_${checks}`;
@@ -249,12 +251,17 @@ export function towerModel(data: TowerData, now: Date, viewer?: string): TowerMo
   };
 }
 
-// "3 live sessions · landing LOCAL-169", or "quiet".
+// "3 live sessions · landing LOCAL-169", or "quiet": the sessions, then the
+// train, which the line draws apart so that only a rollback is in red.
+export function serviceParts(row: ServiceRow, t: Translate): { readonly live: string | null; readonly train: string | null } {
+  const live = row.live > 0 ? plural(row.live, 'service_live', t) : null;
+  const train = row.landing ? t('service_landing', { ticket: row.landing }) : row.rolledBack ? t('service_rolled_back', { ticket: row.rolledBack }) : null;
+  return { live, train };
+}
+
 export function serviceState(row: ServiceRow, t: Translate): string {
-  const parts = row.live > 0 ? [plural(row.live, 'service_live', t)] : [];
-  if (row.landing) parts.push(t('service_landing', { ticket: row.landing }));
-  else if (row.rolledBack) parts.push(t('service_rolled_back', { ticket: row.rolledBack }));
-  return parts.length ? parts.join(' · ') : t('service_quiet');
+  const { live, train } = serviceParts(row, t);
+  return [live, train].filter(Boolean).join(' · ') || t('service_quiet');
 }
 
 export const serviceTone = (row: ServiceRow): string => (row.landing ? 'landing' : row.rolledBack ? 'rolled_back' : row.live > 0 ? 'live' : 'quiet');

@@ -15,8 +15,8 @@ import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import {
   DRAFT_MAX, REFRESH_MS, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, loadTower, needId, needSentence, planProgress,
-  serviceState, serviceTone, takenOverText, towerModel, towerSummary,
-  type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type TowerModel,
+  serviceParts, serviceState, serviceTone, takenOverText, towerModel, towerSummary,
+  type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ServiceRow, type TowerModel,
 } from './model.ts';
 import './tower.css';
 
@@ -100,6 +100,12 @@ function LeadSide({ lead, t, draft, onDraft }: { readonly lead: LeadCardModel | 
   );
 }
 
+function ServiceState({ row, t }: { readonly row: ServiceRow; readonly t: Translate }) {
+  const { live, train } = serviceParts(row, t);
+  if (!train) return <span className="svc-state">{serviceState(row, t)}</span>;
+  return <span className="svc-state">{live ? `${live} · ` : null}<span className="svc-train">{train}</span></span>;
+}
+
 function PlanLine({ row, t }: { readonly row: PlanRow; readonly t: Translate }) {
   const { bar, line } = planProgress(row, t);
   return (
@@ -120,7 +126,7 @@ export function TowerBody({ model, t, leadDraft = '', onLeadDraft }: { readonly 
         <div className="hello"><h1>{heading(model.needs.length, t)}</h1><p className="muted">{towerSummary(model, t)}</p></div>
         {model.services.length === 0 ? null : (
           <ul className="workspace-line" aria-label={t('services_title')}>
-            {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <span className="svc-state">{serviceState(row, t)}</span></li>)}
+            {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
           </ul>
         )}
         <section className="block" aria-labelledby="needs-title">
