@@ -2,7 +2,9 @@
 // It opens ledger.db as the service finds it (users, sign-in sessions),
 // reads or makes the proof it shows the service, and serves the app on
 // 127.0.0.1:8792 with the live service, or the fixtures
-// (CLEARED_V2_APP_SOURCE=fixtures). Settings: src/config.ts.
+// (CLEARED_V2_APP_SOURCE=fixtures). Settings: src/config.ts. The pages are
+// the front end Vite built into dist/ (npm run build; npm run app builds
+// first): without it, the app stops at once and says so.
 import { createServer } from 'node:http';
 import users, { ProofError, SqliteUsers, proofPath, readOrCreateProof } from '../src/modules/users.ts';
 import { formatAddress } from '../src/server.ts';
@@ -10,7 +12,7 @@ import { LedgerPathError, StoreError, applyTables, ledgerPath, openStore } from 
 import { fixtureSource } from './fixtures/source.ts';
 import { AppConfigError, readAppConfig } from './src/config.ts';
 import { serviceSource } from './src/proxy.ts';
-import { createAppHandler } from './src/server.ts';
+import { BuildMissing, createAppHandler, readBundle } from './src/server.ts';
 import { CookieSessions, SESSION_TABLES } from './src/session-cookie.ts';
 import { LoginThrottle } from './src/users.ts';
 
@@ -18,13 +20,14 @@ function orExit<T>(make: () => T): T {
   try {
     return make();
   } catch (error) {
-    if (!(error instanceof AppConfigError || error instanceof LedgerPathError || error instanceof StoreError || error instanceof ProofError)) throw error;
+    if (!(error instanceof AppConfigError || error instanceof LedgerPathError || error instanceof StoreError || error instanceof ProofError || error instanceof BuildMissing)) throw error;
     console.error(`cleared-v2-app: ${error.message}`);
     process.exit(64);
   }
 }
 
 const config = orExit(() => readAppConfig());
+orExit(() => readBundle());
 const ledger = orExit(() => ledgerPath());
 const store = orExit(() => openStore(ledger));
 applyTables(store.db, [...users.tables, ...SESSION_TABLES]);
