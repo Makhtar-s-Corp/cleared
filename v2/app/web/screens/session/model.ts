@@ -7,7 +7,7 @@
 // The browser may only `import type` from v2/src, so the names of the AG-UI
 // subset are copied here and a test keeps the copy equal to EVENT_TYPES.
 import type { Interrupt } from '@ag-ui/core';
-import type { SessionSummary } from '../../../../src/api/types.ts';
+import type { SessionPlan, SessionSummary, TakenOver } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
@@ -27,6 +27,10 @@ export const EVENT_NAMES = [
 
 // The message the plan's first user turn carries: the ticket, shown on the ticket card.
 const PROMPT_AUTHOR = 'cleared';
+
+// The author's host call that proposes its session plan: the plan's own
+// row says it (lane 17's cleared.session_plan), so the call is not a row.
+const PLAN_TOOL = 'mcp__cleared__propose_session_plan';
 
 // ---------------------------------------------------------------- the model
 
@@ -63,7 +67,8 @@ export type Row =
   | { readonly kind: 'denied'; readonly at: string; readonly requestId: string; readonly rule: string }
   | { readonly kind: 'interrupted'; readonly at: string }
   | { readonly kind: 'error'; readonly at: string; readonly message: string }
-  | { readonly kind: 'verdict'; readonly at: string; readonly verdict: 'pass' | 'changes_requested'; readonly round: number };
+  | { readonly kind: 'verdict'; readonly at: string; readonly verdict: 'pass' | 'changes_requested'; readonly round: number }
+  | { readonly kind: 'plan'; readonly at: string; readonly confidence: SessionPlan['confidence']; readonly go: SessionPlan['go'] };
 
 export type Step = { name: SessionState['steps'][number]['name']; startedAt: string; finishedAt: string | null };
 
@@ -83,10 +88,11 @@ export type SessionModel = {
   readonly texts: Map<string, MessageRow>;
   readonly requests: Map<string, ToolRow>;
   readonly questions: Map<string, QuestionRow>;
+  plan: SessionPlan | null;                         // the last cleared.session_plan: the proposal, or its Go
 };
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map() };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -249,6 +255,10 @@ function custom(model: SessionModel, at: string, event: Extract<AgUiEvent, { typ
     case 'cleared.review_verdict':
       model.rows.push({ kind: 'verdict', at, verdict: event.value.verdict, round: event.value.round });
       break;
+    case 'cleared.session_plan':
+      model.plan = event.value;
+      model.rows.push({ kind: 'plan', at, confidence: event.value.confidence, go: event.value.go });
+      break;
     default:
       break;
   }
@@ -267,6 +277,7 @@ export function timeline(model: SessionModel): Row[] {
   const out: Row[] = [];
   for (const row of model.rows) {
     if (row.kind === 'message' && (row.by === PROMPT_AUTHOR || !row.text.trim())) continue;
+    if (row.kind === 'tool' && row.name === PLAN_TOOL) continue;
     const previous = out[out.length - 1];
     if (row.kind === 'tool' && row.input?.kind === 'read' && !row.request) {
       if (previous?.kind === 'read') out[out.length - 1] = { kind: 'read', at: previous.at, paths: [...previous.paths, row.input.path] };
@@ -350,6 +361,7 @@ export type SessionThread = {
   readonly pending: readonly string[];
   readonly interrupts: readonly QuestionInterrupt[];
   readonly steps: readonly Step[];
+  readonly plan: SessionPlan | null;
 };
 
 export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
@@ -361,7 +373,7 @@ export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
 
 export function threadOf(model: SessionModel): SessionThread {
   return {
-    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps],
+    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan,
   };
 }
 
@@ -377,7 +389,13 @@ export type SessionView = {
   readonly now: Date;
   readonly busy?: ReadonlySet<string>;                    // request ids whose answer is on its way
   readonly answers?: ReadonlyMap<string, LocalAnswer>;     // what this tab knows of its questions' answers
+  readonly takenOver?: TakenOver | null;                  // what this tab knows of the take over, newer than the summary's
 };
+
+// Who took the session over (decision 30, lane 20): what this tab knows,
+// else what the service said; null when nobody did.
+export const takenOverOf = (view: Pick<SessionView, 'takenOver' | 'summary'>): TakenOver | null =>
+  (view.takenOver !== undefined ? view.takenOver : view.summary.takenOver) ?? null;
 
 // The stored events say who answered a question, not with what: what this
 // tab sent is kept here, and an answer that came after the question no
@@ -409,18 +427,21 @@ export function known(t: Translate, key: string, values?: Record<string, string 
 
 export const phaseOf = (view: SessionView): SessionPhase => view.thread.state?.phase ?? view.summary.phase;
 
-export function statusTone(view: SessionView): 'waiting' | 'progress' | 'review' | 'ended' {
+export function statusTone(view: SessionView): 'waiting' | 'progress' | 'review' | 'ended' | 'paused' {
   const phase = phaseOf(view);
   if (ENDED.has(phase)) return 'ended';
-  if (phase === 'waiting_human' && view.thread.pending.length > 0) return 'waiting';
+  if (takenOverOf(view)) return 'paused';
+  if (phase === 'waiting_human' && (view.thread.pending.length > 0 || view.thread.plan?.go === null)) return 'waiting';
   return phase === 'reviewing' ? 'review' : 'progress';
 }
 
 export function phrase(view: SessionView, t: Translate): string {
   const phase = phaseOf(view);
   const data = view.thread.state?.status || view.summary.status;
+  const taken = ENDED.has(phase) ? null : takenOverOf(view);
+  if (taken) return t(taken.by === view.me ? 'status_taken_over_you' : 'status_taken_over_other');
   switch (phase) {
-    case 'waiting_human': return t(view.thread.pending.length > 0 ? 'status_waiting_human' : 'status_idle');
+    case 'waiting_human': return t(view.thread.pending.length > 0 ? 'status_waiting_human' : view.thread.plan?.go === null ? 'status_waiting_go' : 'status_idle');
     case 'starting': return t('status_starting');
     case 'done': return t('status_done');
     case 'stopped': return t('status_stopped');

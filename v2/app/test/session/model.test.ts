@@ -26,8 +26,10 @@ function fixtureModel() {
 test('the fixture session adds up to the rows of the capture, with their counts', () => {
   const { model } = fixtureModel();
   const rows = timeline(model);
-  assert.deepEqual(rows.map((row) => row.kind), ['read', 'tool', 'tool', 'message', 'message', 'tool', 'tool']);
-  const [read, editA, run, question, answer, editB, install] = rows as [Row, Row, Row, Row, Row, Row, Row];
+  // The session plan (lane 20's fixture): proposed, then its Go, before the first edit.
+  assert.deepEqual(rows.map((row) => row.kind), ['read', 'plan', 'plan', 'tool', 'tool', 'message', 'message', 'tool', 'tool']);
+  const [read, proposed, given, editA, run, question, answer, editB, install] = rows as [Row, Row, Row, Row, Row, Row, Row, Row, Row];
+  assert.deepEqual([proposed.kind === 'plan' && [proposed.confidence, proposed.go], given.kind === 'plan' && given.go?.by], [['high', null], USER]);
   assert.deepEqual([read.kind === 'read' && read.paths, time(read.at)], [['src/screens/Upcoming.jsx', 'test/upcoming.test.mjs', 'test/screens.test.mjs'], '09:23']);
   assert.deepEqual([editA.kind === 'tool' && editA.input, time(editA.at)], [{ kind: 'edit', path: 'src/engine/upcoming.mjs', added: 24, removed: 6 }, '09:25']);
   assert.deepEqual(run.kind === 'tool' && [run.input, resultSummary(run.output)], [{ kind: 'execute', command: 'npm run test:upcoming', description: 'Run the upcoming tests' }, { tone: 'ok', key: 'passed', n: 18 }]);
@@ -48,8 +50,10 @@ test('the state is the last snapshot with the deltas applied', () => {
   assert.equal(model.state?.phase, 'waiting_human');
   assert.deepEqual(model.state?.files.map((f) => [f.path, f.added, f.removed]), [['src/engine/upcoming.mjs', 24, 6], ['src/screens/Upcoming.jsx', 41, 12], ['test/upcoming.test.mjs', 38, 0]]);
   assert.deepEqual(model.state?.checks, [{ name: 'Targeted tests', state: 'passed' }, { name: 'Full suite', state: 'pending' }]);
-  assert.deepEqual(model.state?.steps.map((s) => [s.name, s.finishedAt === null]), [['workspace', false], ['author', true], ['waiting_human', true]]);
-  assert.deepEqual(detailOf(fixture, AUTHOR_ID)?.state, model.state, 'the service answers the same state');
+  assert.deepEqual(model.state?.steps.map((s) => [s.name, s.finishedAt === null]), [['workspace', false], ['author', false], ['plan_gate', false], ['author', true], ['waiting_human', true]]);
+  const { plan, ...served } = detailOf(fixture, AUTHOR_ID)?.state ?? {};
+  assert.deepEqual(served, model.state, 'the service answers the same state');
+  assert.deepEqual(plan, model.plan, 'with the session plan');
 });
 
 test('a delta covers add, replace and remove at a path, and ignores a path that is not there', () => {

@@ -43,7 +43,7 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
 test('the request has its three buttons, and nothing else on the page answers it', () => {
   const html = renderSession(viewOf(), en);
   assert.deepEqual([...html.matchAll(/data-answer="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once']);
-  assert.equal(count(html, /data-row="/g), 7, 'seven rows: the read group, two edits, the run, the two messages, the install');
+  assert.equal(count(html, /data-row="/g), 9, 'nine rows: the read group, the plan and its Go, two edits, the run, the two messages, the install');
   assert.equal(count(html, /data-row="read"/g), 1);
   assert.equal(count(html, /data-row="edit"/g), 2);
   assert.equal(count(html, /data-row="request"/g), 1);

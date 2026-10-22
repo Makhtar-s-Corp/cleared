@@ -44,8 +44,15 @@
 // applies two sensitivities of the ticket's services (decision 24): a
 // `reviewer:<model>` names the reviewer, and `full` keeps a Quick ticket
 // off Haiku.
+//
+// The owner can take an author's session over (decision 30, lane 20,
+// flow/takeover.ts): the turn is interrupted, what waited for the human is
+// settled as cancelled, and the session is paused, said by `takenOver` on
+// its summary and its state, until Give back resumes it. The flow leaves a
+// paused session alone: no idle stop, no Go of the delay, no review, no
+// message; a restart stops it as any live session.
 import { posix } from 'node:path';
-import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary } from '../api/types.ts';
+import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
@@ -68,6 +75,7 @@ import { PLAN_GO_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } f
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
+import { GIVEN_BACK, TAKEN_OVER } from './takeover.ts';
 import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
 import { foldState, sessionPlanOf } from './state.ts';
 
@@ -211,6 +219,7 @@ export class FlowEngine {
   #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
   #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
   #origins = new Map<TicketId, Origin>();                           // the plan item a ticket's current flow runs for
+  #paused = new Map<SessionId, TakenOver>();                        // sessions the owner took over, until Give back (lane 20)
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -301,7 +310,7 @@ export class FlowEngine {
     const now = this.#now().getTime();
     // A session held by its plan, or its want of one, is not idle: its delay decides (#gateTick).
     for (const live of [...this.#live.values()]) {
-      if (live.closed || this.inbox.waitingFor(live.id) > 0 || this.#holds(live.id)) continue;
+      if (live.closed || this.#paused.has(live.id) || this.inbox.waitingFor(live.id) > 0 || this.#holds(live.id)) continue;
       if (now - live.lastActivity < this.config.idleMs) continue;
       const minutes = Math.round(this.config.idleMs / 60_000);
       await this.#stopTicket(live, 'idle', `No activity for ${minutes} minutes: the session was stopped.`,
@@ -566,13 +575,15 @@ export class FlowEngine {
     const phase = row.status as SessionPhase;
     const state = foldState(events, phase);
     const plan = sessionPlanOf(events);
+    const takenOver = this.#paused.get(id);
     // The service and the preview key the runtime stored when the session's
     // containers started (lane 15), when its row holds them; the session
-    // plan of an author that proposed one (lane 17).
+    // plan of an author that proposed one (lane 17); who took it over (lane 20).
     return {
       id: row.id, project: row.project, ticket: row.ticket, role: row.role, harness: row.harness, model: row.model,
-      phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0, state: plan ? { ...state, plan } : state,
-      ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}),
+      phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0,
+      state: { ...state, ...(plan ? { plan } : {}), ...(takenOver ? { takenOver } : {}) },
+      ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}), ...(takenOver ? { takenOver } : {}),
     };
   }
 
@@ -916,7 +927,7 @@ export class FlowEngine {
     const due: { live: Live; minutes: number; go: boolean }[] = [];
     for (const live of this.#live.values()) {
       const gate = this.#gates.get(live.id);
-      if (live.closed || !gate || gate.heldAt === undefined) continue;
+      if (live.closed || !gate || gate.heldAt === undefined || this.#paused.has(live.id)) continue;
       const minutes = live.settings.planGoMinutes ?? PLAN_GO_MINUTES;
       if (now < gate.heldAt + minutes * 60_000) continue;
       if (gate.phase === 'held' && gate.plan?.confidence === 'high') due.push({ live, minutes, go: true });
@@ -956,14 +967,14 @@ export class FlowEngine {
 
   // The owner's Go, from the session plan's inbox item (POST /api/sessions/:id/plan/go).
   async planGo(id: SessionId, by: UserId): Promise<void> {
-    await this.#go(this.#liveSession(id), by);
+    await this.#go(this.#writable(id), by);
   }
 
   // The owner's Change: the plan's item handled, and the author reopened with
   // the message; its next proposal replaces the plan (POST .../plan/change).
   async planChange(id: SessionId, message: string, by: UserId): Promise<void> {
     if (message.trim() === '') throw new FlowError('invalid', 'a Change says what to change in the plan');
-    const live = this.#liveSession(id);
+    const live = this.#writable(id);
     const gate = this.#gates.get(id);
     if (!gate || gate.phase !== 'held' || !gate.plan) throw new FlowError('conflict', `session ${id} has no session plan waiting for its Go`);
     const waiting = this.inbox.sessionPlan(id);
@@ -1051,6 +1062,8 @@ export class FlowEngine {
     }
     // A turn that ends while the inbox still holds a request of this session is not the end of the work.
     if (this.inbox.waitingFor(live.id) > 0) return;
+    // Nor one of a session the owner took over: Give back decides what comes next.
+    if (this.#paused.has(live.id)) return;
     if (live.input.role === 'author' && await this.#gateHolds(live)) return;
     if (live.input.role === 'author') await this.#authorDone(live);
     else if (live.input.role === 'reviewer') await this.#reviewDone(live);
@@ -1091,6 +1104,7 @@ export class FlowEngine {
     if (live.closed) return;
     live.closed = true;
     this.#live.delete(live.id);
+    this.#paused.delete(live.id);
     if (live.waitOpen) {
       live.waitOpen = false;
       this.#step({ id: live.id, ticket: live.input.ticket, project: live.input.project }, 'STEP_FINISHED', 'waiting_human');
@@ -1456,14 +1470,14 @@ export class FlowEngine {
   }
 
   async send(id: SessionId, text: string, by: UserId): Promise<void> {
-    const live = this.#liveSession(id);
+    const live = this.#writable(id);
     live.lastActivity = this.#now().getTime();
     await live.handle.send({ text, by });
     if (this.#store.sessions.get(id)?.status === 'waiting_human' && this.inbox.waitingFor(id) === 0) this.#setPhase(live, live.input.role === 'reviewer' ? 'reviewing' : 'working');
   }
 
   async answer(id: SessionId, requestId: string, decision: Decision, by: UserId): Promise<void> {
-    const live = this.#liveSession(id);
+    const live = this.#writable(id);
     const item = this.inbox.find(id, requestId);
     if (!item || item.state !== 'waiting') throw new FlowError('not_found', `no request ${requestId} is waiting in session ${id}`);
     const asks = item.kind === 'question';
@@ -1480,5 +1494,98 @@ export class FlowEngine {
 
   async interrupt(id: SessionId): Promise<void> {
     await this.#liveSession(id).handle.interrupt();
+  }
+
+  // ---- take over and give back (decision 30, lane 20) ---------------------
+
+  // A live session nobody took over: what a message, an answer or a Go needs.
+  #writable(id: SessionId): Live {
+    const live = this.#liveSession(id);
+    if (this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is taken over: give it back first`);
+    return live;
+  }
+
+  takenOver(id: SessionId): TakenOver | undefined {
+    return this.#paused.get(id);
+  }
+
+  // The checkout the session works in, as this process started it; undefined
+  // for a session of another process (the files route, flow/files.ts).
+  sessionWorkdir(id: SessionId): string | undefined {
+    return this.#inputs.get(id)?.input.workdir;
+  }
+
+  // The owner takes the author's session over: paused first, so that the
+  // end of the interrupted turn is not taken for the end of the work; then
+  // the turn interrupted, and what still waits for the human settled as
+  // cancelled. A session plan waiting for its Go stays in the inbox.
+  async takeOver(id: SessionId, by: UserId): Promise<TakenOver> {
+    const live = this.#liveSession(id);
+    if (live.input.role !== 'author') throw new FlowError('conflict', `session ${id} is the ${live.input.role}'s: only an author's session is taken over`);
+    if (this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is already taken over`);
+    const taken: TakenOver = { by, at: this.#at() };
+    this.#paused.set(id, taken);
+    const from = this.#store.events.after(id).at(-1)?.seq ?? 0;
+    try {
+      await live.handle.interrupt();
+    } catch (error) {
+      this.#paused.delete(id);
+      throw new FlowError('unavailable', `session ${id} could not be interrupted: ${name(error)}`);
+    }
+    const session = { id, ticket: live.input.ticket, project: live.input.project };
+    // The adapter cancels the request of the turn it interrupts; anything
+    // else that waits is cancelled here, once.
+    const settled = new Set(this.#store.events.after(id, from).flatMap(({ event }) =>
+      event.type === 'CUSTOM' && (event.name === 'cleared.permission_answered' || event.name === 'cleared.answered') ? [event.value.requestId] : []));
+    for (const item of this.inbox.items()) {
+      if ((item.kind !== 'permission' && item.kind !== 'question') || item.sessionId !== id || item.state !== 'waiting') continue;
+      if (!settled.has(item.requestId))
+        this.#journal(session, { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: item.requestId, decision: 'cancelled', by: 'policy', rule: TAKEN_OVER } });
+      if (this.inbox.handle(item.id, 'policy')) this.#answered(item.id, item.ticket, id, item.requestId, 'policy');
+    }
+    if (live.waitOpen && this.inbox.waitingFor(id) === 0) {
+      live.waitOpen = false;
+      this.#step(session, 'STEP_FINISHED', 'waiting_human');
+    }
+    this.#setPhase(live, 'waiting_human');
+    this.#snapshot(id, live.input.ticket);
+    return taken;
+  }
+
+  // Give back: the session resumed with the harness's resume, in the same
+  // container, and told to carry on, unless its plan still waits for a Go,
+  // which tells it. A handle that resume made anew replaces the old one,
+  // whose reading then stops. The idle rule counts from now.
+  async giveBack(id: SessionId): Promise<void> {
+    const live = this.#liveSession(id);
+    if (!this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is not taken over`);
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    if (!adapter) throw new FlowError('unavailable', 'no session adapter is configured');
+    let handle: SessionHandle;
+    try {
+      handle = await adapter.resume(id);
+    } catch (error) {
+      throw new FlowError('unavailable', `session ${id} could not be resumed: ${name(error)}`);
+    }
+    this.#paused.delete(id);
+    let current = live;
+    if (handle !== live.handle) {
+      live.closed = true;
+      current = { ...live, handle, closed: false, lastActivity: this.#now().getTime() };
+      this.#live.set(id, current);
+      this.#supervise(current, this.#store.events.after(id).at(-1)?.seq ?? 0);
+    }
+    current.lastActivity = this.#now().getTime();
+    if (this.#holds(id)) {
+      this.#snapshot(id, live.input.ticket);
+      return;
+    }
+    this.#setPhase(current, 'working');
+    this.#snapshot(id, live.input.ticket);
+    try {
+      await current.handle.send({ text: GIVEN_BACK, by: FLOW_USER });
+    } catch (error) {
+      await this.#stopTicket(current, 'error', `The session could not be told it was given back: ${name(error)}`, `The session was given back, but it could not be resumed: ${name(error)}`, 'failed', 'failed');
+    }
   }
 }

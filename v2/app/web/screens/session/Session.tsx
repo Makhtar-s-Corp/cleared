@@ -3,11 +3,15 @@
 // and the composer, the changes, checks and steps on the right. The
 // timeline is the session's CopilotKit agent (agent.ts): this screen draws
 // what the agent holds, and answers through the service's routes.
+//
+// The middle panel has four tabs (decision 30, lane 20; Tabs.tsx): Plan,
+// Terminal (the timeline and the composer, opened first), Editor and
+// Browser, with Take over and Give back beside them.
 import {
-  ArrowRight, ArrowUpRight, Check, Circle, DotOutline, Eye, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
+  ArrowRight, ArrowUpRight, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import type { SessionSummary } from '../../../../src/api/types.ts';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import type { SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver } from '../../../../src/api/types.ts';
 import type { SessionState } from '../../../../src/session/events.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
@@ -21,9 +25,11 @@ import { ApiError } from '@/lib/screen.ts';
 import { formatModel, harnessSquare, liveDot } from '../tower/model.ts';
 import { isSessionThread, SessionAgent, sessionAgentId } from './agent.ts';
 import {
-  ENDED, answerBody, answerLine, clock, decisionOf, duration, family, known, latestOf, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, statusMeta, statusTone, stepsOf, target, verb,
+  ENDED, answerBody, answerLine, clock, decisionOf, duration, family, known, latestOf, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, statusMeta, statusTone, stepsOf, takenOverOf, target, verb,
   type LocalAnswer, type QuestionRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
+import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverNotice, type EditorShown } from './Tabs.tsx';
+import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import './session.css';
 
 // The timeline's marks, Phosphor's regular weight.
@@ -142,6 +148,8 @@ function RowView({ row, view, t, onAnswer, onQuestion }: { readonly row: Row; re
       return <Frame kind="error" at={row.at} icon={WarningCircle} refused><div className="bad">{row.message}</div></Frame>;
     case 'verdict':
       return <Frame kind="verdict" at={row.at} icon={Check}><div>{t(row.verdict === 'changes_requested' ? 'verdict_changes' : 'verdict_ok', { round: row.round })}</div></Frame>;
+    case 'plan':
+      return <Frame kind="plan" at={row.at} icon={row.go ? Check : ListChecks}><div>{row.go ? goLine(row, view.me, t) : t(`row_plan_${row.confidence}`)}</div></Frame>;
   }
 }
 
@@ -151,30 +159,31 @@ export function Timeline({ view, t, onAnswer, onQuestion }: { readonly view: Ses
   return <>{rows.map((row, index) => <RowView key={'id' in row ? `${row.kind}:${row.id}` : `${row.kind}:${row.at}:${index}`} row={row} view={view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} />)}</>;
 }
 
-export function LeftCards({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
+export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void }) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
+  const plan = view.thread.plan;
+  const service = serviceLine(view.summary.service, t);
   return (
     <>
       <section className="card" aria-labelledby="ticket-title">
-        <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span></p>
+        <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
         {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
       </section>
       <section className="card" aria-labelledby="criteria-title">
         <h3 id="criteria-title" className="card-label">{t('criteria_title')}</h3>
-        {parsed.criteria.length === 0 ? <p className="faint small">{t('criteria_none')}</p> : (
-          <ul className="criteria">
-            {parsed.criteria.map((c, index) => (
-              <li key={index} className={c.done ? 'crit-done' : 'crit-open'}>
-                <span className="mark" aria-hidden="true">{c.done ? <Check size={13} /> : <Circle size={13} />}</span>
-                <span>{c.text}</span>
-                <span className="sr-only">{t(c.done ? 'criterion_done' : 'criterion_open')}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <Criteria view={view} t={t} />
       </section>
-      <section className="card" aria-labelledby="plan-title"><h3 id="plan-title" className="card-label">{t('plan_title')}</h3><p className="faint small">{t('plan_empty')}</p></section>
+      <section className="card" aria-labelledby="plan-title">
+        <h3 id="plan-title" className="card-label">{t('plan_title')}</h3>
+        {plan ? (
+          <div className="plan-short">
+            <p><Confidence plan={plan} t={t} /> <span className="faint small">{t('plan_steps_count', { n: plan.steps.length })}</span></p>
+            <p className="small">{plan.go ? goLine(plan, view.me, t) : t('plan_waiting')}</p>
+            {onPlan ? <button type="button" className="link-button small" onClick={onPlan}>{t('plan_tab_title')}</button> : null}
+          </div>
+        ) : <p className="faint small">{t('plan_empty')}</p>}
+      </section>
     </>
   );
 }
@@ -235,12 +244,14 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
   readonly view: SessionView; readonly t: Translate; readonly text?: string; readonly sending?: boolean; readonly interrupting?: boolean; readonly note?: string;
   readonly onText?: (value: string) => void; readonly onSend?: (event: FormEvent<HTMLFormElement>) => void; readonly onInterrupt?: () => void; readonly onHandover?: () => void;
 }) {
-  const off = ENDED.has(phaseOf(view));
+  // A session taken over is written to by nobody until it is given back.
+  const off = ENDED.has(phaseOf(view)) || takenOverOf(view) !== null;
   const role = view.summary.role === 'reviewer' ? 'reviewer' : 'author';
+  const placeholder = takenOverOf(view) !== null && !ENDED.has(phaseOf(view)) ? t('composer_taken_over') : t(`composer_${role}`);
   return (
     <>
       <form className="composer" id="composer" autoComplete="off" onSubmit={onSend}>
-        <Input id="message" name="text" placeholder={t(`composer_${role}`)} aria-label={t(`composer_${role}`)} disabled={off} value={text} onChange={(event) => onText?.(event.target.value)} />
+        <Input id="message" name="text" placeholder={placeholder} aria-label={placeholder} disabled={off} value={text} onChange={(event) => onText?.(event.target.value)} />
         <Button className="btn" id="handover" aria-disabled="true" aria-describedby="handover-note" title={t('handover_note')} onClick={onHandover}>{t('handover')}</Button>
         <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}>{t('interrupt')}</Button>
         <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending}>{t('send')}</Button>
@@ -308,7 +319,22 @@ function Index() {
   return <SessionIndex sessions={data.sessions} tickets={data.tickets} now={now()} t={t} />;
 }
 
-type Loaded = { readonly summary: SessionSummary; readonly state: SessionState; readonly ticket: Ticket | undefined; readonly siblings: readonly SessionSummary[] };
+type Loaded = {
+  readonly summary: SessionSummary; readonly state: SessionState; readonly ticket: Ticket | undefined; readonly siblings: readonly SessionSummary[];
+  readonly previewKey: string | null;
+};
+
+// A file of the checkout, or of the ticket's base, as the files route
+// answers it; its refusal keeps the service's reason (a 403's rule).
+async function readFile(id: string, path: string, base: boolean): Promise<SessionFile | null | { readonly refused: string }> {
+  const url = `/api/service/sessions/${encodeURIComponent(id)}/files/${path.split('/').map(encodeURIComponent).join('/')}${base ? '?version=base' : ''}`;
+  const response = await fetch(url, { headers: { accept: 'application/json' } });
+  if (response.ok) return await response.json() as SessionFile;
+  if (response.status === 404) return null;
+  const body = await response.json().catch(() => ({})) as { error?: unknown };
+  if (response.status === 403 || response.status === 415 || response.status === 413) return { refused: typeof body.error === 'string' ? body.error : String(response.status) };
+  throw new ApiError(response.status, url);
+}
 
 function Live({ loaded }: { readonly loaded: Loaded }) {
   const context = useScreen();
@@ -322,23 +348,39 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   const [sending, setSending] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
   const [note, setNote] = useState('');
+  const [tab, setTab] = useState<Tab>(() => tabOf(window.location.hash));
+  const [takenOver, setTakenOver] = useState<TakenOver | null>(loaded.summary.takenOver ?? null);
+  const [gesture, setGesture] = useState(false);              // a take over, a give back, a Go or a Change on its way
+  const [changing, setChanging] = useState(false);
+  const [change, setChange] = useState('');
+  const [planNote, setPlanNote] = useState('');
+  const [files, setFiles] = useState<SessionFiles['files'] | null>(null);
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+  const [shown, setShown] = useState<EditorShown | undefined>(undefined);
+  const [fileFailed, setFileFailed] = useState(false);
+  const [mode, setMode] = useState<'diff' | 'file'>('diff');
   const timeline = useRef<HTMLDivElement | null>(null);
   const atEnd = useRef(true);
   const id = loaded.summary.id;
 
-  // The reviewer's session appears once it starts; the clock moves on.
+  // The reviewer's session appears once it starts; who took this one over
+  // follows the service; the clock moves on.
   useEvery(REFRESH_MS, async () => {
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSiblings(all.filter((s) => s.ticket === loaded.summary.ticket));
+      const own = all.find((s) => s.id === id);
+      if (own && !gesture) setTakenOver(own.takenOver ?? null);
     } catch { /* the next tick tries again */ }
   });
   useEvery(TICK_MS, () => setNow(context.now()));
 
   const view: SessionView = useMemo(() => ({
-    summary: loaded.summary, ticket: loaded.ticket, siblings, me: context.me.user.id, language: context.me.language, now, busy, answers,
-    thread: thread ?? { lastSeq: 0, lastAt: undefined, state: loaded.state, rows: [], pending: [], interrupts: [], steps: [] },
-  }), [loaded, siblings, context.me, now, busy, answers, thread]);
+    summary: loaded.summary, ticket: loaded.ticket, siblings, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver,
+    thread: thread ?? { lastSeq: 0, lastAt: undefined, state: loaded.state, rows: [], pending: [], interrupts: [], steps: [], plan: null },
+  }), [loaded, siblings, context.me, now, busy, answers, thread, takenOver]);
+  const ended = ENDED.has(phaseOf(view));
+  const takeover = takeoverOf({ takenOver, me: view.me, role: loaded.summary.role, ended });
 
   // The timeline follows the newest row while the person is at its end.
   const onScroll = () => {
@@ -348,7 +390,44 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   useLayoutEffect(() => {
     const el = timeline.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [thread]);
+  }, [thread, tab]);
+
+  // The tab is in the address, so a reload keeps it.
+  const select = (next: Tab, focus = false) => {
+    setTab(next);
+    window.history.replaceState(null, '', `#${next}`);
+    if (focus) document.getElementById(`tab-${next}-button`)?.focus();
+  };
+  const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    select(nextTab(tab, event.key), true);
+  };
+
+  // The Editor's files, when the tab opens and when the session changes one.
+  const changed = (view.thread.state?.files ?? []).map((f) => `${f.path}:${f.added}:${f.removed}`).join('|');
+  useEffect(() => {
+    if (tab !== 'editor') return;
+    let live = true;
+    void context.api<SessionFiles>(`/sessions/${encodeURIComponent(id)}/files`).then((answer) => {
+      if (!live) return;
+      setFiles(answer.files);
+      setSelected((current) => current ?? answer.files[0]?.path);
+    }, () => { if (live) setFiles([]); });
+    return () => { live = false; };
+  }, [context, id, tab, changed]);
+  useEffect(() => {
+    if (tab !== 'editor' || selected === undefined) return;
+    let live = true;
+    setShown(undefined);
+    setFileFailed(false);
+    void Promise.all([readFile(id, selected, false), readFile(id, selected, true)]).then(([file, base]) => {
+      if (!live) return;
+      if (file && 'refused' in file) return setShown({ file: null, base: null, error: file.refused });
+      setShown({ file, base: base && !('refused' in base) ? base : null });
+    }, () => { if (live) setFileFailed(true); });
+    return () => { live = false; };
+  }, [id, tab, selected, changed]);
 
   const post = async (path: string, body: unknown, failure: string): Promise<boolean> => {
     try {
@@ -402,17 +481,72 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
     setBusy((current) => new Set([...current].filter((other) => other !== requestId)));
   };
 
+  // Take over and Give back (flow/takeover.ts).
+  const takeOver = async () => {
+    setGesture(true);
+    if (await post('/takeover', null, 'takeover_failed')) {
+      setTakenOver({ by: view.me, at: context.now().toISOString() });
+      select('terminal');
+      context.inboxChanged();
+    }
+    setGesture(false);
+  };
+  const giveBack = async () => {
+    setGesture(true);
+    if (await post('/giveback', null, 'giveback_failed')) setTakenOver(null);
+    setGesture(false);
+  };
+
+  // The session plan's Go and Change (flow/plan-gate.ts).
+  const planPost = async (path: string, body: unknown, failure: string): Promise<boolean> => {
+    setGesture(true);
+    try {
+      await context.api(`/sessions/${encodeURIComponent(id)}${path}`, { method: 'POST', body });
+      setPlanNote('');
+      context.inboxChanged();
+      return true;
+    } catch {
+      setPlanNote(t(failure));
+      return false;
+    } finally {
+      setGesture(false);
+    }
+  };
+  const go = () => void planPost('/plan/go', null, 'plan_go_failed');
+  const sendChange = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const problem = changeProblem(change);
+    if (problem) { setPlanNote(t(problem === 'empty' ? 'plan_change_empty' : 'plan_change_too_long', { n: CHANGE_MAX })); return; }
+    if (await planPost('/plan/change', { message: change.trim() }, 'plan_change_failed')) { setChanging(false); setChange(''); }
+  };
+
+  const browser = browserView({ id, previewKey: loaded.previewKey, previewOrigin: document.body.dataset.preview, pageHost: window.location.hostname });
+  const panel = (name: Tab) => ({ id: `tab-${name}`, role: 'tabpanel', 'aria-labelledby': `tab-${name}-button`, hidden: tab !== name });
+
   return (
     <>
       <div className="session-top" id="crumbs"><Crumbs view={view} t={t} /></div>
       <div className="session" aria-busy={thread ? undefined : 'true'}>
-        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} /></aside>
+        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
+          <TabStrip tab={tab} t={t} takeover={takeover} busy={gesture} onSelect={(next) => select(next)} onKey={onKey} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />
           <div className="panel-head" id="status"><StatusHead view={view} t={t} /></div>
-          <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}><Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} onQuestion={(requestId, given, chosen) => void answerQuestion(requestId, given, chosen)} /></div>
-          <div className="panel-foot">
-            <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} onText={setText}
-              onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => setNote(t('handover_note'))} />
+          <div className="tab-panel" {...panel('terminal')}>
+            <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}><TakeoverNotice view={view} t={t} /><Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} onQuestion={(requestId, given, chosen) => void answerQuestion(requestId, given, chosen)} /></div>
+            <div className="panel-foot">
+              <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} onText={setText}
+                onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => setNote(t('handover_note'))} />
+            </div>
+          </div>
+          <div className="tab-panel scroll" {...panel('plan')}>
+            <PlanTab view={view} plan={view.thread.plan} t={t} changing={changing} change={change} busy={gesture} note={planNote}
+              onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }} />
+          </div>
+          <div className="tab-panel scroll" {...panel('editor')}>
+            {tab === 'editor' || files !== null ? <EditorTab t={t} files={files ?? []} selected={selected} shown={shown} mode={mode} failed={fileFailed} onSelect={(path) => { setSelected(path); setMode('diff'); }} onMode={setMode} /> : null}
+          </div>
+          <div className="tab-panel" {...panel('browser')}>
+            {tab === 'browser' ? <BrowserTab view={browser} t={t} /> : null}
           </div>
         </section>
         <aside className="s-right" id="s-right" aria-label={t('right_label')}><RightCards view={view} t={t} /></aside>
@@ -430,9 +564,9 @@ function One({ id }: { readonly id: string }) {
     let live = true;
     void (async () => {
       try {
-        const [detail, all] = await Promise.all([context.api<SessionSummary & { state: SessionState }>(`/sessions/${encodeURIComponent(id)}`), context.api<SessionSummary[]>('/sessions')]);
+        const [detail, all] = await Promise.all([context.api<SessionDetail>(`/sessions/${encodeURIComponent(id)}`), context.api<SessionSummary[]>('/sessions')]);
         const ticket = await context.api<Ticket>(`/tickets/${encodeURIComponent(detail.ticket)}`).catch(() => undefined);
-        if (live) setLoaded({ summary: detail, state: detail.state, ticket, siblings: all.filter((s) => s.ticket === detail.ticket) });
+        if (live) setLoaded({ summary: detail, state: detail.state, ticket, siblings: all.filter((s) => s.ticket === detail.ticket), previewKey: detail.previewKey ?? null });
       } catch {
         if (live) setLoaded('failed');
       }

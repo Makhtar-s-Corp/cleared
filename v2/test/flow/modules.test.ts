@@ -19,16 +19,21 @@ import { applyTables, openStore } from '../../src/store/db.ts';
 import { fakeEffects } from './support.ts';
 
 // A session's preview routes are lane 15's (container/preview.ts), which the sessions module registers.
-const routeKeys = (m: { routes: readonly { method: string; path: string }[] }) => m.routes.filter((r) => !r.path.includes('/preview/')).map((r) => `${r.method} ${r.path}`).sort();
+// A file of the Editor tab is one route per depth (lane 20, flow/files.ts): files/* here.
+const routeKeys = (m: { routes: readonly { method: string; path: string }[] }) =>
+  [...new Set(m.routes.filter((r) => !r.path.includes('/preview/')).map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
 
 test('the three modules of lane 7 declare the routes of the API that are theirs, and the inbox its table', () => {
   assert.deepEqual(routeKeys(sessions), [
     'GET /api/sessions', 'GET /api/sessions/:id', 'GET /api/sessions/:id/events',
     'POST /api/sessions/:id/interrupt', 'POST /api/sessions/:id/messages', 'POST /api/sessions/:id/requests/:requestId/answer',
   ]);
-  // The session plan's Go and Change (lane 17, flow/plan-gate.ts) are the flow module's.
+  // The session plan's Go and Change (lane 17, flow/plan-gate.ts), the
+  // Editor tab's files and Take over and Give back (lane 20) are the flow module's.
   assert.deepEqual(routeKeys(flow), [
-    'GET /api/tickets', 'GET /api/tickets/:id', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/tickets', 'POST /api/tickets/:id/move',
+    'GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'GET /api/tickets', 'GET /api/tickets/:id',
+    'POST /api/sessions/:id/giveback', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/takeover',
+    'POST /api/tickets', 'POST /api/tickets/:id/move',
   ]);
   assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
   assert.equal(inbox.tables.length, 1);
@@ -40,7 +45,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule }, { store });
-  assert.equal(app.routes.filter((r) => !r.path.includes('/preview/')).length, 13);
+  assert.equal(routeKeys(app).length, 17);
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code']);
   assert.ok(!app.routes.some((r) => r.path.endsWith('/approve')), 'the approval route is lane 8\'s');
 });
