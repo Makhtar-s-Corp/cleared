@@ -2,7 +2,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SESSION_PREVIEW_ROUTE, SERVICE_USER_HEADER, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createApiRoutes } from '../../src/api/routes.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
@@ -42,7 +42,8 @@ async function call(method: string, path: string, headers: Record<string, string
 test('the service declares every route of the API but the approval, which is lane 8\'s', () => {
   const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
   const declared = routes.map((r) => `${r.method} ${r.path}`).sort();
-  const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && !MILESTONE_2_ROUTES.includes(r)).sort();
+  // The preview is lane 15's (container/preview.ts).
+  const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r)).sort();
   assert.deepEqual(declared, wanted);
 });
 

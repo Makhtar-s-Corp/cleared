@@ -1,20 +1,26 @@
 // What the flow needs to know about the project it serves, and where it
 // reads it: the environment of the service for the fixed parts (which
-// repository, which models, the limits), and the project's own
+// workspace and services, which models, the limits), and each service's own
 // .cleared/agents.conf, read at the base branch by the service and never
 // from a session's copy, for the verdict phrase, the safe commands and the
-// hosts (docs/v2/milestone-1-plan.md, sections 5 and 8, lane 7).
+// hosts (docs/v2/milestone-1-plan.md, sections 5 and 8, lane 7; the
+// workspace: docs/v2/milestone-2-plan.md, decision 18, lane 14).
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
+import { WorkspaceError, loadWorkspace, parseConf, serviceNameOf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
+
+// The format of agents.conf is read by workspace/config.ts, which reads the
+// workspace file in the same format.
+export { parseConf, type Sections };
 
 export class FlowConfigError extends Error {
   override name = 'FlowConfigError';
 }
 
 export type FlowConfig = {
-  readonly project: string;                 // the project's name, as tickets name it
-  readonly projectDir: string;              // the service's checkout of the project
+  readonly project: string;                 // the workspace's id, as tickets name it (their `project`)
+  readonly projectDir: string;              // the first service's checkout on this server
   readonly repoUrl: string;                 // its address on the forge
   readonly repo: string;                    // owner/name, for gh
   readonly base: string;                    // the base branch
@@ -25,31 +31,11 @@ export type FlowConfig = {
   readonly maxReviewRounds: number;         // the reviews a ticket gets before it goes back
   readonly budgetUsd: number | undefined;   // the ticket's budget; none when unset
   readonly mergeRetryMs: number;            // a merge the lock queued is asked again after this long
+  // The workspace and its services. loadFlowConfig always sets it; a
+  // configuration written without it reads as its one-service workspace
+  // (workspaceOf).
+  readonly workspace?: WorkspaceConfig;
 };
-
-export type Sections = Record<string, Record<string, string>>;
-
-// The format of agents.conf: [section] headers, key = value lines, # or ;
-// at the start of a line for a comment. A value keeps what follows it, a
-// trailing # included, as v1 reads it.
-export function parseConf(text: string): Sections {
-  const sections: Sections = {};
-  let current = '';
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-    const header = /^\[([^\]]+)\]$/.exec(line);
-    if (header) {
-      current = header[1] as string;
-      sections[current] ??= {};
-      continue;
-    }
-    const at = line.indexOf('=');
-    if (at < 0 || !current) continue;
-    (sections[current] as Record<string, string>)[line.slice(0, at).trim()] = line.slice(at + 1).trim();
-  }
-  return sections;
-}
 
 export type ProjectSettings = {
   readonly verdict: string;                 // [merge] verdict: the phrase a passing review ends with
@@ -84,33 +70,48 @@ function positive(value: string | undefined, name: string, integer: boolean): nu
 }
 
 // The flow's configuration, or undefined when the service is not set up to
-// run tickets (CLEARED_V2_PROJECT unset): the service then still serves its
-// health route and answers the API with "not configured". A project that
-// is named but badly set up is an error, not a silent default.
+// run tickets (neither CLEARED_V2_WORKSPACE nor CLEARED_V2_PROJECT): the
+// service then still serves its health route and answers the API with "not
+// configured". A workspace that is named but badly set up is an error, not a
+// silent default. The milestone 1 fields name the workspace (`project`) and
+// its first service (the checkout, the repository, the base branch).
 export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig | undefined {
-  const project = env.CLEARED_V2_PROJECT;
-  if (!project) return undefined;
-  const need = (name: string): string => {
-    const value = env[name];
-    if (!value) throw new FlowConfigError(`${name} is not set, and CLEARED_V2_PROJECT names a project`);
-    return value;
-  };
-  const projectDir = need('CLEARED_V2_PROJECT_DIR');
-  if (!isAbsolute(projectDir)) throw new FlowConfigError('CLEARED_V2_PROJECT_DIR must be an absolute path');
-  const repo = need('CLEARED_V2_REPO');
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new FlowConfigError('CLEARED_V2_REPO must be owner/name');
   const state = env.CLEARED_V2_STATE_DIR || join(env.XDG_STATE_HOME || join(env.HOME || homedir(), '.local', 'state'), 'cleared-v2');
+  const authorModel = env.CLEARED_V2_AUTHOR_MODEL || 'claude-opus-5-5';
+  let workspace: WorkspaceConfig | undefined;
+  try {
+    workspace = loadWorkspace(env, { authorModel, stateDir: state });
+  } catch (error) {
+    if (error instanceof WorkspaceError) throw new FlowConfigError(error.message);
+    throw error;
+  }
+  if (!workspace) return undefined;
+  const first = workspace.services[0] as WorkspaceConfig['services'][number];
   const workdirRoot = env.CLEARED_V2_WORKDIRS || join(state, 'work');
   if (!isAbsolute(workdirRoot)) throw new FlowConfigError('CLEARED_V2_WORKDIRS must be an absolute path');
   const minutes = positive(env.CLEARED_V2_IDLE_MINUTES, 'CLEARED_V2_IDLE_MINUTES', false) ?? 15;
   return {
-    project, projectDir, repoUrl: need('CLEARED_V2_REPO_URL'), repo,
-    base: env.CLEARED_V2_BASE || 'main', workdirRoot,
-    authorModel: env.CLEARED_V2_AUTHOR_MODEL || 'claude-opus-5-5',
+    project: workspace.id, projectDir: first.dir, repoUrl: first.url, repo: first.repo,
+    base: first.base, workdirRoot,
+    authorModel,
     reviewerModel: env.CLEARED_V2_REVIEWER_MODEL || 'claude-sonnet-5-5',
     idleMs: minutes * 60_000,
     maxReviewRounds: positive(env.CLEARED_V2_REVIEW_ROUNDS, 'CLEARED_V2_REVIEW_ROUNDS', true) ?? 2,
     budgetUsd: positive(env.CLEARED_V2_BUDGET_USD, 'CLEARED_V2_BUDGET_USD', false),
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
+    workspace,
+  };
+}
+
+// The configuration's workspace: the one it carries, or the one-service
+// workspace its milestone 1 fields describe.
+export function workspaceOf(config: FlowConfig): WorkspaceConfig {
+  if (config.workspace) return config.workspace;
+  return {
+    id: config.project, name: config.project, file: null,
+    services: [{
+      name: serviceNameOf(config.project), kind: 'repository', repo: config.repo, url: config.repoUrl, base: config.base, path: null, dir: config.projectDir,
+      healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: null, brokerState: null,
+    }],
   };
 }

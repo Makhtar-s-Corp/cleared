@@ -19,9 +19,10 @@ import type { UserDirectory } from '../modules/registry.ts';
 import { ApprovalError } from '../approval/errors.ts';
 import { approvalContext, byPr, readApprovalRecord, sameVersions, type Version } from '../approval/record.ts';
 import { approvalPayload, commentPayload, type ApprovalSigner } from '../approval/signer.ts';
+import type { WorkspaceConfig } from '../workspace/config.ts';
 import {
-  DEFAULT_STATES, TicketError,
-  type Actor, type Author, type Comment, type NewTicket, type StatusChange, type Ticket, type TicketId, type TicketStates, type TicketStore,
+  DEFAULT_STATES, TicketError, newTicketServices,
+  type Actor, type Author, type Comment, type NewTicket, type StatusChange, type Ticket, type TicketId, type TicketService, type TicketStates, type TicketStore,
 } from './contract.ts';
 
 // One statement each, as lib/tracker/adapters/local.mjs SCHEMA writes them
@@ -49,6 +50,53 @@ export const TICKET_TABLES: string[] = [
 )`,
 ];
 
+// The workspace and its services (docs/v2/milestone-2-plan.md, decision 18),
+// tables of the tickets module beside the v1 tracker tables, which do not
+// change: a ticket's workspace is its tracker row's `project`, and its parts
+// per service are ticket_services rows (ticket is 'LOCAL-<n>', as the v2
+// tables name tickets).
+const TICKET_SERVICES_TABLE = `CREATE TABLE IF NOT EXISTS ticket_services (
+  ticket TEXT NOT NULL, service TEXT NOT NULL, branch TEXT, pr INTEGER, state TEXT NOT NULL,
+  PRIMARY KEY (ticket, service)
+)`;
+
+export const WORKSPACE_TABLES: string[] = [
+  `CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL
+)`,
+  `CREATE TABLE IF NOT EXISTS services (
+  workspace TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, repo TEXT NOT NULL, url TEXT NOT NULL, base TEXT NOT NULL,
+  path TEXT, health_url TEXT, sensitivity TEXT NOT NULL, consumes TEXT NOT NULL, run TEXT, contract TEXT, created_at TEXT NOT NULL,
+  PRIMARY KEY (workspace, name)
+)`,
+  TICKET_SERVICES_TABLE,
+];
+
+// Writes the workspace's row and its services' rows as the configuration
+// says, keeping each row's creation time: the same configuration twice
+// changes nothing. A service no longer configured keeps its row (its
+// tickets still name it); nothing is deleted.
+export function recordWorkspace(db: DatabaseSync, workspace: WorkspaceConfig, at: string): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name WHERE name IS NOT excluded.name')
+      .run(workspace.id, workspace.name, at);
+    const upsert = db.prepare(
+      'INSERT INTO services (workspace, name, kind, repo, url, base, path, health_url, sensitivity, consumes, run, contract, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(workspace, name) DO UPDATE SET kind = excluded.kind, repo = excluded.repo, url = excluded.url, base = excluded.base, path = excluded.path, ' +
+      'health_url = excluded.health_url, sensitivity = excluded.sensitivity, consumes = excluded.consumes, run = excluded.run, contract = excluded.contract',
+    );
+    for (const s of workspace.services) {
+      upsert.run(workspace.id, s.name, s.kind, s.repo, s.url, s.base, s.path, s.healthUrl, s.sensitivity, JSON.stringify(s.consumes),
+        s.run ? `${s.run.dockerfile}:${s.run.port}` : null, s.contract ? `${s.contract.format}:${s.contract.path}` : null, at);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export type LocalStoreOptions = {
   readonly stateDir: string;                       // where ask-validation.sh keeps validations/<ticket>.json
   readonly states?: TicketStates;
@@ -75,6 +123,7 @@ export class LocalTicketStore implements TicketStore {
   readonly #tickets: StatementSync;
   readonly #historyRows: StatementSync;
   readonly #commentRows: StatementSync;
+  readonly #serviceRows: StatementSync;
 
   constructor(db: DatabaseSync, options: LocalStoreOptions) {
     this.#db = db;
@@ -89,6 +138,11 @@ export class LocalTicketStore implements TicketStore {
     this.#tickets = db.prepare('SELECT * FROM tracker_tickets ORDER BY id');
     this.#historyRows = db.prepare('SELECT status, actor_kind, actor_id, at, proof, approval_context, content_hash FROM tracker_history WHERE ticket = ? ORDER BY id');
     this.#commentRows = db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? ORDER BY id');
+    // Its own table, made here too: a store opened on the tracker tables
+    // alone (as the v1 tools and the approval's tests open it) still reads
+    // and writes a ticket's services.
+    db.exec(TICKET_SERVICES_TABLE);
+    this.#serviceRows = db.prepare('SELECT service, branch, pr, state FROM ticket_services WHERE ticket = ? ORDER BY rowid');
   }
 
   // Whether the service can sign for the owner at all.
@@ -109,10 +163,14 @@ export class LocalTicketStore implements TicketStore {
   }
 
   #toTicket(row: Row): Ticket {
+    const id = `LOCAL-${str(row, 'id')}`;
+    const services = (this.#serviceRows.all(id) as Row[]).map((r): TicketService => ({
+      name: str(r, 'service'), branch: r.branch === null ? null : str(r, 'branch'), pr: r.pr === null ? null : Number(r.pr), state: str(r, 'state'),
+    }));
     return {
-      id: `LOCAL-${str(row, 'id')}`, title: str(row, 'title'), body: str(row, 'body'), labels: JSON.parse(str(row, 'labels')) as string[],
+      id, title: str(row, 'title'), body: str(row, 'body'), labels: JSON.parse(str(row, 'labels')) as string[],
       project: row.project === null ? null : str(row, 'project'), status: str(row, 'status'),
-      createdAt: str(row, 'created_at'), updatedAt: str(row, 'updated_at'),
+      createdAt: str(row, 'created_at'), updatedAt: str(row, 'updated_at'), ...(services.length > 0 ? { services } : {}),
     };
   }
 
@@ -160,6 +218,7 @@ export class LocalTicketStore implements TicketStore {
 
   async create(ticket: NewTicket, by: Actor): Promise<Ticket> {
     if (!ticket.title?.trim()) throw new TicketError('a ticket needs a title');
+    const services = newTicketServices(ticket.services) ?? [];
     const who = await this.#who(by);
     const at = this.#now();
     const number = this.#transaction(() => {
@@ -167,6 +226,8 @@ export class LocalTicketStore implements TicketStore {
         .run(ticket.title, ticket.body ?? '', JSON.stringify(ticket.labels ?? []), ticket.project, this.states.todo, at, at);
       const created = Number(result.lastInsertRowid);
       this.#insertHistory(created, this.states.todo, who, at, null, this.#contentHash(created));
+      const part = this.#db.prepare('INSERT INTO ticket_services (ticket, service, branch, pr, state) VALUES (?, ?, ?, ?, ?)');
+      for (const s of services) part.run(`LOCAL-${created}`, s.name, s.branch, s.pr, s.state);
       return created;
     });
     return this.#toTicket(this.#row(`LOCAL-${number}`));

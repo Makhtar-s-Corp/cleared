@@ -3,12 +3,15 @@
 // runs merge-pr.sh reads stay in the same file (docs/v2/milestone-1-plan.md,
 // decision 11). This file owns three tables: session_events, sessions and
 // policy_rules. Every other table belongs to the module that declares it.
+// What changes a table that exists is a versioned migration (migrations.ts,
+// milestone 2 decision 19), run here once the tables it needs exist.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../session/events.ts';
+import { MIGRATIONS, migrate, type Migration } from './migrations.ts';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS session_events (
@@ -36,6 +39,12 @@ export class LedgerPathError extends Error {
 // cannot be made or written, a file that is not a database, a lock.
 export class StoreError extends Error {
   override name = 'StoreError';
+}
+
+// A migration that cannot run, or a ledger newer than this code: the ledger
+// is left as it was before the failing migration.
+export class MigrationError extends StoreError {
+  override name = 'MigrationError';
 }
 
 // The project whose ledger this is, named as v1 names it (lib/conf.mjs
@@ -77,6 +86,11 @@ export type SessionRecord = {
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  // Milestone 2 (lane 14): the workspace service it works on, and its
+  // preview's unguessable segment (decision 20, issued by lane 15). Read
+  // back as null when unset; a put that leaves them out keeps them.
+  readonly service?: string | null;
+  readonly previewKey?: string | null;
 };
 
 export type LearnedRule = {
@@ -102,13 +116,23 @@ export type Store = {
   close(): void;
 };
 
-// Creates a module's tables. Each statement must create only what does not
-// exist yet, so opening the store never changes a table someone else owns.
-export function applyTables(db: DatabaseSync, tables: readonly string[]): void {
+// Creates a module's tables, then runs the migrations that waited for them.
+// Each statement must create only what does not exist yet, so opening the
+// store never changes a table someone else owns. A migration that fails
+// stops the process with exit 64 and its message, as a ledger that cannot
+// be opened does: main.ts calls this at the start, before it listens.
+export function applyTables(db: DatabaseSync, tables: readonly string[], migrations: readonly Migration[] = MIGRATIONS): void {
   for (const statement of tables) {
     if (!/^\s*CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement))
       throw new Error(`a module table is created with CREATE TABLE IF NOT EXISTS (or CREATE INDEX IF NOT EXISTS), not: ${statement.trim().slice(0, 60)}`);
     db.exec(statement);
+  }
+  try {
+    migrate(db, migrations);
+  } catch (error) {
+    if (!(error instanceof MigrationError)) throw error;
+    console.error(`cleared-v2: ${error.message}`);
+    process.exit(64);
   }
 }
 
@@ -120,6 +144,7 @@ function session(row: Row): SessionRecord {
     id: text(row, 'id'), project: text(row, 'project'), ticket: text(row, 'ticket'), role: text(row, 'role') as Role,
     harness: text(row, 'harness') as Harness, model: text(row, 'model'), status: text(row, 'status'),
     createdAt: text(row, 'created_at'), updatedAt: text(row, 'updated_at'),
+    service: row.service === null ? null : text(row, 'service'), previewKey: row.preview_key === null ? null : text(row, 'preview_key'),
   };
 }
 
@@ -143,16 +168,24 @@ function openDatabase(path: string): DatabaseSync {
 
 export function openStore(path: string): Store {
   const db = openDatabase(path);
+  try {
+    migrate(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 
-  // One statement, so the next seq is read and written at once.
+  // One statement, so the next seq is read and written at once. The event's
+  // service is its session's.
   const append = db.prepare(
-    'INSERT INTO session_events (session_id, seq, at, ticket, project, type, event) ' +
-    'SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ?, ? FROM session_events WHERE session_id = ? RETURNING seq',
+    'INSERT INTO session_events (session_id, seq, at, ticket, project, type, event, service) ' +
+    'SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ?, ?, (SELECT service FROM sessions WHERE id = ?) FROM session_events WHERE session_id = ? RETURNING seq',
   );
   const after = db.prepare('SELECT seq, at, session_id, ticket, project, event FROM session_events WHERE session_id = ? AND seq > ? ORDER BY seq');
   const putSession = db.prepare(
-    'INSERT INTO sessions (id, project, ticket, role, harness, model, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
-    'ON CONFLICT(id) DO UPDATE SET model = excluded.model, status = excluded.status, updated_at = excluded.updated_at',
+    'INSERT INTO sessions (id, project, ticket, role, harness, model, status, created_at, updated_at, service, preview_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET model = excluded.model, status = excluded.status, updated_at = excluded.updated_at, ' +
+    'service = COALESCE(excluded.service, sessions.service), preview_key = COALESCE(excluded.preview_key, sessions.preview_key)',
   );
   const getSession = db.prepare('SELECT * FROM sessions WHERE id = ?');
   const allSessions = db.prepare('SELECT * FROM sessions ORDER BY created_at, id');
@@ -162,7 +195,7 @@ export function openStore(path: string): Store {
 
   const events: EventLog = {
     append(entry) {
-      const row = append.get(entry.sessionId, entry.at, entry.ticket, entry.project, entry.event.type, JSON.stringify(entry.event), entry.sessionId) as Row;
+      const row = append.get(entry.sessionId, entry.at, entry.ticket, entry.project, entry.event.type, JSON.stringify(entry.event), entry.sessionId, entry.sessionId) as Row;
       return { seq: Number(row.seq), ...entry };
     },
     after(sessionId, seq = 0) {
@@ -177,7 +210,7 @@ export function openStore(path: string): Store {
     db,
     events,
     sessions: {
-      put: (r) => { putSession.run(r.id, r.project, r.ticket, r.role, r.harness, r.model, r.status, r.createdAt, r.updatedAt); },
+      put: (r) => { putSession.run(r.id, r.project, r.ticket, r.role, r.harness, r.model, r.status, r.createdAt, r.updatedAt, r.service ?? null, r.previewKey ?? null); },
       get: (id) => { const row = getSession.get(id) as Row | undefined; return row ? session(row) : undefined; },
       list: (filter = {}) => ((filter.ticket === undefined ? allSessions.all() : ticketSessions.all(filter.ticket)) as Row[]).map(session),
     },
