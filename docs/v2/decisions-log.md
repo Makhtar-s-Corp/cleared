@@ -1402,5 +1402,6 @@ The choices the lane makes:
   - Not taken: the phone header's two rows, the kit's light grey for placeholders, non-breaking spaces in figures, the inbox bar's 46 and 44 px buttons, the tower bar's button order and the dark selection ring. They are the kit's current design, identical before the port, and outside a like-for-like port.
   - Not a fault: the sticky bar over the last plan item is the full-page capture of a sticky bar, as lane 10 noted. The lead pill missing on the session and inbox captures comes from their fixture sources, which have no lead route.
 - **The plans' file lists** (milestone 1 and 2) still name `v2/app/public/screens/*.ts`. Those files are now `v2/app/web/screens/<screen>/`.
-- Files outside the app: `v2/scripts/guard.ts`, `.github/workflows/v2.yml`, `v2/README.md`, `v2/package.json` and its lock file, `v2/.npmrc`, `v2/.gitignore` and this log.
+- **A v1 test.** `test/tracker.test.mjs` reads every tracked `.json` for a tracker provider's name or query. It now leaves out npm's lock files: v2's names the `graphql` package, which CopilotKit pulls in, and no tracker.
+- Files outside the app: `test/tracker.test.mjs`, `v2/scripts/guard.ts`, `.github/workflows/v2.yml`, `v2/README.md`, `v2/package.json` and its lock file, `v2/.npmrc`, `v2/.gitignore` and this log.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-react-port`.
