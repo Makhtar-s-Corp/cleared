@@ -17,23 +17,30 @@
 // row of its own. What the inbox handles is a request settled without the
 // person while it was on screen: the answer route then says nothing waits,
 // and the screen says so instead of offering buttons that cannot work.
-import type { ApproveBody, InboxItem as ServiceItem, PermissionItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../src/api/types.ts';
+//
+// Milestone 2 adds the lead's plan: the inbox item carries only its totals,
+// so the detail reads the plan (GET /api/plans/:id) and shows lane 8's plan
+// panel; Approve calls the plan's route at once, with no grace, since
+// starting a ticket is reversible (decision 6). The lead's question is
+// answered on the lead's screen: the session answer route refuses the lead's
+// session (issue 168, item 3), so the inbox shows it and links there.
+import type { ApproveBody, InboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../src/api/types.ts';
 import type { Decision } from '../../../src/session/contract.ts';
 import type { Question, ToolInput } from '../../../src/session/events.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import { esc } from '../html.ts';
 import type { Translate } from '../i18n.ts';
+import { formatDuration, planStateLine, renderPlanPanel } from '../plan-panel.ts';
 import { ApiError, type ScreenContext } from '../screen.ts';
-
-// The kinds of milestone 1: the plan item of milestone 2 is lane 10's, and
-// until then the list leaves it out.
-type InboxItem = Exclude<ServiceItem, PlanItemInbox>;
-const listed = (item: ServiceItem): item is InboxItem => item.kind !== 'plan';
 
 // The local tracker's default name of the state a ticket is sent back to
 // (DEFAULT_STATES.todo of src/tickets/contract.ts, which the browser cannot
 // import; a test keeps the two equal).
 export const TODO_STATE = 'Todo';
+// The lead's ticket (LEAD_TICKET in src/lead/contract.ts, which the browser
+// cannot import; a test keeps the two equal): a plan and a question of the
+// lead carry it, and the screen never shows it.
+export const LEAD_TICKET = 'lead';
 // The grace lane 8's service holds before it writes an approval, used only
 // when its answer gives no `dueAt`.
 export const GRACE_MS = 60_000;
@@ -47,10 +54,11 @@ export type Local =
   | { readonly kind: 'approved'; readonly at: string }
   | { readonly kind: 'sent_back'; readonly at: string }
   | { readonly kind: 'answered'; readonly decision: Decision['kind'] }
+  | { readonly kind: 'plan_approved'; readonly at: string }   // a plan has no grace: its tickets start
   | { readonly kind: 'settled' };                              // settled without the person
 
 export type InboxView = {
-  readonly items: readonly ServiceItem[];
+  readonly items: readonly InboxItem[];
   readonly tickets: readonly Ticket[];
   readonly sessions: readonly SessionSummary[];
   readonly selected: string | undefined;                       // the item the address names
@@ -59,18 +67,20 @@ export type InboxView = {
   readonly now: Date;
   readonly local: ReadonlyMap<string, Local>;
   readonly frame: 'desktop' | 'phone';
+  readonly plans?: ReadonlyMap<string, Plan>;                  // the plans read so far, by id
+  readonly language?: 'en' | 'fr';                             // for the numbers: 0.30 or 0,30
 };
 
 // ---------------------------------------------------------------- the model
 
-const RANK: Readonly<Record<InboxItem['kind'], number>> = { release: 0, permission: 1, question: 2 };
+// The capture's order: a release, a permission, the lead's plan, a question.
+const RANK: Readonly<Record<InboxItem['kind'], number>> = { release: 0, permission: 1, plan: 2, question: 3 };
 // The catalog names a release's checks by colour, as the tower's does.
 const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
-// What waits, releases first, then permissions, then questions, each oldest
-// first; then what was handled, in the service's order (latest first).
-export function ordered(all: readonly ServiceItem[]): { readonly waiting: InboxItem[]; readonly handled: InboxItem[] } {
-  const items = all.filter(listed);
+// What waits, releases first, then permissions, plans and questions, each
+// oldest first; then what was handled, in the service's order (latest first).
+export function ordered(items: readonly InboxItem[]): { readonly waiting: InboxItem[]; readonly handled: InboxItem[] } {
   const waiting = items.filter((item) => item.state === 'waiting')
     .sort((a, b) => RANK[a.kind] - RANK[b.kind] || Date.parse(a.since) - Date.parse(b.since));
   return { waiting, handled: items.filter((item) => item.state === 'handled') };
@@ -78,7 +88,7 @@ export function ordered(all: readonly ServiceItem[]): { readonly waiting: InboxI
 
 // The item shown: the one the address names, else the first that waits.
 export function chosen(view: InboxView): InboxItem | undefined {
-  if (view.selected !== undefined) return view.items.filter(listed).find((item) => item.id === view.selected);
+  if (view.selected !== undefined) return view.items.find((item) => item.id === view.selected);
   const { waiting, handled } = ordered(view.items);
   return waiting[0] ?? handled[0];
 }
@@ -86,11 +96,40 @@ export function chosen(view: InboxView): InboxItem | undefined {
 // The detail is redrawn only when what it shows changed, so a reason or a
 // free answer being typed is not lost to a refresh. A release's checks are
 // part of what it shows: the owner waits for them to turn green.
+// A plan's detail follows the plan read for it: read or not, and how it runs.
 export function detailKey(v: InboxView): string {
   const item = chosen(v);
   const checks = item?.kind === 'release' ? item.pr.checks : undefined;
-  return JSON.stringify([v.items.length === 0, item?.id, item?.state, checks, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
+  const plan = item?.kind === 'plan' ? planOf(v, item) : undefined;
+  const moved = plan ? [plan.state, plan.items.map((i) => [i.state, i.ticket])] : undefined;
+  return JSON.stringify([v.items.length === 0, item?.id, item?.state, checks, moved, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
 }
+
+// ------------------------------------------------------------------ plans
+
+const PLAN_STATES: readonly Plan['state'][] = ['proposed', 'superseded', 'rejected', 'approved', 'paused', 'done'];
+const ITEM_STATES: readonly PlanItem['state'][] = ['waiting', 'ready', 'running', 'needs_approval', 'landed', 'put_back', 'held', 'cancelled'];
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isEstimate = (value: unknown) => isObject(value) && isNumber(value.minutes) && isNumber(value.costUsd) && isNumber(value.samples)
+  && (value.weekPercent === null || isNumber(value.weekPercent));
+const isPlanItem = (value: unknown) => isObject(value) && isNumber(value.position) && isText(value.title)
+  && (value.lane === 'fast' || value.lane === 'full') && Array.isArray(value.after) && value.after.every(isNumber)
+  && isEstimate(value.estimate) && (value.ticket === null || isText(value.ticket)) && ITEM_STATES.includes(value.state as PlanItem['state']);
+
+// The plan the service answered, if the panel can draw it. lane 8's panel
+// looks its states up in maps and writes them into attributes, so a plan in
+// a state it does not know is not handed to it (issue 177, item 2): the
+// detail then shows what the inbox item says.
+export function readPlan(value: unknown): Plan | undefined {
+  if (!isObject(value) || !isText(value.id) || !isText(value.title) || !isText(value.summary) || !PLAN_STATES.includes(value.state as Plan['state'])) return undefined;
+  if (!Array.isArray(value.items) || !value.items.every(isPlanItem) || !isEstimate(value.totals) || !isNumber(value.maxParallel)) return undefined;
+  return value as unknown as Plan;
+}
+
+const planOf = (view: InboxView, item: PlanItemInbox): Plan | undefined => view.plans?.get(item.planId);
+const isLead = (item: InboxItem) => item.ticket === LEAD_TICKET;
 
 export function itemFromHash(hash: string): string | undefined {
   const raw = hash.replace(/^#/, '');
@@ -159,6 +198,12 @@ export async function sendBack(api: Api, item: ReleaseItem): Promise<void> {
   await api(`${ticketPath(item)}/move`, { method: 'POST', body: { status: TODO_STATE } });
 }
 
+// The plan's approval: one gesture, no grace (decision 6). The service
+// creates the tickets, starts the first ones and answers the plan.
+export async function approvePlan(api: Api, item: PlanItemInbox): Promise<Plan> {
+  return await api<Plan>(`/plans/${encodeURIComponent(item.planId)}/approve`, { method: 'POST', body: null });
+}
+
 export function decisionFor(kind: 'allow_once' | 'allow_always' | 'reject_once', message: string, t: Translate): Decision {
   if (kind === 'allow_once') return { kind: 'allow_once' };
   if (kind === 'allow_always') return { kind: 'allow_always', scope: 'project' };
@@ -185,7 +230,7 @@ export function answersFor(questions: readonly Question[], picks: readonly (read
   return { answers };
 }
 
-export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer';
+export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan';
 
 // How a refusal of the service reads. An answer to a request that no longer
 // waits (404, or 409 for a session that stopped) was settled without the
@@ -203,6 +248,12 @@ export function failure(error: unknown, gesture: Gesture): { readonly key: strin
       return { key: status === 409 ? 'undo_late' : 'undo_failed', settled: false };
     case 'send_back':
       return { key: status === 409 ? 'send_back_conflict' : 'send_back_failed', settled: false };
+    // 409: approved elsewhere, replaced by a newer proposal or rejected; the
+    // screen reads the plan again. 503: the service runs without the lead.
+    case 'approve_plan':
+      if (status === 409) return { key: 'approve_plan_conflict', settled: false };
+      if (status === 404) return { key: 'approve_plan_gone', settled: false };
+      return { key: status === 503 ? 'approve_plan_lead_off' : 'approve_plan_failed', settled: false };
   }
 }
 
@@ -233,6 +284,7 @@ function itemTitle(item: InboxItem): string {
     case 'release': return item.title;
     case 'permission': return item.input.kind === 'execute' && item.input.description ? item.input.description : target(item.input) || item.tool;
     case 'question': return item.questions[0]?.question ?? '';
+    case 'plan': return item.title;
   }
 }
 
@@ -241,8 +293,27 @@ function recommendation(item: QuestionItem): string | undefined {
   return undefined;
 }
 
+const decimals = (value: number, digits: number, language: 'en' | 'fr') =>
+  new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
+
+// "5 tickets · 2 h 15 · 3.9 % of the week", or the cost until the week is
+// measured (section 5.2), as the plan panel's footer says it.
+function planLine(item: PlanItemInbox, view: InboxView, t: Translate): string {
+  const language = view.language ?? 'en';
+  const { totals } = item;
+  const share = totals.weekPercent === null
+    ? t('list_plan_cost', { amount: t('plan_cost', { amount: decimals(totals.costUsd, 2, language) }) })
+    : t('plan_week_total', { n: decimals(totals.weekPercent, 1, language) });
+  return t(item.itemCount === 1 ? 'list_plan_one' : 'list_plan_other', { n: item.itemCount, time: formatDuration(totals.minutes, t), share });
+}
+
 function itemLine(item: InboxItem, view: InboxView, t: Translate): string {
-  if (item.state === 'handled') return t('handled_line', { ticket: item.ticket });
+  if (isLead(item)) {
+    const plan = item.kind === 'plan' ? planOf(view, item) : undefined;
+    if (plan && plan.state !== 'proposed') return t('lead_line', { text: planStateLine(plan, t) });
+    if (item.state === 'handled') return t('lead_line', { text: t('handled_short') });
+    if (item.kind === 'question') return t('lead_line', { text: t('lead_waits_short') });
+  } else if (item.state === 'handled') return t('handled_line', { ticket: item.ticket });
   switch (item.kind) {
     case 'release': {
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
@@ -260,6 +331,8 @@ function itemLine(item: InboxItem, view: InboxView, t: Translate): string {
       const n = item.questions.reduce((sum, q) => sum + (q.options?.length ?? 0), 0);
       return n > 0 ? t('question_choices', { ticket: item.ticket, n }) : t('question_free', { ticket: item.ticket });
     }
+    case 'plan':
+      return planLine(item, view, t);
   }
 }
 
@@ -286,9 +359,12 @@ const code = (text: string) => `<code>${esc(text)}</code>`;
 const link = (url: string, label: string) => /^https?:\/\//i.test(url) ? `<a href="${esc(url)}" rel="noopener noreferrer">${esc(label)}</a>` : esc(label);
 const fact = (label: string, value: string) => `<dt>${esc(label)}</dt><dd>${value}</dd>`;
 
-function eyebrow(item: InboxItem, kindKey: string, open: SessionSummary | undefined, openKey: string, t: Translate): string {
+// The kind, whose item it is, and where to open it: the session, or the
+// lead's screen for the lead's items, whose ticket is never shown.
+function eyebrow(item: InboxItem, kind: string, open: string | undefined, openKey: string, t: Translate): string {
   const live = item.state === 'waiting' ? ' waits' : '';
-  return `<p class="d-eyebrow"><span class="d-kind${live}">${esc(t(kindKey))}</span><span class="id">${esc(item.ticket)}</span>${open ? `<a class="d-link" href="${esc(sessionLink(open.id))}">${esc(t(openKey))}</a>` : ''}</p>`;
+  const whose = isLead(item) ? t('lead_label') : item.ticket;
+  return `<p class="d-eyebrow"><span class="d-kind${live}">${esc(kind)}</span><span class="id">${esc(whose)}</span>${open ? `<a class="d-link" href="${esc(open)}">${esc(t(openKey))}</a>` : ''}</p>`;
 }
 
 function shot(item: ReleaseItem, side: 'before' | 'after', frame: InboxView['frame'], t: Translate): string {
@@ -310,7 +386,8 @@ function releaseBody(item: ReleaseItem, view: InboxView, t: Translate): string {
   const switcher = (['desktop', 'phone'] as const).map((frame) =>
     `<button type="button" data-frame="${frame}" aria-pressed="${view.frame === frame}">${esc(t(`frame_${frame}`))}</button>`).join('');
   const change = `${link(item.pr.url, t('pr_link', { n: item.pr.number }))}<span class="sep" aria-hidden="true">·</span><span>${esc(t(`checks_${CHECKS[item.pr.checks]}`))}</span>`;
-  return `${eyebrow(item, item.state === 'waiting' ? 'eyebrow_release' : 'kind_release', releaseSession(view, item.ticket), 'open_sessions', t)}
+  const open = releaseSession(view, item.ticket);
+  return `${eyebrow(item, t(item.state === 'waiting' ? 'eyebrow_release' : 'kind_release'), open && sessionLink(open.id), 'open_sessions', t)}
 <h2 class="d-title">${esc(item.title)}</h2>
 ${item.announcement ? `<p class="announce">${esc(item.announcement)}</p>` : ''}
 <div class="shots-head"><h3>${esc(t('shots_title'))}</h3><div class="switch" role="group" aria-label="${esc(t('frame_label'))}">${switcher}</div></div>
@@ -337,14 +414,16 @@ function permissionBody(item: PermissionItem, view: InboxView, t: Translate): st
     item.suggestion.decision === 'ask' && item.suggestion.reason ? fact(t('facts_why'), esc(sentence(item.suggestion.reason))) : '',
     session ? fact(t('facts_session'), esc(pausedLine(item, session, view.now, t))) : '',
   ].join('');
-  return `${eyebrow(item, 'eyebrow_permission', session ?? { id: item.sessionId } as SessionSummary, 'open_session', t)}
+  return `${eyebrow(item, t('eyebrow_permission'), sessionLink(item.sessionId), 'open_session', t)}
 <h2 class="d-title">${esc(t(`wants_${verb}`, { tool: item.tool }))}${shown ? ` ${code(shown)}` : ''}</h2>
 ${title ? `<p class="d-ticket">${esc(title)}</p>` : ''}
 ${facts ? `<dl class="facts">${facts}</dl>` : ''}`;
 }
 
 function questionBody(item: QuestionItem, view: InboxView, t: Translate): string {
-  const waiting = item.state === 'waiting';
+  // The lead's question is read here and answered on the lead's screen.
+  const lead = isLead(item);
+  const waiting = item.state === 'waiting' && !lead;
   const questions = item.questions.map((question, index) => {
     const options = (question.options ?? []).map((option) => {
       const recommended = RECOMMENDED.test(option.label);
@@ -357,13 +436,31 @@ function questionBody(item: QuestionItem, view: InboxView, t: Translate): string
     return `<fieldset class="q"${question.multiSelect ? ' data-multi="true"' : ''}><legend class="q-text">${question.header ? `<span class="q-header">${esc(question.header)}</span>` : ''}<span>${esc(question.question)}</span></legend>
 ${options ? `<div class="options">${options}</div>` : ''}${free}</fieldset>`;
   }).join('');
-  const title = ticketTitle(view, item.ticket);
-  const session = sessionOf(view, item.sessionId) ?? { id: item.sessionId } as SessionSummary;
+  const title = lead ? undefined : ticketTitle(view, item.ticket);
   // The question first, on the colour of what waits; the ticket under it (DESIGN.md, 4).
-  return `${eyebrow(item, 'eyebrow_question', session, 'open_session', t)}
+  const head = lead ? eyebrow(item, t('eyebrow_lead_question'), '/lead', 'answer_on_lead', t) : eyebrow(item, t('eyebrow_question'), sessionLink(item.sessionId), 'open_session', t);
+  return `${head}
 <h2 class="sr-only">${esc(t('kind_question'))}</h2>
-<div class="questions${waiting ? ' waits' : ''}">${questions}</div>
+<div class="questions${item.state === 'waiting' ? ' waits' : ''}">${questions}</div>
 ${title ? `<p class="d-ticket for-question">${esc(title)}</p>` : ''}`;
+}
+
+// The plan read for the item, in lane 8's panel without its buttons (the
+// inbox's bar holds the gestures); until it is read, or when it cannot be,
+// what the inbox item itself says.
+function planBody(item: PlanItemInbox, view: InboxView, t: Translate): string {
+  const plan = planOf(view, item);
+  const kind = plan ? planStateLine(plan, t) : t(item.state === 'waiting' ? 'plan_state_proposed' : 'kind_plan');
+  const head = eyebrow(item, kind, `/plans/${encodeURIComponent(item.planId)}`, 'open_plan', t);
+  if (plan) return `${head}\n${renderPlanPanel(plan, t, { language: view.language ?? 'en', actions: false })}`;
+  const language = view.language ?? 'en';
+  const share = item.totals.weekPercent === null
+    ? t('plan_cost_total', { amount: t('plan_cost', { amount: decimals(item.totals.costUsd, 2, language) }) })
+    : t('plan_week_total', { n: decimals(item.totals.weekPercent, 1, language) });
+  return `${head}
+<h2 class="d-title">${esc(item.title)}</h2>
+<p class="announce">${esc(item.summary)}</p>
+<dl class="facts">${fact(t('facts_tickets'), esc(t(item.itemCount === 1 ? 'tickets_one' : 'tickets_other', { n: item.itemCount })))}${fact(t('facts_work'), esc(t('plan_work', { time: formatDuration(item.totals.minutes, t) })))}${fact(t('facts_share'), esc(share))}</dl>`;
 }
 
 const button = (act: string, label: string, primary = false, disabled = false, extra = '') =>
@@ -383,7 +480,11 @@ export function renderActions(item: InboxItem, view: InboxView, t: Translate): s
   if (local?.kind === 'answered') return done(t(`answered_${local.decision}`));
   if (local?.kind === 'approved') return done(t('approved', { time: clock(local.at) }));
   if (local?.kind === 'sent_back') return done(t('sent_back', { time: clock(local.at) }));
+  if (local?.kind === 'plan_approved') return done(t('approved_plan', { time: clock(local.at) }));
   if (item.state === 'handled') return done(t('handled_note'));
+  if (item.kind === 'question' && isLead(item)) {
+    return `<p class="d-done">${esc(t('lead_waits'))}</p><div class="d-buttons"><a class="btn primary" href="/lead">${esc(t('answer_on_lead'))}</a></div>${note}`;
+  }
   switch (item.kind) {
     case 'release': {
       if (local?.kind === 'grace') {
@@ -406,6 +507,14 @@ export function renderActions(item: InboxItem, view: InboxView, t: Translate): s
     case 'question':
       // Disabled until every question has a choice or a free answer: mount enables it.
       return `<span class="signed">${esc(t('signed_in', { name: view.me.name }))}</span><div class="d-buttons">${button('answer', esc(t('send_answer')), true, true)}</div>${note}`;
+    case 'plan': {
+      // A plan the service no longer proposes is not approved from here.
+      const plan = planOf(view, item);
+      if (plan && plan.state !== 'proposed') return done(t('handled_note'));
+      // Change the plan is said to the lead, on its screen (section 5.4).
+      const change = `<a class="btn" href="/plans/${esc(encodeURIComponent(item.planId))}">${esc(t('plan_change'))}</a>`;
+      return `<span class="signed">${esc(t('signed_in', { name: view.me.name }))}</span><div class="d-buttons">${change}${button('approve_plan', esc(t('plan_approve')), true, busy)}</div>${note}`;
+    }
   }
 }
 
@@ -413,7 +522,8 @@ export function renderDetail(view: InboxView, t: Translate): string {
   const item = chosen(view);
   const back = `<a class="back" href="#" aria-label="${esc(t('back_label'))}"><span aria-hidden="true">←</span> ${esc(t('back'))}</a>`;
   if (!item) return `${back}<div class="d-body"><p class="empty">${esc(t('gone'))}</p></div>`;
-  const body = item.kind === 'release' ? releaseBody(item, view, t) : item.kind === 'permission' ? permissionBody(item, view, t) : questionBody(item, view, t);
+  const body = item.kind === 'release' ? releaseBody(item, view, t) : item.kind === 'permission' ? permissionBody(item, view, t)
+    : item.kind === 'plan' ? planBody(item, view, t) : questionBody(item, view, t);
   return `${back}<div class="d-body" data-kind="${item.kind}">${body}</div>
 <div class="d-actions" id="d-actions">${renderActions(item, view, t)}</div>`;
 }
@@ -431,13 +541,17 @@ export function renderInbox(view: InboxView, t: Translate): string {
 const REFRESH_MS = 10_000;
 const STORE_KEY = 'cleared-v2-inbox';
 
+// The inbox's sheet, and the lead screen's, whose plan panel rules are left
+// unscoped for the inbox (lane 8); the inbox's sheet comes last to adapt them.
 function ensureStylesheet(): void {
-  if (document.head.querySelector('link[data-screen="inbox"]')) return;
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = '/screens/inbox.css';
-  link.dataset.screen = 'inbox';
-  document.head.append(link);
+  for (const screen of ['lead', 'inbox']) {
+    if (document.head.querySelector(`link[data-screen="${screen}"]`)) continue;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = `/screens/${screen}.css`;
+    link.dataset.screen = screen;
+    document.head.append(link);
+  }
 }
 
 // The grace and its outcome survive a reload of this tab: the service still
@@ -464,6 +578,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   let stopped = false;
   const local = restore();
   let data: Pick<InboxView, 'items' | 'tickets' | 'sessions'> | undefined;
+  const plans = new Map<string, Plan>();
   // On a phone the captures start in their phone frame; the switch changes the frame only.
   let frame: InboxView['frame'] = window.matchMedia('(max-width: 767px)').matches ? 'phone' : 'desktop';
   let drawnKey = '';
@@ -472,7 +587,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
     const selected = itemFromHash(location.hash);
     return {
       items: data?.items ?? [], tickets: data?.tickets ?? [], sessions: data?.sessions ?? [], selected, open: selected !== undefined,
-      me: context.me.user, now: context.now(), local, frame,
+      me: context.me.user, now: context.now(), local, frame, plans, language: context.me.language,
     };
   };
   const $ = <E extends HTMLElement>(selector: string) => root.querySelector<E>(selector);
@@ -517,11 +632,22 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
     }
   };
 
+  // The plans of the lead's items, read with the list: a service without the
+  // lead answers none, and a plan item then shows what it says itself.
+  const readPlans = async (items: readonly InboxItem[]) => {
+    if (!items.some((item) => item.kind === 'plan')) return;
+    const all = await api<unknown[]>('/plans').catch(() => undefined);
+    if (!Array.isArray(all)) return;
+    plans.clear();
+    for (const value of all) { const plan = readPlan(value); if (plan) plans.set(plan.id, plan); }
+  };
+
   const load = async () => {
     try {
       const [items, tickets, sessions] = await Promise.all([
-        api<ServiceItem[]>('/inbox'), api<Ticket[]>('/tickets').catch(() => []), api<SessionSummary[]>('/sessions').catch(() => []),
+        api<InboxItem[]>('/inbox'), api<Ticket[]>('/tickets').catch(() => []), api<SessionSummary[]>('/sessions').catch(() => []),
       ]);
+      await readPlans(items);
       if (stopped) return;
       // A grace whose release is gone from the list ended elsewhere.
       for (const [id, l] of local) if (!items.some((item) => item.id === id) && l.kind !== 'busy') local.delete(id);
@@ -548,6 +674,9 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
     } catch (error) {
       const { key, settled } = failure(error, gesture);
       if (settled) local.set(item.id, { kind: 'settled' });
+      // Approved elsewhere, replaced, or approved by a call that failed after
+      // it was written (issue 175, item 2): the plan read again says which.
+      else if (gesture === 'approve_plan') local.delete(item.id);
       else if (gesture === 'undo' && key === 'undo_late' && before?.kind === 'grace') local.set(item.id, { kind: 'approved', at: before.dueAt });
       else if (before) local.set(item.id, before);
       else local.delete(item.id);
@@ -555,7 +684,10 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       draw();
       say(key);
       if (settled) context.inboxChanged();
-      if (settled || key === 'approve_conflict') void load();
+      if (settled || key === 'approve_conflict' || gesture === 'approve_plan') {
+        await load();
+        say(key);
+      }
     }
   };
 
@@ -606,6 +738,13 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
       case 'keep':
         local.delete(item.id);
         draw();
+        return;
+      case 'approve_plan':
+        if (item.kind === 'plan') void act(item, 'approve_plan', async () => {
+          const plan = readPlan(await approvePlan(api, item));
+          if (plan) plans.set(plan.id, plan);
+          return { kind: 'plan_approved', at: context.now().toISOString() };
+        });
         return;
       case 'send_back_confirm':
         if (item.kind === 'release') void act(item, 'send_back', async () => { await sendBack(api, item); return { kind: 'sent_back', at: context.now().toISOString() }; });
