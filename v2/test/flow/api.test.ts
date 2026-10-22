@@ -54,10 +54,11 @@ test('the service declares every route of the API but the approval, which is lan
   const declared = [...new Set(routes.map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
   // The preview is lane 15's (container/preview.ts). The ticket's steps and
   // the contract item's Approve and Send back are lane 23's (flow/steps.ts).
+  // The recipes and the schedules are the lead module's (lane 26:
+  // recipes/routes.ts and schedules/routes.ts, with the plan runner).
   // Written ahead by lane 17: the knowledge
   // items and the skill, lane 24's (knowledge/); the questions to the code,
-  // lane 25's (reader/); the recipes and the schedules, lane 26's
-  // (recipes/, schedules/), each of which rewrites this comment to name its
+  // lane 25's (reader/), each of which rewrites this comment to name its
   // module; the web terminal and the editor's save, served by lane 31
   // (terminal/, flow/files.ts), which removes them from here.
   const ahead = [...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES];

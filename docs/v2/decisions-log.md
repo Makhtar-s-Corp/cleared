@@ -2320,6 +2320,91 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - The requirements matrix: M2, C10, O10 and this lane's own lines P30 and P31.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ticket-steps`.
 
+## 2026-10-22: recipes in the repository, schedules in the store, a schedule's budget on its tickets (the author's choices, lane v2-j2-recipes-schedules)
+
+**Decision.** Lane 26 applies decision 29 of the [milestone 2 plan](milestone-2-plan.md). A recipe is `.cleared/recipes/<name>.md` in a service's repository, read at its base branch (`v2/src/recipes/`). A ticket recipe runs as a one-item plan of the plan runner, approved by whoever runs it. A goal recipe is an owner turn to the lead. A schedule is a row of `schedules` (`v2/src/schedules/`). The scheduler runs each due schedule through the plan runner, with the creator's approval, given when the schedule was made, as the plan's approval. Each ticket's budget is the schedule's, carried on the flow's `Origin`. A release still waits for the owner, and the week stop still wins. The lane's choices:
+
+1. **The recipe file** (`recipes/recipe.ts`).
+   - **The front matter** is a strict subset of YAML, read with no dependency. It takes `name`, `kind`, `title`, `lane`, `size`, `services` and `parameters`, and refuses any other key, so a typo never passes for a default.
+   - **`title` is the lane's addition** to the plan's list, since a plan item needs a title. When it is absent, the title is the recipe's name.
+   - **Defaults.** A ticket recipe runs in the `full` lane, at size `s`, on its own service.
+   - **A goal recipe** takes no lane or size: the lead chooses them in its plan.
+   - **A ticket recipe's body** needs a `- [ ]` criterion, as a plan item's does, and is refused when its file is read rather than when it runs.
+   - **The name** is the file's name, in lower-case letters, digits and dashes. A name holding `{{` is refused.
+   - **Marks.** Every `{{mark}}` in the body or the title must name a declared parameter.
+2. **Reading** (`recipes/source.ts`).
+   - **Where.** The files are read from git's objects at `refs/remotes/origin/<base>` of the service's own checkout, as the reader reads a file. The working tree and an unpushed commit are not seen. A committed link is refused, never followed. A file is at most 64 KiB.
+   - **A folder service** reads the `.cleared/recipes/` of its own folder.
+   - **Problems.** What cannot be read is a problem of its file, logged once, never a failure of the list.
+   - **A name used twice.** The run route names a recipe by its name alone, so the first service in the workspace's order keeps the name, and a later service's recipe of that name is such a problem.
+   - **A run fetches first.** Before a run, the recipe's service is fetched, as the flow's effects fetch it before an author's first turn. A fetch that fails is logged, and the run goes on with the base as last fetched.
+3. **The values** are substituted in one pass, so a value is never read for marks.
+   - Each value is one line of at most 500 characters, with no `{{` or `}}`.
+   - A missing required parameter is refused, and so is an unknown one. An optional parameter left out is empty.
+   - The title, the body and the goal go through the service's cleaner.
+4. **A ticket recipe runs** through the runner's own `propose` (`recipes/service.ts`).
+   - **Sensitivity.** `applySensitivity` is applied first, as the lead's `propose_plan` does, so a fast recipe on a `full` service runs in the full lane (decision 24).
+   - **Steps.** A recipe naming several services gets the steps `deriveSteps` gives (decision 26). One naming a single service, in a workspace of several, gets that service's one step, so its ticket names that service.
+   - **Approval.** The plan is then approved by `Recipes.approve`, which does what the runner's `approve` does: the plan's inbox item handled, the tick that creates and starts the ticket, the plan's frame. The service line is its own, so the lead is told once and truly ("Schedule sch-1 ran the recipe ...", or "The owner (u1) ran the recipe ..."). The runner's line, "The owner approved plan ...", would be false for a run at 03:00.
+   - **The goal id** is unique per run (`recipe-<name>-<time>-<n>`), so one run never supersedes another's proposal.
+5. **A goal recipe** is `post(text, user, true)` on the lead: an owner turn as a goal, by the person who runs it. The route answers the message's sequence number.
+6. **A schedule.**
+   - **`every`** is `day HH:MM`, `weekdays HH:MM`, a day of the week with `HH:MM`, or `hour :MM`, in the server's time zone. At the end of summer time, a daily run comes 25 hours after the one before.
+   - **`at`** is an ISO time in the server's zone, or one with its offset, and must be to come. A schedule `at` a time is disabled once it has run.
+   - **Creation checks** the recipe and its parameters, so a schedule is refused when it is made, not at 03:00. The budget is above 0 and at most $1000. The cap is 1 to 100 % of the seven-day window. The creator is the signed-in user.
+   - **Deleting** a schedule marks its row removed (`removed_at`), so its id is never given again, and its runs in `schedule_runs` stay its own: a plan it started keeps its budget.
+7. **The scheduler** (`schedules/scheduler.ts`) ticks each minute.
+   - **A run starts once.** It is taken in one `UPDATE` that moves the schedule to its next run, so overlapping ticks never start it twice. After a stop of the service, a schedule catches up once, not once per missed period.
+   - **The week check.** A run is skipped when the seven-day window is at or above the smaller of the schedule's cap and the runner's week stop. The window is read as the runner reads it: the query is copied, since the runner's `#stop` is private. A skip still moves the schedule to its next run.
+   - **A failed run** (skipped, a recipe gone or refused, a start that failed) is kept in `schedule_runs` and said once as a `schedule_failed` event (`Scheduler.subscribe`). The lead gets a non-urgent event, which it tells the owner in the morning, and a notification is sent.
+   - **A failure that repeats is told once.** When the schedule's last run failed for the same reason, the lead and the owner are not told again until a run goes well, so an hourly schedule whose recipe is gone does not wake the owner every hour.
+8. **A goal schedule.**
+   - Its text tells the lead that the plan it proposes is approved for the creator, with the schedule's budget per ticket, and that the owner is away: it asks nothing, and writes its assumptions in the plan's summary. In goal mode the lead would otherwise ask its questions first, and the plan would miss the night.
+   - The plan the lead proposes for that goal (`goal-<seq>`) within six hours is approved for the creator at the next tick. A plan of another goal is left to the owner.
+   - The plan says the creator's approval is the plan's; this applies it to goals too, so a goal schedule runs at night as a recipe does.
+9. **The budget on `Origin`** (`flow/events.ts`, `flow/engine.ts`).
+   - `Origin.budgetUsd` is the schedule's budget, and the engine's budget check reads it before `CLEARED_V2_BUDGET_USD`.
+   - **How it gets there.** The lead module gives the runner a flow (`schedules/budget.ts`) that adds the budget of the origin's plan, read from `schedule_runs`. So a start again after a put back, and the lead's `start_ticket`, keep it too, although the engine forgets an origin at a put back.
+   - **Timing.** The approval's tick starts the ticket, so the scheduler learns of the plan from the run (`planned`) before the approval, and the budget is known at that first start.
+   - **The scheduler's place.** The recipes and the scheduler are built with the plans, in `plansOf` of `modules/lead.ts`, which registers their tables and routes.
+10. **The notifications** (`notify/sources.ts`).
+    - **A failed run** is a `health` notification: `week_stop` when the week skipped it (lib's catalog words that one), else `schedule_failed`.
+    - **A run that went well notifies nothing.** This departs from the plan's "the `schedule_ran` and `schedule_failed` events for the notifications (`health` kind)". A health notification is urgent and passes the quiet hours, and lib's catalog says "a health problem was detected" for a code it does not know, so a nightly `schedule_ran` would be a false alarm at 03:00. A run that went well tells the lead by its line, and its release waits in the inbox as any other.
+    - **Not a `FlowEvent`.** The two events are not on the flow's bus: its `Base` needs a ticket, and the dispatcher reads no `FlowEvent`. The scheduler adds the occurrence to the queue itself.
+11. **Issue 207, item 7, and lane 23's followup, taken.**
+    - A session plan waiting for its Go, and a contract waiting for its validation, are notified as a team's permission is, with their inbox link: lib's catalog has no kind of their own, and "open it to allow or deny" is what each asks.
+    - A knowledge item waits for the owner's morning, untold.
+12. **Files outside the lane's list.**
+    - `v2/test/lead/module.test.ts` and `v2/test/lead/plans/module.test.ts` pinned the lead module's exact tables and routes, as lane 7 recorded for the first.
+    - `v2/test/flow/api.test.ts`: its comment now names the lead module for the recipes and the schedules, as the plan asks. `RECIPE_ROUTES` stays excluded there, since the flow's API does not serve them.
+
+**Consequences.**
+- **Tests first.** Commit c7ae472 holds them alone. Each failed on `origin/v2` at 5d68c50, where `recipes/` and `schedules/` did not exist and `notify/sources.ts` had no `scheduleOccurrence`. The new files are:
+  - `test/recipes/{recipe,source,run}.test.ts`;
+  - `test/schedules/{when,scheduler,budget,routes}.test.ts`;
+  - `test/notify/sources.test.ts`.
+- **What the tests prove**, the plan's acceptance first:
+  - a recipe with two parameters runs as a one-item plan with the substituted body and the labels, approved by who ran it, and the lead is told once;
+  - a missing parameter is refused, and so is a name with `{{`;
+  - a goal recipe sends an owner turn;
+  - `every: day 03:00` runs at the first tick past 03:00 and not twice, with the budget on the ticket's origin; a ticket past that budget is put back, though the service sets none;
+  - a run at the week stop is skipped with a `schedule_failed` and a `week_stop` notification;
+  - a disabled schedule never runs;
+  - the creator is the plan's approver;
+  - and beyond it: the summer time's end, a catch up once after a stop, a repeated failure told once, a removed schedule's id never given again, a schedule `at` a time disabled once run, a goal schedule's plan approved for its creator, a recipe gone, the creation's refusals, the routes' guards, a recipe naming two services run in steps, a fast recipe on a `full` service run in the full lane, and the base read from git's objects, never the working tree.
+- **Checks.** `npm test`: 1083 node tests, 1077 pass and 6 skipped; 154 Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
+- **No real run.** Nothing here calls a model or Docker. A schedule's real run belongs to the proof (lane 29).
+- **No screen changed.** The lane touches no file of the app, so it ran no visual loop and made no capture. Lane 27 draws "Run a recipe" and the schedules in the tower's plans card.
+- **Followups.**
+  - **A schedule needs the plans to be built.** The scheduler, like the plans, is built on the first request to a lead, plan, recipe or schedule route, since a module's `provide` has no registry. A service restarted at night with no browser open runs no schedule until the app is opened, and a schedule then catches up once. Building the plans at start needs the registry in `provide` (`modules/registry.ts`, `main.ts`).
+  - **lib's catalog** (`lib/notify/contract.mjs` `HEALTH_CODES`, `lib/i18n/{en,fr}.json`) has no `schedule_failed` line, so that notification says "a health problem was detected" until a small lane adds one.
+  - **No route enables, disables or edits a schedule** (the API lane 17 fixed has none): delete it and create it again.
+  - **The schedule's week cap** is read when a run starts. Its tickets then keep to the runner's own week stop.
+  - **A goal schedule's plan** is approved only when the lead proposes it under the goal's id. Otherwise it waits for the owner.
+- Pull request: 222, against `v2`.
+- **The requirements matrix.** C7 and C12 (partial: the screens are lane 27's), C8 and M2 (the notifications), and this lane's own lines P32, P33 and P34.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-recipes-schedules`.
+
 ## 2026-10-22: the steps, the contract and knowledge gestures, the questions to the code, the recipes and the schedules on the screens (the author's choices, lane v2-j2-additions-screens)
 
 **Decision.** Lane 27 applies the app's part of decisions 26 to 29 of the [milestone 2 plan](milestone-2-plan.md). It adds:
@@ -2361,11 +2446,11 @@ The lane's choices:
    - **The plan panel** lists an item's steps under its whole width (decision 26: "the plan shows the steps' order and dependencies"; matrix line M2 names lane 27 for it).
    - **A steps answer that is not a list** shows no steps. The browser tests found it: a stand-in answering `/tickets/:id/steps` with the ticket made the session screen throw before its timeline drew.
    - **Words.** A step's dependency reads "waits for 2 and 3": "after" was taken for an English sentence left in the French screens by the inbox's catalog check (the word is in a class name).
-6. **Recipes and schedules** (lane 26's routes, which were not merged when this lane ran). Both are optional reads, so a service without them shows the tower as before: no "Run a recipe", no schedules.
+6. **Recipes and schedules** (lane 26's routes, built beside this lane and merged before it as pull request 222; the screens send and read its shapes as served: the declared parameters only, the run's `plan` or `message`). Both are optional reads, so a service without them shows the tower as before: no "Run a recipe", no schedules.
    - **The form** refuses a missing required parameter before anything is posted, with its own sentence. The form is `noValidate`, so the browser's bubble does not stand in for it; the `required` attribute stays for assistive technology.
    - **Run** is outlined until the recipe can run, then in ink, so the bar's New ticket is not a second ink gesture on screen.
    - **A run** says what it became and links to the plan (a ticket recipe) or the lead (a goal recipe).
-   - **A schedule** shows its next run ("tomorrow at 03:00", "on Mon at 08:00") and its budget; one switched off reads "Off" and comes last. The `every` text is not shown: its format is lane 26's, in English.
+   - **A schedule** shows its next run ("tomorrow at 03:00", "on Mon at 08:00") and its budget; one switched off reads "Off" and comes last. The `every` text (lane 26's `day 03:00`, `weekdays 08:00`) is not shown: it is English, and the next run says when.
 7. **The French amounts** put a no-break space before the dollar, as the plan panel's `plan_cost` does.
 8. **Fixtures.**
    - `fixtures/source.ts` (this lane's in wave 10) answers every route of this lane: the steps, the contract and knowledge gestures kept in memory, the asks (a new one stays `starting`, a follow-up runs, a second one is a 409), the recipes and their run, and the schedules. The inbox there now lists a contract and a knowledge item.
@@ -2394,7 +2479,7 @@ The lane's choices:
   - **Changed in the first commit:** lane 21's test of the reading-only items now expects the gestures, and `app/test/fixtures.test.ts` lists the new kinds.
   - **Adjusted while the code was written:** a contract's need title is the catalog's (`needTitle`); the French amounts use the no-break space; "waits for" replaces "after"; and lane 22's test of a kind the tower does not draw now uses a later kind, since knowledge is drawn.
 - **Checks.**
-  - `npm test`: 1072 node tests (1066 pass, 6 skipped as before; 1036 before the lane) and 177 Vitest tests (154 before).
+  - `npm test`, after the merge of `origin/v2`: 1119 node tests (1113 pass, 6 skipped as before; 1036 before the lane, 47 of them lane 26's) and 177 Vitest tests (154 before).
   - `npm run typecheck` is green.
   - `npm run guard -- --base origin/v2` is green, without a private-term list (`CLEARED_REPO` unset).
   - **The browser tests**, with `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME`: the five of `app/test/session/tabs-browser.test.ts` and `app/test/choices-browser.test.ts` pass. On the lane's code before the guard above, four of them timed out on the session screen, while all five passed on `origin/v2` at `5d68c50`. `app/test/notify/browser.test.ts` times out on this branch and on `origin/v2` alike, as lane 22 logged.
@@ -2417,11 +2502,11 @@ The lane's choices:
     - the shield on a sensitive service, lane 22's;
     - the facts' label column on the knowledge item, the inbox's layout for every kind.
 - **Followups.**
-  - **Lane 26**, once merged: check that `Recipe` and `Schedule` as served match `types.ts`, and say a schedule's period in the reader's words (the `every` format).
+  - **A schedule's period** in the reader's words (lane 26's `every` format), beside its next run.
   - **Lane 31:** the `PAGES` row of choice 1 is in `server.ts`, its file; a merge keeps both.
   - **Lane 29:** the selectors of choice 9. Through the fixture source, a new ask stays `starting`, and its rehearsal needs a reader on the fake adapter.
   - **Polling cost.** The tower reads one steps route per live author's ticket every 10 seconds in a workspace of several services. A step on `SessionSummary` would save those reads (a change of `types.ts`).
   - **Issue 211, item 3** ("Rolled back" twice on a handled train) is left: lane 29's step 9 reads the line, and the chip is what files the train under "Handled today".
   - **Issue 213's nits** on the session screen ("Done when" twice, the editor's selected file) are left to a pass on that screen.
-- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request. M8 and M9 are `done`, the live runs being lane 29's. C11 stays `partial` for the Plan tab's entry, and C7 and C12 until lane 26. The new lines P32 (choices 1 to 3) and P33 (choices 4 to 7) record the lane's choices.
+- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request. M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P35 (choices 1 to 3) and P36 (choices 4 to 7) record the lane's choices; they were P32 and P33 before the merge of `origin/v2`, where lane 26 (pull request 222) took P32 to P34 first.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-additions-screens`.
