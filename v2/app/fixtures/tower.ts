@@ -4,13 +4,15 @@
 // tickets carry the local tracker's LOCAL-<n> ids; the titles and phrases
 // are the capture's, and the two plans are the capture's shape with the
 // guestbook's content: one proposed for 25 minutes, one with 3 of 6 landed.
-import type { InboxItem, LeadState, Plan, PlanItem, SessionSummary } from '../../src/api/types.ts';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { CreateTicketBody, InboxItem, LeadState, Plan, PlanItem, ReleaseItem, SessionSummary, TrainState, Workspace } from '../../src/api/types.ts';
 import type { Harness, Role, SessionId } from '../../src/session/contract.ts';
 import { createFakeAdapter, type FakeStep } from '../../src/session/adapters/fake.ts';
 import type { SessionPhase, SessionState } from '../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
+import { sendJson, type DataSource } from '../src/proxy.ts';
 import type { TowerData } from '../web/screens/tower/model.ts';
 
 export const FIXTURE_PROJECT = 'guestbook';
@@ -196,4 +198,157 @@ export async function towerFixture(now: Date, options: { readonly project?: stri
     landed('LOCAL-151', 'The envelope list reads one section at a time', at(now, 9, 22), 38),
   ];
   return { sessions, inbox, tickets, lead: lead(now, 'lead-generation-3'), leadLine: LEAD_LINE, plans: plans(now), weekLeft: null, store };
+}
+
+// ------------------------------------------- lane 22: a workspace of two services
+
+// The tower of a workspace of two services (milestone 2, decisions 18, 21
+// and 30, lane 22), beside the capture's data above, which stays as it is:
+// the guestbook, which consumes the filter API (examples/workspace.conf),
+// the filter API under the full review; the live sessions each on their
+// service, one taken over by the owner; a train landing, a train rolled back
+// in the last day, and a ticket blocked before approval. The fixture source
+// (lane 20's in this wave) serves no workspace yet, so towerSource below
+// answers these routes for the tests and the visual loop.
+export const WORKSPACE: Workspace = {
+  id: FIXTURE_PROJECT, name: 'Guestbook',
+  services: [
+    {
+      name: 'guestbook', kind: 'repository', repo: 'example/cleared-example-guestbook', url: 'https://example.invalid/guestbook.git', base: 'main', path: null,
+      healthUrl: 'http://127.0.0.1:8793/health', sensitivity: 'normal', consumes: ['filter-api'], run: { dockerfile: 'Dockerfile', port: 3000 }, contract: null,
+    },
+    {
+      name: 'filter-api', kind: 'repository', repo: 'example/cleared-example-filter-api', url: 'https://example.invalid/filter-api.git', base: 'main', path: null,
+      healthUrl: 'http://127.0.0.1:8795/health', sensitivity: 'full', consumes: [], run: { dockerfile: 'Dockerfile', port: 8795 }, contract: { format: 'openapi', path: 'contract/openapi.yaml' },
+    },
+  ],
+};
+
+// The owner's account in the tests; towerSource puts the signed-in user's id
+// in its place, so the visual loop reads "taken over by you".
+export const OWNER_ID = 'owner-account';
+
+const WORKSPACE_TITLES: Readonly<Record<string, string>> = {
+  'LOCAL-168': 'Longer entries are checked in one call',
+  'LOCAL-169': 'An entry the filter flags is held for review instead of refused',
+  'LOCAL-170': 'The filter API answers its version on /health',
+  'LOCAL-171': 'The filter answers a severity with each word',
+};
+
+const SERVICE_OF: Readonly<Record<string, string>> = { 'LOCAL-161': 'guestbook', 'LOCAL-152': 'guestbook', 'LOCAL-160': 'guestbook', 'LOCAL-163': 'filter-api' };
+
+const pr = (service: string, number: number) => ({ number, url: `https://example.invalid/${service}/pull/${number}` });
+
+function trainRelease(id: string, ticket: string, project: string, since: Date, state: InboxItem['state'], train: TrainState): ReleaseItem {
+  return {
+    kind: 'release', id, ticket, project, since: since.toISOString(), state, title: WORKSPACE_TITLES[ticket] as string,
+    announcement: `${WORKSPACE_TITLES[ticket] as string}.`, pr: { ...pr('guestbook', 50), checks: 'passed' }, heads: [{ pr: 50, head: '9a1b2c3d4e5f' }],
+    requestedAt: since.toISOString(), captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
+    sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 26 }, { role: 'reviewer', model: 'claude-sonnet-5-5', minutes: 5, rounds: 1 }], train,
+  };
+}
+
+// The trains of the workspace, as GET /api/inbox answers them: a train
+// landing (the filter API healthy, the guestbook merged and its health being
+// read), one rolled back in reverse order an hour ago, and one blocked before
+// approval because it changes the contract without a step on the guestbook.
+export function trainItems(now: Date, project = FIXTURE_PROJECT): ReleaseItem[] {
+  const compatibility = 'The guestbook consumes the filter API and is changed in this ticket.';
+  return [
+    trainRelease('release-171', 'LOCAL-171', project, minutesBefore(now, 7), 'waiting', {
+      state: 'blocked', compatibility: 'The guestbook consumes the filter API and is not changed in this ticket.',
+      services: [{ service: 'filter-api', pr: pr('filter-api', 9), state: 'waiting', at: null }],
+      blocked: {
+        reason: 'The ticket changes contract/openapi.yaml of the filter API, and the guestbook, which consumes it, has no step.',
+        proposal: 'Add a step on the guestbook, or keep the change backward compatible: an optional severity the guestbook may ignore.',
+      },
+    }),
+    trainRelease('release-169', 'LOCAL-169', project, minutesBefore(now, 22), 'handled', {
+      state: 'landing', compatibility, blocked: null,
+      services: [
+        { service: 'filter-api', pr: pr('filter-api', 8), state: 'healthy', at: minutesBefore(now, 9).toISOString() },
+        { service: 'guestbook', pr: pr('guestbook', 51), state: 'merged', at: minutesBefore(now, 4).toISOString() },
+      ],
+    }),
+    trainRelease('release-168', 'LOCAL-168', project, minutesBefore(now, 95), 'handled', {
+      state: 'rolled_back', compatibility, blocked: null,
+      services: [
+        { service: 'filter-api', pr: pr('filter-api', 7), state: 'reverted', at: minutesBefore(now, 61).toISOString() },
+        { service: 'guestbook', pr: pr('guestbook', 49), state: 'reverted', at: minutesBefore(now, 63).toISOString(), note: '/health failed twice after the deploy.' },
+      ],
+    }),
+  ];
+}
+
+// The capture's tower in that workspace: each live session on its service,
+// the filter API's session LOCAL-170 taken over by `owner`, and the trains.
+export async function workspaceFixture(now: Date, options: { readonly project?: string; readonly owner?: string } = {}): Promise<TowerFixture & { readonly workspace: Workspace }> {
+  const base = await towerFixture(now, options);
+  const project = options.project ?? FIXTURE_PROJECT;
+  const startedAt = minutesBefore(now, 12);
+  const taken: SessionSummary = {
+    id: 'fixture-taken-170', project, ticket: 'LOCAL-170', role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: 'working',
+    status: 'Adding the version to the /health answer', startedAt: startedAt.toISOString(), updatedAt: minutesBefore(now, 6).toISOString(), lastSeq: 9,
+    service: 'filter-api', takenOver: { by: options.owner ?? OWNER_ID, at: minutesBefore(now, 6).toISOString() },
+  };
+  const ticket = (id: string, status: string, minutes: number): Ticket => ({
+    id, title: WORKSPACE_TITLES[id] as string, body: '', labels: [], project, status, createdAt: minutesBefore(now, minutes).toISOString(), updatedAt: now.toISOString(),
+  });
+  return {
+    ...base,
+    workspace: { ...WORKSPACE, id: project },
+    sessions: [...base.sessions.map((s) => ({ ...s, service: SERVICE_OF[s.ticket] ?? 'guestbook' })), taken],
+    inbox: [...base.inbox, ...trainItems(now, project)],
+    tickets: [...base.tickets, ticket('LOCAL-168', 'Todo', 140), ticket('LOCAL-169', 'Needs Approval', 70), ticket('LOCAL-170', 'In Progress', 12), ticket('LOCAL-171', 'Needs Approval', 40)],
+  };
+}
+
+// A stand-in for the tower's routes in that workspace: GET /api/workspace,
+// the sessions (the taken-over one by the signed-in user), the inbox, the
+// tickets, and POST /api/tickets, which keeps what was asked in `calls`;
+// every other route goes to `rest` (the fixture source, for the lead and
+// the plans), as lane 20's fixture source will once it serves the workspace.
+export type TowerCall = { readonly method: string; readonly path: string; readonly body: unknown };
+export type TowerSource = DataSource & { readonly calls: TowerCall[] };
+
+export function towerSource(now: () => Date, rest?: DataSource): TowerSource {
+  const calls: TowerCall[] = [];
+  let created = 0;
+  const read = (request: IncomingMessage): Promise<unknown> => new Promise((resolve) => {
+    let text = '';
+    request.on('data', (chunk: Buffer) => { text += chunk.toString('utf8'); });
+    request.on('end', () => { try { resolve(text ? JSON.parse(text) : null); } catch { resolve(undefined); } });
+    request.on('error', () => resolve(undefined));
+  });
+  async function handle(request: IncomingMessage, response: ServerResponse, method: string, path: string, user: string): Promise<boolean> {
+    const fixture = await workspaceFixture(now(), { owner: user });
+    if (method === 'GET' && path === '/api/workspace') return sendJson(response, 200, fixture.workspace), true;
+    if (method === 'GET' && path === '/api/sessions') return sendJson(response, 200, fixture.sessions), true;
+    if (method === 'GET' && path === '/api/inbox') return sendJson(response, 200, fixture.inbox), true;
+    if (method === 'GET' && path === '/api/tickets') return sendJson(response, 200, fixture.tickets), true;
+    if (method === 'POST' && path === '/api/tickets') {
+      const body = await read(request) as CreateTicketBody | undefined;
+      calls.push({ method, path, body });
+      const ticket: Ticket = {
+        id: `LOCAL-${180 + ++created}`, title: body?.title ?? '', body: body?.body ?? '', labels: [], project: fixture.workspace.id, status: 'Todo',
+        createdAt: now().toISOString(), updatedAt: now().toISOString(), ...(body?.services ? { services: body.services.map((name) => ({ name, branch: null, pr: null, state: 'open' as const })) } : {}),
+      };
+      return sendJson(response, 201, ticket), true;
+    }
+    return false;
+  }
+  return {
+    kind: 'fixtures', calls,
+    forward(request, response, forward) {
+      const path = new URL(forward.path, 'http://fixtures').pathname;
+      handle(request, response, forward.method, path, forward.user.id).then((done) => {
+        if (done) return;
+        if (rest) rest.forward(request, response, forward);
+        else sendJson(response, 404, { error: 'not in the fixtures' });
+      }).catch(() => {
+        if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });
+        else response.destroy();
+      });
+    },
+  };
 }

@@ -122,6 +122,33 @@
 .plan-actions .plan-go:hover { opacity: .88; }
 .plan-actions button:disabled { opacity: .5; cursor: default; }
 .plan-note { flex-basis: 100%; font-size: 13px; color: var(--text-secondary); }
+/* the services an item names (lane 22): a quiet tag each, the sensitive one
+   in ink with a shield, never amber, which stays for what waits for a person */
+.plan-services { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 6px 0 0; padding: 0; }
+.svc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; box-shadow: var(--e-control); font-size: 12px; line-height: 18px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.svc-chip.sensitive { color: var(--text); font-weight: 500; box-shadow: inset 0 0 0 1px var(--text-faint); }
+.svc-chip svg { flex: none; }
+
+/* a release train in the thread (lane 22): a service line with its own mark,
+   amber when it waits for the person, red when it went back */
+.lead-screen .train-line { display: flex; gap: 10px; align-items: flex-start; }
+.lead-screen .train-mark { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; flex: none; background: var(--surface); color: var(--text-secondary); box-shadow: var(--e-control); }
+.lead-screen .train-body { min-width: 0; max-width: min(520px, calc(100% - 36px)); padding: 10px 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
+.lead-screen .train-line.awaiting .train-mark { background: var(--awaiting-surface); color: var(--awaiting-text); box-shadow: 0 0 0 1px var(--awaiting-outline); }
+.lead-screen .train-line.awaiting .train-body { background: var(--awaiting-surface); box-shadow: 0 0 0 1px var(--awaiting-outline); }
+.lead-screen .train-line.danger .train-mark { color: var(--danger-text); box-shadow: 0 0 0 1px var(--danger); }
+.lead-screen .train-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-weight: 500; }
+.lead-screen .train-head time { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--text-faint); }
+.lead-screen .train-title { margin-top: 2px; font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.lead-screen .train-stops { display: flex; flex-wrap: wrap; gap: 4px 6px; list-style: none; margin: 8px 0 0; padding: 0; }
+.lead-screen .train-stop { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 8px; border-radius: 10px; background: var(--sunken); font-size: 12px; color: var(--text-secondary); }
+.lead-screen .train-stop::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dashed); flex: none; }
+.lead-screen .train-stop[data-stop="merged"]::before { background: var(--stage-progress); }
+.lead-screen .train-stop[data-stop="healthy"]::before { background: var(--success); }
+.lead-screen .train-stop[data-stop="failed"]::before, .lead-screen .train-stop[data-stop="reverted"]::before { background: var(--danger); }
+.lead-screen .train-reason { margin-top: 8px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.lead-screen .train-proposal { margin-top: 4px; font-size: 13px; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
+.lead-screen .train-link { display: inline-block; margin-top: 8px; font-size: 12px; }
 
 /* below 1024 px the panel goes under the thread */
 @media (min-width: 1024px) { .lead-screen .bubble-link.to-panel { display: none; } }
@@ -139,6 +166,7 @@
   .lead-screen .bubble-link, .lead-screen .other-plans li { min-height: 44px; align-items: center; }
   .lead-screen .other-plans li a { padding: 13px 0; margin: -13px 0; }   /* the link itself fills the 44 px row */
   .lead-screen .bubble-link { display: inline-flex; margin-top: 0; }
+  .lead-screen .train-link { display: inline-flex; align-items: center; min-height: 44px; margin: 0; }
   .lead-screen .thread { padding: 4px 14px 10px; }
   .lead-screen .reply { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
   .lead-screen .reply textarea, .lead-screen .goal-toggle, .lead-screen .reply .primary { min-height: 44px; }

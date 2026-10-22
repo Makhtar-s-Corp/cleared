@@ -5,7 +5,7 @@
 // keys in PLAN_PANEL_KEYS, and each screen's catalog holds them
 // (messages/lead.* here, messages/inbox.* for lane 10). Every key is written
 // out whole, so a test can read the list from this file.
-import type { Plan, PlanItem, PlanState } from '../../../src/api/types.ts';
+import type { Plan, PlanItem, PlanState, ServiceSensitivity } from '../../../src/api/types.ts';
 import type { Translate } from '../lib/i18n.ts';
 
 export const PLAN_PANEL_KEYS = [
@@ -18,6 +18,12 @@ export const PLAN_PANEL_KEYS = [
   'plan_change', 'plan_approve', 'plan_pause', 'plan_resume',
 ] as const;
 
+// The services an item names, with their sensitivity (decisions 18 and 24,
+// lane 22). Their keys are not in PLAN_PANEL_KEYS, which the inbox's catalog
+// must hold (lane 21's file in this wave): the lead's catalog holds them, and
+// a screen asks for the chips with `services` once its catalog holds them too.
+export const PLAN_SERVICE_KEYS = ['services_label', 'sensitivity_full', 'sensitivity_reviewer', 'sensitivity_human', 'sensitivity_other'] as const;
+
 export type PlanAction = 'change' | 'approve' | 'pause' | 'resume';
 
 export type PlanPanelOptions = {
@@ -25,6 +31,7 @@ export type PlanPanelOptions = {
   readonly busy?: boolean;              // a gesture is on its way: the buttons wait
   readonly note?: string | null;        // what the last gesture came to, said under the buttons
   readonly actions?: boolean;           // false: the panel without its buttons
+  readonly services?: boolean;          // true: each item's services, as chips (PLAN_SERVICE_KEYS)
 };
 
 export const STATE_KEYS: Readonly<Record<PlanState, string>> = {
@@ -44,6 +51,51 @@ export const ACTION_KEYS: Readonly<Record<PlanAction, string>> = { change: 'plan
 export const ACTIONS: Readonly<Record<PlanState, readonly PlanAction[]>> = {
   proposed: ['change', 'approve'], approved: ['pause'], paused: ['change', 'resume'], done: [], superseded: [], rejected: [],
 };
+
+// A state the maps do not know (a later lane's) reads as the service wrote
+// it, rather than an unknown key that would blank the panel (issue 177).
+export const stateText = (state: PlanState, t: Translate): string => (Object.hasOwn(STATE_KEYS, state) ? t(STATE_KEYS[state]) : state);
+export const itemStateText = (state: PlanItem['state'], t: Translate): string => (Object.hasOwn(ITEM_KEYS, state) ? t(ITEM_KEYS[state]) : state);
+
+export type ServiceChip = {
+  readonly service: string;
+  readonly kind: 'normal' | 'full' | 'reviewer' | 'human' | 'other';
+  readonly who: string | null;           // the reviewer's model family, the approving user, or the setting as written
+};
+
+// 'claude-opus-5-5' reads 'Opus', as the tower names a reviewer.
+function family(model: string): string {
+  const match = /(opus|sonnet|haiku|fable)/i.exec(model)?.[1];
+  return match ? match.charAt(0).toUpperCase() + match.slice(1).toLowerCase() : model;
+}
+
+function chip(service: string, sensitivity: ServiceSensitivity): ServiceChip {
+  if (sensitivity === 'normal') return { service, kind: 'normal', who: null };
+  if (sensitivity === 'full') return { service, kind: 'full', who: null };
+  if (sensitivity.startsWith('reviewer:')) return { service, kind: 'reviewer', who: family(sensitivity.slice('reviewer:'.length)) };
+  if (sensitivity.startsWith('human:')) return { service, kind: 'human', who: sensitivity.slice('human:'.length) };
+  return { service, kind: 'other', who: sensitivity };
+}
+
+// The chips of an item: every service its body names once the plan names
+// two services, or one of them is not of normal sensitivity; none otherwise,
+// so a plan of a one-service workspace reads as before.
+export function serviceChips(item: PlanItem, plan: Plan): ServiceChip[] {
+  const named = item.sensitivity ?? [];
+  const services = new Set(plan.items.flatMap((i) => (i.sensitivity ?? []).map((s) => s.service)));
+  if (services.size < 2 && named.every((s) => s.sensitivity === 'normal')) return [];
+  return named.map((s) => chip(s.service, s.sensitivity));
+}
+
+export function chipText(c: ServiceChip, t: Translate): string {
+  switch (c.kind) {
+    case 'normal': return c.service;
+    case 'full': return t('sensitivity_full', { service: c.service });
+    case 'reviewer': return t('sensitivity_reviewer', { service: c.service, model: c.who ?? '' });
+    case 'human': return t('sensitivity_human', { service: c.service, user: c.who ?? '' });
+    case 'other': return t('sensitivity_other', { service: c.service, value: c.who ?? '' });
+  }
+}
 
 // 40 min, 1 h, 2 h 15: the critical path or an estimate, never zero.
 export function formatDuration(minutes: number, t: Translate): string {
@@ -73,7 +125,7 @@ export function positions(after: readonly number[], t: Translate): string {
 
 // The eyebrow: "Plan to approve", or the state with what landed once it runs.
 export function planStateLine(plan: Plan, t: Translate): string {
-  const state = t(STATE_KEYS[plan.state]);
+  const state = stateText(plan.state, t);
   if (plan.state !== 'approved' && plan.state !== 'paused' && plan.state !== 'done') return state;
   const counted = plan.items.filter((item) => item.state !== 'cancelled');
   return t('plan_progress', { state, landed: counted.filter((item) => item.state === 'landed').length, total: counted.length });

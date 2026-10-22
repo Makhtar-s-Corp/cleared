@@ -75,5 +75,19 @@
   "plan_next": "ensuite : {title}",
   "plan_paused": "En pause",
   "landed_title": "Livré aujourd'hui",
-  "landed_empty": "Rien de livré aujourd'hui pour l'instant."
+  "landed_empty": "Rien de livré aujourd'hui pour l'instant.",
+  "services_title": "Services",
+  "service_live_one": "{n} session en cours",
+  "service_live_other": "{n} sessions en cours",
+  "service_landing": "atterrit {ticket}",
+  "service_rolled_back": "annulé {ticket}",
+  "service_quiet": "au calme",
+  "bar_services_label": "Services que ce ticket touche",
+  "taken_over_you": "Repris en main par vous · {age}",
+  "taken_over_other": "Repris en main par un autre compte · {age}",
+  "need_session_plan": "Plan de session · {age}",
+  "session_plan_low": "Confiance faible : l'auteur attend votre feu vert.",
+  "session_plan_medium": "Confiance moyenne : l'auteur attend votre feu vert.",
+  "session_plan_high": "Confiance élevée : l'auteur attend votre feu vert.",
+  "release_blocked": "Elle ne peut pas être approuvée telle quelle ; sa carte propose comment faire."
 }

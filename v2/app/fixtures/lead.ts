@@ -7,7 +7,7 @@
 // the capture's shape (2 after 1, 3 after 2, two fast lane items) with the
 // guestbook's content.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { leadFrame, type Estimate, type LeadCommitment, type LeadMemory, type LeadMessage, type LeadState, type Plan, type PlanItem, type PlanItemInbox, type SessionSummary } from '../../src/api/types.ts';
+import { leadFrame, type Estimate, type LeadCommitment, type LeadMemory, type LeadMessage, type LeadState, type Plan, type PlanItem, type PlanItemInbox, type ReleaseItem, type SessionSummary } from '../../src/api/types.ts';
 import { LEAD_TICKET, bindLeadTools } from '../../src/lead/contract.ts';
 import { createFakeAdapter, exampleLeadScript } from '../../src/session/adapters/fake.ts';
 import type { CustomValue, SessionPhase } from '../../src/session/events.ts';
@@ -152,6 +152,35 @@ export async function leadFixture(now: Date, options: { readonly project?: strin
   return { state, messages, memory, plans, inbox, session, store };
 }
 
+// ------------------------------------------- lane 22: a plan across two services
+
+// A plan of the workspace of two services (decisions 18 and 24, lane 22):
+// each item carries the services its body names with their sensitivity, as
+// lane 18's plan store gives them, the filter API under the full review.
+// Its own value, so the fixture source keeps lane 1's plan.
+export const SERVICE_PLAN_ID = 'plan-7';
+
+export function servicePlan(now: Date): Plan {
+  const guestbook = { service: 'guestbook', sensitivity: 'normal' } as const;
+  const filter = { service: 'filter-api', sensitivity: 'full' } as const;
+  const item = (position: number, title: string, minutes: number, costUsd: number, after: readonly number[], sensitivity: PlanItem['sensitivity']): PlanItem => ({
+    position, title, body: `${title}.\n\nAcceptance criteria\n- [ ] ${title}, with a test.`, lane: 'full', size: minutes > 30 ? 'm' : 's', after,
+    estimate: { minutes, costUsd, weekPercent: null, samples: 4 }, ticket: null, state: 'waiting', ...(sensitivity ? { sensitivity } : {}),
+  });
+  return {
+    id: SERVICE_PLAN_ID, goal: 'goal-40', title: 'Flagged entries are held for review',
+    summary: 'The filter API answers a severity; the guestbook holds a flagged entry for review instead of refusing it.',
+    items: [
+      item(1, 'The filter answers a severity with each word', 30, 0.70, [], [filter]),
+      item(2, 'The guestbook holds an entry the filter flags', 40, 0.90, [1], [guestbook, filter]),
+      item(3, 'A page lists the entries held for review', 30, 0.60, [2], [guestbook]),
+      item(4, 'The README of each says how a flagged entry is handled', 10, 0.20, [2], [guestbook, filter]),
+    ],
+    maxParallel: 2, totals: { minutes: 100, costUsd: 2.40, weekPercent: null, samples: 4 }, state: 'proposed',
+    proposedAt: minutesBefore(now, 8).toISOString(), approvedAt: null, approvedBy: null,
+  };
+}
+
 // ------------------------------------------------- lane 8: the screen's other states
 
 // The lead screen's other states (milestone 2, lane 8), beside what lane 1
@@ -231,6 +260,7 @@ export function leadSource(start: {
   readonly memory: LeadMemory;
   readonly plans: readonly Plan[];
   readonly inbox?: readonly PlanItemInbox[];
+  readonly releases?: readonly ReleaseItem[];                   // the trains the thread shows (lane 22)
 }, options: { readonly now?: () => Date } = {}): LeadSource {
   const now = options.now ?? (() => new Date());
   const calls: LeadCall[] = [];
@@ -265,7 +295,10 @@ export function leadSource(start: {
     const parts = url.pathname.split('/').slice(2);              // after '/api'
     const [collection, id, action] = parts;
     if (method === 'GET') {
-      if (collection === 'inbox' && parts.length === 1) return sendJson(response, 200, (start.inbox ?? []).map((item) => ({ ...item, state: plans.find((p) => p.id === item.planId)?.state === 'proposed' ? 'waiting' : 'handled' })));
+      if (collection === 'inbox' && parts.length === 1) {
+        const items = (start.inbox ?? []).map((item) => ({ ...item, state: plans.find((p) => p.id === item.planId)?.state === 'proposed' ? 'waiting' : 'handled' }));
+        return sendJson(response, 200, [...items, ...(start.releases ?? [])]);
+      }
       if (collection === 'lead' && parts.length === 1) return sendJson(response, 200, state);
       if (collection === 'lead' && id === 'messages' && parts.length === 2) return sendJson(response, 200, messages.filter((m) => m.seq > after(request, url)));
       if (collection === 'lead' && id === 'memory' && parts.length === 2) return sendJson(response, 200, start.memory);

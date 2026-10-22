@@ -15,7 +15,7 @@
 //
 // Everything here is pure, so the tests run it under Node: agent.ts follows
 // the lead's stream for CopilotKit, and Lead.tsx draws what the agent holds.
-import type { LeadMemory, LeadMessage, LeadMessageBody, LeadState, LeadStreamFrame, Plan } from '../../../../src/api/types.ts';
+import type { LeadMemory, LeadMessage, LeadMessageBody, LeadState, LeadStreamFrame, NextInboxItem, Plan, ReleaseItem, TrainState, TrainStop } from '../../../../src/api/types.ts';
 import type { Question } from '../../../../src/session/events.ts';
 import type { Answers } from '../../components/choices/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
@@ -47,6 +47,7 @@ export type LeadView = {
   readonly now: Date;
   readonly language: 'en' | 'fr';
   readonly memory: LeadMemory | 'loading' | 'failed' | null;   // null: the panel is closed
+  readonly trains?: readonly TrainLine[];                  // the release trains, from the inbox (lane 22)
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -92,6 +93,72 @@ export function headerLine(state: LeadState, now: Date, t: Translate): HeaderLin
 // Whether a question of the thread is the one the lead waits on now.
 export function waitsOn(message: LeadMessage, state: LeadState): boolean {
   return message.question !== undefined && message.question.state === 'waiting' && state.pendingQuestion?.requestId === message.question.requestId;
+}
+
+// ------------------------------------------------------------------ trains
+
+// A release train as a line of the thread (decisions 21 and 23, lane 22).
+// No thread message says a train: the lead hears of a landing and a rollback
+// in its event turns, and the thread has no kind for them. So the screen
+// reads the trains from the inbox's release items (waiting, or handled in
+// the last day) and places each line at the time its train last moved.
+export type TrainLine = {
+  readonly id: string;
+  readonly ticket: string;
+  readonly title: string;
+  readonly href: string;
+  readonly at: string;
+  readonly state: TrainState['state'];
+  readonly stops: readonly TrainStop[];
+  readonly blocked: TrainState['blocked'];
+};
+
+const isTrain = (item: NextInboxItem): item is ReleaseItem & { readonly train: TrainState } => item.kind === 'release' && item.train !== undefined;
+
+export function trainLines(items: readonly NextInboxItem[]): TrainLine[] {
+  return items.filter(isTrain).map((item): TrainLine => {
+    const times = [item.since, ...item.train.services.flatMap((stop) => (stop.at ? [stop.at] : []))];
+    const at = times.reduce((latest, time) => (Date.parse(time) > Date.parse(latest) ? time : latest));
+    return {
+      id: item.id, ticket: item.ticket, title: item.title, href: `/inbox#${encodeURIComponent(item.id)}`, at,
+      state: item.train.state, stops: item.train.services, blocked: item.train.blocked,
+    };
+  }).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+const TRAIN_KEYS: Readonly<Record<TrainState['state'], string>> = {
+  blocked: 'lead_train_blocked', waiting: 'lead_train_waiting', landing: 'lead_train_landing',
+  landed: 'lead_train_landed', rolled_back: 'lead_train_rolled_back', halted: 'lead_train_halted',
+};
+const STOP_KEYS: Readonly<Record<TrainStop['state'], string>> = {
+  waiting: 'lead_stop_waiting', merged: 'lead_stop_merged', healthy: 'lead_stop_healthy', failed: 'lead_stop_failed', reverted: 'lead_stop_reverted',
+};
+
+export const trainHeadline = (line: TrainLine, t: Translate): string => t(TRAIN_KEYS[line.state], { ticket: line.ticket });
+
+export function stopText(stop: TrainStop, t: Translate): string {
+  return t(STOP_KEYS[stop.state], { name: stop.pr ? `${stop.service} #${stop.pr.number}` : stop.service });
+}
+
+// What the person waits on in amber, what went back in red.
+export function trainTone(line: TrainLine): '' | 'awaiting' | 'danger' {
+  if (line.state === 'blocked' || line.state === 'waiting') return 'awaiting';
+  return line.state === 'rolled_back' || line.state === 'halted' ? 'danger' : '';
+}
+
+export type ThreadRow = { readonly kind: 'message'; readonly message: LeadMessage } | { readonly kind: 'train'; readonly line: TrainLine };
+
+// The thread's messages with the train lines among them: a line comes after
+// every message written at or before its time.
+export function threadRows(messages: readonly LeadMessage[], trains: readonly TrainLine[]): ThreadRow[] {
+  const rows: ThreadRow[] = [];
+  let next = 0;
+  for (const message of messages) {
+    while (next < trains.length && Date.parse((trains[next] as TrainLine).at) < Date.parse(message.at)) rows.push({ kind: 'train', line: trains[next++] as TrainLine });
+    rows.push({ kind: 'message', message });
+  }
+  for (; next < trains.length; next++) rows.push({ kind: 'train', line: trains[next] as TrainLine });
+  return rows;
 }
 
 // ------------------------------------------------------------------ memory

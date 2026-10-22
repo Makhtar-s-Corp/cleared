@@ -12,6 +12,7 @@
 // lead engine answers the pending question from that route (decision 8).
 // The plan's gestures call the plan routes at once: approving a plan starts
 // tickets, which is reversible, so there is no grace (decision 6).
+import { ArrowCounterClockwise, TrainSimple, WarningCircle } from '@phosphor-icons/react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react';
 import type { LeadMemory, LeadMessage, LeadState, Plan } from '../../../../src/api/types.ts';
 import { OwnChoices } from '@/components/choices/Choices.tsx';
@@ -28,7 +29,8 @@ import '@/screens/lead/lead.css';
 import { isLeadThread, LEAD_AGENT, LeadAgent, type LeadThread } from './agent.ts';
 import {
   GAP_MS, SEND, TEXT_MAX, TICK_MS, choiceReply, choosePlan, clockOf, composerMode, draftFrom, gestureFailure, headerLine, memoryStats, mergeMessages, mergePlan, otherPlans,
-  placeholderKey, planFrom, planGesture, replyFor, sendReply, waitsOn, type ComposerMode, type LeadDraft, type LeadView, type Reply, type StreamLike,
+  placeholderKey, planFrom, planGesture, replyFor, sendReply, stopText, threadRows, trainHeadline, trainTone, waitsOn,
+  type ComposerMode, type LeadDraft, type LeadView, type Reply, type StreamLike, type TrainLine,
 } from './model.ts';
 
 export function HeaderLine({ state, now, t }: { readonly state: LeadState; readonly now: Date; readonly t: Translate }) {
@@ -51,13 +53,37 @@ function QuestionBody({ message, state, t, busy = false, onAnswer }: { readonly 
   );
 }
 
+// A release train as a service line of the thread (lane 22): where it is,
+// each service in landing order with its pull request and state, a block's
+// reason and proposal, and the way to its card in the inbox.
+export function TrainRow({ line, now, language, t }: { readonly line: TrainLine; readonly now: Date; readonly language: 'en' | 'fr'; readonly t: Translate }) {
+  const tone = trainTone(line);
+  const Icon = line.state === 'blocked' ? WarningCircle : tone === 'danger' ? ArrowCounterClockwise : TrainSimple;
+  return (
+    <li className={tone ? `train-line ${tone}` : 'train-line'} data-train={line.state} data-ticket={line.ticket}>
+      <span className="train-mark" aria-hidden="true"><Icon size={14} /></span>
+      <div className="train-body">
+        <p className="train-head"><span>{trainHeadline(line, t)}</span> <time dateTime={line.at}>{clockOf(line.at, now, language)}</time></p>
+        <p className="train-title">{line.title}</p>
+        <ul className="train-stops" aria-label={t('lead_train_services')}>
+          {line.stops.map((stop) => <li key={stop.service} className="train-stop" data-stop={stop.state}>{stopText(stop, t)}</li>)}
+        </ul>
+        {line.blocked ? <><p className="train-reason">{line.blocked.reason}</p><p className="train-proposal">{t('lead_train_proposal', { text: line.blocked.proposal })}</p></> : null}
+        <a className="train-link" href={line.href}>{t('lead_train_open')}</a>
+      </div>
+    </li>
+  );
+}
+
 export function Thread({ view, t, busy = false, onAnswer }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly onAnswer?: (reply: Reply) => void }) {
-  if (view.messages.length === 0) return <li className="thread-empty">{t('lead_thread_empty')}</li>;
+  if (view.messages.length === 0 && !view.trains?.length) return <li className="thread-empty">{t('lead_thread_empty')}</li>;
   const shown = choosePlan(view.plans, view.planId)?.id;
   let previous: number | undefined;
   return (
     <>
-      {view.messages.map((message) => {
+      {threadRows(view.messages, view.trains ?? []).map((row) => {
+        if (row.kind === 'train') return <TrainRow key={`train-${row.line.id}`} line={row.line} now={view.now} language={view.language} t={t} />;
+        const { message } = row;
         const at = Date.parse(message.at);
         const gap = previous !== undefined && at - previous >= GAP_MS && message.kind !== 'refresh'
           ? <li className="time-line"><time dateTime={message.at}>{clockOf(message.at, view.now, view.language)}</time></li> : null;
@@ -145,7 +171,7 @@ export function Side({ view, t, busy = false, note = null, onAction }: { readonl
   const others = otherPlans(view.plans, shown);
   return (
     <>
-      {shown ? <PlanPanel plan={shown} t={t} options={{ language: view.language, busy, note }} onAction={(action) => onAction?.(shown, action)} />
+      {shown ? <PlanPanel plan={shown} t={t} options={{ language: view.language, busy, note, services: true }} onAction={(action) => onAction?.(shown, action)} />
         : <p className="empty plan-empty">{view.planId === null ? t('lead_no_plan') : t('lead_plan_missing', { id: view.planId })}</p>}
       {others.length === 0 ? null : (
         <section className="other-plans" aria-labelledby="other-plans-title">
@@ -219,7 +245,13 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
     return () => clearInterval(timer);
   }, [context]);
 
-  const view: LeadView | undefined = thread && { state: thread.lead, messages: thread.messages, plans: thread.plans, planId, now, language: context.me.language, memory };
+  // The trains move without a frame of the lead's stream: the inbox is read again at each tick.
+  const loaded = thread !== undefined;
+  useEffect(() => {
+    if (loaded) void lead.readTrains();
+  }, [now, lead, loaded]);
+
+  const view: LeadView | undefined = thread && { state: thread.lead, messages: thread.messages, plans: thread.plans, planId, now, language: context.me.language, memory, trains: thread.trains };
 
   // The thread follows the newest line while the person is at its end.
   const onScroll = () => {
