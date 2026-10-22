@@ -90,7 +90,7 @@ before(async () => {
   writeFileSync(join(workdir, 'long.txt'), Array.from({ length: 1000 }, (_, i) => `line ${i + 1}`).join('\n') + '\n');
   writeFileSync(join(workdir, 'image.bin'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]));
   writeFileSync(join(workdir, '.env'), 'PORT=8080\n');
-  writeFileSync(join(workdir, 'config.ts'), ['export const ', 'API', '_TOKEN', '=', 'q'.repeat(24), ';\n'].join(''));
+  writeFileSync(join(workdir, 'deploy.sh'), ['export ', 'API', '_TOKEN', '=', 'q'.repeat(24), '\n'].join(''));
   symlinkSync(login, join(workdir, 'notes.md'));
   symlinkSync(root, join(workdir, 'linked'));
 
@@ -124,7 +124,7 @@ function get(path: string, proof: string | undefined = PROOF): Promise<{ status:
 const file = (path: string) => `/api/sessions/${session}/files/${path}`;
 
 test('the list names the files the session changed, relative to its checkout, with their counts', async () => {
-  assert.equal((await get(`/api/sessions/${session}/files`, undefined)).status, 401, 'without the proof');
+  assert.equal((await get(`/api/sessions/${session}/files`, '')).status, 401, 'without the proof');
   assert.equal((await get('/api/sessions/nobody/files')).status, 404);
   const listed = await get(`/api/sessions/${session}/files`);
   assert.equal(listed.status, 200);
@@ -167,7 +167,7 @@ test('the route refuses what the session may not read and what is not text, and 
   assert.match(env.json.error, /secret/);
   assert.equal((await get(file('.git/config'))).status, 403, 'the checkout\'s git folder');
   assert.equal((await get(file('image.bin'))).status, 415, 'a binary file');
-  const cleaned = await get(file('config.ts'));
+  const cleaned = await get(file('deploy.sh'));
   assert.equal(cleaned.status, 200);
   assert.ok(!cleaned.json.text.includes('q'.repeat(24)), 'the secret is masked');
   assert.match(cleaned.json.text, /\[removed: /);

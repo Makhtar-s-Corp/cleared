@@ -1886,3 +1886,97 @@ The choices the lane makes:
 
 - Consequence: lane 32 installs both functions of the shim, `installStyleNonce` and `installStyleAttributeCssom`, as that entry says. Matrix line O14 records the decision; P14's note on a refusal of that part no longer applies, and P17 names the validation.
 - Author: the owner, relayed on 2026-10-22 11:27 (Europe/Paris); written in this log.
+
+## 2026-10-22: the session screen's four tabs, Take over and Give back, the files route and the preview listener (the author's choices, lane v2-j2-session-tabs)
+
+**Decision.** Lane 20 applies decision 30 of the [milestone 2 plan](milestone-2-plan.md) and the app's half of decision 20. The session screen's middle panel has four tabs: Plan, Terminal (opened first), Editor (read only) and Browser. Take over and Give back sit beside them. The service gains the files route, Take over and Give back, and the paused session; the app gains its preview listener. The lane's choices:
+
+1. **"Paused" is said by `takenOver`, not by a phase.**
+   - `src/api/types.ts` belongs to no lane in wave 8, and the screens map every member of `SessionPhase`. So the row's status keeps the harness's phase (`waiting_human` once the turn is interrupted), and the session's summary and state carry `takenOver: { by, at }`, which lane 16 wrote for this.
+   - The engine keeps who took a session over in memory. A restart stops every live session (`recover`), so a paused one is stopped as any other: nothing is left paused with no process behind it.
+   - No event name, step name or column is added: `session/events.ts` and the store are not this lane's files.
+   - The screens read `takenOver` (this lane's session screen; lane 22's tower).
+2. **What Take over does** (`POST /api/sessions/:id/takeover`, `flow/takeover.ts`; the engine's `takeOver`):
+   - Only an author's live session is taken over. A reviewer's is refused (409): its policy reads only, and decision 33's saves are refused during the review.
+   - The session is marked paused first, then its turn is interrupted. The end of the interrupted turn is therefore never taken for the end of the work.
+   - The adapter cancels the request of the turn it interrupts. Any permission or question still waiting is then settled here, once, as `cancelled` with the rule `takeover`.
+   - A session plan waiting for its Go stays in the inbox. Settling it would break the gate after Give back.
+   - The owner check: the first account of the users table (`users.list()`, ordered by creation). Any other signed-in account gets 403 before the session is looked at, so nothing changes. Give back is the owner's too, and only by the account that took the session over.
+3. **What the flow leaves alone while a session is paused:**
+   - the idle stop;
+   - the delay's Go and the put-back of a session that proposed no plan (`#dueGates`);
+   - the end of a turn (no review, no gate);
+   - messages, answers, the Go and the Change, which answer 409 ("give it back first").
+   An interrupt is still allowed.
+4. **Give back** (`POST /api/sessions/:id/giveback`) calls the adapter's `resume` with the same id. The Claude Code adapter returns the open handle in the common case (as the followup of pull request 189 notes).
+   - **A handle that `resume` made anew** replaces the old one. The old reading stops, so no event is handled twice.
+   - **The idle rule** counts from the Give back.
+   - **The notice.** The session is told, as the flow's user, that the owner gave the session back and that it should read again any file before editing it. Lane 31 adds the list of changed files to that notice.
+   - **No notice while its plan waits for a Go:** the Go is what tells it.
+   - **A `resume` that fails** answers 503 and leaves the session paused, so the owner can try again.
+5. **The Terminal tab of a session taken over** shows the command that resumes it in its container, `docker exec -it cleared-v2-<id>-session claude --resume <id>`.
+   - The container's name is copied from `sessionNames` into the screen's model, and a test keeps the two equal.
+   - The harness's session id is Cleared's (`images/session/runner/main.ts`).
+   - The composer is disabled while the session is taken over. Lane 32 mounts the web terminal beside the command, which stays the fallback of decision 32.
+6. **The files route** (`GET /api/sessions/:id/files` and `files/<path>`, `flow/files.ts`).
+   - **Why no host git.** The session writes its checkout, and `workspace/checkout.ts` says the host reads it without git once a session has run.
+   - **The list** is the session's stored edits, relative to its checkout, with the Changes card's counts. A file changed only by a command is not listed.
+   - **A file** is read with no link followed:
+     - every folder of the path is a plain folder;
+     - the file is opened with `O_NOFOLLOW`;
+     - the real path of the opened file (`/proc/self/fd`) must still be inside the checkout and outside `.git`, which catches a folder swapped for a link between the check and the open.
+   - **What is refused:**
+     - a path the session's own `Read` is denied (`evaluate()` of `session/policy.ts`: `.env`, keys, credential files) answers 403 with the rule;
+     - the checkout's `.git` answers 403;
+     - a file with a NUL or that is not UTF-8 answers 415;
+     - a file over 16 MB answers 413.
+   - **The text** goes through the events' cleaner, cut at 400 lines. `lines` is the whole file's count and `cut` says it was cut, and the screen writes the sentence.
+   - **The hash** is the SHA-256 of the whole file's bytes, which lane 31's save sends back.
+   - **The diff.** `SessionFiles` has no diff, so `?version=base` answers the same file as the ticket's base holds it. Its commit is read from the checkout's `refs/cleared/base`, without git. The file itself is read by `git cat-file blob` in the service's own project checkout, which no session writes, with the safe settings of `checkout.ts`. The screen draws a line diff of the two.
+   - **The workdir** is the one the engine started the session with (`sessionWorkdir`). A session of an earlier process answers 409.
+   - **One route per depth**, up to 16 segments, since the registry matches a fixed number of segments.
+7. **The preview listener** (`app/src/preview.ts`, started by `app/main.ts`).
+   - **Where it listens.** `127.0.0.1:CLEARED_V2_PREVIEW_PORT`, 8794 by default. A reserved port, the app's or the service's is refused.
+   - **Its origin.** `CLEARED_V2_PREVIEW_ORIGIN` when set, else the loopback address.
+   - **What it answers.** `GET` and `HEAD` of `/preview/<session>/<key>/<path>` only, from the service's `/api/sessions/<session>/preview/<key>/<path>`. It asks with the app's proof and no other header.
+   - **What it never passes on.** The browser sends it the app's cookie, since cookies do not tell ports apart. The listener forwards that cookie to no one, and drops every `Set-Cookie`.
+   - **Its own policy** is `sandbox allow-scripts allow-forms; frame-ancestors <the app's origins>`.
+   - **What it refuses.** Another path answers 404, a write 405, another `Host` 421.
+   - **Redirects.** A redirect to the sibling is kept under the session's preview address.
+   - **The settings live in `preview.ts`**, since `app/src/config.ts` is not this lane's file.
+8. **The app's side of the preview** (`app/src/server.ts`), beyond `frame-src`:
+   - **The policy** gains `frame-src <the preview origin>` when there is one, and is unchanged otherwise.
+   - **The page learns the origin** from `<body data-preview>`. `/api/me` is lane 31's in wave 10, and `Me` is in `lib/screen.ts`, not this lane's file.
+   - **The app's origin refuses `/api/service/sessions/<id>/preview/...` (404).** Before this lane, that path reached lane 15's route with the proof. `proxy.ts` drops the sandbox policy, so a page the session wrote would have run on the app's origin, under its policy, with the owner's cookie.
+   - **The Browser tab's frame** is `sandbox="allow-scripts allow-forms"`, never `allow-same-origin`, with `referrerpolicy="no-referrer"`.
+   - **On the public origin** with a loopback preview origin, the tab says the trial environment opens on this machine's browser only.
+9. **The screen.**
+   - **The tabs** follow the ARIA tabs pattern (the arrow keys, Home and End), built from plain buttons. No new dependency, and neither of lane 30's packages: both wait for lane 32's style nonce.
+   - **The address keeps the tab** (`#plan`, `#editor`, `#browser`). Every milestone 1 id and `data-` selector stays on the Terminal tab, so the proof scripts are unchanged.
+   - **The plan.** The Plan tab shows the session plan, its confidence and reason, its steps and files, Go and Change (at most 2000 characters) while it waits, then who gave the Go, and the ticket's criteria.
+   - **The left plan card** says the plan in short.
+   - **The timeline** shows the proposal and the Go as rows. The host call of `propose_session_plan` is not a row.
+   - **The Editor tab** lists the changed files and shows a file as its changes against the base, or whole. It is read only, and says so.
+   - **The service line** ("on filter-api") is on the ticket card when the session names a service.
+   - **New words.** The catalogs gain `step_plan_gate`, without which a `plan_gate` step made the Checks card throw, and the tabs' words, in English and French.
+10. **The fixtures.**
+    - **The session fixture's story** gains the plan, proposed then given its Go before the first edit, and a `{ plan: 'waiting' }` story.
+    - **The changed files' contents** are the base and the checkout, with the Changes card's counts (+24 -6, +41 -12, +38).
+    - **The preview** has a key, and the example app's upcoming screen as its trial environment (`fixturePreview`).
+    - **Both fixture sources** answer this wave's routes: the workspace, the files, Take over and Give back, and the Go and the Change. The tower's sessions have no waiting plan, so there a Go is a 409.
+11. **Files outside the lane's list.**
+    - `v2/app/test/main.test.ts` gives the preview listener a free port, so a test never binds 8794, and checks that it answers.
+    - `v2/test/flow/api.test.ts` and `v2/test/flow/modules.test.ts` count the files route per depth as one, and drop lane 16's exclusion of this lane's routes, as section 4 asks.
+    - `v2/app/test/session/model.test.ts` and `v2/app/web/test/session/render.test.tsx` follow the fixture's new rows and steps.
+12. **Lane 16's open point** (whether the runtime also looks at `<workdirs>/<ticket>` for a one-service workspace whose service has a `run`) is left as it is: no runtime change. Neither proof meets it, and `flow/runtime.ts` is not this lane's file.
+
+**Consequences.**
+- **Tests first.** Commit 60a3c38 holds them alone, and each failed on `origin/v2` at 26fafbd, where `flow/takeover.ts`, `flow/files.ts`, `app/src/preview.ts` and the tabs did not exist. They are:
+  - `test/flow/takeover.test.ts` (on the fake adapter);
+  - `test/flow/files.test.ts` (a real temporary git checkout, with a link to a stand-in login file and a linked folder);
+  - `app/test/preview.test.ts`, `app/test/session/tabs.test.ts` and `app/web/test/session/tabs.test.tsx`;
+  - `app/test/session/tabs-browser.test.ts` (Chromium, skipped unless `CLEARED_V2_PLAYWRIGHT` is set, as the other browser tests).
+- **Known limits, for later lanes:**
+  - **Root-absolute addresses.** A page in the preview that uses them (the guestbook's form posts to `/entries` and redirects to `/`) leaves the session's preview address, and the listener answers 404.
+  - **No writes.** The preview route is read only (lane 15), so a form's post is not relayed either.
+  - **The base** is read in the project checkout. A base commit it no longer holds answers 404, and the diff shows the whole file as added.

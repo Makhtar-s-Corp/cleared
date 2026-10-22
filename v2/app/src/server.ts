@@ -16,6 +16,11 @@
 // 127.0.0.1 from another site reaches nothing. The pages load nothing
 // inline and nothing from another site (Content-Security-Policy).
 //
+// The Browser tab's page is framed from the preview listener's own origin
+// (preview.ts, decision 20, lane 20): the policy's frame-src names it and
+// nothing else, the page reads it from <body data-preview>, and the app's
+// own origin never serves a preview, not even through /api/service/.
+//
 // /api/notifications and its two writes are the app's own (notifications.ts):
 // a browser of the signed-in person asks to be told, with the same checks
 // as any write. The manifest, the service worker and the icons are served
@@ -45,12 +50,12 @@ export type AppOptions = {
   readonly publicOrigin?: string | undefined;
   readonly distDir?: string;                         // default: app/dist, Vite's build
   readonly notifications?: Notifications;            // default: from the environment, read on first use
+  readonly previewOrigin?: string | undefined;       // the preview listener's origin (preview.ts); none: no frame at all
 };
 
 export const DIST_DIR = new URL('../dist/', import.meta.url).pathname;
 
 const SECURITY_HEADERS = {
-  'content-security-policy': "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'same-origin',   // not no-referrer: Chromium then sends Origin: null on a form POST, and the sign-in is refused
   'cross-origin-opener-policy': 'same-origin',
@@ -75,6 +80,14 @@ const PAGES: readonly { readonly path: RegExp; readonly screen: Exclude<Screen, 
   { path: /^\/sessions(?:\/[A-Za-z0-9_-]{1,64})?$/, screen: 'session' },
   { path: /^\/(?:lead|plans\/[A-Za-z0-9_-]{1,64})$/, screen: 'lead' },
 ];
+
+// The page's policy: nothing inline, nothing from another site, and a frame
+// only from the preview listener's origin when there is one (else as before).
+export const contentPolicy = (previewOrigin?: string): string =>
+  `default-src 'self';${previewOrigin ? ` frame-src ${previewOrigin};` : ''} base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+
+// A preview of a session (/api/sessions/:id/preview/...), which the app's origin never forwards.
+const PREVIEW_PATH = /^sessions\/[^/]+\/preview(?:\/|$)/;
 
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -150,9 +163,9 @@ export function loginPage(t: Translate, language: Language, bundle: Bundle, mess
 // A screen's page: the shell and the screen are drawn by the bundle
 // (web/shell/App.tsx); the body says which screen, and what the header
 // shows before /api/me answers.
-export function shellPage(t: Translate, language: Language, bundle: Bundle, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind'] }): string {
+export function shellPage(t: Translate, language: Language, bundle: Bundle, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind']; readonly preview?: string | undefined }): string {
   return `${head(language, `${t('app_name')} · ${t(`title_${options.screen}`)}`, bundle, options.screen)}
-<body data-screen="${options.screen}" data-source="${options.source}" data-project="${escape(options.project)}" data-user="${escape(options.user.name)}">
+<body data-screen="${options.screen}" data-source="${options.source}" data-project="${escape(options.project)}" data-user="${escape(options.user.name)}"${options.preview ? ` data-preview="${escape(options.preview)}"` : ''}>
 <div id="root"></div>
 </body>
 </html>
@@ -320,6 +333,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
         if (!read && !csrfOk(request, mine.cookie)) return sendJson(response, 403, { error: 'refused: missing anti-forgery token or another origin' });
         const rest = path.slice('/api/service/'.length);
         if (!rest || rest.split('/').some((part) => part === '' || part === '.' || part === '..' || /%2f|%5c/i.test(part))) return sendJson(response, 404, { error: 'not found' });
+        if (PREVIEW_PATH.test(rest)) return sendJson(response, 404, { error: 'a preview is served by the preview listener only' });
         const url = request.url ?? '';
         const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
         return options.source.forward(request, response, { method, path: `/api/${rest}${query}`, user: mine.user });
@@ -350,14 +364,16 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     if (page) {
       const mine = await session(request);
       if (!mine) return redirect(response, '/login');
-      return send(response, 200, shellPage(shellT, options.language, built(), { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind }));
+      return send(response, 200, shellPage(shellT, options.language, built(), { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
     }
 
     if (await serveFile(request, response, path)) return;
     send(response, 404, 'not found', 'text/plain; charset=utf-8');
   }
 
+  const policy = contentPolicy(options.previewOrigin);
   return (request, response) => {
+    response.setHeader('content-security-policy', policy);
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.setHeader(name, value);
     if (!hostAllowed(request)) return send(response, 421, 'this server does not answer for that host name', 'text/plain; charset=utf-8');
     route(request, response).catch((error: unknown) => {

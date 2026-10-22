@@ -58,8 +58,10 @@ test('the Plan tab: the plan, its confidence and reason; Go and Change while it 
   assert.equal(open.kind, 'plan');
   assert.equal(open.kind === 'plan' && open.waiting, true);
   assert.equal(open.kind === 'plan' && open.canAct, true);
-  assert.equal(planView(waiting, { ended: false, takenOver: true }).kind === 'plan' && planView(waiting, { ended: false, takenOver: true }).canAct, false, 'no Go while taken over');
-  assert.equal(planView(waiting, { ended: true, takenOver: false }).kind === 'plan' && planView(waiting, { ended: true, takenOver: false }).canAct, false, 'no Go on an ended session');
+  const paused = planView(waiting, { ended: false, takenOver: true });
+  assert.equal(paused.kind === 'plan' && paused.canAct, false, 'no Go while taken over');
+  const ended = planView(waiting, { ended: true, takenOver: false });
+  assert.equal(ended.kind === 'plan' && ended.canAct, false, 'no Go on an ended session');
   assert.deepEqual(planView(null, { ended: false, takenOver: false }), { kind: 'none' });
 
   const at = SESSION_PLAN.go?.at as string;

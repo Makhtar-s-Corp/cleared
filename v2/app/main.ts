@@ -4,13 +4,18 @@
 // 127.0.0.1:8792 with the live service, or the fixtures
 // (CLEARED_V2_APP_SOURCE=fixtures). Settings: src/config.ts. The pages are
 // the front end Vite built into dist/ (npm run build; npm run app builds
-// first): without it, the app stops at once and says so.
+// first): without it, the app stops at once and says so. Beside it, the
+// Browser tab's preview listener on 127.0.0.1:8794 (src/preview.ts,
+// CLEARED_V2_PREVIEW_PORT and CLEARED_V2_PREVIEW_ORIGIN), which serves a
+// session's trial environment from an origin of its own.
 import { createServer } from 'node:http';
 import users, { ProofError, SqliteUsers, proofPath, readOrCreateProof } from '../src/modules/users.ts';
 import { formatAddress } from '../src/server.ts';
 import { LedgerPathError, StoreError, applyTables, ledgerPath, openStore } from '../src/store/db.ts';
+import { fixturePreview } from './fixtures/session.ts';
 import { fixtureSource } from './fixtures/source.ts';
 import { AppConfigError, readAppConfig } from './src/config.ts';
+import { PreviewConfigError, createPreviewHandler, readPreviewConfig, servicePreview } from './src/preview.ts';
 import { serviceSource } from './src/proxy.ts';
 import { BuildMissing, createAppHandler, readBundle } from './src/server.ts';
 import { CookieSessions, SESSION_TABLES } from './src/session-cookie.ts';
@@ -20,13 +25,14 @@ function orExit<T>(make: () => T): T {
   try {
     return make();
   } catch (error) {
-    if (!(error instanceof AppConfigError || error instanceof LedgerPathError || error instanceof StoreError || error instanceof ProofError || error instanceof BuildMissing)) throw error;
+    if (!(error instanceof AppConfigError || error instanceof PreviewConfigError || error instanceof LedgerPathError || error instanceof StoreError || error instanceof ProofError || error instanceof BuildMissing)) throw error;
     console.error(`cleared-v2-app: ${error.message}`);
     process.exit(64);
   }
 }
 
 const config = orExit(() => readAppConfig());
+const preview = orExit(() => readPreviewConfig(process.env, { app: config.port, service: Number(new URL(config.serviceUrl).port) }));
 orExit(() => readBundle());
 const ledger = orExit(() => ledgerPath());
 const store = orExit(() => openStore(ledger));
@@ -39,7 +45,7 @@ const project = config.project || (config.source === 'fixtures' ? 'Guestbook' : 
 
 const handler = createAppHandler({
   users: new SqliteUsers(store.db), sessions: new CookieSessions(store.db), throttle: new LoginThrottle(), source,
-  language: config.language, project, publicOrigin: config.publicOrigin,
+  language: config.language, project, publicOrigin: config.publicOrigin, previewOrigin: preview.origin,
 });
 
 const address = formatAddress(config.host, config.port);
@@ -49,8 +55,22 @@ server.on('error', (error: NodeJS.ErrnoException) => {
   else console.error(`cleared-v2-app: ${error.message}`);
   process.exit(1);
 });
+// The preview listener: no session, the app's proof to the service and nothing else.
+const appOrigins = [`http://127.0.0.1:${config.port}`, `http://localhost:${config.port}`, ...(config.publicOrigin ? [config.publicOrigin] : [])];
+const previews = createServer(createPreviewHandler({
+  upstream: config.source === 'fixtures' ? fixturePreview() : servicePreview({ url: config.serviceUrl, proof }),
+  origin: preview.origin, appOrigins,
+}));
+previews.on('error', (error: NodeJS.ErrnoException) => {
+  if (error.code === 'EADDRINUSE') console.error(`cleared-v2-app: the preview listener's 127.0.0.1:${preview.port} is already in use: set CLEARED_V2_PREVIEW_PORT to a free port`);
+  else console.error(`cleared-v2-app: the preview listener: ${error.message}`);
+  process.exit(1);
+});
 server.listen(config.port, config.host, () => {
   console.log(`cleared-v2-app: listening on http://${address} (${config.source}${config.source === 'service' ? ` at ${config.serviceUrl}` : ''})`);
+  previews.listen(preview.port, preview.host, () => {
+    console.log(`cleared-v2-app: previews on http://${preview.host}:${preview.port}${preview.origin === `http://${preview.host}:${preview.port}` ? '' : ` (shown as ${preview.origin})`}`);
+  });
 });
 
 let closing = false;
@@ -58,6 +78,8 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     if (closing) return;
     closing = true;
+    previews.close();
+    previews.closeAllConnections();
     server.close(() => {
       store.close();
       process.exit(0);

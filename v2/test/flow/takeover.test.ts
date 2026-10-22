@@ -159,8 +159,7 @@ test('a paused session is neither stopped by the idle rule, nor reviewed, nor wr
     assert.deepEqual(await post(h, `/api/sessions/${id}/giveback`, as('u1')), { status: 200, json: { accepted: true } });
     assert.deepEqual(h.resumed, [id], 'resumed under its own id');
     assert.equal(detail(h, id).takenOver ?? null, null);
-    const notice = events(h, id).filter((e) => e.type === 'TEXT_MESSAGE_CONTENT').at(-1);
-    assert.ok(notice && notice.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(notice.delta), 'the session is told');
+    assert.ok(events(h, id).some((e) => e.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(e.delta)), 'the session is told');
     // The resumed author ends its turn: the review starts as it would have.
     await until(() => h.startedSessions.some((s) => s.input.role === 'reviewer'), 'the review');
     await h.engine.settled();

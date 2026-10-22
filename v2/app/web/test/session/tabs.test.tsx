@@ -9,7 +9,7 @@ import { AUTHOR_ID, FIXTURE_FILES, PREVIEW_KEY, SESSION_PLAN, USER, sessionFixtu
 import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
-import { applyAll, emptyModel, threadOf, type SessionView } from '../../screens/session/model.ts';
+import { applyAll, emptyModel, parseCriteria, threadOf, type SessionView } from '../../screens/session/model.ts';
 import { BrowserTab, EditorTab, PlanTab, TabStrip, TakeoverNotice } from '../../screens/session/Tabs.tsx';
 import { LeftCards, StatusHead } from '../../screens/session/Session.tsx';
 import { browserView } from '../../screens/session/tabs.ts';
@@ -132,7 +132,7 @@ test('the tabs\' words come from the catalog, French included, and nothing is st
     html(<EditorTab t={t} files={view.thread.state?.files ?? []} mode="diff" />),
     html(<BrowserTab view={{ kind: 'here_only' }} t={t} />),
   ];
-  const allowed = strings([SESSION_PLAN, view.thread.state?.files, AUTHOR_ID]);
+  const allowed = strings([SESSION_PLAN, view.thread.state?.files, AUTHOR_ID, parseCriteria(view.ticket?.body ?? '').criteria.map((c) => c.text)]);
   allowed.add(`docker exec -it cleared-v2-${AUTHOR_ID}-session claude --resume ${AUTHOR_ID}`);
   for (const markup of parts(sentinel)) {
     assert.doesNotMatch(markup, / style="/);

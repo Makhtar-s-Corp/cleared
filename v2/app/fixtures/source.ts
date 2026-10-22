@@ -3,13 +3,18 @@
 // lead and its plans (milestone 2, section 7.1), from the lead fixture; and
 // ticket creation into an in-memory ticket store, so the screens work
 // before the service does. It approves, answers, moves and sends nothing:
-// every other write is a 404.
+// every other write is a 404. The session tabs' routes (lane 20) are
+// answered too: the workspace, a session's files (the session fixture's
+// contents), and Take over and Give back, kept in memory; no session of the
+// tower's has a plan waiting, so a Go or a Change is a 409.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { leadFrame, sseFrame, type CreateTicketBody, type SessionDetail } from '../../src/api/types.ts';
+import { leadFrame, sseFrame, type CreateTicketBody, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
+import { PREVIEW_KEY, fixtureFile, workspaceFixture } from './session.ts';
 import { towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -46,6 +51,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
+  const takenOver = new Map<string, TakenOver>();
 
   // The lead and the plan it proposes are the lead fixture's, so the tower
   // and the lead's screen agree; the tower fixture adds its plan under way.
@@ -65,7 +71,8 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   async function handle(request: IncomingMessage, response: ServerResponse, method: string, url: URL, user: string): Promise<void> {
     const parts = url.pathname.split('/').slice(2);              // after '/api'
     const [collection, id, sub] = parts;
-    if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, fixture.sessions);
+    if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, fixture.sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
+    if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
     if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...lead.inbox]);
     if (method === 'GET' && collection === 'lead') {
       if (parts.length === 1) return sendJson(response, 200, lead.state);
@@ -88,10 +95,34 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     if (collection === 'sessions' && id) {
       const session = id === lead.session.id ? lead.session : fixture.sessions.find((s) => s.id === id);
       if (!session) return sendJson(response, 404, { error: 'no such session' });
+      const taken = takenOver.get(id);
+      const files = () => state(id)?.files ?? [];
       if (method === 'GET' && parts.length === 2) {
-        const detail: SessionDetail = { ...session, state: state(id) ?? { status: session.status, phase: session.phase, steps: [], files: [], checks: [], usage: {} } };
+        const detail: SessionDetail = {
+          ...session, state: state(id) ?? { status: session.status, phase: session.phase, steps: [], files: [], checks: [], usage: {} },
+          ...(session.role === 'author' ? { previewKey: PREVIEW_KEY } : {}), ...(taken ? { takenOver: taken } : {}),
+        };
         return sendJson(response, 200, detail);
       }
+      if (method === 'GET' && sub === 'files') {
+        if (parts.length === 3) return sendJson(response, 200, { files: changedFiles(files()) });
+        const version = url.searchParams.get('version');
+        const found = version === null || version === 'base' ? fixtureFile(parts.slice(3).map(decodeURIComponent).join('/'), version === 'base' ? 'base' : 'current') : undefined;
+        return found ? sendJson(response, 200, found) : sendJson(response, 404, { error: 'no such file in the checkout' });
+      }
+      if (method === 'POST' && sub === 'takeover' && parts.length === 3) {
+        if (session.role !== 'author') return sendJson(response, 409, { error: 'only an author\'s session is taken over' });
+        if (taken) return sendJson(response, 409, { error: `session ${id} is already taken over` });
+        takenOver.set(id, { by: user, at: now().toISOString() });
+        return sendJson(response, 200, { accepted: true, by: user });
+      }
+      if (method === 'POST' && sub === 'giveback' && parts.length === 3) {
+        if (!taken) return sendJson(response, 409, { error: `session ${id} is not taken over` });
+        if (taken.by !== user) return sendJson(response, 403, { error: 'only the account that took the session over gives it back' });
+        takenOver.delete(id);
+        return sendJson(response, 200, { accepted: true });
+      }
+      if (method === 'POST' && sub === 'plan' && parts.length === 4) return sendJson(response, 409, { error: `session ${id} has no session plan waiting for its Go` });
       if (method === 'GET' && sub === 'events' && parts.length === 3) {
         response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
         for (const event of storeOf(id).events.after(id, after(request, url))) response.write(sseFrame(event));

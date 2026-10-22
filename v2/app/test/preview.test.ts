@@ -7,7 +7,7 @@
 // (frame-src), and the app's own origin never serves a preview.
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../../src/api/types.ts';
 import { DEFAULT_PREVIEW_PORT, PREVIEW_POLICY, PreviewConfigError, createPreviewHandler, readPreviewConfig, servicePreview } from '../src/preview.ts';
@@ -76,7 +76,7 @@ test('the listener\'s settings: 127.0.0.1:8794 by default, its own origin, never
 test('a preview is asked of the service with the app\'s proof alone, and answered sandboxed, without a cookie', async () => {
   seen.length = 0;
   const answer = await fetch(`${previewBase}/preview/s1/${KEY}/page/index.html?page=2`, {
-    headers: { cookie: 'cleared_session=owner-cookie', 'x-csrf-token': 'owner-token', origin: 'http://127.0.0.1:18792', authorization: 'Basic eDp5' },
+    headers: { cookie: 'cleared_session=owner-cookie', 'x-csrf-token': 'csrf-1', origin: 'http://127.0.0.1:18792', authorization: 'Basic eDp5' },
   });
   assert.equal(answer.status, 200);
   assert.equal(await answer.text(), '<!doctype html><title>Guestbook</title><p>Entries</p>');
@@ -107,7 +107,14 @@ test('the listener answers nothing but previews: another path, a write, another 
   for (const path of ['/', '/login', '/api/me', '/api/service/sessions', `/api/sessions/s1/preview/${KEY}/`, '/preview/s1', `/preview/s1/short/`, `/preview/s%2F1/${KEY}/`, `/preview/s1/${KEY}/%2E%2E/x`])
     assert.equal((await fetch(`${previewBase}${path}`)).status, 404, path);
   assert.equal((await fetch(`${previewBase}/preview/s1/${KEY}/`, { method: 'POST', body: 'x' })).status, 405);
-  assert.equal((await fetch(`${previewBase}/preview/s1/${KEY}/`, { headers: { host: 'evil.invalid' } })).status, 421);
+  // fetch writes its own Host: a raw request names another one.
+  const other = await new Promise<number>((resolve, reject) => {
+    const url = new URL(previewBase);
+    const asked = httpRequest({ hostname: url.hostname, port: url.port, path: `/preview/s1/${KEY}/`, headers: { host: 'evil.invalid' } }, (answer) => { answer.resume(); resolve(answer.statusCode ?? 0); });
+    asked.on('error', reject);
+    asked.end();
+  });
+  assert.equal(other, 421);
   assert.equal(seen.length, 0, 'none of them reached the service');
 });
 
@@ -145,12 +152,12 @@ test('the app allows the preview origin in a frame, names it on the page, and ne
   }
 });
 
-test('without a preview origin the app\'s policy frames nothing', async () => {
+test('without a preview origin the app\'s policy is the one it had', async () => {
   app = await startApp({ source: recording });
   try {
     const { cookie } = await signedIn(app);
     const page = await fetch(`${app.base}/sessions/s1`, { headers: { cookie } });
-    assert.match(page.headers.get('content-security-policy') ?? '', /frame-src 'none'/);
+    assert.equal(page.headers.get('content-security-policy'), "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     assert.ok(!(await page.text()).includes('data-preview'));
   } finally {
     await app.close();

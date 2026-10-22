@@ -20,7 +20,7 @@ import { AUTHOR_ID, PREVIEW_KEY, TICKET_ID, fixturePreview, sessionFixture, sess
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { createPreviewHandler, type PreviewUpstream } from '../../src/preview.ts';
 import type { DataSource } from '../../src/proxy.ts';
-import { PASSWORD, startApp, type Running } from '../support.ts';
+import { PASSWORD, signedIn, startApp, type Running } from '../support.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -47,13 +47,14 @@ async function browse(
   const previewHits: Hit[] = [];
   app.server.prependListener('request', (request) => appHits.push({ method: request.method ?? '', url: request.url ?? '', headers: request.headers }));
   preview.prependListener('request', (request) => previewHits.push({ method: request.method ?? '', url: request.url ?? '', headers: request.headers }));
-  await app.directory.add('alex', PASSWORD);
-  const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
-  const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
-  const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   const errors: string[] = [];
   const away: string[] = [];
+  let browser: any;
   try {
+    await app.directory.add('alex', PASSWORD);
+    const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
+    const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
+    browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
     const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
     page.on('pageerror', (error: Error) => errors.push(error.message));
     page.on('request', (request: { url(): string }) => { if (!request.url().startsWith(app.base) && !request.url().startsWith(previewBase)) away.push(request.url()); });
@@ -65,7 +66,7 @@ async function browse(
     await page.goto(`${app.base}${path}`);
     await run(page, { app, previewBase, appHits, previewHits });
   } finally {
-    await browser.close();
+    await browser?.close();
     await app.close();
     preview.closeAllConnections();
     await new Promise<void>((resolve) => preview.close(() => resolve()));
@@ -89,9 +90,10 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
     await page.locator('#tab-plan [data-act="plan_go"]').waitFor({ state: 'detached' });
     assert.match(await page.locator('#tab-plan').innerText(), /Go given by you at/);
 
+    // Nothing is changed before the Go: the Editor says so.
     await page.locator('[role="tab"][aria-controls="tab-editor"]').click();
-    await page.locator('#tab-editor tr.line.add').first().waitFor();
-    assert.ok(await page.locator('#tab-editor [data-file][aria-current="true"]').count() === 1);
+    await page.locator('#tab-editor .editor-files').waitFor();
+    assert.match(await page.locator('#tab-editor').innerText(), /No file changed yet/);
     await page.keyboard.press('ArrowRight');
     assert.equal(await selected(), 'tab-browser');
     await page.locator('#tab-browser iframe').waitFor();
@@ -105,10 +107,18 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
   assert.deepEqual(seen, { errors: [], away: [] });
 });
 
-test('Take over shows the command, and Give back calls its route', { skip }, async () => {
+test('the Editor shows a file\'s changes against the base; Take over shows the command, and Give back calls its route', { skip }, async () => {
   const fixture = sessionFixture(FIXTURE_NOW);
   const source = sessionSource(fixture);
-  const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+  const seen = await browse(source, `/sessions/${AUTHOR_ID}#editor`, async (page) => {
+    await page.locator('#tab-editor tr.line.add').first().waitFor();
+    assert.equal(await page.locator('#tab-editor [data-file][aria-current="true"]').getAttribute('data-file'), 'src/engine/upcoming.mjs');
+    assert.equal(await page.locator('#tab-editor tr.line.add').count(), 24);
+    assert.equal(await page.locator('#tab-editor tr.line.del').count(), 6);
+    await page.locator('#tab-editor [data-file="test/upcoming.test.mjs"]').click();
+    await page.locator('#tab-editor .tag').waitFor();
+    assert.equal(await page.locator('#tab-editor tr.line.add').count(), 38, 'a new file is all added');
+
     await page.locator('#takeover').click();
     await page.locator('#resume-command').waitFor();
     assert.equal(await page.locator('#resume-command').innerText(), `docker exec -it cleared-v2-${AUTHOR_ID}-session claude --resume ${AUTHOR_ID}`);
@@ -158,7 +168,9 @@ test('a page planted in the preview has an opaque origin, no cookie and a refuse
     assert.notEqual(result.read, 200);
 
     // What reached the app from the page: never the owner's cookie, never an approval.
-    const fromProbe = appHits.filter((hit) => hit.url.startsWith('/api/service/tickets') || hit.url === `/api/service/sessions/${AUTHOR_ID}`);
+    // The page's requests are the ones from an opaque origin (Origin: null); the screen's own carry the app's.
+    const fromProbe = appHits.filter((hit) => hit.headers.origin === 'null');
+    assert.ok(fromProbe.length > 0, 'the planted page reached the app');
     for (const hit of fromProbe) assert.equal(hit.headers.cookie, undefined, `${hit.method} ${hit.url} carried a cookie`);
     assert.ok(!source.calls.some((call) => call.path.endsWith('/approve')), 'nothing was approved');
     // The browser sends the app's cookie to the listener (cookies ignore ports): it forwards it to no one.
@@ -166,7 +178,7 @@ test('a page planted in the preview has an opaque origin, no cookie and a refuse
     const cookies = await page.context().cookies(previewBase);
     assert.ok(!cookies.some((cookie: { name: string }) => cookie.name === 'planted'), 'the planted cookie was stripped');
 
-    const cookie = (await page.context().cookies(app.base)).map((c: { name: string; value: string }) => `${c.name}=${c.value}`).join('; ');
+    const { cookie } = await signedIn(app, 'alex');
     for (const path of ['/', '/login', '/api/me', '/api/service/sessions', `/sessions/${AUTHOR_ID}`])
       assert.equal((await fetch(`${previewBase}${path}`, { headers: { cookie } })).status, 404, `the listener answers ${path}`);
     assert.equal((await fetch(`${app.base}/api/service/sessions/${AUTHOR_ID}/preview/${PREVIEW_KEY}/`, { headers: { cookie } })).status, 404, 'the app serves no preview');
