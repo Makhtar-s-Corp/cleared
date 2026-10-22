@@ -47,7 +47,7 @@ export type ReaderSetup = {
 
 export function readerSetup(options: { readonly script?: readonly FakeStep[]; readonly store?: Store; readonly maxLive?: number } = {}): ReaderSetup {
   const store = options.store ?? openStore(':memory:');
-  store.db.exec(ASK_TABLES);
+  for (const statement of ASK_TABLES) store.db.exec(statement);
   let clock = Date.parse('2026-10-22T10:00:00.000Z');
   let count = 0;
   const fake = createFakeAdapter({ log: store.events, script: options.script ?? turn('t1', 'Line 12 renders the entries.', 0.05), now: () => new Date(clock), newId: () => `00000000-0000-4000-8000-${String(++count).padStart(12, '0')}` });

@@ -523,7 +523,8 @@ test('the reader\'s policy: one case per row', () => {
     { name: 'a fetch, which would ask', request: { tool: 'WebFetch', input: { url: 'https://example.com', prompt: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.ask' },
     { name: 'a subagent, which would ask', request: { tool: 'Task', input: { prompt: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.ask' },
     { name: 'a host tool, which a reader has none of', request: { tool: 'mcp__cleared__propose_plan', input: {} }, policy: reader, decision: 'deny', rule: 'reader.ask' },
-    { name: 'a compound command, which would ask', request: bash('cat a > b'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a redirection, which writes a file', request: bash('cat a > b'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'a compound command, which would ask', request: bash('ls; wget https://example.com'), policy: reader, decision: 'deny', rule: 'reader.ask' },
     { name: 'a learned answer does not widen it', request: bash('make build'), policy: { ...reader, learned: [{ tool: 'Bash', pattern: 'make build' }] }, decision: 'deny', rule: 'reader.ask' },
   ]);
   const verdict = evaluate(bash('npm install left-pad'), { ...base, role: 'reader' });

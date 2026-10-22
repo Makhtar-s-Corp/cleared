@@ -18,10 +18,12 @@ import tickets from '../../src/modules/tickets.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { fakeEffects } from './support.ts';
 
-// A session's preview routes are lane 15's (container/preview.ts), which the sessions module registers.
+// A session's preview routes are lane 15's (container/preview.ts), and the
+// questions to the code lane 25's (reader/, test/reader/routes.test.ts),
+// which the sessions module registers.
 // A file of the Editor tab is one route per depth (lane 20, flow/files.ts): files/* here.
 const routeKeys = (m: { routes: readonly { method: string; path: string }[] }) =>
-  [...new Set(m.routes.filter((r) => !r.path.includes('/preview/')).map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
+  [...new Set(m.routes.filter((r) => !r.path.includes('/preview/') && !r.path.startsWith('/api/asks')).map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
 
 test('the three modules of lane 7 declare the routes of the API that are theirs, and the inbox its table', () => {
   assert.deepEqual(routeKeys(sessions), [

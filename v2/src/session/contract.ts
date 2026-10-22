@@ -11,7 +11,8 @@ import type { SessionEvent } from './events.ts';
 import type { Policy } from './policy.ts';
 
 export type Harness = 'claude-code' | 'codex';            // codex: milestone 3
-export type Role = 'author' | 'reviewer' | 'lead';         // lead: milestone 2
+// lead: milestone 2; reader: a read-only question to the code (milestone 2, decision 28)
+export type Role = 'author' | 'reviewer' | 'lead' | 'reader';
 export type SessionId = string;                            // UUID chosen by Cleared; given to the harness when it accepts one
 export type UserId = string;                               // a row of the users table (lane 6)
 

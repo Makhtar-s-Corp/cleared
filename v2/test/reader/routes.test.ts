@@ -8,12 +8,15 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ASK_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, type Ask } from '../../src/api/types.ts';
 import { dispatch, defaultRegistry, MemoryUsers, type App } from '../../src/modules/registry.ts';
+import sessions from '../../src/modules/sessions.ts';
+import { ASK_TABLES } from '../../src/reader/store.ts';
 import { readerRoutes } from '../../src/reader/routes.ts';
 import { handle } from '../../src/server.ts';
-import { readerSetup, until } from './support.ts';
+import { readerSetup, turn, until } from './support.ts';
 
 const PROOF = 'd'.repeat(64);
-const t = readerSetup();
+// The second turn starts and never ends: the follow-up's turn runs.
+const t = readerSetup({ script: [...turn('t1', 'Line 12 renders the entries.', 0.05), { emit: { type: 'RUN_STARTED', threadId: 'reader', runId: 't2' } }, { awaitMessage: true }] });
 let running = true;
 let server: Server;
 let base = '';
@@ -47,6 +50,12 @@ test('the reader serves the three routes lane 17 wrote ahead for it', () => {
   assert.deepEqual(declared, [...ASK_ROUTES].sort());
 });
 
+test('the sessions module registers them, and the asks table', () => {
+  const registered = sessions.routes.map((r) => `${r.method} ${r.path}`);
+  assert.ok(ASK_ROUTES.every((route) => registered.includes(route)), registered.join(', '));
+  assert.deepEqual(sessions.tables, ASK_TABLES);
+});
+
 test('every route needs the proof, a running reader, and a known user for a write', async () => {
   for (const [method, path] of [['POST', '/api/asks'], ['GET', '/api/asks/ask-x'], ['POST', '/api/asks/ask-x/follow']] as const)
     assert.equal((await call(method, path, {}, method === 'POST' ? { question: 'q' } : undefined)).status, 401, `${method} ${path}`);
@@ -71,7 +80,6 @@ test('an ask, its answer, and a follow-up through the routes', async () => {
   assert.equal(read.status, 200);
   assert.equal((read.json as Ask).turns[0]?.answer, 'Line 12 renders the entries.');
   assert.equal((read.json as Ask).costUsd, 0.05);
-  // The fake's script has one turn: the follow-up is taken, and its turn never ends.
   const followed = await call('POST', `/api/asks/${ask.id}/follow`, person, { question: 'And line 13?' });
   assert.equal(followed.status, 200);
   assert.equal((followed.json as Ask).turns.length, 2);
