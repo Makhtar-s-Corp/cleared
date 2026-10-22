@@ -305,6 +305,8 @@ Merged on 2026-10-22 as pull request 186; its log entry states what it delivered
 
 Not planned here, as the owner decided: complement items 6, 13, 14, 19, multi-repository item 4 and the contract formats JSON Schema, protobuf and events of multi-repository item 2 (milestone 3, the last by the owner's decision of 08:27 on question 5); items 3, 5, 17 and multi-repository item 6 (milestone 4); items 4, 15, 16, 18 and multi-repository item 10 (milestone 5). "Working from the phone" and "service integrations beyond the harness's MCPs" are not taken.
 
+**Planned for milestone 3, not yet split into lanes** (the owner's decision of 2026-10-22, [decisions-log.md](decisions-log.md), matrix line O15): the Consumption screen (Consommation). It shows, for each harness (Claude, Cursor, Codex), a projection of when usage reaches 100 % at the current pace, before and after the reset, and a tokens-per-day curve. It offers clickable levers: change the model, limit the lanes run in parallel, pause new starts. Cost in dollars appears only when a real source provides it; otherwise nothing is shown, never an estimate. A visual reference exists outside the repository; it is inspiration only and nothing is copied from it.
+
 ### 4.8 Waves
 
 At most three lanes run at once, and lanes in one wave never edit the same file. The waves continue the first plan's numbering.

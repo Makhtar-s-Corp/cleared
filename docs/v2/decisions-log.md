@@ -2134,3 +2134,17 @@ The choices the lane makes:
 - **The requirements matrix.** C1, C8, C9, M3, P8, B5.10f, O9 and O10 name this pull request (212). C9 and P8 are `done`; the rest stay `partial` for lanes 31 and 32 or for the proofs. The new line P25 records choices 1 to 4, and P26 records choice 6 (P23 and P24 are lanes 22's and 21's, merged first as pull requests 209 and 208).
 - **Browser tests.** They need `CLEARED_V2_PLAYWRIGHT` and, where playwright-core's own build is not installed, `CLEARED_V2_CHROME`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-session-tabs`.
+
+## 2026-10-22: Owner decision: the Consumption screen is planned for milestone 3
+
+**Decision.** On 2026-10-22 the owner added a Consumption screen (Consommation) at milestone 3. Its content:
+
+- a projection per harness (Claude, Cursor, Codex): at the current pace, the harness reaches 100 % at time T, shown before and after the reset;
+- a tokens-per-day curve per harness;
+- clickable levers: change the model, limit the lanes run in parallel, pause new starts;
+- cost in dollars only from a real source. Without one, nothing is shown, never an estimate.
+
+A visual reference exists outside the repository. It is inspiration only; nothing is copied from it.
+
+- Consequence: the screen is planned in [milestone-2-plan.md](milestone-2-plan.md), section 4.7, as a milestone 3 item with no lane yet. Matrix line O15 records it as `planned`, with no pull request or test yet.
+- Author: the owner, relayed on 2026-10-22; written in this log by Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-docs-consommation`.
