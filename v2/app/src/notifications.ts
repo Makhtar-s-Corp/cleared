@@ -136,8 +136,8 @@ export function notificationsFrom(env: NodeJS.ProcessEnv): Notifications {
     async status(origin) {
       const lib = await usable(origin);
       if (typeof lib === 'string') return unavailable(lib);
-      // The key pair is made here the first time someone opens the app's
-      // notifications, and kept by the store for good.
+      // The key pair is made here the first time a signed-in page asks
+      // (every page does, to draw the bell), and kept by the store for good.
       try { return { available: true, reason: null, publicKey: lib.store.publicKey(), devices: lib.store.subscriptions().length }; }
       catch { return unavailable('store'); }
     },

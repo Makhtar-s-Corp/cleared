@@ -85,10 +85,12 @@ button, input, textarea { font: inherit; color: inherit; }
 /* The notifications button: a bell, filled when this device is told; its menu hangs from the right of the header's group, so it stays on screen on a phone. */
 .notify summary { list-style: none; } .notify summary::-webkit-details-marker { display: none; }
 .notify svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.notify.on summary { color: var(--text); } .notify.on svg path:first-child { fill: currentColor; }
+.notify svg { width: 18px; height: 18px; }
+.notify.on summary, .notify[open] summary { color: var(--text); } .notify[open] summary { background: var(--tab-fill); } .notify.on svg path:first-child { fill: currentColor; }
 .notify .menu { width: 300px; max-width: calc(100vw - 32px); z-index: 1; }
-.notify .menu p { font-size: 13px; line-height: 1.45; }
+.notify .menu p { font-size: 13px; line-height: 1.45; text-wrap: pretty; }
 .notify-state { font-weight: 500; }
+.notify .menu .plain { min-height: 36px; }
 .notify .menu .primary { min-height: 36px; border: 0; border-radius: 8px; background: var(--ink); color: var(--on-ink); font-weight: 500; cursor: pointer; }
 .notify .menu .primary:hover { opacity: .88; }
 .notify .menu button:disabled { opacity: .5; cursor: default; }
@@ -220,6 +222,10 @@ button, input, textarea { font: inherit; color: inherit; }
   .stub { padding: 32px 16px; }
   .lead-stub { padding: 20px 16px 32px; }
   .notify .menu .primary, .notify .menu .plain { min-height: 44px; }
+  /* On a phone the menu spans the gutters, under the header's first row. */
+  .right, .notify { position: static; }
+  .notify .menu { left: 16px; right: 16px; top: 56px; width: auto; max-width: none; }
+  .me summary { width: 44px; height: 44px; border: 7px solid transparent; background-clip: padding-box; margin-right: -7px; }   /* a 30 px circle with a 44 px target */
 }
 @media (max-width: 479px) { .brand .name, .slash { display: none; } .source-pill { font-size: 12px; padding: 4px 10px; } }
 @media (prefers-reduced-motion: reduce) { .live { animation: none; } .need { transition: none; } }
