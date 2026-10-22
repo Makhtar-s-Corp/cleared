@@ -2663,13 +2663,14 @@ The lane's choices:
   - `app/test/style-nonce.test.ts`: two pages, two nonces, each in its page; no `unsafe-inline`; the other directives as before; a file, a catalog and an API answer with no nonce;
   - `app/test/session/bundles.test.ts`: the build manifest read, so neither package is in any chunk the entry or a screen loads at once, both are behind the session screen's dynamic import only, and xterm's sheet is in no other screen's sheets;
   - `app/web/test/session/terminal-editor.test.tsx`: each state of the terminal's frame and of the editor, the command and why, both languages, no inline style;
+  - `app/test/session/fixture-human.test.ts`, written after the code: the tower fixture source's terminal, stream, save and Give back, through the app;
   - `app/test/session/terminal-browser.test.ts` (Chromium). It takes a session over, types `ls` and Enter and finds the input route called with `ls\r`. It saves a change and finds the PUT carrying the loaded hash, then a 409 showing the conflict with Reload, then a 403 showing the rule's reason. With both packages mounted, it shows a line in 256 colours and one in 24-bit colour, selects text in the terminal, types in the editor, opens its completion list and its search panel, then counts the page's `securitypolicyviolation` events: 0 (issue 195, F3). A second test, through an `/api/me` that says `terminal: false`, shows the command and why.
 - **The violation count proves something.** With the shims' hold removed, the same test counted `style-src-elem` violations and failed. The hold was then put back.
 - **Files outside the lane's list:**
   - `app/test/static.test.ts` and `app/test/preview.test.ts` compared a page's whole policy with the old string. They now accept that string with the page's `style-src` nonce, and nothing else.
   - `docs/v2/requirements-matrix.md`.
 - **Checks.**
-  - `npm test`: 1182 node tests, 1174 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
+  - `npm test`: 1183 node tests, 1175 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
   - `npm run typecheck` and `npm run guard -- --base origin/v2` are green. The guard ran without a private-term list (`CLEARED_REPO` unset).
   - The browser tests pass with `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME` (Chromium 1248): this lane's two, lane 20's three, and lane 13's two.
 - **The visual loop.** The app ran on an ephemeral `127.0.0.1` port (after `ss -ltn`), against the session fixture's source, in headless Chromium, with the clock fixed at the fixture's time.
