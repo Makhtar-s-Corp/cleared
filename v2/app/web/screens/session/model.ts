@@ -13,7 +13,7 @@ import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhas
 import type { Verdict } from '../../../../src/session/policy.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { ChoiceStatus } from '../../components/choices/model.ts';
-import type { Translate } from '../../lib/i18n.ts';
+import { hasMark, type Translate } from '../../lib/i18n.ts';
 
 export const EVENT_NAMES = [
   'RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR',
@@ -422,8 +422,12 @@ export function duration(ms: number, t: Translate): string {
 }
 
 // A catalog sentence for a key that may not exist (a rule the catalog has not met).
+// The translator marks a missing key rather than throwing (lane 34, U10).
 export function known(t: Translate, key: string, values?: Record<string, string | number>): string | undefined {
-  try { return t(key, values); } catch { return undefined; }
+  try {
+    const text = t(key, values);
+    return hasMark(text) ? undefined : text;
+  } catch { return undefined; }
 }
 
 export const phaseOf = (view: SessionView): SessionPhase => view.thread.state?.phase ?? view.summary.phase;

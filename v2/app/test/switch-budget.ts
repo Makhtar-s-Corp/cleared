@@ -36,8 +36,11 @@ export const LAP = ['inbox', 'sessions', 'session', 'lead', 'tower'] as const;
 
 export type Run = { readonly times: number[]; readonly p95: number; readonly median: number; readonly documents: number; readonly requests: number[] };
 
-// Installed in every document of the page before its own scripts.
+// Installed in every document of the page before its own scripts; a frame
+// (a sandboxed preview) and a document without storage are left alone.
 export const PROBE = `(() => {
+  if (window.top !== window) return;                   // the page, not a frame of it
+  try { sessionStorage.length; } catch { return; }      // a document without storage (the blank page before the first)
   const now = () => performance.timeOrigin + performance.now();
   document.addEventListener('click', (event) => {
     if (sessionStorage.getItem('budget-expect')) sessionStorage.setItem('budget-click', String(performance.timeOrigin + event.timeStamp));
@@ -59,7 +62,9 @@ export const percentile = (values: readonly number[], p: number): number => {
 };
 
 // The page is signed in and on the tower, with PROBE installed.
-export async function switchRun(page: any, switches = 20): Promise<Run> {
+// `warmed` runs once the five screens were each drawn once, before the
+// twenty switches that are counted.
+export async function switchRun(page: any, switches = 20, warmed?: () => Promise<unknown>): Promise<Run> {
   const go = async (screen: string): Promise<{ time: number; requests: number }> => {
     let requests = 0;
     const count = (request: { url(): string }) => {
@@ -83,6 +88,7 @@ export async function switchRun(page: any, switches = 20): Promise<Run> {
     return { time, requests };
   };
   for (const screen of LAP) await go(screen);
+  await warmed?.();
   let documents = 0;
   const loaded = () => { documents += 1; };
   page.on('load', loaded);

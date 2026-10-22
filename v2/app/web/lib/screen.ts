@@ -42,9 +42,3 @@ export type ScreenContext = {
   navigate?(href: string, options?: { readonly replace?: boolean }): void;
 };
 
-// Moves to an address of the app: in the page when the shell gives a
-// router, else as before.
-export function go(context: Pick<ScreenContext, 'navigate'>, href: string): void {
-  if (context.navigate) context.navigate(href);
-  else location.assign(href);
-}

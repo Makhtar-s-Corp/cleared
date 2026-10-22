@@ -20,11 +20,11 @@
 // playwright-core is v2's own dev dependency; CLEARED_V2_CHROME names
 // another Chromium than the one it installed.
 import { mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { chromium } from 'playwright-core';
 import { fixturePreview } from '../app/fixtures/session.ts';
 import { fixtureSource } from '../app/fixtures/source.ts';
 import { FIXTURE_NOW } from '../app/fixtures/tower.ts';
@@ -40,6 +40,12 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
 export type CaptureScreen = typeof SCREENS[number];
 const ACCOUNT = 'owner';
+
+// playwright-core is read untyped, as the proof scripts read it: its types need the DOM's,
+// which the service's type check leaves out; so do the page's functions below.
+const { chromium } = createRequire(import.meta.url)('playwright-core') as { chromium: any };
+declare const document: any;
+declare const requestAnimationFrame: (run: () => void) => number;
 
 const list = (value: string | undefined, all: readonly string[]): string[] => (value ? value.split(',').map((v) => v.trim()).filter(Boolean) : [...all]);
 
@@ -69,11 +75,11 @@ export async function capture(options: { readonly out: string; readonly screens?
     for (const theme of themes) {
       for (const w of widths) {
         const context = await browser.newContext({ viewport: WIDTHS[w], deviceScaleFactor: 1, colorScheme: theme === 'dark' ? 'dark' : 'light' });
-        await context.addInitScript((value) => { try { localStorage.setItem('cleared-v2-theme', value); } catch { /* no storage */ } }, theme);
+        await context.addInitScript((value: string) => { try { (globalThis as any).localStorage.setItem('cleared-v2-theme', value); } catch { /* no storage */ } }, theme);
         const page = await context.newPage();
         await page.clock.setFixedTime(FIXTURE_NOW);
-        page.on('pageerror', (error) => errors.push(`${w} ${theme}: ${error.message}`));
-        page.on('request', (request) => { if (!request.url().startsWith(app.base) && !request.url().startsWith(previewBase) && !request.url().startsWith('data:')) away.push(request.url()); });
+        page.on('pageerror', (error: Error) => errors.push(`${w} ${theme}: ${error.message}`));
+        page.on('request', (request: { url(): string }) => { if (!request.url().startsWith(app.base) && !request.url().startsWith(previewBase) && !request.url().startsWith('data:')) away.push(request.url()); });
         await page.goto(`${app.base}/login`);
         await page.fill('#name', ACCOUNT);
         await page.fill('#password', PASSWORD);
@@ -88,7 +94,7 @@ export async function capture(options: { readonly out: string; readonly screens?
           const path = paths[screen as CaptureScreen];
           if (options.via === 'click') {
             const before = documents;
-            await page.evaluate((href) => {
+            await page.evaluate((href: string) => {
               const link = document.createElement('a');
               link.href = href;
               document.body.append(link);
@@ -117,12 +123,12 @@ export async function capture(options: { readonly out: string; readonly screens?
 
 // The screen has drawn its data: no element busy, the fonts loaded, then
 // two frames so the last layout is painted.
-async function settle(page: import('playwright-core').Page): Promise<void> {
+async function settle(page: any): Promise<void> {
   await page.waitForSelector('#screen > *', { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[aria-busy="true"]') === null, undefined, { timeout: 10_000 });
   await page.evaluate(async () => {
     await document.fonts.ready;
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
   });
   await page.waitForTimeout(250);
 }

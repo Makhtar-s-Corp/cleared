@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useScreen } from '@/lib/context.tsx';
+import { useKept } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import { planStateLine, type PlanAction } from '@/plan-panel/model.ts';
@@ -222,7 +223,12 @@ export function LeadScreen({ view, t, draft = { text: '', goal: false } }: { rea
 function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: string | null }) {
   const context = useScreen();
   const { t } = context;
-  const { agent, state: thread } = useThread<LeadThread>(LEAD_AGENT, isLeadThread);
+  const { agent, state: own } = useThread<LeadThread>(LEAD_AGENT, isLeadThread);
+  // A second visit draws the thread it last showed until the agent's own
+  // arrives from the cache and the stream (lane 34): no placeholder.
+  const [last, keep] = useKept<LeadThread | undefined>('lead-thread', undefined);
+  useEffect(() => { if (own) keep(own); }, [own, keep]);
+  const thread = own ?? last;
   const lead = agent as unknown as LeadAgent;
   const [now, setNow] = useState(() => context.now());
   const [memory, setMemory] = useState<LeadView['memory']>(null);
