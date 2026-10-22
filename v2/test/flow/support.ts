@@ -108,6 +108,7 @@ export type SetupOptions = {
   scripts?: Scripts; config?: Partial<FlowConfig>; effects?: Partial<FlowEffects>; adapterless?: boolean;
   ledger?: boolean;                       // the v1 events table the lock and the release watch write; true by default
   locks?: (service: ServiceConfig) => ServiceLock;   // the lock of each service of a workspace of several
+  clean?: (text: string) => string;                  // the service's cleaner; the identity by default
 };
 
 export async function setup(options: SetupOptions = {}) {
@@ -129,7 +130,7 @@ export async function setup(options: SetupOptions = {}) {
   };
   const deps = {
     store, inbox, registry, config: { ...CONFIG, ...options.config }, effects: fakeEffects(calls, options.effects),
-    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}),
+    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}), ...(options.clean ? { clean: options.clean } : {}),
   };
   const engine = new FlowEngine(deps);
   const flowEvents: FlowEvent[] = [];

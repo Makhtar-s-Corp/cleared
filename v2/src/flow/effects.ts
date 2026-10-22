@@ -87,6 +87,26 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     return (parts.length === 2 && parts[0] === ticket ? named(parts[1] as string) : undefined) ?? (workspace.services[0] as ServiceConfig);
   };
 
+  // The ticket branch of a session's checkout, fetched as publish fetches a
+  // branch: out of the checkout's .git into a private ref of the service's
+  // own checkout, every object checked, so no git of the session's runs and
+  // no hook either; a checkout whose .git is a link, a linked worktree or has
+  // alternates is refused. The range from the service's base to that ref.
+  const fetchBranch = async (ticket: string, service: ServiceConfig, workdir: string) => {
+    const { dir, base } = of(service);
+    const gitDir = join(workdir, '.git');
+    if (!lstatSync(gitDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the ticket's checkout of ${service.name} has no .git folder of its own`);
+    for (const parts of [['commondir'], ['objects', 'info', 'alternates']])
+      if (lstatSync(join(gitDir, ...parts), { throwIfNoEntry: false })) throw new Error(`the ticket's checkout of ${service.name} cannot be read safely: .git/${parts.join('/')} is present`);
+    const branch = ticketBranch(ticket);
+    // Per service: two folder services of one repository share its checkout.
+    const ref = `refs/cleared/step/${service.name}/${branch}`;
+    await git(dir, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
+      'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', gitDir, `+refs/heads/${branch}:${ref}`]);
+    return { dir, ref, range: `refs/remotes/origin/${base}...${ref}` };
+  };
+  const DIFF_ARGS = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
+
   // Runs the lock's client with `args`, `input` on its stdin; its exit code
   // and the end of what it said on stderr.
   const lock = (args: readonly string[], input: string, limit: number, extra: NodeJS.ProcessEnv) =>
@@ -191,31 +211,17 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     },
 
     // What a step's branch changes against the service's base (decision 26,
-    // lane 23), read as publish reads a branch: fetched out of the step's
-    // checkout into a private ref of the service's own checkout, every
-    // object checked, so no git of the session's runs and no hook either; a
-    // checkout whose .git is a link, a linked worktree or has alternates is
-    // refused. Only what is committed counts. With `snapshot`, the contract
-    // as committed is written into that folder, for the fakes of the steps
-    // after it, and stays as it was validated whatever the branch does next.
+    // lane 23), read as publish reads a branch (fetchBranch). Only what is
+    // committed counts. With `snapshot`, the contract as committed is
+    // written into that folder, for the fakes of the steps after it, and
+    // stays as it was validated whatever the branch does next.
     async stepChanges({ ticket, service, workdir, snapshot }) {
-      const { dir, base } = of(service);
-      const gitDir = join(workdir, '.git');
-      if (!lstatSync(gitDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the step's checkout of ${service.name} has no .git folder of its own`);
-      for (const parts of [['commondir'], ['objects', 'info', 'alternates']])
-        if (lstatSync(join(gitDir, ...parts), { throwIfNoEntry: false })) throw new Error(`the step's checkout of ${service.name} cannot be read safely: .git/${parts.join('/')} is present`);
-      const branch = ticketBranch(ticket);
-      // Per service: two folder services of one repository share its checkout.
-      const ref = `refs/cleared/step/${service.name}/${branch}`;
-      await git(dir, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
-        'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', gitDir, `+refs/heads/${branch}:${ref}`]);
-      const range = `refs/remotes/origin/${base}...${ref}`;
-      const diffArgs = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
-      const files = (await git(dir, [...diffArgs, '--name-only', range, '--'])).split('\n').filter(Boolean);
+      const { dir, ref, range } = await fetchBranch(ticket, service, workdir);
+      const files = (await git(dir, [...DIFF_ARGS, '--name-only', range, '--'])).split('\n').filter(Boolean);
       // The contract as a path of the repository, as the files are: a folder service's is inside its folder (release/order.ts).
       const path = service.contract ? (service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path) : undefined;
       if (!path) return { files, contract: null };
-      const diff = (await git(dir, [...diffArgs, range, '--', path])).slice(0, MAX_DIFF);
+      const diff = (await git(dir, [...DIFF_ARGS, range, '--', path])).slice(0, MAX_DIFF);
       const blob = (await git(dir, ['rev-parse', '--verify', '--quiet', `${ref}:${path}`]).catch(() => '')).trim() || null;
       let copy: string | null = null;
       if (snapshot && blob) {
@@ -224,6 +230,19 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
         writeFileSync(copy, await git(dir, ['cat-file', 'blob', blob]), { mode: 0o644 });
       }
       return { files, contract: { path, diff, blob, snapshot: copy } };
+    },
+
+    // What a service's ticket branch changes, for the reviewer of a ticket
+    // of several services (owner decision of 2026-10-22 20:33): read out of
+    // <workdirs>/<ticket>/<service> as a step's branch is, committed changes
+    // only; a service the ticket has no checkout of has none.
+    async branchChanges({ ticket, service }) {
+      const workdir = join(config.workdirRoot, ticket, service.name);
+      if (!lstatSync(workdir, { throwIfNoEntry: false })) return { files: [], diff: '' };
+      const { dir, range } = await fetchBranch(ticket, service, workdir);
+      const files = (await git(dir, [...DIFF_ARGS, '--name-only', range, '--'])).split('\n').filter(Boolean);
+      const diff = (await git(dir, [...DIFF_ARGS, range, '--'])).slice(0, MAX_DIFF);
+      return { files, diff };
     },
 
     // `release-request.mjs request_release <ticket> <pr> --ask`, the

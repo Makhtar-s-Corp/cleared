@@ -108,3 +108,27 @@ test('a folder service\'s contract is read inside its folder, as a path of the r
   assert.equal(read.contract?.path, 'filter-api/contract/openapi.yaml', 'so the contract-only check compares like with like');
   assert.match(read.contract?.diff ?? '', /\+info: \{\}/);
 });
+
+// The reviewer of a ticket of several services sees every service's change
+// (owner decision of 2026-10-22 20:33): each one read as a step's branch is.
+test('a service\'s ticket branch is read for the reviewer out of <workdirs>/<ticket>/<service>: its files and its whole diff, committed only', async () => {
+  const { flow, filter, guestbook } = world();
+  const read = flow.branchChanges as NonNullable<typeof flow.branchChanges>;
+  assert.deepEqual(await read({ ticket: TICKET.id, service: guestbook }), { files: [], diff: '' }, 'a service the ticket has no checkout of has no change');
+  const { workdir } = await flow.prepareWorkdir({ ticket: TICKET, role: 'author', service: filter });
+  assert.deepEqual(await read({ ticket: TICKET.id, service: filter }), { files: [], diff: '' });
+  writeFileSync(join(workdir, 'contract', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: {}\n');
+  writeFileSync(join(workdir, 'words.txt'), 'held\n');
+  gitIn(workdir, ['add', 'contract/openapi.yaml', 'words.txt']);
+  gitIn(workdir, ['commit', '-q', '-m', 'Hold flagged entries']);
+  writeFileSync(join(workdir, 'words.txt'), 'not committed\n');
+  const changed = await read({ ticket: TICKET.id, service: filter });
+  assert.deepEqual([...changed.files].sort(), ['contract/openapi.yaml', 'words.txt']);
+  assert.match(changed.diff, /^diff --git a\/contract\/openapi\.yaml b\/contract\/openapi\.yaml/m);
+  assert.match(changed.diff, /\+info: \{\}/);
+  assert.match(changed.diff, /\+held/);
+  assert.doesNotMatch(changed.diff, /not committed/);
+  // A checkout whose git would read another repository is refused, as for a step.
+  writeFileSync(join(workdir, '.git', 'commondir'), '../elsewhere\n');
+  await assert.rejects(read({ ticket: TICKET.id, service: filter }), /commondir/);
+});

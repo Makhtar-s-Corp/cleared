@@ -86,7 +86,7 @@ import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
 import { GIVEN_BACK, TAKEN_OVER } from './takeover.ts';
-import { authorPrompt, contractSendBackMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt } from './prompts.ts';
+import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
 import { foldState, sessionPlanOf } from './state.ts';
@@ -123,6 +123,12 @@ export type FlowEffects = {
   // and for a service with a contract, the contract file's diff and blob id;
   // with `snapshot` (a folder), the contract as committed, copied into it.
   stepChanges?(input: { readonly ticket: TicketId; readonly service: ServiceConfig; readonly workdir: string; readonly snapshot?: string }): Promise<StepChanges>;
+  // What the ticket branch of a service changes against its base, read out
+  // of <workdirs>/<ticket>/<service> as a step's branch is: its files and its
+  // diff, none when the ticket has no checkout of it. The reviewer of a
+  // ticket of several services is given it (owner decision of 2026-10-22
+  // 20:33). Absent: the reviewer is told the change could not be read.
+  branchChanges?(input: { readonly ticket: TicketId; readonly service: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
 };
 
 export type StepChanges = {
@@ -1550,14 +1556,55 @@ export class FlowEngine {
         : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer' });
       // The files a person changed in the author's checkouts (decision 33): every author session of the flow, a ticket in steps having several.
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
+      // The reviewer's git commands name its own service's base.
+      const base = this.#several ? (this.#servicesOf(ticket)[0] as ServiceConfig).base : this.config.base;
       const live = await this.#launch(adapter, ticket, 'reviewer', this.#reviewerModel(ticket), prepared.workdir || workdir, prepared.briefing, settings,
-        reviewPrompt({ ticket, base: this.config.base, verdict: settings.verdict, humanEdits: edits }));
+        reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)) }));
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
       this.#snapshot(live.id, ticket.id);
       this.#supervise(live, 0);
     } catch (error) {
       await this.#putBack(ticket.id, `The review could not start: ${name(error)}`, 'review_failed');
     }
+  }
+
+  // The reviewer of a ticket of several services is given every service's
+  // change and the contracts' (owner decision of 2026-10-22 20:33): it works
+  // in the first service's checkout, and judges the criteria on the whole.
+  // A service whose change cannot be read stops the review from starting
+  // (the caller puts the ticket back), so no review runs on half the change.
+  async #reviewServices(ticket: Ticket): Promise<{ services?: ReviewService[]; contracts?: ReviewContract[] }> {
+    const services = this.#several ? this.#servicesOf(ticket) : [];
+    if (services.length < 2) return {};
+    const read = this.#effects.branchChanges;
+    const approved = this.inbox.contracts({ ticket: ticket.id, state: 'handled' }).filter((item) => item.outcome?.decision === 'approve');
+    const out: ReviewService[] = [];
+    const contracts: ReviewContract[] = [];
+    for (const [n, service] of services.entries()) {
+      let change: { files: readonly string[]; diff: string } | null = null;
+      if (read) {
+        try {
+          const got = await read({ ticket: ticket.id, service });
+          change = { files: got.files, diff: this.#clean(got.diff) };
+        } catch (error) {
+          throw new FlowError('unavailable', `the change of ${service.name} could not be read: ${name(error)}`);
+        }
+      }
+      const path = this.#contractPath(service);
+      if (change && path && change.files.includes(path)) {
+        contracts.push({ service: service.name, path, diff: fileDiff(change.diff, path), validated: approved.some((item) => item.service === service.name && item.path === path) });
+        change = { files: change.files, diff: withoutFile(change.diff, path) };
+      }
+      out.push({ name: service.name, base: service.base, checkout: n === 0, change });
+    }
+    return { services: out, contracts };
+  }
+
+  // A service's contract file as a path of its repository, as a diff names
+  // it: a folder service's is inside its folder (release/order.ts).
+  #contractPath(service: ServiceConfig): string | undefined {
+    if (!service.contract) return undefined;
+    return service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path;
   }
 
   // ---- the reviewer is done: verdict ---------------------------------------
@@ -1713,8 +1760,8 @@ export class FlowEngine {
   // What the card's flags read beside the diff (issue 205): the contract
   // files of the ticket's services, and their `[merge] guarded_paths`.
   #guarded(ticket: Ticket, settings: readonly (ProjectSettings | undefined)[]): { contracts: string[]; guarded: string[] } {
-    // As paths of the repository, as the diff's are: a folder service's contract is inside its folder (release/order.ts).
-    const contracts = this.#servicesOf(ticket).flatMap((service) => (service.contract ? [service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path] : []));
+    // As paths of the repository, as the diff's are.
+    const contracts = this.#servicesOf(ticket).flatMap((service) => { const path = this.#contractPath(service); return path ? [path] : []; });
     return { contracts: [...new Set(contracts)], guarded: [...new Set(settings.flatMap((s) => s?.guardedPaths ?? []))] };
   }
 
