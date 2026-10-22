@@ -103,6 +103,10 @@ test('the tower bar\'s New goal and Ask the lead open /lead with the typed text 
   assert.equal(leadHref('goal', '   '), '/lead?goal=1');
   assert.equal(leadHref('lead', ''), '/lead');
   assert.equal(leadHref('lead', 'a&b=c#d'), '/lead?draft=a%26b%3Dc%23d');
+  assert.equal(leadHref('goal', 'A team-ready guestbook', '  A JSON route, trimmed names.\n'), '/lead?goal=1&draft=A+team-ready+guestbook%0A%0AA+JSON+route%2C+trimmed+names.', 'the description follows the title');
+  assert.equal(leadHref('lead', '', 'Only a description'), '/lead?draft=Only+a+description');
+  const long = new URLSearchParams(leadHref('goal', 'Goal', 'é'.repeat(20_000)).split('?')[1]).get('draft') ?? '';
+  assert.equal(long.length, 2000, 'cut at the draft limit, whatever the description holds');
   const bar = renderBar(sentinel);
   assert.match(bar, /<button class="chip-button" type="button" data-lead="goal">«bar_new_goal»<\/button>/);
   assert.match(bar, /<button class="chip-button" type="button" data-lead="lead">«bar_ask_lead»<\/button>/);

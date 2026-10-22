@@ -10,6 +10,7 @@ import type { Ticket } from '../../../src/tickets/contract.ts';
 import { esc } from '../html.ts';
 import type { Translate } from '../i18n.ts';
 import { ApiError, type ScreenContext } from '../screen.ts';
+import { DRAFT_MAX } from './lead.ts';
 
 export type TowerData = {
   readonly sessions: readonly SessionSummary[];
@@ -144,11 +145,14 @@ export function renderBar(t: Translate): string {
 }
 
 // Where New goal and Ask the lead go: the lead's screen, with what was
-// typed as its draft (read by screens/lead.ts).
-export function leadHref(kind: 'goal' | 'lead', text: string): string {
+// typed (the title, then the description when written) as its draft, read
+// by screens/lead.ts. The draft is cut at DRAFT_MAX so the address stays
+// well under the server's header limit.
+export function leadHref(kind: 'goal' | 'lead', title: string, body = ''): string {
   const query = new URLSearchParams();
   if (kind === 'goal') query.set('goal', '1');
-  if (text.trim()) query.set('draft', text.trim());
+  const text = [title.trim(), body.trim()].filter(Boolean).join('\n\n').slice(0, DRAFT_MAX);
+  if (text) query.set('draft', text);
   const search = query.toString();
   return search ? `/lead?${search}` : '/lead';
 }
@@ -256,7 +260,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   };
 
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-lead]')) {
-    button.addEventListener('click', () => location.assign(leadHref(button.dataset.lead === 'goal' ? 'goal' : 'lead', input.value)));
+    button.addEventListener('click', () => location.assign(leadHref(button.dataset.lead === 'goal' ? 'goal' : 'lead', input.value, description.value)));
   }
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
