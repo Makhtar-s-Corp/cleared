@@ -134,13 +134,23 @@ export function renderBar(t: Translate): string {
   return `<form class="ask" id="ask" autocomplete="off">
 <input id="ask-input" name="title" maxlength="200" placeholder="${esc(t('bar_placeholder'))}" aria-label="${esc(t('bar_label'))}">
 <div class="ask-actions">
-<button class="chip-button" type="button" data-later="goal" aria-disabled="true" aria-describedby="ask-note">${esc(t('bar_new_goal'))}</button>
-<button class="chip-button" type="button" data-later="lead" aria-disabled="true" aria-describedby="ask-note">${esc(t('bar_ask_lead'))}</button>
+<button class="chip-button" type="button" data-lead="goal">${esc(t('bar_new_goal'))}</button>
+<button class="chip-button" type="button" data-lead="lead">${esc(t('bar_ask_lead'))}</button>
 <button class="chip-button primary" type="submit">${esc(t('bar_new_ticket'))}</button>
 </div>
 <textarea id="ask-body" name="body" maxlength="20000" rows="5" placeholder="${esc(t('bar_body_placeholder'))}" aria-label="${esc(t('bar_body_label'))}"></textarea>
 </form>
 <p class="ask-note" id="ask-note" role="status"></p>`;
+}
+
+// Where New goal and Ask the lead go: the lead's screen, with what was
+// typed as its draft (read by screens/lead.ts).
+export function leadHref(kind: 'goal' | 'lead', text: string): string {
+  const query = new URLSearchParams();
+  if (kind === 'goal') query.set('goal', '1');
+  if (text.trim()) query.set('draft', text.trim());
+  const search = query.toString();
+  return search ? `/lead?${search}` : '/lead';
 }
 
 // What the bar sends to create a ticket: the title, and the description
@@ -225,7 +235,7 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
   const note = root.querySelector<HTMLElement>('#ask-note')!;
   let stopped = false;
 
-  const say = (text: string, kind: 'ok' | 'error' | 'later') => {
+  const say = (text: string, kind: 'ok' | 'error') => {
     note.textContent = text;
     note.dataset.kind = kind;
   };
@@ -245,8 +255,8 @@ export function mount(root: HTMLElement, context: ScreenContext): () => void {
     }
   };
 
-  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-later]')) {
-    button.addEventListener('click', () => say(t(button.dataset.later === 'goal' ? 'later_goal' : 'later_lead'), 'later'));
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-lead]')) {
+    button.addEventListener('click', () => location.assign(leadHref(button.dataset.lead === 'goal' ? 'goal' : 'lead', input.value)));
   }
   form.addEventListener('submit', async (event) => {
     event.preventDefault();

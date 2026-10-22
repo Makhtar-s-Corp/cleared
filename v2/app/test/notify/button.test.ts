@@ -6,7 +6,7 @@ import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../../public/i18n.ts';
 import { notifyView, renderNotifyMenu, urlKey, type NotifyBrowser, type NotifyStatus } from '../../public/notify.ts';
 
-const sentinel: Translate = (key, values) => `«${key}${values ? ` ${JSON.stringify(values)}` : ''}»`;
+const sentinel: Translate = (key, values) => `«${key}${Object.entries(values ?? {}).map(([name, value]) => ` ${name}=${value}`).join('')}»`;
 const ready: NotifyStatus = { available: true, reason: null, publicKey: 'BKey', devices: 2 };
 const chrome: NotifyBrowser = { supported: true, apple: false, installed: false, permission: 'default' };
 
@@ -20,7 +20,7 @@ test('off on this device: the count of devices told, and the button that turns i
   assert.deepEqual(view, { show: true, on: false, state: 'notify_off', devices: 2, action: 'on', note: null });
   const html = renderNotifyMenu(view, sentinel);
   assert.match(html, /«notify_off»/);
-  assert.match(html, /«notify_devices_other \{"n":2\}»/);
+  assert.match(html, /«notify_devices_other n=2»/);
   assert.match(html, /<button class="primary" id="notify-toggle" type="button" data-action="on">«notify_turn_on»<\/button>/);
 });
 
@@ -28,7 +28,7 @@ test('on for this device: the count includes it, and the button turns it off', (
   const view = notifyView({ ...ready, devices: 1 }, chrome, true);
   assert.deepEqual(view, { show: true, on: true, state: 'notify_on', devices: 1, action: 'off', note: null });
   const html = renderNotifyMenu(view, sentinel);
-  assert.match(html, /«notify_devices_one \{"n":1\}»/);
+  assert.match(html, /«notify_devices_one n=1»/);
   assert.match(html, /<button class="plain" id="notify-toggle" type="button" data-action="off">«notify_turn_off»<\/button>/);
 });
 
