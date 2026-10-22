@@ -1934,3 +1934,106 @@ The choices the lane makes:
   - A thread line for a train written by the service, as above.
   - The tower names another account's takeover "another account" until a route maps a user id to a name.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-plan-flags-screens`.
+
+## 2026-10-22: the release card as a train, the groups and flags, and the session plan in the inbox (the author's choices, lane v2-j2-inbox-train)
+
+**Decision.** Lane 21 applies the inbox's part of decisions 21, 22, 23 and 24 of the [milestone 2 plan](milestone-2-plan.md) (complement item 10, multi-repository item 5), on the React port, in the lane's files only: `v2/app/web/screens/inbox/**`, the `inbox` catalogs, `v2/app/fixtures/inbox.ts`, `v2/app/test/inbox/**` and `v2/app/web/test/inbox/**`. The lane's choices:
+
+1. **`api/types.ts` is not edited; the screen reads `NextInboxItem`.** The logs of lanes 16 and 17 say lane 21 joins the new kinds to `InboxItem`. But the wave 8 table gives `types.ts` to no lane, and `InboxItem` is switched on exhaustively in files of other lanes: `notify/sources.ts`, `notify/dispatcher.ts`, the tower's model and the tower's and session's fixtures. So the inbox's model names `Item = NextInboxItem`, and every function of the screen maps the seven kinds.
+   - `known()` leaves out a kind the screen does not know. A later kind is then not drawn as a row with no words, as a `session_plan` was on `v2` before this lane: no chip, a NaN in the sort, and a detail that crashed.
+   - The shared test helper `web/test/render.tsx` keeps `renderActions(item: InboxItem)`. This lane's tests go through `renderDetail` for the new kinds.
+   - **Followup for lane 23**, which owns `types.ts` in wave 9: join the kinds to `InboxItem` with the notifications and the tower, or keep `NextInboxItem` as the screens' type.
+2. **The order of the kinds:** release, permission, session plan, the lead's plan, question, contract, knowledge. A session plan holds its session as a permission does.
+3. **Approve only when the card can be approved.** `approvable(item)` is true for a release with no train, or with a train that waits.
+   - A blocked train shows its reason and the service's proposal. It offers Send back and "Ask the lead to add the step", a link to `/lead` and the primary gesture: decision 21 leaves the owner the lead's missing step.
+   - A train that lands, landed, rolled back or halted shows where it is, "Nothing to approve now", even if its item reads waiting (P18: the ticket goes back to the validate state between two landings).
+   - A train's Approve reads "Approve 2 pull requests" and stays bound to every head (`approveBody`, unchanged).
+4. **Where a train is, in the list and on the card.**
+   - The list line reads "LOCAL-170 · 2 services · Reviewed by Sonnet, checks green" while the train waits. In any other state it reads "LOCAL-170 · Landing, 1 of 2 landed", "Landed, 2 of 2", "Rolled back, 2 of 2" (the reverted ones), "Halted, 1 of 2 landed" or "Blocked: a consumer is not changed".
+   - A state chip sits beside the kind, so a rolled-back train filed under "Handled today" is still seen.
+   - Each service shows its state (waits for your approval, lands next, merged with its health being checked, landed and healthy, unhealthy, reverted), its time and its note. The detail is drawn again when a service's state, time or note changes (`detailKey`).
+5. **The groups and the flags.**
+   - The groups are the service's, in its order. "Other changes" (`OTHER_CHANGES`, kept equal to `release/flags.ts` by a test) is translated.
+   - A flag is a chip with its meaning, both from the catalog by kind, in the service's order. Each file a flag names carries the flag's chip.
+   - The service's `detail` text is not shown: it is English. What it adds to the catalog's meaning is lost on screen: the guard's pattern names for `secret_shape`, and the line count for `large`.
+   - The catalog names `secret_shape`'s keys `flag_credential_shape` (`flagKey()`). The guard's strict pass (`--base origin/v2`) reads a catalog key with "secret" in it, followed by a text with a space, as an assigned secret, and an object literal mapping that kind as a literal secret.
+6. **Sentences from the service are shown as data, in English:** the compatibility line, the block's reason and proposal, and a service's note. The service writes them in `release/order.ts` and the train. Translating them needs their parts in the API, a change of `types.ts` for a later lane.
+7. **The session plan.**
+   - Its title is the ticket's title, else its first step. The detail shows the service, the confidence with its reason in a card of the confidence's colour, the rule that applies while it waits ("A medium or low confidence waits for your Go", or that a high one starts by itself after the delay), the steps, the files, the session and when it was proposed.
+   - **Go** posts `/sessions/:id/plan/go` with no body.
+   - **Change** first opens a field. Its text is trimmed, and an empty one or one over `CHANGE_MAX` (2000, kept equal to `flow/plan-gate.ts` by a test) is refused before sending. Then it posts `{ message }`. The text is kept by the screen, not by the detail, so a refused Change keeps it.
+   - **Refusals:** 404 or 409 means no plan waits any more, so the item is settled and the inbox reloaded. 403 is an unknown user, 503 a service without the flow, and 400 a refused message.
+   - A handled plan says who started it: you, a user's id, the delay or the lead (`SessionPlan.go`).
+8. **The contract and knowledge items** have their rank, their chip, their list line and a read-only detail: the contract's diff, the knowledge's text and level. Their bar says "Shown for reading". Lane 27 replaces `ContractBody` and `KnowledgeBody` and adds the gestures.
+9. **A train with no picture** of its screens shows no frames. A release of one service keeps milestone 1's frames, empty or not, and is unchanged otherwise.
+10. **The fixture.** `trainRelease(now, state)` builds the multi-service proof's first ticket (filter-api, then guestbook) in each state, and its third ticket for `blocked`. The fixture also exports `sessionPlanItem(now, confidence)`, `contractItem` and `knowledgeItem`.
+    - `inboxFixture(now, { train, sessionPlan, reading })` adds them to the list. The default stays the capture's four waiting items, so the earlier tests are unchanged.
+    - `inboxSource` answers the plan's Go and Change as lane 17's routes do, and refuses a blocked train's approval with 409 and the proposal, as lane 16's route does.
+    - `fixtures/source.ts` (lane 20's in this wave) is not edited. In the app's fixtures mode the new kinds therefore do not appear yet.
+11. **Selectors for lane 29:**
+    - the train: `data-train` (its state), `data-train-line` and `data-train-chip`;
+    - each service: `data-stop` with `data-state`;
+    - the block: `data-blocked`;
+    - the changes: `data-flag`, `data-group`, `data-file` and `data-file-flag`;
+    - the session plan: `data-confidence`, and `data-act` set to `plan_go`, `plan_change`, `plan_change_send` or `plan_keep`.
+
+**Consequences.**
+- **Tests first.** Commit `47b8e31` holds them alone, with the fixture. On `origin/v2` at `26fafbd`:
+  - the 14 Vitest tests fail: the blocked card shows Approve, a `session_plan` item crashes the detail in `answersFor`, and the new kinds have no catalog key;
+  - the node file fails at import, since the model's new functions did not exist.
+  New files:
+  - `app/test/inbox/train.test.ts`:
+    - the order of the kinds, and an unknown kind left out;
+    - `approvable` and the train's lines in both languages;
+    - each service's line, and the detail's redraws;
+    - the session plan's title and line, and who gave the Go;
+    - Go and Change against a stubbed api, and the Change's checks and refusals;
+    - through the app's forwarding, Go as the signed-in user, then a second Go settled, and a blocked approval refused with 409;
+    - `OTHER_CHANGES` and `CHANGE_MAX` equal to the service's;
+    - the catalogs complete, with no em dash.
+  - `app/web/test/inbox/train.test.tsx`: rendering on the fixture of a two-service train in each state (waiting, blocked, landing, landed, rolled back, halted), the groups and the flags, the `secret_shape` chip, the list's state chips, the session plan item and its Change field, the reading items, every word from the catalog in both languages, and no inline style.
+  - `app/web/test/inbox/plan.test.tsx`: its item lists are typed `NextInboxItem`.
+- **Checks.**
+  - `npm test`: 898 node tests (895 pass, 3 skipped as before) and 134 Vitest tests.
+  - `npm run typecheck` is green.
+  - `npm run guard -- --base origin/v2` is green. It ran without a private-term list, since `CLEARED_REPO` is unset here.
+- **Captures**, none committed, in `/tmp/cleared-captures/j2/`:
+  - `inbox-train-<scenario>-<width>-<theme>.png` for `inbox` (the list with the waiting train), `inbox-blocked`, `inbox-landing`, `inbox-rolled-back` and `inbox-session-plan`, at 1440, 1280, 768 and 390, light and dark. That is 40 files, mode 644, with the pointer away from every button.
+  - `inbox-train-reference-inbox.png`, rendered from `/tmp/cleared-reference/inbox.html`.
+  - The app ran on an ephemeral `127.0.0.1` port with the fixture's source. There was no page error, no request off the origin and no horizontal overflow.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the captures and the references.
+  - **Taken:**
+    - Approve on one line ("Approve 2 pull requests");
+    - the flags' chip and meaning on one row on a phone;
+    - the train's state chip in the list;
+    - the confidence as the card's colour, with a stronger chip;
+    - "Ask the lead" as the blocked card's primary gesture;
+    - "Proposed" showing the time alone;
+    - the stop's time muted, apart from its state;
+    - the rail between two services closed.
+  - **Not taken:**
+    - a red kind chip reading "Rolled back" in place of "Release": the kind chip stays the kind, and the state chip sits beside it;
+    - the session plan's empty space above the bar: it is the detail's fixed height, as for every kind.
+- **Followups.**
+  - Lane 23: the kinds and `InboxItem` (choice 1).
+  - Lane 26: the notification of a waiting session plan (issue 207, item 7; `flow/events.ts` and `notify/sources.ts` are its files).
+  - Lane 27: the contract and knowledge items' gestures (choice 8).
+  - Lane 29: the selectors (choice 11). The multi-service proof's step 9 reads "Rolled back, 2 of 2" with a capital R. The fixtures source does not serve the new kinds yet (choice 10).
+  - Issue 179, item 1 (the lead's sentinel on a release) and issue 155's items stay open: they are not this lane's.
+- **The requirements matrix.**
+  - C8 and C9 name this pull request (208) and its tests. They stay `partial` for the session screen's Plan tab (lane 20).
+  - C10 names it too, `partial` until lane 23 passes `contracts` and `guarded`.
+  - M5 names it too, `partial` until the multi-service proof's steps 6 to 10.
+  - The new line P24 records choices 1 and 3 (P23 is lane 22's, merged first as pull request 209).
+  - Lanes 20 and 22, beside this one, may also add P lines; the orchestrator renumbers at merge.
+- **Review round 1 (Sonnet 5.5), taken on 2026-10-22: the Blocked chip.**
+  - **The blocking item.** The list's Blocked chip had the class `blocked`, the train's state, so it took the detail's blocked panel rule: its padding, its ring and its margin. It is now `train-chip-<state>`, and the panel rule is scoped to `.d-body .blocked`.
+  - **The check.** `app/web/test/inbox/train.test.tsx` checks that no chip's class holds a bare state. It failed on the previous `Inbox.tsx` and passes now.
+  - **The captures.** The blocked set was captured again at the four widths in both themes. A new `inbox-train-inbox-blocked-list-*` set shows the list with nothing selected at 768 and 390, where the chip was also wrong.
+  - **Followups taken:**
+    - the blocked card's two buttons are centred, and stacked under 400 px (2);
+    - the stop's state line lost its `aria-label` (4);
+    - a Change whose plan no longer waits drops its text (5).
+  - **Followup 6, said here:** the 768 and 390 captures are full-page, so the sticky action bar shows in the middle of the page. That comes from the capture, not from the screen.
+  - **Left:** followup 3, "Rolled back" twice on a handled train's card (the chip and the line). The line is what the multi-service proof's step 9 reads.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-inbox-train`.

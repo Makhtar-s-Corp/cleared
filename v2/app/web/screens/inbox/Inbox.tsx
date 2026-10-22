@@ -1,15 +1,18 @@
 // The inbox (inbox.png): what waits for the human, oldest first by kind, then
 // what was handled today, and the detail of the item chosen: a release to
 // approve or send back, a permission to allow or deny, a question to answer,
-// the lead's plan to approve (model.ts says what each gesture calls).
-import { ArrowLeft } from '@phosphor-icons/react';
+// the lead's plan to approve, an author's session plan to Go or Change, and
+// the contract and knowledge items to read (model.ts says what each gesture
+// calls). A release of several services is a train (TrainBody).
+import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CheckCircle, Circle, CircleNotch, LockSimple, WarningCircle } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import type { InboxItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../../src/api/types.ts';
+import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TrainState, TrainStop } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices } from '@/components/choices/Choices.tsx';
 import { FREE_MAX, emptyDraft, type ChoiceDraft } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -17,18 +20,23 @@ import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
 import {
-  CHECKS, GRACE_MS, REFRESH_MS, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approve, approvePlan, chosen, clock, decisionFor, detailKey, elapsed, failure,
-  graceLeft, isLead, isWebLink, itemFromHash, itemLine, itemTitle, kept, ordered, pausedLine, planOf, readPlan, releaseSession, sameOrigin, sendBack, sentence, sessionLink,
-  sessionOf, sessionsLine, shareLine, short, target, ticketTitle, undoApproval, verbOf, type Gesture, type InboxView, type Local,
+  CHANGE_MAX, CHECKS, GRACE_MS, REFRESH_MS, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approvePlan, changeMessage, chosen, clock,
+  decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle, kept, known, ordered, pausedLine,
+  planChange, planGo, planOf, readPlan, releaseSession, sameOrigin, sendBack, sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, target,
+  ticketTitle, trainLine, stopState, undoApproval, verbOf, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
 
-function Card({ item, current, view, t }: { readonly item: InboxItem; readonly current: boolean; readonly view: InboxView; readonly t: Translate }) {
+function Card({ item, current, view, t }: { readonly item: Item; readonly current: boolean; readonly view: InboxView; readonly t: Translate }) {
   return (
     <li>
       <a className={`item${current ? ' current' : ''}${item.state === 'handled' ? ' handled' : ''}`} href={`#${encodeURIComponent(item.id)}`} aria-current={current ? 'true' : undefined} data-item={item.id}>
-        <span className="item-head"><span className="chip">{t(`kind_${item.kind}`)}</span><span className="since">{elapsed(item.since, view.now, t)}</span></span>
-        <span className="item-title">{itemTitle(item)}</span>
+        <span className="item-head">
+          <span className="chip">{t(`kind_${item.kind}`)}</span>
+          {item.kind === 'release' && item.train && item.train.state !== 'waiting' ? <span className={`chip train-chip train-chip-${item.train.state}`} data-train-chip={item.train.state}>{t(`train_chip_${item.train.state}`)}</span> : null}
+          <span className="since">{elapsed(item.since, view.now, t)}</span>
+        </span>
+        <span className="item-title">{itemTitle(item, view)}</span>
         <span className="item-line">{itemLine(item, view, t)}</span>
       </a>
     </li>
@@ -44,7 +52,7 @@ export function List({ view, t }: { readonly view: InboxView; readonly t: Transl
   const shown = chosen(view);
   const head = <div className="inbox-head"><h1 id="inbox-title">{t('inbox_title')}</h1>{waiting.length > 0 ? <span className="faint">{t('waiting_count', { n: waiting.length })}</span> : null}</div>;
   if (view.items.length === 0) return <>{head}<Empty t={t} /></>;
-  const list = (items: InboxItem[]) => <ul className="items">{items.map((item) => <Card key={item.id} item={item} current={item.id === shown?.id} view={view} t={t} />)}</ul>;
+  const list = (items: Item[]) => <ul className="items">{items.map((item) => <Card key={item.id} item={item} current={item.id === shown?.id} view={view} t={t} />)}</ul>;
   return (
     <>
       {head}
@@ -66,7 +74,7 @@ const Fact = ({ label, children }: { readonly label: string; readonly children: 
 
 // The kind, whose item it is, and where to open it: the session, or the
 // lead's screen for the lead's items, whose ticket is never shown.
-function Eyebrow({ item, kind, open, openKey, t }: { readonly item: InboxItem; readonly kind: string; readonly open: string | undefined; readonly openKey: string; readonly t: Translate }) {
+function Eyebrow({ item, kind, open, openKey, t }: { readonly item: Item; readonly kind: string; readonly open: string | undefined; readonly openKey: string; readonly t: Translate }) {
   return (
     <p className="d-eyebrow">
       <span className={item.state === 'waiting' ? 'd-kind waits' : 'd-kind'}>{kind}</span>
@@ -86,14 +94,131 @@ function Shot({ item, side, frame, t }: { readonly item: ReleaseItem; readonly s
   );
 }
 
+// The mark of a service in the train: what it is waiting for, or what became of it.
+function StopMark({ stop, train }: { readonly stop: TrainStop; readonly train: TrainState }) {
+  const props = { size: 18, 'aria-hidden': true } as const;
+  switch (stop.state) {
+    case 'healthy': return <CheckCircle {...props} />;
+    case 'merged': return <CircleNotch {...props} />;
+    case 'failed': return <WarningCircle {...props} />;
+    case 'reverted': return <ArrowCounterClockwise {...props} />;
+    case 'waiting': return train.state === 'landing' && train.services.find((s) => s.state === 'waiting') === stop ? <ArrowCircleRight {...props} /> : <Circle {...props} />;
+  }
+}
+
+// A release of several services (decision 21): the services in landing
+// order, each with its pull request and its state, the compatibility line,
+// and where the train is. The data-* names are what the multi-service proof reads.
+function TrainBody({ train, t }: { readonly train: TrainState; readonly t: Translate }) {
+  const before = train.state === 'waiting' || train.state === 'blocked';
+  return (
+    <section className="train" data-train={train.state} aria-label={t('train_label')}>
+      <div className="train-head">
+        <h3>{t('train_title')}</h3>
+        <span className="train-state" data-train-line="">{trainLine(train, t)}</span>
+      </div>
+      {before ? <p className="train-note">{t('train_order_note')}</p> : null}
+      <ol className="stops">
+        {train.services.map((stop) => (
+          <li key={stop.service} className="stop" data-stop={stop.service} data-state={stop.state}>
+            <span className="stop-mark"><StopMark stop={stop} train={train} /></span>
+            <span className="stop-body">
+              <span className="stop-top">
+                <span className="stop-name">{stop.service}</span>
+                {stop.pr ? (isWebLink(stop.pr.url) ? <a className="stop-pr" href={stop.pr.url} rel="noopener noreferrer">{t('pr_link', { n: stop.pr.number })}</a> : <span className="stop-pr">{t('pr_link', { n: stop.pr.number })}</span>)
+                  : <span className="stop-pr none">{t('train_no_pr')}</span>}
+              </span>
+              <span className="stop-line"><span className="stop-state">{stopState(stop, train, t)}</span>{stop.at ? <><span className="sep" aria-hidden="true">·</span><time className="stop-time" dateTime={stop.at}>{clock(stop.at)}</time></> : null}</span>
+              {stop.note ? <span className="stop-note">{stop.note}</span> : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {train.compatibility ? <p className="compat">{train.compatibility}</p> : null}
+    </section>
+  );
+}
+
+// Why a train cannot be approved, and the way out the service proposes.
+function Blocked({ blocked, t }: { readonly blocked: NonNullable<TrainState['blocked']>; readonly t: Translate }) {
+  return (
+    <div className="blocked" data-blocked="" role="note">
+      <p className="blocked-title"><LockSimple size={16} aria-hidden="true" /> {t('blocked_title')}</p>
+      <p className="blocked-reason">{blocked.reason}</p>
+      <p className="blocked-proposal"><span className="blocked-label">{t('blocked_proposal')}</span> {blocked.proposal}</p>
+    </div>
+  );
+}
+
+// What the author said it changed, by intent, and the flags the diff raised
+// (decision 23): a flag is a chip, on the card and on the files it names.
+function Changes({ item, t }: { readonly item: ReleaseItem; readonly t: Translate }) {
+  const groups = groupsOf(item, t);
+  const flags = flagsOf(item);
+  if (groups.length === 0 && flags.length === 0) return null;
+  return (
+    <section className="changes">
+      <h3>{t('changes_title')}</h3>
+      {flags.length > 0 ? (
+        <ul className="flags" aria-label={t('flags_label')}>
+          {flags.map((flag) => (
+            <li key={flag.kind} className="flag" data-flag={flag.kind}>
+              <span className={`flag-chip ${flag.kind}`}>{t(`flag_${flagKey(flag.kind)}`)}</span>
+              <span className="flag-note">{t(`flag_${flagKey(flag.kind)}_note`)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {groups.map((group) => (
+        <section key={group.key} className="group" data-group={group.key}>
+          <h4>{group.intent}</h4>
+          <ul className="files">
+            {group.files.map((file) => (
+              <li key={file.path} data-file={file.path}>
+                <code>{file.path}</code>
+                {file.flags.map((kind) => <span key={kind} className={`file-flag ${kind}`} data-file-flag={kind}>{t(`flag_${flagKey(kind)}`)}</span>)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </section>
+  );
+}
+
 function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; readonly view: InboxView; readonly t: Translate; readonly onFrame?: (frame: InboxView['frame']) => void }) {
   const open = releaseSession(view, item.ticket);
   const pr = t('pr_link', { n: item.pr.number });
+  const { train } = item;
+  // A train with no picture of its screens shows none; a release of one
+  // service keeps milestone 1's frames, empty or not.
+  const pictures = !train || [item.captures.before, item.captures.after].some((c) => c.desktop || c.phone);
+  const waits = item.state === 'waiting' && approvable(item);
   return (
     <>
-      <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_release' : 'kind_release')} open={open && sessionLink(open.id)} openKey="open_sessions" t={t} />
+      <Eyebrow item={item} kind={t(waits ? 'eyebrow_release' : 'kind_release')} open={open && sessionLink(open.id)} openKey="open_sessions" t={t} />
       <h2 className="d-title">{item.title}</h2>
       {item.announcement ? <p className="announce">{item.announcement}</p> : null}
+      {train?.blocked ? <Blocked blocked={train.blocked} t={t} /> : null}
+      {train ? <TrainBody train={train} t={t} /> : null}
+      <Changes item={item} t={t} />
+      {pictures ? <Shots item={item} view={view} t={t} onFrame={onFrame} /> : null}
+      <dl className="facts">
+        {item.sessions.length > 0 ? <Fact label={t('facts_sessions')}>{sessionsLine(item, t)}</Fact> : null}
+        {train ? <Fact label={t('facts_checks')}>{t(`checks_${CHECKS[item.pr.checks]}`)}</Fact> : (
+          <Fact label={t('facts_change')}>
+            {isWebLink(item.pr.url) ? <a href={item.pr.url} rel="noopener noreferrer">{pr}</a> : pr}
+            <span className="sep" aria-hidden="true">·</span><span>{t(`checks_${CHECKS[item.pr.checks]}`)}</span>
+          </Fact>
+        )}
+      </dl>
+    </>
+  );
+}
+
+function Shots({ item, view, t, onFrame }: { readonly item: ReleaseItem; readonly view: InboxView; readonly t: Translate; readonly onFrame?: (frame: InboxView['frame']) => void }) {
+  return (
+    <>
       <div className="shots-head">
         <h3>{t('shots_title')}</h3>
         <div className="switch" role="group" aria-label={t('frame_label')}>
@@ -101,13 +226,6 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
         </div>
       </div>
       <div className={`shots frame-${view.frame}`}><Shot item={item} side="before" frame={view.frame} t={t} /><Shot item={item} side="after" frame={view.frame} t={t} /></div>
-      <dl className="facts">
-        {item.sessions.length > 0 ? <Fact label={t('facts_sessions')}>{sessionsLine(item, t)}</Fact> : null}
-        <Fact label={t('facts_change')}>
-          {isWebLink(item.pr.url) ? <a href={item.pr.url} rel="noopener noreferrer">{pr}</a> : pr}
-          <span className="sep" aria-hidden="true">·</span><span>{t(`checks_${CHECKS[item.pr.checks]}`)}</span>
-        </Fact>
-      </dl>
     </>
   );
 }
@@ -181,12 +299,67 @@ function PlanBody({ item, view, t }: { readonly item: PlanItemInbox; readonly vi
   );
 }
 
+// An author's session plan waiting for its Go (decision 22): what it means
+// to do and to touch, how sure it is and why, and who let it start.
+function SessionPlanBody({ item, view, t }: { readonly item: SessionPlanItem; readonly view: InboxView; readonly t: Translate }) {
+  const { plan } = item;
+  const session = sessionOf(view, item.sessionId);
+  const waiting = item.state === 'waiting';
+  return (
+    <>
+      <Eyebrow item={item} kind={t(waiting ? 'eyebrow_session_plan' : 'kind_session_plan')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
+      <h2 className="d-title">{itemTitle(item, view)}</h2>
+      {item.service ? <p className="d-ticket">{t('on_service', { service: item.service })}</p> : null}
+      <div className="confidence" data-confidence={plan.confidence}>
+        <span className="confidence-chip">{t(`confidence_${plan.confidence}`)}</span>
+        <p className="confidence-reason">{plan.reason}</p>
+        {waiting ? <p className="confidence-rule">{t(plan.confidence === 'high' ? 'confidence_starts' : 'confidence_waits')}</p> : null}
+      </div>
+      <h3 className="d-sub">{t('plan_steps')}</h3>
+      <ol className="plan-steps">{plan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
+      {plan.files.length > 0 ? <><h3 className="d-sub">{t('plan_files')}</h3><ul className="plan-files">{plan.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul></> : null}
+      <dl className="facts">
+        {session ? <Fact label={t('facts_session')}>{pausedLine(item, session, view.now, t)}</Fact> : null}
+        <Fact label={t('facts_proposed')}><time dateTime={plan.proposedAt}>{clock(plan.proposedAt)}</time></Fact>
+      </dl>
+    </>
+  );
+}
+
+// The contract and knowledge items (lanes 23 and 24), for reading: lane 27
+// gives them Approve, Send back and Reject.
+function ContractBody({ item, t }: { readonly item: ContractItem; readonly t: Translate }) {
+  return (
+    <>
+      <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_contract' : 'kind_contract')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
+      <h2 className="d-title">{t('contract_of', { service: item.service })}</h2>
+      <p className="d-ticket"><code>{item.path}</code></p>
+      <h3 className="d-sub">{t('contract_diff')}</h3>
+      <pre className="diff"><code>{item.diff.split('\n').map((line, index) => (
+        <span key={index} className={line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : undefined}>{line}{'\n'}</span>
+      ))}</code></pre>
+    </>
+  );
+}
+
+function KnowledgeBody({ item, t }: { readonly item: KnowledgeItem; readonly t: Translate }) {
+  const level = item.level === 'workspace' || !item.service ? t('level_workspace') : t(`level_${item.level}`, { service: item.service });
+  return (
+    <>
+      <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_knowledge' : 'kind_knowledge')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
+      <h2 className="sr-only">{t('kind_knowledge')}</h2>
+      <p className="announce knowledge-text">{item.text}</p>
+      <dl className="facts"><Fact label={t('facts_level')}>{level}</Fact></dl>
+    </>
+  );
+}
+
 export type Act = (act: string) => void;
 
 // The bottom of the detail: what the person can do now, or what they did.
-export function Actions({ item, view, t, note = '', reason = '', ready = false, onAct, onReason }: {
-  readonly item: InboxItem; readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly reason?: string; readonly ready?: boolean;
-  readonly onAct?: Act; readonly onReason?: (value: string) => void;
+export function Actions({ item, view, t, note = '', reason = '', ready = false, message = '', onAct, onReason, onMessage }: {
+  readonly item: Item; readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly reason?: string; readonly ready?: boolean;
+  readonly message?: string; readonly onAct?: Act; readonly onReason?: (value: string) => void; readonly onMessage?: (value: string) => void;
 }) {
   const local = view.local.get(item.id);
   const busy = local?.kind === 'busy';
@@ -201,7 +374,12 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
   if (local?.kind === 'approved') return done(t('approved', { time: clock(local.at) }));
   if (local?.kind === 'sent_back') return done(t('sent_back', { time: clock(local.at) }));
   if (local?.kind === 'plan_approved') return done(t('approved_plan', { time: clock(local.at) }));
-  if (item.state === 'handled') return done(t('handled_note'));
+  if (local?.kind === 'plan_go') return done(t('plan_go_done', { time: clock(local.at) }));
+  if (local?.kind === 'plan_changed') return done(t('plan_changed_done', { time: clock(local.at) }));
+  if (item.state === 'handled') {
+    if (item.kind === 'release' && item.train) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
+    return done(item.kind === 'session_plan' && item.plan.go ? goLine(item.plan.go, view, t) : t('handled_note'));
+  }
   if (item.kind === 'question' && isLead(item)) {
     // Outlined: it only opens the lead's screen; ink is for a gesture.
     return <><p className="d-done">{t('lead_waits')}</p><div className="d-buttons"><Button asChild className="btn"><a href="/lead">{t('answer_on_lead')}</a></Button></div>{status}</>;
@@ -221,9 +399,17 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
         );
       }
       if (local?.kind === 'confirm') return <><p className="d-confirm">{t('confirm_send_back')}</p><div className="d-buttons">{act('keep', t('keep'))}{act('send_back_confirm', t('send_back_confirm'), true)}</div>{status}</>;
+      // A blocked train can still be sent back, or completed by the lead;
+      // a train that lands or landed was approved already.
+      if (item.train?.blocked || item.train?.state === 'blocked') {
+        return <><p className="d-done">{t('blocked_done')}</p><div className="d-buttons">{act('send_back', t('send_back'), false, busy)}<Button asChild variant="ink" className="btn primary ask-lead"><a href="/lead">{t('ask_lead')}</a></Button></div>{status}</>;
+      }
+      if (item.train && !approvable(item)) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
       const versions = item.heads.map((h) => t('version', { pr: h.pr, head: h.head })).join(', ');
       const first = item.heads[0];
-      const label = <><span>{t('approve')}</span>{first ? <span className="commit">{short(first.head)}</span> : null}</>;
+      // A train's approval names its number of pull requests, on one line.
+      const label = item.heads.length > 1 ? <span>{t('approve_count', { n: item.heads.length })}</span>
+        : <><span>{t('approve')}</span>{first ? <span className="commit">{short(first.head)}</span> : null}</>;
       return <>{signed}<div className="d-buttons">{act('send_back', t('send_back'), false, busy)}{act('approve', label, true, busy, { 'aria-label': t('approve_label', { versions }), title: versions })}</div>{status}</>;
     }
     case 'permission':
@@ -244,17 +430,35 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
       // Change the plan is said to the lead, on its screen (section 5.4).
       return <>{signed}<div className="d-buttons"><Button asChild className="btn"><a href={`/plans/${encodeURIComponent(item.planId)}`}>{t('plan_change')}</a></Button>{act('approve_plan', t('plan_approve'), true, busy)}</div>{status}</>;
     }
+    case 'session_plan':
+      // Change asks what to change; the message reopens the author.
+      if (local?.kind === 'change' || (busy && message !== '')) {
+        return (
+          <>
+            <label className="change-field" htmlFor="plan-change"><span className="sr-only">{t('plan_change_field')}</span>
+              <Textarea id="plan-change" maxLength={CHANGE_MAX} rows={2} autoComplete="off" placeholder={t('plan_change_field')} disabled={busy} value={message} onChange={(event) => onMessage?.(event.target.value)} />
+            </label>
+            <div className="d-buttons">{act('plan_keep', t('plan_keep'), false, busy)}{act('plan_change_send', t('plan_change_send'), true, busy)}</div>
+            {status}
+          </>
+        );
+      }
+      return <>{signed}<div className="d-buttons">{act('plan_change', t('plan_change_open'), false, busy)}{act('plan_go', t('plan_go'), true, busy, { 'aria-label': t('plan_go_label') })}</div>{status}</>;
+    case 'contract': case 'knowledge':
+      return done(t('reading_note'));
   }
 }
 
-const noAnswers = (item: InboxItem | undefined): Answers => emptyDraft(item?.kind === 'question' ? item.questions : []);
+const noAnswers = (item: Item | undefined): Answers => emptyDraft(item?.kind === 'question' ? item.questions : []);
 
 // The detail of the item shown. Its fields (a reason, the choices, a free
 // answer) live as long as what it shows: the screen keys it by detailKey,
 // so a refresh that changes nothing shown loses nothing being typed.
-export function Detail({ view, t, note = '', onAct, onFrame }: {
-  readonly view: InboxView; readonly t: Translate; readonly note?: string;
-  readonly onAct?: (act: string, given: { readonly reason: string; readonly answers: Answers }) => void; readonly onFrame?: (frame: InboxView['frame']) => void;
+// A Change's message is kept by the screen, not the detail: the detail is
+// drawn again when the call starts, and a refused Change keeps its text.
+export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMessage }: {
+  readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly message?: string;
+  readonly onAct?: (act: string, given: Given) => void; readonly onFrame?: (frame: InboxView['frame']) => void; readonly onMessage?: (value: string) => void;
 }) {
   const item = chosen(view);
   const [reason, setReason] = useState('');
@@ -269,18 +473,24 @@ export function Detail({ view, t, note = '', onAct, onFrame }: {
         {item.kind === 'release' ? <ReleaseBody item={item} view={view} t={t} onFrame={onFrame} />
           : item.kind === 'permission' ? <PermissionBody item={item} view={view} t={t} />
           : item.kind === 'plan' ? <PlanBody item={item} view={view} t={t} />
+          : item.kind === 'session_plan' ? <SessionPlanBody item={item} view={view} t={t} />
+          : item.kind === 'contract' ? <ContractBody item={item} t={t} />
+          : item.kind === 'knowledge' ? <KnowledgeBody item={item} t={t} />
           : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers} />}
       </div>
       <div className="d-actions" id="d-actions">
-        <Actions item={item} view={view} t={t} note={note} reason={reason} ready={ready} onReason={setReason} onAct={(act) => onAct?.(act, { reason, answers })} />
+        <Actions item={item} view={view} t={t} note={note} reason={reason} ready={ready} message={message} onReason={setReason} onMessage={onMessage}
+          onAct={(act) => onAct?.(act, { reason, answers, message })} />
       </div>
     </>
   );
 }
 
-export function InboxScreen({ view, t, note = '', onAct, onFrame, detailRef }: {
-  readonly view: InboxView; readonly t: Translate; readonly note?: string;
-  readonly onAct?: (act: string, given: { readonly reason: string; readonly answers: Answers }) => void; readonly onFrame?: (frame: InboxView['frame']) => void;
+type Given = { readonly reason: string; readonly answers: Answers; readonly message: string };
+
+export function InboxScreen({ view, t, note = '', message = '', onAct, onFrame, onMessage, detailRef }: {
+  readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly message?: string;
+  readonly onAct?: (act: string, given: Given) => void; readonly onFrame?: (frame: InboxView['frame']) => void; readonly onMessage?: (value: string) => void;
   readonly detailRef?: Ref<HTMLElement>;
 }) {
   if (view.items.length === 0) return <div className="inbox empty-inbox" data-open="false"><aside className="inbox-list" id="inbox-list" aria-labelledby="inbox-title"><List view={view} t={t} /></aside></div>;
@@ -288,7 +498,7 @@ export function InboxScreen({ view, t, note = '', onAct, onFrame, detailRef }: {
     <div className="inbox" data-open={String(view.open)}>
       <aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}><List view={view} t={t} /></aside>
       <section className="detail" id="detail" tabIndex={-1} aria-label={t('detail_label')} ref={detailRef}>
-        <Detail key={detailKey(view)} view={view} t={t} note={note} onAct={onAct} onFrame={onFrame} />
+        <Detail key={detailKey(view)} view={view} t={t} note={note} message={message} onAct={onAct} onFrame={onFrame} onMessage={onMessage} />
       </section>
     </div>
   );
@@ -323,6 +533,7 @@ export default function Inbox() {
   const [hash, setHash] = useState(() => location.hash);
   const [now, setNow] = useState(() => context.now());
   const [note, setNote] = useState('');
+  const [message, setMessage] = useState('');
   const detail = useRef<HTMLElement | null>(null);
   const localRef = useRef(local);
   localRef.current = local;
@@ -342,7 +553,7 @@ export default function Inbox() {
   const load = useCallback(async () => {
     try {
       const [items, tickets, sessions] = await Promise.all([
-        api<InboxItem[]>('/inbox'), api<Ticket[]>('/tickets').catch(() => []), api<SessionSummary[]>('/sessions').catch(() => []),
+        api<unknown[]>('/inbox').then(known), api<Ticket[]>('/tickets').catch(() => []), api<SessionSummary[]>('/sessions').catch(() => []),
       ]);
       let read = plansRef.current;
       if (items.some((item) => item.kind === 'plan')) {
@@ -391,6 +602,7 @@ export default function Inbox() {
     const onHash = () => {
       setHash(location.hash);
       setNote('');
+      setMessage('');
       if (itemFromHash(location.hash) !== undefined) {
         queueMicrotask(() => detail.current?.focus({ preventScroll: true }));
         if (window.matchMedia('(max-width: 1023px)').matches) window.scrollTo(0, 0);
@@ -407,13 +619,14 @@ export default function Inbox() {
     };
   }, []);
 
-  const act = async (item: InboxItem, gesture: Gesture, run: () => Promise<Local | undefined>) => {
+  const act = async (item: Item, gesture: Gesture, run: () => Promise<Local | undefined>) => {
     const before = localRef.current.get(item.id);
     change((next) => next.set(item.id, { kind: 'busy' }));
     try {
       const after = await run();
       change((next) => { if (after) next.set(item.id, after); else next.delete(item.id); });
       setNote('');
+      if (gesture === 'plan_change') setMessage('');
       context.inboxChanged();
       void load();                                   // the list shows the item handled at once
     } catch (error) {
@@ -428,6 +641,8 @@ export default function Inbox() {
         else next.delete(item.id);
       });
       setNote(t(key));
+      // A Change whose plan no longer waits has nowhere to go: its text is dropped.
+      if (settled && gesture === 'plan_change') setMessage('');
       if (settled) context.inboxChanged();
       if (settled || key === 'approve_conflict' || gesture === 'approve_plan') {
         await load();
@@ -439,7 +654,7 @@ export default function Inbox() {
     }
   };
 
-  const onAct = (name: string, given: { readonly reason: string; readonly answers: Answers }) => {
+  const onAct = (name: string, given: Given) => {
     const item = shown;
     if (!item) return;
     const at = context.now();
@@ -470,6 +685,24 @@ export default function Inbox() {
       case 'send_back_confirm':
         if (item.kind === 'release') void act(item, 'send_back', async () => { await sendBack(api, item); return { kind: 'sent_back', at: context.now().toISOString() }; });
         return;
+      case 'plan_go':
+        if (item.kind === 'session_plan') void act(item, 'plan_go', () => planGo(api, item, context.now()));
+        return;
+      case 'plan_change':
+        change((next) => next.set(item.id, { kind: 'change' }));
+        return;
+      case 'plan_keep':
+        change((next) => next.delete(item.id));
+        setMessage('');
+        setNote('');
+        return;
+      case 'plan_change_send': {
+        if (item.kind !== 'session_plan') return;
+        const checked = changeMessage(given.message);
+        if ('error' in checked) { setNote(t(checked.error, { n: CHANGE_MAX })); return; }
+        void act(item, 'plan_change', () => planChange(api, item, checked.message, context.now()));
+        return;
+      }
       case 'allow_once': case 'allow_always': case 'reject_once':
         if (item.kind === 'permission') void act(item, 'answer', () => answerRequest(api, item, decisionFor(name, given.reason, t)));
         return;
@@ -486,7 +719,7 @@ export default function Inbox() {
   };
 
   if (!view) return failed ? <div className="inbox-error"><p className="empty error">{t('inbox_load_failed')}</p></div> : <div className="inbox-loading" aria-busy="true" />;
-  return <InboxScreen view={view} t={t} note={note} onAct={onAct} onFrame={setFrame} detailRef={detail} />;
+  return <InboxScreen view={view} t={t} note={note} message={message} onAct={onAct} onFrame={setFrame} onMessage={setMessage} detailRef={detail} />;
 }
 
 export type { Answers };
