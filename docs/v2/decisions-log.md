@@ -2131,6 +2131,6 @@ The choices the lane makes:
   - **No writes.** The preview route is read only (lane 15), so a form's post is not relayed either.
   - **The base** is read in the project checkout. A base commit it no longer holds answers 404, and the diff shows the whole file as added.
   - **The rehearsal's app** (`v2/scripts/proof-rehearsal.ts`, lane 29's) starts `app/main.ts` without `CLEARED_V2_PREVIEW_PORT`. Beside a running app, whose listener holds 8794, it would now stop at once. Lane 29 sets that variable to a free port, as `app/test/main.test.ts` does.
-- **The requirements matrix.** C1, C8, C9, M3, P8, B5.10f, O9 and O10 name this pull request. C9 and P8 are `done`; the rest stay `partial` for lanes 31 and 32 or for the proofs. The new line P25 records choices 1 to 4, and P26 records choice 6 (P23 and P24 are lanes 22's and 21's, merged first as pull requests 209 and 208).
+- **The requirements matrix.** C1, C8, C9, M3, P8, B5.10f, O9 and O10 name this pull request (212). C9 and P8 are `done`; the rest stay `partial` for lanes 31 and 32 or for the proofs. The new line P25 records choices 1 to 4, and P26 records choice 6 (P23 and P24 are lanes 22's and 21's, merged first as pull requests 209 and 208).
 - **Browser tests.** They need `CLEARED_V2_PLAYWRIGHT` and, where playwright-core's own build is not installed, `CLEARED_V2_CHROME`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-session-tabs`.
