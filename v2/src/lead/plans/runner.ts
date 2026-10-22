@@ -25,6 +25,12 @@
 //      set, nothing new starts, and the lead and the owner are told once.
 //   6. A plan is done when every item has landed or is cancelled.
 //
+// An item may run in steps across services (decision 26, lane 23): its
+// ticket names the services of its steps, its start gives the flow the
+// steps and the plan's maxParallel, and its estimate adds the steps'. In a
+// workspace of several services, an item without steps names the services
+// its body names, which the flow derives the steps from.
+//
 // What happens to a ticket is heard on the flow's bus (onFlowEvent). The bus
 // is in memory, so each tick also reads the tickets themselves: an item
 // running whose ticket is back in Todo, and not run by the flow, is a put
@@ -40,8 +46,8 @@ import type { Store } from '../../store/db.ts';
 import type { TicketId, TicketStore } from '../../tickets/contract.ts';
 import { LeadConfigError } from '../config.ts';
 import type { LeadToolOutput } from '../contract.ts';
-import { duration, estimateFor, historyOf, planTotals } from './estimates.ts';
-import { FINAL_ITEM_STATES, PlanStore, publicPlan, type StoredItem, type StoredPlan } from './store.ts';
+import { duration, estimateFor, historyOf, itemOfSteps, planTotals, stepHistoryOf } from './estimates.ts';
+import { FINAL_ITEM_STATES, PlanStore, itemServices, publicPlan, type StoredItem, type StoredPlan } from './store.ts';
 import { validatePlan } from './tools.ts';
 
 export type PlanConfig = {
@@ -213,13 +219,15 @@ export class PlanRunner {
   // ---- the lead's tools ------------------------------------------------------------
 
   async propose(input: unknown): Promise<LeadToolOutput['propose_plan']> {
-    const valid = validatePlan(input);
+    const valid = validatePlan(input, this.store.services());
     const clean = (text: string) => this.#clean(text);
     const samples = await historyOf({ tickets: this.#deps.tickets, store: this.#deps.store }, this.#deps.project);
+    const stepSamples = valid.items.some((item) => item.steps) ? await stepHistoryOf({ tickets: this.#deps.tickets, db: this.#deps.store.db }, this.#deps.project) : [];
     const maxParallel = this.#deps.config.maxParallel;
-    const items = valid.items.map((item) => ({
-      title: clean(item.title), body: clean(item.body), lane: item.lane, size: item.size, after: item.after, estimate: estimateFor(samples, item.size, item.lane),
-    }));
+    const items = valid.items.map((item) => {
+      const base = { title: clean(item.title), body: clean(item.body), lane: item.lane, size: item.size, after: item.after };
+      return item.steps ? { ...base, ...itemOfSteps(item.steps, stepSamples, item.size, item.lane, maxParallel) } : { ...base, estimate: estimateFor(samples, item.size, item.lane) };
+    });
     const totals = planTotals(items, maxParallel);
     const { plan, superseded } = this.store.propose({ goal: valid.goal, title: clean(valid.title), summary: clean(valid.summary), maxParallel, totals, items });
     for (const id of superseded) {
@@ -408,13 +416,23 @@ export class PlanRunner {
       if (item.ticket) continue;
       try {
         const labels = [`plan:${plan.id}`, `size:${item.size}`, ...(item.lane === 'fast' ? [QUICK_LABEL] : [])];
-        const created = await this.#deps.tickets.create({ title: item.title, body: item.body, labels, project: this.#deps.project }, { kind: 'human', id: plan.approvedBy as UserId });
+        const services = this.#ticketServices(item);
+        const created = await this.#deps.tickets.create({ title: item.title, body: item.body, labels, project: this.#deps.project, ...(services ? { services } : {}) }, { kind: 'human', id: plan.approvedBy as UserId });
         this.store.setTicket(plan.id, item.position, created.id);
       } catch (error) {
         console.error(`cleared-v2: a ticket of plan ${plan.id} could not be created, the next tick tries again (${errorName(error)})`);
         return;
       }
     }
+  }
+
+  // The services an item's ticket names in a workspace of several: its
+  // steps', in their order, else those its body names; none in a workspace
+  // of one, whose tickets name none.
+  #ticketServices(item: StoredItem): string[] | undefined {
+    if (item.steps) return [...new Set(item.steps.map((step) => step.service))];
+    const services = this.store.services();
+    return services.length > 1 ? itemServices(item.body, services).map((service) => service.name) : undefined;
   }
 
   // Each item as its ticket says, for what the bus did not say.
@@ -484,7 +502,10 @@ export class PlanRunner {
     const ticket = item.ticket as TicketId;
     this.#set(plan, item, 'running');
     this.#starting.add(ticket);
-    const origin: Origin = { plan: plan.id, item: item.position, ...(note ? { note } : {}) };
+    const origin: Origin = {
+      plan: plan.id, item: item.position, ...(note ? { note } : {}),
+      ...(item.steps ? { steps: item.steps.map(({ kind, service, after }) => ({ kind, service, after })), maxParallel: plan.maxParallel } : {}),
+    };
     const started = this.#deps.flow.start(ticket, plan.approvedBy as UserId, origin).then(() => undefined, (error: unknown) => {
       // The flow put a ticket that could not start back itself, and said so
       // on the bus; a ticket in another state is read again at the next tick.

@@ -3,7 +3,7 @@
 // item rows are the truth of where each item stands; the runner (runner.ts)
 // moves them, from the flow's events and from the tickets themselves.
 import type { DatabaseSync } from 'node:sqlite';
-import type { Estimate, Plan, PlanItem, PlanItemState, PlanState, ServiceSensitivity } from '../../api/types.ts';
+import type { Estimate, Plan, PlanItem, PlanItemState, PlanState, PlanStep, ServiceSensitivity } from '../../api/types.ts';
 import type { UserId } from '../../session/contract.ts';
 import type { TicketId } from '../../tickets/contract.ts';
 
@@ -20,6 +20,13 @@ export const PLAN_TABLES: readonly string[] = [
   PRIMARY KEY (plan_id, position)
 )`,
   'CREATE INDEX IF NOT EXISTS plan_items_ticket ON plan_items(ticket)',
+  // An item's steps (decision 26, lane 23): a table of their own, so a
+  // ledger written before them gains it without a migration.
+  `CREATE TABLE IF NOT EXISTS plan_steps (
+  plan_id TEXT NOT NULL, item INTEGER NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, service TEXT NOT NULL,
+  after TEXT NOT NULL, estimate TEXT NOT NULL,
+  PRIMARY KEY (plan_id, item, position)
+)`,
 ];
 
 // A plan as the runner sees it: the API's shape, and per item how many
@@ -34,12 +41,13 @@ export type NewPlan = {
   readonly summary: string;
   readonly maxParallel: number;
   readonly totals: Estimate;
-  readonly items: readonly Pick<PlanItem, 'title' | 'body' | 'lane' | 'size' | 'after' | 'estimate'>[];
+  readonly items: readonly (Pick<PlanItem, 'title' | 'body' | 'lane' | 'size' | 'after' | 'estimate'> & Pick<Partial<PlanItem>, 'steps'>)[];
 };
 
 // A service of the workspace as the plans read it: its name and its
-// sensitivity (decision 24), from the ledger's `services` table.
-export type PlanService = { readonly name: string; readonly sensitivity: ServiceSensitivity };
+// sensitivity (decision 24), from the ledger's `services` table, and the
+// path of its contract when it has one (a plan item's steps, lane 23).
+export type PlanService = { readonly name: string; readonly sensitivity: ServiceSensitivity; readonly contract?: string | null };
 
 // The services an item's body names, in the workspace's order, matched as
 // whole names whatever their case (a dash is part of a name, so
@@ -88,27 +96,45 @@ export class PlanStore {
   // store opened on the plans' tables alone, as before the workspace.
   services(): PlanService[] {
     try {
-      return (this.#db.prepare('SELECT name, sensitivity FROM services WHERE workspace = ? ORDER BY rowid').all(this.#project) as Row[])
-        .map((row) => ({ name: String(row.name), sensitivity: String(row.sensitivity) as ServiceSensitivity }));
+      // The contract is kept as `<format>:<path>` (tickets/local-store.ts).
+      return (this.#db.prepare('SELECT name, sensitivity, contract FROM services WHERE workspace = ? ORDER BY rowid').all(this.#project) as Row[])
+        .map((row) => ({ name: String(row.name), sensitivity: String(row.sensitivity) as ServiceSensitivity, contract: row.contract ? String(row.contract).replace(/^[^:]*:/, '') : null }));
     } catch (error) {
       if (/no such table/.test((error as Error).message)) return [];
       throw error;
     }
   }
 
-  #item(row: Row, services: readonly PlanService[]): StoredItem {
+  #item(row: Row, services: readonly PlanService[], steps: readonly PlanStep[]): StoredItem {
     const named = itemServices(String(row.body), services);
     return {
       position: Number(row.position), title: String(row.title), body: String(row.body), lane: String(row.lane) as PlanItem['lane'],
       size: String(row.size) as PlanItem['size'], after: JSON.parse(String(row.after)) as number[], estimate: JSON.parse(String(row.estimate)) as Estimate,
       ticket: str(row, 'ticket'), state: String(row.state) as PlanItemState, putBacks: Number(row.put_backs), note: str(row, 'note'),
       ...(named.length > 0 ? { sensitivity: named.map((service) => ({ service: service.name, sensitivity: service.sensitivity })) } : {}),
+      ...(steps.length > 0 ? { steps } : {}),
     };
+  }
+
+  // A plan's item steps, by item position.
+  #steps(plan: string): Map<number, PlanStep[]> {
+    const out = new Map<number, PlanStep[]>();
+    for (const row of this.#db.prepare('SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY item, position').all(plan) as Row[]) {
+      const steps = out.get(Number(row.item)) ?? [];
+      steps.push({
+        position: Number(row.position), kind: String(row.kind) as PlanStep['kind'], service: String(row.service),
+        after: JSON.parse(String(row.after)) as number[], estimate: JSON.parse(String(row.estimate)) as Estimate,
+      });
+      out.set(Number(row.item), steps);
+    }
+    return out;
   }
 
   #plan(row: Row): StoredPlan {
     const services = this.services();
-    const items = (this.#db.prepare('SELECT * FROM plan_items WHERE plan_id = ? ORDER BY position').all(String(row.id)) as Row[]).map((r) => this.#item(r, services));
+    const steps = this.#steps(String(row.id));
+    const items = (this.#db.prepare('SELECT * FROM plan_items WHERE plan_id = ? ORDER BY position').all(String(row.id)) as Row[])
+      .map((r) => this.#item(r, services, steps.get(Number(r.position)) ?? []));
     return {
       id: String(row.id), project: String(row.project), goal: String(row.goal), title: String(row.title), summary: String(row.summary), items,
       maxParallel: Number(row.max_parallel), totals: JSON.parse(String(row.totals)) as Estimate, state: String(row.state) as PlanState,
@@ -154,6 +180,9 @@ export class PlanStore {
       input.items.forEach((item, index) => {
         this.#db.prepare('INSERT INTO plan_items (plan_id, position, title, body, lane, size, after, estimate, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
           .run(id, index + 1, item.title, item.body, item.lane, item.size, JSON.stringify(item.after), JSON.stringify(item.estimate), 'waiting', at);
+        for (const step of item.steps ?? [])
+          this.#db.prepare('INSERT INTO plan_steps (plan_id, item, position, kind, service, after, estimate) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(id, index + 1, step.position, step.kind, step.service, JSON.stringify(step.after), JSON.stringify(step.estimate));
       });
       return { plan: this.get(id) as StoredPlan, superseded };
     });

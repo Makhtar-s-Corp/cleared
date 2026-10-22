@@ -17,7 +17,11 @@ const MAX_SUMMARY = 2000;
 const MAX_BODY = 20_000;
 const CRITERION = /^\s*[-*] \[ \] \S/m;
 
+export type ValidStep = NonNullable<PlanItemInput['steps']>[number];
 export type ValidPlan = LeadToolInput['propose_plan'] & { readonly items: readonly (PlanItemInput & { readonly after: readonly number[] })[] };
+
+export const MAX_STEPS = 8;
+const STEP_KINDS: readonly string[] = ['contract', 'service', 'integration'];
 
 const refuse = (message: string): never => { throw new HostToolRefused(message); };
 
@@ -30,8 +34,9 @@ function text(value: unknown, what: string, max: number): string {
 // A plan the runner can run: 1 to 12 items, each with a title of at most
 // 120 characters, a body with at least one "- [ ]" criterion, a lane, a
 // size, and the positions it waits for, which exist, are not its own, and
-// make no cycle. A position given twice is kept once.
-export function validatePlan(input: unknown): ValidPlan {
+// make no cycle. A position given twice is kept once. An item's `steps`
+// (lane 23) are checked against the workspace's `services`.
+export function validatePlan(input: unknown, services: readonly PlanService[] = []): ValidPlan {
   const value = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   const goal = text(value.goal, 'the goal id this plan answers', MAX_TITLE);
   const title = text(value.title, 'the plan title', MAX_TITLE);
@@ -53,7 +58,11 @@ export function validatePlan(input: unknown): ValidPlan {
       if (p === n) refuse(`Item ${n} cannot wait for itself.`);
       if (p < 1 || p > raw.length) refuse(`Item ${n} waits for position ${p}, which the plan does not have.`);
     }
-    return { title: itemTitle, body, lane: item.lane as PlanItemInput['lane'], size: item.size as PlanItemInput['size'], after: [...new Set(after as number[])].sort((a, b) => a - b) };
+    const steps = item.steps === undefined || item.steps === null ? undefined : validateSteps(item.steps, n, services);
+    return {
+      title: itemTitle, body, lane: item.lane as PlanItemInput['lane'], size: item.size as PlanItemInput['size'], after: [...new Set(after as number[])].sort((a, b) => a - b),
+      ...(steps && steps.length > 0 ? { steps } : {}),
+    };
   });
   // Depth-first: a position met again on the path is a cycle.
   const state = new Map<number, 'open' | 'done'>();
@@ -66,6 +75,52 @@ export function validatePlan(input: unknown): ValidPlan {
   };
   for (let position = 1; position <= items.length; position++) visit(position, []);
   return { goal, title, summary, items };
+}
+
+// An item's steps (decision 26): each a known kind on a service of the
+// workspace, a contract step only on a service with a contract, the steps
+// it waits for among the item's, with no cycle; and two steps of one
+// service never able to run at once, since they share its checkout.
+export function validateSteps(raw: unknown, n: number, services: readonly PlanService[]): ValidStep[] {
+  if (!Array.isArray(raw)) return refuse(`Item ${n}'s steps are a list.`);
+  if (raw.length > MAX_STEPS) return refuse(`Item ${n} has at most ${MAX_STEPS} steps.`);
+  const steps = raw.map((entry: unknown, index) => {
+    const at = `Item ${n}'s step ${index + 1}`;
+    const step = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
+    if (!STEP_KINDS.includes(step.kind as string)) refuse(`${at} is a contract, service or integration step.`);
+    if (typeof step.service !== 'string' || step.service.trim() === '') refuse(`${at} names its service.`);
+    const service = services.find((s) => s.name === step.service);
+    if (!service) refuse(`${at}: ${String(step.service)} is not a service of this workspace (${services.map((s) => s.name).join(', ') || 'none recorded'}).`);
+    if (step.kind === 'contract' && !service?.contract) refuse(`${at}: ${String(step.service)} has no contract, so it has no contract step.`);
+    const after = step.after ?? [];
+    if (!Array.isArray(after)) return refuse(`${at}'s after is a list of step positions.`);
+    for (const p of after) {
+      if (!Number.isInteger(p)) refuse(`${at}'s after lists step positions, whole numbers from 1 to ${raw.length}.`);
+      if (p === index + 1) refuse(`${at} cannot wait for itself.`);
+      if (p < 1 || p > raw.length) refuse(`${at} waits for position ${p}, which the item's steps do not have.`);
+    }
+    return { kind: step.kind as ValidStep['kind'], service: step.service as string, after: [...new Set(after as number[])].sort((a, b) => a - b) };
+  });
+  // Every step a step waits for, directly or not; a step met on its own path is a cycle.
+  const before = new Map<number, Set<number>>();
+  const reach = (position: number, path: number[]): Set<number> => {
+    if (path.includes(position)) return refuse(`Item ${n}'s steps wait for one another in a cycle (${[...path.slice(path.indexOf(position)), position].join(' after ')}): order them.`);
+    const known = before.get(position);
+    if (known) return known;
+    const all = new Set<number>();
+    for (const p of steps[position - 1]?.after ?? []) {
+      all.add(p);
+      for (const q of reach(p, [...path, position])) all.add(q);
+    }
+    before.set(position, all);
+    return all;
+  };
+  for (let position = 1; position <= steps.length; position++) reach(position, []);
+  for (let a = 1; a <= steps.length; a++)
+    for (let b = a + 1; b <= steps.length; b++)
+      if (steps[a - 1]?.service === steps[b - 1]?.service && !before.get(a)?.has(b) && !before.get(b)?.has(a))
+        refuse(`Item ${n}'s steps ${a} and ${b} are both on ${steps[a - 1]?.service} and could run at once, but they share a checkout: make one wait for the other.`);
+  return steps;
 }
 
 // Decision 24: a service whose sensitivity is `full` refuses the fast lane
@@ -86,9 +141,12 @@ export function applySensitivity(input: unknown, services: readonly PlanService[
   return {
     ...value,
     items: value.items.map((entry: unknown) => {
-      const item = entry as { lane?: unknown; body?: unknown } | null;
+      const item = entry as { lane?: unknown; body?: unknown; steps?: unknown } | null;
       if (typeof item !== 'object' || item === null || item.lane !== 'fast' || typeof item.body !== 'string') return entry;
-      const full = itemServices(item.body, services).filter((service) => service.sensitivity === 'full').map((service) => service.name);
+      // The services its steps name count as its body's do (lane 23).
+      const stepped = new Set(Array.isArray(item.steps) ? item.steps.map((step: unknown) => (step as { service?: unknown } | null)?.service) : []);
+      const touched = services.filter((service) => stepped.has(service.name) || itemServices(item.body as string, services).includes(service));
+      const full = touched.filter((service) => service.sensitivity === 'full').map((service) => service.name);
       return full.length === 0 ? entry : { ...item, lane: 'full', body: `${item.body.trimEnd()}\n\n${fullLaneNote(full)}` };
     }),
   };

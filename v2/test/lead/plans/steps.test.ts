@@ -50,18 +50,18 @@ async function runner(flow?: PlanFlow) {
 
 test('propose_plan refuses a step naming an unknown service, a contract step on a service with no contract, and two steps of one service that could run at once', async () => {
   const t = await runner();
-  await assert.rejects(t.tools.propose_plan(plan([item([{ kind: 'service', service: 'billing', after: [] }])]), context), /billing is not a service of this workspace/);
-  await assert.rejects(t.tools.propose_plan(plan([item([{ kind: 'contract', service: 'guestbook', after: [] }])]), context), /guestbook has no contract/);
-  await assert.rejects(t.tools.propose_plan(plan([item([{ kind: 'service', service: 'guestbook', after: [] }, { kind: 'integration', service: 'guestbook', after: [] }])]), context), /share a checkout/);
-  await assert.rejects(t.tools.propose_plan(plan([item([{ kind: 'deploy', service: 'guestbook', after: [] }])]), context), /contract, service or integration/);
-  await assert.rejects(t.tools.propose_plan(plan([item([{ kind: 'service', service: 'guestbook', after: [2] }, { kind: 'service', service: 'filter-api', after: [1] }])]), context), /cycle/);
-  await assert.rejects(t.tools.propose_plan(plan([item([{ kind: 'service', service: 'guestbook', after: [3] }])]), context), /position 3/);
+  await assert.rejects(t.tools.propose_plan!(plan([item([{ kind: 'service', service: 'billing', after: [] }])]), context), /billing is not a service of this workspace/);
+  await assert.rejects(t.tools.propose_plan!(plan([item([{ kind: 'contract', service: 'guestbook', after: [] }])]), context), /guestbook has no contract/);
+  await assert.rejects(t.tools.propose_plan!(plan([item([{ kind: 'service', service: 'guestbook', after: [] }, { kind: 'integration', service: 'guestbook', after: [] }])]), context), /share a checkout/);
+  await assert.rejects(t.tools.propose_plan!(plan([item([{ kind: 'deploy', service: 'guestbook', after: [] }])]), context), /contract, service or integration/);
+  await assert.rejects(t.tools.propose_plan!(plan([item([{ kind: 'service', service: 'guestbook', after: [2] }, { kind: 'service', service: 'filter-api', after: [1] }])]), context), /cycle/);
+  await assert.rejects(t.tools.propose_plan!(plan([item([{ kind: 'service', service: 'guestbook', after: [3] }])]), context), /position 3/);
   assert.equal(t.plans.list().length, 0);
 });
 
 test('each step has its estimate by kind; the item adds them, its time the steps\' critical path; the plan\'s totals add the items', async () => {
   const t = await runner();
-  const proposed = await t.tools.propose_plan(plan([item(STEPS, 'm'), { ...item(undefined, 's'), title: 'Second', steps: undefined }]), context);
+  const proposed = await t.tools.propose_plan!(plan([item(STEPS, 'm'), { ...item(undefined, 's'), title: 'Second', steps: undefined }]), context);
   const stored = t.plans.plan((proposed as { plan: string }).plan);
   const steps = stored.items[0]?.steps ?? [];
   assert.deepEqual(steps.map((s) => [s.position, s.kind, s.service, s.after, s.estimate.costUsd]), [
@@ -87,7 +87,7 @@ test('the ticket of an item with steps names their services, and its start carri
   const starts: { ticket: string; origin?: Origin }[] = [];
   const flow: PlanFlow = { async start(ticket, _by, origin) { starts.push({ ticket, ...(origin ? { origin } : {}) }); }, isActive: () => false, subscribe: () => () => undefined };
   const t = await runner(flow);
-  const proposed = await t.tools.propose_plan(plan([item(STEPS)]), context);
+  const proposed = await t.tools.propose_plan!(plan([item(STEPS)]), context);
   await t.plans.approve((proposed as { plan: string }).plan, 'u1');
   await t.plans.settled();
   const created = await t.tickets.get(starts[0]?.ticket ?? '');
@@ -100,7 +100,7 @@ test('the ticket of an item without steps in a workspace of several services nam
   const starts: string[] = [];
   const flow: PlanFlow = { async start(ticket) { starts.push(ticket); }, isActive: () => false, subscribe: () => () => undefined };
   const t = await runner(flow);
-  const proposed = await t.tools.propose_plan(plan([{ ...item(undefined), steps: undefined }]), context);
+  const proposed = await t.tools.propose_plan!(plan([{ ...item(undefined), steps: undefined }]), context);
   await t.plans.approve((proposed as { plan: string }).plan, 'u1');
   await t.plans.settled();
   assert.deepEqual((await t.tickets.get(starts[0] ?? ''))?.services?.map((s) => s.name), ['guestbook', 'filter-api']);
