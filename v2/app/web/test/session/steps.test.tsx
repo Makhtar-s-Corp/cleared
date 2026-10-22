@@ -53,3 +53,16 @@ test('every word of the steps card is from the catalog, in both languages', () =
   for (const word of ['Steps of the ticket', 'Contract', 'Integration', 'This session', 'Running', 'waits for']) assert.ok(!text.includes(word), word);
   assert.match(html(<PlanTab view={viewOf({ steps: steps(AUTHOR_ID) })} plan={null} t={fr} />), /Étapes du ticket/);
 });
+
+test('a reader\'s session in the sessions list is its question to the code, linked to its ask (lane 25\'s role)', async () => {
+  const { renderIndex } = await import('../render.tsx');
+  const fixture = sessionFixture(FIXTURE_NOW);
+  const reader: SessionSummary = { ...(fixture.sessions[0] as SessionSummary), id: 'reader-1', role: 'reader', ticket: 'ask-1', status: 'Reading src/page.ts' };
+  for (const t of [en, fr]) {
+    const markup = renderIndex({ sessions: [...fixture.sessions, reader], tickets: [fixture.ticket], now: FIXTURE_NOW }, t);
+    assert.match(markup, /href="\/ask\/ask-1"/);
+    assert.doesNotMatch(markup, /href="\/sessions\/reader-1"/);
+  }
+  const text = visibleText(renderIndex({ sessions: [reader], tickets: [], now: FIXTURE_NOW }, en)).join('\n');
+  for (const words of ['Reader', 'A question to the code', 'Open the question']) assert.ok(text.includes(words), words);
+});

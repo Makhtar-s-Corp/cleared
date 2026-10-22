@@ -64,3 +64,7 @@ test('the service line says which step this session is', () => {
   assert.equal(serviceLine('filter-api', en), 'on filter-api');
   assert.equal(serviceLine(undefined, en, { current: 2, total: 4 }), undefined);
 });
+
+test('an answer of the steps route that is not a list shows no steps, and breaks nothing', () => {
+  assert.equal(stepsView({ id: 'LOCAL-163', title: 'a ticket' } as never, 'x'), null);
+});

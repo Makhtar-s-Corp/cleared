@@ -183,7 +183,7 @@ export type StepsView = { readonly rows: readonly StepRow[]; readonly current: n
 // The ticket's steps in order, this session's marked; none for a ticket of
 // one step (a one-service ticket), whose screen stays as it was.
 export function stepsView(steps: readonly TicketStep[] | null | undefined, session: string): StepsView | null {
-  if (!steps || steps.length < 2) return null;
+  if (!Array.isArray(steps) || steps.length < 2) return null;
   const rows = [...steps].sort((a, b) => a.position - b.position).map((step): StepRow => ({
     position: step.position, kind: step.kind, service: step.service, after: step.after, state: step.state, costUsd: step.costUsd, current: step.session === session,
   }));

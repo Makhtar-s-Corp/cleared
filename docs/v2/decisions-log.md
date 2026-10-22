@@ -2346,7 +2346,8 @@ The lane's choices:
    - The title and the description are the question.
    - **Its target** is a `service:path:line` token of a workspace service (any service when the workspace could not be read, since the service checks it); a time such as 10:30:15 is no target. Else the one service picked; else the whole platform.
    - The tower opens `/ask/<id>` at once.
-   - **A reader's session** is no longer drawn among the tower's live sessions (lane 25's followup): its role had no word in the tower's catalog, so it would have thrown, and it is the ask screen's.
+   - **A reader's session** is no longer drawn among the tower's live sessions (lane 25's followup): its role had no word in the tower's catalog, so it would have thrown, and it is the ask screen's. The sessions list (`/sessions`) had the same throw: it now lists a reader's session as "A question to the code", linked to its ask.
+   - **Not built:** an ask started from a session's Plan tab, which decision 28 also names (the lane's goal names the bar only). C11 stays `partial` for it.
 4. **The contract and knowledge items** (`screens/inbox/`).
    - **Answered at once, with no grace.** Both routes answer before the work they start: the next steps for a contract, the memory's write for knowledge.
    - **Send back** opens a field as the session plan's Change does, checked against `SEND_BACK_MAX`, which a test keeps equal to `MAX_SEND_BACK` of `flow/steps.ts`.
@@ -2358,6 +2359,7 @@ The lane's choices:
    - **The session screen** reads `GET /api/tickets/:id/steps` at once and on its 10-second tick. The Plan tab shows a card of the steps, this session's outlined in ink, each with its state and cost. The ticket card's service line reads "on filter-api · step 2 of 4".
    - **The tower** reads the steps in a workspace of several services only, once per ticket of its live authors.
    - **The plan panel** lists an item's steps under its whole width (decision 26: "the plan shows the steps' order and dependencies"; matrix line M2 names lane 27 for it).
+   - **A steps answer that is not a list** shows no steps. The browser tests found it: a stand-in answering `/tickets/:id/steps` with the ticket made the session screen throw before its timeline drew.
    - **Words.** A step's dependency reads "waits for 2 and 3": "after" was taken for an English sentence left in the French screens by the inbox's catalog check (the word is in a class name).
 6. **Recipes and schedules** (lane 26's routes, which were not merged when this lane ran). Both are optional reads, so a service without them shows the tower as before: no "Run a recipe", no schedules.
    - **The form** refuses a missing required parameter before anything is posted, with its own sentence. The form is `noValidate`, so the browser's bubble does not stand in for it; the `required` attribute stays for assistive technology.
@@ -2392,9 +2394,10 @@ The lane's choices:
   - **Changed in the first commit:** lane 21's test of the reading-only items now expects the gestures, and `app/test/fixtures.test.ts` lists the new kinds.
   - **Adjusted while the code was written:** a contract's need title is the catalog's (`needTitle`); the French amounts use the no-break space; "waits for" replaces "after"; and lane 22's test of a kind the tower does not draw now uses a later kind, since knowledge is drawn.
 - **Checks.**
-  - `npm test`: 1071 node tests (1065 pass, 6 skipped as before; 1036 before the lane) and 176 Vitest tests (154 before).
+  - `npm test`: 1072 node tests (1066 pass, 6 skipped as before; 1036 before the lane) and 177 Vitest tests (154 before).
   - `npm run typecheck` is green.
   - `npm run guard -- --base origin/v2` is green, without a private-term list (`CLEARED_REPO` unset).
+  - **The browser tests**, with `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME`: the five of `app/test/session/tabs-browser.test.ts` and `app/test/choices-browser.test.ts` pass. On the lane's code before the guard above, four of them timed out on the session screen, while all five passed on `origin/v2` at `5d68c50`. `app/test/notify/browser.test.ts` times out on this branch and on `origin/v2` alike, as lane 22 logged.
 - **The visual loop.** The app ran on an ephemeral `127.0.0.1` port per source (after `ss -ltn`), in headless Chromium, with the clock fixed at the fixtures' time.
   - Captures, none committed, mode 644, with the pointer in an empty corner: `/tmp/cleared-captures/j2/additions-<screen>-<width>-<theme>.png` for `tower`, `tower-recipe`, `ask`, `ask-running`, `ask-starting`, `inbox-contract`, `inbox-contract-send-back`, `inbox-knowledge`, `session-steps` and `lead-steps`, at 1440, 1280, 768 and 390, light and dark. That is 80 files, with `additions-reference-<screen>.png` rendered from `/tmp/cleared-reference/`.
   - All 80: no horizontal overflow, no page error, no `securitypolicyviolation`, no request off the app's origin.
@@ -2420,5 +2423,5 @@ The lane's choices:
   - **Polling cost.** The tower reads one steps route per live author's ticket every 10 seconds in a workspace of several services. A step on `SessionSummary` would save those reads (a change of `types.ts`).
   - **Issue 211, item 3** ("Rolled back" twice on a handled train) is left: lane 29's step 9 reads the line, and the chip is what files the train under "Handled today".
   - **Issue 213's nits** on the session screen ("Done when" twice, the editor's selected file) are left to a pass on that screen.
-- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request. C11, M8 and M9 are `done`, the live runs being lane 29's; C7 and C12 stay `partial` until lane 26. The new lines P32 (choices 1 to 3) and P33 (choices 4 to 7) record the lane's choices.
+- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request. M8 and M9 are `done`, the live runs being lane 29's. C11 stays `partial` for the Plan tab's entry, and C7 and C12 until lane 26. The new lines P32 (choices 1 to 3) and P33 (choices 4 to 7) record the lane's choices.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-additions-screens`.

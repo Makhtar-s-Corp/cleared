@@ -292,7 +292,7 @@ const isLive = (s: SessionSummary) => s.role !== 'lead' && s.role !== 'reader' &
 
 // A session's step of its ticket, for a ticket of two steps or more.
 function liveStep(steps: readonly TicketStep[] | undefined, session: string): LiveStep | null {
-  if (!steps || steps.length < 2) return null;
+  if (!Array.isArray(steps) || steps.length < 2) return null;
   const step = steps.find((s) => s.session === session);
   return step ? { position: step.position, total: steps.length, service: step.service } : null;
 }

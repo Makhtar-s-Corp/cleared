@@ -30,6 +30,7 @@ import {
 } from './model.ts';
 import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverNotice, type EditorShown } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
+import { askHref } from '@/screens/ask/model.ts';
 import './session.css';
 
 // The timeline's marks, Phosphor's regular weight.
@@ -271,18 +272,23 @@ export function SessionIndex({ sessions, tickets, now, t }: { readonly sessions:
       <h1>{t('index_title')}</h1>
       {ordered.length === 0 ? <p className="empty">{t('index_empty')}</p> : (
         <ul className="sessions">
-          {ordered.map((s) => (
+          {ordered.map((s) => {
+            // A reader's session (decision 28) is its question's: the ask
+            // screen shows it, and its ticket is the ask's id.
+            const reader = s.role === 'reader';
+            return (
             <li key={s.id} className="session-card">
-              <span className="session-head"><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span><span className="id">{s.ticket}</span></span>
-              <span className="session-title">{titles.get(s.ticket) ?? s.ticket}</span>
+              <span className="session-head"><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span>{reader ? null : <span className="id">{s.ticket}</span>}</span>
+              <span className="session-title">{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
               <span className="phrase">{s.phase === 'waiting_human' ? t('status_waiting_human') : s.status}</span>
               <span className="session-foot">
                 <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
                 <span className="elapsed">{t('minutes', { n: minutes(s.startedAt) })}</span>
-                <a className="open" href={`/sessions/${s.id}`}>{t('open_session')}</a>
+                {reader ? <a className="open" href={askHref(s.ticket)}>{t('open_ask')}</a> : <a className="open" href={`/sessions/${s.id}`}>{t('open_session')}</a>}
               </span>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>
@@ -367,7 +373,10 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   // The ticket's steps across services (lane 23's route): a service
   // without them, or a ticket of one step, shows none.
   const readSteps = useCallback(async () => {
-    try { setSteps(await context.api<TicketStep[]>(`/tickets/${encodeURIComponent(loaded.summary.ticket)}/steps`)); }
+    try {
+      const answer = await context.api<unknown>(`/tickets/${encodeURIComponent(loaded.summary.ticket)}/steps`);
+      setSteps(Array.isArray(answer) ? answer as TicketStep[] : null);
+    }
     catch { /* the next tick tries again */ }
   }, [context, loaded.summary.ticket]);
   useEffect(() => { void readSteps(); }, [readSteps]);
