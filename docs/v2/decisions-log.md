@@ -2916,3 +2916,56 @@ The lane's choices:
 - `npm run typecheck` is green.
 
 **Author.** Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-proof-step4-heading`.
+
+## 2026-10-22: Owner decision: the reviewer of a multi-service ticket sees the change of every service
+
+**Decision.** On 2026-10-22 at 20:33, the owner decided that the reviewer of a ticket of several services receives the diffs of all the ticket's services, and the contract's change, in its checkout or its prompt, and evaluates the acceptance criteria on the whole. It is a requirement of the multi-repository addition ([complement-multi-depots.md](complement-multi-depots.md)), in the scope of milestone 2. It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the lane `v2-j2-review-multi-service-diff` implements it and cites this entry.
+
+**Why.** On 2026-10-22, the real multi-service proof's ticket LOCAL-10 was refused twice. Its reviewer worked in the guestbook's checkout and read the guestbook's diff only, so it judged criteria 1 and 2, the filter API's work, unmet.
+
+**Consequences.** Issue 221, item 4 ("the review starts on the first service only") becomes a requirement. The requirements matrix records the decision as O17, and the author's choices as P46 (the entry below).
+
+- Author: the owner, relayed on 2026-10-22 20:33; written in this log by Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.
+
+## 2026-10-22: the reviewer of a ticket of several services reads every service's change and the contract's (the author's choices, lane v2-j2-review-multi-service-diff)
+
+**Decision.** The lane applies the owner's decision of 20:33 (the entry above). Its choices:
+
+1. **The prompt, not the checkout.** The reviewer keeps the first service's checkout, where it can run that service's tests, and its prompt carries the other services' diffs. Reason: a checkout holding every service would change the session's mounts and runtime (`container/session-runtime.ts`, the adapters), which are not this lane's files. The reviewer would also lose the one service checkout where its tests run today.
+2. **Each service's branch is read on the host, as a step's is.** `branchChanges` (`flow/effects.ts`) reads `<workdirs>/<ticket>/<service>` with the fetch the step read already used, now shared as `fetchBranch`. The branch is fetched into a private ref of the service's own checkout, with every object checked. A `.git` that is a link, a linked worktree or has alternates is refused, and no git of the session's runs. Only committed changes count. A service the ticket has no checkout of has no change.
+3. **What the reviewer is told** (`reviewPrompt`'s `services` and `contracts`, `flow/prompts.ts`):
+   - the ticket's services, and which one is its checkout;
+   - that the git commands show that service's change only, and that the others' are in the prompt;
+   - the rule: judge each acceptance criterion on the change of every service together. A criterion another service's change meets is met; a criterion no service's change meets is not;
+   - a defect outside the checkout is named with its service.
+4. **The contract on its own, first.** A contract file the ticket changes (a service's `contract`, as a path of its repository) gets its own block.
+   - It is said validated when a `contract` inbox item of the ticket, for that service and path, was approved. Otherwise the prompt says it was not validated in the inbox.
+   - Its chunk is taken out of its service's diff, so it is not shown twice.
+   - A contract of the reviewer's own service is shown too.
+5. **Reference data, cleaned, within a budget.** Each diff goes through the service's cleaner, sits between BEGIN and END lines, and is called reference data written by the ticket's sessions. The diffs shown share 96 KiB (`REVIEW_DIFF_BUDGET`) in equal parts. Each is cut at a line, the cut is said, and the file list stays whole. Reason: the card's 4 MB cut is no prompt's size.
+6. **No review on half the change.** When a service's change cannot be read, the review does not start: the ticket goes back to Todo with `review_failed` and the reason. Without the reader (only the tests' configurations lack it), the prompt says each other service's change could not be read. The reviewer is then asked to count as unmet a criterion only that change would meet.
+7. **The base.** In a workspace of several services, the reviewer's git commands name its own service's base. Before, they named the workspace's configured base.
+8. **One service, unchanged.** A ticket of one service, in a workspace of one service or of several, gets the review prompt as before, byte for byte, and no branch is read.
+
+**Files.** The lane is not in the plan's lane list, so it names its own: `v2/src/flow/{engine,prompts,effects}.ts`; under `v2/test/flow/`, `review-services.test.ts` (new), `steps.test.ts`, `effects-services.test.ts` and `support.ts` (the cleaner as a setup option); this log and `docs/v2/requirements-matrix.md`. No screen changed, so there is no visual loop and no capture.
+
+**Tests.**
+- `test/flow/review-services.test.ts`:
+  - the prompt's text: two services, the contract validated or not, the provider as the checkout, a service with no change, one that could not be read, the budget's cut, the split of a diff by file, and one service byte for byte;
+  - on the fake adapter, LOCAL-10's shape (a train ticket on the guestbook and the filter API): the guestbook's reviewer gets the filter API's diff, the contract's diff and its own base;
+  - an approved contract item is said validated, an unreadable branch puts the ticket back, the diffs go through the cleaner, and a one-service ticket reads no branch.
+- `test/flow/steps.test.ts`: after the steps, the reviewer gets the contract as validated and the filter API's diff.
+- `test/flow/effects-services.test.ts`: the real read on two temporary repositories (committed changes only, no checkout means no change, a `commondir` refused).
+- On the old code, the steps and effects tests fail, and the new file's four flow tests fail.
+
+**Followups.**
+- Issue 221, item 4, is taken in part: the review now sees every service. The other half stays. A review that asks for changes reopens the last author, the integration step's session on the consumer, which cannot fix another service. Such a ticket ends its rounds and goes back to Todo (lane 23's choice 8).
+- The reviewer reads the other services' diffs but cannot run their tests; the integration step runs the tests that cross the services.
+- No real run: as the brief asked, no proof or rehearsal ran against the live service on 8791 and 8792, where a real proof setup was in progress. The next review of a two-service ticket in the multi-service proof shows the change.
+
+**Checks.**
+- `npm test`: 1240 node tests, 1232 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), 0 fail; 184 Vitest tests pass.
+- `npm run typecheck` is green.
+- `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.

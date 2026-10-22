@@ -93,6 +93,13 @@ async function stepped(options: Options = {}) {
       const file = name === 'filter-api' ? 'contract/openapi.yaml' : 'src/page.ts';
       return { files: [file], diff: `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-a\n+b\n` };
     },
+    // Each service's ticket branch, as the reviewer is given it.
+    async branchChanges({ service: svc }) {
+      const diff = (file: string, line: string) => `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-ok\n+${line}\n`;
+      return svc.name === 'filter-api'
+        ? { files: ['contract/openapi.yaml', 'src/check.ts'], diff: diff('contract/openapi.yaml', 'severity 2') + diff('src/check.ts', 'answers a severity') }
+        : { files: ['src/page.ts'], diff: diff('src/page.ts', 'held for review') };
+    },
   };
   t = await setup({
     scripts: { authors: options.authors ?? [quickAuthor, waiting('s1'), waiting('s2'), quickAuthor], ...(options.reopen ? { reopen: options.reopen } : {}) },
@@ -171,6 +178,14 @@ test('a two-service ticket: the contract step, sent back once and validated, the
     { ...planned('LOCAL-2', 'guestbook')[1], contract: validated },
   ]);
   assert.equal(t.startedSessions[4]?.input.role, 'reviewer');
+  // The reviewer, in the guestbook's checkout, gets the filter API's change and the contract as validated (owner decision of 2026-10-22 20:33).
+  const review = t.startedSessions[4]!.input;
+  assert.equal(review.service, 'guestbook');
+  assert.match(review.prompt, /This ticket spans 2 services: guestbook \(your checkout\) and filter-api\./);
+  assert.match(review.prompt, /The owner validated this change in the inbox/);
+  assert.match(review.prompt, /--- BEGIN CONTRACT DIFF filter-api contract\/openapi\.yaml ---\n[^]*\+severity 2/);
+  assert.match(review.prompt, /--- BEGIN DIFF filter-api ---\n[^]*\+answers a severity/);
+  assert.doesNotMatch(review.prompt, /\+held for review/, 'the guestbook\'s own change is read in its checkout');
   assert.deepEqual((await states()), ['1 contract filter-api done', '2 service filter-api done', '3 service guestbook done', '4 integration guestbook done']);
   assert.ok((await steps()).every((s) => typeof s.costUsd === 'number'));
   assert.equal((await steps())[0]?.costUsd, 0.5, 'the contract step\'s session: its first turn and the turn after the send back');
