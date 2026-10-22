@@ -16,11 +16,11 @@ test('the lead section has its one real check', () => {
 // a different share of a 200 000 and a 1 000 000-token window.
 test('deriveThresholds: the handover point a margin past the opening, the threshold one largest answer past it, as shares of the window', () => {
   const million = deriveThresholds({ totalTokens: 23_001, maxTokens: 1_000_000 }, REFRESH_MARGIN_TOKENS);
-  assert.ok(Math.abs(million.handoverPercent - 2.3101) < 1e-9, `${million.handoverPercent}`);
-  assert.ok(Math.abs(million.contextPercent - 2.7101) < 1e-9, `${million.contextPercent}`);
+  assert.ok(Math.abs(million.handoverPercent - 2.3001) < 1e-9, `${million.handoverPercent}`);
+  assert.ok(Math.abs(million.contextPercent - 2.7001) < 1e-9, `${million.contextPercent}`);
   const small = deriveThresholds({ totalTokens: 23_001, maxTokens: 200_000 }, REFRESH_MARGIN_TOKENS);
-  assert.ok(Math.abs(small.handoverPercent - 11.5505) < 1e-9, `${small.handoverPercent}`);
-  assert.ok(Math.abs(small.contextPercent - 13.5505) < 1e-9, `${small.contextPercent}`);
+  assert.ok(Math.abs(small.handoverPercent - 11.5005) < 1e-9, `${small.handoverPercent}`);
+  assert.ok(Math.abs(small.contextPercent - 13.5005) < 1e-9, `${small.contextPercent}`);
   for (const t of [million, small]) assert.ok(t.contextPercent > t.handoverPercent);
   // The service's 5 % of old, on this window, is never met by one turn.
   assert.ok(million.contextPercent < 5);
@@ -33,15 +33,16 @@ test('tomorrowAtEight: an ISO time with its offset, as the commit tool wants', (
 });
 
 // The doctor's run on the fake adapter, with the measures of a real one on
-// a 1 000 000-token window: Claude Code reports 2 % for both 23 001 and
-// 23 600 tokens, so only the share of tokens crosses the derived handover
-// point. Before this fix, generation 1 was never refreshed.
+// a 1 000 000-token window: Claude Code reports 2 % for 23 001 tokens, and
+// its measure did not move over the owner turn, so only the share of tokens
+// meets the derived handover point. Before this fix, generation 1 was never
+// refreshed.
 test('on a 1 000 000-token window, the derived thresholds refresh generation 1 after its first owner turn, and generation 2 answers without a refresh', async () => {
   const million = 1_000_000;
   const t = await leadSetup({ lead: [
     [
       ...opening(tokens(23_001, million)),
-      ...turn('t1', call('t1-commit', 'commit', { text: 'Remind the owner to check the texts of the page.' }), tokens(23_400, million), say('r1', 'I will remind you.'), tokens(23_600, million)),
+      ...turn('t1', call('t1-commit', 'commit', { text: 'Remind the owner to check the texts of the page.' }), tokens(23_001, million), say('r1', 'I will remind you.'), tokens(23_001, million)),
       ...handsOver('t2', 'One reminder is open.'),
     ],
     [...opening(tokens(26_000, million)), ...turn('g2t1', say('g2r1', 'Open: c1, remind the owner to check the texts of the page.'), tokens(26_500, million))],

@@ -35,14 +35,16 @@ export type DoctorLeadCheck = {
 
 // The largest single answer the rules allow, in tokens (section 4.1).
 export const ANSWER_TOKENS = 4_000;
-// Generation 1 is refreshed this far past its opening: any real owner turn
-// (the message, a commit call and its result, one sentence) adds more.
-export const REFRESH_MARGIN_TOKENS = 100;
+// Generation 1's handover point is its opening itself. The engine never
+// counts the opening's own measure, and Claude Code's summary measure did not
+// move over an owner turn with a commit (23 001 tokens at the opening, after
+// the call and after the turn), so any margin above it might never be met.
+export const REFRESH_MARGIN_TOKENS = 0;
 // Generation 2 is not refreshed again: no question turn adds this much.
 export const QUIET_MARGIN_TOKENS = 20_000;
 
 // The thresholds of a generation, from its measured opening: the handover
-// point a margin past the opening, the threshold one largest answer past
+// point a margin past the opening (none for a forced refresh), the threshold one largest answer past
 // that, so the turn that crosses the handover point is not interrupted. In
 // tokens, then as a share of the generation's window: the opening is a
 // number of tokens (22 560 to 23 001 measured with claude-haiku-5-5), not a
