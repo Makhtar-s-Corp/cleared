@@ -193,7 +193,7 @@ test('search_memory answers approved decisions first, then the glossary and the 
   assert.ok(order.every((at) => at >= 0), answer);
   assert.deepEqual([...order].sort((a, b) => a - b), order);
   assert.doesNotMatch(answer, /decision-9/, 'only approved decisions');
-  await assert.rejects(tool.handle({ query: '  ' }, { sessionId: 'x', turn: 't' }), /words/);
+  await assert.rejects(tool.handle({ query: '  ' }, { sessionId: t.generations[0]?.id as string, turn: 't' }), /words/);
 });
 
 test('a call from a session that is not the live generation is refused', async () => {

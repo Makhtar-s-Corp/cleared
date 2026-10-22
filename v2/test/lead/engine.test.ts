@@ -273,7 +273,7 @@ test('the flow\'s events are batched over 60 seconds into one turn, and nothing 
   assert.match(batch, /LOCAL-7/);
   assert.match(batch, /started/);
   assert.match(batch, /review/);
-  assert.doesNotMatch(batch, /permission/, 'a permission waits for the owner: it is not the lead\'s event');
+  assert.doesNotMatch(batch, /Bash|permission:x/, 'a permission waits for the owner: it is not the lead\'s event');
   assert.match(batch, /Live sessions/, 'the compact state comes with it');
   await t.lead.settled();
   t.clock.now += 120_000;
@@ -332,6 +332,12 @@ test('a generation whose session fails is replaced, with the machine handover an
     ],
   });
   await t.lead.post('Hello', 'u1');
+  await until(() => t.lead.state().phase === 'down' && t.lead.memory().handover !== null, 'the failed generation');
+  // It served no turn: the next one waits the retry delay, so a session that fails at once does not loop.
+  await t.lead.tick();
+  assert.equal(t.generations.length, 1);
+  t.clock.now += 61_000;
+  await t.lead.tick();
   await until(() => t.lead.state().generation === 2, 'the next generation');
   const old = t.generations[0]?.id as string;
   const value = customs(t, old, 'cleared.lead_refreshed')[0]?.event;

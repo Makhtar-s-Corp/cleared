@@ -53,13 +53,15 @@ export const question = (requestId: string, text: string): FakeStep => ({
 export type Generation = { readonly input: StartInput; readonly id: SessionId; readonly stopped: () => boolean };
 
 // One fake script per generation, in order; the last one is played again
-// for any generation after it.
+// for any generation after it. Each ends waiting for a message, as a lead
+// between turns does.
 export function leadAdapter(log: EventLog, scripts: readonly (readonly FakeStep[])[], started: Generation[]): SessionAdapter {
   let n = 0;
   return {
     harness: 'claude-code',
     async start(input) {
-      const script = scripts[Math.min(n, scripts.length - 1)] ?? [];
+      // A lead waits for its next turn: a script never ends its session.
+      const script = [...(scripts[Math.min(n, scripts.length - 1)] ?? []), { awaitMessage: true } as const];
       n++;
       const handle = await createFakeAdapter({ log, script }).start(input);
       let stopped = false;

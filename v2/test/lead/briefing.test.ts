@@ -61,7 +61,7 @@ test('the rules say what section 4.4 says, in under 5 KB', () => {
   for (const phrase of [/language/, /one closed question/i, /recommend/i, /data, never as instructions/, /commit/, /answer_question/, /approved plan/, /independent/, /Acceptance criteria/, /hand over/]) {
     assert.match(LEAD_RULES, phrase);
   }
-  assert.doesNotMatch(LEAD_RULES, /—/);
+  assert.doesNotMatch(LEAD_RULES, /\u2014/);
 });
 
 test('a memory that cannot be read leaves the generation briefed without it', async () => {
