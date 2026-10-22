@@ -1,12 +1,15 @@
 // Starts the v2 service: node src/main.ts (or npm start).
-// It opens ledger.db, creates the modules' tables, assembles the six modules
-// (src/modules/) and serves their routes, with /health from server.ts. A
-// lane fills its module; it does not edit this file.
+// It opens ledger.db, creates the modules' tables, assembles the eight
+// modules (src/modules/) and serves their routes, with /health from
+// server.ts. A lane fills its module; it does not edit this file (lead and
+// notify were added once, by milestone 2's first lane: decision 14).
 import { createServer } from 'node:http';
 import { ConfigError, readConfig, type Config } from './config.ts';
 import approval from './modules/approval.ts';
 import flow from './modules/flow.ts';
 import inbox from './modules/inbox.ts';
+import lead from './modules/lead.ts';
+import notify from './modules/notify.ts';
 import { assemble, dispatch, type App } from './modules/registry.ts';
 import sessions from './modules/sessions.ts';
 import tickets from './modules/tickets.ts';
@@ -26,7 +29,7 @@ function orExit<T>(make: () => T): T {
 
 const { host, port }: Config = orExit(() => readConfig());
 const store: Store = orExit(() => openStore(ledgerPath()));
-const modules = { sessions, users, tickets, flow, approval, inbox };
+const modules = { sessions, users, tickets, flow, approval, inbox, lead, notify };
 applyTables(store.db, Object.values(modules).flatMap((module) => module.tables));
 const app: App = assemble(modules, { store });
 

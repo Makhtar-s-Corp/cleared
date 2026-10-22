@@ -1,12 +1,15 @@
 // The fixture source (CLEARED_V2_APP_SOURCE=fixtures): the service's read
-// routes answered in the app's process from the tower fixture, and ticket
-// creation into an in-memory ticket store, so the tower works before lane
-// 7's service does. It approves, answers and moves nothing.
+// routes answered in the app's process from the tower fixture and, for the
+// lead and its plans (milestone 2, section 7.1), from the lead fixture; and
+// ticket creation into an in-memory ticket store, so the screens work
+// before the service does. It approves, answers, moves and sends nothing:
+// every other write is a 404.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sseFrame, type CreateTicketBody, type SessionDetail } from '../../src/api/types.ts';
+import { leadFrame, sseFrame, type CreateTicketBody, type SessionDetail } from '../../src/api/types.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
+import { leadFixture } from './lead.ts';
 import { towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -40,31 +43,55 @@ function ticketBody(value: unknown, project: string): CreateTicketBody | undefin
 export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string } = {}): Promise<DataSource> {
   const now = options.now ?? (() => new Date());
   const fixture = await towerFixture(now(), options.project === undefined ? {} : { project: options.project });
+  const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
 
+  const storeOf = (id: string) => (id === lead.session.id ? lead.store : fixture.store);
   const state = (id: string): SessionState | undefined => {
     let found: SessionState | undefined;
-    for (const { event } of fixture.store.events.after(id)) if (event.type === 'STATE_SNAPSHOT') found = event.snapshot;
+    for (const { event } of storeOf(id).events.after(id)) if (event.type === 'STATE_SNAPSHOT') found = event.snapshot;
     return found;
+  };
+  // The seq a stream or a thread read starts after: ?after=, else Last-Event-ID.
+  const after = (request: IncomingMessage, url: URL): number => {
+    const from = Number(url.searchParams.get('after') ?? request.headers['last-event-id'] ?? 0);
+    return Number.isInteger(from) && from >= 0 ? from : 0;
   };
 
   async function handle(request: IncomingMessage, response: ServerResponse, method: string, url: URL, user: string): Promise<void> {
     const parts = url.pathname.split('/').slice(2);              // after '/api'
     const [collection, id, sub] = parts;
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, fixture.sessions);
-    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, fixture.inbox);
+    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox, ...lead.inbox]);
+    if (method === 'GET' && collection === 'lead') {
+      if (parts.length === 1) return sendJson(response, 200, lead.state);
+      if (id === 'messages' && parts.length === 2) return sendJson(response, 200, lead.messages.filter((m) => m.seq > after(request, url)));
+      if (id === 'memory' && parts.length === 2) return sendJson(response, 200, lead.memory);
+      if (id === 'stream' && parts.length === 2) {
+        const from = after(request, url);
+        response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+        for (const message of lead.messages) if (message.seq > from) response.write(leadFrame({ kind: 'message', message }));
+        response.write(leadFrame({ kind: 'state', state: lead.state }));
+        for (const plan of lead.plans) response.write(leadFrame({ kind: 'plan', plan }));
+        return void response.end();
+      }
+    }
+    if (method === 'GET' && collection === 'plans') {
+      if (parts.length === 1) return sendJson(response, 200, lead.plans);
+      const plan = lead.plans.find((p) => p.id === id);
+      if (parts.length === 2) return plan ? sendJson(response, 200, plan) : sendJson(response, 404, { error: 'no such plan' });
+    }
     if (collection === 'sessions' && id) {
-      const session = fixture.sessions.find((s) => s.id === id);
+      const session = id === lead.session.id ? lead.session : fixture.sessions.find((s) => s.id === id);
       if (!session) return sendJson(response, 404, { error: 'no such session' });
       if (method === 'GET' && parts.length === 2) {
         const detail: SessionDetail = { ...session, state: state(id) ?? { status: session.status, phase: session.phase, steps: [], files: [], checks: [], usage: {} } };
         return sendJson(response, 200, detail);
       }
       if (method === 'GET' && sub === 'events' && parts.length === 3) {
-        const from = Number(url.searchParams.get('after') ?? request.headers['last-event-id'] ?? 0);
         response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
-        for (const event of fixture.store.events.after(id, Number.isInteger(from) && from >= 0 ? from : 0)) response.write(sseFrame(event));
+        for (const event of storeOf(id).events.after(id, after(request, url))) response.write(sseFrame(event));
         return void response.end();
       }
     }
