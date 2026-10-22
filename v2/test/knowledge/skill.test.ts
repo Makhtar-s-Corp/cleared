@@ -25,7 +25,7 @@ test('the skill file has the standard front matter, its sections by level, and t
   const lines = text.split('\n');
   assert.equal(lines[0], '---');
   assert.equal(lines[1], 'name: cleared-filter-api');
-  assert.match(lines[2] ?? '', /^description: .*filter-api.*Guestbook/);
+  assert.match(lines[2] ?? '', /^description: .*Guestbook.*filter-api/);
   assert.equal(lines[3], '---');
   // The levels in order (the workspace, the service, its contracts), decisions before lessons.
   const headings = lines.filter((line) => line.startsWith('#'));

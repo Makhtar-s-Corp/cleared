@@ -11,6 +11,11 @@
 // proposal, which lib/memory never briefs; a level the session has not goes
 // to the workspace's. A lesson that cannot be filed is logged by its level:
 // the handover is stored all the same, and the capture answers its id.
+//
+// Its knowledge is proposed in the inbox (decision 27, lane 24): once stored,
+// the handover is given to the sink the knowledge module sets, which turns
+// its lessons and decisions into `knowledge` items. A sink that fails is
+// logged, and the capture still answers the handover's id.
 import type { Role } from '../session/contract.ts';
 import { LESSON_HEADINGS, ensureLevel, runMemory, type MemoryContext, type MemoryLevel } from './briefing.ts';
 
@@ -28,31 +33,68 @@ export type Lessons = { readonly workspace: readonly string[]; readonly service:
 type Level = keyof typeof LESSON_HEADINGS;
 const LEVELS = Object.keys(LESSON_HEADINGS) as Level[];
 
-// The lessons sections of a handover. A heading counts at the start of a
-// line and outside a fenced code block, as the line it is; a section runs to
-// the next level-two heading. An empty section files nothing.
-export function lessonsOf(text: string): Lessons {
-  const out: Record<Level, string[]> = { workspace: [], service: [], contract: [] };
-  let current: Level | null = null;
-  let lines: string[] = [];
-  let fenced = false;
-  const flush = () => {
-    const body = lines.join('\n').trim();
-    if (current && body) out[current].push(body);
-    current = null;
-    lines = [];
-  };
+// A fence opens on three or more backticks or tildes, indented by at most
+// three spaces, and is closed only by a line of the same character, at least
+// as long, with nothing after it (issue 206, item 6).
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+export type Section = { readonly heading: string; readonly body: string };
+
+// The level-two sections of a handover, in order: a heading counts at the
+// start of a line and outside a fenced code block, as the line it is; a
+// section runs to the next level-two heading. Text before the first heading
+// is no section.
+export function sectionsOf(text: string): Section[] {
+  const out: Section[] = [];
+  let current: { heading: string; lines: string[] } | null = null;
+  let fence: string | null = null;
   for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
-    if (!fenced && line.startsWith('## ')) {
-      flush();
-      current = LEVELS.find((level) => line.trimEnd() === LESSON_HEADINGS[level]) ?? null;
+    if (fence === null && line.startsWith('## ')) {
+      if (current) out.push({ heading: current.heading, body: current.lines.join('\n') });
+      current = { heading: line.trimEnd(), lines: [] };
       continue;
     }
-    if (/^(```|~~~)/.test(line)) fenced = !fenced;
-    if (current) lines.push(line);
+    const match = FENCE.exec(line);
+    if (match) {
+      const run = match[1] as string;
+      if (fence === null) { if (!(run[0] === '`' && (match[2] as string).includes('`'))) fence = run; }
+      else if (run[0] === fence[0] && run.length >= fence.length && (match[2] as string).trim() === '') fence = null;
+    }
+    current?.lines.push(line);
   }
-  flush();
+  if (current) out.push({ heading: current.heading, body: current.lines.join('\n') });
   return out;
+}
+
+// The lessons sections of a handover. An empty section files nothing.
+export function lessonsOf(text: string): Lessons {
+  const out: Record<Level, string[]> = { workspace: [], service: [], contract: [] };
+  for (const section of sectionsOf(text)) {
+    const level = LEVELS.find((candidate) => section.heading === LESSON_HEADINGS[candidate]);
+    const body = section.body.trim();
+    if (level && body) out[level].push(body);
+  }
+  return out;
+}
+
+// What the knowledge module is given of a stored handover: the entry
+// lib/memory stored, and the service and the contract the session's lessons
+// are filed for, when it has them (their memory level's name).
+export type CapturedHandover = {
+  readonly ticket: string;
+  readonly sessionId: string;
+  readonly content: string;
+  readonly service?: string;
+  readonly contract?: string;
+};
+
+export type HandoverSink = (handover: CapturedHandover) => void | Promise<void>;
+
+let sink: HandoverSink | undefined;
+
+// The knowledge module's sink, set when it starts; undefined removes it.
+export function setHandoverSink(next: HandoverSink | undefined): void {
+  sink = next;
 }
 
 export type HandoverInput = MemoryContext & {
@@ -82,8 +124,14 @@ export async function captureHandover(input: HandoverInput): Promise<string | nu
   // Taken from the entry lib/memory stored, never from a second read of the file.
   const lessons = lessonsOf(answer.content);
   const targets: [Level, MemoryContext | MemoryLevel][] = [['workspace', workspace], ['service', input.service ?? workspace], ['contract', input.contract ?? workspace]];
+  // The same lesson filed twice in one ledger is filed once (issue 206, item 7).
+  const filed = new Map<MemoryContext | MemoryLevel, Set<string>>();
   for (const [level, context] of targets) {
     for (const content of lessons[level]) {
+      const seen = filed.get(context) ?? new Set<string>();
+      filed.set(context, seen);
+      if (seen.has(content)) continue;
+      seen.add(content);
       try {
         if ('kind' in context) ensureLevel(context as MemoryLevel);
         await runMemory(context, {
@@ -94,6 +142,16 @@ export async function captureHandover(input: HandoverInput): Promise<string | nu
         const where = 'kind' in context ? `the ${(context as MemoryLevel).kind} ${(context as MemoryLevel).name}` : 'the workspace';
         console.error(`cleared-v2: a lesson of ${input.ticket} could not be filed in the memory of ${where} (${error instanceof Error ? error.name : typeof error})`);
       }
+    }
+  }
+  if (sink) {
+    try {
+      await sink({
+        ticket: input.ticket, sessionId: input.sessionId, content: answer.content,
+        ...(input.service ? { service: input.service.name } : {}), ...(input.contract ? { contract: input.contract.name } : {}),
+      });
+    } catch (error) {
+      console.error(`cleared-v2: the knowledge of ${input.ticket}'s handover could not be proposed (${error instanceof Error ? error.name : typeof error})`);
     }
   }
   return id;
