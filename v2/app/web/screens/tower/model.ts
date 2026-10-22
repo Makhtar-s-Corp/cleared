@@ -1,24 +1,26 @@
 // The tower (tower.png): the bar to create a ticket or open the lead, what
 // needs the human (a plan the lead proposes among it), the live sessions
 // with their current phrase, the lead's card with its state and last line,
-// the plans under way, and what landed today with its duration.
+// the plans under way, and what landed today with its duration. In a
+// workspace of several services (lane 22), a line with each service's state,
+// each live session's service, and the services a new ticket names.
 // towerModel and the wording functions are pure, so the tests run them
 // without a browser; loadTower reads the service, and Tower.tsx draws it.
-import type { InboxItem, LeadMessage, LeadPhase, LeadState, Plan, PlanItemInbox, PlanItemState, SessionSummary } from '../../../../src/api/types.ts';
+import type { ApiSessionPhase, CreateTicketBody, InboxItem, LeadMessage, LeadPhase, LeadState, NextInboxItem, Plan, PlanItemInbox, PlanItemState, ReleaseItem, SessionPlanItem, SessionSummary, TrainState, Workspace } from '../../../../src/api/types.ts';
 import type { Harness, Role } from '../../../../src/session/contract.ts';
-import type { SessionPhase } from '../../../../src/session/events.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import type { ScreenContext } from '../../lib/screen.ts';
 
 export type TowerData = {
   readonly sessions: readonly SessionSummary[];
-  readonly inbox: readonly InboxItem[];
+  readonly inbox: readonly NextInboxItem[];
   readonly tickets: readonly Ticket[];
   readonly lead: LeadState | null;              // null when the service has no lead to show
   readonly leadLine: string | null;             // the last thing the lead said to the owner
   readonly plans: readonly Plan[];
   readonly weekLeft: number | null;             // the share of the week left; no route reports it yet
+  readonly workspace?: Workspace | null;        // null or absent when GET /api/workspace could not be read
 };
 
 // The lead's ticket (LEAD_TICKET in src/lead/contract.ts, which the browser
@@ -32,10 +34,17 @@ export const DRAFT_MAX = 2000;
 // src/tickets/contract.ts, which the browser cannot import at run time).
 export const DONE_STATE = 'Done';
 
-const LIVE_PHASES: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
+// A paused session (taken over, decision 30) is live too: someone works in it.
+const LIVE_PHASES: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing', 'paused']);
+
+// The kinds the tower draws: a later kind (a contract, a knowledge item:
+// lane 27) is left out until its card is drawn, instead of breaking the tower.
+type TowerKind = InboxItem['kind'] | 'session_plan';
+const NEED_KINDS: ReadonlySet<string> = new Set<TowerKind>(['release', 'permission', 'question', 'plan', 'session_plan']);
+const isNeed = (item: NextInboxItem): item is InboxItem | SessionPlanItem => NEED_KINDS.has(item.kind);
 
 export type NeedCard = {
-  readonly kind: InboxItem['kind'];
+  readonly kind: TowerKind;
   readonly id: string;
   readonly href: string;
   readonly ticket: string;                      // empty for the lead's items
@@ -47,6 +56,10 @@ export type NeedCard = {
   readonly detailValues: Readonly<Record<string, string>>;
 };
 
+// Who took a session over (decision 30): the signed-in person, or another
+// account, which the app cannot name (no route maps an id to a name).
+export type TakenOverCard = { readonly you: boolean; readonly minutes: number };
+
 export type LiveCard = {
   readonly id: string;
   readonly role: Role;
@@ -56,8 +69,14 @@ export type LiveCard = {
   readonly harness: Harness;
   readonly model: string;
   readonly minutes: number;
-  readonly phase: SessionPhase;
+  readonly phase: ApiSessionPhase;
+  readonly service: string | null;              // in a workspace of several services
+  readonly takenOver: TakenOverCard | null;
 };
+
+// A service of the workspace line: its live sessions, and its train: a
+// landing in progress on it, else a train rolled back in the inbox's day.
+export type ServiceRow = { readonly name: string; readonly live: number; readonly landing: string | null; readonly rolledBack: string | null };
 
 export type LandedRow = { readonly ticket: string; readonly title: string; readonly time: string; readonly minutes: number };
 
@@ -91,6 +110,8 @@ export type TowerModel = {
   readonly lead: LeadCard | null;
   readonly plans: readonly PlanRow[];
   readonly weekLeft: number | null;
+  readonly services: readonly ServiceRow[];     // none for a workspace of one service
+  readonly serviceNames: readonly string[];     // what a new ticket may name; none for one service
 };
 
 const minutesSince = (from: string, now: Date) => Math.max(0, Math.floor((now.getTime() - Date.parse(from)) / 60_000));
@@ -113,7 +134,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 // The catalog names a release's checks by colour.
 const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
-function need(item: InboxItem, now: Date): NeedCard {
+function need(item: InboxItem | SessionPlanItem, now: Date, titles: ReadonlyMap<string, string>): NeedCard {
   const lead = item.ticket === LEAD_TICKET;
   const base = {
     kind: item.kind, id: item.id, ticket: lead ? '' : item.ticket, owner: lead ? 'lead' : 'team', minutes: minutesSince(item.since, now),
@@ -121,6 +142,8 @@ function need(item: InboxItem, now: Date): NeedCard {
   } as const;
   switch (item.kind) {
     case 'release': {
+      // A train blocked before approval (decision 21) cannot be approved as it is.
+      if (item.train?.state === 'blocked') return { ...base, title: item.title, detail: item.train.blocked?.reason ?? '', detailKey: 'release_blocked', detailValues: {} };
       const reviewer = item.sessions.find((s) => s.role === 'reviewer');
       const checks = CHECKS[item.pr.checks];
       const key = reviewer ? `release_reviewed_${checks}` : `release_unreviewed_${checks}`;
@@ -139,6 +162,8 @@ function need(item: InboxItem, now: Date): NeedCard {
     }
     case 'plan':
       return { ...base, title: item.title, detail: '', detailKey: 'plan_proposes', detailValues: proposal(item) };
+    case 'session_plan':
+      return { ...base, title: titles.get(item.ticket) ?? item.ticket, detail: item.plan.reason, detailKey: `session_plan_${item.plan.confidence}`, detailValues: {} };
   }
 }
 
@@ -178,17 +203,34 @@ export function lastLeadLine(messages: readonly LeadMessage[], previous: LeadThr
   return { after, line };
 }
 
-export function towerModel(data: TowerData, now: Date): TowerModel {
+type Train = ReleaseItem & { readonly train: TrainState };
+const isTrain = (item: NextInboxItem): item is Train => item.kind === 'release' && item.train !== undefined;
+
+// The service a train lands now: the first one not yet healthy.
+const landingNow = (train: TrainState) => train.services.find((stop) => stop.state !== 'healthy')?.service;
+
+function serviceRows(workspace: Workspace, live: readonly LiveCard[], inbox: readonly NextInboxItem[]): ServiceRow[] {
+  const trains = inbox.filter(isTrain).sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
+  return workspace.services.map(({ name }) => {
+    const landing = trains.find((item) => item.train.state === 'landing' && landingNow(item.train) === name)?.ticket ?? null;
+    const rolledBack = landing ? null : trains.find((item) => item.train.state === 'rolled_back' && item.train.services.some((stop) => stop.service === name && stop.state === 'reverted'))?.ticket ?? null;
+    return { name, live: live.filter((card) => card.service === name).length, landing, rolledBack };
+  });
+}
+
+export function towerModel(data: TowerData, now: Date, viewer?: string): TowerModel {
   const titles = new Map(data.tickets.map((ticket) => [ticket.id, ticket.title]));
+  const several = (data.workspace?.services.length ?? 0) >= 2 ? data.workspace ?? null : null;
   // What the teams wait for comes first, oldest first; then the plans the
   // lead proposes, which wait for a decision rather than hold a session.
-  const needs = data.inbox.filter((item) => item.state === 'waiting')
-    .map((item) => need(item, now))
+  const needs = data.inbox.filter((item) => item.state === 'waiting').filter(isNeed)
+    .map((item) => need(item, now, titles))
     .sort((a, b) => Number(a.kind === 'plan') - Number(b.kind === 'plan') || b.minutes - a.minutes);
   // The lead's own session is its card, not a team's session.
-  const live = data.sessions.filter((s) => s.role !== 'lead' && LIVE_PHASES.has(s.phase)).map((s): LiveCard => ({
+  const live = data.sessions.filter((s) => s.role !== 'lead' && (LIVE_PHASES.has(s.phase) || s.takenOver)).map((s): LiveCard => ({
     id: s.id, role: s.role, ticket: s.ticket, title: titles.get(s.ticket) ?? s.ticket, status: s.status, harness: s.harness, model: s.model,
-    minutes: minutesSince(s.startedAt, now), phase: s.phase,
+    minutes: minutesSince(s.startedAt, now), phase: s.phase, service: several ? s.service ?? null : null,
+    takenOver: s.takenOver ? { you: viewer !== undefined && s.takenOver.by === viewer, minutes: minutesSince(s.takenOver.at, now) } : null,
   }));
   const today = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
   const landed = data.tickets.filter((ticket) => {
@@ -203,7 +245,29 @@ export function towerModel(data: TowerData, now: Date): TowerModel {
     phase: data.lead.phase, percent: data.lead.context ? Math.round(data.lead.context.percent) : null,
     refreshedMinutes: data.lead.refreshedAt && data.lead.refreshCount > 0 ? minutesSince(data.lead.refreshedAt, now) : null, line: data.leadLine,
   };
-  return { needs, live, landed, lead, plans: data.plans.filter((p) => UNDER_WAY.has(p.state)).map(planRow), weekLeft: data.weekLeft };
+  return {
+    needs, live, landed, lead, plans: data.plans.filter((p) => UNDER_WAY.has(p.state)).map(planRow), weekLeft: data.weekLeft,
+    services: several ? serviceRows(several, live, data.inbox) : [], serviceNames: several ? several.services.map((service) => service.name) : [],
+  };
+}
+
+// "3 live sessions · landing LOCAL-169", or "quiet": the sessions, then the
+// train, which the line draws apart so that only a rollback is in red.
+export function serviceParts(row: ServiceRow, t: Translate): { readonly live: string | null; readonly train: string | null } {
+  const live = row.live > 0 ? plural(row.live, 'service_live', t) : null;
+  const train = row.landing ? t('service_landing', { ticket: row.landing }) : row.rolledBack ? t('service_rolled_back', { ticket: row.rolledBack }) : null;
+  return { live, train };
+}
+
+export function serviceState(row: ServiceRow, t: Translate): string {
+  const { live, train } = serviceParts(row, t);
+  return [live, train].filter(Boolean).join(' · ') || t('service_quiet');
+}
+
+export const serviceTone = (row: ServiceRow): string => (row.landing ? 'landing' : row.rolledBack ? 'rolled_back' : row.live > 0 ? 'live' : 'quiet');
+
+export function takenOverText(taken: TakenOverCard, t: Translate): string {
+  return t(taken.you ? 'taken_over_you' : 'taken_over_other', { age: duration(taken.minutes, t) });
 }
 
 // "18 min", "1 h 24".
@@ -247,11 +311,16 @@ export function leadHref(kind: 'goal' | 'lead', title: string, body = ''): strin
   return search ? `/lead?${search}` : '/lead';
 }
 
-// What the bar sends to create a ticket: the title, and the description
-// only when one was written.
-export function newTicket(title: string, body: string, project: string): { title: string; project: string; body?: string } {
+// What the bar sends to create a ticket: the title, the description only
+// when one was written, and the services picked only when some were (the
+// service takes a non-empty list or nothing).
+export function newTicket(title: string, body: string, project: string, services: readonly string[] = []): CreateTicketBody {
   const text = body.trim();
-  return { title: title.trim(), project, ...(text ? { body: text } : {}) };
+  return { title: title.trim(), project, ...(text ? { body: text } : {}), ...(services.length ? { services: [...services] } : {}) };
+}
+
+export function createTicket(api: ScreenContext['api'], input: { readonly title: string; readonly body: string; readonly project: string; readonly services?: readonly string[] }): Promise<Ticket> {
+  return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services) });
 }
 
 // What a need's card says under its title: the item's own words, then the catalog's sentence.
@@ -266,7 +335,9 @@ export function needId(card: NeedCard, t: Translate): string {
 
 export const harnessSquare = (harness: Harness): 'claude' | 'codex' | 'other' => (harness === 'claude-code' ? 'claude' : harness === 'codex' ? 'codex' : 'other');
 
-export function liveDot(phase: SessionPhase, role: Role): string {
+// A session taken over does not pulse: nobody but the person works in it.
+export function liveDot(phase: ApiSessionPhase, role: Role, takenOver: TakenOverCard | null = null): string {
+  if (takenOver) return 'live taken';
   return phase === 'waiting_human' ? 'live waiting' : role === 'reviewer' ? 'live review' : 'live';
 }
 
@@ -308,12 +379,13 @@ export const REFRESH_MS = 10_000;
 // the last seq already seen.
 export async function loadTower(api: ScreenContext['api'], thread: LeadThread): Promise<{ readonly data: TowerData; readonly thread: LeadThread }> {
   const optional = <T,>(path: string, fallback: T): Promise<T> => api<T>(path).catch(() => fallback);
-  const [sessions, inbox, tickets, lead, messages, plans] = await Promise.all([
-    api<SessionSummary[]>('/sessions'), api<InboxItem[]>('/inbox'), api<Ticket[]>('/tickets'),
+  const [sessions, inbox, tickets, lead, messages, plans, workspace] = await Promise.all([
+    api<SessionSummary[]>('/sessions'), api<NextInboxItem[]>('/inbox'), api<Ticket[]>('/tickets'),
     optional<LeadState | null>('/lead', null),
     optional<LeadMessage[]>(thread.after > 0 ? `/lead/messages?after=${thread.after}` : '/lead/messages', []),
     optional<Plan[]>('/plans', []),
+    optional<Workspace | null>('/workspace', null),
   ]);
   const next = lastLeadLine(messages, thread);
-  return { data: { sessions, inbox, tickets, lead, leadLine: next.line, plans, weekLeft: null }, thread: next };
+  return { data: { sessions, inbox, tickets, lead, leadLine: next.line, plans, weekLeft: null, workspace }, thread: next };
 }

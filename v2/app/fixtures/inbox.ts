@@ -13,13 +13,22 @@
 // permission answered earlier. A question of the lead is a separate export,
 // so the list keeps the capture's four waiting items.
 //
+// The replanned milestone 2 (lane 21) adds the two-service ticket of the
+// multi-service proof: its release as a train in each of its states, with
+// its groups and flags, a session plan waiting for its Go, and a contract
+// and a knowledge item (rendered for reading until lane 27). They are
+// separate exports too, and `inboxFixture(now, { train, sessionPlan })` adds
+// them to the list for the visual loop.
+//
 // The approval routes behave as lane 8's service does: the approval is held
 // for a grace period and written at its end unless Undo came first, and
 // what is written is recorded in `writes`. The plan routes behave as lane
 // 7's: a proposed plan is approved once, its inbox item is then handled,
 // and a second approval is a 409.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { InboxItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../src/api/types.ts';
+import type {
+  ContractItem, KnowledgeItem, NextInboxItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanConfidence, SessionPlanItem, SessionSummary, TrainState,
+} from '../../src/api/types.ts';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
@@ -40,6 +49,16 @@ export const PLAN_TITLE = 'Make the guestbook ready for a small team';
 export const LEAD_SESSION = 'lead-generation-3';
 export const LEAD_QUESTION_ID = 'lead-question-2';
 export const LEAD_QUESTION_TEXT = 'Should the JSON route list the hidden entries too?';
+export const TRAIN_TICKET = 'LOCAL-170';
+export const TRAIN_TITLE = 'An entry the filter flags is held for review instead of refused';
+export const BLOCKED_TICKET = 'LOCAL-172';
+export const BLOCKED_TITLE = 'The filter answers a severity with every verdict';
+export const FILTER_HEAD = '7c41d0e9b2a5f3681d4e7a9c0b3f5e2d8a6c1b40';
+export const GUESTBOOK_HEAD = 'e05b9a3c7d21f4e6a8b0c2d4f6e8a1b3c5d7e9f1';
+export const PLAN_TICKET = 'LOCAL-165';
+export const PLAN_TICKET_TITLE = 'Moderation: a held entry waits for a moderator';
+export const PLAN_SESSION = 'fixture-165';
+export const PLAN_REASON = 'The change follows the refusal path that exists; only the moderator\'s view is new.';
 
 const MINUTE = 60_000;
 const ago = (now: Date, minutes: number) => new Date(now.getTime() - minutes * MINUTE).toISOString();
@@ -47,7 +66,7 @@ const ago = (now: Date, minutes: number) => new Date(now.getTime() - minutes * M
 export type InboxFixture = {
   readonly project: string;
   readonly now: Date;
-  readonly items: InboxItem[];
+  readonly items: NextInboxItem[];
   readonly tickets: Ticket[];
   readonly sessions: SessionSummary[];
   readonly plans: Plan[];
@@ -101,11 +120,115 @@ export function leadQuestion(now: Date = FIXTURE_NOW): QuestionItem {
   };
 }
 
+// ------------------------------------------------- the replanned milestone 2
+
+// The release of the multi-service proof's first ticket as a train: the
+// filter API (the provider) lands first, the guestbook (its consumer) after
+// it. Before the approval the item waits; once approved it is handled and
+// keeps its train, which the service updates as it lands (lane 16). The
+// blocked card is the proof's third ticket: the contract changes and the
+// guestbook, which consumes it, is not part of the ticket.
+export function trainRelease(now: Date = FIXTURE_NOW, state: TrainState['state'] = 'waiting'): ReleaseItem {
+  const project = FIXTURE_PROJECT;
+  const filterPr = { number: 7, url: 'https://example.invalid/filter-api/pull/7' };
+  const guestbookPr = { number: 43, url: 'https://example.invalid/guestbook/pull/43' };
+  const stop = (service: string, pr: typeof filterPr, head: string, s: TrainState['services'][number]['state'], minutes: number | null, note: string | null = null) =>
+    ({ service, pr, state: s, at: minutes === null ? null : ago(now, minutes), head, note });
+  const blocked = state === 'blocked';
+  const services: TrainState['services'] = blocked ? [stop('filter-api', { number: 9, url: 'https://example.invalid/filter-api/pull/9' }, FILTER_HEAD, 'waiting', null)]
+    : state === 'waiting' ? [stop('filter-api', filterPr, FILTER_HEAD, 'waiting', null), stop('guestbook', guestbookPr, GUESTBOOK_HEAD, 'waiting', null)]
+    : state === 'landing' ? [stop('filter-api', filterPr, FILTER_HEAD, 'healthy', 4), stop('guestbook', guestbookPr, GUESTBOOK_HEAD, 'merged', 1)]
+    : state === 'landed' ? [stop('filter-api', filterPr, FILTER_HEAD, 'healthy', 9), stop('guestbook', guestbookPr, GUESTBOOK_HEAD, 'healthy', 5)]
+    : state === 'rolled_back' ? [
+      stop('filter-api', filterPr, FILTER_HEAD, 'reverted', 2, 'Reverted after the guestbook\'s health failed.'),
+      stop('guestbook', guestbookPr, GUESTBOOK_HEAD, 'reverted', 3, 'GET /health failed twice after the deploy; the merge was reverted.'),
+    ]
+    : [stop('filter-api', filterPr, FILTER_HEAD, 'healthy', 8), stop('guestbook', guestbookPr, GUESTBOOK_HEAD, 'failed', 2, 'The merge failed: the base branch moved. Nothing was reverted.')];
+  const train: TrainState = {
+    state, services,
+    compatibility: blocked ? 'guestbook consumes filter-api and is not changed in this ticket.' : 'guestbook consumes filter-api and is changed in this ticket.',
+    blocked: blocked ? {
+      reason: 'filter-api changes its contract (openapi.yaml), and guestbook, which consumes it, is not changed in this ticket.',
+      proposal: 'Extend the contract so that guestbook keeps working as it is (add to it, without changing or removing what it calls), or keep the change backward compatible; or ask the lead to add a step on guestbook.',
+    } : null,
+  };
+  const ticket = blocked ? BLOCKED_TICKET : TRAIN_TICKET;
+  const since = ago(now, blocked ? 6 : 16);
+  const first = services[0] as TrainState['services'][number];
+  return {
+    kind: 'release', id: `release:${ticket}:${first.pr?.number ?? 0}:${since}`, ticket, project, since,
+    state: state === 'blocked' || state === 'waiting' ? 'waiting' : 'handled',
+    title: blocked ? BLOCKED_TITLE : TRAIN_TITLE,
+    announcement: blocked
+      ? 'The filter now says how serious a match is. The guestbook is not part of this ticket.'
+      : 'A flagged entry is kept and shown to the moderator instead of being refused. The filter API answers a severity; the guestbook holds the entries it marks high.',
+    pr: { number: first.pr?.number ?? 0, url: first.pr?.url ?? '', checks: 'passed' },
+    heads: services.flatMap((s) => (s.pr && s.head ? [{ pr: s.pr.number, head: s.head }] : [])),
+    requestedAt: since,
+    captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
+    sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 34 }, { role: 'reviewer', model: 'claude-sonnet-5-5', minutes: 9, rounds: 1 }],
+    train,
+    groups: blocked ? [{ intent: 'The verdict carries a severity', files: ['openapi.yaml', 'src/check.ts', 'test/check.test.ts'] }] : [
+      { intent: 'The filter answers a severity', files: ['openapi.yaml', 'src/check.ts'] },
+      { intent: 'A flagged entry is held for a moderator', files: ['migrations/004_held.sql', 'src/entries.ts', 'views/moderate.html'] },
+      { intent: 'Other changes', files: ['package-lock.json'] },
+    ],
+    flags: blocked ? [{ kind: 'contract', files: ['openapi.yaml'], detail: 'Changes a contract another service may consume.' }] : [
+      { kind: 'schema', files: ['migrations/004_held.sql'], detail: 'Changes the database: a migration or SQL file.' },
+      { kind: 'dependency', files: ['package-lock.json'], detail: 'Changes the dependencies: package.json\'s dependencies or a lock file.' },
+      { kind: 'contract', files: ['openapi.yaml'], detail: 'Changes a contract another service may consume.' },
+    ],
+  };
+}
+
+// An author's session plan waiting for its Go (decision 22, lane 17).
+export function sessionPlanItem(now: Date = FIXTURE_NOW, confidence: SessionPlanConfidence = 'medium'): SessionPlanItem {
+  const since = ago(now, 7);
+  return {
+    kind: 'session_plan', id: `session_plan:${PLAN_SESSION}:1`, ticket: PLAN_TICKET, project: FIXTURE_PROJECT, since, state: 'waiting',
+    sessionId: PLAN_SESSION, service: 'guestbook',
+    plan: {
+      steps: [
+        'Add a held column to the entries, set when the filter answers high',
+        'Keep a held entry out of the public list',
+        'Show the held entries on the moderator\'s page, with Publish and Delete',
+        'Test the three cases: clean, held, refused',
+      ],
+      files: ['migrations/004_held.sql', 'src/entries.ts', 'views/moderate.html', 'test/entries.test.ts'],
+      confidence, reason: PLAN_REASON, proposedAt: since, go: null,
+    },
+  };
+}
+
+// A contract step's change and a handover's knowledge (lanes 23 and 24),
+// which this screen shows for reading until lane 27 gives them their buttons.
+export function contractItem(now: Date = FIXTURE_NOW): ContractItem {
+  return {
+    kind: 'contract', id: 'contract:LOCAL-170:1', ticket: TRAIN_TICKET, project: FIXTURE_PROJECT, since: ago(now, 40), state: 'waiting',
+    sessionId: 'fixture-170-contract', step: 'LOCAL-170:1', service: 'filter-api', path: 'openapi.yaml',
+    diff: '--- a/openapi.yaml\n+++ b/openapi.yaml\n@@ -31,6 +31,9 @@\n           properties:\n             verdict:\n               type: string\n+            severity:\n+              type: string\n+              enum: [low, high]\n',
+    outcome: null,
+  };
+}
+
+export function knowledgeItem(now: Date = FIXTURE_NOW): KnowledgeItem {
+  return {
+    kind: 'knowledge', id: 'knowledge:fixture-158-author:1', ticket: RELEASE_TICKET, project: FIXTURE_PROJECT, since: ago(now, 50), state: 'waiting',
+    sessionId: 'fixture-158-author', text: 'The archive page reuses the list\'s heading: a heading changes in both templates.', level: 'service', service: 'guestbook', outcome: null,
+  };
+}
+
+export type InboxFixtureOptions = {
+  readonly train?: TrainState['state'];                       // a train release, in that state
+  readonly sessionPlan?: SessionPlanConfidence;               // a session plan, with that confidence
+  readonly reading?: boolean;                                 // the contract and knowledge items
+};
+
 // Captures of the example's page, drawn as SVG, served by the stand-in at
 // these same-origin addresses (the service gives none in milestone 1).
 const capture = (side: 'before' | 'after', frame: 'desktop' | 'phone') => `/api/service/captures/${side}-${frame}.svg`;
 
-export function inboxFixture(now: Date = FIXTURE_NOW): InboxFixture {
+export function inboxFixture(now: Date = FIXTURE_NOW, options: InboxFixtureOptions = {}): InboxFixture {
   const project = FIXTURE_PROJECT;
   const session = (id: string, ticket: string, role: SessionSummary['role'], model: string, minutes: number, phase: SessionSummary['phase'], status: string): SessionSummary => ({
     id, project, ticket, role, harness: 'claude-code', model, phase, status, startedAt: ago(now, minutes), updatedAt: ago(now, 1), lastSeq: 1,
@@ -131,7 +254,7 @@ export function inboxFixture(now: Date = FIXTURE_NOW): InboxFixture {
     },
     sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 2 }, { role: 'reviewer', model: 'claude-sonnet-5-5', minutes: 6, rounds: 1 }],
   };
-  const items: InboxItem[] = [
+  const items: NextInboxItem[] = [
     release,
     {
       kind: 'permission', id: `permission:${AUTHOR_ID}:${REQUEST_ID}`, ticket: PERMISSION_TICKET, project, since: ago(now, 3), state: 'waiting',
@@ -171,6 +294,19 @@ export function inboxFixture(now: Date = FIXTURE_NOW): InboxFixture {
     ticket(QUESTION_TICKET, 'Entries: what an entry without a name shows', 'In Progress', 70),
     ticket('LOCAL-160', 'Glossary: add the “Fast lane” entry', 'In Progress', 200),
   ];
+  if (options.train) {
+    const train = trainRelease(now, options.train);
+    items.unshift(train);
+    tickets.push(ticket(train.ticket, train.title, train.state === 'waiting' ? 'Needs Approval' : 'Done', 90));
+    sessions.push(session(`fixture-${train.ticket.slice(6)}-author`, train.ticket, 'author', 'claude-opus-5-5', 80, 'done', 'Done'));
+  }
+  if (options.sessionPlan) {
+    const plan = sessionPlanItem(now, options.sessionPlan);
+    items.push(plan);
+    tickets.push(ticket(PLAN_TICKET, PLAN_TICKET_TITLE, 'In Progress', 12));
+    sessions.push({ ...session(PLAN_SESSION, PLAN_TICKET, 'author', 'claude-opus-5-5', 12, 'waiting_human', 'Waiting for the Go on its plan'), service: 'guestbook' });
+  }
+  if (options.reading) items.push(contractItem(now), knowledgeItem(now));
   return { project, now, items, tickets, sessions, plans };
 }
 
@@ -285,6 +421,19 @@ export function inboxSource(fixture: InboxFixture, options: {
       settle(item.id);
       return sendJson(response, 200, { accepted: true });
     }
+    // Lane 17's Go and Change: the session's plan waiting for its Go is
+    // handled, with the Go's author and time; a Change needs its message.
+    if (collection === 'sessions' && id && sub === 'plan' && (requestId === 'go' || requestId === 'change') && parts.length === 4) {
+      const index = items.findIndex((i) => i.kind === 'session_plan' && i.sessionId === id && i.state === 'waiting');
+      const item = items[index];
+      if (!item || item.kind !== 'session_plan') return sendJson(response, 409, { error: `session ${id} has no session plan waiting for its Go` });
+      if (requestId === 'change') {
+        const message = record.message;
+        if (typeof message !== 'string' || message.trim() === '' || message.length > 2000) return sendJson(response, 400, { error: 'message must be a non-empty text of at most 2000 characters' });
+        items[index] = { ...item, state: 'handled' };
+      } else items[index] = { ...item, state: 'handled', plan: { ...item.plan, go: { by: user, at: now().toISOString() } } };
+      return sendJson(response, 200, { accepted: true });
+    }
     if (collection === 'plans' && id && sub === 'approve' && parts.length === 3) {
       const index = plans.findIndex((p) => p.id === id);
       const plan = plans[index];
@@ -305,6 +454,7 @@ export function inboxSource(fixture: InboxFixture, options: {
     if (collection === 'tickets' && id && sub === 'approve' && parts.length === 3) {
       const release = items.find((i): i is ReleaseItem => i.kind === 'release' && i.ticket === id && i.state === 'waiting');
       if (!release) return sendJson(response, 409, { error: `ticket ${id} does not wait for an approval` });
+      if (release.train?.blocked) return sendJson(response, 409, { error: release.train.blocked.reason, proposal: release.train.blocked.proposal });
       if (held.has(id)) return sendJson(response, 409, { error: 'an approval of this ticket is already held' });
       if (record.requestedAt !== release.requestedAt || !sameHeads(record.heads, release.heads))
         return sendJson(response, 409, { error: 'this is not the version the release asks for' });

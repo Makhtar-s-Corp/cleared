@@ -1,23 +1,31 @@
 // The tower (tower.png): the bar to create a ticket or open the lead, what
 // needs the human (a plan the lead proposes among it), the live sessions
 // with their current phrase, the lead's card with its state and last line,
-// the plans under way, and what landed today with its duration.
+// the plans under way, and what landed today with its duration. In a
+// workspace of several services (lane 22): the services' line, each live
+// session's service, a session taken over, and a chip per service in the bar.
+import { Check, HandGrabbing } from '@phosphor-icons/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
+import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import {
-  DRAFT_MAX, REFRESH_MS, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, loadTower, needId, needSentence, newTicket, planProgress, towerModel, towerSummary,
-  type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type TowerModel,
+  DRAFT_MAX, REFRESH_MS, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, loadTower, needId, needSentence, planProgress,
+  serviceParts, serviceState, serviceTone, takenOverText, towerModel, towerSummary,
+  type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ServiceRow, type TowerModel,
 } from './model.ts';
+import './tower.css';
 
-export function Bar({ t, title, body, onTitle, onBody, onLead, onSubmit }: {
+// The services a new ticket names: a chip per service of a workspace of
+// several, shown with the description once a title is typed.
+export function Bar({ t, title, body, services = [], picked = [], onTitle, onBody, onPick, onLead, onSubmit }: {
   readonly t: Translate; readonly title: string; readonly body: string;
-  readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void;
+  readonly services?: readonly string[]; readonly picked?: readonly string[];
+  readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void; readonly onPick?: (service: string) => void;
   readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
@@ -29,6 +37,15 @@ export function Bar({ t, title, body, onTitle, onBody, onLead, onSubmit }: {
         <Button variant="ink" className="chip-button primary" type="submit">{t('bar_new_ticket')}</Button>
       </div>
       <Textarea id="ask-body" name="body" maxLength={20000} rows={5} placeholder={t('bar_body_placeholder')} aria-label={t('bar_body_label')} value={body} onChange={(event) => onBody?.(event.target.value)} />
+      {services.length >= 2 ? (
+        <div className="ask-services" role="group" aria-label={t('bar_services_label')}>
+          {services.map((name) => (
+            <Toggle key={name} className="svc-toggle" pressed={picked.includes(name)} onPressedChange={() => onPick?.(name)} data-service={name}>
+              {picked.includes(name) ? <Check size={12} aria-hidden="true" /> : null}{name}
+            </Toggle>
+          ))}
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -45,12 +62,17 @@ function Need({ card, t }: { readonly card: NeedCard; readonly t: Translate }) {
   );
 }
 
+// A session taken over says by whom and since when in place of its phrase,
+// which stopped when it was paused (decision 30).
 export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: Translate }) {
   return (
-    <li className="session-card">
-      <span className="session-head"><span className={liveDot(card.phase, card.role)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span><span className="id">{card.ticket}</span></span>
+    <li className={card.takenOver ? 'session-card taken' : 'session-card'}>
+      <span className="session-head">
+        <span className={liveDot(card.phase, card.role, card.takenOver)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span>
+        {card.service ? <span className="svc-tag">{card.service}</span> : null}<span className="id">{card.ticket}</span>
+      </span>
       <span className="session-title">{card.title}</span>
-      <span className="phrase">{card.status}</span>
+      {card.takenOver ? <span className="phrase taken-line"><HandGrabbing size={16} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase">{card.status}</span>}
       <span className="session-foot">
         <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" />{formatModel(card.harness, card.model)}</span>
         <span className="elapsed">{duration(card.minutes, t)}</span>
@@ -82,6 +104,12 @@ function LeadSide({ lead, t, draft, onDraft }: { readonly lead: LeadCardModel | 
   );
 }
 
+function ServiceState({ row, t }: { readonly row: ServiceRow; readonly t: Translate }) {
+  const { live, train } = serviceParts(row, t);
+  if (!train) return <span className="svc-state">{serviceState(row, t)}</span>;
+  return <span className="svc-state">{live ? `${live} · ` : null}<span className="svc-train">{train}</span></span>;
+}
+
 function PlanLine({ row, t }: { readonly row: PlanRow; readonly t: Translate }) {
   const { bar, line } = planProgress(row, t);
   return (
@@ -100,6 +128,11 @@ export function TowerBody({ model, t, leadDraft = '', onLeadDraft }: { readonly 
     <div className="tower">
       <div className="tower-main">
         <div className="hello"><h1>{heading(model.needs.length, t)}</h1><p className="muted">{towerSummary(model, t)}</p></div>
+        {model.services.length === 0 ? null : (
+          <ul className="workspace-line" aria-label={t('services_title')}>
+            {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
+          </ul>
+        )}
         <section className="block" aria-labelledby="needs-title">
           <div className="block-head"><span className="dot awaiting" aria-hidden="true" /><h2 id="needs-title">{t('needs_title')}</h2><a className="more" href="/inbox">{t('open_inbox')}</a></div>
           {model.needs.length === 0 ? <p className="empty">{t('needs_empty')}</p>
@@ -140,6 +173,7 @@ export default function Tower() {
   const [model, setModel] = useState<TowerModel | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [leadDraft, setLeadDraft] = useState('');
+  const [picked, setPicked] = useState<readonly string[]>([]);
   const thread = useRef<LeadThread>({ after: 0, line: null });
 
   const refresh = useCallback(async (live: () => boolean = () => true) => {
@@ -147,7 +181,7 @@ export default function Tower() {
       const loaded = await loadTower(context.api, thread.current);
       if (!live()) return;
       thread.current = loaded.thread;
-      setModel(towerModel(loaded.data, context.now()));
+      setModel(towerModel(loaded.data, context.now(), context.me.user.id));
       setFailed(null);
     } catch (error) {
       if (!live()) return;
@@ -171,9 +205,11 @@ export default function Tower() {
       return;
     }
     try {
-      const ticket = await context.api<Ticket>('/tickets', { method: 'POST', body: newTicket(typed, body, context.me.project) });
+      const services = model?.serviceNames.filter((name) => picked.includes(name)) ?? [];
+      const ticket = await createTicket(context.api, { title: typed, body, project: context.me.project, services });
       setTitle('');
       setBody('');
+      setPicked([]);
       setNote({ text: t('ticket_created', { id: ticket.id, status: ticket.status }), kind: 'ok' });
       void refresh();
     } catch {
@@ -183,7 +219,8 @@ export default function Tower() {
 
   return (
     <>
-      <Bar t={t} title={title} body={body} onTitle={setTitle} onBody={setBody} onSubmit={(event) => void submit(event)}
+      <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} onTitle={setTitle} onBody={setBody} onSubmit={(event) => void submit(event)}
+        onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
         onLead={(kind) => location.assign(leadHref(kind, title, body))} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       <div id="tower-body" aria-busy={model === null && failed === null ? 'true' : undefined}>
