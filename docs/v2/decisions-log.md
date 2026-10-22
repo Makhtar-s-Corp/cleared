@@ -663,7 +663,7 @@ The choices the lane makes:
    - Output redirections are taken out of a part: `>`, `>>`, `N>`, `N>>`, `&>`, `&>>` with one word as the target, and the duplications `N>&M` (`2>&1`), which write no file.
    - Still refused, so asked as `shell.compound`: a lone `&`, `|&`, `>|`, `>&file`, an empty part, an input redirection, a here-document, a newline, `$(`, a backtick.
    - A target gets the verdict a `Write` of that path, without content, gets. Only `edit.workdir` keeps the command allowed. A deny stays a deny: a reviewer's redirection is `reviewer.edit`, `> .env` is `secret.read`. An ask keeps its own rule: `scripts.change` for `package.json`, `install.package` for the lock file. Any other target asks as `shell.compound`.
-   - `/dev/null` is allowed as a target, although it is outside the workdir: writing there changes nothing, and `2>/dev/null` is common.
+   - `/dev/null` is outside the workdir, so `2>/dev/null` asks, as decision 10 says. Allowing it (writing there changes nothing, and it is common) is proposed to the owner in the pull request, not decided here.
    - The first part that is not allowed gives the verdict. It keeps its rule when it has one of its own (`net.undeclared`, `install.package`, `delete.outside_ticket`). A part that only reaches `default` is reported as `shell.compound`, with a reason that names the part.
    - A learned command counts as allowed on its own.
    - Milestone 1 rows that changed, in `test/session/policy.test.ts`:
@@ -676,7 +676,7 @@ The choices the lane makes:
    - A git read (`git log *`, `git show *`, `git diff *`, `git status`, `git branch --show-current`, milestone 1's conditions on the words) may stand alone, as the acceptance's `git log --oneline` does, or be piped into `head`.
    - `ls`, `grep` and `find` must be piped into `head`.
    - `head -n N file` alone is allowed: head is the lead's reader and caps itself.
-   - `head` is `-n N` or `-nN`, with N from 1 to 400. The piped head reads no file of its own.
+   - `head` is `-n N` or `-nN`, with N from 1 to 400, and nothing else: a standalone head reads exactly one file, and the piped head reads none. A second count, a byte count or several files would lift the cap, so they deny.
    - Any redirection, a duplication included, denies as `lead.command`.
    - `git commit`, `push`, `checkout` or `add` anywhere in the text is `lead.edit`.
    - A `Read` with a limit but outside the workdir goes on to the role-free rows: it asks as `default`.
@@ -700,6 +700,8 @@ The choices the lane makes:
    - `NotificationStatus` keeps v1's reasons without the passkey one (`off`, `insecure`, `no_subject`, `store`). The three notification routes are typed in `NotificationRoutes` and are not in `API_ROUTES`, since they are the app's own (lane 3).
 6. **The fake adapter** plays `hostCall`, `context` and `question` steps.
    - Its `run` now awaits the host tools, so after `await start()`, `answer()` or `send()` every call is answered.
+   - An interrupt or a stop that comes while a host call is answered ends the turn there: the call writes nothing after it, and the next message starts the next turn.
+   - After a `context` step the fake yields once, so a reader sees the measure before the turn goes on and can interrupt it there, as lane 5's threshold does.
    - A question is settled by `cleared.answered`, as the Claude Code mapper does.
    - `exampleLeadScript` and `examplePlanInput` are the scripted lead of lanes 5, 7 and 11.
 7. **The lead fixture** (`app/fixtures/lead.ts`) plays that script into a store, with host tools that record what lanes 5 and 7 will store. The thread, the plan, the commitments and the context are read back from it.
@@ -717,7 +719,7 @@ The choices the lane makes:
   - `app/public/screens/tower.ts`, `need()` and its filter: a plan item is no need until lane 9 draws the plan card.
   - `app/public/screens/inbox.ts`: a local type and the `listed` filter leave plan items out of the list until lane 10.
   - `app/fixtures/inbox.ts` line 194: the answer route matches permissions and questions only.
-- **Interface lane: no.** The lane has no screen, so no visual loop ran and nothing is in `/tmp/cleared-captures/j2/`.
+- **Interface lane: no**, and the lane has no screen of its own. It did touch the tower and the inbox, so both were captured in fixtures mode at 1440, 1280, 768 and 390, light and dark, as `/tmp/cleared-captures/j2/{tower,inbox}-<width>-<theme>.png`. They render as before, without the plan item. The shell's inbox count (`app/public/app.ts`, lane 3's) counts every waiting item, so in fixtures mode it says 3 while the inbox lists 2. The count is right for milestone 2, since the plan waits for the owner; lane 10's list catches up with it.
 - **Open on the answer cap (section 4.1).** The policy does not cap a `Grep` in content mode or a git read that stands alone. Whether and where Claude Code cuts a command's output was not measured here. Lanes 4 and 5 measure it against the plan's margin of about 4 000 tokens per answer.
 - **Not done here.**
   - Issue 145, item 4 (a tool id on a policy refusal's `cleared.permission_answered`) needs lane 4's mapper.
