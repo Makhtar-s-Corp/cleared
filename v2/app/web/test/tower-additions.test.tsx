@@ -67,6 +67,9 @@ test('the recipe form: a choice per recipe, the picked one\'s parameters, the re
   assert.match(markup, /required/);
   assert.match(markup, /<button[^>]*type="submit"[^>]*data-act="recipe_run"[^>]*>Run<\/button>/);
   assert.match(markup, /A ticket, as a one-ticket plan/);
+  // Run is outlined while a required parameter is missing, in ink once it can run: one ink gesture on screen.
+  assert.doesNotMatch(/<button[^>]*data-act="recipe_run"[^>]*>/.exec(markup)?.[0] ?? '', /primary/);
+  assert.match(html(<RecipeForm t={en} recipes={RECIPES} picked={update.name} values={{ package: 'pg' }} note="" />), /<button[^>]*class="chip-button primary"[^>]*data-act="recipe_run"/);
   const goal = html(<RecipeForm t={en} recipes={RECIPES} picked="weekly-review" values={{}} note="" />);
   assert.match(goal, /A goal, sent to the lead/);
   assert.match(goal, /This recipe takes no parameter\./);

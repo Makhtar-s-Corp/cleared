@@ -72,7 +72,7 @@ export function RecipeForm({ t, recipes, picked, values, note, link = null, busy
 }) {
   const recipe = recipes.find((r) => r.name === picked);
   return (
-    <form className="recipe-form" id="recipe-form" autoComplete="off" aria-labelledby="recipe-title" onSubmit={onRun}>
+    <form className="recipe-form" id="recipe-form" autoComplete="off" noValidate aria-labelledby="recipe-title" onSubmit={onRun}>
       <div className="recipe-head">
         <h2 id="recipe-title">{t('recipe_title')}</h2>
         <Button variant="ghost" className="icon recipe-close" aria-label={t('recipe_close')} onClick={onClose}><X size={16} aria-hidden="true" /></Button>
@@ -101,7 +101,10 @@ export function RecipeForm({ t, recipes, picked, values, note, link = null, busy
           )}
           <div className="recipe-bar">
             <p className="recipe-note" role="status">{note}{link ? <>{' '}<a href={link}>{t('recipe_open')}</a></> : null}</p>
-            <Button variant="ink" className="chip-button primary" type="submit" data-act="recipe_run" disabled={busy}>{t('recipe_run')}</Button>
+            {/* In ink once it can run: until then the bar's New ticket stays the one ink gesture. */}
+            {recipeProblem(recipe, values) === undefined
+              ? <Button variant="ink" className="chip-button primary" type="submit" data-act="recipe_run" disabled={busy}>{t('recipe_run')}</Button>
+              : <Button variant="chip" className="chip-button" type="submit" data-act="recipe_run" disabled={busy}>{t('recipe_run')}</Button>}
           </div>
         </>
       ) : <p className="recipe-pick">{t('recipe_pick')}</p>}

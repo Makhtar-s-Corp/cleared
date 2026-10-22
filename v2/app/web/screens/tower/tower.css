@@ -43,11 +43,11 @@
 .sub-title { margin: 16px 0 8px; padding-top: 14px; border-top: 1px solid var(--hairline); font-size: 13px; font-weight: 500; color: var(--text); }
 .schedules { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .schedule { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
-.schedule-name { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
 .schedule-line { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .schedule.off .schedule-name, .schedule.off .schedule-line { color: var(--text-faint); }
 
-.recipe-form { margin: 0 0 18px; padding: 16px 18px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
+.recipe-form { margin: 12px 28px 0; padding: 16px 18px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
 .recipe-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .recipe-head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .recipe-close { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; }
@@ -68,7 +68,7 @@
 .recipe-bar .chip-button { flex: none; }
 
 @media (max-width: 767px) {
-  .recipe-form { padding: 14px; }
+  .recipe-form { margin: 12px 16px 0; padding: 14px; }
   .recipe-toggle { min-height: 44px; padding: 0 16px; }
   .recipe-param input { min-height: 44px; }
   .recipe-bar { flex-direction: column; align-items: stretch; }

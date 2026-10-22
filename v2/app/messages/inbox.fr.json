@@ -291,6 +291,7 @@
   "contract_rule": "Les étapes suivantes démarrent dès que vous le validez.",
   "contract_approve": "Valider le contrat",
   "contract_send_back_field": "Que doit changer l'étape du contrat ?",
+  "contract_keep": "Le garder tel que proposé",
   "contract_send_back_send": "Renvoyer",
   "contract_send_back_empty": "Dites ce que l'étape du contrat doit changer.",
   "contract_send_back_long": "Un message fait au plus {n} caractères.",

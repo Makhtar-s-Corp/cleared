@@ -3,7 +3,7 @@
 // and its cost, the ask's sum with the week share, and a follow-up field,
 // held while a turn runs (the reader answers 409 then). model.ts holds the
 // rules; this file draws them and reads the ask again while a turn runs.
-import { ArrowLeft, Eye } from '@phosphor-icons/react';
+import { ArrowLeft } from '@phosphor-icons/react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { Ask } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -55,7 +55,7 @@ export function AskScreen({ ask, t, language, draft = '', note = '', busy = fals
           <p className="follow-note" role="status">{note || (runs ? t('ask_follow_running') : '')}</p>
           <Button variant="ink" className="btn primary" type="submit" data-act="follow" disabled={busy || runs}>{t('ask_follow_send')}</Button>
         </div>
-        <p className="ask-read-only"><Eye size={14} aria-hidden="true" />{t('ask_read_only')}</p>
+        <p className="ask-read-only">{t('ask_read_only')}</p>
       </form>
     </section>
   );

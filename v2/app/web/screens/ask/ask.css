@@ -26,16 +26,18 @@
 .turn .answer.waiting, .turn .answer.lost { margin: 0; color: var(--text-muted); }
 .turn-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 0; color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-.ask-total { margin: 14px 2px 0; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ask-total { text-wrap: pretty; margin: 14px 2px 0; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
 .ask-follow { margin-top: 24px; padding: 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
-.ask-follow textarea { display: block; width: 100%; min-height: 72px; padding: 10px 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: vertical; outline: none; }
+.ask-follow textarea { display: block; width: 100%; min-height: 72px; padding: 10px 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: none; outline: none; }
 .ask-follow textarea::placeholder { color: var(--placeholder); }
 .ask-follow textarea:focus-visible { box-shadow: 0 0 0 1px var(--ink); }
 .follow-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
 .follow-note { margin: 0; min-width: 0; color: var(--text-muted); font-size: 13px; }
 .follow-bar .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 20px; border-radius: 10px; font-weight: 600; flex: none; }
-.follow-bar .btn:disabled { cursor: default; }
+.follow-bar .btn.primary { background: var(--ink); color: var(--on-ink); box-shadow: none; }
+.follow-bar .btn.primary:hover { opacity: .88; }
+.follow-bar .btn.primary:disabled { cursor: default; opacity: 1; background: var(--surface-muted); color: var(--text-faint); box-shadow: var(--e-outline); }
 .ask-read-only { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--hairline); color: var(--text-faint); font-size: 12px; }
 
 @media (max-width: 767px) {

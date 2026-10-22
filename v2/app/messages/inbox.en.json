@@ -291,6 +291,7 @@
   "contract_rule": "The steps after it start once you validate it.",
   "contract_approve": "Validate the contract",
   "contract_send_back_field": "What should the contract step change?",
+  "contract_keep": "Keep it as proposed",
   "contract_send_back_send": "Send back",
   "contract_send_back_empty": "Say what the contract step should change.",
   "contract_send_back_long": "A message has at most {n} characters.",

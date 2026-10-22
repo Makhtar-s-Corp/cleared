@@ -265,4 +265,5 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 @media (max-width: 767px) {
   .ticket-step { grid-template-columns: 20px minmax(0, 1fr) auto; }
   .ticket-step .step-cost { grid-column: 2; }
+  .ticket-step .step-this { display: block; margin: 2px 0 0; }
 }

@@ -25,11 +25,6 @@ function Item({ item, plan, t, language, services }: { readonly item: PlanItem; 
           </ul>
         ) : null}
         {item.after.length > 0 ? <p className="plan-after">{t('plan_after', { list: positions(item.after, t) })}</p> : null}
-        {steps.length > 0 ? (
-          <ol className="plan-item-steps" aria-label={t('plan_steps_label')}>
-            {steps.map((step) => <li key={step.position} className="plan-item-step" data-step={step.position} data-kind={step.kind}><span className="plan-step-n" aria-hidden="true">{step.position}</span>{stepText(step, t, language)}</li>)}
-          </ol>
-        ) : null}
         {started ? (
           <p className="plan-progress">
             <span className={`item-state ${item.state}`}>{itemStateText(item.state, t)}</span>
@@ -39,6 +34,12 @@ function Item({ item, plan, t, language, services }: { readonly item: PlanItem; 
       </div>
       <span className={`lane ${item.lane}`}>{t(LANE_KEYS[item.lane])}</span>
       <span className="plan-estimate">{t('plan_estimate', { time: formatDuration(item.estimate.minutes, t), share: share(item.estimate, t, language) })}</span>
+      {/* The steps run under the item's whole width, its lane and estimate included. */}
+      {steps.length > 0 ? (
+        <ol className="plan-item-steps" aria-label={t('plan_steps_label')}>
+          {steps.map((step) => <li key={step.position} className="plan-item-step" data-step={step.position} data-kind={step.kind}><span className="plan-step-n" aria-hidden="true">{step.position}</span>{stepText(step, t, language)}</li>)}
+        </ol>
+      ) : null}
     </li>
   );
 }

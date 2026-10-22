@@ -461,7 +461,7 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
             <label className="change-field" htmlFor="contract-message"><span className="sr-only">{t('contract_send_back_field')}</span>
               <Textarea id="contract-message" maxLength={SEND_BACK_MAX} rows={2} autoComplete="off" placeholder={t('contract_send_back_field')} disabled={busy} value={message} onChange={(event) => onMessage?.(event.target.value)} />
             </label>
-            <div className="d-buttons">{act('contract_keep', t('plan_keep'), false, busy)}{act('contract_send_back_send', t('contract_send_back_send'), true, busy)}</div>
+            <div className="d-buttons">{act('contract_keep', t('contract_keep'), false, busy)}{act('contract_send_back_send', t('contract_send_back_send'), true, busy)}</div>
             {status}
           </>
         );
