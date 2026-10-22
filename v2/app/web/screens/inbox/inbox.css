@@ -72,26 +72,21 @@
 /* a question */
 .questions { display: flex; flex-direction: column; gap: 22px; margin-top: 10px; }
 .questions.waits { padding: 16px 18px 18px; border-radius: 12px; background: var(--awaiting-surface); box-shadow: 0 0 0 1px var(--awaiting-highlight); }
-.q { margin: 0; padding: 0; border: 0; min-width: 0; }
-.q-text { display: flex; flex-direction: column; gap: 8px; padding: 0; margin-bottom: 12px; font-size: 18px; font-weight: 600; letter-spacing: -.02em; line-height: 1.35; }
-.q-header { align-self: flex-start; padding: 1px 8px; border-radius: 999px; background: var(--awaiting-pill); color: var(--awaiting-text); font-size: 12px; font-weight: 500; letter-spacing: 0; }
-.options { display: grid; gap: 8px; }
-.option { display: grid; gap: 2px; padding: 10px 14px; border: 0; border-radius: 10px; background: var(--surface); box-shadow: var(--option-ring); text-align: left; cursor: pointer; transition: box-shadow 200ms var(--ease); }
-.option:hover { background: var(--tab-fill); }
-.option[aria-pressed="true"] { box-shadow: 0 0 0 1.5px var(--ink); }
-.option:disabled { cursor: default; opacity: .7; }
-.o-label { font-weight: 500; }
-/* the lead's question is read here, answered on the lead's screen: its
-   choices are lines, not buttons */
-.questions.read .options { gap: 0; }
-.questions.read .option:disabled { padding: 10px 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--awaiting-highlight); opacity: 1; cursor: default; }
-.questions.read .o-desc { color: var(--text-secondary); }
-.o-rec { justify-self: start; margin: 2px 0; padding-bottom: 2px; border-bottom: 1px solid var(--awaiting-highlight); font-size: 12px; color: var(--awaiting-text); font-weight: 500; }
-.o-desc { font-size: 12.5px; color: var(--text-muted); }
-.free { display: grid; gap: 6px; margin-top: 12px; font-size: 13px; color: var(--text-muted); }
-.free input, .deny-reason input { height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--field-ring); color: var(--text); }
-.free input:focus, .deny-reason input:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
-.free input::placeholder, .deny-reason input::placeholder { color: var(--placeholder); }
+/* the clickable answers (choices.css) at the detail's size: the question
+   as the title, one option per row, the inbox's field */
+.questions .choices { gap: 22px; font-size: 14px; }
+.questions .choice-text { margin-bottom: 12px; gap: 8px; font-size: 18px; letter-spacing: -.02em; line-height: 1.35; }
+.questions .choice-header { letter-spacing: 0; }
+.questions .choice-options { display: grid; gap: 8px; }
+.questions .choice { min-height: 44px; padding: 10px 14px; box-shadow: var(--option-ring); }
+.questions .choice-free { margin-top: 2px; font-size: 13px; }
+.questions .choice-free-input { height: 44px; box-shadow: var(--field-ring); }
+/* the lead's question is read here, answered on the lead's screen */
+.questions.read .choice-line { padding: 10px 0; border-top-color: var(--awaiting-highlight); }
+.questions.read .choice-line .choice-label { font-weight: 500; color: var(--text); }
+.deny-reason input { height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--field-ring); color: var(--text); }
+.deny-reason input:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
+.deny-reason input::placeholder { color: var(--placeholder); }
 
 /* the lead's plan: lane 8's panel (its rules are in lead.css, which the
    screen loads first), flattened into the detail, whose eyebrow already
@@ -167,4 +162,4 @@ a.btn, a.btn:hover { text-decoration: none; }
   .grace .btn { min-width: 96px; flex: none; }
 }
 @media (max-width: 359px) { .shots { flex-direction: column; } .shots.frame-phone .shot { flex-basis: auto; width: 70%; } }
-@media (prefers-reduced-motion: reduce) { .item, .option { transition: none; } .grace-fill { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .item { transition: none; } .grace-fill { transition: none; } }

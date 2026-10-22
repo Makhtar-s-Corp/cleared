@@ -6,13 +6,13 @@
 .choices { --choice-highlight: #FCE2B3; display: grid; gap: 12px; min-width: 0; white-space: normal; font-size: 13.5px; }
 :root[data-theme="dark"] .choices { --choice-highlight: #4A3612; }
 .choice-q { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
-.choice-text { display: grid; gap: 6px; padding: 0; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; text-wrap: pretty; }
+.choice-text { display: grid; gap: 6px; width: 100%; margin-bottom: 10px; padding: 0; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; text-wrap: pretty; }
 .choice-question { white-space: pre-wrap; }
 .choice-header { justify-self: start; padding: 1px 8px; border-radius: 999px; background: var(--awaiting-pill); color: var(--awaiting-text); font-size: 12px; font-weight: 500; }
 [data-choices-state] .choice-header { background: var(--tab-fill); color: var(--text-muted); }
 .choice-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .choice-options:has(.choice-desc) { display: grid; }   /* options that explain themselves read one per row */
-.choice { display: grid; grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: baseline; align-content: center; gap: 2px 8px; min-height: 40px; max-width: 100%; padding: 8px 14px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font: inherit; text-align: left; transition: box-shadow 150ms var(--ease, ease); }
+.choice { display: grid; grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: baseline; align-content: center; gap: 2px 8px; min-height: 36px; max-width: 100%; padding: 7px 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font: inherit; text-align: left; transition: box-shadow 150ms var(--ease, ease); }
 .choice:hover:not(:disabled) { background: var(--surface); box-shadow: 0 0 0 1px var(--text-muted); }
 .choice:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--link); }
 .choice[aria-pressed="true"] { box-shadow: 0 0 0 1.5px var(--ink); }

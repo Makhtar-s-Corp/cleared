@@ -66,13 +66,12 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .bubble.assistant { margin-left: 72px; background: var(--sunken); }
 .bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--ink); color: var(--on-ink); }
 .request { margin: 10px 0 4px 72px; padding: 14px; border-radius: 10px; background: var(--awaiting-pill); box-shadow: 0 0 0 1px rgba(245,166,35,.5); }
-.request.question { background: var(--awaiting-surface); }
+.request.question.waits { background: var(--awaiting-surface); }
+/* amber only while the question waits */
+.request.question:not(.waits) { background: var(--surface-muted); box-shadow: var(--e-outline); }
 .request-title { margin-bottom: 4px; font-weight: 600; overflow-wrap: anywhere; }
 .request-why { margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); }
 .request-why span { display: block; }
-.request.question p + p { margin-top: 4px; }
-.request .options { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
-.request .q-foot { margin-top: 8px; font-size: 13px; color: var(--awaiting-text); }
 .request-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .request-actions .btn { flex: 1 1 auto; }
 .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); font-size: 13px; cursor: pointer; white-space: nowrap; }
