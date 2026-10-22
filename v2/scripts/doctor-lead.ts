@@ -2,9 +2,10 @@
 // lanes 4 and 5): doctor.ts imports this list and runs it when the section
 // is named. One check: a real generation of the lead on this server, in a
 // container labelled cleared.dev=v2, on the doctor's model (claude-haiku-5-5
-// by default), with one owner message, one commit, a refresh forced by a
-// threshold of 5 % (so it comes after the first real turn), and the next
-// generation answering a question about the commitment from its briefing.
+// by default), with one owner message, one commit, a refresh forced by
+// thresholds derived from the generation's measured opening (deriveThresholds),
+// and the next generation answering a question about the commitment from its
+// briefing.
 //
 // It needs lane 4's runner (the host tools and the context line); before
 // that runner is in the image, the commit never reaches the host and the
@@ -31,6 +32,36 @@ export type DoctorLeadCheck = {
   readonly name: string;
   run(context: DoctorLeadContext): Promise<{ readonly ok: boolean; readonly detail?: string }>;
 };
+
+// The largest single answer the rules allow, in tokens (section 4.1).
+export const ANSWER_TOKENS = 4_000;
+// Generation 1's handover point is its opening itself. The engine never
+// counts the opening's own measure, and Claude Code's summary measure did not
+// move over an owner turn with a commit (23 001 tokens at the opening, after
+// the call and after the turn), so any margin above it might never be met.
+export const REFRESH_MARGIN_TOKENS = 0;
+// Generation 2 is not refreshed again: no question turn adds this much.
+export const QUIET_MARGIN_TOKENS = 20_000;
+
+// The thresholds of a generation, from its measured opening: the handover
+// point a margin past the opening (none for a forced refresh), the threshold one largest answer past
+// that, so the turn that crosses the handover point is not interrupted. In
+// tokens, then as a share of the generation's window: the opening is a
+// number of tokens (22 560 to 23 001 measured with claude-haiku-5-5), not a
+// share, so a fixed percentage cannot follow the window.
+export function deriveThresholds(opening: { readonly totalTokens: number; readonly maxTokens: number }, marginTokens: number): { handoverPercent: number; contextPercent: number } {
+  const share = (tokens: number) => tokens / opening.maxTokens * 100;
+  return { handoverPercent: share(opening.totalTokens + marginTokens), contextPercent: share(opening.totalTokens + marginTokens + ANSWER_TOKENS) };
+}
+
+// Tomorrow at 08:00 on this server, with its offset, as the commit tool
+// wants it (a due time without an offset is refused, and the lead then asks).
+export function tomorrowAtEight(now: Date): string {
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 8, 0, 0);
+  const offset = -at.getTimezoneOffset();
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T08:00:00${offset < 0 ? '-' : '+'}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`;
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,10 +105,22 @@ const realGeneration: DoctorLeadCheck = {
       after: store.events.after,
     };
     let workdirs = 0;
+    // The engine reads its thresholds at each measure (#measured), so they
+    // are set here once each generation's opening is measured. Until then the
+    // service's defaults stand; an opening's own measure never refreshes.
+    const config = { enabled: true, model, contextPercent: 50, handoverPercent: 40, batchMs: 60_000 };
+    const derive = (generation: number, marginTokens: number): boolean => {
+      const opening = lead.state().context;
+      if (!opening) return false;
+      Object.assign(config, deriveThresholds(opening, marginTokens));
+      say(`generation ${generation} opening ${opening.totalTokens} of ${opening.maxTokens} tokens (${opening.percent} %): handover point ${config.handoverPercent.toFixed(4)} %, threshold ${config.contextPercent.toFixed(4)} %`);
+      return true;
+    };
+
     const lead = new LeadEngine({
       store: { db: store.db, events: log, sessions: store.sessions }, inbox: new InboxStore(store.db), flow: quietFlow(),
       adapter: createClaudeCodeAdapter({ log, runtime, cleaner: () => createCleaner({ servicePaths: [runtime.stateDir, homedir(), scratch] }) }),
-      config: { enabled: true, model, contextPercent: 5, handoverPercent: 4, batchMs: 60_000 },
+      config,
       project: { name: 'doctor', base: 'main', workdir: join(scratch, 'lead') },
       effects: {
         async prepareWorkdir() {
@@ -94,20 +137,29 @@ const realGeneration: DoctorLeadCheck = {
     try {
       await lead.start();
       if (!await until(() => lead.state().phase === 'idle', 240_000)) return { ok: false, detail: `the first generation did not become idle (${lead.state().phase})` };
-      say(`generation 1 idle, context ${JSON.stringify(lead.state().context)}`);
-      await lead.post('Promise me that tomorrow at 08:00 you will remind me to check the texts of the page. Record it with the commit tool, then answer in one sentence.', 'doctor');
-      if (!await until(() => lead.store.openCommitments().length > 0, 240_000)) return { ok: false, detail: 'no commitment was recorded: is lane 4\'s runner in the image?' };
+      if (!derive(1, REFRESH_MARGIN_TOKENS)) return { ok: false, detail: 'the first generation\'s opening was not measured: is lane 4\'s runner in the image?' };
+
+      const due = tomorrowAtEight(new Date());
+      await lead.post(`Promise me that you will remind me to check the texts of the page at ${due}. Record it with the commit tool, with exactly that due time, then answer in one sentence. Do not ask me anything.`, 'doctor');
+      if (!await until(() => lead.store.openCommitments().length > 0 || lead.state().pendingQuestion !== null, 240_000)) return { ok: false, detail: 'no commitment was recorded: is lane 4\'s runner in the image?' };
+      if (lead.store.openCommitments().length === 0) return { ok: false, detail: 'the lead asked a question instead of recording the commitment' };
       const commitment = lead.store.openCommitments()[0];
-      say(`commitment ${commitment?.id}: ${commitment?.text}`);
-      if (!await until(() => lead.state().generation === 2 && lead.state().phase === 'idle', 300_000)) return { ok: false, detail: `no refresh at 5 % (generation ${lead.state().generation}, ${lead.state().phase})` };
-      say(`generation 2 idle after a refresh; handover ${JSON.stringify(lead.memory().handover)}`);
+      say(`commitment ${commitment?.id}: ${commitment?.text} (due ${commitment?.due})`);
+      if (!await until(() => lead.state().generation === 2 && lead.state().phase === 'idle', 300_000)) return { ok: false, detail: `no refresh at the handover point ${config.handoverPercent.toFixed(4)} % (generation ${lead.state().generation}, ${lead.state().phase})` };
+      say(`generation 2 idle after a refresh (${lead.state().refreshCount} so far); handover ${JSON.stringify(lead.memory().handover)}`);
+      if (!derive(2, QUIET_MARGIN_TOKENS)) return { ok: false, detail: 'the second generation\'s opening was not measured' };
+
       const before = lead.messages().length;
       await lead.post('Which commitment do you have open? Give its id and what it says.', 'doctor');
       if (!await until(() => lead.messages().slice(before).some((m) => m.by === 'lead'), 240_000)) return { ok: false, detail: 'the second generation did not answer' };
       const reply = lead.messages().slice(before).find((m) => m.by === 'lead')?.text ?? '';
-      say(`reply of generation 2: ${reply.slice(0, 300)}`);
+      const answeredBy = lead.state().generation;
+      say(`reply of generation ${answeredBy}: ${reply.slice(0, 300)}`);
+      if (answeredBy !== 2) return { ok: false, detail: `generation ${answeredBy} answered, not generation 2` };
       const named = commitment !== undefined && reply.includes(commitment.id);
-      return named ? { ok: true, detail: `highest share ${lead.state().highestPercent} %` } : { ok: false, detail: 'the answer does not name the commitment' };
+      return named
+        ? { ok: true, detail: `generation 1 refreshed into generation 2, which answered; refreshes ${lead.state().refreshCount}, highest share ${lead.state().highestPercent} %` }
+        : { ok: false, detail: 'the answer does not name the commitment' };
     } finally {
       await lead.stop();
       await lead.close();

@@ -1200,3 +1200,26 @@ The choices the lane makes:
   - answering the lead's question from the inbox (issue 168, item 3).
 - This entry is the only change outside the lane's files.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-inbox-plan`.
+
+## 2026-10-22: Owner decision on plan question 1: the current Claude login, read-only, for the example project only
+
+**Decision.** On 2026-10-22 at 05:05 (Europe/Paris), in reply to plan question 1 (section 11), the owner chose option (b): the sessions use the current Claude Code login, read-only, for the example project only. During the 48-hour proof, the runner is relaunched when the login reports a revoked token, and each cut is counted in the proof report. Issue 147 stays open, as an accepted risk scoped to the example project.
+
+- Author: the owner, relayed on 2026-10-22 05:05 (Europe/Paris); written in this log.
+
+## 2026-10-22: Owner note for milestone 3: a Cursor harness next to Codex
+
+**Note.** Milestone 3 adds a Cursor harness next to Codex. The owner's Codex account is paused, so real trials run with Cursor, and Codex is tested without an account.
+
+- Author: the owner, relayed on 2026-10-22 05:05 (Europe/Paris); written in this log.
+
+## 2026-10-22: how the two owner entries above are applied (the author's choices and proposals)
+
+**Decision.** These are the author's choices and proposals for applying the two owner entries above, not the owner's decisions.
+
+- **The login (choices).** The login is mounted read-only into the session containers. Its content is never read, printed, copied, logged or committed by the runner, `doctor.ts` or a lane. `CLEARED_CLAUDE_CREDENTIALS` names the host's login file. Without it, the runner falls back to a token file in the state folder (option (a), a setup-token token), which nothing creates. The open policy question on a claude.ai login in third-party products is not settled by this choice. The policy already denies tool calls that name `/proc/*/environ`, and `printenv` (`v2/src/session/policy.ts`).
+- **Milestone 3 (proposals).**
+  - Cursor's real trials use the same arrangement as Claude Code: the host's existing login, read-only.
+  - The Cursor and Codex harnesses follow the session adapter contract (plan, section 6), with the harness named in `StartInput.harness`.
+  - Until a harness is named, the default stays `claude-code`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-fix-doctor-window`.

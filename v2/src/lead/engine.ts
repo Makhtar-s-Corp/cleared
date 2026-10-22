@@ -502,11 +502,15 @@ export class LeadEngine {
   // briefing, the harness's prompt) never refreshes a generation: a refresh
   // would start from the same share. Past the threshold during a turn, the
   // turn is interrupted here, before anything else runs: the fake adapter
-  // and the runner go on after one turn of the event loop.
+  // and the runner go on after one turn of the event loop. The thresholds
+  // are compared with the share of tokens, not the harness's `percent`:
+  // Claude Code reports a whole number (23 001 of 1 000 000 tokens is 2), so
+  // a threshold less than one point above the opening would never be met.
   #measured(gen: Generation, value: CustomValue['cleared.context_usage']): void {
     this.#context = { percent: value.percent, totalTokens: value.totalTokens, maxTokens: value.maxTokens };
     this.store.noteContext(gen.number, value.percent);
     const { contextPercent, handoverPercent } = this.#deps.config;
+    const share = value.maxTokens > 0 ? value.totalTokens / value.maxTokens * 100 : value.percent;
     if (gen.turn?.kind === 'opening' && !gen.sawRun) {
       // A harness that plays no opening turn (a scripted lead): the measure says it is ready.
       gen.turn = undefined;
@@ -515,8 +519,8 @@ export class LeadEngine {
       return;
     }
     const counts = gen.served > 0 || (gen.turn !== undefined && gen.turn.kind !== 'opening');
-    if (counts && value.percent >= handoverPercent && gen.refresh === undefined) gen.refresh = value.percent >= contextPercent ? 'threshold' : 'handover_point';
-    if (counts && value.percent >= contextPercent && gen.turn && gen.turn.kind !== 'handover' && gen.turn.kind !== 'opening' && !gen.interrupting) {
+    if (counts && share >= handoverPercent && gen.refresh === undefined) gen.refresh = share >= contextPercent ? 'threshold' : 'handover_point';
+    if (counts && share >= contextPercent && gen.turn && gen.turn.kind !== 'handover' && gen.turn.kind !== 'opening' && !gen.interrupting) {
       gen.refresh = 'threshold';
       gen.interrupting = true;
       gen.handle.interrupt().catch((error) => console.error(`cleared-v2: the lead's turn could not be interrupted (${errorName(error)})`));
