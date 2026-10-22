@@ -29,10 +29,19 @@
 // stream with the cookie and, when the browser sends it, Sec-Fetch-Site:
 // same-origin. /api/me says whether the terminal is offered (`terminal`).
 //
+// Each page the server writes draws its own style nonce (decisions 32 and
+// 33, lane 32): its response's policy gains style-src 'self' 'nonce-<value>'
+// and the page holds the value in <meta property="csp-nonce">, which the
+// session screen gives to the editor (EditorView.cspNonce) and to the
+// terminal's shims (web/lib/style-nonce.ts). Nothing else changes: no
+// 'unsafe-inline', script-src still default-src 'self', and a file, a
+// catalog or an API answer carries the policy with no nonce.
+//
 // /api/notifications and its two writes are the app's own (notifications.ts):
 // a browser of the signed-in person asks to be told, with the same checks
 // as any write. The manifest, the service worker and the icons are served
 // without a session, so the app can be added to a Home Screen.
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -92,8 +101,12 @@ const PAGES: readonly { readonly path: RegExp; readonly screen: Exclude<Screen, 
 
 // The page's policy: nothing inline, nothing from another site, and a frame
 // only from the preview listener's origin when there is one (else as before).
-export const contentPolicy = (previewOrigin?: string): string =>
-  `default-src 'self';${previewOrigin ? ` frame-src ${previewOrigin};` : ''} base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+// A page's response adds its style nonce; nothing else does.
+export const contentPolicy = (previewOrigin?: string, styleNonce?: string): string =>
+  `default-src 'self';${styleNonce ? ` style-src 'self' 'nonce-${styleNonce}';` : ''}${previewOrigin ? ` frame-src ${previewOrigin};` : ''} base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+
+// A fresh value for each page: 128 random bits, base64 as the policy writes a nonce.
+export const styleNonce = (): string => randomBytes(16).toString('base64');
 
 // A preview of a session (/api/sessions/:id/preview/...), which the app's origin never forwards.
 const PREVIEW_PATH = /^sessions\/[^/]+\/preview(?:\/|$)/;
@@ -142,7 +155,7 @@ export function readBundle(distDir: string = DIST_DIR): Bundle {
   return { script: `/${entry.file}`, styles: (entry.css ?? []).map((file) => `/${file}`), screens };
 }
 
-function head(language: Language, title: string, bundle: Bundle, screen?: string): string {
+function head(language: Language, title: string, bundle: Bundle, nonce: string, screen?: string): string {
   const own = screen ? bundle.screens[screen] : undefined;
   const sheets = [...bundle.styles, ...(own?.styles ?? [])].map((href) => `<link rel="stylesheet" href="${escape(href)}">`).join('\n');
   return `<!doctype html>
@@ -150,6 +163,7 @@ function head(language: Language, title: string, bundle: Bundle, screen?: string
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta property="csp-nonce" nonce="${escape(nonce)}">
 <title>${escape(title)}</title>
 <meta name="theme-color" content="#FAFAFA">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -163,8 +177,8 @@ ${sheets}
 // The sign-in page: the form is drawn by the bundle (web/shell/Login.tsx)
 // and posts here. The server's sentence (a wrong password, the throttle, a
 // form from elsewhere) rides on the body, since the page runs no inline script.
-export function loginPage(t: Translate, language: Language, bundle: Bundle, message?: string): string {
-  return `${head(language, t('login_title'), bundle)}
+export function loginPage(t: Translate, language: Language, bundle: Bundle, nonce: string, message?: string): string {
+  return `${head(language, t('login_title'), bundle, nonce)}
 <body class="login-page" data-screen="login"${message ? ` data-error="${escape(message)}"` : ''}>
 <div id="root"></div>
 </body>
@@ -175,8 +189,8 @@ export function loginPage(t: Translate, language: Language, bundle: Bundle, mess
 // A screen's page: the shell and the screen are drawn by the bundle
 // (web/shell/App.tsx); the body says which screen, and what the header
 // shows before /api/me answers.
-export function shellPage(t: Translate, language: Language, bundle: Bundle, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind']; readonly preview?: string | undefined }): string {
-  return `${head(language, `${t('app_name')} · ${t(`title_${options.screen}`)}`, bundle, options.screen)}
+export function shellPage(t: Translate, language: Language, bundle: Bundle, nonce: string, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind']; readonly preview?: string | undefined }): string {
+  return `${head(language, `${t('app_name')} · ${t(`title_${options.screen}`)}`, bundle, nonce, options.screen)}
 <body data-screen="${options.screen}" data-source="${options.source}" data-project="${escape(options.project)}" data-user="${escape(options.user.name)}"${options.preview ? ` data-preview="${escape(options.preview)}"` : ''}>
 <div id="root"></div>
 </body>
@@ -210,6 +224,12 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   const send = (response: ServerResponse, status: number, body: string, type = 'text/html; charset=utf-8', headers: Record<string, string> = {}) => {
     response.writeHead(status, { 'content-type': type, 'content-length': String(Buffer.byteLength(body)), 'cache-control': 'no-store', ...headers });
     response.end(body);
+  };
+  // A page: its own style nonce, in its response's policy and in its markup.
+  const sendPage = (response: ServerResponse, status: number, render: (nonce: string) => string, headers: Record<string, string> = {}) => {
+    const nonce = styleNonce();
+    response.setHeader('content-security-policy', contentPolicy(options.previewOrigin, nonce));
+    send(response, status, render(nonce), undefined, headers);
   };
   const redirect = (response: ServerResponse, location: string, headers: Record<string, string> = {}) => {
     response.writeHead(303, { location, 'cache-control': 'no-store', ...headers });
@@ -301,7 +321,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   }
 
   async function signIn(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!sameOrigin(request)) return send(response, 403, loginPage(shellT, options.language, built(), shellT('login_refused')));
+    if (!sameOrigin(request)) return sendPage(response, 403, (nonce) => loginPage(shellT, options.language, built(), nonce, shellT('login_refused')));
     const body = await readBody(request, 4096);
     const form = new URLSearchParams(body ?? '');
     const name = (form.get('name') ?? '').trim();
@@ -311,10 +331,10 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     const attempt = options.throttle.start(peer, name);
     if (attempt.succeeded === undefined) {
       const minutes = Math.max(1, Math.ceil(attempt.wait / 60));
-      return send(response, 429, loginPage(shellT, options.language, built(), shellT('login_throttled', { minutes })), undefined, { 'retry-after': String(attempt.wait) });
+      return sendPage(response, 429, (nonce) => loginPage(shellT, options.language, built(), nonce, shellT('login_throttled', { minutes })), { 'retry-after': String(attempt.wait) });
     }
     const user = body === undefined ? undefined : await options.users.verify(name, password);
-    if (!user) return send(response, 401, loginPage(shellT, options.language, built(), shellT('login_wrong')));
+    if (!user) return sendPage(response, 401, (nonce) => loginPage(shellT, options.language, built(), nonce, shellT('login_wrong')));
     attempt.succeeded();
     const made = options.sessions.create(user.id);
     redirect(response, '/', { 'set-cookie': sessionCookie(made.id) });
@@ -350,7 +370,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
       if (method === 'POST') return signIn(request, response);
       if (!read) return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'GET, HEAD, POST' });
       if (await session(request)) return redirect(response, '/');
-      return send(response, 200, loginPage(shellT, options.language, built()));
+      return sendPage(response, 200, (nonce) => loginPage(shellT, options.language, built(), nonce));
     }
 
     if (path.startsWith('/api/')) {
@@ -397,7 +417,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     if (page) {
       const mine = await session(request);
       if (!mine) return redirect(response, '/login');
-      return send(response, 200, shellPage(shellT, options.language, built(), { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
+      return sendPage(response, 200, (nonce) => shellPage(shellT, options.language, built(), nonce, { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
     }
 
     if (await serveFile(request, response, path)) return;

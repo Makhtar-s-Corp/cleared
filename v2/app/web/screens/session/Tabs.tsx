@@ -1,8 +1,12 @@
 // The session screen's four tabs (decision 30, lane 20): the strip, with
 // Take over or Give back beside it, and what each tab shows. Session.tsx
-// holds their state and calls the routes; tabs.ts holds the rules.
+// holds their state and calls the routes; tabs.ts holds the rules. Lane 32
+// adds the web terminal beside the command (components/terminal/) and the
+// editor in the Editor tab (components/editor/).
 import { Browser, Check, Circle, Code, ListChecks, TerminalWindow, type Icon } from '@phosphor-icons/react';
 import type { FormEvent, KeyboardEvent } from 'react';
+import { Editing, type EditorHandlers } from '@/components/editor/Editor.tsx';
+import { isDirty, type EditorState, type ReadOnlyWhy } from '@/components/editor/model.ts';
 import type { SessionFile, SessionFiles, SessionPlan } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
@@ -145,16 +149,29 @@ export function PlanTab({ view, plan, t, changing = false, change = '', busy = f
 }
 
 // The Terminal tab of a session taken over: what is paused, and the command
-// that resumes the session in its container, on the server.
-export function TakeoverNotice({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
+// that resumes the session in its container, on the server. Beside the web
+// terminal (web) the command stays, shorter, as its fallback (decision 32);
+// without it, the notice says why (here_only: not the loopback address).
+export function TakeoverNotice({ view, t, web = false, why }: { readonly view: SessionView; readonly t: Translate; readonly web?: boolean; readonly why?: 'here_only' | 'other' | undefined }) {
   const taken = takenOverOf(view);
   if (!taken || ENDED.has(phaseOf(view))) return null;
   const time = clock(taken.at);
+  const command = <pre className="command"><code id="resume-command">{resumeCommand(view.summary.id)}</code></pre>;
   return (
-    <div className="takeover" role="note">
+    <div className={web ? 'takeover web' : 'takeover'} role="note">
       <p className="takeover-title">{taken.by === view.me ? t('takeover_title', { time }) : t('takeover_other_title', { time })}</p>
-      <p className="takeover-body">{t('takeover_body')}</p>
-      <pre className="command"><code id="resume-command">{resumeCommand(view.summary.id)}</code></pre>
+      {web ? (
+        <>
+          <p className="takeover-body">{t('takeover_web_body')}</p>
+          <div className="command-line"><span className="takeover-body">{t('takeover_command_label')}</span>{command}</div>
+        </>
+      ) : (
+        <>
+          <p className="takeover-body">{t('takeover_body')}</p>
+          {command}
+          {why === 'here_only' ? <p className="takeover-body">{t('terminal_here_only')}</p> : null}
+        </>
+      )}
       <p className="takeover-body">{t('takeover_after')}</p>
     </div>
   );
@@ -168,14 +185,33 @@ const SIGN: Readonly<Record<DiffLine['kind'], string>> = { same: ' ', add: '+', 
 
 export type EditorShown = { readonly file: SessionFile | null; readonly base: SessionFile | null; readonly error?: string };
 
-// The Editor tab, read only: the changed files, and the one picked, as its
-// changes against the ticket's base or as the whole file.
-export function EditorTab({ t, files, selected, shown, mode, failed = false, onSelect, onMode }: {
+// The Editor tab's editing (decision 33, lane 32): whether the file shown
+// can be opened for editing, else why not; and once it is, the editor's
+// state, whether the session changed the file meanwhile (stale), and
+// whether the session is taken over (the session is then told at Give back).
+export type EditorEdit = EditorHandlers & {
+  readonly can: boolean;
+  readonly why?: ReadOnlyWhy | undefined;
+  readonly state?: EditorState | undefined;
+  readonly stale?: boolean;
+  readonly taken?: boolean;
+  readonly generation?: number;                             // a new editor at each open and reload, not at each save
+  readonly onEdit?: () => void;
+};
+
+// The Editor tab: the changed files, and the one picked, as its changes
+// against the ticket's base or as the whole file; Edit opens it in the
+// editor when it can be (lane 32), else the bar says why it is read only.
+export function EditorTab({ t, files, selected, shown, mode, failed = false, edit, onSelect, onMode }: {
   readonly t: Translate; readonly files: SessionFiles['files']; readonly selected?: string | undefined; readonly shown?: EditorShown | undefined;
-  readonly mode: 'diff' | 'file'; readonly failed?: boolean; readonly onSelect?: (path: string) => void; readonly onMode?: (mode: 'diff' | 'file') => void;
+  readonly mode: 'diff' | 'file'; readonly failed?: boolean; readonly edit?: EditorEdit | undefined;
+  readonly onSelect?: (path: string) => void; readonly onMode?: (mode: 'diff' | 'file') => void;
 }) {
-  const lines = shown?.file ? (mode === 'diff' ? lineDiff(shown.base?.text, shown.file.text) : fileLines(shown.file.text)) : [];
-  const cut = shown?.file ? cutNote(shown.file, t) : undefined;
+  const editing = edit?.state;
+  const held = editing !== undefined && (isDirty(editing) || editing.status === 'saving');
+  const lines = shown?.file && !editing ? (mode === 'diff' ? lineDiff(shown.base?.text, shown.file.text) : fileLines(shown.file.text)) : [];
+  const cut = shown?.file && !editing ? cutNote(shown.file, t) : undefined;
+  const readOnly = edit?.why === undefined || edit.why === 'session' ? t('editor_read_only') : t(`editor_ro_${edit.why}`);
   return (
     <div className="editor">
       <nav className="editor-files" aria-label={t('editor_files')}>
@@ -184,13 +220,14 @@ export function EditorTab({ t, files, selected, shown, mode, failed = false, onS
           <ul>
             {files.map((file) => (
               <li key={file.path}>
-                <button type="button" className="file-pick" data-file={file.path} aria-current={file.path === selected ? 'true' : undefined} onClick={() => onSelect?.(file.path)}>
+                <button type="button" className="file-pick" data-file={file.path} disabled={held} aria-current={file.path === selected ? 'true' : undefined} onClick={() => onSelect?.(file.path)}>
                   <span className="path">{file.path}</span><span className="counts"><Counts added={file.added} removed={file.removed} /></span>
                 </button>
               </li>
             ))}
           </ul>
         )}
+        {held ? <p className="faint small editor-wait">{t('editor_wait')}</p> : null}
       </nav>
       <div className="editor-view">
         {selected === undefined ? (files.length > 0 ? <p className="faint small">{t('editor_pick')}</p> : null) : (
@@ -198,13 +235,19 @@ export function EditorTab({ t, files, selected, shown, mode, failed = false, onS
             <div className="editor-bar">
               <span className="path">{selected}</span>
               {shown?.file && shown.base === null ? <span className="tag">{t('editor_new')}</span> : null}
-              <div className="mode" role="group" aria-label={t('editor_mode')}>
-                <button type="button" aria-pressed={mode === 'diff'} onClick={() => onMode?.('diff')}>{t('editor_diff')}</button>
-                <button type="button" aria-pressed={mode === 'file'} onClick={() => onMode?.('file')}>{t('editor_file')}</button>
-              </div>
-              <span className="read-only">{t('editor_read_only')}</span>
+              {editing ? null : (
+                <div className="mode" role="group" aria-label={t('editor_mode')}>
+                  <button type="button" aria-pressed={mode === 'diff'} onClick={() => onMode?.('diff')}>{t('editor_diff')}</button>
+                  <button type="button" aria-pressed={mode === 'file'} onClick={() => onMode?.('file')}>{t('editor_file')}</button>
+                </div>
+              )}
+              {editing ? null : edit?.can && shown?.file
+                ? <Button className="btn edit-button" data-act="editor_edit" onClick={edit.onEdit}>{t('editor_edit')}</Button>
+                : <span className="read-only">{readOnly}</span>}
             </div>
-            {shown?.error !== undefined ? <p className="editor-note bad">{t('editor_refused', { reason: shown.error })}</p>
+            {editing && edit ? <Editing key={`${editing.doc.path}:${edit.generation ?? 0}`} t={t} state={editing} taken={edit.taken ?? false} stale={edit.stale ?? false} path={editing.doc.path}
+              onChange={edit.onChange} onSave={edit.onSave} onConfirm={edit.onConfirm} onReload={edit.onReload} onClose={edit.onClose} />
+              : shown?.error !== undefined ? <p className="editor-note bad">{t('editor_refused', { reason: shown.error })}</p>
               : failed ? <p className="editor-note bad">{t('editor_failed')}</p>
               : !shown?.file ? <p className="editor-note faint">{t('editor_loading')}</p> : (
                 <div className="code-scroll" tabIndex={0}>

@@ -10,6 +10,9 @@ export type Me = {
   readonly language: 'en' | 'fr';
   readonly project: string;
   readonly source: 'service' | 'fixtures';
+  // The web terminal is offered (decision 32): the page came through the
+  // app's loopback address. Absent from an app before lane 31: not offered.
+  readonly terminal?: boolean;
 };
 
 export class ApiError extends Error {

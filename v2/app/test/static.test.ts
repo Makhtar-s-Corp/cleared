@@ -35,7 +35,8 @@ test('the pages load nothing inline and nothing from another site', async () => 
   try {
     const login = await fetch(`${running.base}/login`);
     assert.equal(login.status, 200);
-    assert.equal(login.headers.get('content-security-policy'), "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    // The page's own style nonce is the one addition (lane 32, style-nonce.test.ts).
+    assert.match(login.headers.get('content-security-policy') ?? '', /^default-src 'self'; style-src 'self' 'nonce-[A-Za-z0-9+/=]+'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'$/);
     assert.equal(login.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(login.headers.get('referrer-policy'), 'same-origin');
     const html = await login.text();

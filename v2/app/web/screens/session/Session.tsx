@@ -6,18 +6,26 @@
 //
 // The middle panel has four tabs (decision 30, lane 20; Tabs.tsx): Plan,
 // Terminal (the timeline and the composer, opened first), Editor and
-// Browser, with Take over and Give back beside them.
+// Browser, with Take over and Give back beside them. Once the signed-in
+// account took the session over, on the app's loopback address, the
+// Terminal tab holds the web terminal in place of the timeline (decision
+// 32); the Editor tab opens a changed file for editing and saves it through
+// the files route (decision 33). Both packages load by a dynamic import
+// (lane 32).
 import {
   ArrowRight, ArrowUpRight, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import type { SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
+import type { ConfirmableRule, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { SessionState } from '../../../../src/session/events.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { editorReducer, editorStart, putFile, readOnlyWhy, saveOutcome, type EditorAction, type EditorState, type ReadOnlyWhy } from '@/components/editor/model.ts';
+import { terminalChoice } from '@/components/terminal/model.ts';
+import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -366,6 +374,11 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   const [fileFailed, setFileFailed] = useState(false);
   const [mode, setMode] = useState<'diff' | 'file'>('diff');
   const [steps, setSteps] = useState<readonly TicketStep[] | null>(null);
+  const [editing, setEditing] = useState<EditorState | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const [editable, setEditable] = useState<{ readonly file: SessionFile; readonly why: ReadOnlyWhy | undefined } | null>(null);
+  const editingNow = useRef(editing);
+  editingNow.current = editing;
   const timeline = useRef<HTMLDivElement | null>(null);
   const atEnd = useRef(true);
   const id = loaded.summary.id;
@@ -400,6 +413,9 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   }), [loaded, siblings, context.me, now, busy, answers, thread, takenOver, steps]);
   const ended = ENDED.has(phaseOf(view));
   const takeover = takeoverOf({ takenOver, me: view.me, role: loaded.summary.role, ended });
+  const terminal = terminalChoice({ offered: context.me.terminal, takeover });
+  // An author's live session, not another account's: the service checks the rest at the save.
+  const sessionOpen = loaded.summary.role === 'author' && !ended && takeover.kind !== 'other';
 
   // The timeline follows the newest row while the person is at its end.
   const onScroll = () => {
@@ -447,6 +463,55 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
     }, () => { if (live) setFileFailed(true); });
     return () => { live = false; };
   }, [id, tab, selected, changed]);
+
+  // The Editor's editing (decision 33): a file opens only when its text on
+  // screen is the file (components/editor/model.ts); the editor's own text
+  // stays until it is saved, put back or reloaded.
+  const shownFile = shown?.file ?? null;
+  useEffect(() => {
+    if (!shownFile) return;
+    let live = true;
+    void readOnlyWhy(shownFile, { sessionOpen }).then((why) => { if (live) setEditable({ file: shownFile, why }); });
+    return () => { live = false; };
+  }, [shownFile, sessionOpen]);
+  const editWhy: ReadOnlyWhy = editable?.file === shownFile ? editable.why ?? 'session' : 'session';
+  const canEdit = editable?.file === shownFile && editable?.why === undefined;
+  const stale = editing !== null && shownFile !== null && shownFile.path === editing.doc.path && shownFile.hash !== editing.doc.hash && editing.status !== 'saving';
+  const dispatch = (action: EditorAction) => setEditing((current) => (current ? editorReducer(current, action) : current));
+  const startEditing = (file: SessionFile) => {
+    setEditing(editorStart(file));
+    setGeneration((n) => n + 1);
+  };
+  const saveEditing = async (confirm?: ConfirmableRule) => {
+    const current = editingNow.current;
+    if (!current || current.status === 'saving') return;
+    dispatch(confirm ? { kind: 'save', confirm } : { kind: 'save' });
+    try {
+      const answer = await putFile({ session: id, path: current.doc.path, text: current.text, hash: current.doc.hash, csrf: context.me.csrf, confirm });
+      const outcome = saveOutcome(answer.status, answer.body, context.now().toISOString());
+      dispatch(outcome);
+      // The viewer holds what was saved, so the file is not taken for the session's change.
+      if (outcome.kind === 'saved') {
+        const lines = current.text === '' ? 0 : current.text.split('\n').length - (current.text.endsWith('\n') ? 1 : 0);
+        setShown((was) => (was?.file?.path === current.doc.path ? { ...was, file: { ...was.file, text: current.text, hash: outcome.hash, lines } } : was));
+      }
+    } catch {
+      dispatch({ kind: 'failed' });
+    }
+  };
+  const reloadEditing = async () => {
+    const current = editingNow.current;
+    if (!current) return;
+    try {
+      const file = await readFile(id, current.doc.path, false);
+      if (!file || 'refused' in file) return setEditing(null);
+      setShown((was) => (was?.file?.path === file.path ? { ...was, file } : was));
+      if (await readOnlyWhy(file, { sessionOpen })) return setEditing(null);
+      startEditing(file);
+    } catch {
+      dispatch({ kind: 'failed' });
+    }
+  };
 
   const post = async (path: string, body: unknown, failure: string): Promise<boolean> => {
     try {
@@ -551,7 +616,17 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
           <TabStrip tab={tab} t={t} takeover={takeover} busy={gesture} onSelect={(next) => select(next)} onKey={onKey} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />
           <div className="panel-head" id="status"><StatusHead view={view} t={t} /></div>
           <div className="tab-panel" {...panel('terminal')}>
-            <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}><TakeoverNotice view={view} t={t} /><Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} onQuestion={(requestId, given, chosen) => void answerQuestion(requestId, given, chosen)} /></div>
+            {terminal.kind === 'web' ? (
+              <div className="term-wrap">
+                <TakeoverNotice view={view} t={t} web />
+                <WebTerminal session={id} csrf={context.me.csrf} active={tab === 'terminal'} t={t} />
+              </div>
+            ) : (
+              <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}>
+                <TakeoverNotice view={view} t={t} why={terminal.kind === 'command' ? terminal.why : undefined} />
+                <Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} onQuestion={(requestId, given, chosen) => void answerQuestion(requestId, given, chosen)} />
+              </div>
+            )}
             <div className="panel-foot">
               <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} onText={setText}
                 onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => setNote(t('handover_note'))} />
@@ -562,7 +637,19 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
               onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }} />
           </div>
           <div className="tab-panel scroll" {...panel('editor')}>
-            {tab === 'editor' || files !== null ? <EditorTab t={t} files={files ?? []} selected={selected} shown={shown} mode={mode} failed={fileFailed} onSelect={(path) => { setSelected(path); setMode('diff'); }} onMode={setMode} /> : null}
+            {tab === 'editor' || files !== null ? (
+              <EditorTab t={t} files={files ?? []} selected={selected} shown={shown} mode={mode} failed={fileFailed}
+                onSelect={(path) => { setEditing(null); setSelected(path); setMode('diff'); }} onMode={setMode}
+                edit={{
+                  can: canEdit, why: editWhy, state: editing ?? undefined, stale, taken: takeover.kind === 'mine', generation,
+                  onEdit: () => { if (shownFile) startEditing(shownFile); },
+                  onChange: (text) => dispatch({ kind: 'edit', text }),
+                  onSave: () => void saveEditing(),
+                  onConfirm: () => { const current = editingNow.current; if (current?.status === 'confirm') void saveEditing(current.rule); },
+                  onReload: () => void reloadEditing(),
+                  onClose: () => setEditing(null),
+                }} />
+            ) : null}
           </div>
           <div className="tab-panel" {...panel('browser')}>
             {tab === 'browser' ? <BrowserTab view={browser} t={t} /> : null}

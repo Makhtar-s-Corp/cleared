@@ -55,6 +55,14 @@ test('the editor\'s states: clean, changed, saving, saved, then a second save se
   assert.equal(isDirty(state), false);
   state = editorReducer(state, { kind: 'edit', text: 'one\ntwo\nthree\n' });
   assert.equal(state.status, 'changed');
+
+  // Typing while the save is on its way: what was sent is what is saved.
+  state = editorReducer(editorReducer(state, { kind: 'save' }), { kind: 'edit', text: 'one\ntwo\nthree\nfour\n' });
+  assert.equal(state.status, 'saving');
+  state = editorReducer(state, { kind: 'saved', hash: hex('one\ntwo\nthree\n'), at: '2026-10-22T09:42:00.000Z' });
+  assert.equal(state.status, 'changed', 'the line typed meanwhile is not saved yet');
+  assert.equal(state.doc.loaded, 'one\ntwo\nthree\n');
+  assert.equal(state.text, 'one\ntwo\nthree\nfour\n');
 });
 
 test('a stale hash is a conflict, and Reload takes the file as it is now', () => {
