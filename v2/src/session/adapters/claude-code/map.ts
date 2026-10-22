@@ -194,8 +194,9 @@ export type Mapper = {
 const RATE_WINDOWS = ['five_hour', 'seven_day'] as const;
 
 // A rate limit window as cleared.rate_limit says it: the event's
-// utilization is a fraction (0.26 is 26 %, measured against the usage call
-// on 2026-10-22, docs/adapters.md) and its reset time is in seconds.
+// utilization is a fraction (0.26 is 26 %, as
+// in the CLI 2.1.306 code, which shows Math.round(utilization * 100)) and
+// its reset time is in seconds (the CLI shows new Date(resets_at * 1000)).
 function rateWindow(window: (typeof RATE_WINDOWS)[number], raw: Record<string, unknown> | undefined): CustomValue['cleared.rate_limit'] | undefined {
   const utilization = num(raw?.utilization);
   if (utilization === undefined) return undefined;

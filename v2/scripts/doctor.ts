@@ -666,6 +666,8 @@ function liveRun() {
       await sleep(200);
     }
     if (ends(from).length === 0) say(`    the turn did not end within ${timeoutMs} ms`);
+    // The runner measures the context once the turn's result is out.
+    await until(() => raw.slice(rawFrom).some((line) => line.type === 'context' && line.after === 'turn'), 5000);
     return { from, rawFrom };
   }
   return { all, raw, runnerLog, docker, log, custom, texts, ends, lines, sleep, until, turn, write: (line: unknown) => stdin?.write(JSON.stringify(line) + '\n') };
@@ -731,7 +733,8 @@ async function hostToolsSection(build: boolean, model: string): Promise<void> {
     const leadDir = join(scratch, 'lead');
     mkdirSync(leadDir);
     const code = `CODE-${randomUUID().slice(0, 8).toUpperCase()}`;
-    const filler = Array.from({ length: 64 }, (_, i) => `line ${String(i + 1).padStart(2, '0')}: the guestbook keeps its entries in order, newest first.`).join('\n');
+    // About 8 KB, the cap of the lead's largest reading tools (lead/contract.ts, ANSWER_CAPS).
+    const filler = Array.from({ length: 128 }, (_, i) => `line ${String(i + 1).padStart(3, '0')}: the guestbook keeps its entries in order, newest first.`).join('\n');
     const answer = `${code}\n${filler}`;
     say(`    the ping answer: ${Buffer.byteLength(answer)} bytes, its first line a fresh code`);
     const pings: unknown[] = [];
@@ -757,6 +760,15 @@ async function hostToolsSection(build: boolean, model: string): Promise<void> {
     const firstTurn = run.lines(at.rawFrom, 'context').filter((line) => line.after === 'turn');
     for (const line of run.lines(at.rawFrom, 'context')) say(`<< ${JSON.stringify(line)}`);
 
+    const measure = async (label: string): Promise<Record<string, unknown> | undefined> => {
+      const measureFrom = run.raw.length;
+      run.write({ type: 'measure' });
+      await run.until(() => run.lines(measureFrom, 'measure').length > 0, 120_000);
+      const measured = run.lines(measureFrom, 'measure')[0];
+      say(`<< (${label}) ${JSON.stringify(measured)}`);
+      return measured;
+    };
+    const beforeCall = await measure('before the tool call');
     at = await run.turn(handle, 'a host tool call', 'Call the mcp__cleared__ping tool once, with the word plum. The first line of its answer is a code. Reply with that code only.');
     const calls = run.custom(at.from, 'cleared.host_call');
     const started = run.all.slice(at.from).flatMap((e) => (e.event.type === 'TOOL_CALL_START' && e.event.toolCallName === 'mcp__cleared__ping' ? [e.event.toolCallId] : []));
@@ -779,16 +791,14 @@ async function hostToolsSection(build: boolean, model: string): Promise<void> {
     say(`OBSERVED the summary measure around a ${Buffer.byteLength(answer)}-byte tool answer: ${baseline} tokens after the first turn, ${afterTool.join(', ') || 'none'} after the tool call, ${afterTurn} after the turn`);
 
     // The measures, while the lead waits between turns.
-    const measureFrom = run.raw.length;
-    run.write({ type: 'measure' });
-    await run.until(() => run.lines(measureFrom, 'measure').length > 0, 120_000);
-    const measured = run.lines(measureFrom, 'measure')[0];
-    say(`<< ${JSON.stringify(measured)}`);
+    const measured = await measure('after the tool call\'s turn');
     const summaryMs = (measured?.summaryMs as number[] | undefined) ?? [];
     const fullMs = (measured?.fullMs as number[] | undefined) ?? [];
     check('getContextUsage() timed over ten calls of each detail', summaryMs.length === 10 && fullMs.length === 10, `summary: median ${median(summaryMs)} ms, max ${Math.max(...summaryMs)} ms; full: median ${median(fullMs)} ms, max ${Math.max(...fullMs)} ms`);
     const summary = measured?.summary as Record<string, unknown> | undefined;
     const full = measured?.full as Record<string, unknown> | undefined;
+    const fullBefore = (beforeCall?.full as Record<string, unknown> | undefined)?.totalTokens;
+    say(`OBSERVED the full measure across the tool call's turn: ${fullBefore} tokens before, ${full?.totalTokens} after (the turn added the prompt, the call, a ${Buffer.byteLength(answer)}-byte answer and the reply)`);
     say(`OBSERVED summary and full after the turn: ${summary?.totalTokens} and ${full?.totalTokens} tokens, ${summary?.percentage} % and ${full?.percentage} %; autoCompactThreshold ${summary?.autoCompactThreshold}, isAutoCompactEnabled ${summary?.isAutoCompactEnabled}, maxTokens ${summary?.maxTokens}, rawMaxTokens ${summary?.rawMaxTokens}`);
     say(`OBSERVED the experimental usage call: ${JSON.stringify(measured?.usage ?? measured?.error)}`);
 
@@ -813,7 +823,7 @@ async function hostToolsSection(build: boolean, model: string): Promise<void> {
     mkdirSync(authorDir);
     const author: StartInput = {
       project: 'doctor', ticket: 'DOCTOR-2', role: 'author', harness: 'claude-code', model, workdir: authorDir, briefing, policy: policyOf('author'),
-      prompt: 'Use the Bash tool to run exactly: git init -q && git commit -q --allow-empty -m probe && git log -1 --format=identity:%an/%ae/%cn/%ce . Then reply with its output.',
+      prompt: 'Use the Bash tool to run this exact command, with nothing added: git init -q && git commit -q --allow-empty -m probe && git log -1 --format=identity:%an/%ae/%cn/%ce\nThen reply with its output.',
     };
     const authorHandle = await adapter.start(author);
     sessions.push(authorHandle.id);
@@ -850,18 +860,19 @@ async function hostToolsSection(build: boolean, model: string): Promise<void> {
     await run.sleep(15_000);
     const status = run.all.slice(eventsFrom).flatMap((e) => (e.event.type === 'STATE_DELTA' ? e.event.delta.filter((op) => op.path === '/status').map((op) => (op as { value?: unknown }).value) : [])).at(-1);
     check('15 s later the runner still waits, and the session says it waits for a new login', !exited() && status === 'Waiting for a new login', `status ${JSON.stringify(status)}, exited ${exited()}`);
-    // A rename over the file: the bind mount keeps the old inode.
-    const renamed = join(loginDir, 'claude.token.new');
-    writeFileSync(renamed, invalid(2), { mode: 0o600 });
-    renameSync(renamed, tokenFile);
-    await run.sleep(25_000);
-    say(`OBSERVED a rename over the login file (a new inode), 25 s later: ${logins().includes('renewed') ? 'seen by the runner' : 'not seen by the runner: the bind mount still shows the old file'}`);
     // A rewrite in place: the same inode, seen through the mount.
-    writeFileSync(tokenFile, invalid(3));
+    writeFileSync(tokenFile, invalid(2));
     await run.until(() => logins().includes('renewed') || exited(), 40_000);
     await run.until(() => logins().filter((s) => s === 'failed').length >= 2 || exited(), 120_000);
     for (const line of run.raw.slice(loginFrom).filter((l) => l.type === 'login' || l.type === 'error' || l.type === 'exit')) say(`<< ${short(JSON.stringify(line))}`);
-    check('a rewrite of the file in place is read: the runner resumes the session in the same container with the new token (which fails again, being invalid)', logins().join(',').startsWith('failed') && logins().includes('renewed') && logins().filter((s) => s === 'failed').length >= 2 && !exited(), JSON.stringify(logins()));
+    check('a rewrite of the file in place is read: the runner resumes the session in the same container with the new token (which fails again, being invalid)', logins().join(',') === 'failed,renewed,failed' && !exited(), JSON.stringify(logins()));
+    // A rename over the file (what an editor or an atomic writer does): the
+    // bind mount keeps the old inode, so the runner never sees the new token.
+    const renamed = join(loginDir, 'claude.token.new');
+    writeFileSync(renamed, invalid(3), { mode: 0o600 });
+    renameSync(renamed, tokenFile);
+    await run.sleep(25_000);
+    say(`OBSERVED a rename over the login file (a new inode), 25 s later: ${logins().filter((s) => s === 'renewed').length > 1 ? 'seen by the runner' : 'not seen by the runner: the bind mount still shows the old file'}`);
     await loginHandle.stop();
     const serviceToken = join(runtime.stateDir, 'claude.token');
     say(`NOT MEASURED the recovering half (a valid token after a failure): ${existsSync(serviceToken) ? 'the service\'s token file exists, but only the owner may put a token into a file a session reads; the proof observes a natural refresh' : 'no setup-token token in the service\'s token file (plan question 1); the proof observes a natural refresh'}`);
