@@ -325,3 +325,20 @@ test('a merge its lock made while the last process stopped is read from the ledg
   assert.deepEqual(of(t, 'release_merged').map((e) => e.service), ['filter-api']);
   await t.engine.close();
 });
+
+test('what a provider with an untouched consumer changes cannot be read: the card is blocked, not taken as compatible', async () => {
+  const calls: Call[] = [];
+  let t: Setup | undefined;
+  t = await setup({
+    scripts: { author: quickAuthor }, config: { workspace: WORKSPACE },
+    effects: { ...effects({}), async changes() { throw new Error('git diff failed'); } },
+    locks: locks(() => t as Setup, calls),
+  });
+  const ticket = await t.tickets.create({ title: 'Held', body: 'b', project: 'guestbook', services: ['filter-api'] }, { kind: 'human', id: 'u1' });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => t!.inbox.list().some((i) => i.kind === 'release' && i.ticket === ticket.id), 'the release item', 5000);
+  const card = t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release' && i.ticket === ticket.id) as ReleaseItem;
+  assert.equal(card.train?.state, 'blocked');
+  assert.match(card.train?.blocked?.reason ?? '', /on filter-api could not be read/);
+  await t.engine.close();
+});

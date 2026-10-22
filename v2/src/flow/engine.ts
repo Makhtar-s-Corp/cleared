@@ -323,7 +323,10 @@ export class FlowEngine {
     });
     if (!release.train) return read(release.pr.number);
     const all: (ReleaseItem['pr']['checks'] | undefined)[] = [];
-    for (const stop of release.train.services) if (stop.pr) all.push(await read(stop.pr.number, this.#service(stop.service)));
+    for (const stop of release.train.services) {
+      const service = this.#workspace.services.find((s) => s.name === stop.service);
+      if (stop.pr) all.push(service ? await read(stop.pr.number, service) : undefined);
+    }
     if (all.includes(undefined)) return undefined;
     return all.includes('failed') ? 'failed' : all.includes('pending') ? 'pending' : 'passed';
   }
@@ -1133,7 +1136,7 @@ export class FlowEngine {
       await this.#putBack(id, note, reason);
     };
     const order = landingOrder(this.#workspace.services, this.#servicesOf(ticket).map((s) => s.name)).map((name) => this.#service(name));
-    const published: { service: ServiceConfig; pr: Published; files: readonly string[]; diff: string }[] = [];
+    const published: { service: ServiceConfig; pr: Published; files: readonly string[] | null; diff: string }[] = [];
     const skipped: string[] = [];
     for (const service of order) {
       try {
@@ -1141,7 +1144,7 @@ export class FlowEngine {
         const workdir = this.#workdirs.get(id)?.get(service.name) ?? posix.join(this.config.workdirRoot, id, service.name);
         const pr = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report, service });
         const changed = await this.#changes(id, pr.head, service);
-        published.push({ service, pr, files: changed?.files ?? [], diff: changed?.diff ?? '' });
+        published.push({ service, pr, files: changed?.files ?? null, diff: changed?.diff ?? '' });
       } catch (error) {
         if ((error as { code?: unknown }).code === 'empty') { skipped.push(service.name); continue; }
         return fail(`The branch was not published on ${service.name}: ${name(error)}`, 'publish_refused');
@@ -1154,7 +1157,7 @@ export class FlowEngine {
       ...published.map((p) => `Pull request on ${p.service.name}: ${p.pr.url}`),
       `Reviewed by ${model} in ${round} round${round === 1 ? '' : 's'}: ${report.split('\n').filter((line) => /verdict\s*:/i.test(line)).at(-1)?.trim() ?? 'passed'}`,
     ].join('\n');
-    const compat = compatibility(this.#workspace.services, Object.fromEntries(published.map((p) => [p.service.name, p.files])));
+    const compat = this.#compatibility(published);
     const stops: Stop[] = [];
     try {
       const reviewedAt = this.#now().toISOString();
@@ -1191,6 +1194,26 @@ export class FlowEngine {
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
     this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: first.pr.number, url: first.pr.url });
+  }
+
+  // The compatibility check of the card. What a provider changes that could
+  // not be read is not taken as compatible: with a consumer the ticket does
+  // not change, the card is blocked until the ticket is published again.
+  #compatibility(published: readonly { readonly service: ServiceConfig; readonly files: readonly string[] | null }[]): ReturnType<typeof compatibility> {
+    const said = compatibility(this.#workspace.services, Object.fromEntries(published.map((p) => [p.service.name, p.files ?? []])));
+    if (said.blocked) return said;
+    const touched = new Set(published.map((p) => p.service.name));
+    const unread = published.filter((p) => p.files === null && p.service.contract
+      && this.#workspace.services.some((other) => other.consumes.includes(p.service.name) && !touched.has(other.name)));
+    if (unread.length === 0) return said;
+    const names = unread.map((p) => p.service.name).join(', ');
+    return {
+      ...said,
+      blocked: {
+        reason: `What this ticket changes on ${names} could not be read, so whether it changes the contract a service it does not change consumes is not known.`,
+        proposal: 'Send the ticket back and start it again, so that it is published and read again; or ask the lead to add a step on the services that consume it.',
+      },
+    };
   }
 
   #releaseSessions(ticket: TicketId, rounds: number): { role: Role; model: string; minutes: number; rounds?: number }[] {

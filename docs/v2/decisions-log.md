@@ -1523,3 +1523,77 @@ The choices the lane makes:
 - **Tests.** The lane owns only `v2/package.json` and its lock file, so it adds no test file under `v2/test`. The test is the probe: before the install its build failed to resolve `@xterm/xterm` (red), after it the CodeMirror page reached 0 violations with the nonce (green). The probe, its server and the Playwright runner are scratch files outside the repository, and nothing in the repository imports the new packages yet.
 - **Checks.** `npm ci`, `npm test` (which builds first; 101 tests), `npm run typecheck` and `npm run guard -- --base origin/v2` are green on a clean install.
 - Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-deps-terminal-editor`, at the orchestrator's request.
+
+## 2026-10-22: the lock per service and the release train (the author's choices, lane v2-j2-workspace-lock)
+
+**Decision.** Lane 16 applies decision 21 of the [milestone 2 plan](milestone-2-plan.md), places the call of decision 23 and writes the API shapes of waves 7 and 8. A ticket of a workspace of several services lands as a release train: one pull request per service on the same branch, each service's review and approval kept by that service's own release broker, the services landed in order with the health read between landings, the rollback in reverse order, and the card blocked before approval when a contract changes without its consumer. A ticket of a one-service workspace runs as in milestone 1. Nothing under `serve/`, `lib/`, `merge-pr.sh` or `ask-validation.sh` was edited. The lane's choices:
+
+1. **One owner gesture, one signed move per service.** Each service's `merge-pr.sh` reads the owner's move to go against its own `validations/<ticket>.json`, in its own state folder. It also closes the ticket once every pull request of that record is merged, which means its own one. So one signed move cannot satisfy two brokers, and the first landing closes the ticket. The real run below shows both. The train therefore works this way:
+   - At publish, it asks `--ask` on every service's broker, in landing order. Each keeps its own record.
+   - The approval route checks the owner's heads against every service's card head and record, then holds the grace with the approval writer on the first service's ticket store. The move written after the grace is bound to the first service's record.
+   - Before each later service lands, the train puts the ticket back in the validate state as the service account. Then it signs the owner's move again, bound to that service's record, only after checking that the record still holds exactly the head the card showed.
+   - A record that changed signs nothing. The train halts and the ticket goes back to Todo with the reason, naming what is live.
+   - The approver's user id is kept with the train by the route, and forgotten on Undo.
+
+   **This is a choice for the owner's review: one approval in the app becomes one signature per service, each bound only to what the card showed.**
+2. **Where the train lives.** `v2/src/release/`:
+   - `order.ts`: the landing order, providers first, followed through untouched services, then the workspace's position. Also the compatibility check and its proposal.
+   - `store.ts`: `release_trains`, one row per release item, read again at every tick so that a new process goes on.
+   - `train.ts`: the landing loop the flow's tick runs.
+   - `lock.ts`: what the train asks of one service's lock.
+   - `flags.ts`: `flags({ diff, report })` with its empty default, and `changesReport(events)`, which reads the session's last `cleared.changes` event by that name.
+   The real per-service lock is `serviceLocks` in `approval/service.ts`: the broker over its own socket, the validations and the review reports in its own state folder, the shared ledger. A service with no `broker_socket` or `broker_state` takes the milestone 1 socket and state folder. Two services resolving to one socket or one state folder are refused, since a broker rewrites its secret at start.
+3. **The landing.**
+   - A service's merge is asked with `from_queue`. A queued merge is asked again after `CLEARED_V2_MERGE_RETRY_SECONDS`.
+   - Its watch is read with `landingOf` from the time its merge was asked, which keeps two pull requests numbered 7 of two repositories apart, since they land one after the other.
+   - Between landings, a ticket the lock closed is put back in the validate state, so it is never Done while a service is still to land.
+   - A healthy last service makes the ticket Done and says `release_landed` once, with the services. An unhealthy one, with nothing reverted, halts the train and leaves the decision to the owner.
+   - A failing watch the service's own `auto_rollback` reverted makes the train ask `request_rollback` of each earlier landed service, newest first. The train is `rolled_back`, `rolled_back` is said once, naming the failing service, and the ticket goes back to Todo with the note.
+   - The time of a merge request is kept before the call, and a merge the ledger already shows is not asked again.
+4. **The card.**
+   - The release item carries `train`, from the train's store as it lands, waiting or handled. Its `pr` is the first service's, and its `heads` are every service's.
+   - `TrainStop` gains `head` and `note`, and `TrainState` gains `halted`.
+   - `groups` and `flags` are kept only when there are some, so a one-service card is unchanged until lane 18 fills `flags.ts`.
+   - The diff given to `flags()` is the services' diffs one after the other, each with its repository's own paths.
+   - What a provider changes that cannot be read is not taken as compatible: with a consumer the ticket does not change, the card is blocked.
+   - The approve route answers 409 with `proposal` for a blocked card.
+5. **Workdirs and publish.**
+   - A train ticket has a checkout per service under `<workdirs>/<ticket>/<service>`, through `ticketCheckout` as it is. A one-service ticket keeps `<workdirs>/<ticket>`.
+   - The author and the reviewer work in the first named service's checkout until lane 23's steps.
+   - A ticket that names no service is on the workspace's first service.
+   - Each service is published from its own checkout, with its own repository, base and forge. A service whose branch has no commit of its own is left out of the train, with a note.
+   - Each review run is named by `reviewRun(session, service)`, so two pull requests #7 never share a `runs` row.
+6. **The API shapes of waves 7 and 8** (`v2/src/api/types.ts`):
+   - `SessionPlan`, on the API's session state (`ApiSessionState.plan`), and `SessionPlanItem`.
+   - The routes `POST /api/sessions/:id/plan/go` and `change` (lane 17's), `GET /api/sessions/:id/files` and `files/*`, `POST /api/sessions/:id/takeover` and `giveback` (lane 20's). Each route is excluded from `test/flow/api.test.ts` through `SESSION_PLAN_ROUTES` and `SESSION_TABS_ROUTES`, with the serving lane named.
+   - `ReleaseItem.groups` and `flags`, `ChangesReport`, `PlanItem.sensitivity`, `ServiceSensitivity`, `SessionFiles` and `SessionFile`.
+   - The taken-over session as `takenOver` (`by`, `at`) on `SessionSummary` and the session state, with `ApiSessionPhase` (`paused` added).
+
+   Two of these are additive only, because the screens map every member of `InboxItem` and `SessionPhase` and fail the typecheck otherwise:
+   - `SessionPlanItem` is in `NextInboxItem`, not yet in `InboxItem`. Lane 21 adds it with the inbox screen that renders it.
+   - `SessionSummary.phase` keeps the harness's phases. `paused` joins it with lanes 20 and 22, which own those screens.
+7. **Two files outside the lane's list:** `v2/test/api/types.test.ts`, which pins the route list (31 routes now), and `v2/test/flow/fixtures/one-service-events.json`, the fixture below.
+
+**Consequences.**
+- **Tests first.** Each one failed on `origin/v2` at `81bf1d6`, where the modules did not exist:
+  - `test/release/order.test.ts`, `flags.test.ts` and `brokers.test.ts`.
+  - `test/flow/train.test.ts`: the fake adapter with a fake lock per service, covering the landing in order with the gap, the queued retry, the reverse rollback, a refused rollback, the block, a drifted head, the unread change and the restart's merge.
+  - `test/flow/effects-services.test.ts` (two real temporary repositories) and the new cases of `test/flow/inbox-store.test.ts`.
+  - `test/approval/train.test.ts`: the route, with v1's `tracker.sh moved-by-owner` as the oracle of each signed move.
+  - `test/flow/one-service.test.ts` wrote its fixture on the engine before this lane and still matches it after. It compares the events, flow events, inbox items, calls, starts and moves of a whole one-service ticket, with the configuration as milestone 1 writes it and with its one-service workspace spelled out.
+- **The real run** (`test/release/brokers.test.ts`, on this server, 2026-10-22). Two real brokers ran with one shared `ORCH_LEDGER`, two state folders and two temporary repositories, both pull requests numbered 7, with a fake `gh` and `docker`. Results:
+  - Before the approval, `merge-pr.sh --dry-run` of the filter API said "the user has not agreed".
+  - After it, the filter API's dry run said `would_merge: 7` with its own reviewed commit, found in the shared ledger with its report in its own folder.
+  - The guestbook's dry run refused the first move: "the move of the user to « Ready to Ship » is older than the request".
+  - The filter API's real merge (its fake `gh` recorded exactly its head) left the ticket Done.
+  - Once the train put the ticket back and signed again for the guestbook's record, the guestbook's dry run said `would_merge: 7` with its own commit, and its merge followed. The ledger holds two `merged_by_script` rows, in that order.
+- **Section 8's unknown.** Five rounds of both brokers' `merge-pr.sh` run at once on the one ledger each answered what it answers alone (0 and 6), with no lock error. Within what was run, the brokers contend on nothing beyond SQLite's own locking: `merge.lock`, the secret and the validations are per state folder.
+- **`request_rollback` from the service account is accepted by the broker under the setup's `human_user`.** It reached `lib/release.mjs rollback`, which answered "No Cleared release recorded" (the fake `gh` gives no merge commit, so no watch started).
+- **A gap this lane cannot close in its files.** On a shared ledger, `lib/release.mjs rollback <ticket>` reverts the ticket's newest `releases` row. After the guestbook's own rollback, that row is the guestbook's: with the rows as the watch writes them, the filter API's `request_rollback` answered "This release was already rolled back". So the reverse rollback of an earlier service does not work through the lock as it is.
+  - The train reports such a service as still live, "could not be rolled back", on the card and in the ticket's note, and the owner reverts it by hand.
+  - The fix is out of this lane: `lib/release.mjs rollback` choosing the row of its own repository, for example by `merge_sha` being in `ORCH_REPO` or by a pull request argument. That makes it a v1 change, for the orchestrator to place.
+  - Row M5 stays `partial` until then, and until lane 21's card.
+- **Not run here.** A real `gh` and forge, a real release watch with a health check, `auto_rollback` on a real deploy, and the guestbook and filter API brokers of this server. These are the multi-service proof's (lane 29).
+- **Checks.** `npm test` (the node suites and 101 Vitest tests), `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
+- **The requirements matrix.** M5 is `partial`, delivered by this lane's pull request, proven by its train tests and the real run. The new line P15 records choice 1.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-workspace-lock`, at the orchestrator's request.
