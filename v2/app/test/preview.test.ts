@@ -157,7 +157,8 @@ test('without a preview origin the app\'s policy is the one it had', async () =>
   try {
     const { cookie } = await signedIn(app);
     const page = await fetch(`${app.base}/sessions/s1`, { headers: { cookie } });
-    assert.equal(page.headers.get('content-security-policy'), "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    // As before, but for the page's own style nonce (lane 32, style-nonce.test.ts).
+    assert.match(page.headers.get('content-security-policy') ?? '', /^default-src 'self'; style-src 'self' 'nonce-[A-Za-z0-9+/=]+'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'$/);
     assert.ok(!(await page.text()).includes('data-preview'));
   } finally {
     await app.close();

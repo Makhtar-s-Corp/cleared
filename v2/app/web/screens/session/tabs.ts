@@ -3,9 +3,9 @@
 //   Plan: the session plan (lane 17) with its confidence, Go and Change;
 //   Terminal: the timeline and the composer of milestone 1; once the owner
 //     took the session over, the command that resumes it on the server
-//     (lane 32 mounts the web terminal beside it);
+//     (lane 32 mounts the web terminal beside it: components/terminal/);
 //   Editor: the changed files and a file's diff against the ticket's base,
-//     read only (lane 32 makes it editable);
+//     opened for editing by lane 32 (components/editor/);
 //   Browser: the session's trial environment from the preview listener's
 //     own origin (decision 20), else milestone 1's "Screen so far".
 // The Plan tab also lists the ticket's steps across services (decision 26,

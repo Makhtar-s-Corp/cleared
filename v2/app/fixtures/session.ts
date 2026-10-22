@@ -20,10 +20,11 @@
 // the ticket's base held them and as the checkout holds them now, whose
 // diffs are the Changes card's counts; the session's preview key, and the
 // example app's upcoming screen as its trial environment (fixturePreview);
-// and the take over, the give back, the Go and the Change as routes.
+// and the take over, the give back, the Go and the Change as routes. Lane
+// 32 adds the web terminal's routes and the editor's save (fixtureHuman).
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sseFrame, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type Workspace } from '../../src/api/types.ts';
+import { sseFrame, TERMINAL_INPUT_MAX_BYTES, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type Workspace } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import { GIVEN_BACK } from '../../src/flow/takeover.ts';
 import { createCleaner } from '../../src/session/clean.ts';
@@ -567,6 +568,7 @@ function readJson(request: IncomingMessage): Promise<unknown> {
 // `?after=` and ends.
 export function sessionSource(fixture: SessionFixture, options: { readonly now?: () => Date } = {}): SessionSource {
   const calls: Call[] = [];
+  const human = fixtureHuman();
   const now = options.now ?? (() => new Date());
   const players = new Map<string, Player>();
   const player = (id: string): Player => {
@@ -597,7 +599,8 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       if (parts.length === 3) return sendJson(response, 200, { files: changedFiles(detail.state.files) });
       const version = url.searchParams.get('version');
       if (version !== null && version !== 'base') return sendJson(response, 400, { error: 'version is base, or nothing for the checkout' });
-      const found = fixtureFile(parts.slice(3).map(decodeURIComponent).join('/'), version === 'base' ? 'base' : 'current');
+      const path = parts.slice(3).map(decodeURIComponent).join('/');
+      const found = version === 'base' ? fixtureFile(path, 'base') : human.file(path);
       return found ? sendJson(response, 200, found) : sendJson(response, 404, { error: 'no such file in the checkout' });
     }
     if (method === 'GET' && sub === 'events') {
@@ -606,6 +609,9 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       for (const event of fixture.store.events.after(id as string, Number.isInteger(from) && from >= 0 ? from : 0)) response.write(sseFrame(event));
       return void response.end();
     }
+    // The web terminal and the editor's save (lane 32).
+    const route = { method, url, parts, user, taken: fixture.takenOver.get(id as string), record: (body: unknown) => calls.push({ method, path: url.pathname, user, body }) };
+    if (await human.handle(request, response, route)) return;
     if (method !== 'POST') return sendJson(response, 405, { error: 'method not allowed' });
     const body = await readJson(request);
     calls.push({ method, path: url.pathname, user, body });
@@ -650,6 +656,7 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       const taken = fixture.takenOver.get(id as string);
       if (!taken) return sendJson(response, 409, { error: `session ${id} is not taken over` });
       if (taken.by !== user) return sendJson(response, 403, { error: 'only the account that took the session over gives it back' });
+      human.close(id as string, 'give_back');
       fixture.takenOver.delete(id as string);
       player(id as string).play(stamp, text(`given-back-${calls.length}`, 'user', GIVEN_BACK, 'cleared'), delta({ phase: 'working', status: 'Working' }));
       return sendJson(response, 200, { accepted: true });
@@ -694,6 +701,161 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
         if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });
         else response.destroy();
       });
+    },
+  };
+}
+
+// The web terminal and the editor's save over the fixtures (decisions 32
+// and 33, lane 32), for both fixture sources: a stand-in for the shell of
+// each session taken over (it echoes what is typed and answers ls, pwd,
+// git status, colours and exit; its first lines are the service's, then a
+// line in 256 colours and one in 24-bit colour), its stream as the service
+// sends it (the chunks after Last-Event-ID or ?after=, held open until the
+// terminal closes), and the checkout's files as the editor saves them (a
+// stale hash is a 409 with the current one; CLAUDE.md and .claude/ are
+// refused by the default rule; a dependency of package.json asks for its
+// confirmation). Nothing runs: the shell is words.
+type Listener = (frame: string) => void;
+type FixtureTerminal = { readonly chunks: { seq: number; data: string }[]; readonly listeners: Set<Listener>; line: string; closed?: TerminalClosed['reason'] };
+
+const PROMPT = '\u001b[1mnode@session\u001b[0m:/workspace$ ';
+const COLOURS = '\u001b[38;5;208m256 colours\u001b[0m: \u001b[48;5;24m\u001b[38;5;231m a line from the palette \u001b[0m\r\n'
+  + '\u001b[38;2;200;30;40m24-bit colour\u001b[0m: \u001b[48;2;20;80;160m\u001b[38;2;255;255;255m a line in true colour \u001b[0m\r\n';
+
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+const dataFrame = (chunk: { seq: number; data: string }) => `id: ${chunk.seq}\nevent: data\ndata: ${JSON.stringify(chunk)}\n\n`;
+const closedFrame = (reason: TerminalClosed['reason']) => `event: closed\ndata: ${JSON.stringify({ reason })}\n\n`;
+
+export type FixtureHuman = {
+  readonly files: Map<string, string>;
+  // A file of the checkout as the files route answers it, after the saves.
+  file(path: string): SessionFile | undefined;
+  // Closes a session's terminal, as Give back does.
+  close(session: string, reason: TerminalClosed['reason']): void;
+  // Answers the terminal's routes and the save; false for any other route.
+  handle(request: IncomingMessage, response: ServerResponse, route: {
+    readonly method: string; readonly url: URL; readonly parts: readonly string[]; readonly user: string;
+    readonly taken: TakenOver | undefined; readonly record?: (body: unknown) => void;
+  }): Promise<boolean>;
+};
+
+export function fixtureHuman(): FixtureHuman {
+  const files = new Map(Object.entries(FIXTURE_FILES).map(([path, versions]) => [path, versions.current]));
+  const terminals = new Map<string, FixtureTerminal>();
+  const push = (terminal: FixtureTerminal, data: string) => {
+    const chunk = { seq: terminal.chunks.length + 1, data };
+    terminal.chunks.push(chunk);
+    for (const listener of terminal.listeners) listener(dataFrame(chunk));
+  };
+  const close = (session: string, reason: TerminalClosed['reason']) => {
+    const terminal = terminals.get(session);
+    if (!terminal) return;
+    terminals.delete(session);
+    terminal.closed = reason;
+    for (const listener of terminal.listeners) listener(closedFrame(reason));
+    terminal.listeners.clear();
+  };
+  const run = (session: string, command: string): string => {
+    if (command === '') return '';
+    if (command === 'ls') return `${[...files.keys()].join('\r\n')}\r\n`;
+    if (command === 'pwd') return '/workspace\r\n';
+    if (command === 'git status') return `On branch cleared/${TICKET_ID}\r\nChanges not staged for commit:\r\n${[...files.keys()].map((path) => `\t\u001b[31mmodified:   ${path}\u001b[0m`).join('\r\n')}\r\n`;
+    if (command === 'colours') return COLOURS;
+    if (command === 'exit') { queueMicrotask(() => close(session, 'exit')); return 'logout\r\n'; }
+    return `${command.split(' ')[0]}: not in the fixtures\r\n`;
+  };
+  const type = (session: string, terminal: FixtureTerminal, data: string) => {
+    let echo = '';
+    for (const char of data) {
+      if (char === '\r' || char === '\n') {
+        const command = terminal.line.trim();
+        terminal.line = '';
+        echo += `\r\n${run(session, command)}`;
+        if (command !== 'exit') echo += PROMPT;
+      } else if (char === '\u007f') {
+        if (terminal.line) { terminal.line = terminal.line.slice(0, -1); echo += '\b \b'; }
+      } else if (char >= ' ') {
+        terminal.line += char;
+        echo += char;
+      }
+    }
+    if (echo) push(terminal, echo);
+  };
+  const json = async (request: IncomingMessage): Promise<Record<string, unknown> | undefined> => {
+    const value = await readJson(request);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  };
+
+  return {
+    files,
+    file(path) {
+      const text = files.get(path);
+      return text === undefined ? undefined : { path, text, lines: text.split('\n').length - 1, cut: false, hash: sha256(text) };
+    },
+    close,
+    async handle(request, response, { method, url, parts, user, taken, record }) {
+      const [collection, id, sub, action] = parts;
+      if (collection !== 'sessions' || !id) return false;
+      const answer = (status: number, body: unknown): true => { sendJson(response, status, body); return true; };
+      if (method === 'PUT' && sub === 'files' && parts.length > 3) {
+        const path = parts.slice(3).map(decodeURIComponent).join('/');
+        const body = await json(request);
+        record?.(body);
+        if (taken && taken.by !== user) return answer(403, { error: 'the session is taken over by another account' });
+        const current = files.get(path);
+        if (current === undefined) return answer(404, { error: 'no such file in the checkout' });
+        const { text, hash, confirm } = body ?? {};
+        if (typeof text !== 'string' || typeof hash !== 'string') return answer(400, { error: 'text and hash are required' });
+        const refuse = (status: number, rule: string | null, reason: string, extra: object = {}) => answer(status, { error: reason, rule, reason, confirmable: false, ...extra });
+        if (hash !== sha256(current)) return refuse(409, null, 'the file changed since the editor loaded it: reload it', { hash: sha256(current) });
+        if (path === 'CLAUDE.md' || path.endsWith('/CLAUDE.md') || path.startsWith('.claude/')) return refuse(403, 'default', 'the session\'s own files are not edited');
+        if (path === 'package.json' && confirm !== 'install.package' && text !== current)
+          return answer(403, { error: 'a dependency change asks first', rule: 'install.package', reason: 'a dependency change asks first', confirmable: true });
+        files.set(path, text);
+        return answer(200, { saved: true, hash: sha256(text) });
+      }
+      if (sub !== 'terminal' || parts.length !== 4) return false;
+      if (!taken) return answer(409, { error: 'the session is not taken over: take it over first' });
+      if (taken.by !== user) return answer(403, { error: 'the terminal is for the account that took the session over' });
+      const terminal = terminals.get(id);
+      if (method === 'GET' && action === 'stream') {
+        if (!terminal) return answer(409, { error: 'no terminal is open for this session' });
+        const after = Number(request.headers['last-event-id'] ?? url.searchParams.get('after') ?? 0);
+        response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
+        for (const chunk of terminal.chunks) if (chunk.seq > (Number.isFinite(after) ? after : 0)) response.write(dataFrame(chunk));
+        const listener: Listener = (frame) => {
+          response.write(frame);
+          if (frame.startsWith('event: closed')) response.end();
+        };
+        terminal.listeners.add(listener);
+        request.on('close', () => terminal.listeners.delete(listener));
+        return true;
+      }
+      if (method !== 'POST') return answer(405, { error: 'method not allowed' });
+      const body = await json(request);
+      record?.(body);
+      if (action === 'open') {
+        if (terminal) return answer(409, { error: 'a terminal is already open for this session' });
+        const opened: FixtureTerminal = { chunks: [], listeners: new Set(), line: '' };
+        terminals.set(id, opened);
+        const resume = `claude --resume ${id}`;
+        push(opened, `\u001b[2m# The session is paused. To run its harness here: ${resume}\u001b[0m\r\n${COLOURS}${PROMPT}`);
+        return answer(200, { opened: true, cols: Number(body?.cols) || 80, rows: Number(body?.rows) || 24, resume });
+      }
+      if (!terminal) return answer(409, { error: 'no terminal is open for this session' });
+      if (action === 'input') {
+        const data = body?.data;
+        if (typeof data !== 'string') return answer(400, { error: 'data is the text typed' });
+        if (Buffer.byteLength(data) > TERMINAL_INPUT_MAX_BYTES) return answer(413, { error: `at most ${TERMINAL_INPUT_MAX_BYTES} bytes per post` });
+        type(id, terminal, data);
+        return answer(200, { accepted: true });
+      }
+      if (action === 'resize') return answer(200, { accepted: true });
+      if (action === 'close') {
+        close(id, 'closed');
+        return answer(200, { accepted: true });
+      }
+      return false;
     },
   };
 }

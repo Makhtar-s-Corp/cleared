@@ -10,7 +10,9 @@
 // routes are answered too: a ticket's steps, the contract and knowledge
 // items with their Approve, Send back and Reject (kept in memory), the asks
 // (a new one starts and stays starting; a follow-up runs), the recipes with
-// their run, and the schedules.
+// their run, and the schedules. Lane 32's too: the web terminal of a
+// session taken over (a stand-in shell) and the editor's save, kept in
+// memory (fixtureHuman of fixtures/session.ts).
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { leadFrame, sseFrame, type Ask, type ContractItem, type CreateTicketBody, type KnowledgeItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
@@ -19,7 +21,7 @@ import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
-import { PREVIEW_KEY, fixtureFile, workspaceFixture } from './session.ts';
+import { PREVIEW_KEY, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
 import { contractItem, knowledgeItem } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
@@ -59,6 +61,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
   const takenOver = new Map<string, TakenOver>();
+  const human = fixtureHuman();
   const decided: (ContractItem | KnowledgeItem)[] = [contractItem(now()), knowledgeItem(now())];
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
   // The first author's ticket and LOCAL-163 run in four steps, each live
@@ -167,9 +170,11 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (method === 'GET' && sub === 'files') {
         if (parts.length === 3) return sendJson(response, 200, { files: changedFiles(files()) });
         const version = url.searchParams.get('version');
-        const found = version === null || version === 'base' ? fixtureFile(parts.slice(3).map(decodeURIComponent).join('/'), version === 'base' ? 'base' : 'current') : undefined;
+        const path = parts.slice(3).map(decodeURIComponent).join('/');
+        const found = version === 'base' ? fixtureFile(path, 'base') : version === null ? human.file(path) : undefined;
         return found ? sendJson(response, 200, found) : sendJson(response, 404, { error: 'no such file in the checkout' });
       }
+      if (await human.handle(request, response, { method, url, parts, user, taken })) return;
       if (method === 'POST' && sub === 'takeover' && parts.length === 3) {
         if (session.role !== 'author') return sendJson(response, 409, { error: 'only an author\'s session is taken over' });
         if (taken) return sendJson(response, 409, { error: `session ${id} is already taken over` });
@@ -179,6 +184,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (method === 'POST' && sub === 'giveback' && parts.length === 3) {
         if (!taken) return sendJson(response, 409, { error: `session ${id} is not taken over` });
         if (taken.by !== user) return sendJson(response, 403, { error: 'only the account that took the session over gives it back' });
+        human.close(id, 'give_back');
         takenOver.delete(id);
         return sendJson(response, 200, { accepted: true });
       }

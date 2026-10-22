@@ -2611,3 +2611,92 @@ The lane's choices:
 - **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request (225). M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P37 (choices 1 to 3) and P38 (choices 4 to 7) record the lane's choices. They were P32 and P33 in the first version of the pull request, then P35 and P36 after lane 26 (pull request 222) took P32 to P34; lane 31 (pull request 224) took P35 and P36 before this lane merged.
 - Pull request: 225, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-additions-screens`.
+
+## 2026-10-22: the web terminal and the editable editor on the session screen, and the page's style nonce (the author's choices, lane v2-j2-terminal-editor-screens)
+
+**Decision.** Lane 32 applies the session screen's part of decisions 32 and 33 of the [milestone 2 plan](milestone-2-plan.md), on lane 20's tabs and lane 31's routes. The Terminal tab of a session taken over by the signed-in account, on the app's loopback address, mounts the web terminal. The Editor tab opens a changed file for editing and saves it. Every page carries its own style nonce, which both packages need. The lane's choices:
+
+1. **Where the terminal goes** (`components/terminal/`, `screens/session/`).
+   - It takes the timeline's place while the session is taken over by the signed-in account and `/api/me` says `terminal: true`. The timeline does not move while the session is paused, and comes back at Give back.
+   - The notice stays above it, shorter. The server command (`docker exec -it ... claude --resume <id>`) stays in it as the fallback, as lane 20 asked. The disabled composer stays below.
+   - Elsewhere (the public origin, or an app that does not say) the tab shows lane 20's command and says why: the web terminal opens on this machine's browser only. Another account's take over shows the command and no terminal.
+2. **How it talks to lane 31's routes** (`components/terminal/model.ts`, `Terminal.tsx`).
+   - **The open waits for the tab.** A hidden terminal has no size to give the shell, so the first open happens when the Terminal tab is first shown. The terminal then stays mounted while other tabs are open.
+   - **Open, then the stream.** An open answered 409 is a terminal already open (a reload of the page): the stream is attached, the service replays what it holds, and the size is posted again. Each chunk is written once, by its seq.
+   - **The end.** The stream's `closed` frame ends it with its reason (Give back, idle, closed, exit), and the screen says it in words. A stream that gives up is "lost". Open again opens a new one, except after Give back.
+   - **The keys.** They are batched every 30 ms into posts of at most 4096 bytes of UTF-8, cut between characters, never between the two halves of a surrogate pair. The posts are sent one at a time, so they reach the shell in order. A refused post stops the batcher and says the typed text was not sent.
+   - **The size** follows the panel (a `ResizeObserver` and the fit addon), posted 150 ms after the last change. **The colours** follow the page's theme (a `MutationObserver` on `data-theme`).
+3. **The shims, once per screen** (issue 200, items 2 and 3). `screenShims.hold(nonce)` installs `installStyleNonce` and `installStyleAttributeCssom` at the first hold, just before `term.open()`, and removes them at the last release, after `term.dispose()`. Each release counts once. So a second mount (React's StrictMode, a reopen) can never remove them from under a live terminal. xterm writes `<style>` elements on fit and on theme changes too, not only at open, which is why they stay installed while it is mounted.
+   - **Not done here, for lane `v2-j2-deps-xterm`'s file:** the unwrapped insertion methods and the colour pattern (issue 200, items 1 and 4). `style-nonce.ts` is imported, not edited. The xterm pin stays exact for that reason, and `app/test/session/terminal-browser.test.ts` is to be run again on every bump of either package.
+4. **When a file can be edited** (`components/editor/model.ts`).
+   - **Only when the text on screen is the file.** Lane 20's files route cleans the text it shows (a secret's shape, a path of the service) but hashes the file's bytes. Saving the cleaned text with that hash would pass the hash check and write the mask over the file. So the editor hashes the text it was given (SHA-256, `crypto.subtle`) and compares it with the route's hash. If they differ, the file is read only, and the bar says that some of its text is hidden on screen.
+   - **Other read-only cases:** a file the viewer cut at 400 lines; a page with no digest (not a secure context, which the loopback address and the https proxy both are); an ended session, a reviewer's, or another account's take over.
+   - **What the service still checks:** the owner account, the review running, the ticket's state. Those come back as the save's refusal, with their sentence.
+5. **The editor's states.**
+   - **Save** sends the text and the hash the editor loaded, then the hash each save answered. Typing can go on during a save: the text sent is kept apart, and what was typed meanwhile stays unsaved.
+   - **A 409 with a hash is a conflict.** Its Reload takes the file as it is now and drops the person's changes. The sentence says so before the click.
+   - **A 403** shows the rule and its reason. For `install.package` and `scripts.change` the route answers `confirmable`, and the editor shows "Save anyway", which sends the rule. A `confirmable` with any other rule is shown as a refusal.
+   - **The session's own change to the open file** (lane 20's refetch, when the session's files move) never replaces the editor's text. The tab says the session changed the file and offers Reload.
+   - **The file list** is held while there are unsaved changes, so no edit is dropped by a click on another file. "Stop editing" puts the file back.
+   - **The editor keeps a file's own line ends** (`\r\n` through `EditorState.lineSeparator`). Mod-S saves.
+   - **After a save** the viewer holds the saved text and hash, so the file is not taken for the session's change.
+6. **The packages load by a dynamic import of the session screen only.**
+   - `components/terminal/xterm.ts` and `components/editor/codemirror.ts` are the only modules that import them. The session screen imports each with `import()`, so Vite builds them as chunks of their own: xterm 332 kB, CodeMirror 501 kB.
+   - xterm's sheet is in xterm's chunk, a file of the app's origin.
+   - `codemirror.ts` also imports `@codemirror/state`, `@codemirror/view`, `@codemirror/language` and `@lezer/highlight`. They come with `codemirror` (lane 30), and no dependency is added.
+   - CodeMirror takes the nonce through `EditorView.cspNonce`. The terminal's shims are not for it.
+7. **The style nonce** (`app/src/server.ts`).
+   - **Every page gets one**, the sign-in page included, as the plan says ("each page it writes"). Each draws 128 random bits, adds `style-src 'self' 'nonce-<value>'` to that response's policy, and writes `<meta property="csp-nonce" nonce="<value>">` in the page.
+   - **The page reads it** from the element's `nonce` property, since Chromium hides the attribute.
+   - **What is unchanged:** every other directive; `script-src` still falls back to `default-src 'self'`; never `unsafe-inline`.
+   - **What carries no nonce:** a file, a catalog and an API answer keep the policy as it was. `contentPolicy(previewOrigin)` without a nonce is the policy of before.
+8. **The fixture sources** (`fixtures/session.ts` `fixtureHuman`, used by `sessionSource` and `fixtures/source.ts`) answer the terminal's routes and the save.
+   - **A stand-in shell.** Its first line is the service's. Then come a line in 256 colours and one in 24-bit colour, for the violation count. It echoes what is typed and answers `ls`, `pwd`, `git status`, `colours` and `exit`.
+   - **Its stream** answers after `Last-Event-ID` or `?after=` and is held open until the terminal closes. Give back closes it.
+   - **The checkout's files** are kept as the editor saves them: a stale hash is a 409 with the current one; `CLAUDE.md` and `.claude/` are refused by `default`; a dependency of `package.json` asks for its confirmation.
+9. **Issue 213's nit (a) is taken:** the selected file in the Editor's list is a tint, without the heavy ink bar. The other nits ("Done when" twice, Give back on its own row at 768) are left.
+
+**Consequences.**
+- **Tests first.** Commit 07ba31f holds them alone, and each failed on `origin/v2` at b62572c. Two files failed at import, two style-nonce tests and three bundle tests failed, and the Vitest file failed to load. The new files are:
+  - `app/test/session/terminal.test.ts`: the batching (no post above 4 KiB, a burst in order, one post at a time), the choice between the terminal and the command, the chunks once, the closed reasons, the routes with the anti-forgery header, the nonce's reading, and the shims held once per screen;
+  - `app/test/session/editor.test.ts`: when a file is editable, the states, the answers of the save, the PUT with the loaded hash;
+  - `app/test/style-nonce.test.ts`: two pages, two nonces, each in its page; no `unsafe-inline`; the other directives as before; a file, a catalog and an API answer with no nonce;
+  - `app/test/session/bundles.test.ts`: the build manifest read, so neither package is in any chunk the entry or a screen loads at once, both are behind the session screen's dynamic import only, and xterm's sheet is in no other screen's sheets;
+  - `app/web/test/session/terminal-editor.test.tsx`: each state of the terminal's frame and of the editor, the command and why, both languages, no inline style;
+  - `app/test/session/fixture-human.test.ts`, written after the code: the tower fixture source's terminal, stream, save and Give back, through the app;
+  - `app/test/session/terminal-browser.test.ts` (Chromium). It takes a session over, types `ls` and Enter and finds the input route called with `ls\r`. It saves a change and finds the PUT carrying the loaded hash, then a 409 showing the conflict with Reload, then a 403 showing the rule's reason. With both packages mounted, it shows a line in 256 colours and one in 24-bit colour, selects text in the terminal, types in the editor, opens its completion list and its search panel, then counts the page's `securitypolicyviolation` events: 0 (issue 195, F3). A second test, through an `/api/me` that says `terminal: false`, shows the command and why.
+- **The violation count proves something.** With the shims' hold removed, the same test counted `style-src-elem` violations and failed. The hold was then put back.
+- **Files outside the lane's list:**
+  - `app/test/static.test.ts` and `app/test/preview.test.ts` compared a page's whole policy with the old string. They now accept that string with the page's `style-src` nonce, and nothing else.
+  - `docs/v2/requirements-matrix.md`.
+- **Checks.**
+  - `npm test`: 1183 node tests, 1175 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
+  - `npm run typecheck` and `npm run guard -- --base origin/v2` are green. The guard ran without a private-term list (`CLEARED_REPO` unset).
+  - The browser tests pass with `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME` (Chromium 1248): this lane's two, lane 20's three, and lane 13's two.
+- **The visual loop.** The app ran on an ephemeral `127.0.0.1` port (after `ss -ltn`), against the session fixture's source, in headless Chromium, with the clock fixed at the fixture's time.
+  - **The captures** are `/tmp/cleared-captures/j2/terminal-editor-<state>-<width>-<theme>.png`: the states `terminal`, `terminal-closed`, `editor`, `editor-saved`, `editor-conflict` and `editor-confirm`, at 1440, 1280, 768 and 390, light and dark. Beside them are `terminal-command` at 1440 and 390, and `terminal-editor-reference-session.png` rendered from `/tmp/cleared-reference/session.html`. That is 51 files, mode 644, with the pointer in an empty corner. None is committed.
+  - **The checks:** every capture had no horizontal overflow, no page error and no `securitypolicyviolation`.
+  - **The first loop found** a global `.open` rule (`margin-left: auto`) taking the state dot's class, the closed terminal's footer and the confirmation's buttons below the panel at 1440, and the phone's state dot on its own line. All were fixed before the art director's pass.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the captures, the reference and `app/DESIGN.md`. It found the identity held.
+  - **Taken:**
+    - the code's colours as `--code-*` tokens per theme, since CodeMirror's default palette is for light only and was unreadable in dark;
+    - the terminal's ANSI colours lifted on its dark surface, and a neutral selection;
+    - a confirmation on the amber card, as every gesture that waits for the person;
+    - a conflict that leads with Reload in ink, its sentence not in red;
+    - the editor's focus ring in the link colour;
+    - the footer centred;
+    - the command's label as a muted meta line;
+    - a 12 px terminal font on a phone;
+    - Save kept in view below 1440 (a footer sticky to the tab's scroll).
+  - **Not taken:**
+    - dropping the notice's title, which repeats lane 20's state strip but carries the time;
+    - resetting the editor's horizontal scroll, which follows the cursor as any editor does;
+    - Give back on its own row at 768, which is lane 20's strip (issue 213);
+    - the two primaries on a phone while editing (Give back and Save): each is the gesture of its own area.
+- **Followups.**
+  - **Lane 29 (the proof's step 11):** the selectors are `[data-terminal-state]` with `data-reason`, `.term-host` (click it to type), `[data-act="terminal_open"]`, and `[data-act]` set to `editor_edit`, `editor_save`, `editor_reload`, `editor_confirm` or `editor_close`, with `[data-editor-state]`. The terminal needs the loopback address.
+  - **Issue 200, items 1 and 4,** in `style-nonce.ts`, for its own small lane.
+  - **A save that changes nothing** is still a save (the route writes and journals it). The editor's Save is disabled until the text differs from what it loaded.
+- **The requirements matrix.** B5.10f, D4, O9, O10 and C1 name this pull request (228) and stay `partial` only for the live run (proof j2-multi steps 4 and 11). O14 and P17 are `done`. The new lines are P39 (the terminal, choices 1 to 3), P40 (the editor, choices 4 to 6) and P41 (the nonce, choice 7).
+- Pull request: 228, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-terminal-editor-screens`.
