@@ -7,10 +7,11 @@ import { ShieldCheck } from '@phosphor-icons/react';
 import type { Plan, PlanItem } from '../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import type { Translate } from '@/lib/i18n.ts';
-import { ACTION_KEYS, ACTIONS, chipText, facts, formatDuration, itemStateText, LANE_KEYS, planStateLine, positions, serviceChips, share, type PlanAction, type PlanPanelOptions } from './model.ts';
+import { ACTION_KEYS, ACTIONS, chipText, facts, formatDuration, itemStateText, LANE_KEYS, planStateLine, planSteps, positions, serviceChips, share, stepText, type PlanAction, type PlanPanelOptions } from './model.ts';
 
 function Item({ item, plan, t, language, services }: { readonly item: PlanItem; readonly plan: Plan; readonly t: Translate; readonly language: 'en' | 'fr'; readonly services: boolean }) {
   const chips = services ? serviceChips(item, plan) : [];
+  const steps = planSteps(item);
   const started = plan.state !== 'proposed' && plan.state !== 'superseded' && plan.state !== 'rejected';
   return (
     <li className="plan-item" data-position={item.position}>
@@ -33,6 +34,12 @@ function Item({ item, plan, t, language, services }: { readonly item: PlanItem; 
       </div>
       <span className={`lane ${item.lane}`}>{t(LANE_KEYS[item.lane])}</span>
       <span className="plan-estimate">{t('plan_estimate', { time: formatDuration(item.estimate.minutes, t), share: share(item.estimate, t, language) })}</span>
+      {/* The steps run under the item's whole width, its lane and estimate included. */}
+      {steps.length > 0 ? (
+        <ol className="plan-item-steps" aria-label={t('plan_steps_label')}>
+          {steps.map((step) => <li key={step.position} className="plan-item-step" data-step={step.position} data-kind={step.kind}><span className="plan-step-n" aria-hidden="true">{step.position}</span>{stepText(step, t, language)}</li>)}
+        </ol>
+      ) : null}
     </li>
   );
 }

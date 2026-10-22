@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ENDED, clock, parseCriteria, phaseOf, takenOverOf, type SessionView } from './model.ts';
 import {
-  CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planView, resumeCommand, type BrowserView, type DiffLine, type Tab, type TakeoverView,
+  CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planView, resumeCommand, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
 } from './tabs.ts';
 
 const ICONS: Readonly<Record<Tab, Icon>> = { plan: ListChecks, terminal: TerminalWindow, editor: Code, browser: Browser };
@@ -59,8 +59,34 @@ export function Criteria({ view, t }: { readonly view: SessionView; readonly t: 
 export const Confidence = ({ plan, t }: { readonly plan: SessionPlan; readonly t: Translate }) =>
   <span className={`confidence ${plan.confidence}`}>{t(`confidence_${plan.confidence}`)}</span>;
 
+// The ticket's steps across services (decision 26): each with its kind, its
+// service, what it waits for, its state and its cost; this session's marked.
+export function StepsCard({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
+  const steps = stepsView(view.steps, view.summary.id);
+  if (!steps) return null;
+  return (
+    <section className="card steps-card" aria-labelledby="ticket-steps-title">
+      <h3 id="ticket-steps-title" className="card-label">{t('ticket_steps_title')}</h3>
+      <ol className="ticket-steps">
+        {steps.rows.map((row) => {
+          const cost = stepCost(row, view.language, t);
+          return (
+            <li key={row.position} className={row.current ? 'ticket-step current' : 'ticket-step'} data-step={row.position} data-state={row.state} aria-current={row.current ? 'step' : undefined}>
+              <span className="step-n" aria-hidden="true">{row.position}</span>
+              <span className="step-what">{stepLine(row, t)}{row.current ? <span className="step-this">{t('ticket_step_this')}</span> : null}</span>
+              <span className={`step-state ${row.state}`}>{t(`ticket_step_${row.state}`)}</span>
+              {cost ? <span className="step-cost">{cost}</span> : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 // The Plan tab: the session plan with its confidence, Go and Change while it
-// waits, who gave the Go after; then the ticket's criteria.
+// waits, who gave the Go after; the ticket's steps across services; then
+// the ticket's criteria.
 export function PlanTab({ view, plan, t, changing = false, change = '', busy = false, note = '', onGo, onChangeOpen, onChangeText, onChangeSend, onChangeCancel }: {
   readonly view: SessionView; readonly plan: SessionPlan | null; readonly t: Translate;
   readonly changing?: boolean; readonly change?: string; readonly busy?: boolean; readonly note?: string;
@@ -109,6 +135,7 @@ export function PlanTab({ view, plan, t, changing = false, change = '', busy = f
           </>
         )}
       </section>
+      <StepsCard view={view} t={t} />
       <section className="card" aria-labelledby="plan-criteria-title">
         <h3 id="plan-criteria-title" className="card-label">{t('criteria_title')}</h3>
         <Criteria view={view} t={t} />

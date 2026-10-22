@@ -2504,3 +2504,110 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - **The requirements matrix.** B5.10f, D4, O9, O10 and C1 name this pull request and stay `partial` for lane 32's screens. P12 and P13 are `done`. The new lines P35 (the terminal's process) and P36 (what a human changed and how the session is told) record choices 1 and 6 (P32 to P34 are lane 26's, merged first as pull request 222).
 - Pull request: 224, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-terminal-editor-service`.
+
+## 2026-10-22: the steps, the contract and knowledge gestures, the questions to the code, the recipes and the schedules on the screens (the author's choices, lane v2-j2-additions-screens)
+
+**Decision.** Lane 27 applies the app's part of decisions 26 to 29 of the [milestone 2 plan](milestone-2-plan.md). It adds:
+
+- the ticket's steps on the session screen's Plan tab, on the tower's live sessions ("step 2 of 4, filter-api") and in the plan panel;
+- the contract item's Validate and Send back, and the knowledge item's Approve and Reject, in the inbox, and both kinds in the tower's Needs you;
+- the `/ask/:id` screen and "Ask about the code" in the tower's bar;
+- "Run a recipe" with its parameters' form, and the schedules in the tower's plans card.
+
+The lane's choices:
+
+1. **The `/ask/:id` page needs one line outside the lane's files.** `app/src/server.ts` writes a page only for the addresses of its `PAGES` list, and that file is lane 31's in wave 10. The plan names `app/src/catalog.ts` for the ask screen, which adds `ask` to the screens, but no page is served without the list's row.
+   - The lane adds the one row `/^\/ask\/[A-Za-z0-9_-]{1,64}$/`. It sits away from lane 31's edits (the loopback gate and `/api/me`), and a merge takes both.
+   - The rest is inside the lane's `v2/app/web/**`: `main.tsx`, `shell/App.tsx` (the screen's chunk), `ShellScreen` in `shell/Header.tsx` (no tab of its own), `lib/catalogs.ts`, and `title_ask` in the shell's catalogs.
+   - The screen is `screens/ask/Ask.tsx`, so the server's manifest reader finds its chunk and its sheet.
+2. **The ask screen** (`screens/ask/`).
+   - **Layout.** One reading column: the question as the page's title, what it is about (a service, a file and a line, or the whole platform), each turn as a card with its answer, then the sum and the follow-up field. No kit reference exists for it; it follows `app/DESIGN.md`.
+   - **Answers** are text (`white-space: pre-wrap`), never markup.
+   - **The cost.** A turn under a cent reads to the hundredth of a cent ($0.0023), else in cents. The week share is "week used at 29 %": the seven-day window as the reader's session last saw it, not this ask's share, as lane 25's `Ask.weekPercent` says. It is left out while it is null.
+   - **Polling.** The ask is read again every 2 seconds while a turn runs (`starting` or `running`), and never once it ended.
+   - **The follow-up** is held while a turn runs, since the reader answers 409 then. It is checked against `QUESTION_MAX`, which a test keeps equal to the reader's `MAX_QUESTION` (4000).
+   - **Refusals.** 409 reads as three questions at once for a new ask, and as a turn that runs for a follow-up.
+3. **"Ask about the code" in the bar.**
+   - The title and the description are the question.
+   - **Its target** is a `service:path:line` token of a workspace service (any service when the workspace could not be read, since the service checks it); a time such as 10:30:15 is no target. Else the one service picked; else the whole platform.
+   - The tower opens `/ask/<id>` at once.
+   - **A reader's session** is no longer drawn among the tower's live sessions (lane 25's followup): its role had no word in the tower's catalog, so it would have thrown, and it is the ask screen's. The sessions list (`/sessions`) had the same throw: it now lists a reader's session as "A question to the code", linked to its ask.
+   - **Not built:** an ask started from a session's Plan tab, which decision 28 also names (the lane's goal names the bar only). C11 stays `partial` for it.
+4. **The contract and knowledge items** (`screens/inbox/`).
+   - **Answered at once, with no grace.** Both routes answer before the work they start: the next steps for a contract, the memory's write for knowledge.
+   - **Send back** opens a field as the session plan's Change does, checked against `SEND_BACK_MAX`, which a test keeps equal to `MAX_SEND_BACK` of `flow/steps.ts`.
+   - **Refusals.** 404 and 409 read as already answered, and the list is read again. A knowledge item's 403 says only the workspace's owner answers it (lane 24's choice 3).
+   - **A handled item** says who did what and when, with a Send back's message.
+   - **Ids.** The routes name an item by its inbox id, encoded (it holds colons).
+   - **In the tower.** Both kinds join Needs you; a contract's title is the catalog's ("Contract of filter-api").
+5. **The steps.** They show only for a ticket of two steps or more, so a one-service ticket's screens are unchanged (tests compare the markup).
+   - **The session screen** reads `GET /api/tickets/:id/steps` at once and on its 10-second tick. The Plan tab shows a card of the steps, this session's outlined in ink, each with its state and cost. The ticket card's service line reads "on filter-api · step 2 of 4".
+   - **The tower** reads the steps in a workspace of several services only, once per ticket of its live authors.
+   - **The plan panel** lists an item's steps under its whole width (decision 26: "the plan shows the steps' order and dependencies"; matrix line M2 names lane 27 for it).
+   - **A steps answer that is not a list** shows no steps. The browser tests found it: a stand-in answering `/tickets/:id/steps` with the ticket made the session screen throw before its timeline drew.
+   - **Words.** A step's dependency reads "waits for 2 and 3": "after" was taken for an English sentence left in the French screens by the inbox's catalog check (the word is in a class name).
+6. **Recipes and schedules** (lane 26's routes, built beside this lane and merged before it as pull request 222; the screens send and read its shapes as served: the declared parameters only, the run's `plan` or `message`). Both are optional reads, so a service without them shows the tower as before: no "Run a recipe", no schedules.
+   - **The form** refuses a missing required parameter before anything is posted, with its own sentence. The form is `noValidate`, so the browser's bubble does not stand in for it; the `required` attribute stays for assistive technology.
+   - **Run** is outlined until the recipe can run, then in ink, so the bar's New ticket is not a second ink gesture on screen.
+   - **A run** says what it became and links to the plan (a ticket recipe) or the lead (a goal recipe).
+   - **A schedule** shows its next run ("tomorrow at 03:00", "on Mon at 08:00") and its budget; one switched off reads "Off" and comes last. The `every` text (lane 26's `day 03:00`, `weekdays 08:00`) is not shown: it is English, and the next run says when.
+7. **The French amounts** put a no-break space before the dollar, as the plan panel's `plan_cost` does.
+8. **Fixtures.**
+   - `fixtures/source.ts` (this lane's in wave 10) answers every route of this lane: the steps, the contract and knowledge gestures kept in memory, the asks (a new one stays `starting`, a follow-up runs, a second one is a 409), the recipes and their run, and the schedules. The inbox there now lists a contract and a knowledge item.
+   - `towerSource` and `inboxSource` answer them too.
+   - New values: `fixtures/ask.ts`, and in `fixtures/tower.ts` `ticketSteps`, `RECIPES` and `schedulesFixture`. In `fixtures/lead.ts`, `stepsPlan`.
+9. **Selectors for lane 29:**
+   - the bar: `data-bar="ask"`, `data-bar="recipe"`;
+   - the recipe form: `data-recipe`, `data-param`, `data-act="recipe_run"`;
+   - the inbox: `data-act` set to `contract_approve`, `contract_send_back`, `contract_send_back_send`, `contract_keep`, `knowledge_approve` or `knowledge_reject`;
+   - the steps: `data-step` on a live session's tag, on the Plan tab's rows (with `data-state`) and in the plan panel (with `data-kind`);
+   - the ask: `data-ask` and `data-state` on the screen, `#follow-input`, `data-act="follow"`, `data-ask-total`;
+   - the schedules: `data-schedule`.
+10. **Review followups taken:** issue 210, item 1 (the services picked are dropped once the title is cleared, which hid their chips), and item 5 (the inbox's plan item shows each item's services: its catalog holds `PLAN_SERVICE_KEYS`, and it passes `services: true`).
+
+**Consequences.**
+- **Tests first.** Commit `9bbf704` holds them alone, with the fixtures' new values (data only). On `origin/v2` at `5d68c50`:
+  - 8 of the 11 node tests failed: the files failed at import, or the page answered 404;
+  - 16 Vitest tests in 6 files failed.
+
+  The new files are:
+  - `app/test/ask/model.test.ts` and `app/test/ask/app.test.ts`;
+  - `app/test/tower-additions.test.ts`, `app/test/inbox/additions.test.ts`, `app/test/session/steps.test.ts` and `app/test/lead/steps.test.ts`;
+  - their Vitest files under `app/web/test/`.
+
+  Among them: a test that Approve on a contract calls its route and the item leaves what waits, through the app; and a test that the recipe form refuses a missing parameter before posting.
+  - **Changed in the first commit:** lane 21's test of the reading-only items now expects the gestures, and `app/test/fixtures.test.ts` lists the new kinds.
+  - **Adjusted while the code was written:** a contract's need title is the catalog's (`needTitle`); the French amounts use the no-break space; "waits for" replaces "after"; and lane 22's test of a kind the tower does not draw now uses a later kind, since knowledge is drawn.
+- **Checks.**
+  - `npm test`, after the merge of `origin/v2`: 1119 node tests (1113 pass, 6 skipped as before; 1036 before the lane, 47 of them lane 26's) and 177 Vitest tests (154 before).
+  - `npm run typecheck` is green.
+  - `npm run guard -- --base origin/v2` is green, without a private-term list (`CLEARED_REPO` unset).
+  - **The browser tests**, with `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME`: the five of `app/test/session/tabs-browser.test.ts` and `app/test/choices-browser.test.ts` pass. On the lane's code before the guard above, four of them timed out on the session screen, while all five passed on `origin/v2` at `5d68c50`. `app/test/notify/browser.test.ts` times out on this branch and on `origin/v2` alike, as lane 22 logged.
+- **The visual loop.** The app ran on an ephemeral `127.0.0.1` port per source (after `ss -ltn`), in headless Chromium, with the clock fixed at the fixtures' time.
+  - Captures, none committed, mode 644, with the pointer in an empty corner: `/tmp/cleared-captures/j2/additions-<screen>-<width>-<theme>.png` for `tower`, `tower-recipe`, `ask`, `ask-running`, `ask-starting`, `inbox-contract`, `inbox-contract-send-back`, `inbox-knowledge`, `session-steps` and `lead-steps`, at 1440, 1280, 768 and 390, light and dark. That is 80 files, with `additions-reference-<screen>.png` rendered from `/tmp/cleared-reference/`.
+  - All 80: no horizontal overflow, no page error, no `securitypolicyviolation`, no request off the app's origin.
+  - The first loop found the follow-up's button unreadable (ink on ink, `.btn` being each screen's own rule) and the recipe form without the bar's margins; both were fixed before the art director's pass.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the captures, the references and `app/DESIGN.md`.
+  - **Taken:**
+    - an item's steps under its whole width in the plan panel;
+    - the step's "This session" under its line on a phone;
+    - a goal's schedule on two lines instead of cut;
+    - Run in ink only once the recipe can run;
+    - "Keep it as proposed" in place of the plan's "Keep the plan" on a contract;
+    - the ask's total wrapped without an orphan, and no resize grip;
+    - no eye icon on the ask's read-only line.
+  - **Not taken:**
+    - **dropping every dollar amount**, which the pass read in `DESIGN.md`'s "never a currency" (written of the tower's instruments). Decision 28 asks for each answer's `total_cost_usd`; the plan panel already shows the cost until the week share is measured (section 5.2 of the first plan); and the owner's decision on the Consumption screen allows dollars from a real source, which `total_cost_usd` is;
+    - the contract's file in Geist Mono, as the session's file paths are (issue 213, item 6, the same question);
+    - the shield on a sensitive service, lane 22's;
+    - the facts' label column on the knowledge item, the inbox's layout for every kind.
+- **Followups.**
+  - **A schedule's period** in the reader's words (lane 26's `every` format), beside its next run.
+  - **Lane 31:** the `PAGES` row of choice 1 is in `server.ts`, its file; a merge keeps both.
+  - **Lane 29:** the selectors of choice 9. Through the fixture source, a new ask stays `starting`, and its rehearsal needs a reader on the fake adapter.
+  - **Polling cost.** The tower reads one steps route per live author's ticket every 10 seconds in a workspace of several services. A step on `SessionSummary` would save those reads (a change of `types.ts`).
+  - **Issue 211, item 3** ("Rolled back" twice on a handled train) is left: lane 29's step 9 reads the line, and the chip is what files the train under "Handled today".
+  - **Issue 213's nits** on the session screen ("Done when" twice, the editor's selected file) are left to a pass on that screen.
+- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request (225). M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P37 (choices 1 to 3) and P38 (choices 4 to 7) record the lane's choices. They were P32 and P33 in the first version of the pull request, then P35 and P36 after lane 26 (pull request 222) took P32 to P34; lane 31 (pull request 224) took P35 and P36 before this lane merged.
+- Pull request: 225, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-additions-screens`.

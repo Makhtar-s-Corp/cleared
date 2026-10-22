@@ -41,6 +41,8 @@
 .d-title.small-title { font-size: 15px; font-weight: 500; letter-spacing: -.01em; color: var(--text-muted); }
 .d-title code, .d-body code { font-family: var(--mono); font-size: .86em; font-weight: 500; letter-spacing: 0; padding: 1px 6px; border-radius: 5px; background: var(--tab-fill); overflow-wrap: anywhere; }
 .d-ticket { margin: -4px 0 14px; color: var(--text-muted); font-size: 13.5px; }
+.d-ticket .sep { margin: 0 6px; }
+.decide-rule { margin: 0 0 16px; color: var(--text-secondary); font-size: 13.5px; }
 .d-ticket.for-question { margin: 16px 0 0; }
 .d-ticket.for-question::before { content: ""; display: block; width: 56px; height: 3px; margin-bottom: 8px; background: var(--awaiting); }
 .d-body > .facts:last-child { padding-top: 14px; border-top: 1px solid var(--hairline); }

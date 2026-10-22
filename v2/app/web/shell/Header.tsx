@@ -10,7 +10,8 @@ import type { Me } from '@/lib/screen.ts';
 import { applyTheme, currentTheme, type Theme } from './model.ts';
 import { NotifyButton } from './NotifyButton.tsx';
 
-export type ShellScreen = 'tower' | 'inbox' | 'session' | 'lead';
+// ask: a question to the code (decision 28), opened from the tower's bar; no tab of its own.
+export type ShellScreen = 'tower' | 'inbox' | 'session' | 'lead' | 'ask';
 
 export function Logo({ className = 'logo' }: { readonly className?: string }) {
   return <svg className={className} width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 H2 Z" /></svg>;

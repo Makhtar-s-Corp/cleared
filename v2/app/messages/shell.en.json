@@ -26,6 +26,7 @@
   "signed_out": "Your session has ended. Sign in again.",
   "load_failed": "Cannot reach the service right now. This page tries again on its own.",
   "title_lead": "Lead",
+  "title_ask": "Question to the code",
   "nav_plans": "Plans",
   "notify_label": "Notifications",
   "notify_label_on": "Notifications: on for this device",

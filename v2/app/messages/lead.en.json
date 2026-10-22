@@ -119,5 +119,10 @@
   "lead_stop_merged": "{name} merged, health being read",
   "lead_stop_healthy": "{name} healthy",
   "lead_stop_failed": "{name} failed",
-  "lead_stop_reverted": "{name} reverted"
+  "lead_stop_reverted": "{name} reverted",
+  "plan_steps_label": "Steps across services",
+  "plan_step_contract": "Contract",
+  "plan_step_service": "Service",
+  "plan_step_integration": "Integration",
+  "plan_step_after": "waits for {list}"
 }

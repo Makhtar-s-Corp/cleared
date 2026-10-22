@@ -167,11 +167,12 @@ test('after Go, after Change, and once the plan started: what the bar says', () 
   assert.match(shown(html), /Started by itself at \d\d:\d\d/);
 });
 
-test('the contract and knowledge items are shown for reading, with no button', () => {
+test('the contract and knowledge items show what they propose, with their gestures (lane 27)', () => {
+  const gestures = { contract: ['contract_send_back', 'contract_approve'], knowledge: ['knowledge_reject', 'knowledge_approve'] } as const;
   for (const item of [contractItem(FIXTURE_NOW), knowledgeItem(FIXTURE_NOW)]) {
     const html = detailOf(item);
     assert.match(html, new RegExp(`data-kind="${item.kind}"`));
-    assert.deepEqual(acts(html), [], item.kind);
+    assert.deepEqual(acts(html), [...gestures[item.kind]], item.kind);
   }
   const contract = shown(detailOf(contractItem(FIXTURE_NOW)));
   assert.ok(contract.includes('openapi.yaml') && contract.includes('+            severity:'), 'the diff');
