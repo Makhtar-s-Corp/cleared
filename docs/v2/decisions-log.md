@@ -2436,7 +2436,7 @@ A visual reference exists outside the repository. It is inspiration only; nothin
    - taken over (409);
    - by this user (403);
    - then one terminal at a time (409).
-   An input post is at most 4096 bytes (413). The stream is `data` frames (a `TerminalChunk`, its seq as the id), then one `closed` frame.
+   An input post is at most 4096 bytes (413). The stream is `data` frames (a `TerminalChunk`, its seq as the id), then one `closed` frame. The app's proxy (`app/src/proxy.ts`, unchanged) sends the user and the proof on every method, and passes `Last-Event-ID` on, so the stream reaches these checks as the posts do.
 4. **The app's gate** (`app/src/server.ts`).
    - `/api/service/sessions/:id/terminal/*` is forwarded only when the request reached the app on a loopback socket, with a `Host` of `127.0.0.1`, `localhost` or `[::1]` at its port, and not the public origin's host.
    - Every post needs the anti-forgery token, `Sec-Fetch-Site: same-origin` when sent, and an `Origin` equal to that loopback address; the public origin's `Origin` is refused even on the loopback `Host`.
