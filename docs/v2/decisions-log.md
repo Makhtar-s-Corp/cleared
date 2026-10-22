@@ -1729,3 +1729,77 @@ The choices the lane makes:
   - **F4, in part.** `TrainApprovals.waiting` logs a release item it cannot read. Between two landings, the ticket reads Done for the moment between the lock's close and the train's move back to Needs Approval; matrix line P18 says so.
   - **Left as followups.** F2: the ledger reads are keyed on the ticket and the pull request; only the order of the landings keeps two `#7`s apart. F3: a test of Undo when the train stops waiting during the grace. F4: a blocked train stays active until a new one replaces it, which F1's halt now does.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-workspace-lock`, at the orchestrator's request.
+
+## 2026-10-22: the session plan validated before the code, the author's report by intent, and the shapes of waves 9 to 11 (the author's choices, lane v2-j2-session-plan-gate)
+
+**Decision.** Lane 17 applies decision 22 of the [milestone 2 plan](milestone-2-plan.md), writes the author's half of decision 23 (`report_changes`), the engine's half of decision 24, the inbox kinds that lanes 23 and 24 call, and the API shapes, routes and event names of waves 9 to 11. The author's first turn ends with its session plan, and the flow holds it until a Go. The lane's choices:
+
+1. **The author's host tools** (`v2/src/flow/author-tools.ts`) are declared as data like the lead's and bound per author session by the engine.
+   - `propose_session_plan` takes steps (1 to 30), files (paths in the checkout; the container's mount point is taken off, a path outside it is refused), a confidence (`low`, `medium` or `high`) and its reason.
+   - `report_changes` takes groups of an intent and its files. A file named in two groups is refused, by name. A file the journal shows the ticket edited but no group names goes to "Other changes", a name the author may not use itself. A file the journal does not know (written by a command) stays in the group the author put it in. Lane 18 compares the report with the published diff.
+   - Both journal on the calling session through the cleaner: `cleared.session_plan` and `cleared.changes`.
+2. **The hold.** The tool answers at once and the author ends its turn: the runner gives up on a host call after 5 minutes, and the delay is 10. The engine holds at the end of the turn, when nothing else waits.
+   - **Steps.** The hold closes the `author` step and opens `plan_gate`; the Go closes `plan_gate` and opens `author` again. The gate is thus counted apart from the working time, and a Change keeps one `plan_gate` from the first proposal to the Go.
+   - **The plan.** It goes into the inbox as a `session_plan` item, and the session's phase is `waiting_human`. The session JSON answers it as `state.plan`, which is the last `cleared.session_plan`.
+   - **The Go** is the plan journaled again with `go: { by, at }`, where `by` is the owner's id, `delay` or `lead`. The author is then told to carry the plan out and to call `report_changes` at the end.
+   - **A Change** handles the item and sends the owner's message, framed as reference data, to the live author. The author's next proposal is a new item that replaces the first. A proposal made while a plan waits (the owner wrote to the author) replaces it too.
+3. **The three Gos.**
+   - **The owner's** is `POST /api/sessions/:id/plan/go`, or `.../change` with a message of at most 2000 characters. Both routes are in `flow/plan-gate.ts` and registered by the flow module, with the API's checks: the proof (401), the flow (503), a known user (403), then the session (404, or 409 when no plan waits).
+   - **The delay's** is `[session] plan_go_minutes` of the service's `agents.conf` (10 by default), counted from the start of the hold. At the delay, a high confidence starts by itself; a medium or low one waits for the owner, through the night if need be. A held session is not idle: the idle stop skips it.
+   - **The lead's** applies at once to a high confidence of a ticket the plan runner started (the `Origin` it already passes to `start`). Nothing waits in the inbox then. `lead/plans/runner.ts` needed no change, since the origin carries the plan item into the flow. A paused plan's running ticket still gets this Go, as rule 4 of the runner lets its running tickets go on.
+4. **What is not proposed again, and what is not proposed at all.**
+   - An author reopened after a review keeps its tools, but `propose_session_plan` is refused: its gate stays `working`, and a closed session's working gate is kept for its resume.
+   - A new author started after a review, because the old one could not resume, is bound without the plan: its prompt asks only for the report, and the call is refused.
+   - A first turn that ends with no plan holds the session for the same delay, unless a message makes it propose. At the delay the session is stopped with the `RUN_ERROR` code `no_plan`, and the ticket is put back with a note. That note says the author did not propose a session plan, so it never started on the code.
+5. **Where the gate is on.** `FlowConfig.authorTools`, which `loadFlowConfig` always sets. A configuration written by hand, as milestone 1's and the tests of every other lane are, runs the flow as before: no tool, no plan asked, no gate. Lane 16's one-service fixture still matches. `[session] plan_go_minutes` is in `ProjectSettings` only when the service sets it, so the settings tests of lane 19's `effects.test.ts` see nothing new.
+6. **The policy.** The runner asks the policy before every tool call, and `session/policy.ts` (not this lane's file) has no row for an author's `mcp__cleared__*` tools, so a real author's call would become a permission request. The engine therefore adds the author's two tools as learned answers in the policy it gives the session and in `policyFor`, and only those two names. A row `author.tools` beside the lead's `lead.tools` is a followup for lane 25, which owns the policy in wave 9.
+7. **The inbox kinds** (`v2/src/inbox/store.ts`).
+   - **`session_plan`** is a request of its session: it counts in `waitingFor`, no answer route finds it, and it leaves with the session (`handleSession`) and at a restart (`handleRequests`). It is numbered per session, so a plan proposed again in the same second is a new item.
+   - **`contract`** (a ticket, a step, the providing service, the contract file and its diff) and **`knowledge`** (a text, a level, the service when the level is not the workspace's, the source session) outlive their session. Each has its add, its list and its handle method, and the handle writes `outcome` (the decision, the message of a Send back, by whom and when). An item is handled once; a second answer is refused.
+   - The service and the step are kept in the payload, not in lane 14's `flow_inbox.service` and `step` columns, which the tests' tables, made without the migrations, do not have.
+   - `list()` stays typed `InboxItem[]`, because `modules/notify.ts` types the inbox by it, but it returns every kind, as `GET /api/inbox` answers them; the notifications and the lead's state skip a kind they do not know. `items()` is the typed accessor (`NextInboxItem[]`). Lanes 21 and 27, whose screens map every kind, join the new kinds to `InboxItem`.
+8. **Decision 24 in the engine.**
+   - The reviewer is named by the first service of the ticket that names one with `reviewer:<model>`, else the configured reviewer.
+   - A Quick ticket is written by the author model, not Haiku, when a service it touches is `full`, or when Haiku reviews it, so the reviewer is always another model.
+9. **The API of waves 9 to 11** (`v2/src/api/types.ts`).
+   - **The shapes:** `TicketStep`, `ContractItem`, `KnowledgeItem`, `Ask` and `AskAnswer`, `Recipe`, `Schedule`, `TerminalChunk` (with `TerminalClosed`, the bodies and `TERMINAL_INPUT_MAX_BYTES` of 4096), `FileWrite`, `FileWriteRefusal`, `FileWritten` and `HumanEdit`.
+   - **The paths the plan fixes:** lane 25's asks, lane 26's recipes and schedules, lane 31's terminal and the `PUT` of the editor's save.
+   - **The paths this lane chose:** `GET /api/tickets/:id/steps` and `POST /api/contracts/:id/approve` and `sendback` for lane 23; `POST /api/knowledge/:id/approve` and `reject`, and `POST /api/services/:name/skill` for "Update the skill now", for lane 24. A contract or a knowledge item is named by its inbox id. None is under `/api/lead` or `/api/plans`, which the lead module's route list is read from.
+   - **The exclusions.** Each group is a list (`STEP_ROUTES`, `KNOWLEDGE_ROUTES`, `ASK_ROUTES`, `RECIPE_ROUTES`, `TERMINAL_ROUTES`), excluded from `test/flow/api.test.ts` with its serving lane named. `SESSION_PLAN_ROUTES` leaves the exclusions, since lane 17 serves them. The route list holds 51 routes.
+10. **The event names.**
+    - `plan_gate` joins `STEP_NAMES`.
+    - `cleared.session_plan` and `cleared.changes` are this lane's.
+    - `cleared.terminal_opened` (by whom, the size), `cleared.terminal_input` (one line, by whom), `cleared.terminal_closed` (why, and the output's byte count, never the output) and `cleared.human_edit` (a `HumanEdit` without its time, never the content) are lane 31's to emit.
+11. **Files outside the lane's list.** None. The tests changed under `test/flow/` are the lane's, `effects.test.ts` excepted. Among them, `modules.test.ts` now lists the flow module's two plan routes.
+
+**Consequences.**
+- **Tests first.** Commit 73edb86 holds them alone, and each failed on `origin/v2` at 596d085, where `flow/author-tools.ts` and `flow/plan-gate.ts` did not exist. The new files are:
+  - `test/flow/author-tools.test.ts`, `inbox-kinds.test.ts`, `plan-gate.test.ts`, `plan-routes.test.ts` and `sensitivity.test.ts`;
+  - new cases in `test/flow/config.test.ts`, `test/api/types.test.ts` (the 51 routes and the shapes), `test/session/events.test.ts`, `test/flow/modules.test.ts` and `test/flow/api.test.ts`.
+- **What `plan-gate.test.ts` proves**, on the fake adapter:
+  - a high plan still waits at 9:59 and starts at 10:00 by the delay;
+  - a medium plan still waits at 11 minutes and two hours later, never idle-stopped, until the owner's Go;
+  - a Change reopens the author with the message, and the next proposal replaces the first;
+  - a ticket the lead started with a high plan starts at once, and a medium one waits;
+  - a reopened author, and a new one after a failed resume, propose nothing;
+  - a silent first turn is put back at the delay, which `plan_go_minutes = 25` moves past the 15-minute idle stop;
+  - a report with a file in two groups is refused, and the next one is kept;
+  - a restart handles a waiting plan.
+- **A test made stable.** `test/flow/engine.test.ts`'s idle test depends on how many microtasks a tick yields before its idle check. The engine's own journaled events are read by the session's loop as activity, so a tick that yields earlier moves `lastActivity`. The gate's scan in the tick is therefore synchronous, after the idle loop: a tick with nothing due yields as before. The race itself was there before this lane and is left as it is.
+- **Checks.** `npm test`: 833 node tests, 830 pass and 3 skipped as before; 117 Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
+- **Section 8's unknown** ("whether the author proposes a plan before reading the code, or after, and how long the gate adds") is not closed here: it needs a real author, in the proof (lane 29). The prompt asks the author to read what it needs, then propose before any change.
+- **Open, for other lanes:**
+  - A waiting session plan raises no notification: `flow/events.ts` and `notify/sources.ts` are not this lane's files (lane 26 owns both in wave 10). The inbox and the session JSON show it.
+  - The author is not kept read-only before its Go: a model that writes code in its planning turn is not stopped by the policy. A read-only policy until the Go needs the policy's rows (lane 25).
+  - The app's session catalogs have no `step_plan_gate` key yet (lane 20's file in wave 8).
+  - Lane 21 renders the `session_plan` item, and lane 27 renders the `contract` and `knowledge` items.
+  - Lane 29's rehearsal must give a session plan its Go in its morning rule, as the plan says.
+- **The requirements matrix.** C8, C9, C10, C2, M2 and M8 name this pull request (204) and are `partial`. P19 records the gate's choices and P20 the policy's answer to the author's tools.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-session-plan-gate`, at the orchestrator's request.
+
+## 2026-10-22: Owner decision: the CSSOM style-attribute function of pull request 199 is validated
+
+**Decision.** On 2026-10-22 at 11:27 (Europe/Paris), the owner validated the CSSOM style-attribute function of pull request 199: `installStyleAttributeCssom` in `v2/app/web/lib/style-nonce.ts`, which the lane `v2-j2-deps-xterm` added for the orchestrator to confirm (its log entry of 2026-10-22).
+
+- Consequence: lane 32 installs both functions of the shim, `installStyleNonce` and `installStyleAttributeCssom`, as that entry says. Matrix line O14 records the decision; P14's note on a refusal of that part no longer applies, and P17 names the validation.
+- Author: the owner, relayed on 2026-10-22 11:27 (Europe/Paris); written in this log.
