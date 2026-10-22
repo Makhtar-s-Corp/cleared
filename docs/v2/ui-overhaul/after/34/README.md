@@ -1,6 +1,6 @@
 # Lane 34's "after": the five screens, reached without a document load
 
-Taken on 2026-10-22 at 23:58 (Europe/Paris) on the lane's branch (`v2-j2-ui-foundation`), with the same script, source, clock, browser and sizes as [../../before/34/](../../before/34/README.md), but each screen reached by a click on a link of the page, which the app's router answers without loading a document:
+Taken on 2026-10-22 at 23:47 (Europe/Paris) on the lane's branch (`v2-j2-ui-foundation`), with the same script, source, clock, browser and sizes as [../../before/34/](../../before/34/README.md), but each screen reached by a click on a link of the page, which the app's router answers without loading a document:
 
     node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34 --via click
 

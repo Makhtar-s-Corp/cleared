@@ -14,7 +14,7 @@
 // screen keeps its scroll, has its title, turns on its own sheets
 // (lib/sheets.ts) and fails alone (lib/boundary.tsx).
 import { RouterProvider, useRouterState, type AnyRouter } from '@tanstack/react-router';
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import type { LeadState } from '../../../src/api/types.ts';
 import { json, serviceApi } from '@/lib/api.ts';
 import { ScreenBoundary } from '@/lib/boundary.tsx';
@@ -99,8 +99,10 @@ type HostProps = {
   readonly inboxChanged: () => void;
 };
 
-// One screen: its catalog, its reader of the cache, its boundary.
-function ScreenHost({ screen, path, me, language, cache, raw, navigate, inboxChanged }: HostProps) {
+// One screen: its catalog, its reader of the cache, its boundary. Drawn
+// again only when its own props change: the shell's clock redraws the
+// header, not the screens (hidden sessions included).
+const ScreenHost = memo(function ScreenHost({ screen, path, me, language, cache, raw, navigate, inboxChanged }: HostProps) {
   const Component = useScreenComponent(screen);
   const reader = useReader(cache, raw);
   const t = useMemo(() => translator(screenCatalog(screen, language)), [screen, language]);
@@ -112,7 +114,7 @@ function ScreenHost({ screen, path, me, language, cache, raw, navigate, inboxCha
       <ScreenBoundary t={t} screen={screen}>{Component ? <Component /> : null}</ScreenBoundary>
     </Screen.Provider>
   );
-}
+});
 
 // The window's scroll, kept for each place and given back on its return.
 function useScrollKept(key: string): void {
@@ -194,6 +196,17 @@ function Shell({ shared }: { readonly shared: Shared }) {
     document.title = `${t('app_name')} · ${t(titleKey(place.screen))}`;
   }, [place.screen, t]);
 
+  // A move in the page does what a page load did for a keyboard or a
+  // screen reader: focus at the start of the new screen (the main region,
+  // which draws no ring), and its title said. Not on the first draw.
+  const [said, say] = useState('');
+  const moved = useRef(false);
+  useLayoutEffect(() => {
+    if (!moved.current) { moved.current = true; return; }
+    document.getElementById('screen')?.focus({ preventScroll: true });
+    say(document.title);
+  }, [place.path]);
+
   const host = (screen: ScreenName, path: string) => (me && raw
     ? <ScreenHost screen={screen} path={path} me={me} language={start.language} cache={cache} raw={raw} navigate={navigate} inboxChanged={inboxChanged} />
     : null);
@@ -201,7 +214,8 @@ function Shell({ shared }: { readonly shared: Shared }) {
     <>
       <Header t={t} screen={place.screen} project={start.project} userName={start.userName} source={start.source} me={me}
         waiting={waiting} leadOn={leadOn} now={now} language={start.language} onSignOut={() => void signOut()} />
-      <main id="screen" className="screen">
+      <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
+      <main id="screen" className="screen" tabIndex={-1} style={{ outline: 'none' }}>
         {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}
         {stack.current.map((id) => (
           <div key={id} data-session-view={id} style={{ display: id === place.session ? 'contents' : 'none' }}>

@@ -1,6 +1,6 @@
 # Lane 34's "before": the five screens on the fixtures source
 
-Taken on 2026-10-22 at 23:13 (Europe/Paris) on `origin/v2` commit `8a93cd5`, before any change of lane 34 (`v2-j2-ui-foundation`, [../../../ui-overhaul-plan.md](../../../ui-overhaul-plan.md), section 7), with the capture script the lane adds (`v2/scripts/capture-screens.ts`, which runs on the old code as is):
+Taken on 2026-10-22 at 23:16 (Europe/Paris) on `origin/v2` commit `8a93cd5`, before any change of lane 34 (`v2-j2-ui-foundation`, [../../../ui-overhaul-plan.md](../../../ui-overhaul-plan.md), section 7), with the capture script the lane adds (`v2/scripts/capture-screens.ts`, which runs on the old code as is):
 
     node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/before/34
 

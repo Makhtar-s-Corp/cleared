@@ -5,6 +5,7 @@
 //     Back) finds the same terminal and editor (never made again: one
 //     terminal open, the same nodes), the terminal's lines and the editor's
 //     unsaved text, in one document;
+//   - a switch moves the focus to the new screen and says its title;
 //   - a message leaves the composer at once and comes back when refused;
 //   - a screen that throws while it draws shows which screen failed and a
 //     way to draw it again; the header stays, and the other screens draw.
@@ -93,6 +94,10 @@ test('a message comes back when refused; a session\'s terminal and editor live t
       await page.locator('header nav a[href="/inbox"]').click();
       await page.waitForURL(`${app.base}/inbox`);
       await page.locator('#screen > [data-session-view]').first().waitFor({ state: 'hidden' });
+      // What a page load did for a keyboard and a screen reader: focus at the new screen, its title said.
+      await page.waitForFunction(() => document.querySelector('#screen-said')?.textContent === 'Cleared · Inbox');
+      assert.equal(await page.evaluate(() => document.activeElement?.id), 'screen');
+      assert.equal(await page.title(), 'Cleared · Inbox');
       await page.goBack();
       await page.waitForURL(new RegExp(`/sessions/${AUTHOR_ID}`));
       await page.locator('#tab-editor .cm-editor').waitFor();
