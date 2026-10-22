@@ -36,9 +36,7 @@
   "lead_refresh_line": "Refreshed from memory · generation {generation} · {time}",
   "lead_system_line": "{text} · {time}",
   "lead_see_plan": "See the plan",
-  "lead_question_recommended": "Recommended",
   "lead_question_answer_below": "Or write your answer below.",
-  "lead_question_several": "Answer them in the field below, in one message.",
   "lead_reply_label": "Your message to the lead",
   "lead_placeholder": "Message the lead…",
   "lead_placeholder_goal": "Describe the goal…",
@@ -93,5 +91,14 @@
   "plan_change": "Change the plan",
   "plan_approve": "Approve the plan and start",
   "plan_pause": "Pause",
-  "plan_resume": "Resume"
+  "plan_resume": "Resume",
+  "choice_recommended": "Recommended",
+  "choice_free": "Or answer in your own words",
+  "choice_send": "Send the answer",
+  "choice_too_long": "An answer is at most {n} characters.",
+  "choice_answered": "Answered by {who}",
+  "choice_answered_with": "Answered by {who}: {answer}",
+  "choice_cancelled": "Cancelled when the turn was interrupted",
+  "choice_settled": "This question was settled without you.",
+  "choice_ended": "The session ended before an answer."
 }

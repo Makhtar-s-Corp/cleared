@@ -16,6 +16,8 @@
 // Everything here is pure, so the tests run it under Node: agent.ts follows
 // the lead's stream for CopilotKit, and Lead.tsx draws what the agent holds.
 import type { LeadMemory, LeadMessage, LeadMessageBody, LeadState, LeadStreamFrame, Plan } from '../../../../src/api/types.ts';
+import type { Question } from '../../../../src/session/events.ts';
+import type { Answers } from '../../components/choices/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
 import type { PlanAction } from '../../plan-panel/model.ts';
@@ -24,7 +26,6 @@ export type LeadDraft = { readonly text: string; readonly goal: boolean };
 
 export const DRAFT_MAX = 2000;
 export const TEXT_MAX = 20_000;                                   // what POST /api/lead/messages accepts
-export const RECOMMENDED = /\s*\(Recommended\)\s*$/i;
 export const GAP_MS = 30 * 60_000;                                // a time line in the thread after a silence this long
 
 // The tower bar's draft, from the page's query string.
@@ -148,6 +149,17 @@ export function replyFor(text: string, state: LeadState, goal: boolean): Reply |
   if (!trimmed || trimmed.length > TEXT_MAX) return undefined;
   const kind = composerMode(state, goal);
   return { kind, body: kind === 'goal' ? { text: trimmed, goal: true } : { text: trimmed } };
+}
+
+// The reply the question's options make, through POST /api/lead/messages:
+// one text, which the lead engine gives to every question of the ask. One
+// question sends its answer as it is (an option's label as written,
+// "(Recommended)" kept); several send one line each, named by their header.
+export function choiceReply(questions: readonly Question[], answers: Answers): Reply {
+  const text = questions.length === 1
+    ? Object.values(answers).join('\n')
+    : questions.map((question) => `${question.header ?? question.question}: ${answers[question.question] ?? ''}`).join('\n');
+  return { kind: 'answer', body: { text } };
 }
 
 export function sendReply(api: ScreenContext['api'], reply: Reply): Promise<LeadMessage> {

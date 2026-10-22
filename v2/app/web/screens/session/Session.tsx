@@ -10,16 +10,19 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { SessionSummary } from '../../../../src/api/types.ts';
 import type { SessionState } from '../../../../src/session/events.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
+import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
+import { sentText, type Answers } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
+import { ApiError } from '@/lib/screen.ts';
 import { formatModel, harnessSquare, liveDot } from '../tower/model.ts';
 import { isSessionThread, SessionAgent, sessionAgentId } from './agent.ts';
 import {
-  ENDED, answerLine, clock, decisionOf, duration, family, known, latestOf, parseCriteria, phaseOf, phrase, refusal, resultSummary, statusMeta, statusTone, stepsOf, target, verb, who,
-  type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
+  ENDED, answerBody, answerLine, clock, decisionOf, duration, family, known, latestOf, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, statusMeta, statusTone, stepsOf, target, verb,
+  type LocalAnswer, type QuestionRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import './session.css';
 
@@ -98,8 +101,24 @@ function ToolLine({ row, view, t, onAnswer }: { readonly row: ToolRow; readonly 
 }
 
 type Answer = (requestId: string, kind: string) => void;
+// A question's answer: the answers keyed by question text, and the labels picked.
+type QuestionAnswer = (requestId: string, answers: Answers, chosen: readonly string[]) => void;
 
-function RowView({ row, view, t, onAnswer }: { readonly row: Row; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer }) {
+// A question of the session, answered here through the session answer
+// route: the questions the interrupt carries while it waits, else the row's.
+function QuestionView({ row, view, t, onQuestion }: { readonly row: QuestionRow; readonly view: SessionView; readonly t: Translate; readonly onQuestion?: QuestionAnswer }) {
+  const status = questionStatus(row, view, t);
+  const questions = view.thread.interrupts.find((i) => i.id === row.requestId)?.metadata.questions ?? row.questions;
+  return (
+    <div className={status.kind === 'waiting' ? 'request question waits' : 'request question'} data-row="question" data-request-id={row.requestId}>
+      {status.kind === 'waiting'
+        ? <OwnChoices questions={questions} t={t} requestId={row.requestId} busy={status.busy ?? false} onAnswer={(answers, chosen) => onQuestion?.(row.requestId, answers, chosen)} />
+        : <Choices questions={questions} status={status} t={t} requestId={row.requestId} />}
+    </div>
+  );
+}
+
+function RowView({ row, view, t, onAnswer, onQuestion }: { readonly row: Row; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer }) {
   switch (row.kind) {
     case 'read': {
       const [first = '', ...others] = row.paths;
@@ -113,20 +132,8 @@ function RowView({ row, view, t, onAnswer }: { readonly row: Row; readonly view:
       return <ToolLine row={row} view={view} t={t} onAnswer={onAnswer} />;
     case 'message':
       return <div className={`bubble ${row.role}`} data-row="message">{row.text}</div>;
-    case 'question': {
-      const [first, ...others] = row.questions;
-      const options = first?.options ?? [];
-      return (
-        <div className="request question" data-row="question" data-request-id={row.requestId}>
-          <p className="request-title">{first?.question ?? ''}</p>
-          {others.map((q, index) => <p key={index}>{q.question}</p>)}
-          {options.length ? <ul className="options">{options.map((o) => <li key={o.label}>{o.label}</li>)}</ul> : null}
-          {row.answeredBy !== undefined
-            ? <p className="q-foot">{t('question_answered', { who: who(row.answeredBy, view, t) })}</p>
-            : <p className="q-foot"><a href="/inbox">{t('question_open')}</a></p>}
-        </div>
-      );
-    }
+    case 'question':
+      return <QuestionView row={row} view={view} t={t} onQuestion={onQuestion} />;
     case 'denied':
       return <Frame kind="denied" at={row.at} icon={Prohibit} refused><div>{refusal(row.rule, t)}</div></Frame>;
     case 'interrupted':
@@ -138,10 +145,10 @@ function RowView({ row, view, t, onAnswer }: { readonly row: Row; readonly view:
   }
 }
 
-export function Timeline({ view, t, onAnswer }: { readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer }) {
+export function Timeline({ view, t, onAnswer, onQuestion }: { readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer }) {
   const rows = view.thread.rows;
   if (rows.length === 0) return <p className="empty">{t('timeline_empty')}</p>;
-  return <>{rows.map((row, index) => <RowView key={'id' in row ? `${row.kind}:${row.id}` : `${row.kind}:${row.at}:${index}`} row={row} view={view} t={t} onAnswer={onAnswer} />)}</>;
+  return <>{rows.map((row, index) => <RowView key={'id' in row ? `${row.kind}:${row.id}` : `${row.kind}:${row.at}:${index}`} row={row} view={view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} />)}</>;
 }
 
 export function LeftCards({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
@@ -310,6 +317,7 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   const [siblings, setSiblings] = useState(loaded.siblings);
   const [now, setNow] = useState(() => context.now());
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const [answers, setAnswers] = useState<ReadonlyMap<string, LocalAnswer>>(new Map());
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
@@ -328,9 +336,9 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   useEvery(TICK_MS, () => setNow(context.now()));
 
   const view: SessionView = useMemo(() => ({
-    summary: loaded.summary, ticket: loaded.ticket, siblings, me: context.me.user.id, language: context.me.language, now, busy,
-    thread: thread ?? { lastSeq: 0, lastAt: undefined, state: loaded.state, rows: [], pending: [], steps: [] },
-  }), [loaded, siblings, context.me, now, busy, thread]);
+    summary: loaded.summary, ticket: loaded.ticket, siblings, me: context.me.user.id, language: context.me.language, now, busy, answers,
+    thread: thread ?? { lastSeq: 0, lastAt: undefined, state: loaded.state, rows: [], pending: [], interrupts: [], steps: [] },
+  }), [loaded, siblings, context.me, now, busy, answers, thread]);
 
   // The timeline follows the newest row while the person is at its end.
   const onScroll = () => {
@@ -373,6 +381,26 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
     if (await post(`/requests/${encodeURIComponent(requestId)}/answer`, { decision: decisionOf(kind, t) }, 'answer_failed')) context.inboxChanged();
     else setBusy((current) => new Set([...current].filter((other) => other !== requestId)));
   };
+  // A question's answer, with its own body: a permission's decisionOf would
+  // read an option's label as a denial.
+  const answerQuestion: QuestionAnswer = async (requestId, given, chosen) => {
+    if (busy.has(requestId)) return;
+    setBusy((current) => new Set([...current, requestId]));
+    const remember = (answer: LocalAnswer) => setAnswers((current) => new Map([...current, [requestId, answer]]));
+    try {
+      await context.api(`/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(requestId)}/answer`, { method: 'POST', body: answerBody(given) });
+      remember({ kind: 'sent', sent: sentText(given), chosen });
+      setNote('');
+      context.inboxChanged();
+    } catch (error) {
+      // 404: nothing waits under that id any more; 409: the session stopped.
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        remember({ kind: 'settled' });
+        context.inboxChanged();
+      } else setNote(t('answer_failed'));
+    }
+    setBusy((current) => new Set([...current].filter((other) => other !== requestId)));
+  };
 
   return (
     <>
@@ -381,7 +409,7 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
         <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
           <div className="panel-head" id="status"><StatusHead view={view} t={t} /></div>
-          <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}><Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} /></div>
+          <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}><Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} onQuestion={(requestId, given, chosen) => void answerQuestion(requestId, given, chosen)} /></div>
           <div className="panel-foot">
             <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} onText={setText}
               onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => setNote(t('handover_note'))} />

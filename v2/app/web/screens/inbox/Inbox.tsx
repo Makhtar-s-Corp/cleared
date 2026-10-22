@@ -6,6 +6,8 @@ import { ArrowLeft } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { InboxItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
+import { Choices } from '@/components/choices/Choices.tsx';
+import { FREE_MAX, emptyDraft, type ChoiceDraft } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
@@ -15,7 +17,7 @@ import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
 import {
-  CHECKS, GRACE_MS, RECOMMENDED, REFRESH_MS, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approve, approvePlan, chosen, clock, decisionFor, detailKey, elapsed, failure,
+  CHECKS, GRACE_MS, REFRESH_MS, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approve, approvePlan, chosen, clock, decisionFor, detailKey, elapsed, failure,
   graceLeft, isLead, isWebLink, itemFromHash, itemLine, itemTitle, kept, ordered, pausedLine, planOf, readPlan, releaseSession, sameOrigin, sendBack, sentence, sessionLink,
   sessionOf, sessionsLine, shareLine, short, target, ticketTitle, undoApproval, verbOf, type Gesture, type InboxView, type Local,
 } from './model.ts';
@@ -130,16 +132,18 @@ function PermissionBody({ item, view, t }: { readonly item: PermissionItem; read
   );
 }
 
-type Answers = { readonly picks: readonly (readonly string[])[]; readonly free: readonly string[] };
+// What the person picked and typed: the clickable answers' draft, kept by
+// the detail with its other fields and sent from the bar.
+type Answers = ChoiceDraft;
 
-function QuestionBody({ item, view, t, answers, onPick, onFree }: {
-  readonly item: QuestionItem; readonly view: InboxView; readonly t: Translate; readonly answers: Answers;
-  readonly onPick?: (index: number, label: string, multi: boolean) => void; readonly onFree?: (index: number, value: string) => void;
+function QuestionBody({ item, view, t, answers, onDraft }: {
+  readonly item: QuestionItem; readonly view: InboxView; readonly t: Translate; readonly answers: Answers; readonly onDraft?: (draft: Answers) => void;
 }) {
   // The lead's question is read here and answered on the lead's screen.
   const lead = isLead(item);
   const waiting = item.state === 'waiting' && !lead;
   const title = lead ? undefined : ticketTitle(view, item.ticket);
+  const busy = view.local.get(item.id)?.kind === 'busy';
   return (
     <>
       {lead ? <Eyebrow item={item} kind={t('eyebrow_lead_question')} open={undefined} openKey="" t={t} />
@@ -147,27 +151,8 @@ function QuestionBody({ item, view, t, answers, onPick, onFree }: {
       <h2 className="sr-only">{t('kind_question')}</h2>
       {/* The question first, on the colour of what waits; the ticket under it (DESIGN.md, 4). */}
       <div className={`questions${item.state === 'waiting' ? ' waits' : ''}${lead ? ' read' : ''}`}>
-        {item.questions.map((question, index) => {
-          const options = question.options ?? [];
-          return (
-            <fieldset key={index} className="q" data-multi={question.multiSelect ? 'true' : undefined}>
-              <legend className="q-text">{question.header ? <span className="q-header">{question.header}</span> : null}<span>{question.question}</span></legend>
-              {options.length ? (
-                <div className="options">
-                  {options.map((option) => (
-                    <Toggle key={option.label} className="option" data-q={index} data-option={option.label} disabled={!waiting}
-                      pressed={(answers.picks[index] ?? []).includes(option.label)} onPressedChange={() => onPick?.(index, option.label, question.multiSelect === true)}>
-                      <span className="o-label">{option.label.replace(RECOMMENDED, '')}</span>
-                      {RECOMMENDED.test(option.label) ? <span className="o-rec">{t('recommended')}</span> : null}
-                      {option.description ? <span className="o-desc">{option.description}</span> : null}
-                    </Toggle>
-                  ))}
-                </div>
-              ) : null}
-              {waiting ? <label className="free"><span>{t('free_answer')}</span><Input type="text" data-free={index} maxLength={2000} autoComplete="off" value={answers.free[index] ?? ''} onChange={(event) => onFree?.(index, event.target.value)} /></label> : null}
-            </fieldset>
-          );
-        })}
+        <Choices questions={item.questions} t={t} requestId={item.requestId} send="bar" free={waiting}
+          status={waiting ? { kind: 'waiting', draft: answers, busy } : { kind: 'read' }} onDraft={onDraft} />
       </div>
       {title ? <p className="d-ticket for-question">{title}</p> : null}
     </>
@@ -262,10 +247,7 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
   }
 }
 
-const noAnswers = (item: InboxItem | undefined): Answers => {
-  const n = item?.kind === 'question' ? item.questions.length : 0;
-  return { picks: Array.from({ length: n }, () => []), free: Array.from({ length: n }, () => '') };
-};
+const noAnswers = (item: InboxItem | undefined): Answers => emptyDraft(item?.kind === 'question' ? item.questions : []);
 
 // The detail of the item shown. Its fields (a reason, the choices, a free
 // answer) live as long as what it shows: the screen keys it by detailKey,
@@ -279,16 +261,7 @@ export function Detail({ view, t, note = '', onAct, onFrame }: {
   const [answers, setAnswers] = useState<Answers>(() => noAnswers(item));
   const back = <a className="back" href="#" aria-label={t('back_label')}><ArrowLeft size={14} aria-hidden="true" /> {t('back')}</a>;
   if (!item) return <>{back}<div className="d-body"><p className="empty">{t('gone')}</p></div></>;
-  const pick = (index: number, label: string, multi: boolean) => setAnswers((current) => ({
-    ...current,
-    picks: current.picks.map((chosenOnes, at) => {
-      if (at !== index) return chosenOnes;
-      if (chosenOnes.includes(label)) return chosenOnes.filter((other) => other !== label);
-      return multi ? [...chosenOnes, label] : [label];
-    }),
-  }));
-  const free = (index: number, value: string) => setAnswers((current) => ({ ...current, free: current.free.map((text, at) => (at === index ? value : text)) }));
-  const ready = item.kind === 'question' && answersFor(item.questions, answers.picks, answers.free).missing === undefined;
+  const ready = item.kind === 'question' && answersFor(item.questions, answers.picks, answers.free).answers !== undefined;
   return (
     <>
       {back}
@@ -296,7 +269,7 @@ export function Detail({ view, t, note = '', onAct, onFrame }: {
         {item.kind === 'release' ? <ReleaseBody item={item} view={view} t={t} onFrame={onFrame} />
           : item.kind === 'permission' ? <PermissionBody item={item} view={view} t={t} />
           : item.kind === 'plan' ? <PlanBody item={item} view={view} t={t} />
-          : <QuestionBody item={item} view={view} t={t} answers={answers} onPick={pick} onFree={free} />}
+          : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers} />}
       </div>
       <div className="d-actions" id="d-actions">
         <Actions item={item} view={view} t={t} note={note} reason={reason} ready={ready} onReason={setReason} onAct={(act) => onAct?.(act, { reason, answers })} />
@@ -504,6 +477,7 @@ export default function Inbox() {
         if (item.kind !== 'question') return;
         const result = answersFor(item.questions, given.answers.picks, given.answers.free);
         if (result.missing !== undefined) { setNote(t('answer_missing')); return; }
+        if (result.tooLong !== undefined) { setNote(t('choice_too_long', { n: FREE_MAX })); return; }
         void act(item, 'answer', () => answerRequest(api, item, { kind: 'answer', answers: result.answers }));
         return;
       }

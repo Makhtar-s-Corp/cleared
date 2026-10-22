@@ -64,8 +64,6 @@
   "answer_allow_always": "Autorisé dans ce projet par {who}",
   "answer_deny": "Refusé par {who}",
   "answer_cancelled": "Annulé quand le tour a été interrompu",
-  "question_open": "Répondre dans la boîte de réception",
-  "question_answered": "Réponse de {who}",
   "refused": "Bloqué par les règles : {rule}.",
   "refused_rule": "Bloqué par les règles ({rule}).",
   "refused_plain": "Bloqué par les règles.",
@@ -110,5 +108,14 @@
   "open_session": "Ouvrir la session",
   "index_title": "Sessions",
   "index_empty": "Aucune session pour l'instant. Passez un ticket en Todo et une session démarre.",
-  "load_failed": "La session n'a pas pu être chargée."
+  "load_failed": "La session n'a pas pu être chargée.",
+  "choice_recommended": "Recommandé",
+  "choice_free": "Ou répondez avec vos mots",
+  "choice_send": "Envoyer la réponse",
+  "choice_too_long": "Une réponse fait au plus {n} caractères.",
+  "choice_answered": "Répondu par {who}",
+  "choice_answered_with": "Répondu par {who} : {answer}",
+  "choice_cancelled": "Annulé quand le tour a été interrompu",
+  "choice_settled": "Cette question a été réglée sans vous.",
+  "choice_ended": "La session s'est terminée avant une réponse."
 }

@@ -102,8 +102,6 @@
   "settled": "Cette demande a été réglée sans vous : la session a été interrompue ou s'est terminée, ou quelqu'un a répondu depuis la session.",
   "handled_note": "Ceci ne vous attend plus.",
   "gone": "Cet élément n'est plus dans la boîte de réception.",
-  "recommended": "Recommandé par l'équipe",
-  "free_answer": "Ou répondez avec vos mots",
   "send_answer": "Envoyer la réponse",
   "answer_missing": "Répondez d'abord à chaque question.",
   "answer_settled": "Déjà réglé sans vous. La boîte de réception a été rafraîchie.",
@@ -174,5 +172,14 @@
   "plan_change": "Modifier le plan",
   "plan_approve": "Approuver le plan et démarrer",
   "plan_pause": "Mettre en pause",
-  "plan_resume": "Reprendre"
+  "plan_resume": "Reprendre",
+  "choice_recommended": "Recommandé",
+  "choice_free": "Ou répondez avec vos mots",
+  "choice_send": "Envoyer la réponse",
+  "choice_too_long": "Une réponse fait au plus {n} caractères.",
+  "choice_answered": "Répondu par {who}",
+  "choice_answered_with": "Répondu par {who} : {answer}",
+  "choice_cancelled": "Annulé quand le tour a été interrompu",
+  "choice_settled": "Cette question a été réglée sans vous.",
+  "choice_ended": "La session s'est terminée avant une réponse."
 }
