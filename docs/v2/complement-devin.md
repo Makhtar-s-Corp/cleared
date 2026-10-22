@@ -1,4 +1,4 @@
-# Complement to the Cleared v2 work: what is taken over (2026-10-22)
+# Complement to the Cleared v2 work: what we take from Devin (2026-10-22)
 
 Full text received from the owner, to be integrated into the milestones listed, without changing their order or their proof.
 
