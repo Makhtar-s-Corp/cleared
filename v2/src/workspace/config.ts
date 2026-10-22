@@ -83,6 +83,28 @@ const NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 const BRANCH = /^[A-Za-z0-9._/-]+$/;
 const SERVICE_KEYS = new Set(['kind', 'repository', 'url', 'base', 'path', 'dir', 'health_url', 'sensitivity', 'consumes', 'run', 'contract', 'broker_socket', 'broker_state']);
 
+// A clone address with no secret in it: an http address names no user and
+// no password (a token is often written as either), any other address no
+// password. A clone authenticates through git's own credentials, never
+// through the configuration, which GET /api/workspace shows and the store
+// keeps. The message never repeats the address.
+function checkUrl(url: string, what: string): void {
+  let parsed: URL | undefined;
+  try { parsed = new URL(url); } catch { parsed = undefined; }
+  if (!parsed) return;                           // git@host:owner/name.git and other forms with no password
+  const web = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  if (parsed.password || (web && parsed.username)) throw new WorkspaceError(`${what} carries credentials: give the address without them, and let git's credentials authenticate the clone`);
+}
+
+// The name of the service of a one-service workspace: the project value as
+// the service name rule allows it (lower case, other characters as dashes,
+// at most 40), since the name is a path segment and a container's name. The
+// workspace's id stays the project value.
+export function serviceNameOf(project: string): string {
+  const name = project.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 40).replace(/-+$/, '');
+  return name || 'service';
+}
+
 // A path inside the repository: relative, and never above it.
 function inside(value: string): boolean {
   return value !== '' && !isAbsolute(value) && !value.split('/').some((part) => part === '..' || part === '');
@@ -121,6 +143,7 @@ function serviceOf(name: string, keys: Record<string, string>, options: Workspac
   if (!REPO.test(repo)) throw new WorkspaceError(`${where} repository must be owner/name`);
   const url = keys.url ?? '';
   if (!url) throw new WorkspaceError(`${where} names no url`);
+  checkUrl(url, `${where} url`);
   const base = keys.base || 'main';
   if (!BRANCH.test(base) || base.includes('..')) throw new WorkspaceError(`${where} base is not a branch name: "${base}"`);
   let path: string | null = null;
@@ -228,8 +251,9 @@ export function loadWorkspace(env: NodeJS.ProcessEnv, options: WorkspaceOptions)
   const repo = need('CLEARED_V2_REPO');
   if (!REPO.test(repo)) throw new WorkspaceError('CLEARED_V2_REPO must be owner/name');
   const url = need('CLEARED_V2_REPO_URL');
+  checkUrl(url, 'CLEARED_V2_REPO_URL');
   const service: ServiceConfig = {
-    name: project, kind: 'repository', repo, url, base: env.CLEARED_V2_BASE || 'main', path: null, dir,
+    name: serviceNameOf(project), kind: 'repository', repo, url, base: env.CLEARED_V2_BASE || 'main', path: null, dir,
     healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: null, brokerState: null,
   };
   return { id: project, name: project, services: [service], file: null };

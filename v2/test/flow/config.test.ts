@@ -203,3 +203,47 @@ test('the workspace file refuses an unknown kind, a service that consumes itself
     assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_WORKSPACE: '/nonexistent/workspace.conf' }), /cannot read/);
   });
 });
+
+// The addresses are built, not written: the guard refuses credentials in a
+// URL and an email-like address in the repository's text.
+function addressWith(user: string, password: string): string {
+  const url = new URL('https://github.example/example-org/guestbook.git');
+  url.username = user;
+  url.password = password;
+  return url.href;
+}
+
+test('a service url carrying credentials is refused, from the file and from CLEARED_V2_REPO_URL (review round 1, followup 2)', () => {
+  const plain = 'url = https://github.com/example-org/cleared-example-guestbook.git';
+  withWorkspaceFile(TWO.replace(plain, `url = ${addressWith('someone', 'not-a-token')}`), (env) =>
+    assert.throws(() => loadFlowConfig(env), (error: unknown) => error instanceof FlowConfigError && /\[service guestbook\] url carries credentials/.test(error.message) && !error.message.includes('not-a-token')));
+  withWorkspaceFile(TWO.replace(plain, `url = ${addressWith('only-a-name', '')}`), (env) =>
+    assert.throws(() => loadFlowConfig(env), /url carries credentials/));
+  assert.throws(() => loadFlowConfig({ ...M1_ENV, CLEARED_V2_REPO_URL: addressWith('x-access', 'not-a-token') }),
+    (error: unknown) => error instanceof FlowConfigError && /CLEARED_V2_REPO_URL carries credentials/.test(error.message) && !error.message.includes('not-a-token'));
+  // A git address over ssh names its account, not a secret.
+  const ssh = `${['git', 'github.com'].join('@')}:example-org/cleared-example-guestbook.git`;
+  withWorkspaceFile(TWO.replace(plain, `url = ${ssh}`), (env) =>
+    assert.equal(workspaceOf(loadFlowConfig(env)!).services[0]?.url, ssh));
+});
+
+test('the one-service workspace names its service by the service name rule, and keeps the project value as its id (review round 1, followup 3)', () => {
+  const config = loadFlowConfig({ ...M1_ENV, CLEARED_V2_PROJECT: 'My_Project.v2' });
+  assert.equal(config?.project, 'My_Project.v2');
+  assert.equal(workspaceOf(config!).id, 'My_Project.v2');
+  assert.equal(workspaceOf(config!).services[0]?.name, 'my-project-v2');
+  const { workspace: _workspace, ...rest } = config!;
+  assert.equal(workspaceOf(rest).services[0]?.name, 'my-project-v2', 'the same name from the milestone 1 fields');
+  assert.equal(workspaceOf(loadFlowConfig({ ...M1_ENV, CLEARED_V2_PROJECT: '__' })!).services[0]?.name, 'service');
+  assert.equal(workspaceOf(loadFlowConfig({ ...M1_ENV, CLEARED_V2_PROJECT: 'A'.repeat(60) })!).services[0]?.name, 'a'.repeat(40));
+});
+
+test('the proof\'s workspace file, examples/workspace.conf, parses as lane 28 wrote it', () => {
+  const file = new URL('../../../examples/workspace.conf', import.meta.url).pathname;
+  const workspace = workspaceOf(loadFlowConfig({ CLEARED_V2_WORKSPACE: file, CLEARED_V2_STATE_DIR: '/state' })!);
+  assert.equal(workspace.id, 'guestbook');
+  assert.deepEqual(workspace.services.map((s) => [s.name, s.consumes, s.run?.port, s.contract?.path ?? null]), [
+    ['guestbook', ['filter-api'], 8793, null],
+    ['filter-api', [], 8795, 'contract/openapi.yaml'],
+  ]);
+});

@@ -8,7 +8,7 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
-import { WorkspaceError, loadWorkspace, parseConf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
+import { WorkspaceError, loadWorkspace, parseConf, serviceNameOf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
 
 // The format of agents.conf is read by workspace/config.ts, which reads the
 // workspace file in the same format.
@@ -110,7 +110,7 @@ export function workspaceOf(config: FlowConfig): WorkspaceConfig {
   return {
     id: config.project, name: config.project, file: null,
     services: [{
-      name: config.project, kind: 'repository', repo: config.repo, url: config.repoUrl, base: config.base, path: null, dir: config.projectDir,
+      name: serviceNameOf(config.project), kind: 'repository', repo: config.repo, url: config.repoUrl, base: config.base, path: null, dir: config.projectDir,
       healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: null, brokerState: null,
     }],
   };

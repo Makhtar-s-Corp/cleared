@@ -9,10 +9,13 @@
 //
 // Before the first migration of a start, the ledger is copied with VACUUM
 // INTO (a consistent copy of an open database and its WAL) as
-// ledger.db.before-<version>-<time> next to it, 0600. The code never reads
+// ledger.db.before-<version>-<time> next to it. The store creates that file
+// itself first, new and 0600, and VACUUM INTO fills it (it takes an empty
+// file): the copy, which holds the users' password hashes, is never
+// readable by others, whatever the umask and the folder. The code never reads
 // or removes these copies: the owner removes them by hand once the
 // migration is trusted. A ledger with no row at all is not copied.
-import { chmodSync } from 'node:fs';
+import { chmodSync, closeSync, openSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { MigrationError } from './db.ts';
 
@@ -81,8 +84,10 @@ function backup(db: DatabaseSync, version: number, now: Date): void {
   if (!file || !holdsRows(db)) return;
   const target = `${file}.before-${version}-${now.toISOString().replace(/[-:.]/g, '')}`;
   try {
-    db.prepare('VACUUM INTO ?').run(target);
+    // wx: a file already at that name (someone else's, perhaps open) is refused.
+    closeSync(openSync(target, 'wx', 0o600));
     chmodSync(target, 0o600);
+    db.prepare('VACUUM INTO ?').run(target);
   } catch (error) {
     copied.delete(db);
     throw new MigrationError(`cannot copy the ledger before migration ${version} to ${target}: ${error instanceof Error ? error.message : String(error)}; nothing was migrated`);
@@ -101,9 +106,10 @@ export function migrate(db: DatabaseSync, migrations: readonly Migration[] = MIG
     if (!migration.tables.every((table) => exists(db, table))) return;
     // The copy is the ledger as it was: made before v2_schema is created.
     backup(db, migration.version, now());
-    db.exec(SCHEMA_TABLE);
     db.exec('BEGIN IMMEDIATE');
     try {
+      // In the transaction: a failing first migration leaves no v2_schema either.
+      db.exec(SCHEMA_TABLE);
       // Another process may have applied it since the read above.
       if (applied(db) >= migration.version) {
         db.exec('ROLLBACK');

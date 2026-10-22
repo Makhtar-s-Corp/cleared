@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -153,11 +153,9 @@ test('a migration that throws leaves the ledger as it was, and is reported as a 
     }];
     assert.throws(() => migrate(db, failing), (error: unknown) =>
       error instanceof MigrationError && error instanceof StoreError && /migration 1 \(adds a column, then fails\) failed: planted failure/.test(error.message) && /left as it was/.test(error.message));
-    // v2_schema, empty, is the only thing the attempt leaves.
-    const after = [schemaOf(db).filter((o) => o.name !== 'v2_schema'), rows(db, Object.fromEntries(Object.keys(before[1] as Rows).map((t) => [t, columnsOf(db, t)])))];
-    assert.deepEqual(after, [before[0], before[1]]);
+    // Nothing is left, v2_schema included: it is created in the migration's transaction (review round 1, followup 1).
+    assert.deepEqual([schemaOf(db), rows(db)], before);
     assert.equal(columnsOf(db, 'sessions').includes('half_done'), false);
-    assert.deepEqual(db.prepare('SELECT * FROM v2_schema').all(), []);
   } finally {
     db.close();
   }
@@ -235,5 +233,30 @@ test('a session keeps its service and its preview key, and its events carry the 
     assert.deepEqual(store.db.prepare('SELECT session_id, service FROM session_events ORDER BY session_id').all().map((r) => ({ ...r })), [{ session_id: 's1', service: 'filter-api' }, { session_id: 's2', service: null }]);
   } finally {
     store.close();
+  }
+}));
+
+test('the copy is a new file the store creates private: a file already at its name is refused, and nothing is migrated (review round 1, followups 4 and 5)', withDir((dir) => {
+  chmodSync(dir, 0o755);
+  const path = fixtureLedger(dir);
+  const at = new Date('2026-10-23T08:00:00.123Z');
+  // Someone else's file, made before the copy, empty and readable by all.
+  const target = `${path}.before-1-20261023T080000123Z`;
+  writeFileSync(target, '', { mode: 0o644 });
+  chmodSync(target, 0o644);
+  const db = new DatabaseSync(path);
+  try {
+    const before = [schemaOf(db), rows(db)];
+    assert.throws(() => migrate(db, MIGRATIONS, () => at), (error: unknown) => error instanceof MigrationError && /cannot copy the ledger before migration 1/.test(error.message) && /nothing was migrated/.test(error.message));
+    assert.deepEqual([schemaOf(db), rows(db)], before, 'nothing was migrated, v2_schema not even made');
+    assert.equal(statSync(target).size, 0, 'the ledger was not written into a file the store did not make');
+    // Once that name is free, the copy is made, 0600 from its creation.
+    rmSync(target);
+    const previous = process.umask(0);
+    try { migrate(db, MIGRATIONS, () => at); } finally { process.umask(previous); }
+    assert.equal(statSync(target).mode & 0o777, 0o600);
+    assert.ok(statSync(target).size > 0);
+  } finally {
+    db.close();
   }
 }));
