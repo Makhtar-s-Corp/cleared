@@ -1,0 +1,198 @@
+# Cleared v2: requirements matrix
+
+Every requirement of the brief (the orchestrator's prompt and the owner's decisions of 2026-10-21) and of the two complements of 2026-10-22 ([complement-devin.md](complement-devin.md), [complement-multi-depots.md](complement-multi-depots.md)), with its milestone, the pull request that delivers it, the test that proves it, and its status. Created on 2026-10-22 by the milestone 2 replan (logged in [decisions-log.md](decisions-log.md)); the merged lines were filled from pull requests 118 to 181 and the tests under `v2/test/` and `v2/app/test/` at commit `f86c147`.
+
+## The rules of this file
+
+1. **Updated at every merge.** The orchestrator, when merging a lane into `v2`, fills the lane's lines: the pull request number, the test file or the doctor section or the proof step that proves each one, and the status. A lane's pull request names the lines it delivers.
+2. **Checked line by line before every merge of `v2` into `main`.** At the end of a milestone, the orchestrator reads every line of that milestone and the lines "always" applies to: each one is `done` with a green test named in its "Proven by" column, or the merge waits. **No line of the milestone without a green test.** A line whose proof is a proof step is green when that step passed in the recorded proof run; a line whose proof is a process (a review, a report) is green when the pull request shows it. A line of a milestone already merged into `main` that the owner later reopened as a catch-up (the complements of 2026-10-22) is checked at the merge of the milestone that carries the catch-up: the milestone 1 catch-up lines are checked at the milestone 2 merge, and B6.1 stays `partial` until then.
+3. **Status values**: `done` (merged, with its test green); `partial` (merged in part, the rest named); `in progress` (a lane runs); `planned` (a lane of the current plan, named); `later` (a later milestone, named); `open` (waits for the owner, the question named); `not taken` (the owner's decision).
+4. **"Proven by"** names a test file under `v2/` (`test/...` or `app/test/...`), a doctor section (`doctor <section>`), a proof step (`proof j1 step N`, `proof j2 step N`, `proof j2-multi step N`), a CI step, or a log entry for a process rule. A line with code and no test is not `done`, whatever the code says.
+5. **Ids** are stable: `B` for the brief's prompt (its section), `D` for the owner's decisions of 2026-10-21, `O` for the owner's decisions of 2026-10-22 (the decisions log), `C` for the first complement (its item number), `M` for the multi-repository complement (its item number), `P` for a decision a plan took. A new requirement gets a new id at the end of its group; an id is never reused.
+6. **Names.** No person's or organisation's name, no private project name: "the owner", "the first piloted project", "the organisation this repository lives in".
+
+## A. The brief's rules (apply to every milestone)
+
+| Id | Requirement | Milestone | Delivered by | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| B3.1 | Never touch the first piloted project's production; every Docker command filters on `cleared.dev=v2`, every created object carries it | always | 129 (wrapper), 128 (watcher) | `test/container/docker.test.ts`, `examples/guestbook/test/watch.test.ts` | done |
+| B3.2 | No listener on 80, 443, 8788 or a used port; loopback or tailnet only; no tunnel | always | 120, 129 | `test/config.test.ts` (reserved ports); `ss -ltn` in each real-run pull request | done |
+| B3.3 | No secret in the repository, the logs, the pull requests, the captures or the reports; the guard runs on every pull request | always | 120, 125, 130 (the cleaner) | CI step "Private terms and secrets guard" (`.github/workflows/v2.yml`), `test/session/clean.test.ts` | done |
+| B3.4 | Nothing irreversible outside the v2 branches without the owner's written agreement | always | process | log entries of 2026-10-21 (v1 stopped, the example repository) | done |
+| B3.5 | No deploy without the human's agreement, ever, the fast lane included | always | 151 | `test/approval/lock.test.ts`, `test/approval/route.test.ts`; proof j1 step 7 | done |
+| B3.6 | English by default, fully translatable; French complete; teams' content stays in the project's language | always | 135 and every screen lane | `app/test/catalog.test.ts` (fr has every en key) | done |
+| B3.7 | The computer is the main screen: 1440 and 1280 first, then 768 and 390 | always | every interface lane | the visual loop's captures in each interface pull request | done |
+| B3.8 | No gradient; `app/DESIGN.md`; Geist, Geist Mono for ids only | always | 135 | `app/test/static.test.ts` (no gradient), the art-director pass per interface pull request | done |
+| B3.9 | Password login, no passkeys | always | 135 | `app/test/login.test.ts` | done |
+| B3.10 | Authors Opus 5.5 or Haiku 5.5; reviewer Sonnet 5.5, always another model; never Fable without the owner's explicit request | always | process | log entries "model choice per lane", "Fable 5.1 used once" (three); the owner's explicit request for each Fable use confirmed in a report | partial (the confirmation of the three Fable uses is still to be recorded in a report) |
+| B3.11 | Shared quota: no new lane past 85 % of the week; a session idle 15 minutes is stopped | always | 150 (idle), 172 (week stop), process | `test/flow/engine.test.ts` (idle), `test/lead/plans/runner.test.ts` (week stop); the daily report's share | done |
+| B3.12 | Measure the full cost of a successful ticket: quota, session time, review rounds, human time | always | 156, 181 | proof j1 `durations.md`; `test/scripts/proof-report.test.ts` | done |
+| B4.1 | One integration branch `v2`; a lane is a branch `v2-jN-topic` from `v2` to `v2` | always | 120, process | log entry "lane branches are named v2-jN-topic" | done |
+| B4.2 | The orchestrator merges into `v2` after review and green CI, and `v2` into `main` at each milestone's end | always | process | the merged pull requests; `main` at `bd496f1` after milestone 1 | done |
+| B4.3 | At most 3 lanes in parallel, each in its own worktree; a lane past 3 hours without a pull request or 5 % of the week is stopped and analysed | always | process | the waves of each plan; the daily report | done |
+| B4.4 | Two review rounds by another model in a fresh session, the reviewer given the brief and the diff; after round two only breakage, security and data loss block, the rest become `review-followup` issues | always | process | the issues labelled `review-followup` | done |
+| B4.9 | Every lane brief holds the context in three sentences, what must exist at the end and how it is proven, what is out of scope, the branch name, the author model and the rules of section 3 that apply | always | process | the lane briefs (not in the repository); each plan's lane sections carry the same fields | done |
+| B4.10 | A security fix made after the second round gets a targeted review of that diff alone | always | process | the pull requests where it happened (none yet) | done |
+| B4.11 | Questions to the owner grouped in one message, at most one a day except when blocked | always | process | the reports sent | done |
+| B4.12 | The milestone report holds captures of what runs, the demo step by step, what stays open and the milestone's cost; no em dash in a report | always | process | the milestone 1 report | done |
+| B2.1 | Kept from v1: the heartbeat and `cleared status` | 4 | | | later (milestone 4, with the v1 conversion; `keep-and-drop.md` holds the verdict) |
+| B2.2 | Kept from v1: the fast lane (rules on the real diff) | 2 then 4 | 172 (the `Quick` label and the Haiku author) | `test/lead/plans/runner.test.ts`; the real-diff rules and the approval while the checks run: milestone 4 (first plan, decision 15) | partial |
+| B4.5 | Interface lanes: the visual loop at the four widths, light and dark, then the art-director pass | always | 135, 148, 154, 162, 171, 174, 178, 184 | each interface pull request's captures and pass | done |
+| B4.6 | Tests first; each defect test fails on the old code; a fake harness proves nothing about the real one: every adapter has a real run on the server, documented, run by `cleared doctor`; the whole suite in CI; no skipped test without an issue | always | 120, 143, 169 | CI; `doctor claude-code`, `doctor host-tools`, `doctor lead`; issue 146 for the one skipped test | done |
+| B4.7 | Ask the owner only for the big decisions, grouped, with 2 to 4 options and a recommendation; decide the rest and log it | always | process | the plans' question sections; [decisions-log.md](decisions-log.md) | done |
+| B4.8 | A daily report and a milestone report in French for a product owner, "De quoi on parle" first, "Ce qui t'attend" last | always | process | the reports sent (not in the repository) | done |
+
+## B. The brief's architecture (section 5) and the owner's decisions
+
+| Id | Requirement | Milestone | Delivered by | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| B5.1a | The session contract: start, send, events, answer, interrupt, resume, handover, stop; aligned on ACP | 1 | 130 | `test/session/fake.test.ts`, `test/session/claude-code/adapter.test.ts` | done |
+| B5.1b | Claude Code driven through its programmatic mode, the choice and versions in `docs/adapters.md` | 1 | 119, 143 | `doctor claude-code`; `docs/adapters.md` dated paragraphs | done |
+| B5.1c | Codex on the same contract; a Cursor harness beside it (owner note of 2026-10-22) | 3 | | | later (milestone 3) |
+| B5.1d | What is harness-specific lives in its adapter only | 1 | 130, 143 | `test/session/claude-code/map.test.ts` | done |
+| B5.2a | Events in AG-UI's format: messages, tool calls, permissions, questions, state, start and end | 1 | 130 | `test/session/events.test.ts` (every type in `EventType`) | done |
+| B5.2b | Cleaned before storage (the guard's filter; no file content; command output truncated), stored in the ledger, pushed live | 1 | 130, 150 | `test/session/clean.test.ts`, `test/store/db.test.ts`, `test/flow/api.test.ts` | done |
+| B5.2c | CopilotKit's conversation components may be reused (see O2) | 2 | 184 | `app/web/test/copilot.test.tsx` (the threads as AG-UI agents through CopilotKit's headless hooks; no request leaves) | done |
+| B5.3a | Each harness keeps its permission mechanism; a policy per role answers: allowed (read, write in the checkout, declared commands), refused (base branch, production, outside the checkout, secrets), escalated (install, delete outside the ticket, undeclared network) | 1 | 130, 160 | `test/session/policy.test.ts` (one case per row), `test/flow/policy.test.ts` | done |
+| B5.3b | In the inbox, one click: once, always in this project (saved in the project's policy), deny | 1 | 150, 154 | `test/flow/inbox-store.test.ts`, `app/test/inbox/flow.test.ts`; proof j1 step 5 | done |
+| B5.3c | A deploy agreement is never a permission: only the lock checks it | 1 | 151 | `test/approval/lock.test.ts` | done |
+| B5.4a | Docker mandatory, one container per session with the harness, the checkout, the dependencies and the test browsers | 1 | 129 | `test/container/session-runtime.test.ts`; `doctor docker` | done |
+| B5.4b | The image from `.devcontainer/devcontainer.json`, else Cleared's base image | 1 | 129 | `test/container/devcontainer.test.ts` | done |
+| B5.4c | Test services as sibling containers from the project's config, on a per-session private network; the session never reaches Docker | 1 | 129, 156 (the `[session] services` fix) | `test/container/services.test.ts`; `doctor docker` | done |
+| B5.4d | Network: no reach to the app, the lock, the host's tailnet address or production; reach to the model API, declared registries and the session's services | 1 | 129 | `test/container/egress.test.ts`; `doctor docker` | done |
+| B5.4e | The harness login mounted read-only from the service | 1 | 143 | `doctor claude-code`; log entry of 2026-10-21 on the login | done |
+| B5.4f | Stopping a session removes its container; no orphan, a test proves it | 1 | 129 | `test/container/session-runtime.test.ts`; `doctor docker` (nothing left with the label) | done |
+| B5.4g | Memory and CPU limits per session, configurable | 1 | 129 | `doctor docker` (`docker inspect`) | done |
+| B5.5a | A generated, unversioned context file in the harness's native format: project page, approved decisions linked to the ticket, glossary, the role's lessons, last handover, and the reference-data line | 1 | 136 | `test/workspace/briefing.test.ts` | done |
+| B5.5b | The project's skills mounted as they are | 1 (catch-up in 2) | lane 15 | lane 15's mount test | planned (nothing of it in the code on 2026-10-22) |
+| B5.5c | Hooks enforce the rules: no push to the base branch, the guard before anything leaves, `HANDOVER.md` at the end | 1 | 136, 169 (by role) | `test/runner/hooks.test.ts` | done |
+| B5.6a | The lead: one permanent session, context under a threshold (50 % by default), a handover before it, a restart briefed with it and the memory, one conversation for the human; native compaction used if present, never relied on | 2 | 167, 169, 176 | `test/lead/engine.test.ts`, `test/lead/property.test.ts`; `doctor lead` | done |
+| B5.6b | The lead opens, follows and stops team sessions, answers their questions when memory settles them, escalates the rest | 2 | 167 | `test/lead/tools.test.ts` | done |
+| B5.6c | Goal mode: questions, a plan of tickets with lane, dependencies, time and cost estimated from history; the human approves the plan; the lead runs it alone, in order, at most 2 at a time | 2 | 172 | `test/lead/plans/{runner,estimates,tools,routes}.test.ts` | done |
+| B5.6d | Night work on what is approved, the human told by notification | 2 | 166, 172 | `test/notify/dispatcher.test.ts`; proof j2 steps 5 and 6 | partial (the proof run pending) |
+| B5.7 | Review is a session of another model, visible, the human can talk to it; a verdict; a requested change reopens the author | 1 | 150 | `test/flow/review.test.ts`; proof j1 step 6 | done |
+| B5.8a | Cleared owns its tickets, created and moved in the app; the local adapter is the store | 1 | 151 | `test/approval/local-store.test.ts`, `test/tickets/contract.test.ts` | done |
+| B5.8b | Linear and GitHub Issues as two-way mirrors with a written conflict rule | 4 | | | later (milestone 4) |
+| B5.8c | Without a tracker configured, Cleared works alone | 1 | 151 | `test/flow/engine.test.ts` on the memory store | done |
+| B5.9a | Users in the data model from milestone 1; every agreement, answer and message attached to a user | 1 | 135, 150 | `test/modules/users.test.ts`, `test/flow/api.test.ts` | done |
+| B5.9b | Password set at setup (Argon2id), cookie `HttpOnly`, `Secure`, `SameSite=Strict`, 30 days | 1 | 135 | `app/test/login.test.ts`, `test/cli/user.test.ts` | done |
+| B5.9c | The identity for a deploy agreement is the app session; the lock accepts an agreement from the app for a signed-in user and refuses anything from an agent session; the 60-second Undo stays | 1 | 151, 154 | `test/approval/{signer,route,lock}.test.ts`, `app/test/inbox/flow.test.ts` | done |
+| B5.9d | Passkeys and their code removed | 1 then 4 | 135 (v2 app without them) | log entry "app login by password, no passkeys"; the v1 code's removal is milestone 4 | partial |
+| B5.10a | The app follows `app/DESIGN.md` and the four reference screens, opening on the tower | 1, 2 | 135, 184 (React) | `app/test/tower.test.ts`, `app/web/test/tower.test.tsx`; the visual loops of 135 and 184 | done |
+| B5.10b | The tower: the bar (ask the lead, a goal, a ticket), what waits, live sessions with their phrase, the lead, the plans, landed today | 1, 2 | 135, 162, 171 | `app/test/tower.test.ts`, `app/test/tower-lead.test.ts` | done |
+| B5.10c | The session screen: ticket and criteria, the session's plan, live timeline, questions and permissions in the thread, a message field, Interrupt, Hand over to Codex (milestone 3), changed files, checks, the screen so far | 1 | 148 | `app/test/session/{model,render,follow}.test.ts` | done |
+| B5.10d | The lead and its plan: the conversation and the plan with "Approve the plan and start" | 2 | 174, 178 | `app/test/lead/{render,reply,follow,app}.test.ts`, `app/test/inbox/plan.test.ts` | done |
+| B5.10e | The inbox: everything waiting for a human gesture, with detail and buttons | 1, 2 | 154, 178 | `app/test/inbox/{model,render,flow}.test.ts` | done |
+| B5.10f | "Open in terminal" pauses the session and shows the resume command; "Give back to Cleared" resumes it | 2 (owner: milestone 1 catch-up) | lane 20 | lane 20's takeover test | planned |
+| B5.10g | Web notifications in the Mac's browser as the default channel: a deploy to agree, a permission, a question, a plan, a rollback; subscription from the signed-in session without a passkey | 2 | 162, 166 | `app/test/notify/{routes,button,browser}.test.ts`, `test/notify/dispatcher.test.ts`; delivery to the Mac: proof j2, skipped until question 2 | partial (open: the https address) |
+| B5.11a | Node, no bash, strict TypeScript run natively; `tsc --noEmit` in CI | 0 | 120 | CI step "Types" | done |
+| B5.11b | Kept JavaScript converted when touched, and entirely before the end of milestone 4 | 4 | 166 (one logged exception: `lib/notify/contract.mjs`) | `git grep` at milestone 4 | partial |
+| B5.11c | Minimal dependencies, each justified in its pull request | always | 130 (`@ag-ui/core`), 184 (the React set, each with its licence and size, all dev dependencies) | each pull request's list | done |
+| B5.11d | One service holding sessions, policy, events, tickets, the lead, Docker; the app and the lock as separate processes | 1 | 120, 150, 151 | `test/main.test.ts`, `test/modules/registry.test.ts` | done |
+| D1 | Three entries: a ticket, a conversation, a goal, all leading to sessions | 2 | 135 (ticket), 174 (conversation and goal) | `app/test/tower.test.ts`, `app/test/lead/reply.test.ts` | done |
+| D2 | A team is autonomous by default; the human enters when they want (watch, write, interrupt, resume) | 1 | 143, 150 | `doctor claude-code` (message mid turn, interrupt, resume); proof j1 step 4 | done |
+| D3 | Permissions reach the human only for risky commands; the inbox stays short | 1, 2 | 130, 160 (compound safe commands) | `test/session/policy.test.ts` | done |
+| D4 | The human talks to teams in the app by default, in a terminal if they want | 1, 2 | 148; lane 20 | `app/test/session/follow.test.ts`; lane 20 | partial (the terminal: planned) |
+| D5 | The lead pilots the teams and the human talks to it | 2 | 167, 174 | `test/lead/engine.test.ts`, `app/test/lead/reply.test.ts` | done |
+| D6 | The lead is permanent but never inflated: a mechanism, not a setting | 2 | 167, 176 | `test/lead/property.test.ts`; `doctor lead` | done |
+| D7 | The human's agreement before any deploy, always; the fast lane accelerates everything but that | 1 | 151 | `test/approval/lock.test.ts` | done |
+| D8 | Review is a session like the others, visible, another model | 1 | 150 | `test/flow/review.test.ts` | done |
+| D9 | A goal to the lead from the first version: a plan proposed, validated, run alone | 2 | 172 | `test/lead/plans/runner.test.ts` | done |
+| D10 | One container per team, Docker mandatory; the service alone talks to Docker; test services as siblings | 1 | 129 | `test/container/docker.test.ts` | done |
+| D11 | Node for the whole core, no bash; the rest migrated along the way | 0 then 4 | 120 | CI | partial (the v1 scripts go in milestone 4) |
+| D12 | Keep what serves, drop the rest, as listed | 0 | 118 | `docs/v2/keep-and-drop.md` | done |
+| D13 | Claude Code first, Codex next on the same contract | 1, 3 | 143 | `doctor claude-code` | partial (Codex: milestone 3) |
+| D14 | One server, Docker Compose, one-command install; the installer is part of the product | 5 | | | later (milestone 5) |
+| D15 | The repository stays public during the rebuild | always | process | the repository's visibility | done |
+| D16 | The app opens on the tower; the inbox and the sessions one click away | 1 | 135 | `app/test/shell.test.ts` | done |
+| D17 | Tickets created and moved in the app, synchronised with Linear; GitHub Issues alike; with nothing configured the app alone suffices | 1, 4 | 151 | `test/approval/local-store.test.ts` | partial (mirrors: milestone 4) |
+| D18 | A simple password or a link, no passkey; the identity for an agreement is the app session | 1 | 135, 151 | `app/test/login.test.ts`, `test/approval/route.test.ts` | done |
+| D19 | One human now, several planned: user accounts from the start | 1 | 135 | `test/modules/users.test.ts` | done |
+| D20 | Cleared works alone at night, alerts the human and talks to them | 2 | 166, 167, 172 | proof j2 steps 5 and 6 | partial (the proof run pending) |
+| D21 | Web notifications in the Mac's browser, subscription without a passkey | 2 | 162, 166 | `app/test/notify/routes.test.ts` | partial (delivery: open, question 2) |
+| D22 | v1 stopped on the first piloted project: services stopped, nothing deleted | 0 | orchestrator (no pull request) | log entry "v1 is stopped without an archive" | done |
+| O1 | The sessions use the current Claude Code login, read-only, for the example project only; the runner is relaunched on a revoked token during the 48-hour proof and each cut is counted (2026-10-22 05:05) | 2 | 169 (the login wait), 181 (the cuts counted) | `test/session/claude-code/map.test.ts` (the login wait), `test/scripts/proof-report.test.ts` (the cuts); the second example: open, question 1 | partial (the proof run pending; the scope for the second example open) |
+| O2 | The interface moves to React with CopilotKit for the chat: open source packages only, no Copilot Cloud, no public key, telemetry off with a check that nothing leaves for its hosts; Vite for the front end only, the service unbuilt (2026-10-22 06:29) | 2 | 184 | `app/web/test/copilot.test.tsx` (every request watched, none allowed); the CI's opt-out variables and `v2/.npmrc`; the server unbuilt (`npm start` runs `node src/main.ts`) | done |
+| O3 | shadcn/ui as the component library, copied into the repository on Radix and Tailwind; the themes through its variables with the current colours and Geist, no gradient; English by default, French; the kit's identity kept (2026-10-22 06:30) | 2 | 184 | `app/test/static.test.ts` (no gradient), `app/test/catalog.test.ts`, `app/web/test/shell.test.tsx`; the visual loop of 184 (48 captures per run, at most 0.12 % of pixels different, the icons only) | done |
+| O4 | Phosphor icons everywhere, in the regular weight, bold only for active states (2026-10-22 06:30) | 2 | 184 | the visual loop of 184 (the icons are the only pixel difference); CopilotKit's Lucide chat components not imported (`app/web/test/copilot.test.tsx`) | done |
+| O5 | The complements integrated: milestone 1 items 1, 8, 9, 10 as a milestone 2 catch-up after the React port and the clickable answers and before the 48-hour proof; milestone 2 items 2, 7, 11, 12 added; the rest in milestones 3 to 5; the milestones' order and proofs unchanged (2026-10-22 06:45) | 2 | this plan (pull request 183) | the waves of the plan's section 4.8, in that order | planned |
+| O6 | A Cursor harness beside Codex in milestone 3; real trials with Cursor, Codex tested without an account (2026-10-22 05:05) | 3 | | | later |
+
+## C. The milestones
+
+| Id | Requirement | Milestone | Delivered by | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| B6.0a | Stop v1 on the first piloted project cleanly, with the owner's agreement, the site still answering | 0 | orchestrator | log entry of 2026-10-21; the orchestrator's report | done |
+| B6.0b | The `v2` branch | 0 | 118 | the branch exists | done |
+| B6.0c | `docs/v2/keep-and-drop.md`: every file kept, adapted or removed, with a reason | 0 | 118 | the file | done |
+| B6.0d | The service skeleton in strict TypeScript, the CI (tests, types, guard), `docs/v2/decisions-log.md` | 0 | 118, 120, 125 | CI green on `v2` | done |
+| B6.0e | The real driving modes of Claude Code and Codex and ACP's state, in `docs/adapters.md` | 0 | 119 | the file's dated sections | done |
+| B6.0p | Milestone 0's proof: v1 stopped, the site answering, the `v2` CI green, the two documents present | 0 | 118, 119, 120 | the orchestrator's report of 2026-10-21; CI green on `v2` | done |
+| B6.1 | Milestone 1's content: contract and Claude Code adapter, AG-UI events, a container per session with its services, policy and inbox, native memory and hooks, review in a session, tickets in the app, password login, agreement in the app, the lock, watch and rollback reused, the three screens | 1 | 126 to 156 | the lines of section B; proof j1 (pull request 156, `durations.md`, nine steps) | partial (merged into `main` on 2026-10-21; its catch-up lines B5.5b, B5.10f, C1, C8, C9, C10, M1, M3, M5 and M8 are checked at the milestone 2 merge, rule 2) |
+| B6.1p | Milestone 1's proof: the owner creates a ticket, moves it to Todo, watches the session, writes mid run, answers a risky permission, sees the review, approves in the app, the change is live; no command on the server; durations shown | 1 | 156 | proof j1 steps 1 to 9, run 7 | done |
+| B6.1q | Then one real low-risk ticket of the first piloted project, after the owner's go | 1 | | | open (the owner's go) |
+| B6.2 | Milestone 2's content: the permanent lead, goal mode (questions, estimated plan, approval, autonomous start), night work, the lead and plan screen, a notification for every wait | 2 | 159 to 181 | the lines of section B; proof j2 | partial (the proof run pending) |
+| B6.2p | Milestone 2's proof: a goal in the evening, one or two questions, a plan of 4 to 6 tickets approved; in the morning the tickets advanced and what waits is in the inbox; the lead ran 48 hours under its threshold without losing a commitment | 2 | 181 (the script and its rehearsals), lane 29; the real run by the orchestrator | proof j2 steps 1 to 8 | planned (after wave 11, the last wave; an early run is question 7 of the plan) |
+| B6.2m | The multi-service proof on a second example (the replan's section 2.2) | 2 | lanes 28, 29 | proof j2-multi steps 1 to 10 | planned (after wave 11; the repository and the login scope: open, question 1) |
+| B6.3 | Codex (and Cursor) on the contract; cross-harness review; "Hand over to Codex" and back; two sessions on one ticket | 3 | | | later |
+| B6.3p | Milestone 3's proof: a stuck Claude session is handed over to Codex from the app and finishes the ticket | 3 | | | later |
+| B6.4 | Two-way Linear and GitHub Issues; v1 data reused (memory, ticket history for estimates); every removal of keep-and-drop done; no bash in the core | 4 | | | later |
+| B6.4p | Milestone 4's proof: a ticket created in the app appears in Linear and the reverse; a human move in Linear wins; `git grep` finds no bash script in the core | 4 | | | later |
+| B6.5 | One-command install, the browser setup assistant, `cleared doctor`, README and documentation | 5 | | | later |
+| B6.5p | Milestone 5's proof: on a fresh machine with Docker, a developer who does not know Cleared installs it and takes a first ticket to live in under an hour, following the assistant only | 5 | | | later |
+
+## D. The first complement (what we take from the compared product)
+
+| Id | Requirement | Milestone | Delivered by | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| C1 | A workspace with four tabs, Plan, Terminal, Editor, Browser, with Take over and Give back | 1 (catch-up in 2) | lane 20 | lane 20's tab and takeover tests; proof j2-multi step 4 | planned |
+| C2 | Proposed knowledge with Approve and Reject in the inbox, replacing approvals by comment | 2 | lanes 17 (the inbox kind), 24, 27 | lane 24's tests make the line green; proof j2 step 6 records how many knowledge items the night produced, whatever the count | planned |
+| C3 | Linear and GitHub delegation (Slack later) | 4 | | | later |
+| C4 | A `.devcontainer` setup session | 5 | | | later |
+| C5 | The project page kept up to date | 4 | | | later |
+| C6 | Multiple sessions in batches | 3 | | | later |
+| C7 | Recipes | 2 | lanes 26, 27 | lane 26's recipe tests | planned |
+| C8 | The plan validated before the code: Go, a delay per project, automatic start when the confidence is high | 1 (catch-up in 2) | lanes 17, 20, 21 | lane 17's gate tests; proof j2 step 5 | planned |
+| C9 | Low, medium or high confidence, with its reason | 1 (catch-up in 2) | lanes 17, 20 | lane 17's tests | planned |
+| C10 | The release request grouped by intent, with flags | 1 (catch-up in 2) | lanes 17, 18, 21 | lane 18's flag tests; proof j2 step 7 | planned |
+| C11 | A read-only question to the code, with the cost shown | 2 | lanes 25, 27 | lane 25's tests and its real ask | planned |
+| C12 | Scheduled sessions with a budget | 2 | lanes 26, 27 | lane 26's schedule tests | planned |
+| C13 | Fix the CI | 3 | | | later |
+| C14 | Replay, and Redo from here | 3 | | | later |
+| C15 | An image ready in seconds | 5 | | | later |
+| C16 | Test secrets managed in the app | 5 | | | later |
+| C17 | Weekly figures | 4 | | | later |
+| C18 | `cleared run` as a CLI and an API | 5 | | | later |
+| C19 | Open in an editor (VS Code or Cursor) | 3 | | | later |
+| C20 | Working from the phone | none | | | not taken |
+| C21 | Service integrations beyond the harness's MCPs | none | | | not taken |
+
+## E. The multi-repository complement (a workspace is several services)
+
+| Id | Requirement | Milestone | Delivered by | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| M0 | Principle: a workspace is several services (repositories or monorepo folders); a ticket belongs to the workspace and can touch several; a one-service workspace changes nothing | 2 | lane 14 | lane 14's migration and configuration tests (the one-service case equal to today) | planned |
+| M1 | The workspace and services model with a config per service; three-level memory (workspace, service, contracts) | 1 (catch-up in 2) | lanes 14, 19 | lane 14's tests; lane 19's briefing tests | planned |
+| M2 | A ticket in steps: the contract first (OpenAPI, protobuf, JSON Schema or an event, validated by the human), steps per service with a fake service, then end-to-end integration; a plan with dependencies, order and cost per step | 2 | lanes 17 (the inbox kind), 23, 27 (OpenAPI 3); protobuf, JSON Schema and events deferred by the plan's question 5 | lane 23's tests; proof j2-multi steps 2 to 5 | partial / open (question 5: the default moves the other formats to milestone 3) |
+| M3 | A set of branches with the same name, sibling containers, a fake service when one cannot be launched, a trial environment per ticket (the Browser tab) | 1 (catch-up in 2) | lanes 15, 20 | lane 15's tests and `doctor workspace`; lane 20's preview isolation test; proof j2-multi step 4 | planned |
+| M4 | Notes between the sessions of a ticket; a contract change reopens the contract step with the human's approval; the handover files knowledge in the contract's memory | 3 | | | later (the contract memory level itself: lane 19) |
+| M5 | One release card as a train: the landing order, health between landings, rollback in reverse order, compatibility verified before approval (an untouched consumer blocks; propose an extension or backward compatibility) | 1 (catch-up in 2) | lanes 16, 21 | lane 16's train tests; proof j2-multi steps 6 to 10 | planned |
+| M6 | A map of the services (calls, events, databases, contracts) kept up to date; impact analysis by the lead; a diagram in the app | 4 | | | later |
+| M7 | Skills per service in the standard format in the repository; approved knowledge goes into the skill | 2 | lane 24 | lane 24's skill tests | planned (question 6 of the plan) |
+| M8 | Sensitivity per service (full circuit, a dedicated reviewer, a specific human), flagged from the plan | 1 (catch-up in 2) | lanes 18, 22 | lane 18's tests | planned |
+| M9 | A question to the whole platform (service, file, line) | 2 | lanes 25, 27 | lane 25's platform test | planned |
+| M10 | Connect a workspace: several repositories, setup sessions, links guessed and proposed; the forge as an adapter per service, GitLab after GitHub | 5 | | | later |
+
+## F. Lines added by the plans (decisions the lanes must keep)
+
+| Id | Requirement | Milestone | Delivered by | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| P1 | The store is migrated by versioned, tested, reversible migrations (replan decision 19) | 2 | lane 14 | `test/store/migrations.test.ts` | planned |
+| P8 | A page built by a session (the trial environment) runs on another origin than the app, sandboxed, without the owner's credentials, behind an unguessable per-session address, so it can approve nothing (replan decision 20) | 2 | lanes 15, 20 | lane 20's preview isolation test; lane 15's header test | planned |
+| P9 | No instruction written by a session runs during a sibling's build, and the ticket layer is built with no network (replan decision 20) | 2 | lane 15 | lane 15's build command-line test | planned |
+| P2 | The front end's build never reaches a CopilotKit host; the telemetry switches are off (owner decision of 2026-10-22 06:29) | 2 | 184 | `app/web/test/copilot.test.tsx`; the Chromium captures' request logs in 184 | done |
+| P3 | The lead's context cycle, commitments as rows, the handover record, the event turns (first plan, decisions 3, 4; sections 4.1 to 4.3) | 2 | 167, 169, 176 | `test/lead/engine.test.ts`, `test/lead/property.test.ts`, `doctor lead` | done |
+| P4 | Estimates computed by the service from history, never by the model; the runner starts in order, at most `maxParallel` (first plan, decision 5) | 2 | 172 | `test/lead/plans/estimates.test.ts`, `test/lead/plans/runner.test.ts` | done |
+| P5 | The landing is followed through: the queued merge retried, the watch read from the ledger, a restart puts things straight (first plan, decisions 11, 12) | 2 | 161 | `test/flow/landing.test.ts`, `test/flow/recovery.test.ts` | done |
+| P6 | Compound shell commands of safe simple commands are allowed; a redirection target gets an edit's verdict (first plan, decision 10) | 2 | 160 | `test/session/policy.test.ts` (the compound rows) | done |
+| P7 | The quota share is read before each wave and each proof; a wave starts only under 85 minus its estimate (replan decision 31) | 2 | process | the daily report | planned |
