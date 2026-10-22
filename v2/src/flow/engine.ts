@@ -327,14 +327,15 @@ export class FlowEngine {
   }
 
   // The end of a landing: the ticket's move first, then the `watch` step
-  // and the events. A move that fails leaves the watch open, so the next
+  // and the events. A read or a move that fails leaves the watch open, so the next
   // tick makes it again (the ticket stays a candidate while it is in go or
   // Done). True when the landing is closed.
   async #settleLanding(c: Candidate, landing: Extract<Landing, { at: string }>): Promise<boolean> {
     const tickets = this.registry.ticketStore;
     const base = { at: landing.at, project: this.config.project, ticket: c.ticket, pr: c.pr };
-    const status = (await tickets.get(c.ticket).catch(() => undefined))?.status;
     try {
+      // A read that fails is retried like a move; a ticket that is gone has nothing to move.
+      const status = (await tickets.get(c.ticket))?.status;
       if (landing.state === 'landed') {
         // merge-pr.sh moves the card to Done when every shown pull request is merged; the flow does when it did not.
         if (status === tickets.states.go) await tickets.move(c.ticket, tickets.states.done, SERVICE);

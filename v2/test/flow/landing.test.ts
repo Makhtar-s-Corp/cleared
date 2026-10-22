@@ -341,3 +341,44 @@ test('a put back that fails after a refused merge is made again without asking t
   assert.equal(asked.length, 1, 'the lock is asked once');
   assert.deepEqual(of(t, 'ticket_put_back').map((e) => e.reason), ['merge_refused']);
 });
+
+test('a ticket read that fails at the end of a landing is not "no ticket": the watch stays open and the next tick moves it to Done', async () => {
+  const { t } = await landing({ answers: ['merged'] });
+  await tickAfter(t, 60_000);
+  releaseRow(t.store, { ticket: t.ticket.id, pr: 7, status: 'complete', mergedAt: iso(t.clock.now), endedAt: iso(t.clock.now + 1000) });
+  ledgerRow(t.store, { kind: 'release_watch_complete', ticket: t.ticket.id, pr: 7, at: iso(t.clock.now + 1000) });
+  // The tracker answers the tick's own reads, then fails the landing's read once.
+  const get = t.tickets.get.bind(t.tickets);
+  let failed = 0;
+  let calls = 0;
+  t.tickets.get = async (id) => {
+    calls += 1;
+    if (failed === 0 && new Error().stack?.includes('settleLanding')) {
+      failed += 1;
+      throw new Error('the tracker did not answer');
+    }
+    return get(id);
+  };
+  await quietly(() => tickAfter(t, 30_000));
+  assert.equal(failed, 1);
+  assert.ok(calls > 1);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Ready to Ship');
+  assert.equal(steps(t).at(-1), '+watch', 'the watch stays open');
+  assert.deepEqual(of(t, 'release_landed'), []);
+
+  await tickAfter(t, 30_000);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Done');
+  assert.equal(steps(t).filter((s) => s === '-watch').length, 1);
+  assert.equal(of(t, 'release_landed').length, 1);
+});
+
+test('a ticket that is gone at the end of a landing has nothing to move: the watch closes', async () => {
+  const { t } = await landing({ answers: ['merged'] });
+  await tickAfter(t, 60_000);
+  ledgerRow(t.store, { kind: 'rollback_pushed', ticket: t.ticket.id, pr: 7, at: iso(t.clock.now + 1000), detail: 'reverted' });
+  const get = t.tickets.get.bind(t.tickets);
+  t.tickets.get = async (id) => (new Error().stack?.includes('settleLanding') ? undefined : get(id));
+  await tickAfter(t, 30_000);
+  assert.equal(steps(t).at(-1), '-watch');
+  assert.deepEqual(types(t).filter((x) => x === 'rolled_back'), ['rolled_back']);
+});
