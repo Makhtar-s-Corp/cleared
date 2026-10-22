@@ -51,7 +51,8 @@ test('the scripted authors: the contract step changes the contract only, the sec
   assert.deepEqual(parseRehearsalScript(JSON.stringify(script)), script);
   const rules = script.authorRules ?? [];
   const contract = ruleFor(rules, promptOf(1, 'contract', 'filter-api'), 'filter-api');
-  assert.deepEqual(contract?.files.map((f) => f.path), ['contract/openapi.yaml']);
+  // Two changes of one file, its two answer examples: the contract file and nothing else.
+  assert.deepEqual([...new Set(contract?.files.map((f) => f.path))], ['contract/openapi.yaml']);
   assert.ok(contract?.files[0]?.replace?.[1].includes('severity'), 'the contract gains severity');
   assert.equal(ruleFor(rules, promptOf(1, 'service', 'guestbook', 3), 'guestbook')?.service, 'guestbook');
   assert.ok(ruleFor(rules, promptOf(1, 'integration', 'guestbook', 4), 'guestbook'));

@@ -5,8 +5,10 @@
 // lane 11): CLEARED_V2_ADAPTER=fake plays the scripts of the JSON file
 // CLEARED_V2_FAKE_SCRIPT under the claude-code name, and is refused unless
 // every state folder of the service is temporary, so a rehearsal never
-// writes its sessions into a real ledger. Tests and fixtures create the fake
-// adapter themselves.
+// writes its sessions into a real ledger. The multi-service proof's
+// rehearsal (lane 29) adds a workspace file: it, and every checkout,
+// broker and clone address it names, must be temporary too. Tests and
+// fixtures create the fake adapter themselves.
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +19,7 @@ import type { Cleaner } from '../clean.ts';
 import type { AgUiEvent, CustomValue, EventLog, Question } from '../events.ts';
 import type { Policy } from '../policy.ts';
 import { ledgerPath, LedgerPathError } from '../../store/db.ts';
+import { parseConf } from '../../workspace/config.ts';
 import { createClaudeCodeAdapter } from './claude-code.ts';
 import { createFakeAdapter, type FakeStep } from './fake.ts';
 
@@ -73,11 +76,27 @@ export function adapterSetting(env: NodeJS.ProcessEnv): AdapterSetting {
     const value = env[key];
     if (value) folders.push([key, value]);
   }
+  // A clone address is a folder of the temporary one: a rehearsal pushes
+  // to its remote, and must never reach a real one.
+  if (env.CLEARED_V2_REPO_URL) folders.push(['CLEARED_V2_REPO_URL', env.CLEARED_V2_REPO_URL]);
   const temporary = real(tmpdir());
-  for (const [what, folder] of folders) {
-    if (!inside(temporary, real(folder)))
-      throw new AdapterSettingError(`CLEARED_V2_ADAPTER=fake is refused: ${what} (${folder}) is not inside the temporary folder ${temporary}; a rehearsal never writes into a real state folder`);
+  const check = (what: string, folder: string) => {
+    if (!isAbsolute(folder) || !inside(temporary, real(folder)))
+      throw new AdapterSettingError(`CLEARED_V2_ADAPTER=fake is refused: ${what} (${folder}) is not inside the temporary folder ${temporary}; a rehearsal never writes into a real state folder, nor reaches a real remote`);
+  };
+  const workspace = env.CLEARED_V2_WORKSPACE;
+  if (workspace) {
+    check('CLEARED_V2_WORKSPACE', workspace);
+    let text: string;
+    try { text = readFileSync(workspace, 'utf8'); } catch (error) {
+      throw new AdapterSettingError(`CLEARED_V2_ADAPTER=fake cannot read the workspace file (${(error as NodeJS.ErrnoException).code ?? 'error'})`);
+    }
+    for (const [section, keys] of Object.entries(parseConf(text))) {
+      if (!section.startsWith('service ')) continue;
+      for (const key of ['dir', 'url', 'broker_socket', 'broker_state'] as const) if (keys[key]) folders.push([`${section} ${key}`, keys[key] as string]);
+    }
   }
+  for (const [what, folder] of folders) check(what, folder);
   return { kind: 'fake', script };
 }
 
@@ -97,6 +116,22 @@ export type LeadAct =
 // to the acts as $1 to $9. A rule marked once applies to one turn only.
 export type LeadRule = { readonly when: string; readonly acts: readonly LeadAct[]; readonly once?: boolean };
 
+// The author of one start, chosen by the first rule whose `when` (a
+// regular expression on the start's prompt, which names the ticket and the
+// step) matches, and whose `service`, when given, is the start's (lane 29).
+// Its files are committed at the Go: each one written whole (`text`) or one
+// line changed (`replace`: [what is there, what it becomes]), {ticket} and
+// {title} filled in ({ticket} in its steps too). Its handover, when given, is left in the checkout as
+// HANDOVER.md, uncommitted, for the flow to capture.
+export type AuthorFile = { readonly path: string; readonly text?: string; readonly replace?: readonly [string, string] };
+export type AuthorRule = {
+  readonly when: string;
+  readonly service?: string;
+  readonly files: readonly AuthorFile[];
+  readonly steps: readonly FakeStep[];
+  readonly handover?: string;
+};
+
 export type RehearsalScript = {
   readonly lead: {
     readonly rules: readonly LeadRule[];
@@ -108,11 +143,17 @@ export type RehearsalScript = {
   };
   // An author commits `file` ({ticket} and {title} filled in) in its
   // checkout when it starts, then plays `steps`: the branch has a commit to
-  // publish. `authors` are played first, one per author start.
-  readonly author: { readonly steps: readonly FakeStep[]; readonly file: { readonly path: string; readonly text: string } };
+  // publish. `authors` are played first, one per author start. An author
+  // whose steps propose a session plan (propose_session_plan) commits at
+  // its Go, the first message that starts with "Go:", not when it starts.
+  readonly author: { readonly steps: readonly FakeStep[]; readonly file: { readonly path: string; readonly text: string }; readonly handover?: string };
   readonly authors?: readonly (readonly FakeStep[])[];
+  readonly authorRules?: readonly AuthorRule[];             // before `authors` and `author`
   readonly reviewer: readonly FakeStep[];
-  readonly reopen?: readonly FakeStep[];                   // an author the flow resumes (a review asked for changes)
+  readonly reopen?: readonly FakeStep[];                   // an author the flow resumes (a review asked for changes, a Give back)
+  // A reopened author commits what its checkout holds at its first message
+  // (a human's change, told by the Give back's notice).
+  readonly reopenCommits?: boolean;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -138,7 +179,20 @@ export function parseRehearsalScript(text: string): RehearsalScript {
   }
   if (!isObject(author) || !Array.isArray(author.steps) || !isObject(author.file) || typeof author.file.path !== 'string' || typeof author.file.text !== 'string')
     return fail('author needs steps and file { path, text }');
-  if (isAbsolute(author.file.path) || author.file.path.split('/').includes('..')) return fail('author.file.path stays inside the checkout');
+  const outside = (path: string) => isAbsolute(path) || path.split('/').includes('..');
+  if (outside(author.file.path)) return fail('author.file.path stays inside the checkout');
+  if (value.authorRules !== undefined) {
+    if (!Array.isArray(value.authorRules)) return fail('authorRules is a list');
+    for (const rule of value.authorRules as unknown[]) {
+      if (!isObject(rule) || typeof rule.when !== 'string' || !Array.isArray(rule.files) || !Array.isArray(rule.steps)) return fail('each author rule needs when, files and steps');
+      try { new RegExp(rule.when); } catch { return fail(`the author rule's when is not a regular expression: ${rule.when}`); }
+      for (const file of rule.files as unknown[]) {
+        if (!isObject(file) || typeof file.path !== 'string' || (typeof file.text !== 'string' && !(Array.isArray(file.replace) && file.replace.length === 2 && file.replace.every((x) => typeof x === 'string'))))
+          return fail('each file of an author rule needs a path, and a text or a replace of two texts');
+        if (outside(file.path)) return fail(`an author rule's file ${file.path} stays inside the checkout`);
+      }
+    }
+  }
   if (!Array.isArray(reviewer)) return fail('reviewer needs its steps');
   return value as RehearsalScript;
 }
@@ -247,24 +301,94 @@ export function createRehearsalAdapter(options: RehearsalOptions): SessionAdapte
     };
   }
 
-  // The ticket's file, committed on the ticket branch, unless the branch
-  // already holds it as written (an author started again).
-  async function commit(input: StartInput): Promise<void> {
-    const heading = /^Ticket (\S+): (.*)$/m.exec(input.prompt);
-    const title = heading?.[2]?.trim() || input.ticket;
-    const put = (text: string) => text.replaceAll('{ticket}', input.ticket).replaceAll('{title}', title);
-    const path = put(script.author.file.path);
-    const file = join(input.workdir, path);
-    if (!inside(input.workdir, resolve(file))) throw new Error(`the rehearsal file ${path} is outside the checkout`);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, put(script.author.file.text));
-    const git = (...args: string[]) => run('git', args, { cwd: input.workdir, env: { ...process.env, ...IDENTITY } });
-    await git('add', '--', path);
+  const titleOf = (input: StartInput) => /^Ticket (\S+): (.*)$/m.exec(input.prompt)?.[2]?.trim() || input.ticket;
+  const git = (input: StartInput, ...args: string[]) => run('git', args, { cwd: input.workdir, env: { ...process.env, ...IDENTITY } });
+
+  // Commits what is staged, unless nothing is (an author started again).
+  async function commitStaged(input: StartInput, message: string): Promise<void> {
     try {
-      await git('diff', '--cached', '--quiet');
+      await git(input, 'diff', '--cached', '--quiet');
       return;                                              // nothing new to commit
     } catch { /* staged changes: commit them */ }
-    await git('commit', '--quiet', '-m', `${input.ticket}: ${title}`);
+    await git(input, 'commit', '--quiet', '-m', message);
+  }
+
+  // The ticket's files, committed on the ticket branch, unless the branch
+  // already holds them as written; the handover left beside them.
+  async function commit(input: StartInput, files: readonly AuthorFile[], handover: string | undefined): Promise<void> {
+    const title = titleOf(input);
+    const put = (text: string) => text.replaceAll('{ticket}', input.ticket).replaceAll('{title}', title);
+    const paths: string[] = [];
+    for (const entry of files) {
+      const path = put(entry.path);
+      const file = join(input.workdir, path);
+      if (!inside(input.workdir, resolve(file))) throw new Error(`the rehearsal file ${path} is outside the checkout`);
+      mkdirSync(dirname(file), { recursive: true });
+      if (entry.replace) {
+        const [from, to] = entry.replace;
+        const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
+        // Already changed (an author started again): left as it is.
+        if (!before.includes(from) && !before.includes(to)) throw new Error(`the rehearsal file ${path} does not hold "${from}"`);
+        writeFileSync(file, before.replace(from, to));
+      } else writeFileSync(file, put(entry.text ?? ''));
+      paths.push(path);
+    }
+    if (handover !== undefined) writeFileSync(join(input.workdir, 'HANDOVER.md'), put(handover));
+    if (paths.length === 0) return;
+    await git(input, 'add', '--', ...paths);
+    await commitStaged(input, `${input.ticket}: ${title}`);
+  }
+
+  // The author of a start: the first rule that matches, else the next of
+  // `authors`, else `author`; its files and its handover.
+  function authorOf(input: StartInput): { steps: readonly FakeStep[]; files: readonly AuthorFile[]; handover: string | undefined } {
+    const rule = (script.authorRules ?? []).find((r) => new RegExp(r.when, 's').test(input.prompt) && (r.service === undefined || r.service === input.service));
+    if (rule) return { steps: rule.steps, files: rule.files, handover: rule.handover };
+    return { steps: authors.shift() ?? script.author.steps, files: [script.author.file], handover: script.author.handover };
+  }
+
+  const proposes = (steps: readonly FakeStep[]) => steps.some((step) => 'hostCall' in step && step.hostCall.name === 'propose_session_plan');
+
+  async function startAuthor(input: StartInput): Promise<SessionHandle> {
+    const chosen = authorOf(input);
+    // The steps name the ticket's files as the rules do: {ticket} filled in (an id, safe in JSON).
+    const steps = JSON.parse(JSON.stringify(chosen.steps).replaceAll('{ticket}', input.ticket)) as FakeStep[];
+    // Without a session plan, the change is there when the session starts.
+    if (!proposes(steps)) {
+      await commit(input, chosen.files, chosen.handover);
+      return fake(steps).start(input);
+    }
+    const handle = await fake(steps).start(input);
+    let done = false;
+    return {
+      ...handle,
+      async send(message) {
+        if (!done && message.text.startsWith('Go:')) {
+          done = true;
+          await commit(input, chosen.files, chosen.handover);
+        }
+        await handle.send(message);
+      },
+    };
+  }
+
+  // A reopened author: its steps, and, when the script says so, a commit of
+  // what its checkout holds at its first message (the human's change).
+  async function reopen(id: SessionId, input: StartInput): Promise<SessionHandle> {
+    const handle = await fake(script.reopen ?? [{ awaitMessage: true }], () => id).start(input);
+    if (!script.reopenCommits) return handle;
+    let done = false;
+    return {
+      ...handle,
+      async send(message) {
+        if (!done) {
+          done = true;
+          await git(input, 'add', '--all', '--', '.', ':!HANDOVER.md', ':!CLAUDE.md');
+          await commitStaged(input, `${input.ticket}: the changes the owner made`);
+        }
+        await handle.send(message);
+      },
+    };
   }
 
   return {
@@ -273,19 +397,16 @@ export function createRehearsalAdapter(options: RehearsalOptions): SessionAdapte
       let handle: SessionHandle;
       if (input.role === 'lead') handle = await startLead(input);
       else if (input.role === 'reviewer') handle = await fake(script.reviewer).start(input);
-      else {
-        await commit(input);
-        handle = await fake(authors.shift() ?? script.author.steps).start(input);
-      }
+      else handle = await startAuthor(input);
       inputs.set(handle.id, input);
       return handle;
     },
-    // The flow resumes an author after a review that asked for changes: the
-    // reopen steps, under the same id.
+    // The flow resumes an author after a review that asked for changes, or
+    // at a Give back: the reopen steps, under the same id.
     async resume(id) {
       const input = inputs.get(id);
       if (!input) throw new Error(`unknown session ${id}`);
-      return fake(script.reopen ?? [{ awaitMessage: true }], () => id).start(input);
+      return reopen(id, input);
     },
   };
 }

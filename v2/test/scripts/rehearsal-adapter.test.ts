@@ -235,7 +235,9 @@ const plannedSteps = (files: string[]): RehearsalScript['author']['steps'] => [
 test('an author that proposes its session plan commits only at the Go, not before (lane 29)', async () => {
   const store = openStore(':memory:');
   const dir = checkout();
-  const adapter = createRehearsalAdapter({ log: store.events, script: { ...SCRIPT, author: { ...SCRIPT.author, steps: plannedSteps(['notes/LOCAL-1.md']) } } });
+  // The owner asks for a change: the author proposes again, then waits for the Go.
+  const steps = [...plannedSteps(['notes/LOCAL-1.md']).slice(0, 4), ...plannedSteps(['notes/LOCAL-1.md'])];
+  const adapter = createRehearsalAdapter({ log: store.events, script: { ...SCRIPT, author: { ...SCRIPT.author, steps } } });
   const author = await adapter.start(input('author', [], { workdir: dir, ticket: 'LOCAL-1', prompt: 'Ticket LOCAL-1: Entries as JSON' }));
   assert.equal(log(dir), '', 'nothing is committed while the plan waits for its Go');
   await author.send({ text: 'The owner asks for a change to your session plan.', by: 'u1' });
@@ -265,12 +267,13 @@ test('the author rules: the first whose prompt and service match gives the files
   const author = await adapter.start(input('author', [], { workdir: dir, ticket: 'LOCAL-2', service: 'guestbook', prompt: 'Ticket LOCAL-2: Casino\n\nYou do step 3, the step of guestbook.' }));
   await author.send({ text: go, by: 'cleared' });
   assert.equal(readFileSync(join(dir, 'config.ts'), 'utf8'), 'export const PROOF_BREAK_HEALTH: boolean = true;\n');
-  assert.equal(log(dir), 'LOCAL-2: Casino|Cleared\n\nconfig.ts\nnotes/LOCAL-2.md');
+  // The newest commit is the rule's (the one below it set the test up).
+  assert.ok(log(dir).startsWith('LOCAL-2: Casino|Cleared\n\nconfig.ts\nnotes/LOCAL-2.md\n'), log(dir));
   // The handover is left in the checkout for the flow to capture, never committed.
   assert.equal(readFileSync(join(dir, 'HANDOVER.md'), 'utf8'), handover);
   assert.equal(execFileSync('git', ['status', '--porcelain', '--', 'HANDOVER.md'], { cwd: dir, encoding: 'utf8' }).trim(), '?? HANDOVER.md');
   // A rule whose line is not in the file is an error of the script, said at the Go.
-  const wrong = createRehearsalAdapter({ log: store.events, script: { ...script, authorRules: [{ when: 'Casino', files: [{ path: 'config.ts', replace: ['nowhere', 'x'] }], steps: plannedSteps([]) }] } });
+  const wrong = createRehearsalAdapter({ log: store.events, script: { ...script, authorRules: [{ when: 'Casino', files: [{ path: 'config.ts', replace: ['nowhere', 'somewhere else'] }], steps: plannedSteps([]) }] } });
   const second = await wrong.start(input('author', [], { workdir: dir, ticket: 'LOCAL-2', prompt: 'Ticket LOCAL-2: Casino' }));
   await assert.rejects(second.send({ text: go, by: 'cleared' }), /nowhere/);
   // A rule's path stays inside the checkout.
