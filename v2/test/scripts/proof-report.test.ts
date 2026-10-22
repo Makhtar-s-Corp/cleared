@@ -78,10 +78,21 @@ test('the commitment check: each planted commitment found done or open, and lost
   ]);
   assert.deepEqual(outcomes.map((o) => [o.key, o.state, o.ids]), [['first_landing', 'done', ['c1']], ['reminder', 'open', ['c2']]]);
   assert.equal(outcomes[1]?.due, '2026-10-23T06:00:00.000Z');
-  assert.deepEqual(commitmentOutcomes([]).map((o) => o.state), ['lost', 'lost']);
+  assert.deepEqual(commitmentOutcomes([]).map((o) => o.state), ['not_recorded', 'not_recorded']);
   // A commitment the lead made again after a refresh counts once: any done one settles it.
   assert.equal(commitmentOutcomes([commitment({ id: 'c3', text: 'how long the first ticket took', state: 'open' }), commitment({ id: 'c1', text: 'How long did the first ticket take from start to live', state: 'done' })])[0]?.state, 'done');
   assert.equal(PLANTED.length, 2);
+});
+
+test('the commitment check by the ids the lead recorded when each was planted: a paraphrase counts, a dropped id is lost', () => {
+  const paraphrase = commitment({ id: 'c4', text: 'Report the start-to-live duration of the opening ticket once it ships.', state: 'done', fulfilledAt: '2026-10-23T08:31:00.000Z' });
+  const reminder = commitment({ id: 'c5', text: 'Ping the owner about the page copy in the morning.', due: '2026-10-23T06:00:00.000Z' });
+  const outcomes = commitmentOutcomes([paraphrase, reminder], { first_landing: ['c4'], reminder: ['c5'] });
+  assert.deepEqual(outcomes.map((o) => [o.key, o.state, o.ids]), [['first_landing', 'done', ['c4']], ['reminder', 'open', ['c5']]]);
+  // Recorded at step 4, gone by step 8: lost, which the milestone must never show.
+  assert.deepEqual(commitmentOutcomes([paraphrase], { first_landing: ['c4'], reminder: ['c5'] }).map((o) => o.state), ['done', 'lost']);
+  // Never recorded at step 4: said as such, not as lost.
+  assert.deepEqual(commitmentOutcomes([paraphrase], { first_landing: ['c4'], reminder: [] }).map((o) => o.state), ['done', 'not_recorded']);
 });
 
 test('the morning: what waits by kind, tickets by state, and the lead\'s night messages', () => {
@@ -151,6 +162,8 @@ test('each login cut: when the runner waited for a new login, when it relaunched
   const waiting = { type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/phase', value: 'waiting_human' }, { op: 'replace', path: '/status', value: LOGIN_WAIT }] };
   const started = { type: 'RUN_STARTED', threadId: 't', runId: 'r' };
   put('l1', 'lead', 'lead'); put('a1', 'LOCAL-1', 'author');
+  store.sessions.put({ id: 'l0', project: 'guestbook', ticket: 'lead', role: 'lead', harness: 'claude-code', model: 'm', status: 'stopped', createdAt: '2026-10-22T21:01:00.000Z', updatedAt: '2026-10-23T01:30:00.000Z' });
+  at('l0', 'lead', '2026-10-23T01:00:00.000Z', waiting);                 // a generation that ended instead of resuming
   at('l1', 'lead', '2026-10-23T02:00:00.000Z', started);
   at('l1', 'lead', '2026-10-23T02:10:00.000Z', waiting);
   at('l1', 'lead', '2026-10-23T02:10:01.000Z', waiting);                 // the turn's end says it again: one cut
@@ -158,8 +171,9 @@ test('each login cut: when the runner waited for a new login, when it relaunched
   at('a1', 'LOCAL-1', '2026-10-23T03:00:00.000Z', waiting);              // never relaunched
   const facts = ledgerFacts(store.db, '2026-10-22T21:00:00.000Z');
   assert.deepEqual(facts.loginCuts, [
-    { session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510 },
-    { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null },
+    { session: 'l0', role: 'lead', ticket: 'lead', at: '2026-10-23T01:00:00.000Z', relaunchedAt: null, seconds: null, ended: true },
+    { session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510, ended: false },
+    { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null, ended: false },
   ]);
 });
 
@@ -183,7 +197,7 @@ test('the durations table names every step with its time, the lead, the commitme
     planDoneAt: null,
     stand_ins: ['a bare copy of the guestbook as the forge'],
     notificationsSkipped: null,
-    loginCuts: [{ session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510 }, { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null }],
+    loginCuts: [{ session: 'l1', role: 'lead', ticket: 'lead', at: '2026-10-23T02:10:00.000Z', relaunchedAt: '2026-10-23T02:18:30.000Z', seconds: 510, ended: false }, { session: 'a1', role: 'author', ticket: 'LOCAL-1', at: '2026-10-23T03:00:00.000Z', relaunchedAt: null, seconds: null, ended: false }, { session: 'l0', role: 'lead', ticket: 'lead', at: '2026-10-23T01:00:00.000Z', relaunchedAt: null, seconds: null, ended: true }],
   };
   const text = renderDurations(result);
   for (const expected of [
@@ -191,7 +205,7 @@ test('the durations table names every step with its time, the lead, the commitme
     'last answer → plan proposed | 50 s', '| 1 | Entries as JSON | LOCAL-1 |', 'refreshes | 3', 'highest context share | 4.5 % (threshold 5 %)',
     '| first_landing | done | c1 |', '"3 after 2" | done', '| approval | 2 |', '| LOCAL-1 | 2 | 1 | $0.40 |', '| release | LOCAL-1 | 2026-10-22T21:20:00.000Z | 2026-10-23T08:05:00.000Z | 10 h 45 |',
     'owner gestures | 2', 'a bare copy of the guestbook as the forge', 'the plan is not done',
-    '2 login cuts, 1 relaunched', '| 2026-10-23T02:10:00.000Z | lead | lead | 2026-10-23T02:18:30.000Z | 8 min 30 s |', '| 2026-10-23T03:00:00.000Z | author | LOCAL-1 | not relaunched |  |',
+    '3 login cuts, 1 relaunched', '| 2026-10-23T01:00:00.000Z | lead | lead | not relaunched: the session ended |  |', '| 2026-10-23T02:10:00.000Z | lead | lead | 2026-10-23T02:18:30.000Z | 8 min 30 s |', '| 2026-10-23T03:00:00.000Z | author | LOCAL-1 | not relaunched |  |',
   ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
   // Without an https address for the Mac (plan question 2), the notifications are skipped, not failed.
   const skipped = renderDurations({ ...result, notificationsSkipped: 'no https address for the Mac (plan question 2): inbox only', loginCuts: [] });

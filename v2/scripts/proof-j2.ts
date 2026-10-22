@@ -113,6 +113,8 @@ const answers: { at: string; text: string }[] = [];
 const gestures: { at: string; what: string }[] = [];
 const watchLog: { at: string; lines: string[] }[] = [];
 const timeline = newTimeline();
+// The commitment ids the lead recorded in the turn that answered each planted message.
+const planted: Record<string, string[]> = {};
 let planId = '';
 let plan: Plan | undefined;
 let morning: Morning | null = null;
@@ -134,7 +136,7 @@ async function capture(name: string, target: any = page): Promise<string> {
 
 function save(): void {
   const file = join(OUT, 'result.json');
-  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', planId, steps, times, answers, gestures, timeline, morning, watch: watchLog }, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', planId, planted, steps, times, answers, gestures, timeline, morning, watch: watchLog }, null, 2)}\n`);
   chmodSync(file, 0o644);
 }
 
@@ -330,12 +332,15 @@ if (planned) {
     times.first_start_at = now();
     const running = first.items.filter((i) => i.state === 'running').length;
     // The two planted commitments, as the owner writes them in the thread.
-    for (const planted of PLANTED) {
+    for (const message of PLANTED) {
       const before = (await thread()).length;
-      await page.locator('#reply-text').fill(planted.text);
+      const known = new Set((await api<LeadMemory>('/lead/memory')).commitments.map((c) => c.id));
+      await page.locator('#reply-text').fill(message.text);
       await page.locator('#reply-send').click();
-      gesture(`told the lead: ${planted.text}`);
+      gesture(`told the lead: ${message.text}`);
       await until('the lead\'s reply', async () => (await thread()).slice(before).some((m) => m.by === 'lead'), 10 * 60_000, 2_000);
+      planted[message.key] = (await api<LeadMemory>('/lead/memory')).commitments.filter((c) => !known.has(c.id)).map((c) => c.id);
+      log(`planted ${message.key}: ${planted[message.key]?.join(', ') || 'no commitment recorded'}`);
     }
     await watch('evening');
     const memory = await api<LeadMemory>('/lead/memory');
@@ -460,7 +465,7 @@ if (approved) {
     await page.goto(`${APP}/lead`);
     await page.locator('#lead-remember').click();
     await page.locator('#lead-memory > *').first().waitFor();
-    const outcomes = commitmentOutcomes(memory.commitments);
+    const outcomes = commitmentOutcomes(memory.commitments, planted);
     return `${leadState.refreshCount} refreshes, highest share ${leadState.highestPercent ?? '?'} %; ${outcomes.map((o) => `${o.key} ${o.state}`).join(', ')}`;
   });
 } else {
@@ -501,7 +506,7 @@ const result: ProofResult = {
     threshold: REHEARSAL ? 5 : Number(env.CLEARED_V2_LEAD_CONTEXT_PERCENT ?? 50), generations: f?.lead.generations ?? null, turns: f?.lead.turns ?? null,
     costUsd: f?.lead.costUsd ?? null, compactions: f?.lead.compactions ?? null,
   },
-  commitments: commitmentOutcomes(memory?.commitments ?? []), order: orders(), notifications: f?.notifications ?? null, tickets: f?.tickets ?? {},
+  commitments: commitmentOutcomes(memory?.commitments ?? [], planted), order: orders(), notifications: f?.notifications ?? null, tickets: f?.tickets ?? {},
   gestures, planDoneAt, stand_ins: world?.standIns ?? [],
   notificationsSkipped: NOTIFICATIONS_SKIPPED, loginCuts: f?.loginCuts ?? null,
 };

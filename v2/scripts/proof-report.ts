@@ -97,19 +97,24 @@ export const PLANTED = [
 ] as const;
 
 export type CommitmentOutcome = {
-  readonly key: string; readonly planted: string; readonly state: 'done' | 'open' | 'lost'; readonly ids: readonly string[];
+  readonly key: string; readonly planted: string; readonly state: 'done' | 'open' | 'lost' | 'not_recorded'; readonly ids: readonly string[];
   readonly due: string | null; readonly fulfilledAt: string | null; readonly note: string | null;
 };
 
-// Done when a commitment for it is done, open when one is open, lost when
-// the lead holds none (never recorded, or dropped by a refresh).
-export function commitmentOutcomes(commitments: readonly LeadCommitment[]): CommitmentOutcome[] {
+// `recorded` holds, per planted commitment, the ids the lead made in the
+// turn that answered it (step 4): those are judged first, whatever their
+// words; the words are the fallback, for a commitment made again later.
+// Done when one is done, open when one is open; lost when the lead recorded
+// one and holds it no more; not_recorded when it never recorded one.
+export function commitmentOutcomes(commitments: readonly LeadCommitment[], recorded: Readonly<Record<string, readonly string[]>> = {}): CommitmentOutcome[] {
   return PLANTED.map((planted) => {
-    const found = commitments.filter((c) => planted.match.test(c.text));
+    const ids = recorded[planted.key] ?? [];
+    const found = commitments.filter((c) => ids.includes(c.id) || planted.match.test(c.text));
     const done = found.find((c) => c.state === 'done');
     const kept = done ?? found[0];
+    const missing = ids.length > 0 ? 'lost' : 'not_recorded';
     return {
-      key: planted.key, planted: planted.text, state: done ? 'done' : found.length > 0 ? 'open' : 'lost', ids: found.map((c) => c.id),
+      key: planted.key, planted: planted.text, state: done ? 'done' : found.length > 0 ? 'open' : missing, ids: found.map((c) => c.id),
       due: kept?.due ?? null, fulfilledAt: kept?.fulfilledAt ?? null, note: kept?.note ?? null,
     };
   });
@@ -150,7 +155,9 @@ export function morningSummary(snap: Snapshot, messages: readonly LeadMessage[],
 // starts. The owner chose this (plan question 1, option b); the proof counts each cut.
 export const LOGIN_WAIT = 'Waiting for a new login';
 
-export type LoginCut = { readonly session: string; readonly role: string; readonly ticket: string; readonly at: string; readonly relaunchedAt: string | null; readonly seconds: number | null };
+// `ended`: the session ended without its next turn (a lead whose generation
+// was replaced, a session stopped), so the cut was not relaunched.
+export type LoginCut = { readonly session: string; readonly role: string; readonly ticket: string; readonly at: string; readonly relaunchedAt: string | null; readonly seconds: number | null; readonly ended: boolean };
 
 export type LedgerFacts = {
   readonly notifications: { readonly count: number; readonly byKind: Record<string, number>; readonly firstAt: Record<string, string> };
@@ -188,9 +195,9 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
     byKind[kind] = (byKind[kind] ?? 0) + 1;
     firstAt[kind] ??= String(row.at);
   }
-  const sessions = rows(db, 'SELECT id, ticket, role, created_at, updated_at FROM sessions WHERE created_at >= ? ORDER BY created_at', since);
+  const sessions = rows(db, 'SELECT id, ticket, role, status, created_at, updated_at FROM sessions WHERE created_at >= ? ORDER BY created_at', since);
   const events = (types: string) => rows(db, `SELECT session_id, type, event FROM session_events WHERE at >= ? AND type IN (${types})`, since);
-  const role = new Map(sessions.map((s) => [String(s.id), { ticket: String(s.ticket), role: String(s.role) }]));
+  const role = new Map(sessions.map((s) => [String(s.id), { ticket: String(s.ticket), role: String(s.role), status: String(s.status) }]));
   const lead = { generations: sessions.filter((s) => s.role === 'lead').length, turns: 0, costUsd: 0, highestPercent: null as number | null, compactions: 0 };
   const tickets: Record<string, { sessions: number; reviewRounds: number; costUsd: number; startedAt: string; lastAt: string; landedAt: string | null }> = {};
   for (const s of sessions) {
@@ -228,7 +235,7 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
   const open = new Map<string, number>();                   // session → index of its open cut
   for (const row of rows(db, "SELECT session_id, at, type, event FROM session_events WHERE at >= ? AND type IN ('STATE_DELTA', 'STATE_SNAPSHOT', 'RUN_STARTED') ORDER BY at, seq", since)) {
     const id = String(row.session_id);
-    const of = role.get(id) ?? { ticket: '', role: 'unknown' };
+    const of = role.get(id) ?? { ticket: '', role: 'unknown', status: '' };
     if (row.type === 'RUN_STARTED') {
       const index = open.get(id);
       if (index === undefined) continue;
@@ -237,7 +244,7 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
       open.delete(id);
     } else if (String(row.event).includes(LOGIN_WAIT) && !open.has(id)) {
       open.set(id, loginCuts.length);
-      loginCuts.push({ session: id, role: of.role, ticket: of.ticket, at: String(row.at), relaunchedAt: null, seconds: null });
+      loginCuts.push({ session: id, role: of.role, ticket: of.ticket, at: String(row.at), relaunchedAt: null, seconds: null, ended: ['done', 'stopped', 'failed'].includes(of.status) });
     }
   }
   return { notifications: { count: sent, byKind, firstAt }, lead, tickets, maxLive, loginCuts };
@@ -365,7 +372,7 @@ export function renderDurations(r: ProofResult): string {
   else if (r.loginCuts.length === 0) out.push('No login cut.', '');
   else {
     out.push(`${r.loginCuts.length} login cuts, ${r.loginCuts.filter((c) => c.relaunchedAt).length} relaunched.`, '', row('Cut at', 'Role', 'Ticket', 'Relaunched at', 'Lasted'), row('---', '---', '---', '---', '---'));
-    for (const c of r.loginCuts) out.push(row(c.at, c.role, c.ticket, c.relaunchedAt ?? 'not relaunched', c.relaunchedAt ? duration(c.at, c.relaunchedAt) : ''));
+    for (const c of r.loginCuts) out.push(row(c.at, c.role, c.ticket, c.relaunchedAt ?? (c.ended ? 'not relaunched: the session ended' : 'not relaunched'), c.relaunchedAt ? duration(c.at, c.relaunchedAt) : ''));
     out.push('');
   }
   if (r.morning) {
