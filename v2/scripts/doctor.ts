@@ -776,9 +776,10 @@ async function hostToolsSection(build: boolean, model: string): Promise<void> {
     check('the model called mcp__cleared__ping and the host ran the handler once, with the model\'s input', pings.length === 1 && JSON.stringify(pings[0]) === '{"word":"plum"}', JSON.stringify(pings));
     check('the call is journaled as cleared.host_call ok, under the tool call\'s own id', calls.length === 1 && calls[0]?.outcome === 'ok' && calls[0]?.name === 'ping' && started.includes(String(calls[0]?.toolCallId)), short(JSON.stringify({ calls, started })));
     check('the model read the host\'s answer', run.texts(at.from).some((t) => t.includes(code)), short(run.texts(at.from).join(' / ')));
-    const asked = run.custom(at.from, 'cleared.permission_request').filter((v) => String(v.tool).startsWith('mcp__cleared__'));
+    // The runner's own lines: the adapter stores a permission request only when the policy asks.
+    const asked = run.lines(at.rawFrom, 'permission_request').filter((line) => String(line.toolName).startsWith('mcp__cleared__'));
     const answered = run.custom(at.from, 'cleared.permission_answered');
-    say(`OBSERVED the host tool's permission: ${asked.length ? `asked (${JSON.stringify(asked.map((v) => v.suggestion))})` : 'not asked by the CLI'}; policy answers in the turn: ${JSON.stringify(answered.map((v) => [v.decision, v.rule]))}`);
+    say(`OBSERVED the host tool's permission: ${asked.length ? `canUseTool asked for ${asked.map((line) => line.toolName).join(', ')}` : 'canUseTool was not called'}; policy answers in the turn: ${JSON.stringify(answered.map((v) => [v.decision, v.rule]))}`);
     for (const line of run.runnerLog) say(`<< stderr ${line}`);
 
     const contextLines = run.lines(at.rawFrom, 'context');
