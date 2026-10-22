@@ -190,6 +190,8 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .term-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .term-mode { min-width: 0; font-size: 13px; font-weight: 600; }
 .term-switch { min-height: 28px; padding: 0 12px; }
+/* A harness that cannot be resumed ran nothing: no empty terminal, its reason and the Shell. */
+.term[data-reason="unsupported"] .term-host { display: none; }
 .term { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .term-host { flex: 1; min-height: 260px; padding: 8px 4px 8px 10px; border-radius: 8px; background: var(--ink); overflow: hidden; }
 :root[data-theme="dark"] .term-host { background: var(--canvas); box-shadow: 0 0 0 1px var(--hairline); }

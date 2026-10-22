@@ -726,8 +726,7 @@ const HARNESS = 'Claude Code';
 const HARNESS_PROMPT = '\u001b[1m>\u001b[0m ';
 // What the stand-in harness shows when resumed: the session's last words, as a resumed conversation does.
 const HARNESS_RESUMED = '\u001b[2m# Claude Code, resumed on this session. Give the session back when you are done: Cleared carries on from here.\u001b[0m\r\n\r\n'
-  + '\u001b[38;5;174m⏺\u001b[0m I grouped the upcoming entries by week, Monday first, in src/engine/upcoming.mjs. A week that spans\r\n'
-  + '  two months stays under the first month. Next: the screen\'s headings, then the tests.\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m I grouped the upcoming entries by week, Monday first. A week that spans two months stays under the first month. Next: the headings, then the tests.\r\n\r\n'
   + '\u001b[38;5;174m⏺\u001b[0m \u001b[1mBash\u001b[0m(npm test)\r\n  ⎿  \u001b[32m14 passed\u001b[0m, 1 failed: entries are grouped by week, Monday first\r\n\r\n'
   + '\u001b[2m  ⎿  Interrupted: the owner took the session over\u001b[0m\r\n\r\n';
 const HARNESS_ANSWER = '\u001b[38;5;174m⏺\u001b[0m (the fixtures\' stand-in for the harness: in a real session, Claude Code answers here)\r\n\r\n';
