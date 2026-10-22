@@ -273,6 +273,7 @@ export function shellAnswer(raw: string): ShellAnswer {
   if (line === 'pwd') return { kind: 'text', text: MOUNT };
   if (line === 'git status') return { kind: 'git-status' };
   if (line === 'exit') return { kind: 'exit' };
+  if (line === 'npm ci') return { kind: 'text', text: 'npm ci: the rehearsal\'s stand-in shell installs nothing (a real session\'s container does)' };
   if (line === 'npm test') return { kind: 'text', text: 'npm test: the rehearsal\'s stand-in shell does not run the project\'s tests (a real session\'s container does)' };
   if (/^git push\b/.test(line)) return { kind: 'text', text: 'fatal: could not read Username for the remote: no credential in the session\'s container' };
   return { kind: 'text', text: `${line.split(/\s+/)[0]}: not part of the rehearsal's stand-in shell` };
@@ -477,7 +478,7 @@ coalesce_minutes = 1
       'the containers: a docker stand-in answers the labelled lists and inspections of a session\'s containers, runs the service\'s own programs (the editor\'s read and save, the checkout at Take over and Give back) on the session\'s checkout on this machine, and relays the preview; no container, no network and no image exist',
       'the trial environment: a loopback stand-in for the session\'s siblings, the guestbook\'s page and the filter API\'s fake; the fake is images/fake/fake.ts built from the contract the owner validated, and the page checks one sample entry with it at each load',
       'the harness in the terminal: the fake adapter\'s scripted sessions have no interactive harness, so Take over shows the harness as unsupported and step 11 goes to the Shell; Take over attached to a live Claude Code harness, then the Shell beside it, is shown by the real run only',
-      'the human\'s terminal: a stand-in shell answers pwd, runs git status on the checkout, says it does not run npm test, and refuses a push for want of a credential',
+      'the human\'s terminal: a stand-in shell answers pwd, runs git status on the checkout, says it does not run npm ci nor npm test, and refuses a push for want of a credential',
       'the models: the authors and the reviewers play a script (session/adapters/index.ts); their plans, changes and verdicts are scripted, not judged',
     ],
     async stop() {

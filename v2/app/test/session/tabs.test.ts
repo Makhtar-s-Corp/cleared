@@ -79,12 +79,14 @@ test('the Plan tab: the plan, its confidence and reason; Go and Change while it 
   assert.equal(changeProblem('Test the empty list too.'), undefined);
 });
 
-test('the Terminal tab: Take over for the author of a live session; no command to run on the server once taken over', () => {
+test('the Terminal tab: Take over for the author or the reviewer of a live session; no command to run on the server once taken over', () => {
   // The owner's request of 2026-10-22 17:26: the docker exec command is gone from the screen.
   assert.equal('resumeCommand' in tabs, false);
   assert.equal('containerName' in tabs, false);
   assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'author', ended: false }), { kind: 'free', can: true });
-  assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'reviewer', ended: false }), { kind: 'free', can: false });
+  // The owner's scope extension of 2026-10-22 22:01: a reviewer's session is taken over too; the lead's is not.
+  assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'reviewer', ended: false }), { kind: 'free', can: true });
+  assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'lead', ended: false }), { kind: 'free', can: false });
   assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'author', ended: true }), { kind: 'free', can: false });
   assert.deepEqual(takeoverOf({ takenOver: { by: USER, at: FIXTURE_NOW.toISOString() }, me: USER, role: 'author', ended: false }), { kind: 'mine', at: FIXTURE_NOW.toISOString() });
   assert.deepEqual(takeoverOf({ takenOver: { by: 'other', at: FIXTURE_NOW.toISOString() }, me: USER, role: 'author', ended: false }), { kind: 'other', at: FIXTURE_NOW.toISOString() });

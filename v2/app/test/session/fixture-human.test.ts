@@ -69,3 +69,28 @@ test('the tower\'s fixture source: the terminal of a session taken over, its str
     await app.close();
   }
 });
+
+// The owner's scope extension of 2026-10-22 22:01: the reviewer's session is
+// taken over too, its harness resumed in the terminal, then given back.
+test('the tower\'s fixture source: a reviewer\'s session is taken over, its harness opens, and it is given back', async () => {
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }) });
+  try {
+    const { cookie, csrf } = await signedIn(app);
+    const write = { cookie, 'x-csrf-token': csrf, origin: app.origin, 'content-type': 'application/json' };
+    const api = (path: string, init: { method?: string; body?: unknown } = {}) => fetch(`${app.base}/api/service${path}`, {
+      method: init.method ?? 'GET', headers: init.method && init.method !== 'GET' ? write : { cookie }, body: init.body === undefined ? null : JSON.stringify(init.body),
+    });
+    const sessions = await (await api('/sessions')).json() as { id: string; role: string; phase: string }[];
+    const reviewer = sessions.find((s) => s.role === 'reviewer' && s.phase === 'reviewing');
+    assert.ok(reviewer, 'the tower fixture has a live reviewer');
+    const id = encodeURIComponent(reviewer.id);
+    const taken = await api(`/sessions/${id}/takeover`, { method: 'POST' });
+    assert.equal(taken.status, 200);
+    assert.equal((await taken.json() as { accepted: boolean }).accepted, true);
+    const harness = await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 100, rows: 30 } });
+    assert.deepEqual(await harness.json(), { opened: true, cols: 100, rows: 30, mode: 'harness', name: 'Claude Code' });
+    assert.equal((await api(`/sessions/${id}/giveback`, { method: 'POST' })).status, 200);
+  } finally {
+    await app.close();
+  }
+});

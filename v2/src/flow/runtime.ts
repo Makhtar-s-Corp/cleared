@@ -123,10 +123,16 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     return { ...input, service, siblings, ...(skills === undefined ? {} : { skills }) };
   }
 
+  // Every method of the harness's adapter passes through; only start is
+  // changed. The interactive resume of Take over (owner request of
+  // 2026-10-22 17:26) is kept when the adapter has one: without it, Take
+  // over said the harness cannot be resumed (the real proof's step 11,
+  // owner decision of 2026-10-22 21:58).
   function withWorkspace(adapter: SessionAdapter): SessionAdapter {
     return {
       harness: adapter.harness,
       resume: (id) => adapter.resume(id),
+      ...(adapter.interactive ? { interactive: adapter.interactive.bind(adapter) } : {}),
       async start(input) {
         if (input.role === 'lead' || !config || !store) return adapter.start(input);
         const prepared = await inWorkspace(input, config);
