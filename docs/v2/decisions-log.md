@@ -976,3 +976,71 @@ The choices the lane makes:
 - **For plan question 1.** The bind mount finding weighs for answer (a), a `setup-token` token: with the host login, a refresh by rename is invisible to a running session.
 - No screen changed: lane 4 is not an interface lane, so there was no visual loop and no capture.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-runner-host-tools`.
+
+## 2026-10-22: the lead and plan screen, against lead-and-plan.png (milestone 2, lane 8)
+
+**Decision.** Lane `v2-j2-lead-screen` fills lane 3's stub with the screen of section 7.2 of the [milestone 2 plan](milestone-2-plan.md): `screens/lead.ts`, `screens/lead.css`, `public/plan-panel.ts`, the lead catalogs and the lead fixture. The screen follows `lead-and-plan.png` for layout, sizes and colours, and the plan and lanes 1 and 5 for content. The lane's choices:
+
+1. **The reply always goes through `POST /api/lead/messages`.** The plan says the reply field answers the pending question "through the session answer route with the lead's session id". That route answers 409 for the lead's session (issue 168, item 3; lane 5's entry), and lane 5's `post()` answers the pending question itself (decision 8). So:
+   - with Goal pressed, the field sends `{ text, goal: true }`, which never answers a question: a goal wins over a waiting question, and the question keeps waiting;
+   - else, when `LeadState.pendingQuestion` is set, `{ text }` answers it, and the button reads "Answer";
+   - else `{ text }` is a message.
+   An option of the question sends its label as the text, "(Recommended)" kept, as the inbox does. Lane 5 gives the same text to every question of one ask, so options are buttons only for an ask of one question; an ask of several shows its options as a list and says to answer them in one message.
+2. **A Goal toggle in the reply field.** The capture has none, but a goal needs `goal: true` to get its id (`goal-<seq>`) for `propose_plan`. The tower bar's New goal (`?goal=1`) presses it. It is released after a send.
+3. **The draft leaves the address.** `?draft=` and `?goal=1` are read once, then `history.replaceState` drops them (issue 164: typed text in the browser history). `draftFrom`, `planFrom` and `DRAFT_MAX` keep their names and behaviour, since `tower.ts` imports `DRAFT_MAX`.
+4. **Which plan the panel shows.** On `/plans/<id>`, that plan. On `/lead`: a plan to approve; else a running or paused one; else the last done; newest first in each group. A superseded or rejected plan is shown only from its address. The other plans are listed under the panel with their state, as links to `/plans/<id>`.
+5. **The panel's gestures.**
+   - Approve, Pause and Resume call their route at once, with no grace (decision 6). The panel redraws from the plan the route answers, and the shell recounts the inbox.
+   - A 409 says the plan changed meanwhile, and the panel reloads that plan. Any other failure says the gesture failed.
+   - "Change the plan" only focuses the reply field, with the hint "Tell the lead what to change"; it rejects nothing. A paused plan offers it too, as section 5.4 changes an approved plan.
+   - Approve and Resume are in ink; Change and Pause are outlined, because a running plan needs nothing from the person.
+   - The panel has amber only while the plan waits for approval.
+6. **The plan panel is shared** (`renderPlanPanel`, pure, with the translator it is given). Its keys are all prefixed `plan_` and named in `PLAN_PANEL_KEYS`. A test checks that every `'plan_…'` literal of the file is in the list, and that the list is in `lead.en` and `lead.fr`. Lane 10 copies the list into `inbox.*`. Its rules (`.plan-*`) live in `screens/lead.css`, unscoped, so the inbox can load that sheet.
+7. **Estimates.** A share of the week when it is measured, else dollars, as section 5.2 says ("$0.30", "About $1.70"). This departs from DESIGN.md's "don't show money"; the plan wins on content. Below 3 samples the footer says the estimates are defaults. The work time is the critical path the service gives (`totals.minutes`), written "2 h", "2 h 15", "42 min".
+8. **The thread.**
+   - A refresh is a grey line with the generation and the time, and a service line uses the same style.
+   - A question that waits sits on `awaiting-surface` with its header, options and how to answer. Once settled it reads as a line of the lead, as in the capture, with the owner's answer below it.
+   - Whether a question waits is read from `LeadState.pendingQuestion`, not from the row.
+   - A time line comes after 30 minutes of silence, so the morning's account shows when the night's messages came.
+   - The plan message links to the panel where the panel goes under the thread, and to `/plans/<id>` for another plan.
+9. **The header line.**
+   - `idle` and `working` read "Always on · context N % · refreshed from memory X ago".
+   - `starting` reads "Starting", and `refreshing` reads "Refreshing from memory".
+   - `down` is a danger pill, "The lead is not running". So is a `GET /api/lead` that fails, a 503 included.
+10. **What the lead remembers** opens a panel in the lead's card with:
+    - the refresh count, the highest share and the model;
+    - the last handover: the lead's own words, or the line that the service wrote it;
+    - the commitments, open then done, with their times.
+11. **The stream** is read with one listener per frame name (`message`, `state`, `plan`). When it drops, it is reopened after the last message seq with a doubling pause, as the session screen does. A message already seen is not delivered twice.
+12. **Below 1024 px** the page scrolls, not the thread (the art director's item 1), and the panel follows the thread. On a phone, the reply field takes its own row above Goal and Send.
+
+**Consequences.**
+- **The fixture** (`app/fixtures/lead.ts`) keeps lane 1's values unchanged, so `fixtures.test.ts` and `fixtures/source.ts` stay as they are. It adds, as separate exports:
+  - `otherPlans` (a running plan, the same paused, a done one), with the guestbook's content of plan question 5;
+  - `waitingForAnswer`, the thread while the lead's question waits;
+  - `leadSource`, a stand-in for the lead and plan routes that answers their writes as lanes 5 and 7 do, for the tests and the visual loop. `fixtures/source.ts` still refuses every write.
+- **Edit outside the lane's files:** `v2/app/test/shell.test.ts`, the test of lane 3's stub (`renderLeadStub`, gone) and its two imports, removed. The tests of `draftFrom` and `planFrom` stay.
+- **The stub's rules stay in `style.css`** (`.lead-stub`, `.lead-draft`), now unused. That file is not this lane's.
+- **Live run: not done.** Lane 7's plan routes are not in `v2` (its branch had no commit on 2026-10-22 at 05:00), so the screen ran only against the fixtures and `leadSource`. In headless Chromium, `mount` was driven through Approve, Pause, a message, Change the plan, the memory panel, an answer by option and a goal from the tower's draft. There was no page error; the only 404 was `/favicon.ico`, which the shell does not serve. The run against the live service waits for lane 7.
+- **Captures**, none committed, in `/tmp/cleared-captures/j2/`:
+  - `lead-<width>-<theme>.png`, at 1440, 1280, 768 and 390, light and dark, with no horizontal overflow;
+  - the same for `lead-question`, `lead-running`, `lead-done`, `lead-memory` and `lead-down`;
+  - `lead-reference.png`, rendered from `/tmp/cleared-reference/lead-and-plan.html`.
+  The app ran on an ephemeral `127.0.0.1` port with a temporary ledger and user.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session. Taken:
+  - one scroll below 1024 px, the memory panel unclipped;
+  - the reply field on its own row on a phone;
+  - 44 px targets for the panel link and the other plans;
+  - a tighter phone header;
+  - "About $1.70" kept on one line (a non-breaking space);
+  - the other plans' states aligned right, amber for a plan to approve;
+  - more room under the last item;
+  - the link keeps its colour when open;
+  - Pause outlined;
+  - a link from the plan message to the panel on narrow screens;
+  - the estimate on the title's line;
+  - an outline on the lead's bubble in dark.
+  Not taken:
+  - a fade at the bottom of the scrolling list, which would be a gradient;
+  - a sticky "plan waits" chip on a phone, replaced by the plan message's link.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-lead-screen`.
