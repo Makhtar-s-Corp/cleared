@@ -649,7 +649,7 @@ The choices the lane makes:
 
 ## 2026-10-22: Fable 5.1 used once to plan milestone 2
 
-**Decision.** Fable 5.1 was used once, on 2026-10-22, to plan milestone 2: the split into lanes and waves, the lead's tools and policy, the context cycle, the plan model and its runner's rules, and the notification kinds. Reason: strong planning, the case the "model choice per lane" entry allows. It wrote no code and reviewed nothing.
+**Decision.** Fable 5.1 was used once, on 2026-10-22, to plan milestone 2: the split into lanes and waves, the lead's tools and policy, the context cycle, the plan model and its runner's rules, and the notification kinds. Reason: strong planning, the case the "model choice per lane" entry allows. The planning session was opened by the orchestrator's brief, which named the model; brief rule 10 asks for the owner's explicit request for any use of Fable, and the orchestrator confirms that request, with its date, in its next report and adds it here. It wrote no code and reviewed nothing.
 
 **Consequences.**
 - The plan is [milestone-2-plan.md](milestone-2-plan.md). Its lanes are authored by Opus 5.5 or Haiku 5.5 and reviewed by a different model, as the model rule says.
