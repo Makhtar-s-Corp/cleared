@@ -977,6 +977,37 @@ The choices the lane makes:
 - No screen changed: lane 4 is not an interface lane, so there was no visual loop and no capture.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-runner-host-tools`.
 
+## 2026-10-22: goal mode, the estimates and the plan runner (milestone 2, lane 7)
+
+**Decision.** Lane `v2-j2-plans` implements decisions 5, 6, 7 and 15 and section 5 of the [milestone 2 plan](milestone-2-plan.md) in `v2/src/lead/plans/` (`store`, `estimates`, `runner`, `tools`, `routes`), `v2/src/inbox/store.ts`, `v2/src/modules/lead.ts`, the plan paragraph of `v2/src/lead/prompts.ts` and one helper in `v2/src/flow/engine.ts`. The lane's choices:
+
+1. **The item rows are the truth.** `plan_items` keeps each item's state, its ticket, how many times it was put back and the last note. The runner moves them from the flow's bus (`ticket_started`, `release_requested`, `release_landed`, `release_unhealthy`, `ticket_put_back`), matched by ticket id, not by `origin`, so a ticket a person sends back and starts again is still followed. The bus lives in memory, so each 30-second tick also reads the tickets: an item running or in Needs Approval whose ticket is back in Todo, and not run by the flow, is a put back the bus did not say. A Done ticket the bus did not land is landed when it never asked for a release (a person closed it), or when lane 2's `landingOf` reads its release as landed.
+2. **Landed is not Done.** merge-pr.sh moves a card to Done before the release watch's verdict (lane 2's entry), so a dependent waits for `release_landed`, never for the Done status alone. A release live but not healthy (`release_unhealthy`) holds its item, so the items after it wait, and the lead is told. A rollback after a landing is a put back, as section 5.3 says.
+3. **Put backs.** The first counted put back makes the item `put_back`; the next tick starts it again, with the note and "integrate the base branch first" added to the author's prompt through `Origin.note`. The second holds the item and sends the lead an urgent event that names `start_ticket`. A put back with the reason `restart` does not count: decision 12 has the runner start such a ticket again, and the service's restart is not the ticket's fault. The tick may read a ticket back in Todo before the flow says why, since the flow says it after its comment and its move. A put back that comes for an item already `put_back` therefore only replaces the note, so one put back never counts twice. An item already held is not announced to the lead again.
+4. **Starting.** An item is set to `running` before the flow is asked, and the runner counts its own running items. Without that, two ticks during one slow start (a clone) could start a third ticket. The flow's `FlowError` for a ticket in another state is left to the next tick's reading; a ticket that is gone holds its item.
+5. **Approval.** `approve` first moves the plan from `proposed` to `approved` in one `UPDATE ... WHERE state = 'proposed'`. A second approval is a 409. The tickets are created by the tick, never by the approval itself, so a timer's tick that runs during the approval cannot create them twice: ticks run one at a time. They are created in position order, by the approving person (`{ kind: 'human' }`, as `POST /api/tickets` does), with the labels `plan:<id>`, `size:<s>` and `Quick` for a fast item. A creation that fails is tried again at each tick. The approval waits for that tick, so the first tickets start at once rather than up to 30 seconds later.
+6. **Estimates** (section 5.2). The plan's time is the runner's own rule played on the estimates: items start in position order once every item they wait for is done, at most `maxParallel` at once. On lane 1's fixture this gives the fixture's 120 minutes. `totals.samples` is the fewest samples of any item, so the screen says "Default estimates" as soon as one item uses them. `weekPercent` stays null: lane 4 reports the seven-day window as a share of the subscription, with no cost per share, so an item's share cannot be derived from it. Dollars are shown, as the plan says.
+7. **The week stop and the day budget.** The runner reads the newest `cleared.rate_limit` of the `seven_day` window among the project's events. At or above `CLEARED_V2_WEEK_STOP_PERCENT` (85) it starts nothing new: no first starts, no restarts after a put back, no `start_ticket`.
+   - A measure whose `resetsAt` has passed does not stop anything. Lane 4's mapper reports a window only when its value changes, and while the plans are stopped no session runs to report the reset.
+   - `CLEARED_V2_DAY_BUDGET_USD`, when set, applies beside the week measure, and the stricter of the two wins. It is the sum of `total_cost_usd` of the project's `RUN_FINISHED` events since midnight, in the server's time zone.
+   - The plan (section 5.3, rule 6) makes the budget a fallback for when there is no week measure. This departs from that: lane 4 has closed that unknown, so real sessions now always report the window, and a fallback-only budget would never apply. The proof sets the budget, so it must apply. Both stops tell the lead once, with an urgent event, and the owner once, with `reportHealth(db, { code: 'week_stop' })` (lane 6). They do so only when something was ready to start. "Once" is kept in memory: a service restarted during a stop says it again. Both settings are read when the module is provided; a value that is set but wrong stops the service with exit code 64, as the lead's settings do.
+8. **Decision 15.** `flow/engine.ts` gains `QUICK_LABEL` ("Quick") and `QUICK_MODEL` (`claude-haiku-5-5`). A ticket with the label gets Haiku as its author, on its first start and when a new author replaces one that cannot be resumed after a review. The exception is a configuration whose reviewer is Haiku: the author keeps `CLEARED_V2_AUTHOR_MODEL`, so the reviewer stays another model.
+9. **The inbox.** The plan item is `plan:<id>`, under `LEAD_TICKET`, with no session and its plan id in `request_id`. `find`, `waitingFor` and `handleSession` now read permissions and questions only, so a plan item never counts as a session's request and no answer route reaches it. `handleRequests('system', live?)`, which a new flow engine runs, handles only the permissions of any session and the questions of the teams, outside the `live` set it is given. A release, a proposed plan and the lead's question survive a restart; the lead's next generation receives that question's answer (section 3.3). Issue 157, item 3: `setReleaseChecks` writes only a release that still waits.
+10. **The tools and the lead.** `propose_plan` and `start_ticket` are registered through lane 5's `LeadExtensions`, with the plans' lines of the compact state and their section of the handover record, without editing `lead/tools.ts`. The model's titles, bodies and summary go through the service's cleaner before they become a plan or a ticket. A proposal adds a `plan` line to the thread ("Plan to approve: ..., 5 tickets, about 1 h 42 of work.") and a `plan` frame on the stream. Every change of a plan or an item sends a frame. Approve, reject, pause and resume each add a service line to the thread, which is an owner turn for the lead. The runner does not repeat into the lead's queue what lane 5 already hears from the bus (a start, a landing, a put back). It adds only what the bus does not say: an item held, a plan done, a stop.
+11. **Validation.** A plan has a goal id (any text of at most 120 characters: `goal-<seq>` from a goal turn, or a word for a ticket the owner asked for in conversation, which is a one-item plan), a title and a summary, and 1 to 12 items. Each item has a title of at most 120 characters, a body with at least one unticked `- [ ]` line, a lane and a size. `after` holds existing positions other than the item's own, with no cycle; a forward position is allowed when it makes no cycle, and a position given twice is kept once.
+12. **The module.** The runner is built with the lead, on the first request to a lead or plan route. The lead's routes build it too, so lane 9's poll of `GET /api/lead` runs the plans after a restart. It subscribes to the flow in the same synchronous call as the flow engine's construction. Its tick runs every 30 seconds.
+
+**Consequences.**
+- **Edits outside the lane's files:** `v2/test/lead/module.test.ts` (lane 5's), which asserted the module's exact tables and routes. It now expects the plans' tables after the lead's, and checks the lead's five routes among the eleven.
+- **Not done here.**
+  - `cancelled` is never reached: no route or tool cancels an item. A plan with a held item is done only once that item lands.
+  - A rollback after the plan is `done` is not followed: a done plan is no longer read.
+  - Issue 168, item 3 (answering the lead's question through the session answer route) needs `FlowEngine.answer` to hand the lead's session to the lead, which is beyond this lane's edit of `engine.ts`. Lane 8 can answer through `POST /api/lead/messages`, which answers the pending question.
+- **Proven on the fake adapter, through the real flow engine.** A five-item night (1, 2 and 4 independent, 3 after 2, 5 after 3): at most two live tickets; 1, 2 and 4 in Needs Approval in the morning with 3 and 5 waiting; 3 started after 2's `release_landed`; the plan done when 5 lands. Also: a put back started again with the note then held; pause and resume; the estimates from a seeded history of 7 tickets (median, `samples: 7`) and of 2 (the defaults, `samples: 2`); the critical path; the three refusals; the approval's labels, bodies and the 409; a new engine over a proposed plan and the lead's question; and a scripted lead proposing through its host tool. The defect tests of the inbox narrowing, the checks and the Haiku author fail on the code before this lane.
+- **No real run.** Nothing here calls a model or Docker: the runner's real use is the milestone proof.
+- **No screen changed.** The lane touches no file of the app, so it ran no visual loop and made no capture. Lanes 8, 9 and 10 draw the plan.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-plans`.
+
 ## 2026-10-22: the tower of milestone 2, against tower.png (milestone 2, lane 9)
 
 **Decision.** Lane `v2-j2-tower-m2` gives the tower its milestone 2 state (plan, section 7.2) in `v2/app/public/screens/tower.ts`, with the "Lead · always on" pill in the shell's header. The lane's choices:
@@ -1039,6 +1070,74 @@ The choices the lane makes:
     - **Smaller polish:** the field's radius, and a focus check the global rule already covers.
 - **Not done:** the week share (item 6); answering the lead's question from the tower.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-tower-m2`.
+
+## 2026-10-22: the lead and plan screen, against lead-and-plan.png (milestone 2, lane 8)
+
+**Decision.** Lane `v2-j2-lead-screen` fills lane 3's stub with the screen of section 7.2 of the [milestone 2 plan](milestone-2-plan.md): `screens/lead.ts`, `screens/lead.css`, `public/plan-panel.ts`, the lead catalogs and the lead fixture. The screen follows `lead-and-plan.png` for layout, sizes and colours, and the plan and lanes 1 and 5 for content. The lane's choices:
+
+1. **The reply always goes through `POST /api/lead/messages`.** The plan says the reply field answers the pending question "through the session answer route with the lead's session id". That route answers 409 for the lead's session (issue 168, item 3; lane 5's entry), and lane 5's `post()` answers the pending question itself (decision 8). So:
+   - with Goal pressed, the field sends `{ text, goal: true }`, which never answers a question: a goal wins over a waiting question, and the question keeps waiting;
+   - else, when `LeadState.pendingQuestion` is set, `{ text }` answers it, and the button reads "Answer";
+   - else `{ text }` is a message.
+   An option of the question sends its label as the text, "(Recommended)" kept, as the inbox does. Lane 5 gives the same text to every question of one ask, so options are buttons only for an ask of one question; an ask of several shows its options as a list and says to answer them in one message.
+2. **A Goal toggle in the reply field.** The capture has none, but a goal needs `goal: true` to get its id (`goal-<seq>`) for `propose_plan`. The tower bar's New goal (`?goal=1`) presses it. It is released after a send.
+3. **The draft leaves the address.** `?draft=` and `?goal=1` are read once, then `history.replaceState` drops them from the tab's address and its back history. The browser's global history still records the address the tower opened, so issue 164's item is narrowed, not closed: closing it means the tower passing the draft another way (lane 9's file). `draftFrom`, `planFrom` and `DRAFT_MAX` keep their names and behaviour, since `tower.ts` imports `DRAFT_MAX`.
+4. **Which plan the panel shows.** On `/plans/<id>`, that plan. On `/lead`: a plan to approve; else a running or paused one; else the last done; newest first in each group. A superseded or rejected plan is shown only from its address. The other plans are listed under the panel with their state, as links to `/plans/<id>`.
+5. **The panel's gestures.**
+   - Approve, Pause and Resume call their route at once, with no grace (decision 6). The panel redraws from the plan the route answers, and the shell recounts the inbox.
+   - A 409 says the plan changed meanwhile, and the panel reloads that plan. Any other failure says the gesture failed.
+   - "Change the plan" only focuses the reply field, with the hint "Tell the lead what to change"; it rejects nothing. A paused plan offers it too, as section 5.4 changes an approved plan.
+   - Approve and Resume are in ink; Change and Pause are outlined, because a running plan needs nothing from the person.
+   - The panel has amber only while the plan waits for approval.
+6. **The plan panel is shared** (`renderPlanPanel`, pure, with the translator it is given). Its keys are all prefixed `plan_` and named in `PLAN_PANEL_KEYS`. A test checks that every `'plan_…'` literal of the file is in the list, and that the list is in `lead.en` and `lead.fr`. Lane 10 copies the list into `inbox.*`. Its rules (`.plan-*`, `.lane`, `.item-state`) live in `screens/lead.css`, unscoped, so the inbox can load that sheet; every other rule of the sheet is under `.lead-screen`, since the inbox already uses `option`, `options`, `q-header`, `q-text` and `bubble` for its own question form.
+7. **Estimates.** A share of the week when it is measured, else dollars, as section 5.2 says ("$0.30", "About $1.70"). This departs from DESIGN.md's "don't show money"; the plan wins on content. Below 3 samples the footer says the estimates are defaults. The work time is the critical path the service gives (`totals.minutes`), written "2 h", "2 h 15", "42 min".
+8. **The thread.**
+   - A refresh is a grey line with the generation and the time, and a service line uses the same style.
+   - A question that waits sits on `awaiting-surface` with its header, options and how to answer. Once settled it reads as a line of the lead, as in the capture, with the owner's answer below it.
+   - Whether a question waits is read from `LeadState.pendingQuestion`, not from the row.
+   - A time line comes after 30 minutes of silence, so the morning's account shows when the night's messages came.
+   - The plan message links to the panel where the panel goes under the thread, and to `/plans/<id>` for another plan.
+9. **The header line.**
+   - `idle` and `working` read "Always on · context N % · refreshed from memory X ago".
+   - `starting` reads "Starting", and `refreshing` reads "Refreshing from memory".
+   - `down` is a danger pill, "The lead is not running". So is a `GET /api/lead` that fails, a 503 included.
+10. **What the lead remembers** opens a panel in the lead's card with:
+    - the refresh count, the highest share and the model;
+    - the last handover: the lead's own words, or the line that the service wrote it;
+    - the commitments, open then done, with their times.
+11. **The stream** is read with one listener per frame name (`message`, `state`, `plan`). When it drops, it is reopened after the last message seq with a doubling pause, as the session screen does. A message already seen is not delivered twice.
+12. **Below 1024 px** the page scrolls, not the thread (the art director's item 1), and the panel follows the thread. On a phone, the reply field takes its own row above Goal and Send.
+
+**Consequences.**
+- **The fixture** (`app/fixtures/lead.ts`) keeps lane 1's values unchanged, so `fixtures.test.ts` and `fixtures/source.ts` stay as they are. It adds, as separate exports:
+  - `otherPlans` (a running plan, the same paused, a done one), with the guestbook's content of plan question 5;
+  - `waitingForAnswer`, the thread while the lead's question waits;
+  - `leadSource`, a stand-in for the lead and plan routes that answers their writes as lanes 5 and 7 do, for the tests and the visual loop. `fixtures/source.ts` still refuses every write.
+- **Edit outside the lane's files:** `v2/app/test/shell.test.ts`, the test of lane 3's stub (`renderLeadStub`, gone) and its two imports, removed. The tests of `draftFrom` and `planFrom` stay.
+- **The stub's rules stay in `style.css`** (`.lead-stub`, `.lead-draft`), now unused. That file is not this lane's.
+- **Live run: not done.** Lane 7's plan routes are not in `v2` (its branch had no commit on 2026-10-22 at 05:00), so the screen ran only against the fixtures and `leadSource`. In headless Chromium, `mount` was driven through Approve, Pause, a message, Change the plan, the memory panel, an answer by option and a goal from the tower's draft. There was no page error; the only 404 was `/favicon.ico`, which the shell does not serve. The run against the live service waits for lane 7.
+- **Captures**, none committed, in `/tmp/cleared-captures/j2/`:
+  - `lead-<width>-<theme>.png`, at 1440, 1280, 768 and 390, light and dark, with no horizontal overflow;
+  - the same for `lead-question`, `lead-running`, `lead-done`, `lead-memory` and `lead-down`;
+  - `lead-reference.png`, rendered from `/tmp/cleared-reference/lead-and-plan.html`.
+  The app ran on an ephemeral `127.0.0.1` port with a temporary ledger and user.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session. Taken:
+  - one scroll below 1024 px, the memory panel unclipped;
+  - the reply field on its own row on a phone;
+  - 44 px targets for the panel link and the other plans;
+  - a tighter phone header;
+  - "About $1.70" kept on one line (a non-breaking space);
+  - the other plans' states aligned right, amber for a plan to approve;
+  - more room under the last item;
+  - the link keeps its colour when open;
+  - Pause outlined;
+  - a link from the plan message to the panel on narrow screens;
+  - the estimate on the title's line;
+  - an outline on the lead's bubble in dark.
+  Not taken:
+  - a fade at the bottom of the scrolling list, which would be a gradient;
+  - a sticky "plan waits" chip on a phone, replaced by the plan message's link.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-lead-screen`.
 
 ## 2026-10-22: Owner decision on plan question 1: the current Claude login, read-only, for the proof
 
