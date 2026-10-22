@@ -45,7 +45,7 @@ export function readerPrompt(input: ReaderPromptInput): string {
     parts.push('This conversation started in an earlier session, which stopped. What was asked and answered then:', '');
     for (const turn of input.earlier) parts.push(`Question: ${turn.question}`, `Answer: ${turn.answer ?? '(no answer)'}`, '');
   }
-  parts.push(`The code you read: ${input.services.map((name) => `${name}/`).join(', ')} (in ${WORKDIR_MOUNT}).`, '');
+  parts.push(`The code you read: ${input.services.map((name) => `${name}/`).join(', ')} (in ${WORKDIR_MOUNT}). Every Read takes a limit of at most ${READER_READ_LINES} lines.`, '');
   if (input.target && input.excerpt) {
     parts.push(
       `The question names ${input.target.service}/${input.target.path}, line ${input.target.line}. Its lines ${input.excerpt.from} to ${input.excerpt.to}, the named one marked with >:`,

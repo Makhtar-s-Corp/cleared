@@ -39,6 +39,7 @@ test('a question naming guestbook:src/page.ts:12 starts a reader on the guestboo
   assert.equal(input.workdir, `/state/work/asks/${ask.id}`);
   assert.match(input.prompt, /What does line 12 do\?/);
   assert.ok(input.prompt.includes('guestbook/src/page.ts'), 'the file is named where the reader finds it');
+  assert.ok(input.prompt.includes('Every Read takes a limit of at most 400 lines'), 'the real run\'s first Read had none, and was refused');
   for (const kept of ['    2  line 2', '>  12  line 12', '   22  line 22']) assert.ok(input.prompt.includes(kept), kept);
   for (const left of ['    1  line 1', '   23  line 23']) assert.ok(!input.prompt.includes(left), left);
   assert.deepEqual(t.prepared.map((p) => [p.id, p.services]), [[ask.id, ['guestbook']]]);
