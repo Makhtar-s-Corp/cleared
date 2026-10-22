@@ -99,8 +99,8 @@ async function stepped(options: Options = {}) {
     config: { workspace: WORKSPACE, steps: true }, effects, locks: locks(() => t as Setup),
   });
   const ticket = await t.tickets.create({ title: 'Held for review', body: 'An entry the filter flags is held for review instead of refused.\n\n- [ ] a flagged entry is held', project: 'guestbook', services: ['guestbook', 'filter-api'] }, { kind: 'human', id: 'u1' });
-  const steps = () => t.engine.ticketSteps(ticket.id) as TicketStep[];
-  const states = () => steps().map((s) => `${s.position} ${s.kind} ${s.service} ${s.state}`);
+  const steps = async () => (await t.engine.ticketSteps(ticket.id)) as TicketStep[];
+  const states = async () => (await steps()).map((s) => `${s.position} ${s.kind} ${s.service} ${s.state}`);
   const contract = () => t.inbox.contracts({ ticket: ticket.id }).at(-1) as ContractItem | undefined;
   return { t: t as Setup, ticket, steps, states, contract, asked };
 }
@@ -118,15 +118,15 @@ test('a two-service ticket: the contract step, sent back once and validated, the
   assert.equal(first.input.workdir, '/work/LOCAL-2/filter-api');
   assert.match(first.input.prompt, /contract step/i);
   assert.match(first.input.prompt, /contract\/openapi\.yaml/);
-  assert.deepEqual(states(), ['1 contract filter-api validating', '2 service filter-api waiting', '3 service guestbook waiting', '4 integration guestbook waiting']);
-  assert.deepEqual(steps()[0]?.after, []);
-  assert.deepEqual(steps()[3]?.after, [2, 3]);
+  assert.deepEqual((await states()), ['1 contract filter-api validating', '2 service filter-api waiting', '3 service guestbook waiting', '4 integration guestbook waiting']);
+  assert.deepEqual((await steps())[0]?.after, []);
+  assert.deepEqual((await steps())[3]?.after, [2, 3]);
   const item = contract() as ContractItem;
   assert.equal(item.service, 'filter-api');
   assert.equal(item.path, 'contract/openapi.yaml');
   assert.match(item.diff, /severity 1/);
   assert.equal(item.sessionId, first.id);
-  assert.equal(item.step, steps()[0]?.id);
+  assert.equal(item.step, (await steps())[0]?.id);
   assert.match(asked[0]?.snapshot ?? '', /^\/work\/LOCAL-2\/\.validated\//, 'the contract is kept as validated under the ticket\'s folder');
 
   // Sent back once: the step's session is reopened with the message, and proposes a new diff.
@@ -138,13 +138,13 @@ test('a two-service ticket: the contract step, sent back once and validated, the
   assert.ok(t.store.events.after(first.id).some(({ event }) => JSON.stringify(event).includes('Add an example for a flagged entry.')), 'the message reached the step\'s session');
   assert.equal(t.startedSessions.length, 1, 'the same session, resumed');
   assert.match(contract()?.diff ?? '', /severity 2/);
-  assert.equal(states()[0], '1 contract filter-api validating');
+  assert.equal((await states())[0], '1 contract filter-api validating');
 
   // Validated: the two service steps start at once, each with its siblings.
   await t.engine.approveContract((contract() as ContractItem).id, 'u1');
   await until(() => t.startedSessions.length === 3, 'the two service steps');
   await t.engine.settled();
-  assert.deepEqual(states(), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook running', '4 integration guestbook waiting']);
+  assert.deepEqual((await states()), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook running', '4 integration guestbook waiting']);
   const [filterStep, guestbookStep] = [t.startedSessions[1]!, t.startedSessions[2]!];
   assert.equal(filterStep.input.service, 'filter-api');
   assert.equal(guestbookStep.input.service, 'guestbook');
@@ -170,9 +170,9 @@ test('a two-service ticket: the contract step, sent back once and validated, the
     { ...planned('LOCAL-2', 'guestbook')[1], contract: validated },
   ]);
   assert.equal(t.startedSessions[4]?.input.role, 'reviewer');
-  assert.deepEqual(states(), ['1 contract filter-api done', '2 service filter-api done', '3 service guestbook done', '4 integration guestbook done']);
-  assert.ok(steps().every((s) => typeof s.costUsd === 'number'));
-  assert.equal(steps()[0]?.costUsd, 0.5, 'the contract step\'s session: its first turn and the turn after the send back');
+  assert.deepEqual((await states()), ['1 contract filter-api done', '2 service filter-api done', '3 service guestbook done', '4 integration guestbook done']);
+  assert.ok((await steps()).every((s) => typeof s.costUsd === 'number'));
+  assert.equal((await steps())[0]?.costUsd, 0.5, 'the contract step\'s session: its first turn and the turn after the send back');
   const releases = t.inbox.list().filter((i): i is ReleaseItem => i.kind === 'release' && i.ticket === ticket.id);
   assert.equal(releases.length, 1);
   assert.deepEqual(releases[0]?.train?.services.map((s) => s.service), ['filter-api', 'guestbook']);
@@ -185,15 +185,15 @@ test('a one-service ticket with steps on has one service step, done when its aut
   await t.engine.start(t.ticket.id, 'u1');
   await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release item', 5000);
   await t.engine.settled();
-  const steps = t.engine.ticketSteps(t.ticket.id) as TicketStep[];
+  const steps = (await t.engine.ticketSteps(t.ticket.id)) as TicketStep[];
   assert.deepEqual(steps.map((s) => [s.kind, s.service, s.state, s.session]), [['service', 'guestbook', 'done', t.startedSessions[0]?.id]]);
   await t.engine.close();
 });
 
 test('a ticket without steps on answers no step; an unknown ticket is not found', async () => {
   const t = await setup({ scripts: { author: quickAuthor } });
-  assert.deepEqual(t.engine.ticketSteps(t.ticket.id), []);
-  assert.equal(t.engine.ticketSteps('LOCAL-99'), undefined);
+  assert.deepEqual(await t.engine.ticketSteps(t.ticket.id), []);
+  assert.equal(await t.engine.ticketSteps('LOCAL-99'), undefined);
   await t.engine.close();
 });
 
@@ -203,7 +203,7 @@ test('a contract step that changed another file than the contract puts the ticke
   await until(async () => (await t.tickets.get(ticket.id))?.status === 'Todo', 'the put back');
   await t.engine.settled();
   assert.equal(contract(), undefined);
-  assert.equal(states()[0], '1 contract filter-api failed');
+  assert.equal((await states())[0], '1 contract filter-api failed');
   const back = t.flowEvents.find((e) => e.type === 'ticket_put_back');
   assert.equal(back?.type === 'ticket_put_back' && back.reason, 'step_failed');
   assert.match(back?.type === 'ticket_put_back' ? back.note : '', /src\/check\.ts/);
@@ -211,12 +211,12 @@ test('a contract step that changed another file than the contract puts the ticke
 });
 
 test('a contract step that left the contract as it was proposes nothing and the service steps start', async () => {
-  const { t, ticket, states, contract } = await stepped({ reads: { 'filter-api': [{ files: [], contract: { path: 'contract/openapi.yaml', diff: '', blob: 'blob-0', snapshot: null }] } });
+  const { t, ticket, states, contract } = await stepped({ reads: { 'filter-api': [{ files: [], contract: { path: 'contract/openapi.yaml', diff: '', blob: 'blob-0', snapshot: null } }] } });
   await t.engine.start(ticket.id, 'u1');
   await until(() => t.startedSessions.length === 3, 'the service steps');
   await t.engine.settled();
   assert.equal(contract(), undefined);
-  assert.deepEqual(states().slice(0, 3), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook running']);
+  assert.deepEqual((await states()).slice(0, 3), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook running']);
   await t.engine.close();
 });
 
@@ -227,7 +227,7 @@ test('a step that fails stops the ticket\'s other steps, keeps what is done, and
   await t.engine.approveContract((contract() as ContractItem).id, 'u1');
   await until(async () => (await t.tickets.get(ticket.id))?.status === 'Todo', 'the put back');
   await t.engine.settled();
-  assert.deepEqual(states(), ['1 contract filter-api done', '2 service filter-api failed', '3 service guestbook waiting', '4 integration guestbook waiting']);
+  assert.deepEqual((await states()), ['1 contract filter-api done', '2 service filter-api failed', '3 service guestbook waiting', '4 integration guestbook waiting']);
   const guestbookStep = t.startedSessions[2]!;
   assert.equal(t.store.sessions.get(guestbookStep.id)?.status, 'stopped', 'the other running step was stopped');
   const back = t.flowEvents.find((e) => e.type === 'ticket_put_back');
@@ -241,7 +241,7 @@ test('a step that fails stops the ticket\'s other steps, keeps what is done, and
   await until(() => t.startedSessions.length === 5, 'the service steps again');
   await t.engine.settled();
   assert.deepEqual(t.startedSessions.slice(3).map((s) => s.input.service), ['filter-api', 'guestbook']);
-  assert.deepEqual(states(), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook running', '4 integration guestbook waiting']);
+  assert.deepEqual((await states()), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook running', '4 integration guestbook waiting']);
   await t.engine.close();
 });
 
@@ -252,7 +252,7 @@ test('the provider\'s service step that changed the validated contract puts the 
   await t.engine.approveContract((contract() as ContractItem).id, 'u1');
   await until(async () => (await t.tickets.get(ticket.id))?.status === 'Todo', 'the put back');
   await t.engine.settled();
-  assert.equal(states()[1], '2 service filter-api failed');
+  assert.equal((await states())[1], '2 service filter-api failed');
   const back = t.flowEvents.find((e) => e.type === 'ticket_put_back');
   assert.match(back?.type === 'ticket_put_back' ? back.note : '', /validated contract/);
   await t.engine.close();
@@ -273,7 +273,7 @@ test('a contract approved while its ticket is in Todo starts nothing; a contract
   await again.approveContract(item.id, 'u1');
   await again.settled();
   assert.equal(t.startedSessions.length, 1, 'nothing started');
-  assert.equal(states()[0], '1 contract filter-api done');
+  assert.equal((await states())[0], '1 contract filter-api done');
   await assert.rejects(again.approveContract(item.id, 'u1'), /already/);
   // Started again, the ticket goes on from the service steps.
   await again.start(ticket.id, 'u1');
