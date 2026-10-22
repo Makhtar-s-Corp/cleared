@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { RELAY } from '../../src/container/preview.ts';
 import { authorPrompt, stepPrompt } from '../../src/flow/prompts.ts';
 import { parseRehearsalScript, type AuthorRule } from '../../src/session/adapters/index.ts';
-import { END_TERMINAL, TERMINAL_SHELL, giveCommand, readCommand, takeCommand, writeCommand } from '../../src/terminal/container.ts';
+import { END_TERMINAL, SHELL_COMMAND, giveCommand, readCommand, takeCommand, terminalCommand, writeCommand } from '../../src/terminal/container.ts';
 import { loadWorkspace } from '../../src/workspace/config.ts';
 import { MULTI_TICKETS, breaksHealth, dockerStub, multiScript, rehearsalWorkspace, shellAnswer, type StubContext } from '../../scripts/proof-rehearsal-multi.ts';
 
@@ -128,8 +128,10 @@ test('the docker stand-in runs the service\'s own programs on the session\'s che
   const fake = dockerStub(['exec', '--', `stub-${SESSION}-egress`, 'node', '-e', RELAY, 'http://10.89.0.3:9712/__fake/calls', '1000', '1000'], ctx());
   if (fake.kind === 'program') assert.equal(fake.args[2], `http://127.0.0.1:9720/__session/${SESSION}/filter-api/__fake/calls`);
   // The human's shell, and its end.
-  const shell = dockerStub(['exec', '--interactive', '--tty', '--env', 'TERM=xterm-256color', '--user', 'node', '--workdir', '/workspace', '--', `stub-${SESSION}-session`, 'sh', '-c', TERMINAL_SHELL], ctx());
-  assert.deepEqual(shell, { kind: 'shell', cwd: checkout, session: SESSION, pidFile: `/tmp/rehearsal/terminal-${SESSION}.pid` });
+  const tty = (...command: string[]) => dockerStub(['exec', '--interactive', '--tty', '--env', 'TERM=xterm-256color', '--user', 'node', '--workdir', '/workspace', '--', `stub-${SESSION}-session`, ...command], ctx());
+  assert.deepEqual(tty(...terminalCommand(SHELL_COMMAND)), { kind: 'shell', cwd: checkout, session: SESSION, pidFile: `/tmp/rehearsal/terminal-${SESSION}.pid` });
+  // A harness resumed in the terminal (pull request 230) is never run here: the fake adapter has none.
+  assert.equal(tty(...terminalCommand(['sh', '-c', 'exec claude --resume "$1"', 'claude', SESSION])).kind, 'refuse');
   assert.deepEqual(exec('session', ...END_TERMINAL), { kind: 'end', pidFile: `/tmp/rehearsal/terminal-${SESSION}.pid` });
   // Anything else is refused: another program, a program in another container, a create, a build, a run, a push.
   for (const args of [

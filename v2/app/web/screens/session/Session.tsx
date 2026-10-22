@@ -24,7 +24,7 @@ import { sentText, type Answers } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { editorReducer, editorStart, putFile, readOnlyWhy, saveOutcome, type EditorAction, type EditorState, type ReadOnlyWhy } from '@/components/editor/model.ts';
-import { terminalChoice } from '@/components/terminal/model.ts';
+import { harnessName, terminalChoice } from '@/components/terminal/model.ts';
 import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useScreen } from '@/lib/context.tsx';
@@ -619,11 +619,11 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
             {terminal.kind === 'web' ? (
               <div className="term-wrap">
                 <TakeoverNotice view={view} t={t} web />
-                <WebTerminal session={id} csrf={context.me.csrf} active={tab === 'terminal'} t={t} />
+                <WebTerminal session={id} csrf={context.me.csrf} active={tab === 'terminal'} t={t} harness={harnessName(view.summary.harness)} />
               </div>
             ) : (
               <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}>
-                <TakeoverNotice view={view} t={t} why={terminal.kind === 'command' ? terminal.why : undefined} />
+                <TakeoverNotice view={view} t={t} why={terminal.kind === 'notice' ? terminal.why : undefined} />
                 <Timeline view={view} t={t} onAnswer={(requestId, kind) => void answer(requestId, kind)} onQuestion={(requestId, given, chosen) => void answerQuestion(requestId, given, chosen)} />
               </div>
             )}

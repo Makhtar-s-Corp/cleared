@@ -2701,6 +2701,93 @@ The lane's choices:
 - Pull request: 228, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-terminal-editor-screens`.
 
+## 2026-10-22: Owner request: Take over attaches the web terminal directly to the session's harness
+
+**Decision.** The owner asked on 2026-10-22 at 17:26 for a lane outside the [milestone 2 plan](milestone-2-plan.md). On Take over, the web terminal attaches directly to the session's interactive harness: for Claude Code, the equivalent of `claude --resume <session id>` inside the session's container. It goes through the harness adapter so that it stays generic: the adapter interface gets a method for the interactive resume, Claude Code implements it, and the other adapters (Cursor and Codex, later) answer unsupported with a clear message. The raw shell becomes a secondary option, a Shell button. The displayed `docker exec` command and the words "run this in a terminal on the server" are removed entirely. Give back leaves the interactive session cleanly (the harness exits, the transcript is saved) and hands control back to Cleared, which resumes with the updated journal.
+
+**Consequences.** This changes decision 30 (the command on the server, where the web terminal is not offered) and decision 32 (the terminal's first line naming `claude --resume`, a shell by default) for milestone 2. The safety rules of decision 32 are unchanged: the owner account only, the anti-forgery and origin checks, the loopback address only, everything typed journaled. The requirements matrix records the request as O16, and the author's choices as P42 and P43 (the entry below).
+
+## 2026-10-22: the web terminal on the session's own harness, Shell beside it, Give back from the transcript (the author's choices, lane v2-j2-takeover-harness-direct)
+
+**Decision.** The lane applies the owner's request of 17:26 (the entry above). Its choices:
+
+1. **The adapter interface** (`session/contract.ts`).
+   - `SessionAdapter.interactive?(id)` answers `{ supported: true, name, command }` or `{ supported: false, reason }`. The command is what to run in the session's container: fixed words, the session and its model, never a secret.
+   - **Optional, not required.** `session/adapters/index.ts` (lane 29's file in this wave) and several test adapters build the interface, so a required method would break them. `interactiveResume(adapter, id)` turns a missing method, a missing adapter or one that throws into unsupported. The sentence says to open the Shell instead: "The codex harness cannot be resumed in a terminal yet: open the Shell instead." The error of an adapter that throws stays on the host.
+   - The fake adapter answers that a scripted session has no interactive harness.
+   - When an adapter answers supported, its own harness process has been handed over, so only one harness writes the session at a time. `resume()` then takes it back from the transcript.
+2. **The runner hands its harness over without ending** (`images/session/runner/main.ts`).
+   - **Why the runner changes.** Take over only interrupted the SDK's query, and the query kept its context in memory. A human's `claude --resume` beside it would fork the transcript, and Give back would answer from the old context. The runner is the container's command, so closing the query must not end it either.
+   - `release` closes the query and the runner says `released`. This also works while the runner waits for a new login: the wait wakes at once.
+   - `reload` starts a new query with `resume: <id>`, which reads the transcript as the human's harness left it, and the login file again. A turn sent meanwhile waits for it.
+   - `stop` and the end of the input end a released runner.
+   - An image built before this lane ignores the two lines. Its adapter then answers unsupported ("rebuild the session image") after `releaseTimeoutMs` (15 seconds by default).
+3. **Claude Code's interactive resume** (`session/adapters/claude-code.ts`, `claude-code/interactive.ts`).
+   - `interactive()` asks the runner to release, waits for `released`, and answers Claude Code with `interactiveCommand(id, model)`. `resume()` sends `reload` before any turn once a release was sent. The engine's `giveBack` already calls `resume()`, so the engine is not edited.
+   - **A Give back during the hand-over.** The release is recorded as sent before it is written, so a Give back that lands before the runner says `released` still reloads it (the runner keeps a `reload` that comes before it parks). `interactive()` then answers unsupported ("given back"), so no `claude --resume` starts beside the reloaded runner. A timeout keeps the release as sent too.
+   - **The launcher** is `sh -c` with positional words: the session, its model, the login's program, the login file's mount point, and the config's program. Nothing is quoted into the script.
+   - **The login.** It reads the login file inside the container, as the runner's `loginToken` does: a token, or only the access token of a credentials file. It puts the token in the harness's environment only: never a word of a command line (the host's `ps` and `docker inspect` would show it), never printed. Without a login it exits 3 with a sentence.
+   - It sets the runner's git identity and execs `claude --resume "$1" --model "$2"`, on the same session id (`--fork-session` is not given) and on the session's model.
+   - **The first run** (found by the labelled run). Claude Code started interactively for the first time in a config folder shows its first-run screens. Their connectivity check reaches `platform.claude.com`, which the session's egress refuses, and the harness exits. The launcher therefore first marks the session's own config (`$CLAUDE_CONFIG_DIR/.claude.json`, on the session's volume): `hasCompletedOnboarding`, and the checkout as trusted. Every other key is kept, and a config that is not JSON is left as it is. The egress allow list is not widened.
+   - **What the harness's tools see.** They see the login in their environment, as the runner's harness's tools do (issue 147). The shell does not: the labelled run printed an empty `${CLAUDE_CODE_OAUTH_TOKEN:+yes}` there.
+   - **Who answers its permission requests.** In the terminal the harness asks the human directly, in its own manual mode, not through the policy and the inbox. It loads the checkout's `CLAUDE.md`, which holds the briefing. The container keeps its reach (the egress list, no forge credential), so a push fails as the session's would.
+4. **The terminal's two modes** (`terminal/`, `api/types.ts`).
+   - `POST .../terminal/open` takes `mode: 'harness' | 'shell'`, with `harness` as the default.
+   - **The harness.** The human side asks the session's adapter (by the session's `harness`) for its interactive resume and runs that command.
+   - **Answers.** A harness that cannot be resumed answers 501 with the adapter's sentence, and nothing opens. A second open answers 409 with the mode of the one open, so a reloaded page attaches to it. Any other mode answers 400.
+   - **The terminal's one slot** is claimed before the adapter is asked, so a second open during the release is a conflict.
+   - **Give back during an open** (issue 226, item 1). After the process starts, the terminal checks that the session is still taken over. If it was given back meanwhile, what started is ended at once and the open answers 409, so the human's harness and the reloaded runner never run the session together.
+   - **The wrapper** is `echo $$ > <pid file>; exec "$@"`, with the program's words as arguments, for the harness and for `bash -l` alike.
+   - **The close** sends a hang-up, as a closed terminal does. It then waits up to 5 seconds for the program itself to leave (a zombie counts as gone, since nothing in the container reaps it), then kills what is left of its session. The labelled run measured 523 ms for Claude Code, which wrote its last transcript lines as it left.
+   - **The first line** says what runs: "Claude Code, resumed on this session. Give the session back when you are done", or "A shell in the session's container". `cleared.terminal_opened` carries the mode. `TerminalOpened` carries the mode and the harness's name instead of the `resume` command.
+5. **The screen** (`components/terminal/`, `screens/session/`, the `session` catalogs).
+   - **The command is gone.** `resumeCommand`, `containerName` and the `takeover_command_label` key are removed, and `takeover_body` and `terminal_here_only` are rewritten. No word of Take over or of the terminal, in either language, sends anyone to a terminal on the server; a test reads the catalogs. On the public origin the notice says the terminal opens on this machine's browser only, with no command.
+   - **What runs.** A line above the terminal names it ("Claude Code, resumed on this session", or "Shell in the session's container"). Beside it, an outline button gives the other mode: Shell, or Back to Claude Code. Give back stays the primary gesture.
+   - **The switch** closes the open terminal (the harness leaves, its transcript kept), then opens the other. The `closed` frame of the terminal that closed is not shown.
+   - **A harness that cannot be resumed.** The header says "<name> cannot be resumed here", the adapter's sentence is shown once, and only Shell is offered, with no empty terminal.
+   - **The harness's exit** reads "The harness ended", apart from the shell's.
+   - **The fixture sources** answer both modes. A stand-in harness shows the session's last words and answers each line with a sentence that says it is a stand-in; `/exit` ends it. The shell stand-in is lane 32's.
+6. **The engine's words at Give back** (`flow/takeover.ts`, `GIVEN_BACK`) now say that what the owner did with the session meanwhile is in the conversation above.
+
+**Consequences.**
+- **Tests first.** Commit 47a02f9 holds them alone, and each failed on `origin/v2` at 309aea5. The new files are:
+  - `test/session/interactive.test.ts`;
+  - `test/session/claude-code/interactive.test.ts`: the launcher run by this machine's `sh` and `node`, with a stand-in `claude` and a test login file;
+  - `test/terminal/harness.test.ts`.
+  The new cases are in `test/session/claude-code/{runner,adapter}.test.ts`, `test/terminal/{routes,container}.test.ts`, `app/test/session/{terminal,tabs,fixture-human,terminal-browser}.test.ts` and `app/web/test/session/{terminal-editor,tabs}.test.tsx`. Three tests were added later, each failing first: the release during a login wait and the first run's config (both found by the labelled run), and a Give back during the hand-over (found by the review before the pull request). Lane 20's `app/test/session/tabs-browser.test.ts` asserted the server command; it now asserts the harness attached and no command.
+- **The labelled run on this server** (Docker 29.8.1). A probe image `cleared-v2-session:takeover-probe` was built from this branch's `images/session` and labelled `cleared.dev=v2`. The real Claude Code adapter, terminal and docker wrapper ran one session on a temporary checkout, with a dummy login file written for the run (never a real login), so every API call was refused.
+  - The first turn was refused, and the runner said it waits for a new login.
+  - **The release.** `interactive()` answered `supported` while the runner waited. `ps` in the container then showed only `node /opt/cleared/runner/main.ts`: the runner's harness was gone, and the container was still up.
+  - **The harness.** The terminal opened `claude --resume <id> --model claude-haiku-5-5`. The screen showed Claude Code 2.1.306 on Haiku 5.5, with the session's own first turn ("Say hello.", then the refusal). A line typed to it reached it, and the transcript went from 25 to 41 lines. The dummy login appeared nowhere in the output.
+  - **Give back.** The terminal closed in 523 ms, and the transcript went from 41 to 44 lines as the harness left. `ps` showed no `claude`.
+  - **The reload.** `resume()` returned the same handle, and the runner reloaded and ran the next turn: the turns ended went from 1 to 2.
+  - **The shell.** It had no login in its environment, and `pgrep` is in the image.
+  - **The cleanup.** After the stop, no container with the session label was left; the volume was removed, and so was the probe image.
+  - **The first of three runs** found the first-run screens (choice 3). The second measured a 5-second close, because zombies were counted (choice 4). The third is the one above.
+  - **What the run did not show:** a harness turn on a real login. It belongs to the proof's step 11.
+- **The visual loop.** The app ran on an ephemeral `127.0.0.1` port (after `ss -ltn`), on the session fixture's source, in headless Chromium 1248, with the clock fixed at the fixture's time.
+  - **The captures** are `/tmp/cleared-captures/j2/takeover/takeover-<state>-<width>-<theme>.png`, for the states `harness`, `shell`, `unsupported`, `given-back` and `public`, at 1440, 1280, 768 and 390, light and dark. With `takeover-reference-session.png`, rendered from `/tmp/cleared-reference/session.html`, that is 41 files, mode 644, with the pointer in a corner away from the buttons. None is committed.
+  - **The checks:** every capture had no horizontal overflow, no page error, no `securitypolicyviolation`, and no `docker exec` or "on the server" in the Terminal tab.
+  - **The loop found** the stand-in's hard line breaks wrapping mid-word, and an empty terminal in the unsupported state. Both were fixed.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session, on the captures, the reference and `app/DESIGN.md`. It found the identity held (Geist, hairlines, tokens, no gradient, one icon weight, no command anywhere).
+  - **Taken:** in the unsupported state, the header named the harness as resumed and the reason appeared twice. It now says "<name> cannot be resumed here", with the adapter's sentence once.
+  - **Not taken:**
+    - the notice over the feed on the public origin, which is lane 20's sticky notice by design (rows scroll under it; the full-page capture shows the feed scrolled);
+    - the status line under the terminal and Give back's row at 768, both lane 32's and lane 20's layout, already declined there (issue 213);
+    - the composer's clipped placeholder at 1280, which is lane 32's words;
+    - "Back to Claude Code" wrapping to its own row at 390, which stays readable.
+- **Open, for other lanes:**
+  - **Lane 29 (the proof's step 11).** Take over now opens the harness, so `git status` and `npm test` typed first would go to Claude Code. The step clicks `[data-act="terminal_shell"]` first, or types to the harness, as the proof chooses. The selectors are `[data-terminal-state]` with `data-mode` (`harness` or `shell`) and `data-reason` (`unsupported` added), and `[data-act="terminal_shell"]` and `[data-act="terminal_harness"]` beside lane 32's. The rehearsal on the fake adapter gets the unsupported state and the Shell. The real run rebuilds the session image first, for the runner's two lines.
+  - **The proof's step 11** also closes what this run could not: a harness turn on the real login, and whether the harness's first screen asks anything else.
+  - **Issue 226, item 1** is fixed here (choice 4).
+- **Checks.**
+  - `npm test`: 1195 node tests pass and 8 are skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 184 Vitest tests pass.
+  - With `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME`, the 8 browser tests pass.
+  - `npm run typecheck` and `npm run guard -- --base origin/v2` are green. The guard ran without a private-term list (`CLEARED_REPO` unset).
+- **The requirements matrix.** O16 (the owner's request, `partial` until the proof's step 11 runs a real turn), P42 (the adapter's interactive resume) and P43 (the terminal's modes and the screen) are new. B5.10f, D4, O9 and C1 name this pull request. P39 says the server command it kept was removed.
+- Pull request: 230, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-takeover-harness-direct`.
+
 ## 2026-10-22: the proof scripts on the React screens and the replanned milestone 2, and the multi-service proof's driver (the author's choices, lane v2-j2-proof-scripts-m2)
 
 **Decision.** Lane 29 adapts the 48-hour proof of pull request 181 (`v2/scripts/proof-j2.ts`) to the React screens and to what waves 5 to 11 added, and writes `v2/scripts/proof-j2-multi.ts`, the driver of section 2.2 of the [milestone 2 plan](milestone-2-plan.md), each with a rehearsal on the fake adapter. It does not start either real run: both are the orchestrator's, after this wave. The lane's choices:
@@ -2790,7 +2877,7 @@ The lane's choices:
 - **Files.** All are of the lane's list: `v2/scripts/proof-*.ts` (`proof-j2-multi.ts` and `proof-rehearsal-multi.ts` new), `v2/src/session/adapters/index.ts`, and the tests under `v2/test/scripts/`. Beyond them, only this entry and `docs/v2/requirements-matrix.md`:
   - B6.2p, B6.2m, O8, C2, C8, C10, M2, M3, M5, B5.10f and O1 name this pull request (232).
   - They stay `partial` or `planned` until the real runs.
-  - The new lines are P42 (choices 1 to 6 and 8) and P43 (choices 7 and 9).
+  - The new lines are P44 (choices 1 to 6 and 8) and P45 (choices 7 and 9); P42 and P43 are pull request 230's, merged first.
 - **Checks.**
   - `npm test`: 1204 node tests, 1196 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 183 Vitest tests pass.
   - `npm run typecheck` is green.

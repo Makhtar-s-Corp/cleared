@@ -4,10 +4,14 @@
 //   POST /api/sessions/:id/takeover pauses an author's live session: the
 //   engine interrupts its turn, settles what waited for the human as
 //   cancelled and records who took it over and when (`takenOver`). The
-//   session screen then shows the command that resumes the session in a
-//   terminal on the server; lane 32 mounts the web terminal beside it.
-//   POST /api/sessions/:id/giveback resumes it, with the harness's resume in
-//   the same container, and tells it to carry on.
+//   session screen then opens the web terminal (lanes 31 and 32) on the
+//   session's own harness, resumed on the same session in its container
+//   through the harness adapter, with a shell as the second choice (owner
+//   request of 2026-10-22 17:26, terminal/human.ts).
+//   POST /api/sessions/:id/giveback closes that terminal (the harness
+//   leaves, its transcript kept), then resumes the session with the
+//   harness's resume in the same container, from that transcript, and tells
+//   it to carry on.
 //
 // In milestone 2 the users module has no role, so Take over is the single
 // owner account's: the first account of the users table (the oldest, the
@@ -43,7 +47,7 @@ export const TAKEN_OVER = 'takeover';
 // What the resumed session is told at Give back.
 export const GIVEN_BACK = [
   'The owner, who had taken over this session, gave the session back to you.',
-  'Carry on with the ticket where you left off. The owner may have changed files of the checkout: read again any file before you edit it.',
+  'Carry on with the ticket where you left off: what the owner did with you meanwhile, if anything, is in the conversation above. The owner may have changed files of the checkout: read again any file before you edit it.',
 ].join('\n');
 
 export type TakeoverDeps = {

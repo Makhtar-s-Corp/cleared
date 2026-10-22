@@ -107,7 +107,7 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
   assert.deepEqual(seen, { errors: [], away: [] });
 });
 
-test('the Editor shows a file\'s changes against the base; Take over shows the command, and Give back calls its route', { skip }, async () => {
+test('the Editor shows a file\'s changes against the base; Take over attaches the harness, and Give back calls its route', { skip }, async () => {
   const fixture = sessionFixture(FIXTURE_NOW);
   const source = sessionSource(fixture);
   const seen = await browse(source, `/sessions/${AUTHOR_ID}#editor`, async (page) => {
@@ -119,9 +119,10 @@ test('the Editor shows a file\'s changes against the base; Take over shows the c
     await page.locator('#tab-editor .tag').waitFor();
     assert.equal(await page.locator('#tab-editor tr.line.add').count(), 38, 'a new file is all added');
 
+    // Take over attaches the terminal to the session's harness, with no command to run on the server (owner request of 2026-10-22 17:26).
     await page.locator('#takeover').click();
-    await page.locator('#resume-command').waitFor();
-    assert.equal(await page.locator('#resume-command').innerText(), `docker exec -it cleared-v2-${AUTHOR_ID}-session claude --resume ${AUTHOR_ID}`);
+    await page.locator('#tab-terminal [data-terminal-state="open"][data-mode="harness"]').waitFor();
+    assert.equal(await page.locator('#resume-command').count(), 0);
     assert.ok(await page.locator('#message').isDisabled(), 'no message to a paused session');
     await page.locator('#giveback').click();
     await page.locator('#takeover').waitFor();

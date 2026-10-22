@@ -146,13 +146,8 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 /* Terminal, taken over */
 /* Pinned to the timeline's top (its 8px padding) while the rows scroll under it. */
 .takeover { position: sticky; top: -8px; z-index: 1; margin: 0 0 14px; padding: 14px; border-radius: 10px; background: var(--sunken); box-shadow: var(--e-outline), 0 12px 0 var(--surface); }
-/* In dark, --ink is near white: the command stays a terminal line, not a button. */
-:root[data-theme="dark"] .command { background: var(--canvas); color: var(--text); box-shadow: 0 0 0 1px var(--hairline); }
 .takeover-title { margin-bottom: 4px; font-weight: 600; }
 .takeover-body { font-size: 13px; color: var(--text-secondary); }
-.command { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: var(--ink); color: var(--on-ink); }
-/* The command wraps rather than hides its end; selecting it copies it whole. */
-.command code { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-ligatures: none; }
 
 /* Editor, read only */
 .editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -185,15 +180,18 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .editor-note { margin-top: 8px; font-size: 12.5px; }
 
 /* The web terminal of a session taken over (decision 32, lane 32): the
-   notice above, then the terminal, in the command block's colours (ink in
-   light, the canvas in dark: Terminal.tsx gives xterm the same), then its
-   state and Open again. */
+   notice above, then what runs (the session's harness, or the shell) with
+   the other as a quiet button, then the terminal (ink in light, the canvas
+   in dark: Terminal.tsx gives xterm the same), then its state and Open
+   again. */
 .term-wrap { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; padding: 12px 16px; overflow-y: auto; }
 .takeover.web { position: static; margin: 0; box-shadow: var(--e-outline); }
 .takeover.web .takeover-title { margin-bottom: 2px; }
-.command-line { display: grid; gap: 4px; margin: 8px 0 6px; }
-.command-line .command { margin: 0; padding: 6px 10px; }
-.command-line > .takeover-body { font-size: 12px; color: var(--text-muted); }
+.term-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.term-mode { min-width: 0; font-size: 13px; font-weight: 600; }
+.term-switch { min-height: 28px; padding: 0 12px; }
+/* A harness that cannot be resumed ran nothing: no empty terminal, its reason and the Shell. */
+.term[data-reason="unsupported"] .term-host { display: none; }
 .term { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .term-host { flex: 1; min-height: 260px; padding: 8px 4px 8px 10px; border-radius: 8px; background: var(--ink); overflow: hidden; }
 :root[data-theme="dark"] .term-host { background: var(--canvas); box-shadow: 0 0 0 1px var(--hairline); }
@@ -285,6 +283,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
   .takeover { position: static; box-shadow: var(--e-outline); }
   .term-wrap { overflow: visible; padding: 12px; }
   .term-host { min-height: 380px; padding: 6px 2px 6px 6px; }
+  .term-switch { min-height: 44px; }
   .cm-host .cm-editor { max-height: 70vh; }
   .editing-foot { bottom: 0; padding-bottom: 12px; }
   .editing-actions { width: 100%; }

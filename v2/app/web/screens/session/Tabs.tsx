@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ENDED, clock, parseCriteria, phaseOf, takenOverOf, type SessionView } from './model.ts';
 import {
-  CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planView, resumeCommand, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
+  CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planView, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
 } from './tabs.ts';
 
 const ICONS: Readonly<Record<Tab, Icon>> = { plan: ListChecks, terminal: TerminalWindow, editor: Code, browser: Browser };
@@ -148,30 +148,20 @@ export function PlanTab({ view, plan, t, changing = false, change = '', busy = f
   );
 }
 
-// The Terminal tab of a session taken over: what is paused, and the command
-// that resumes the session in its container, on the server. Beside the web
-// terminal (web) the command stays, shorter, as its fallback (decision 32);
-// without it, the notice says why (here_only: not the loopback address).
+// The Terminal tab of a session taken over: what is paused, and what the
+// web terminal below runs (web: the session's harness, Shell beside it);
+// without the web terminal, why (here_only: not the loopback address). No
+// command to run on the server: the terminal is the app's (owner request of
+// 2026-10-22 17:26).
 export function TakeoverNotice({ view, t, web = false, why }: { readonly view: SessionView; readonly t: Translate; readonly web?: boolean; readonly why?: 'here_only' | 'other' | undefined }) {
   const taken = takenOverOf(view);
   if (!taken || ENDED.has(phaseOf(view))) return null;
   const time = clock(taken.at);
-  const command = <pre className="command"><code id="resume-command">{resumeCommand(view.summary.id)}</code></pre>;
   return (
     <div className={web ? 'takeover web' : 'takeover'} role="note">
       <p className="takeover-title">{taken.by === view.me ? t('takeover_title', { time }) : t('takeover_other_title', { time })}</p>
-      {web ? (
-        <>
-          <p className="takeover-body">{t('takeover_web_body')}</p>
-          <div className="command-line"><span className="takeover-body">{t('takeover_command_label')}</span>{command}</div>
-        </>
-      ) : (
-        <>
-          <p className="takeover-body">{t('takeover_body')}</p>
-          {command}
-          {why === 'here_only' ? <p className="takeover-body">{t('terminal_here_only')}</p> : null}
-        </>
-      )}
+      <p className="takeover-body">{web ? t('takeover_web_body') : t('takeover_body')}</p>
+      {!web && why === 'here_only' ? <p className="takeover-body">{t('terminal_here_only')}</p> : null}
       <p className="takeover-body">{t('takeover_after')}</p>
     </div>
   );

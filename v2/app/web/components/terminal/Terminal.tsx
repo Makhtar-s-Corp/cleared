@@ -1,6 +1,10 @@
 // The web terminal of a session taken over (decision 32, lane 32): xterm on
 // the terminal's routes, mounted on the session screen's Terminal tab for
 // the account that took the session over, on the app's loopback address.
+//   - It opens on the session's own harness, resumed on the session (owner
+//     request of 2026-10-22 17:26); Shell, the second choice, closes it and
+//     opens a shell in the container, and a button goes back. A harness
+//     that cannot be resumed says why, with the Shell beside it.
 //   - xterm and its sheet load by a dynamic import (xterm.ts), so no other
 //     screen grows; the first open waits until the tab is shown, since a
 //     hidden terminal has no size to give the shell.
@@ -13,29 +17,46 @@
 //     up is "lost". Open again opens a new one.
 //   - The keys go through the model's batcher; the size follows the panel.
 import { useEffect, useRef, useState, type Ref } from 'react';
-import type { TerminalChunk, TerminalClosed } from '../../../../src/api/types.ts';
+import type { TerminalChunk, TerminalClosed, TerminalMode } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import type { Translate } from '@/lib/i18n.ts';
-import { InputBatcher, closedLine, freshChunk, pageNonce, screenShims, terminalApi, type TerminalStatus } from './model.ts';
+import { DEFAULT_MODE, InputBatcher, closedLine, freshChunk, otherMode, pageNonce, screenShims, terminalApi, type TerminalStatus } from './model.ts';
 
-export function TerminalFrame({ t, status, host, note = '', onOpen }: {
-  readonly t: Translate; readonly status: TerminalStatus; readonly host?: Ref<HTMLDivElement>; readonly note?: string; readonly onOpen?: () => void;
+// harness: the harness's name; canHarness: false once it said it cannot be resumed.
+export function TerminalFrame({ t, status, mode = DEFAULT_MODE, harness = '', canHarness = true, host, note = '', onOpen, onSwitch }: {
+  readonly t: Translate; readonly status: TerminalStatus; readonly mode?: TerminalMode; readonly harness?: string; readonly canHarness?: boolean;
+  readonly host?: Ref<HTMLDivElement>; readonly note?: string; readonly onOpen?: () => void; readonly onSwitch?: () => void;
 }) {
   const closed = status.kind === 'closed' ? status : undefined;
-  const line = status.kind === 'opening' ? t('terminal_opening')
-    : status.kind === 'open' ? t('terminal_open', { cols: status.cols, rows: status.rows })
-    : closedLine(status.reason, t);
+  const name = harness;
+  const shell = mode === 'shell';
+  const line = status.kind === 'opening' ? (shell ? t('terminal_opening') : t('terminal_opening_harness', { name }))
+    : status.kind === 'open' ? (shell ? t('terminal_open', { cols: status.cols, rows: status.rows }) : t('terminal_open_harness', { name, cols: status.cols, rows: status.rows }))
+    : closed?.reason === 'unsupported' && closed.detail ? closed.detail     // the adapter's own reason, once
+    : closedLine(status.reason, t, mode);
+  const unsupported = closed?.reason === 'unsupported';
+  const given = closed?.reason === 'give_back';
+  const canSwitch = !given && (shell ? canHarness : true);
+  const again = closed && !given && closed.reason !== 'unsupported';
   return (
-    <section className="term" aria-label={t('terminal_label')} data-terminal-state={status.kind} data-reason={closed?.reason}>
+    <section className="term" aria-label={t('terminal_label')} data-terminal-state={status.kind} data-reason={closed?.reason} data-mode={mode}>
+      <div className="term-head">
+        <p className="term-mode">{shell ? t('terminal_mode_shell') : unsupported ? t('terminal_mode_unsupported', { name }) : t('terminal_mode_harness', { name })}</p>
+        {canSwitch ? (
+          <Button className="btn term-switch" data-act={shell ? 'terminal_harness' : 'terminal_shell'} onClick={onSwitch}>
+            {shell ? t('terminal_switch_harness', { name }) : t('terminal_switch_shell')}
+          </Button>
+        ) : null}
+      </div>
       <div className="term-host" ref={host} />
       <div className="term-foot">
         <p className="term-state" role="status">
           <span className="dot" data-state={status.kind} aria-hidden="true" />
           <span>{line}</span>
-          {closed?.detail ? <span className="term-detail">{closed.detail}</span> : null}
+          {closed?.detail && !unsupported ? <span className="term-detail">{closed.detail}</span> : null}
           {note ? <span className="term-detail bad">{note}</span> : null}
         </p>
-        {closed && closed.reason !== 'give_back' ? <Button className="btn" data-act="terminal_open" onClick={onOpen}>{t('terminal_open_again')}</Button> : null}
+        {again ? <Button className="btn" data-act="terminal_open" onClick={onOpen}>{t('terminal_open_again')}</Button> : null}
       </div>
     </section>
   );
@@ -57,12 +78,16 @@ function themeOf(): Record<string, string> {
 // Fit only a terminal that is shown: a hidden one measures nothing.
 const shown = (element: HTMLElement | null): element is HTMLElement => !!element && element.offsetWidth > 0 && element.offsetHeight > 0;
 
-export function WebTerminal({ session, csrf, active, t }: { readonly session: string; readonly csrf: string; readonly active: boolean; readonly t: Translate }) {
+export function WebTerminal({ session, csrf, active, t, harness }: { readonly session: string; readonly csrf: string; readonly active: boolean; readonly t: Translate; readonly harness: string }) {
   const host = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<TerminalStatus>({ kind: 'opening' });
   const [note, setNote] = useState('');
   const [started, setStarted] = useState(active);
   const [attempt, setAttempt] = useState(0);
+  const [mode, setMode] = useState<TerminalMode>(DEFAULT_MODE);
+  const [name, setName] = useState(harness);
+  const [canHarness, setCanHarness] = useState(true);
+  const switching = useRef(false);                          // a switch closes the terminal: its `closed` frame is not shown
   const refit = useRef<() => void>(() => {});
   const words = useRef(t);                                   // the catalog, without reopening the terminal when it changes
   words.current = t;
@@ -99,10 +124,18 @@ export function WebTerminal({ session, csrf, active, t }: { readonly session: st
       cleanups.unshift(() => batcher.dispose());
       term.onData((data) => batcher.push(data));
 
-      const opened = await api.open({ cols: term.cols, rows: term.rows }).catch((): { kind: 'lost' } => ({ kind: 'lost' }));
+      const opened = await api.open({ cols: term.cols, rows: term.rows }, mode).catch((): { kind: 'lost' } => ({ kind: 'lost' }));
       if (disposed) return;
+      switching.current = false;
       if (opened.kind === 'lost') return setStatus({ kind: 'closed', reason: 'lost' });
       if (opened.kind === 'refused') return setStatus({ kind: 'closed', reason: 'refused', detail: opened.reason });
+      if (opened.kind === 'unsupported') {
+        setCanHarness(false);
+        return setStatus({ kind: 'closed', reason: 'unsupported', detail: opened.reason });
+      }
+      // Another mode is open (a reload of the page after a switch): attach to that one.
+      if (opened.kind === 'attach' && opened.mode !== mode) return setMode(opened.mode);
+      if (opened.kind === 'opened' && opened.name) setName(opened.name);
       if (opened.kind === 'attach') void api.resize({ cols: term.cols, rows: term.rows }).catch(() => {});
 
       // The output, each chunk once; the stream ends with its reason.
@@ -121,6 +154,7 @@ export function WebTerminal({ session, csrf, active, t }: { readonly session: st
         stream.close();
         batcher.dispose();
         term.options.disableStdin = true;
+        if (switching.current) return;
         setStatus({ kind: 'closed', reason: (JSON.parse((event as MessageEvent<string>).data) as TerminalClosed).reason });
       });
       stream.addEventListener('error', () => {
@@ -154,7 +188,20 @@ export function WebTerminal({ session, csrf, active, t }: { readonly session: st
       refit.current = () => {};
       for (const cleanup of cleanups) cleanup();
     };
-  }, [started, attempt, session, csrf]);
+  }, [started, attempt, session, csrf, mode]);
 
-  return <TerminalFrame t={t} status={status} host={host} note={note} onOpen={() => setAttempt((n) => n + 1)} />;
+  // Shell, or back to the harness: one terminal at a time, so the one open
+  // closes first (the harness leaves, its transcript kept), then the other opens.
+  const switchMode = () => {
+    const next = otherMode(mode);
+    switching.current = true;
+    setStatus({ kind: 'opening' });
+    void terminalApi(session, csrf).close().catch(() => {}).then(() => {
+      setMode(next);
+      setAttempt((n) => n + 1);
+    });
+  };
+
+  return <TerminalFrame t={t} status={status} mode={mode} harness={name} canHarness={canHarness} host={host} note={note}
+    onOpen={() => setAttempt((n) => n + 1)} onSwitch={switchMode} />;
 }

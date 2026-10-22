@@ -13,7 +13,8 @@
 //     containers, runs the service's own programs (the editor's read and
 //     save, the checkout at Take over and Give back) on the session's
 //     checkout, relays the preview to the trial stand-in, and gives the
-//     human's terminal a stand-in shell; it refuses anything else, and
+//     human's terminal's Shell a stand-in shell; it refuses anything else
+//     (a harness resumed in the terminal among them), and
 //     never runs the real docker;
 //   - the trial environment: a loopback server stands for the session's
 //     siblings: the guestbook's page, which calls the filter API's fake,
@@ -35,7 +36,7 @@ import { createFake, readContract, type Fake } from '../images/fake/fake.ts';
 import { RELAY } from '../src/container/preview.ts';
 import type { FakeStep } from '../src/session/adapters/fake.ts';
 import type { RehearsalScript } from '../src/session/adapters/index.ts';
-import { END_TERMINAL, GIVE_PROGRAM, READ_PROGRAM, TAKE_PROGRAM, TERMINAL_SHELL, WRITE_PROGRAM } from '../src/terminal/container.ts';
+import { END_TERMINAL, GIVE_PROGRAM, READ_PROGRAM, SHELL_COMMAND, TAKE_PROGRAM, WRITE_PROGRAM, terminalCommand } from '../src/terminal/container.ts';
 import { buildApp, freePort, listening, plannedAuthor, startBroker, writeGhStub } from './proof-rehearsal.ts';
 
 const V2 = fileURLToPath(new URL('../', import.meta.url));
@@ -242,7 +243,9 @@ export function dockerStub(args: readonly string[], ctx: StubContext): StubAnswe
   if (!target) return refuse('an exec in what no labelled list returned');
   const known = ctx.session(target.session) as { ticket: string; checkout: string };
   if (target.part === 'session') {
-    if (flags.includes('--tty') && command.length === 3 && command[0] === 'sh' && command[1] === '-c' && command[2] === TERMINAL_SHELL)
+    // The terminal's Shell (terminal/container.ts); a harness resumed there is a model's, never a rehearsal's.
+    const shell = terminalCommand(SHELL_COMMAND);
+    if (flags.includes('--tty') && command.length === shell.length && command.every((word, i) => word === shell[i]))
       return { kind: 'shell', cwd: known.checkout, session: target.session, pidFile: ctx.pidFile(target.session) };
     if (command.length === END_TERMINAL.length && command.every((word, i) => word === END_TERMINAL[i])) return { kind: 'end', pidFile: ctx.pidFile(target.session) };
     if (command[0] === 'node' && command[1] === '-e' && PROGRAMS.has(command[2] ?? '') && command[3] === '--' && command[4] === MOUNT)

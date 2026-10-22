@@ -15,9 +15,10 @@
 //   10 create the third ticket, a contract change without the guestbook: the
 //      card is blocked before approval with the proposal, and has no Approve;
 //   11 create the fourth ticket, on the guestbook alone; Take over its working
-//      session, type git status and npm test in the web terminal, change one
-//      line in the Editor tab and save it, Give back; see the session's next
-//      turn begin with the notice, and the change in the ticket's diff.
+//      session (the web terminal opens on its harness, pull request 230), open
+//      the Shell and type git status and npm test, change one line in the
+//      Editor tab and save it, Give back; see the session's next turn begin
+//      with the notice, and the change in the ticket's diff.
 // Every session proposes its session plan first (decision 22): the proof
 // gives each one of its tickets its Go from the inbox, as the owner would.
 // The times come from the app's routes, as the screens read them, and from
@@ -105,6 +106,7 @@ const saves: { at: string; status: number; kept: boolean | null }[] = [];
 let fake: MultiResult['fake'] = null;
 let proposal: string | null = null;
 let human: { session: string; givenBackAt: string | null } | null = null;
+let harnessShown = '';
 let captures = 0;
 const now = () => new Date().toISOString();
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -427,13 +429,25 @@ if (signedIn) {
     times.take_over_at = now();
     gesture(`took over ${session.id.slice(0, 8)} of ${fourth}`);
     await page.locator('#giveback').waitFor({ timeout: 60_000 });
-    // The web terminal: opened on its tab, typed into, its answers read.
+    // The web terminal opens on the session's own harness (pull request 230):
+    // Claude Code resumed, or, for a harness that cannot be resumed (the
+    // rehearsal's scripted one), the reason and the Shell alone. What it
+    // showed is recorded; the lines of section 2.2 are typed in the Shell.
     await page.locator('#tab-terminal-button').click();
     const terminal = page.locator('[data-terminal-state]').first();
     await terminal.waitFor();
-    if ((await terminal.getAttribute('data-terminal-state')) !== 'open' && await page.locator('[data-act="terminal_open"]').count() > 0) await page.locator('[data-act="terminal_open"]').first().click();
-    await page.locator('[data-terminal-state="open"]').first().waitFor({ timeout: 60_000 });
+    await until('the terminal to open or to say why not', async () => {
+      const state = await terminal.getAttribute('data-terminal-state');
+      return state === 'open' || (state === 'closed' && (await terminal.getAttribute('data-reason')) === 'unsupported') ? state : undefined;
+    }, 60_000, 500, false);
+    harnessShown = `${(await terminal.getAttribute('data-mode')) ?? '?'}: ${(await page.locator('.term-mode').first().innerText().catch(() => '')).trim()}`;
     times.terminal_open_at = now();
+    await capture('takeover-harness');
+    if ((await terminal.getAttribute('data-mode')) !== 'shell') {
+      await page.locator('[data-act="terminal_shell"]').first().click();
+      gesture('opened the Shell beside the harness');
+    }
+    await page.locator('[data-terminal-state="open"][data-mode="shell"]').first().waitFor({ timeout: 60_000 });
     await page.locator('.term-host').first().click();
     for (const line of ['git status', 'npm test']) {
       await page.keyboard.type(line, { delay: 20 });
@@ -475,7 +489,7 @@ if (signedIn) {
     // as not kept.
     for (const s of saves) s.kept = s.status === 200;
     const facts = ledger((db) => humanFacts(db, session.id, times.give_back_at ?? null));
-    return `taken over, ${facts?.lines ?? '?'} lines journaled, ${saves.length} save(s), given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
+    return `taken over; the terminal showed ${harnessShown}; ${facts?.lines ?? '?'} lines journaled in the Shell, ${saves.length} save(s), given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
   });
 }
 

@@ -337,10 +337,17 @@ export type CreateScheduleBody = {
 export const TERMINAL_INPUT_MAX_BYTES = 4096;
 export type TerminalChunk = { readonly seq: number; readonly data: string };
 export type TerminalClosed = { readonly reason: 'give_back' | 'idle' | 'closed' | 'exit' };
-export type TerminalOpenBody = { readonly cols: number; readonly rows: number };
+// What the terminal runs (owner request of 2026-10-22 17:26): the session's
+// own harness, resumed on the session through its adapter (the default), or
+// a shell in its container. An open of a harness its adapter cannot resume
+// answers 501 with why; an open while one is open answers 409 with the mode
+// of the one open, so that a reloaded page attaches to it.
+export type TerminalMode = 'harness' | 'shell';
+export const TERMINAL_MODES: readonly TerminalMode[] = ['harness', 'shell'];
+export type TerminalOpenBody = { readonly cols: number; readonly rows: number; readonly mode?: TerminalMode };
 export type TerminalInputBody = { readonly data: string };
 export type TerminalResizeBody = { readonly cols: number; readonly rows: number };
-export type TerminalOpened = { readonly opened: true; readonly cols: number; readonly rows: number; readonly resume: string };   // resume: the command that resumes the harness inside it
+export type TerminalOpened = { readonly opened: true; readonly cols: number; readonly rows: number; readonly mode: TerminalMode; readonly name?: string };   // name: the harness's, in the harness mode
 
 // The editor's save (decision 33, lane 31): the text, the hash of the
 // version the editor loaded, and, on a second save after a confirmation,

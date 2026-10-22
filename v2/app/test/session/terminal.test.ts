@@ -10,7 +10,7 @@ import { TERMINAL_INPUT_MAX_BYTES } from '../../../src/api/types.ts';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import {
-  BATCH_MS, InputBatcher, closedLine, freshChunk, pageNonce, splitBytes, styleShims, terminalApi, terminalChoice,
+  BATCH_MS, DEFAULT_MODE, InputBatcher, closedLine, freshChunk, otherMode, pageNonce, splitBytes, styleShims, terminalApi, terminalChoice,
 } from '../../web/components/terminal/model.ts';
 
 const en = translator(loadCatalog('session', 'en'));
@@ -116,12 +116,12 @@ test('a refused post stops the batcher and says so; what was typed after it is n
   assert.deepEqual(posts, ['boom']);
 });
 
-test('the web terminal for the session I took over, on the loopback address; else the command, and why', () => {
+test('the web terminal for the session I took over, on the loopback address; else why, and no command', () => {
   const at = '2026-10-22T09:30:00.000Z';
   assert.deepEqual(terminalChoice({ offered: true, takeover: { kind: 'mine', at } }), { kind: 'web' });
-  assert.deepEqual(terminalChoice({ offered: false, takeover: { kind: 'mine', at } }), { kind: 'command', why: 'here_only' });
-  assert.deepEqual(terminalChoice({ offered: undefined, takeover: { kind: 'mine', at } }), { kind: 'command', why: 'here_only' }, 'an app that does not say: no terminal');
-  assert.deepEqual(terminalChoice({ offered: true, takeover: { kind: 'other', at } }), { kind: 'command', why: 'other' }, 'another account\'s take over: its command, no terminal');
+  assert.deepEqual(terminalChoice({ offered: false, takeover: { kind: 'mine', at } }), { kind: 'notice', why: 'here_only' });
+  assert.deepEqual(terminalChoice({ offered: undefined, takeover: { kind: 'mine', at } }), { kind: 'notice', why: 'here_only' }, 'an app that does not say: no terminal');
+  assert.deepEqual(terminalChoice({ offered: true, takeover: { kind: 'other', at } }), { kind: 'notice', why: 'other' }, 'another account\'s take over: no terminal');
   assert.deepEqual(terminalChoice({ offered: true, takeover: { kind: 'free', can: true } }), { kind: 'none' });
   assert.deepEqual(terminalChoice({ offered: true, takeover: { kind: 'free', can: false } }), { kind: 'none' });
 });
@@ -138,19 +138,39 @@ test('each chunk of the stream is written once, in order, after a reconnection t
 });
 
 test('the closed state says why, in both languages', () => {
-  for (const reason of ['give_back', 'idle', 'closed', 'exit', 'lost', 'refused'] as const) {
+  for (const reason of ['give_back', 'idle', 'closed', 'exit', 'lost', 'refused', 'unsupported'] as const) {
     for (const t of [en, fr]) {
       const line = closedLine(reason, t);
       assert.ok(line && !line.includes('{'), `${reason}: ${line}`);
     }
   }
   assert.match(closedLine('idle', en), /15 minutes/);
+  // The harness's own exit is said as the harness's, the shell's as the shell's.
+  assert.match(closedLine('exit', en, 'harness'), /harness ended/);
+  assert.match(closedLine('exit', en, 'shell'), /shell ended/);
+});
+
+test('the terminal\'s two modes: the harness first, the shell its second choice, each named in both languages', () => {
+  assert.equal(DEFAULT_MODE, 'harness');
+  assert.equal(otherMode('harness'), 'shell');
+  assert.equal(otherMode('shell'), 'harness');
+  for (const t of [en, fr]) {
+    for (const key of ['terminal_mode_harness', 'terminal_mode_shell', 'terminal_mode_unsupported', 'terminal_switch_shell', 'terminal_switch_harness', 'terminal_closed_unsupported']) {
+      assert.ok(t(key) && t(key) !== key && !t(key).includes('{'), `${key}`);
+    }
+  }
+  assert.equal(en('terminal_switch_shell'), 'Shell');
+  // No word of Take over or of the terminal sends anyone to a terminal on the server.
+  for (const lang of ['en', 'fr'] as const) {
+    const words = Object.entries(loadCatalog('session', lang)).filter(([key]) => /^(takeover|terminal)/.test(key)).map(([, text]) => text).join('\n');
+    assert.doesNotMatch(words, /docker exec|on the server|sur le serveur|run this in a terminal/i, lang);
+  }
 });
 
 test('the routes: open with the size, the input as typed, the resize; each post with the anti-forgery token; an open terminal is attached', async () => {
   const calls: { url: string; init: RequestInit }[] = [];
   const answers: Record<string, { status: number; body: unknown }> = {
-    open: { status: 200, body: { opened: true, cols: 100, rows: 30, resume: 'claude --resume s-1' } },
+    open: { status: 200, body: { opened: true, cols: 100, rows: 30, mode: 'harness', name: 'Claude Code' } },
   };
   const fetcher = async (url: string | URL | Request, init: RequestInit = {}) => {
     calls.push({ url: String(url), init });
@@ -159,13 +179,15 @@ test('the routes: open with the size, the input as typed, the resize; each post 
     return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'content-type': 'application/json' } });
   };
   const api = terminalApi('s 1', 'token-1', fetcher);
-  assert.deepEqual(await api.open({ cols: 100, rows: 30 }), { kind: 'opened', cols: 100, rows: 30, resume: 'claude --resume s-1' });
+  assert.deepEqual(await api.open({ cols: 100, rows: 30 }, 'harness'), { kind: 'opened', cols: 100, rows: 30, mode: 'harness', name: 'Claude Code' });
   await api.input('ls\r');
   await api.resize({ cols: 120, rows: 40 });
+  await api.close();
   assert.deepEqual(calls.map((c) => [c.init.method, c.url]), [
     ['POST', '/api/service/sessions/s%201/terminal/open'],
     ['POST', '/api/service/sessions/s%201/terminal/input'],
     ['POST', '/api/service/sessions/s%201/terminal/resize'],
+    ['POST', '/api/service/sessions/s%201/terminal/close'],
   ]);
   for (const call of calls) {
     const headers = new Headers(call.init.headers);
@@ -173,14 +195,17 @@ test('the routes: open with the size, the input as typed, the resize; each post 
     assert.equal(headers.get('content-type'), 'application/json');
     assert.equal(call.init.credentials, 'same-origin');
   }
-  assert.deepEqual(calls.map((c) => JSON.parse(String(c.init.body))), [{ cols: 100, rows: 30 }, { data: 'ls\r' }, { cols: 120, rows: 40 }]);
+  assert.deepEqual(calls.map((c) => JSON.parse(String(c.init.body))), [{ cols: 100, rows: 30, mode: 'harness' }, { data: 'ls\r' }, { cols: 120, rows: 40 }, {}]);
   assert.equal(api.streamUrl, '/api/service/sessions/s%201/terminal/stream');
 
-  // A terminal already open (a reload of the page): the stream is attached.
-  answers.open = { status: 409, body: { error: 'a terminal is already open for this session' } };
-  assert.deepEqual(await api.open({ cols: 80, rows: 24 }), { kind: 'attach' });
+  // A terminal already open (a reload of the page): the stream is attached, in the mode that is open.
+  answers.open = { status: 409, body: { error: 'a terminal is already open for this session', mode: 'shell' } };
+  assert.deepEqual(await api.open({ cols: 80, rows: 24 }, 'harness'), { kind: 'attach', mode: 'shell' });
+  // A harness the adapter cannot resume: its reason, for the Shell to be offered.
+  answers.open = { status: 501, body: { error: 'The codex harness cannot be resumed in a terminal yet: open the Shell instead.' } };
+  assert.deepEqual(await api.open({ cols: 80, rows: 24 }, 'harness'), { kind: 'unsupported', reason: 'The codex harness cannot be resumed in a terminal yet: open the Shell instead.' });
   answers.open = { status: 403, body: { error: 'the web terminal opens on this machine\'s browser only, at the app\'s loopback address' } };
-  assert.deepEqual(await api.open({ cols: 80, rows: 24 }), { kind: 'refused', reason: 'the web terminal opens on this machine\'s browser only, at the app\'s loopback address' });
+  assert.deepEqual(await api.open({ cols: 80, rows: 24 }, 'shell'), { kind: 'refused', reason: 'the web terminal opens on this machine\'s browser only, at the app\'s loopback address' });
   answers.input = { status: 409, body: { error: 'no terminal is open' } };
   await assert.rejects(api.input('x'));
 });
