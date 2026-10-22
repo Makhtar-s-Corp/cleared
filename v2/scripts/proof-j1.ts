@@ -25,7 +25,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { OUTSIDE, inboxAction } from './proof-inbox.ts';
+import { answerFor, inboxAction } from './proof-inbox.ts';
 
 const env = process.env;
 const APP = (env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').replace(/\/$/, '');
@@ -87,7 +87,7 @@ const rounds: string[] = [];
 const timeline: Record<string, string> = {};
 // The sessions' own requests (not the one the message asks for), answered on
 // the session screen as the owner would, each one listed: "Allow once" for
-// work in the checkout, "Deny" for what installs or fetches something.
+// work in the checkout, "Deny" for anything else (proof-inbox.ts).
 const otherRequests: { command: string; answer: 'allow_once' | 'reject_once'; at: string }[] = [];
 const REVIEW_ROUNDS = Number(env.PROOF_REVIEW_ROUNDS ?? 2);
 let ticketId = env.PROOF_TICKET ?? '';
@@ -169,7 +169,9 @@ async function waitAnswering(done: () => Promise<boolean>, timeout: number): Pro
     for (const request of await open.all()) {
       const text = (await request.innerText()).replace(/\s+/g, ' ').trim();
       if (text.includes(SCRATCH)) continue;
-      const answer = OUTSIDE.test(text) ? 'reject_once' : 'allow_once';
+      // The command alone is judged, from the row's code chip (issue 157, item 4).
+      const chip = request.locator('.request-title code');
+      const answer = answerFor(await chip.count() > 0 ? await chip.first().innerText() : text);
       await request.locator(`[data-answer="${answer}"]`).click();
       otherRequests.push({ command: text.slice(0, 300), answer, at: new Date().toISOString() });
       console.log(`proof: ${answer} for a session request: ${text.slice(0, 120)}`);
@@ -296,12 +298,13 @@ if (sent) {
       if (Date.now() > until) throw new Error('the request the message asked for never reached the inbox');
       await page.goto(`${APP}/inbox`);
       await page.locator('#inbox-list, .inbox').first().waitFor();
-      const details: { detail: string }[] = [];
+      const details: { detail: string; command?: string }[] = [];
       for (const item of await items.all()) {
         await item.click();
         // The detail is drawn after the click: wait for this ticket's, then read it.
         await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
-        details.push({ detail: await page.locator('#detail').innerText() });
+        const chip = page.locator('#detail .d-title code');
+        details.push({ detail: await page.locator('#detail').innerText(), ...(await chip.count() > 0 ? { command: await chip.first().innerText() } : {}) });
       }
       const action = inboxAction(details, SCRATCH);
       if (action.kind === 'wait') { await page.waitForTimeout(2_000); continue; }
