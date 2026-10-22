@@ -281,7 +281,7 @@ The whole output (274 lines, every docker command line and every stored event) i
 
 ### Host tools, context and login in a container (2026-10-22)
 
-Run on this server on 2026-10-22 by lane `v2-j2-runner-host-tools` with `node v2/scripts/doctor.ts claude-code host-tools lead --no-build`, after a build of the session image. The setup was the same as the run above: Claude Code 2.1.306, `@anthropic-ai/claude-agent-sdk` 0.3.306, zod 4.6.7 (now pinned), `claude-haiku-5-5`, objects labelled `cleared.dev=v2` only, and the service account's login named by `CLEARED_CLAUDE_CREDENTIALS`, mounted read only and never read by the lane or the doctor. The login check below used a token file the doctor wrote itself. The three sessions of the `host-tools` section reported 0.0016 USD (the lead), 0.0012 USD (the author) and 0 USD (the invalid login). The proxy saw `api.anthropic.com:443` only.
+Run on this server on 2026-10-22 by lane `v2-j2-runner-host-tools` with `node v2/scripts/doctor.ts host-tools lead`, which builds the session image first; the `claude-code` section of milestone 1 passed on the same image. The setup was the same as the run above: Claude Code 2.1.306, `@anthropic-ai/claude-agent-sdk` 0.3.306, zod 4.6.7 (now pinned), `claude-haiku-5-5`, objects labelled `cleared.dev=v2` only, and the service account's login named by `CLEARED_CLAUDE_CREDENTIALS`, mounted read only and never read by the lane or the doctor. The login check below used a token file the doctor wrote itself. The three sessions of the `host-tools` section reported 0.0017 USD (the lead), 0.0012 USD (the author) and 0 USD (the invalid login). The proxy saw `api.anthropic.com:443` only.
 
 What the run established (milestone 2 plan, section 13, lane 4's unknowns):
 
@@ -310,24 +310,24 @@ What the run established (milestone 2 plan, section 13, lane 4's unknowns):
 Raw lines of the `host-tools` section, edited as above: ids are `<id>`, the host's paths `<scratch>`, `<state>` and `<login file>`, and a long line is cut around `...`. The doctor's own check lines come first, then the runner lines it printed (`<<`).
 
 ```console
-$ CLEARED_CLAUDE_CREDENTIALS=<login file> node scripts/doctor.ts claude-code host-tools lead --no-build
+$ CLEARED_CLAUDE_CREDENTIALS=<login file> node scripts/doctor.ts host-tools lead
 == host-tools (milestone 2, lane 4)
 PASS the login file (the Claude Code credentials file named by CLEARED_CLAUDE_CREDENTIALS) is a file of the service's account that only it can read: mode 600
 PASS the CLI lists the in-process MCP server cleared as connected, with mcp__cleared__ping
 PASS the model called mcp__cleared__ping and the host ran the handler once, with the model's input: [{"word":"plum"}]
 PASS the call is journaled as cleared.host_call ok, under the tool call's own id: {"calls":[{"toolCallId":"<id>","name":"ping","input":{"word":"plum"},"outcome":"ok"}],"started":["<id>"]}
-PASS the model read the host's answer: CODE-FD8049ED
+PASS the model read the host's answer: CODE-5E26A50F
 OBSERVED the host tool's permission: canUseTool asked for mcp__cleared__ping; policy answers in the turn: [["allow_once","lead.tools"]]
 PASS the context is measured after the tool call and after the turn, as cleared.context_usage with a percentage and rawMaxTokens: 3 events
 OBSERVED the summary measure around a 8461-byte tool answer: 19181 tokens after the first turn, 19181 after the tool call, 20999 after the turn
-PASS getContextUsage() timed over ten calls of each detail: summary: median 9 ms, max 10.3 ms; full: median 9.7 ms, max 10.6 ms
+PASS getContextUsage() timed over ten calls of each detail: summary: median 8.100000000000001 ms, max 9 ms; full: median 8.8 ms, max 9.6 ms
 OBSERVED the full measure across the tool call's turn: 17829 tokens before, 20999 after (the turn added the prompt, the call, a 8461-byte answer and the reply)
 OBSERVED summary and full after the turn: 20999 and 20999 tokens, 2 % and 2 %; autoCompactThreshold 967000, isAutoCompactEnabled true, maxTokens 1000000, rawMaxTokens 1000000
 OBSERVED the experimental usage call: {"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}
 OBSERVED rate_limit_event frames: 1
 OBSERVED compact_boundary frames: 0
 PASS the lead's turns ended without the Stop hook asking for HANDOVER.md: 2 turn ends
-PASS a commit in the session carries the runner's identity: Cleared, no address: ["identity:Cleared//Cleared/","/workspace\n4498c39 probe"]
+PASS a commit in the session carries the runner's identity: Cleared, no address: ["identity:Cleared//Cleared/","/workspace\n/workspace\nmaster\nfdb70eb probe"]
 PASS an author still writes HANDOVER.md, asked by the Stop hook: 5 of 5 headings
 PASS with an invalid token, the runner reports the login error and the turn ends as cancelled, not failed: ["failed"]
 PASS 15 s later the runner still waits, and the session says it waits for a new login: status "Waiting for a new login", exited false
@@ -337,22 +337,25 @@ NOT MEASURED the recovering half (a valid token after a failure): no setup-token
 PASS nothing with the sessions' labels remains (containers, networks, volumes): 0 objects
 PASS no new listening socket on the host from this run: none (0 new from other processes)
 << system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","mcp_servers":[{"name":"cleared","status":"connected","source":"sdk"}],"cleared_tools":["mcp__cleared__ping"]}
-<< {"type":"context","after":"turn","detail":"summary","ms":51.1,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
-<< (before the tool call) {"type":"measure","summaryMs":[14.9,15,13.3,14.6,16,11.1,11.1,10.9,10.4,11.5],"fullMs":[577.9,11,9.8,10,7.7,8.6,9.4,9.1,12.4,8.1],"summary":{"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":17829,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
+<< {"type":"context","after":"turn","detail":"summary","ms":50.4,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< (before the tool call) {"type":"measure","summaryMs":[10.5,10.2,11.4,10,9.2,9,10.5,8.4,8.5,8.3],"fullMs":[730.7,9.2,9,10.5,8.7,9.5,8.7,7,7.1,7.4],"summary":{"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":17829,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
 << {"type":"host_call","callId":"<id>","toolUseId":"<id>","name":"ping","input":{"word":"plum"}}
 << stderr cleared-runner: a host call's extra has the keys signal,sessionId,_meta,sendNotification,sendRequest,authInfo,requestId,requestInfo,taskId,taskStore,taskRequestedTtl,closeSSEStream,closeStandaloneSSEStream; its _meta claudecode/toolUseId,progressToken
-<< {"type":"context","after":"tool","detail":"summary","ms":14.1,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
-<< {"type":"context","after":"turn","detail":"summary","ms":13.4,"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
-<< (after the tool call's turn) {"type":"measure","summaryMs":[10.3,9.5,9.8,9.6,8.3,8.9,8.8,8.4,9.1,7.3],"fullMs":[8.6,9.1,8.3,10.3,9.7,10,9.7,10.3,10.6,8.7],"summary":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
-<< {"type":"login","state":"failed"}
+<< {"type":"context","after":"tool","detail":"summary","ms":17.7,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< {"type":"context","after":"turn","detail":"summary","ms":14,"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< (after the tool call's turn) {"type":"measure","summaryMs":[8.3,7.4,9,8.9,7.1,7.7,8.4,6.6,7.9,8.9],"fullMs":[8.9,8.8,9.6,8.3,8.8,7.5,7.5,8.4,8.8,9.1],"summary":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
 << sdk {"type":"system","subtype":"api_retry","error":"authentication_failed","error_status":401}
+<< sdk {"type":"system","subtype":"api_retry","error":"authentication_failed","error_status":401}
+<< sdk {"type":"assistant","error":"authentication_failed","text":"Failed to authenticate. API Error: 401 Invalid bearer token"}
+<< {"type":"login","state":"failed"}
+<< sdk {"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}
 << {"type":"login","state":"failed"}
 << {"type":"login","state":"renewed"}
 << {"type":"login","state":"failed"}
-<< rate_limit_info {"status":"allowed","resetsAt":1792650600,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.03,"resetsAt":1792650600},"seven_day":{"utilization":0.15,"resetsAt":1793091600}}}
+<< rate_limit_info {"status":"allowed","resetsAt":1792650600,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1792650600},"seven_day":{"utilization":0.16,"resetsAt":1793091600}}}
 ```
 
-The whole output (606 lines with the `claude-code` section, every docker command line and every stored event) is in the lane's pull request.
+The whole output, with every docker command line and every stored event, is in the lane's pull request.
 
 ### Proof
 

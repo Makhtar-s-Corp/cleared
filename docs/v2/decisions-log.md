@@ -835,7 +835,7 @@ The choices the lane makes:
 5. **`compact_boundary`** maps to `cleared.compacted`. None was seen: haiku's window is reported as 1 000 000 tokens with auto compaction at 967 000, so Claude Code does not compact below 50 % on its own. `settings.autoCompactWindow` was not tried: nothing needs a larger window.
 6. **The Stop hook is an author's only.** `hooks.ts` gains `hooksFor(role)`, which leaves the Stop hook out for `lead` and `reviewer` (issue 139's lasting fix). The push and pull request rules stay for every role.
 7. **The commit identity is `Cleared` with no address**, through `GIT_AUTHOR_*` and `GIT_COMMITTER_*` in the CLI's environment. Git 2.39 in the image accepts an empty address from these variables (checked in a labelled container); without them a commit fails, since `HOME=/tmp` has no git configuration. An empty address gives the guard nothing to refuse.
-8. **Login resilience.** On a frame whose typed error is `authentication_failed` (an assistant message or an API retry, never the text), the runner prints `login failed`, lets the turn's `result` through, closes the query, and reads the login file every 10 seconds until its token changes. Then it prints `login renewed`, recreates the query with `resume` in the same container and pushes a message of its own saying the login was renewed; the failed turn is not sent again.
+8. **Login resilience.** A frame whose typed error is `authentication_failed` (an assistant message or an API retry, never the text) is remembered for the turn. The CLI retries a 401, so the failure is decided at the turn's `result`: an error result prints `login failed` before it, and a successful one (the retry worked) is a turn like any other. After a failure the runner closes the query and reads the login file every 10 seconds until its token changes. Then it prints `login renewed`, recreates the query with `resume` in the same container and pushes a message of its own saying the login was renewed; the failed turn is not sent again.
    - Measured with an invalid token in a file the doctor owns: the CLI 2.1.306 reports it as `system/api_retry` with `error: 'authentication_failed'` and `error_status: 401`; the runner waited, saw a rewrite of the file, resumed the same session (whose first turn had failed) and failed again on the new invalid token, as expected.
    - The mapper ends that turn as `RUN_FINISHED` cancelled, with the status "Waiting for a new login", not as a `RUN_ERROR`. Reason: the flow stops the ticket on any `RUN_ERROR` (`flow/engine.ts`), which would remove the container that waits.
    - The turn queue ends the first query's iteration before the second starts, so no turn reaches a closed query.
@@ -844,6 +844,7 @@ The choices the lane makes:
    - The runner no longer awaits an interrupt in its input loop, so a verdict sent right after it is not held (issue 145, item 5).
    - The doctor reads the Claude Code version from the Dockerfile (issue 145, item 6).
    - A test checks that every runner file is copied into the image, and that a runner file imports the service by type only.
+   - A context measure that does not answer within 5 seconds is given up and logged, so the end-of-turn measure, which the relay awaits, cannot hold the session.
 10. **Issue 140** asked for `settingSources: ['project']`. It stays `[]`: the briefing is appended to the system prompt (decisions log, 2026-10-21, the Claude Code adapter, item 3), and the project source would also load the project's settings and hooks. The `stop_hook_active` test it asked for exists in `test/runner/hooks.test.ts`.
 
 **Consequences.**
@@ -853,5 +854,10 @@ The choices the lane makes:
   - A host call's `turn` is the mapper's running turn id: the `command_lifecycle` uuid of the user message that started it.
 - **For lane 7.** No week share yet: the usage call is unavailable with this login, and `cleared.rate_limit` gives the seven-day window from the frames. Whether the week share is right against `/usage` on the host is for the orchestrator's evening and morning readings.
 - **Not measured:** the recovering half of the login (a valid token after a failure). The service's token file holds no `setup-token` token, and only the owner may put one there. The proof observes a natural refresh.
+- **Left as they are:**
+  - A host call the CLI gave up on (an abort or the 5-minute timeout) is still journaled with the host's outcome, though the model never read the answer.
+  - A session waiting for a new login is still stopped by the flow's idle rule after 15 minutes (`CLEARED_V2_IDLE_MINUTES`). A lead is exempt from that rule (plan, section 4.3), so a lead waits as long as the login takes.
+  - The containers a stopped service leaves behind are still not removed at the next start (lane 2's entry names the adapter's runtime for it); that is not in this lane's goal.
+- **For plan question 1.** The bind mount finding weighs for answer (a), a `setup-token` token: with the host login, a refresh by rename is invisible to a running session.
 - No screen changed: lane 4 is not an interface lane, so there was no visual loop and no capture.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-runner-host-tools`.
