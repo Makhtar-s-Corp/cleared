@@ -55,14 +55,17 @@ const entry = (file: string): Stats | undefined => {
   try { return lstatSync(join(root, file)); }
   catch { return undefined; }
 };
-// The app's web fonts are binary, and the guard's tree mode reads text only
-// (lib/guard/codex-guard.mjs expects a snapshot pruned of non-text files).
-// Only these are left out, by exact place and name; any other binary under
-// v2/ is still refused.
+// The app's web fonts and its three icons are binary, and the guard's tree
+// mode reads text only (lib/guard/codex-guard.mjs expects a snapshot pruned
+// of non-text files). Only these are left out, by exact place and name; any
+// other binary under v2/ is still refused.
 const FONT = /^v2\/app\/public\/fonts\/[A-Za-z0-9-]+\.woff2$/;
+const ICON = /^v2\/app\/public\/icons\/(?:icon-192|icon-512|apple-touch-icon)\.png$/;
 const fonts = [...files].filter((file) => FONT.test(file) && entry(file)?.isFile());
-const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory() && !fonts.includes(file); }).sort();
+const icons = [...files].filter((file) => ICON.test(file) && entry(file)?.isFile());
+const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory() && !fonts.includes(file) && !icons.includes(file); }).sort();
 if (fonts.length > 0) console.log(`guard: ${fonts.length} font files of v2/app/public/fonts left out (binary)`);
+if (icons.length > 0) console.log(`guard: ${icons.length} icons of v2/app/public/icons left out (binary)`);
 if (present.length === 0) {
   console.error('guard: no file to check');
   process.exit(1);

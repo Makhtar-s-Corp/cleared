@@ -35,7 +35,7 @@ Run from `v2/`:
 
 ## The app
 
-`v2/app` is the web app: the sign-in page, the shell (project, Tower, Inbox with its count, Sessions, Tickets, the signed-in person, the clock, the theme button) and the screens. It holds no key and signs nothing. Every request a signed-in person makes to `/api/service/*` goes to the service on loopback as `/api/*`, with the person's id and the app's proof, and with nothing of the browser's cookie or anti-forgery token. Design: [`app/DESIGN.md`](../app/DESIGN.md), with the Geist fonts served by the app itself.
+`v2/app` is the web app: the sign-in page, the shell (project, Tower, Inbox with its count, Sessions, Tickets, Plans, the notifications button, the clock, the theme button, the signed-in person) and the screens. It holds no key and signs nothing. Every request a signed-in person makes to `/api/service/*` goes to the service on loopback as `/api/*`, with the person's id and the app's proof, and with nothing of the browser's cookie or anti-forgery token. Design: [`app/DESIGN.md`](../app/DESIGN.md), with the Geist fonts served by the app itself.
 
 To try it on sample data, without the service:
 
@@ -68,11 +68,22 @@ Sign-in and writes:
 - A request for another host name gets `421`.
 - The pages load nothing inline and nothing from another site.
 
-Each screen is `app/public/screens/<screen>.ts`, with its words in `app/messages/<screen>.en.json` and `.fr.json`. The browser gets the TypeScript with its types stripped. The session and inbox screens are stubs that lanes 9 and 10 fill.
+Each screen is `app/public/screens/<screen>.ts`, with its words in `app/messages/<screen>.en.json` and `.fr.json`. The browser gets the TypeScript with its types stripped. The lead screen (`/lead` and `/plans/<id>`, the Plans tab) is a stub until lane 8 of milestone 2 fills it: it keeps the draft that the tower's New goal and Ask the lead send as `?draft=` (and `?goal=1`), and sends nothing.
+
+### Notifications
+
+The bell in the header turns this browser's notifications on or off, and says how many devices are told. A signed-in person does it with the same checks as any write (the session, the anti-forgery token, the app's origin); there is no passkey in v2. The app only keeps the subscriptions: the service's dispatcher sends the notifications.
+
+- **Where they are kept.** In the service's private notification directory, the one v1 used: `[notify] secrets_dir`, by default `~/.config/cleared/notify` of the account the app and the service run under. The app creates it with mode 0700 and the Web Push key pair in it (`vapid.json`, 0600) the first time a signed-in page asks for the status (every page does, to draw the bell), and refuses it, without repairing it, when it is looser, a link, owned by another account, or inside the project or this checkout. The browsers are in `subscriptions.json`: at most ten, the oldest pushed out, each named by its user and platform only (`alex · iPhone`).
+- **What a browser may give.** An `https` address of a known push service (Google, Mozilla, Apple, Microsoft), without a port, and its two keys. `CLEARED_NOTIFY_PUSH_HOSTS` (comma separated) adds hosts, for a self-hosted push service or a test.
+- **The settings.** `[notify] adapters` must include `webpush` (the default), and the service needs an address to sign with: `[notify] vapid_subject` (a `mailto:` address or an `https` address), or else `CLEARED_NOTIFY_LINK_BASE` when it is `https`. They are read from the project's `agents.conf` (`CLEARED_CONF`, else `<CLEARED_REPO>/.cleared/agents.conf`) and the app's environment, once, at the first use: restart the app after changing them.
+- **The https address.** Web Push needs a secure origin. `http://127.0.0.1:8792` is one for a browser on this machine. Any other device needs the app's `https` address, served by a proxy on this machine: set it as `CLEARED_V2_APP_ORIGIN` for the app and as `CLEARED_NOTIFY_LINK_BASE` for the service, so a notification opens the app there. On plain `http` from another address, the menu says notifications need the https address.
+- **iPhone and iPad.** Web notifications exist only for the app added to the Home Screen (Share, then Add to Home Screen); the menu says so in Safari. The app serves `manifest.webmanifest`, its icons and the service worker `sw.js` without a session, so it can be installed. The worker shows what is pushed, opens only addresses of the app, and caches nothing.
+- **Routes.** `GET /api/notifications` answers `{ available, reason, publicKey, devices }`, with `reason` one of `off` (no Web Push), `insecure`, `no_subject`, `config` (a setting cannot be read) and `store` (the directory is refused). `POST /api/notifications/subscribe` takes `{ subscription }` as the browser gives it, and `POST /api/notifications/unsubscribe` takes `{ endpoint }`.
 
 ## The guard
 
-The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`.
+The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`.
 
 ## CI
 

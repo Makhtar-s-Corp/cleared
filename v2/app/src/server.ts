@@ -10,6 +10,11 @@
 // that is not the app's own is refused (421), so a name pointed at
 // 127.0.0.1 from another site reaches nothing. The pages load nothing
 // inline and nothing from another site (Content-Security-Policy).
+//
+// /api/notifications and its two writes are the app's own (notifications.ts):
+// a browser of the signed-in person asks to be told, with the same checks
+// as any write. The manifest, the service worker and the icons are served
+// without a session, so the app can be added to a Home Screen.
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { stripTypeScriptTypes } from 'node:module';
@@ -20,6 +25,7 @@ import { requestPath } from '../../src/server.ts';
 import type { UserId } from '../../src/session/contract.ts';
 import { translator, type Translate } from '../public/i18n.ts';
 import { isScreen, loadCatalog, type Language, type Screen } from './catalog.ts';
+import { deviceName, notificationsFrom, NotifyError, type Notifications } from './notifications.ts';
 import { sendJson, type DataSource } from './proxy.ts';
 import { clearedCookie, readCookie, sessionCookie, type CookieSession, type CookieSessions } from './session-cookie.ts';
 import type { LoginThrottle } from './users.ts';
@@ -33,6 +39,7 @@ export type AppOptions = {
   readonly project: string;
   readonly publicOrigin?: string | undefined;
   readonly publicDir?: string;
+  readonly notifications?: Notifications;            // default: from the environment, read on first use
 };
 
 export const PUBLIC_DIR = new URL('../public/', import.meta.url).pathname;
@@ -49,13 +56,20 @@ const TYPES: Readonly<Record<string, string>> = {
   '.ts': 'text/javascript; charset=utf-8',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',             // the service worker, which a browser registers by its own address
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
+
+// The app's icons, by exact name: the guard leaves these out as binaries.
+const ICONS = /^\/icons\/(?:icon-192|icon-512|apple-touch-icon)\.png$/;
 
 // The screens a signed-in person can open, and the stub each one mounts.
 const PAGES: readonly { readonly path: RegExp; readonly screen: Exclude<Screen, 'shell'> }[] = [
   { path: /^\/$/, screen: 'tower' },
   { path: /^\/inbox$/, screen: 'inbox' },
   { path: /^\/sessions(?:\/[A-Za-z0-9_-]{1,64})?$/, screen: 'session' },
+  { path: /^\/(?:lead|plans\/[A-Za-z0-9_-]{1,64})$/, screen: 'lead' },
 ];
 
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -69,6 +83,9 @@ function head(language: Language, title: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title>
+<meta name="theme-color" content="#FAFAFA">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="/style.css">
 <script src="/theme.ts"></script>
 </head>`;
@@ -110,9 +127,14 @@ ${tab('tower', '/', t('nav_tower'))}
 ${tab('inbox', '/inbox', t('nav_inbox'), `<span class="count" id="inbox-count" hidden></span>`)}
 ${tab('session', '/sessions', t('nav_sessions'))}
 <span aria-disabled="true" title="${escape(t('nav_tickets_later'))}">${escape(t('nav_tickets'))}</span>
+${tab('lead', '/lead', t('nav_plans'))}
 </nav>
 ${options.source === 'fixtures' ? `<span class="source-pill">${escape(t('source_fixtures'))}</span>` : ''}
 <div class="right">
+<details class="notify" id="notify" hidden>
+<summary class="icon" id="notify-summary" aria-label="${escape(t('notify_label'))}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></summary>
+<div class="menu" id="notify-menu"></div>
+</details>
 <time class="clock" id="clock"></time>
 <button class="icon theme" id="theme" type="button" aria-label="${escape(t('theme_dark'))}" data-dark="${escape(t('theme_dark'))}" data-light="${escape(t('theme_light'))}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path class="moon" d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/><circle class="sun" cx="12" cy="12" r="4.5"/><path class="sun" d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1"/></svg></button>
 <details class="me">
@@ -193,6 +215,39 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   const csrfOk = (request: IncomingMessage, cookie: CookieSession) =>
     sameProof(request.headers['x-csrf-token'], cookie.csrf) && sameOrigin(request);
 
+  // The address the browser used: the configured public origin when the
+  // request names its host, else this server's own (hostAllowed has
+  // already refused any other host).
+  const browserOrigin = (request: IncomingMessage): string =>
+    options.publicOrigin !== undefined && request.headers.host?.toLowerCase() === new URL(options.publicOrigin).host ? options.publicOrigin : `http://${request.headers.host}`;
+
+  const notifications = options.notifications ?? notificationsFrom(process.env);
+
+  async function notify(request: IncomingMessage, response: ServerResponse, path: string, mine: { cookie: CookieSession; user: User }): Promise<void> {
+    const origin = browserOrigin(request);
+    const method = request.method ?? 'GET';
+    if (path === '/api/notifications') {
+      if (method !== 'GET' && method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' });
+      return sendJson(response, 200, await notifications.status(origin));
+    }
+    const gesture = path.slice('/api/notifications/'.length);
+    if (gesture !== 'subscribe' && gesture !== 'unsubscribe') return sendJson(response, 404, { error: 'not found' });
+    if (method !== 'POST') return sendJson(response, 405, { error: 'method not allowed' });
+    if (!csrfOk(request, mine.cookie)) return sendJson(response, 403, { error: 'refused: missing anti-forgery token or another origin' });
+    const text = await readBody(request, 8192);
+    let body: unknown;
+    try { body = JSON.parse(text ?? ''); }
+    catch { return sendJson(response, 400, { error: 'subscription' }); }
+    try {
+      return sendJson(response, 200, gesture === 'subscribe'
+        ? await notifications.subscribe(origin, body, deviceName(mine.user.name, request.headers['user-agent']))
+        : await notifications.unsubscribe(origin, body));
+    } catch (error) {
+      if (error instanceof NotifyError) return sendJson(response, error.status, { error: error.code });
+      throw error;
+    }
+  }
+
   async function signIn(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (!sameOrigin(request)) return send(response, 403, loginPage(shellT, options.language, shellT('login_refused')));
     const body = await readBody(request, 4096);
@@ -217,7 +272,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     const parts = path.split('/').slice(1);
     if (parts.length === 0 || parts.length > 2 || !parts.every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part))) return false;
     const type = TYPES[extname(path)];
-    if (!type) return false;
+    if (!type || (type === 'image/png' && !ICONS.test(path))) return false;
     let body: Buffer | string;
     try {
       const file = join(publicDir, ...parts);
@@ -232,7 +287,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     } catch {
       return false;
     }
-    response.writeHead(200, { 'content-type': type, 'content-length': String(Buffer.byteLength(body)), 'cache-control': type === 'font/woff2' ? 'public, max-age=86400' : 'no-cache' });
+    response.writeHead(200, { 'content-type': type, 'content-length': String(Buffer.byteLength(body)), 'cache-control': type === 'font/woff2' || type === 'image/png' ? 'public, max-age=86400' : 'no-cache' });
     response.end(request.method === 'HEAD' ? undefined : body);
     return true;
   }
@@ -257,6 +312,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
         if (!read) return sendJson(response, 405, { error: 'method not allowed' });
         return sendJson(response, 200, { user: mine.user, csrf: mine.cookie.csrf, language: options.language, project: options.project, source: options.source.kind });
       }
+      if (path === '/api/notifications' || path.startsWith('/api/notifications/')) return notify(request, response, path, mine);
       if (path.startsWith('/api/service/')) {
         if (!read && !csrfOk(request, mine.cookie)) return sendJson(response, 403, { error: 'refused: missing anti-forgery token or another origin' });
         const rest = path.slice('/api/service/'.length);

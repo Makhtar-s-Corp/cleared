@@ -1,7 +1,8 @@
 // The shell in the browser: who is signed in, the clock, the inbox count,
-// the theme button, signing out, and the screen of this page (body's
+// the theme button, the notifications button (notify.ts), signing out, and the screen of this page (body's
 // data-screen), mounted with its catalog over the shell's.
 import { translator, type Catalog } from './i18n.ts';
+import { initNotify } from './notify.ts';
 import { ApiError, type Me, type Mount, type ScreenContext } from './screen.ts';
 
 const INBOX_MS = 15_000;
@@ -47,6 +48,8 @@ async function start(): Promise<void> {
   const theme = document.getElementById('theme') as HTMLButtonElement;
   setTheme(theme, document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light', false);
   theme.addEventListener('click', () => setTheme(theme, document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true));
+
+  void initNotify(t, me);
 
   document.getElementById('sign-out')?.addEventListener('click', async () => {
     try { await json('/logout', { method: 'POST', headers: { 'x-csrf-token': me.csrf } }); }

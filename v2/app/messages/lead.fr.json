@@ -1,0 +1,11 @@
+{
+  "lead_initial": "L",
+  "lead_heading": "Lead",
+  "lead_intro": "Le lead planifie le travail à partir d'un objectif et occupe la machine. Son écran est en cours de construction et le lead ne tourne pas encore.",
+  "lead_draft_goal": "Votre objectif",
+  "lead_draft_message": "Votre message",
+  "lead_draft_kept": "Votre texte est gardé ici : copiez-le, et envoyez-le quand le lead tournera.",
+  "lead_plan": "Plan",
+  "lead_plan_later": "Le plan {id} s'affichera ici quand les plans tourneront.",
+  "lead_back": "Retour à la tour"
+}
