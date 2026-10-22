@@ -53,8 +53,8 @@ test('the thread: the owner in ink on the right, the lead with its square, a gre
   assert.match(text(html), /Goal: make the guestbook readable once it has many entries\. I want it before Friday\./);
   assert.match(text(html), /Pages of 20\. The phone keeps the long list\./);
   assert.match(text(html), /Here is a plan in five tickets\./);
-  assert.doesNotMatch(html, /data-answer=/, 'the fixture\'s question was answered: no option is a button');
-  assert.match(html, /Answered/);
+  assert.doesNotMatch(html, /data-answer=|q-header|q-hint/, 'the fixture\'s question was answered: it reads as a line of the lead, the answer below it');
+  assert.match(html, /<div class="bubble lead question"><p class="bubble-text">Before I plan: on desktop/);
 });
 
 test('a question that waits is a bubble with its options as buttons, the recommendation marked, and the free answer below', async () => {
@@ -182,7 +182,7 @@ test('the memory panel: the last handover, the commitments open then done, the r
   assert.match(open, /<h2 id="memory-title">What the lead remembers<\/h2>/);
   assert.match(renderLead(await view({ memory: 'loading' }), en), /Reading what the lead remembers…/);
   assert.match(renderLead(await view(), en), /aria-expanded="false"/);
-  assert.match(text(html), /Refreshed 2 times · highest context 45 % · claude-opus-5-5/);
+  assert.match(text(html), /Refreshed 2 times · highest context 45 % · claude · opus-5\.5/);
   assert.match(text(html), /Last handover Generation 2 handed over at 09:31, in its own words\. The owner asked for nothing new since the morning\./);
   assert.match(text(html), /Open commitments When the first ticket of the plan lands, tell the owner how long it took from start to live\./);
   assert.match(text(html), /Done Tell the owner when the checks of the example are green again\. Done at 05:41: Told at 15:41: green after the lock file fix\./);

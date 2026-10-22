@@ -94,13 +94,16 @@ function renderHeaderLine(state: LeadState, now: Date, t: Translate): string {
 
 // ------------------------------------------------------------------ thread
 
+// A question that waits shows its header, its options and how to answer;
+// once settled it reads as the lead's other lines, as in the capture, the
+// owner's answer following it.
 function renderQuestion(message: LeadMessage, state: LeadState, t: Translate): string {
   const asked = message.question;
-  if (!asked) return `<p class="bubble-text">${esc(message.text)}</p>`;
-  const pending = asked.state === 'waiting' && state.pendingQuestion?.requestId === asked.requestId;
+  const pending = asked !== undefined && asked.state === 'waiting' && state.pendingQuestion?.requestId === asked.requestId;
+  if (!asked || !pending) return `<p class="bubble-text">${esc(asked ? asked.questions.map((q) => q.question).join('\n\n') : message.text)}</p>`;
   // One text answers every question of an ask (the lead engine's rule), so
   // options are buttons only when the ask has one question.
-  const buttons = pending && asked.questions.length === 1;
+  const buttons = asked.questions.length === 1;
   const body = asked.questions.map((question: Question) => {
     const head = question.header ? `<span class="q-header">${esc(question.header)}</span>` : '';
     const options = question.options ?? [];
@@ -109,10 +112,7 @@ function renderQuestion(message: LeadMessage, state: LeadState, t: Translate): s
       : `<ul class="q-options">${options.map((option) => `<li>${esc(option.label.replace(RECOMMENDED, ''))}${RECOMMENDED.test(option.label) ? ` <span class="recommended">${esc(t('lead_question_recommended'))}</span>` : ''}</li>`).join('')}</ul>`;
     return `<p class="q-text">${head}<span>${esc(question.question)}</span></p>${list}`;
   }).join('');
-  const hint = pending
-    ? `<p class="q-hint">${esc(t(asked.questions.length === 1 ? 'lead_question_answer_below' : 'lead_question_several'))}</p>`
-    : asked.state === 'handled' ? `<p class="q-hint">${esc(t('lead_question_answered'))}</p>` : '';
-  return `${body}${hint}`;
+  return `${body}<p class="q-hint">${esc(t(buttons ? 'lead_question_answer_below' : 'lead_question_several'))}</p>`;
 }
 
 export function renderThread(view: LeadView, t: Translate): string {
@@ -141,11 +141,15 @@ export function renderThread(view: LeadView, t: Translate): string {
 
 // ------------------------------------------------------------------ memory
 
+// 'claude-opus-5-5' reads 'claude · opus-5.5', as the tower writes a model
+// (tower.ts imports this file, so its formatModel is not imported here).
+const modelName = (model: string) => (model.startsWith('claude-') ? `claude · ${model.slice('claude-'.length).replace(/-(\d+)-(\d+)$/, '-$1.$2')}` : model);
+
 export function renderMemory(memory: LeadMemory, state: LeadState, now: Date, t: Translate, language: 'en' | 'fr' = 'en'): string {
   const stats = [
     state.refreshCount === 0 ? t('lead_memory_refreshes_none') : state.refreshCount === 1 ? t('lead_memory_refreshes_one') : t('lead_memory_refreshes', { n: state.refreshCount }),
     ...(state.highestPercent === null ? [] : [t('lead_memory_highest', { n: Math.round(state.highestPercent) })]),
-    state.model,
+    ...(state.model ? [modelName(state.model)] : []),
   ].join(' · ');
   const { handover } = memory;
   const last = handover === null ? `<p class="faint">${esc(t('lead_memory_no_handover'))}</p>`
