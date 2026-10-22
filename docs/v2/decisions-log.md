@@ -1039,3 +1039,25 @@ The choices the lane makes:
     - **Smaller polish:** the field's radius, and a focus check the global rule already covers.
 - **Not done:** the week share (item 6); answering the lead's question from the tower.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-tower-m2`.
+
+## 2026-10-22: Owner decision on plan question 1: the current Claude login, read-only, for the proof
+
+**Decision.** On 2026-10-21 at 21:35 (Europe/Paris), in reply to plan question 1 (the demo project and the session logins, options a and b of section 11), the owner chose option (b) with a modification: the sessions use the host's existing Claude Code login, read-only, for the milestone 2 proof. The login is mounted read-only into session containers; its content is never read, printed, copied, logged or committed. No setup-token token is configured (plan question 1 option a, the fallback). The open policy question on claude.ai login in third-party products stands. The deployment model (plan section 11) changes to: no setup-token token in the default path; a session reads from the host's already-existing login, as the owner's account's login; for now, no token refresh happens (the session keeps the access token it started with), unknown whether an expired token mid-session restarts.
+
+For the 48-hour proof: the runner is relaunched when the login reports a revoked token; each cut is counted in the proof report. The evidence is in the pull request.
+
+**Consequences.**
+- Lane 4's runner and `doctor.ts` never read, print, copy or log the login's content. The session reads it, and both the API key and the refresh token are at risk: the API key is in the CLI's environment (plan, section 5's decision), the refresh token is in the mounted file readable by the session's uid. The policy denies tool calls that name `/proc/*/environ` and `printenv`, so code that the policy allows cannot leak the API key through an environment read.
+- The `CLEARED_CLAUDE_CREDENTIALS` environment variable names the host's login file, and only if it is set does lane 4 try to use it; otherwise it uses a token file in the service's state folder (the setup-token fallback, never created by lane 4).
+- A `setup-token` token, which the plan names as the default, can only make model requests and limits what a leaked token allows; the full login cannot be limited that way.
+- For the milestone 3 proof of Cursor (later decision), a similar arrangement applies.
+- Author: the owner, oral decision on 2026-10-21; written in this log on 2026-10-22.
+
+## 2026-10-22: Owner note for milestone 3: Cursor harness and login
+
+**Note.** For the first pilot of milestone 2 on a real project, the harness will add support for Codex (lane 4 of milestone 1 allows Claude Code first, then Codex later). The owner has a Codex account on this machine and a Cursor account. As Codex is not yet in the milestones, the first real proof runs with Cursor in place of Codex, on the same login arrangement as Claude Code (the host's existing credentials, read-only, no refresh). The owner's Codex account is paused (no subscription), so the measured cost and the behavior are real for Cursor. A milestone 3 lane adds the Cursor harness; the Codex harness follows. Both follow the Claude Code adapter contract (plan, section 6), with the model setting `CLEARED_V2_HARNESS_CODEX` or `CLEARED_V2_HARNESS_CURSOR` at the choice of the lane.
+
+**Consequences.**
+- A harness is identified by its `harness` value in the session's `StartInput`.
+- Until a harness is named, the default is `claude-code`.
+- Author: the owner, oral note on 2026-10-21; written in this log on 2026-10-22.

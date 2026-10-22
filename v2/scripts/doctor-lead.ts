@@ -3,8 +3,9 @@
 // is named. One check: a real generation of the lead on this server, in a
 // container labelled cleared.dev=v2, on the doctor's model (claude-haiku-5-5
 // by default), with one owner message, one commit, a refresh forced by a
-// threshold of 5 % (so it comes after the first real turn), and the next
-// generation answering a question about the commitment from its briefing.
+// threshold of 2 % (so it comes after the first real turn, regardless of
+// actual token window size), and the next generation answering a question
+// about the commitment from its briefing.
 //
 // It needs lane 4's runner (the host tools and the context line); before
 // that runner is in the image, the commit never reaches the host and the
@@ -77,7 +78,7 @@ const realGeneration: DoctorLeadCheck = {
     const lead = new LeadEngine({
       store: { db: store.db, events: log, sessions: store.sessions }, inbox: new InboxStore(store.db), flow: quietFlow(),
       adapter: createClaudeCodeAdapter({ log, runtime, cleaner: () => createCleaner({ servicePaths: [runtime.stateDir, homedir(), scratch] }) }),
-      config: { enabled: true, model, contextPercent: 5, handoverPercent: 4, batchMs: 60_000 },
+      config: { enabled: true, model, contextPercent: 2, handoverPercent: 1, batchMs: 60_000 },
       project: { name: 'doctor', base: 'main', workdir: join(scratch, 'lead') },
       effects: {
         async prepareWorkdir() {
