@@ -1,6 +1,7 @@
 // What a human does in a session's checkout, and what the session is told
 // of it (docs/v2/milestone-2-plan.md, decisions 32 and 33, lane 31): the
-// web terminals, the checkout's state at Take over, the editor's saves made
+// web terminals (the session's own harness first, through its adapter, or
+// a shell: owner request of 2026-10-22 17:26), the checkout's state at Take over, the editor's saves made
 // while the session was taken over, and the journal of both. One per
 // process, made by the flow module (modules/flow.ts) next to the engine.
 //
@@ -10,16 +11,16 @@
 // once. Every text is cleaned first; no event carries a file's content or
 // the terminal's output.
 import { homedir } from 'node:os';
-import type { HumanEdit } from '../api/types.ts';
+import type { HumanEdit, TerminalMode, TerminalOpened } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { FlowEngine } from '../flow/engine.ts';
 import { cleanText, secretValues } from '../session/clean.ts';
-import type { SessionId, UserId } from '../session/contract.ts';
+import { interactiveResume, type SessionId, type UserId } from '../session/contract.ts';
 import type { AgUiEvent } from '../session/events.ts';
 import type { Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
-import { giveCommand, takeCommand, type SessionContainer } from './container.ts';
-import { Terminals } from './terminals.ts';
+import { giveCommand, SHELL_COMMAND, takeCommand, type SessionContainer } from './container.ts';
+import { checkSize, TerminalError, Terminals, type TerminalProgram } from './terminals.ts';
 
 export type HumanDeps = {
   readonly engine: FlowEngine;
@@ -63,12 +64,34 @@ export class HumanSide {
     this.terminals = new Terminals({
       container: deps.container, clean: this.clean, journal: (session, event) => this.journal(session, event),
       now: () => this.#now().getTime(), ...(deps.idleMs === undefined ? {} : { idleMs: deps.idleMs }),
+      keep: (session) => this.engine.takenOver(session) !== undefined,
     });
   }
 
   // A terminal stays open only while its session is taken over.
   startTimer(): void {
-    this.terminals.startTimer((session) => this.engine.takenOver(session) !== undefined);
+    this.terminals.startTimer();
+  }
+
+  // Opens the session's terminal: its harness, resumed on the session by
+  // its adapter (which hands the session's own harness process over first),
+  // or a shell. A harness the adapter cannot resume is refused with why,
+  // and nothing opens; the Shell still does.
+  async openTerminal(session: SessionId, by: UserId, size: { readonly cols: number; readonly rows: number }, mode: TerminalMode): Promise<TerminalOpened> {
+    checkSize(size);
+    this.terminals.claim(session, mode);
+    try {
+      let program: TerminalProgram = { mode: 'shell', command: SHELL_COMMAND };
+      if (mode === 'harness') {
+        const harness = this.engine.sessionDetail(session)?.harness;
+        const resume = await interactiveResume(harness ? this.engine.registry.sessionAdapters[harness] : undefined, session);
+        if (!resume.supported) throw new TerminalError('unsupported', resume.reason);
+        program = { mode, command: resume.command, name: resume.name };
+      }
+      return await this.terminals.open(session, by, size, program);
+    } finally {
+      this.terminals.unclaim(session);
+    }
   }
 
   journal(session: SessionId, event: AgUiEvent): void {

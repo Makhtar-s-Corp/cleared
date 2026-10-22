@@ -33,6 +33,14 @@
 //     recreates the query with `resume` in the same container, and says so
 //     to the model in a message of its own.
 //
+// Take over with the harness (owner request of 2026-10-22 17:26): `release`
+// ends the harness's process (the query is closed), so that the human who
+// took the session over runs the same session in a terminal of this
+// container, and says `released`; the runner, the container's command,
+// stays up. `reload` starts the harness again with `resume`, from the
+// transcript as the human's harness left it; a turn sent meanwhile waits
+// for it. Only one harness writes the session at a time.
+//
 // The SDK is installed in the image only, so it is loaded at run time and
 // its types are mirrored here, as hooks.ts does: query() and the MCP
 // functions are injected, and the test drives run() with stand-ins.
@@ -111,6 +119,9 @@ export type RunnerInput =
   // For the doctor: ten timed context measures of each detail, and the usage once.
   | { readonly type: 'measure' }
   | { readonly type: 'interrupt' }
+  // Take over: the harness handed to a human, then taken back from its transcript.
+  | { readonly type: 'release' }
+  | { readonly type: 'reload' }
   | { readonly type: 'stop' };
 
 export type RunnerOutput =
@@ -126,6 +137,7 @@ export type RunnerOutput =
   | { readonly type: 'login'; readonly state: 'failed' | 'renewed' }
   | { readonly type: 'measure'; readonly summaryMs: readonly number[]; readonly fullMs: readonly number[]; readonly summary?: ContextFields; readonly full?: ContextFields; readonly usage?: UsageProbe; readonly error?: string }
   | { readonly type: 'error'; readonly message: string }
+  | { readonly type: 'released' }                      // the harness's process ended: a human may run the session
   | { readonly type: 'exit'; readonly code: number };
 
 // The parts of the SDK 0.3.306 types (sdk.d.ts) the runner uses.
@@ -505,6 +517,23 @@ export async function run(deps: RunnerDeps): Promise<number> {
   let stopped: () => void = () => {};
   const stop = new Promise<'stopped'>((resolve) => { stopped = () => resolve('stopped'); });
 
+  // The harness handed to a human: released until a reload, or the end.
+  let released = false;
+  let inputEnded = false;
+  let reloadAsked = false;
+  let parked: ((back: boolean) => void) | undefined;
+  const park = () => new Promise<boolean>((resolve) => {
+    if (stopping || inputEnded) return resolve(false);
+    if (reloadAsked) { reloadAsked = false; return resolve(true); }
+    parked = resolve;
+  });
+  const unpark = (back: boolean) => {
+    const wake = parked;
+    parked = undefined;
+    if (wake) wake(back);
+    else if (back) reloadAsked = true;
+  };
+
   // Relays the SDK messages; after a login error, waits for a new token and
   // resumes the session in a new query.
   const relaying = (async () => {
@@ -514,19 +543,30 @@ export async function run(deps: RunnerDeps): Promise<number> {
       current = query;
       let refused = false;                        // an authentication error in this turn
       let failed = false;
-      for await (const message of query) {
-        const frame = record(message);
-        if (authenticationFailed(message)) refused = true;
-        if (frame?.type === 'result') {
-          // A turn that ends in an error after a refused login waits for a new one.
-          failed = refused && (frame.is_error === true || frame.subtype !== 'success');
-          refused = false;
-          if (failed) out({ type: 'login', state: 'failed' });
+      try {
+        for await (const message of query) {
+          const frame = record(message);
+          if (authenticationFailed(message)) refused = true;
+          if (frame?.type === 'result') {
+            // A turn that ends in an error after a refused login waits for a new one.
+            failed = refused && (frame.is_error === true || frame.subtype !== 'success');
+            refused = false;
+            if (failed) out({ type: 'login', state: 'failed' });
+          }
+          out({ type: 'sdk', message });
+          if (frame?.type !== 'result') continue;
+          if (failed) break;
+          await measure('turn');
         }
-        out({ type: 'sdk', message });
-        if (frame?.type !== 'result') continue;
-        if (failed) break;
-        await measure('turn');
+      } catch (error) {
+        if (!released) throw error;               // a closed query may end its iteration with an error
+      }
+      if (released && !stopping) {
+        out({ type: 'released' });
+        if (!(await park())) return 'ended' as const;
+        released = false;
+        resume = true;
+        continue;
       }
       if (!failed || stopping) return 'ended' as const;
       turns.reset();
@@ -555,8 +595,14 @@ export async function run(deps: RunnerDeps): Promise<number> {
       else if (line.type === 'host_result') hostCalls.get(line.callId)?.(line.ok === true, typeof line.text === 'string' ? line.text : '');
       else if (line.type === 'measure') void measureAll();
       else if (line.type === 'interrupt') void current?.interrupt().catch((error: Error) => out({ type: 'error', message: `interrupt failed: ${error.message}` }));
-      else if (line.type === 'stop') { stopping = true; current?.close(); stopped(); return; }
+      else if (line.type === 'release') {
+        if (!released) { released = true; reloadAsked = false; turns.reset(); current?.close(); }
+        else if (parked) out({ type: 'released' });  // asked again: still released
+      } else if (line.type === 'reload') { if (released) unpark(true); }
+      else if (line.type === 'stop') { stopping = true; current?.close(); unpark(false); stopped(); return; }
     }
+    inputEnded = true;
+    unpark(false);
     turns.end();
   })();
 

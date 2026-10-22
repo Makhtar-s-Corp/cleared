@@ -24,7 +24,7 @@
 // 32 adds the web terminal's routes and the editor's save (fixtureHuman).
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sseFrame, TERMINAL_INPUT_MAX_BYTES, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type Workspace } from '../../src/api/types.ts';
+import { sseFrame, TERMINAL_INPUT_MAX_BYTES, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type TerminalMode, type Workspace } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import { GIVEN_BACK } from '../../src/flow/takeover.ts';
 import { createCleaner } from '../../src/session/clean.ts';
@@ -706,19 +706,31 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
 }
 
 // The web terminal and the editor's save over the fixtures (decisions 32
-// and 33, lane 32), for both fixture sources: a stand-in for the shell of
-// each session taken over (it echoes what is typed and answers ls, pwd,
-// git status, colours and exit; its first lines are the service's, then a
-// line in 256 colours and one in 24-bit colour), its stream as the service
+// and 33, lane 32), for both fixture sources: a stand-in for the harness of
+// each session taken over, the terminal's default (owner request of
+// 2026-10-22 17:26: it shows the session's last words, echoes what is
+// typed and answers each line with a sentence saying it is a stand-in;
+// /exit ends it), and one for its shell (it echoes what is typed and
+// answers ls, pwd, git status, colours and exit; its first lines are the
+// service's, then a line in 256 colours and one in 24-bit colour), its stream as the service
 // sends it (the chunks after Last-Event-ID or ?after=, held open until the
 // terminal closes), and the checkout's files as the editor saves them (a
 // stale hash is a 409 with the current one; CLAUDE.md and .claude/ are
 // refused by the default rule; a dependency of package.json asks for its
 // confirmation). Nothing runs: the shell is words.
 type Listener = (frame: string) => void;
-type FixtureTerminal = { readonly chunks: { seq: number; data: string }[]; readonly listeners: Set<Listener>; line: string; closed?: TerminalClosed['reason'] };
+type FixtureTerminal = { readonly mode: TerminalMode; readonly chunks: { seq: number; data: string }[]; readonly listeners: Set<Listener>; line: string; closed?: TerminalClosed['reason'] };
 
 const PROMPT = '\u001b[1mnode@session\u001b[0m:/workspace$ ';
+const HARNESS = 'Claude Code';
+const HARNESS_PROMPT = '\u001b[1m>\u001b[0m ';
+// What the stand-in harness shows when resumed: the session's last words, as a resumed conversation does.
+const HARNESS_RESUMED = '\u001b[2m# Claude Code, resumed on this session. Give the session back when you are done: Cleared carries on from here.\u001b[0m\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m I grouped the upcoming entries by week, Monday first, in src/engine/upcoming.mjs. A week that spans\r\n'
+  + '  two months stays under the first month. Next: the screen\'s headings, then the tests.\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m \u001b[1mBash\u001b[0m(npm test)\r\n  ⎿  \u001b[32m14 passed\u001b[0m, 1 failed: entries are grouped by week, Monday first\r\n\r\n'
+  + '\u001b[2m  ⎿  Interrupted: the owner took the session over\u001b[0m\r\n\r\n';
+const HARNESS_ANSWER = '\u001b[38;5;174m⏺\u001b[0m (the fixtures\' stand-in for the harness: in a real session, Claude Code answers here)\r\n\r\n';
 const COLOURS = '\u001b[38;5;208m256 colours\u001b[0m: \u001b[48;5;24m\u001b[38;5;231m a line from the palette \u001b[0m\r\n'
   + '\u001b[38;2;200;30;40m24-bit colour\u001b[0m: \u001b[48;2;20;80;160m\u001b[38;2;255;255;255m a line in true colour \u001b[0m\r\n';
 
@@ -772,6 +784,24 @@ export function fixtureHuman(): FixtureHuman {
         terminal.line = '';
         echo += `\r\n${run(session, command)}`;
         if (command !== 'exit') echo += PROMPT;
+      } else if (char === '\u007f') {
+        if (terminal.line) { terminal.line = terminal.line.slice(0, -1); echo += '\b \b'; }
+      } else if (char >= ' ') {
+        terminal.line += char;
+        echo += char;
+      }
+    }
+    if (echo) push(terminal, echo);
+  };
+  // The stand-in harness: each line answered by the same sentence; /exit ends it.
+  const talk = (session: string, terminal: FixtureTerminal, data: string) => {
+    let echo = '';
+    for (const char of data) {
+      if (char === '\r' || char === '\n') {
+        const said = terminal.line.trim();
+        terminal.line = '';
+        if (said === '/exit') { queueMicrotask(() => close(session, 'exit')); echo += '\r\n'; continue; }
+        echo += said ? `\r\n\r\n${HARNESS_ANSWER}${HARNESS_PROMPT}` : `\r\n${HARNESS_PROMPT}`;
       } else if (char === '\u007f') {
         if (terminal.line) { terminal.line = terminal.line.slice(0, -1); echo += '\b \b'; }
       } else if (char >= ' ') {
@@ -835,19 +865,25 @@ export function fixtureHuman(): FixtureHuman {
       const body = await json(request);
       record?.(body);
       if (action === 'open') {
-        if (terminal) return answer(409, { error: 'a terminal is already open for this session' });
-        const opened: FixtureTerminal = { chunks: [], listeners: new Set(), line: '' };
+        if (terminal) return answer(409, { error: 'a terminal is already open for this session: one at a time', mode: terminal.mode });
+        const mode: TerminalMode = body?.mode === 'shell' ? 'shell' : 'harness';
+        const opened: FixtureTerminal = { mode, chunks: [], listeners: new Set(), line: '' };
         terminals.set(id, opened);
-        const resume = `claude --resume ${id}`;
-        push(opened, `\u001b[2m# The session is paused. To run its harness here: ${resume}\u001b[0m\r\n${COLOURS}${PROMPT}`);
-        return answer(200, { opened: true, cols: Number(body?.cols) || 80, rows: Number(body?.rows) || 24, resume });
+        const size = { cols: Number(body?.cols) || 80, rows: Number(body?.rows) || 24 };
+        if (mode === 'harness') {
+          push(opened, `${HARNESS_RESUMED}${HARNESS_PROMPT}`);
+          return answer(200, { opened: true, ...size, mode, name: HARNESS });
+        }
+        push(opened, `\u001b[2m# A shell in the session's container, as its user, in its checkout.\u001b[0m\r\n${COLOURS}${PROMPT}`);
+        return answer(200, { opened: true, ...size, mode });
       }
       if (!terminal) return answer(409, { error: 'no terminal is open for this session' });
       if (action === 'input') {
         const data = body?.data;
         if (typeof data !== 'string') return answer(400, { error: 'data is the text typed' });
         if (Buffer.byteLength(data) > TERMINAL_INPUT_MAX_BYTES) return answer(413, { error: `at most ${TERMINAL_INPUT_MAX_BYTES} bytes per post` });
-        type(id, terminal, data);
+        if (terminal.mode === 'harness') talk(id, terminal, data);
+        else type(id, terminal, data);
         return answer(200, { accepted: true });
       }
       if (action === 'resize') return answer(200, { accepted: true });

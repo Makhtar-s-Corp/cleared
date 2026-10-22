@@ -23,7 +23,7 @@ function launch(login: string | undefined, expected: string) {
     const bin = join(dir, 'bin');
     mkdirSync(bin);
     // The stand-in harness says what it was given: its words, and whether its environment holds the expected login.
-    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nprintf "args:%s|" "$@"\nif [ "$CLAUDE_CODE_OAUTH_TOKEN" = "$EXPECTED" ]; then echo token:ok; else echo token:bad; fi\n');
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nprintf "args:"; printf "%s|" "$@"\nif [ "$CLAUDE_CODE_OAUTH_TOKEN" = "$EXPECTED" ]; then echo token:ok; else echo token:bad; fi\n');
     chmodSync(join(bin, 'claude'), 0o755);
     const file = join(dir, 'claude.token');
     if (login !== undefined) writeFileSync(file, login);

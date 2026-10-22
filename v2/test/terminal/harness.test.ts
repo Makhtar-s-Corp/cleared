@@ -127,7 +127,8 @@ test('a harness the adapter cannot resume answers 501 with its reason, and opens
   try {
     const refused = await post(h, `/api/sessions/${h.session}/terminal/open`, { cols: 80, rows: 24 });
     assert.equal(refused.status, 501);
-    assert.match(String(refused.json.error), /scripted session.*no interactive harness.*Shell/);
+    // The flow's scripted adapter has no interactive resume, as Codex and Cursor until theirs come.
+    assert.equal(refused.json.error, 'The claude-code harness cannot be resumed in a terminal yet: open the Shell instead.');
     assert.equal(h.container.terminals.length, 0);
     assert.equal(opened(h).length, 0);
     assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, { cols: 80, rows: 24, mode: 'shell' })).status, 200);

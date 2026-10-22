@@ -1,6 +1,6 @@
 // What the service runs in a session's own container for a human
 // (docs/v2/milestone-2-plan.md, decisions 32 and 33, lane 31): the web
-// terminal's shell, the editor's read and save, and the checkout's state at
+// terminal's program (the session's harness, or a shell), the editor's read and save, and the checkout's state at
 // Take over and at Give back. Nothing here writes or runs git on the host:
 // the session writes its checkout, and may have swapped a folder for a link
 // or written a git hook, so the host only ever asks the container, where the
@@ -21,16 +21,24 @@ import type { SessionId } from '../session/contract.ts';
 // Where the terminal's shell writes its process id, in the container's own /tmp.
 export const TERMINAL_PID_FILE = '/tmp/.cleared-terminal.pid';
 
-// The shell of the web terminal: its id written down, so that the close can
+// What the web terminal runs: the session's harness, resumed on the session
+// (its adapter's interactive command, owner request of 2026-10-22 17:26),
+// or this shell, the second choice.
+export const SHELL_COMMAND: readonly string[] = ['bash', '-l'];
+
+// The terminal's program, its id written down first, so that the close can
 // end it and everything it started, since ending the docker client does not
 // end a process of `docker exec` (checked on this server with Docker 29.8.1).
-export const TERMINAL_SHELL = `echo $$ > ${TERMINAL_PID_FILE}; exec bash -l`;
+// The program's words follow as the wrapper's arguments, never quoted into it.
+export const TERMINAL_WRAP = `echo $$ > ${TERMINAL_PID_FILE}; exec "$@"`;
+export const terminalCommand = (command: readonly string[]): string[] => ['sh', '-c', TERMINAL_WRAP, 'sh', ...command];
 
-// Ends the terminal's shell and every process of its session (pkill -s):
-// a hang-up first, as a closed terminal sends, then a kill a second later.
+// Ends the terminal's program and every process of its session (pkill -s):
+// a hang-up first, as a closed terminal sends, then up to 5 seconds for a
+// harness to leave and keep its transcript, then a kill.
 export const END_TERMINAL = [
   'sh', '-c',
-  `p=$(cat ${TERMINAL_PID_FILE} 2>/dev/null); case "$p" in ''|*[!0-9]*) exit 0;; esac; pkill -HUP -s "$p"; sleep 1; pkill -KILL -s "$p"; rm -f ${TERMINAL_PID_FILE}; exit 0`,
+  `p=$(cat ${TERMINAL_PID_FILE} 2>/dev/null); case "$p" in ''|*[!0-9]*) exit 0;; esac; pkill -HUP -s "$p"; i=0; while [ $i -lt 50 ] && pgrep -s "$p" >/dev/null; do sleep 0.1; i=$((i+1)); done; pkill -KILL -s "$p"; rm -f ${TERMINAL_PID_FILE}; exit 0`,
 ] as const;
 
 // The checks both file programs share: the checkout's real path, the real
@@ -160,7 +168,8 @@ export type TerminalProcess = {
 // A session's own container, as the human's routes reach it.
 export type SessionContainer = {
   exec(session: SessionId, command: readonly string[], options?: { readonly input?: string; readonly timeoutMs?: number }): Promise<DockerResult>;
-  terminal(session: SessionId, size: { readonly cols: number; readonly rows: number }): Promise<TerminalProcess>;
+  // A terminal running `command` (the harness's, or SHELL_COMMAND) in the session's container.
+  terminal(session: SessionId, size: { readonly cols: number; readonly rows: number }, command: readonly string[]): Promise<TerminalProcess>;
 };
 
 // The terminal on the client's side: `script` gave the docker client a
@@ -216,9 +225,9 @@ export function dockerContainer(docker: Docker = new Docker()): SessionContainer
   const name = (session: SessionId) => sessionNames(session).container;
   return {
     exec: (session, command, options = {}) => docker.exec(session, name(session), command, options),
-    async terminal(session, size) {
+    async terminal(session, size, command) {
       const inspected = await docker.inspect(session, name(session)) as { Config?: { User?: string } };
-      const child = await docker.terminal(session, name(session), { user: inspected.Config?.User ?? '', workdir: WORKDIR_MOUNT, command: ['sh', '-c', TERMINAL_SHELL] });
+      const child = await docker.terminal(session, name(session), { user: inspected.Config?.User ?? '', workdir: WORKDIR_MOUNT, command: terminalCommand(command) });
       const process = scriptTerminal(child, () => docker.exec(session, name(session), END_TERMINAL, { timeoutMs: 15_000 }));
       await process.resize(size.cols, size.rows);
       return process;

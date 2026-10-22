@@ -462,7 +462,7 @@ test('interactive hands the runner\'s harness over and gives Claude Code resumed
     assert.match(INTERACTIVE_LAUNCH, /exec claude --resume "\$1" --model "\$2"/);
     assert.doesNotMatch(INTERACTIVE_LAUNCH, /fork-session/);
     // The login is read inside the container, into the harness's environment only: no word carries it.
-    assert.ok(resume.supported && !resume.command.some((word) => /CLAUDE_CODE_OAUTH_TOKEN=\S/.test(word) || word.includes('sk-ant')));
+    assert.ok(resume.supported && !resume.command.some((word) => /CLAUDE_CODE_OAUTH_TOKEN=[^$\s]/.test(word) || word.includes('sk-ant')));
     assert.ok(!JSON.stringify(t.log.all).includes('release'), 'the hand-over is no event of the session');
 
     // Asked again (Shell, then the harness again): nothing more to release.

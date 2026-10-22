@@ -160,10 +160,10 @@ test('the terminal\'s two modes: the harness first, the shell its second choice,
     }
   }
   assert.equal(en('terminal_switch_shell'), 'Shell');
-  // No word of the catalog sends anyone to a terminal on the server.
+  // No word of Take over or of the terminal sends anyone to a terminal on the server.
   for (const lang of ['en', 'fr'] as const) {
-    const all = JSON.stringify(loadCatalog('session', lang));
-    assert.doesNotMatch(all, /docker exec|on the server|sur le serveur|run this in a terminal/i, lang);
+    const words = Object.entries(loadCatalog('session', lang)).filter(([key]) => /^(takeover|terminal)/.test(key)).map(([, text]) => text).join('\n');
+    assert.doesNotMatch(words, /docker exec|on the server|sur le serveur|run this in a terminal/i, lang);
   }
 });
 

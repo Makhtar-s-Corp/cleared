@@ -19,7 +19,12 @@
 //   - interrupt() cancels what waits and asks the runner to interrupt the turn;
 //   - stop() asks the runner to stop, then removes the containers and the
 //     networks; the config volume stays, so resume() can start a new
-//     container on the same Claude Code session.
+//     container on the same Claude Code session;
+//   - interactive() (Take over, owner request of 2026-10-22 17:26) asks the
+//     runner to release its harness, waits until it says so, and gives
+//     Claude Code resumed on the same session for the human's terminal in
+//     the container (claude-code/interactive.ts); resume() then has the
+//     runner reload the session from its transcript, in the same container.
 // The login never appears on a docker command line: the runner reads it from
 // the read-only mount, inside the container.
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -33,9 +38,10 @@ import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
 import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
-import { HostToolRefused, NotImplemented, type Answer, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { HostToolRefused, NotImplemented, type Answer, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../events.ts';
 import { evaluate, type Policy, type PolicyContext } from '../policy.ts';
+import { INTERACTIVE_NAME, interactiveCommand } from './claude-code/interactive.ts';
 import { createMapper, toolRequest, type Mapper } from './claude-code/map.ts';
 
 export const RUNNER_COMMAND: readonly string[] = ['node', '/opt/cleared/runner/main.ts'];
@@ -53,6 +59,7 @@ export type ClaudeCodeRuntime = {
   readonly limits?: Limits;
   readonly maxBudgetUsd?: number;                 // per session, passed to the SDK
   readonly stopTimeoutMs?: number;                // how long stop() waits for the runner to exit
+  readonly releaseTimeoutMs?: number;             // how long interactive() waits for the runner to release its harness
 };
 
 // The default runtime: the service's state folder (CLEARED_V2_STATE_DIR, or
@@ -94,6 +101,8 @@ type Session = {
   exitSeen: boolean;                              // the runner printed its exit line
   exited: Promise<void>;
   handle: SessionHandle | undefined;
+  released: boolean;                              // the runner handed its harness to a human: resume() reloads it
+  onReleased: Set<() => void>;
 };
 
 // Reads a file of the ticket checkout by the path the harness names it
@@ -180,6 +189,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       void hostCall(session, line);
       return;
     }
+    if (line.type === 'released') {
+      for (const wake of [...session.onReleased]) wake();
+      return;
+    }
     if (line.type === 'question') {
       session.pending.set(line.requestId, { kind: 'question' });
       emit(session, session.mapper.question(line));
@@ -231,6 +244,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     session.child = child;
     session.closed = false;
     session.exitSeen = false;
+    session.released = false;
     session.exited = new Promise<void>((done) => {
       child.on('close', (code: number | null) => {
         if (session.child === child) {
@@ -339,7 +353,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       const id = newId();
       const session: Session = {
         id, input, cleaner: options.cleaner(), mapper: createMapper({ sessionId: id }), wake: new Set(), pending: new Map(),
-        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined,
+        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined, released: false, onReleased: new Set(),
       };
       sessions.set(id, session);
       await launch(session, false);
@@ -351,10 +365,38 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     async resume(id) {
       const session = sessions.get(id);
       if (!session) throw new Error(`unknown session ${id}`);
-      if (!session.closed && session.handle) return session.handle;
+      if (!session.closed && session.handle) {
+        // Given back after a human ran the harness: the runner reads the
+        // session again from its transcript, before any turn it is sent.
+        if (session.released) {
+          session.released = false;
+          write(session, { type: 'reload' });
+        }
+        return session.handle;
+      }
       await launch(session, true);
       session.handle = handle(session);
       return session.handle;
+    },
+    async interactive(id): Promise<InteractiveResume> {
+      const session = sessions.get(id);
+      if (!session || session.closed || !session.child) return { supported: false, reason: `There is no running session ${id} here to resume in a terminal.` };
+      if (!session.released) {
+        const child = session.child;
+        const released = await new Promise<boolean>((resolve) => {
+          const done = (value: boolean) => { session.onReleased.delete(wake); clearTimeout(timer); resolve(value); };
+          const wake = () => done(true);
+          const timer = setTimeout(() => done(false), runtime.releaseTimeoutMs ?? 15_000);
+          timer.unref();
+          session.onReleased.add(wake);
+          write(session, { type: 'release' });
+        });
+        if (!released || session.child !== child) {
+          return { supported: false, reason: 'The session\'s runner did not hand its harness over in time: rebuild the session image if it predates this version, or open the Shell instead.' };
+        }
+        session.released = true;
+      }
+      return { supported: true, name: INTERACTIVE_NAME, command: interactiveCommand(id, session.input.model) };
     },
   };
 }

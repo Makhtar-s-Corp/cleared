@@ -1,8 +1,11 @@
 // The web terminals of the sessions taken over (docs/v2/milestone-2-plan.md,
-// decision 32, lane 31): one per session at a time, a shell in the
-// session's own container (container.ts), opened by the user who took the
-// session over and closed at Give back, after TERMINAL_IDLE_MS without
-// input, when its shell exits, or on the user's close.
+// decision 32, lane 31): one per session at a time, in the session's own
+// container (container.ts), opened by the user who took the session over
+// and closed at Give back, after TERMINAL_IDLE_MS without input, when its
+// program exits, or on the user's close. Its program is the session's own
+// harness, resumed on the session through its adapter, or a shell (owner
+// request of 2026-10-22 17:26); a session given back while its terminal
+// was opening gets no terminal: what started is ended at once.
 //
 // What is typed is journaled line by line (lines.ts), each line through the
 // events' cleaner as a whole, as `cleared.terminal_input` with who typed it;
@@ -11,7 +14,7 @@
 // hold a file's content. It is kept in memory only, its last
 // OUTPUT_KEPT_CHARS characters, so that a stream that reconnects gets what
 // it missed.
-import type { TerminalChunk, TerminalClosed, TerminalOpened } from '../api/types.ts';
+import type { TerminalChunk, TerminalClosed, TerminalMode, TerminalOpened } from '../api/types.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 import type { AgUiEvent } from '../session/events.ts';
 import type { SessionContainer, TerminalProcess } from './container.ts';
@@ -24,12 +27,17 @@ export const TERMINAL_SIZE = { min: 2, max: 500 } as const;
 export type TerminalEvent = { readonly kind: 'data'; readonly chunk: TerminalChunk } | { readonly kind: 'closed'; readonly closed: TerminalClosed };
 
 export class TerminalError extends Error {
-  readonly kind: 'conflict' | 'invalid';
-  constructor(kind: 'conflict' | 'invalid', message: string) {
+  readonly kind: 'conflict' | 'invalid' | 'unsupported';
+  readonly mode: TerminalMode | undefined;                       // a conflict's: the mode of the terminal open
+  constructor(kind: 'conflict' | 'invalid' | 'unsupported', message: string, mode?: TerminalMode) {
     super(message);
     this.kind = kind;
+    this.mode = mode;
   }
 }
+
+// What a terminal runs: the harness (its name for the first line) or the shell.
+export type TerminalProgram = { readonly mode: TerminalMode; readonly command: readonly string[]; readonly name?: string };
 
 export type TerminalsDeps = {
   readonly container: SessionContainer;
@@ -37,10 +45,14 @@ export type TerminalsDeps = {
   readonly clean: (text: string) => string;
   readonly now?: () => number;
   readonly idleMs?: number;
+  // Whether a session may keep a terminal: taken over still. Checked by the
+  // sweep and after an open's process started.
+  readonly keep?: (session: SessionId) => boolean;
 };
 
 type Open = {
   readonly by: UserId;
+  readonly mode: TerminalMode;
   readonly process: TerminalProcess;
   readonly lines: TypedLines;
   readonly decoder: InstanceType<typeof TextDecoder>;
@@ -53,15 +65,17 @@ type Open = {
   closing?: Promise<void>;
 };
 
-// The command that resumes the session's harness inside the terminal, shown on its first line.
-export const resumeCommand = (session: SessionId): string => `claude --resume ${session}`;
+// The terminal's own first line: what runs in it.
+export const firstLine = (program: TerminalProgram): string => program.mode === 'harness'
+  ? `\u001b[2m# ${program.name ?? 'The harness'}, resumed on this session. Give the session back when you are done: Cleared carries on from here.\u001b[0m\r\n`
+  : '\u001b[2m# A shell in the session\'s container, as its user, in its checkout.\u001b[0m\r\n';
 
 export class Terminals {
   readonly #deps: TerminalsDeps;
   readonly #now: () => number;
   readonly #idleMs: number;
   readonly #open = new Map<SessionId, Open>();
-  readonly #opening = new Set<SessionId>();
+  readonly #opening = new Map<SessionId, TerminalMode>();
   #timer: NodeJS.Timeout | undefined;
 
   constructor(deps: TerminalsDeps) {
@@ -74,31 +88,51 @@ export class Terminals {
     return this.#open.get(session)?.by;
   }
 
-  async open(session: SessionId, by: UserId, size: { readonly cols: number; readonly rows: number }): Promise<TerminalOpened> {
+  // The mode of the terminal open or opening, if any.
+  openMode(session: SessionId): TerminalMode | undefined {
+    return this.#open.get(session)?.mode ?? this.#opening.get(session);
+  }
+
+  // Claims the session's one terminal before its program is looked up (the
+  // harness's adapter may take a while), so a second open is a conflict.
+  claim(session: SessionId, mode: TerminalMode): void {
+    const busy = this.openMode(session);
+    if (busy) throw new TerminalError('conflict', 'a terminal is already open for this session: one at a time', busy);
+    this.#opening.set(session, mode);
+  }
+
+  unclaim(session: SessionId): void {
+    this.#opening.delete(session);
+  }
+
+  async open(session: SessionId, by: UserId, size: { readonly cols: number; readonly rows: number }, program: TerminalProgram): Promise<TerminalOpened> {
     checkSize(size);
-    if (this.#open.has(session) || this.#opening.has(session)) throw new TerminalError('conflict', 'a terminal is already open for this session: one at a time');
-    this.#opening.add(session);
+    if (this.#opening.get(session) !== program.mode) this.claim(session, program.mode);
     let process: TerminalProcess;
     try {
-      process = await this.#deps.container.terminal(session, size);
+      process = await this.#deps.container.terminal(session, size, program.command);
     } finally {
       this.#opening.delete(session);
     }
+    // Given back meanwhile (issue 226, item 1): the harness and the human never run the session at once.
+    if (this.#deps.keep && !this.#deps.keep(session)) {
+      await process.end().catch(() => undefined);
+      throw new TerminalError('conflict', 'the session was given back while its terminal was opening');
+    }
     const open: Open = {
-      by, process, lines: new TypedLines(), decoder: new TextDecoder('utf-8'), chunks: [], listeners: new Set(),
+      by, mode: program.mode, process, lines: new TypedLines(), decoder: new TextDecoder('utf-8'), chunks: [], listeners: new Set(),
       kept: 0, seq: 0, outputBytes: 0, lastInput: this.#now(),
     };
     this.#open.set(session, open);
-    this.#deps.journal(session, { type: 'CUSTOM', name: 'cleared.terminal_opened', value: { by, cols: size.cols, rows: size.rows } });
-    const resume = resumeCommand(session);
-    this.#push(open, `\u001b[2m# The session is paused. To run its harness here: ${resume}\u001b[0m\r\n`);
+    this.#deps.journal(session, { type: 'CUSTOM', name: 'cleared.terminal_opened', value: { by, cols: size.cols, rows: size.rows, mode: program.mode } });
+    this.#push(open, firstLine(program));
     process.onOutput((chunk) => {
       open.outputBytes += chunk.length;
       const text = open.decoder.decode(chunk, { stream: true });
       if (text !== '') this.#push(open, text);
     });
     process.onExit(() => { void this.close(session, 'system', 'exit'); });
-    return { opened: true, cols: size.cols, rows: size.rows, resume };
+    return { opened: true, cols: size.cols, rows: size.rows, mode: program.mode, ...(program.mode === 'harness' && program.name ? { name: program.name } : {}) };
   }
 
   input(session: SessionId, data: string): void {
@@ -144,7 +178,7 @@ export class Terminals {
 
   // Closes what waited too long for input, and what `keep` no longer allows
   // (a session given back, stopped or ended meanwhile).
-  async sweep(keep: (session: SessionId) => boolean = () => true): Promise<void> {
+  async sweep(keep: (session: SessionId) => boolean = this.#deps.keep ?? (() => true)): Promise<void> {
     const now = this.#now();
     await Promise.all([...this.#open].map(([session, open]) =>
       !keep(session) ? this.close(session, 'system', 'closed')
@@ -182,7 +216,7 @@ export class Terminals {
   }
 }
 
-function checkSize(size: { readonly cols: unknown; readonly rows: unknown }): void {
+export function checkSize(size: { readonly cols: unknown; readonly rows: unknown }): void {
   const ok = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= TERMINAL_SIZE.min && value <= TERMINAL_SIZE.max;
   if (!ok(size.cols) || !ok(size.rows)) throw new TerminalError('invalid', `cols and rows are whole numbers from ${TERMINAL_SIZE.min} to ${TERMINAL_SIZE.max}`);
 }

@@ -229,6 +229,10 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
       if (!session) throw new Error(`unknown session ${id}`);
       return handle(session);
     },
+    // A scripted session has no harness a human could talk to.
+    async interactive() {
+      return { supported: false, reason: 'This is a scripted session: it has no interactive harness to resume. Open the Shell instead.' };
+    },
   };
 }
 

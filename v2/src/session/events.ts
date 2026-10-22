@@ -5,7 +5,7 @@
 // the JSON of a typed value in it, read back with readToolInput and
 // readToolOutput. Nothing here depends on @ag-ui/core at run time; a test
 // checks every type name against its EventType.
-import type { ChangesReport, HumanEdit, SessionPlan } from '../api/types.ts';
+import type { ChangesReport, HumanEdit, SessionPlan, TerminalMode } from '../api/types.ts';
 import type { Decision, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
 import type { Verdict } from './policy.ts';
 
@@ -145,7 +145,7 @@ export type CustomValue = {
   // and its size; each line typed, at its Enter or at the close, through the
   // cleaner as a whole; why it closed and how many bytes it wrote. The
   // output itself is never stored.
-  'cleared.terminal_opened': { readonly by: UserId; readonly cols: number; readonly rows: number };
+  'cleared.terminal_opened': { readonly by: UserId; readonly cols: number; readonly rows: number; readonly mode?: TerminalMode };   // mode: what ran (owner request of 2026-10-22 17:26)
   'cleared.terminal_input': { readonly by: UserId; readonly line: string };
   'cleared.terminal_closed': { readonly by: UserId | 'system'; readonly reason: 'give_back' | 'idle' | 'closed' | 'exit'; readonly outputBytes: number };
   // A file a human changed in the checkout (decision 33): never its content.
