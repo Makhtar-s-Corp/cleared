@@ -28,7 +28,8 @@ function world() {
   const guestbook = service('guestbook', { '.cleared/agents.conf': conf('no blocking issues', 'registry.npmjs.org'), 'src/page.ts': 'export const page = 1;\n' });
   const filter = service('filter-api', { '.cleared/agents.conf': conf('ship it', 'example.invalid'), 'contract/openapi.yaml': 'openapi: 3.1.0\n', 'package.json': '{"scripts":{"test":"node --test"}}' });
   const config = { ...CONFIG, projectDir: guestbook.dir, repoUrl: guestbook.url, workdirRoot: join(root, 'work') };
-  return { root, env, guestbook, filter, flow: realEffects(config, { env }) };
+  const mono = { ...service('mono', { '.cleared/agents.conf': conf('ok', 'none'), 'filter-api/contract/openapi.yaml': 'openapi: 3.1.0\n' }), kind: 'folder' as const, path: 'filter-api', contract: { format: 'openapi' as const, path: 'contract/openapi.yaml' } };
+  return { root, env, guestbook, filter, mono, flow: realEffects(config, { env }) };
 }
 
 test('each service is read at its own base branch, from its own checkout', async () => {
@@ -95,4 +96,15 @@ test('a step\'s branch is read against its service\'s base: its files, the contr
   assert.equal((await read({ ticket: TICKET.id, service: filter, workdir })).contract, null, 'a service without a contract');
   writeFileSync(join(workdir, '.git', 'objects', 'info', 'alternates'), '/elsewhere/objects\n');
   await assert.rejects(read({ ticket: TICKET.id, service, workdir }), /alternates/);
+});
+
+test('a folder service\'s contract is read inside its folder, as a path of the repository', async () => {
+  const { flow, mono } = world();
+  const { workdir } = await flow.prepareWorkdir({ ticket: TICKET, role: 'author', service: mono });
+  writeFileSync(join(workdir, 'filter-api', 'contract', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: {}\n');
+  gitIn(workdir, ['commit', '-q', '-am', 'The contract gains its info']);
+  const read = await (flow.stepChanges as NonNullable<typeof flow.stepChanges>)({ ticket: TICKET.id, service: mono, workdir });
+  assert.deepEqual(read.files, ['filter-api/contract/openapi.yaml']);
+  assert.equal(read.contract?.path, 'filter-api/contract/openapi.yaml', 'so the contract-only check compares like with like');
+  assert.match(read.contract?.diff ?? '', /\+info: \{\}/);
 });

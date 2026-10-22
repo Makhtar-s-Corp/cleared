@@ -937,7 +937,7 @@ export class FlowEngine {
   // reads; the ticket's other sessions stop, and the ticket goes back to
   // Todo, keeping the steps that are done.
   async #failStep(step: Step, why: string): Promise<void> {
-    const note = this.#stepNote(step, why);
+    const note = this.#clean(this.#stepNote(step, why));
     this.#steps.update(step.id, { state: 'failed', note });
     for (const live of [...this.#live.values()].filter((l) => l.input.ticket === step.ticket)) await this.#close(live, 'stopped', note);
     await this.#putBack(step.ticket, note, 'step_failed');
@@ -988,18 +988,24 @@ export class FlowEngine {
   }
 
   // Approve (POST /api/contracts/:id/approve): the contract is validated as
-  // proposed, and the steps after it start if the ticket runs; a ticket put
-  // back meanwhile goes on from them when it starts again.
+  // proposed, and the steps after it start if the ticket runs, in the
+  // background, since a click does not wait for clones and containers; a
+  // ticket put back meanwhile goes on from them when it starts again.
   async approveContract(id: string, by: UserId): Promise<void> {
     const step = this.#contractItem(id);
     if (!this.inbox.handleContract(id, by, { decision: 'approve' })) throw new FlowError('conflict', `contract item ${id} is already answered`);
     this.#steps.update(step.id, { state: 'done' });
-    await this.#runSteps(step.ticket);
+    this.#background(this.#runSteps(step.ticket), step.ticket);
+  }
+
+  #background(work: Promise<void>, ticket: TicketId): void {
+    void this.#track(work.catch((error: unknown) => console.error(`cleared-v2: the steps of ${ticket} could not go on (${error instanceof Error ? error.name : typeof error})`)));
   }
 
   // Send back (POST /api/contracts/:id/sendback): the contract step's
   // session is resumed with the message, or, when it cannot be, a new one
-  // runs the step with it; a ticket put back runs it when it starts again.
+  // runs the step with it, in the background; a ticket put back runs it
+  // when it starts again.
   async sendBackContract(id: string, message: string, by: UserId): Promise<void> {
     if (message.trim() === '') throw new FlowError('invalid', 'a Send back says what to change in the contract');
     const step = this.#contractItem(id);
@@ -1009,9 +1015,11 @@ export class FlowEngine {
       return;
     }
     this.#steps.update(step.id, { state: 'running', note: message });
-    if (await this.#reopenStep(step, contractSendBackMessage(message), by)) return;
-    this.#steps.update(step.id, { state: 'waiting' });
-    await this.#runSteps(step.ticket);
+    this.#background((async () => {
+      if (await this.#reopenStep(step, contractSendBackMessage(message), by)) return;
+      this.#steps.update(step.id, { state: 'waiting' });
+      await this.#runSteps(step.ticket);
+    })(), step.ticket);
   }
 
   // The step's last session resumed in its container, then told `text`; false when either fails.
@@ -1474,7 +1482,7 @@ export class FlowEngine {
     const stepId = this.#stepOf.get(from.id);
     const step = stepId ? this.#steps.get(stepId) : undefined;
     if (step && step.state === 'running' && this.#steps.list(ticket).length > 1) {
-      note = this.#stepNote(step, note);
+      note = this.#clean(this.#stepNote(step, note));
       this.#steps.update(step.id, { state: 'failed', note });
       if (reason === 'failed') reason = 'step_failed';
     }
@@ -1704,7 +1712,8 @@ export class FlowEngine {
   // What the card's flags read beside the diff (issue 205): the contract
   // files of the ticket's services, and their `[merge] guarded_paths`.
   #guarded(ticket: Ticket, settings: readonly (ProjectSettings | undefined)[]): { contracts: string[]; guarded: string[] } {
-    const contracts = this.#servicesOf(ticket).flatMap((service) => (service.contract ? [service.contract.path] : []));
+    // As paths of the repository, as the diff's are: a folder service's contract is inside its folder (release/order.ts).
+    const contracts = this.#servicesOf(ticket).flatMap((service) => (service.contract ? [service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path] : []));
     return { contracts: [...new Set(contracts)], guarded: [...new Set(settings.flatMap((s) => s?.guardedPaths ?? []))] };
   }
 

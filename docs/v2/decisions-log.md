@@ -2288,7 +2288,9 @@ A visual reference exists outside the repository. It is inspiration only; nothin
    - No change to the contract: the step is done, and nothing is proposed.
    - Otherwise the contract's diff becomes a `contract` inbox item, and the contract as committed is copied to `<workdirs>/<ticket>/.validated/step-<n>-<round>/`, outside every session's mount, so the fakes of the later steps read the validated version whatever the branch does next.
    - Only what is committed counts: a change left uncommitted in the checkout is not seen. The provider's service step works in the same checkout, and whatever it commits is reviewed as part of the ticket.
-4. **Approve and Send back** (`POST /api/contracts/:id/approve`, `/sendback`, in `flow/steps.ts`, with the checks of every route of the service's API): Approve validates the contract and starts the next steps if the ticket runs. Send back resumes the step's session, in the same container, with the owner's message. When the resume fails, a new session runs the step, with the message in its first turn. An item is answered once. A ticket put back meanwhile goes on from there when it starts again. A contract item survives a restart (it is not a session's request).
+   - The ref is per service (`refs/cleared/step/<service>/<branch>`), since two folder services of one repository share its checkout. A folder service's contract is compared as a path of the repository, inside its folder, as `release/order.ts` reads it; the card's `contract` chip reads it the same way.
+   - The notes a step fails with are cleaned before they are kept, since the failed step's next first turn reads them.
+4. **Approve and Send back** (`POST /api/contracts/:id/approve`, `/sendback`, in `flow/steps.ts`, with the checks of every route of the service's API): the item is answered at once, and what follows runs in the background, since a click does not wait for clones and containers. Approve validates the contract and starts the next steps if the ticket runs. Send back resumes the step's session, in the same container, with the owner's message. When the resume fails, a new session runs the step, with the message in its first turn. An item is answered once. A ticket put back meanwhile goes on from there when it starts again. A contract item survives a restart (it is not a session's request).
    - **Correction to the inbox store** (`inbox/store.ts`, this lane's for corrections): a contract item's id was per session, so a resumed session's second proposal was silently dropped. It is now numbered per step: the diff proposed again while the item waits is that item, and after an answer it is a new one.
 5. **The siblings of each kind of step** (`stepSiblings`), from what the runtime plans for a session on that service (`container/services.ts`, now called by `flow/runtime.ts` for the engine too). The contract step keeps them as planned. A service step keeps its own service, runs every other service with a contract as its fake from the validated contract, and leaves the others out, since their own steps change their checkouts meanwhile. The integration step keeps every sibling real from the ticket branch, a fake reading the validated contract. A consumer's own sibling gets the address of each service it names in `[session] service_urls` (`filter-api:FILTER_URL`): a variable must be upper case and end in `_URL`, so no setting names `PATH` or `NODE_OPTIONS`.
 6. **A provider's service step that changes the validated contract fails**: its branch's contract blob is compared with the validated one. A change to the contract goes through the contract step.
@@ -2303,7 +2305,6 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 15. **Outside the lane's files**:
     - `v2/src/lead/contract.ts`, for `propose_plan`'s schema and `PlanItemInput.steps`, which the lane's goal needs and no lane of wave 9 owns;
     - `v2/test/lead/contract.test.ts`, for its schema;
-    - `v2/test/lead/plans/module.test.ts`, for the new table's name;
     - `v2/src/api/types.ts` (a correction lane 17 left out): `PlanItem.steps` and `PlanStep`.
 
 **Followups.**
@@ -2313,6 +2314,7 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - A review's fix on a service other than the consumer (choice 8): reopen the step of the service the report names, or a new session on it.
 - `policyFor` setting `Policy.planning` while an author's gate is `planning` (lane 25's followup 3) is not taken: the policy is evaluated from the session's `StartInput`, which does not name the session. A small fix lane can key it.
 - The cost over-count of a session of several turns (lane 25's followup), now also in the step's cost.
+- The card's groups read the last author's report only (`#report`), which is the integration step's: what the contract and service steps committed falls under "Other changes". Merge each author session's last `cleared.changes`.
 
 - The requirements matrix: M2, C10, O10 and this lane's own lines P30 and P31.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ticket-steps`.

@@ -3,7 +3,7 @@
 // the flow's tests replace all of them (FlowEffects in engine.ts).
 import { execFile, spawn } from 'node:child_process';
 import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readApprovalRecord } from '../approval/record.ts';
 import { stateDirectory } from '../approval/service.ts';
@@ -205,13 +205,15 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       for (const parts of [['commondir'], ['objects', 'info', 'alternates']])
         if (lstatSync(join(gitDir, ...parts), { throwIfNoEntry: false })) throw new Error(`the step's checkout of ${service.name} cannot be read safely: .git/${parts.join('/')} is present`);
       const branch = ticketBranch(ticket);
-      const ref = `refs/cleared/step/${branch}`;
+      // Per service: two folder services of one repository share its checkout.
+      const ref = `refs/cleared/step/${service.name}/${branch}`;
       await git(dir, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
         'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', gitDir, `+refs/heads/${branch}:${ref}`]);
       const range = `refs/remotes/origin/${base}...${ref}`;
       const diffArgs = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
       const files = (await git(dir, [...diffArgs, '--name-only', range, '--'])).split('\n').filter(Boolean);
-      const path = service.contract?.path;
+      // The contract as a path of the repository, as the files are: a folder service's is inside its folder (release/order.ts).
+      const path = service.contract ? (service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path) : undefined;
       if (!path) return { files, contract: null };
       const diff = (await git(dir, [...diffArgs, range, '--', path])).slice(0, MAX_DIFF);
       const blob = (await git(dir, ['rev-parse', '--verify', '--quiet', `${ref}:${path}`]).catch(() => '')).trim() || null;
