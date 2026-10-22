@@ -7,6 +7,9 @@ import type { LeadExtensions } from '../engine.ts';
 import type { LeadToolInput, PlanItemInput } from '../contract.ts';
 import { HostToolRefused } from '../../session/contract.ts';
 import type { PlanRunner } from './runner.ts';
+import { itemServices, type PlanService } from './store.ts';
+
+export { itemServices } from './store.ts';
 
 export const MAX_ITEMS = 12;
 export const MAX_TITLE = 120;
@@ -65,13 +68,42 @@ export function validatePlan(input: unknown): ValidPlan {
   return { goal, title, summary, items };
 }
 
+// Decision 24: a service whose sensitivity is `full` refuses the fast lane
+// for any ticket touching it. The note ends the item's body, so the lead,
+// the plan panel and the ticket's author read why its lane changed.
+export function fullLaneNote(services: readonly string[]): string {
+  const names = services.length < 2 ? services.join('') : `${services.slice(0, -1).join(', ')} and ${services.at(-1)}`;
+  return `Cleared: this item runs in the full lane, not the fast one it was proposed in, since ${names} ${services.length === 1 ? 'has' : 'have'} the full sensitivity.`;
+}
+
+// The lead's input with every fast item that touches a full service made
+// full, with its note, before the runner validates and estimates it, so
+// its estimate is the full lane's and its ticket has no Quick label. An
+// input that is not a plan is left as it is, for the validation to refuse.
+export function applySensitivity(input: unknown, services: readonly PlanService[]): unknown {
+  const value = input as { items?: unknown } | null;
+  if (services.length === 0 || typeof value !== 'object' || value === null || !Array.isArray(value.items)) return input;
+  return {
+    ...value,
+    items: value.items.map((entry: unknown) => {
+      const item = entry as { lane?: unknown; body?: unknown } | null;
+      if (typeof item !== 'object' || item === null || item.lane !== 'fast' || typeof item.body !== 'string') return entry;
+      const full = itemServices(item.body, services).filter((service) => service.sensitivity === 'full').map((service) => service.name);
+      return full.length === 0 ? entry : { ...item, lane: 'full', body: `${item.body.trimEnd()}\n\n${fullLaneNote(full)}` };
+    }),
+  };
+}
+
 // The extensions the lead module gives the lead's engine. The runner is
 // built with the lead, so its tools ask for it when called.
 export function planExtensions(plans: () => PlanRunner | undefined): LeadExtensions {
   const runner = (): PlanRunner => plans() ?? refuse('The plans are not running yet: try again in a moment.');
   return {
     tools: {
-      propose_plan: async (input) => runner().propose(input),
+      propose_plan: async (input) => {
+        const plans = runner();
+        return plans.propose(applySensitivity(input, plans.store.services()));
+      },
       start_ticket: async (input) => {
         const value = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
         return runner().startTicket(text(value.id, 'the ticket id', MAX_TITLE), text(value.reason, 'the reason', MAX_SUMMARY));
