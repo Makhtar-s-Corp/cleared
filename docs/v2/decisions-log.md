@@ -2984,3 +2984,64 @@ The owner took three more decisions at the same time. They are recorded here as 
 
 - Pull request: 238, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-review-multi-service-diff`.
+
+## 2026-10-22: Owner decision of 22:03: the reviewer's read-only commands and the compound command split part by part
+
+**Decision.** On 2026-10-22 at 22:03 (Europe/Paris), from a demo inbox capture, the owner decided:
+- In the session permission policy, the reviewer may run by default, inside its container, the read-only commands (`git log`, `git show`, `git diff`, `git merge-base`, `git status`, `git rev-parse`, `grep`, `rg`, `cat`, `head`, `tail`, `ls`, `wc`, `find` without `-exec` or `-delete`) and the project's own checks (`npm test`, and `npm run test` or `typecheck` as the project declares them).
+- A compound command (`;`, `&&`, `||`, `|`) is split and evaluated part by part, and only the risky part asks.
+- A redirection to a file and a command substitution keep asking.
+- The same split applies to the other roles only where it does not widen their rights.
+
+It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the lane `v2-j2-reviewer-policy` implements it and cites this entry.
+
+**Why.** A Sonnet reviewer asked to run a chained command (`git log; git merge-base main HEAD; git show ...; npm test | tail`). The request went to the owner's inbox with the reason "git merge-base main HEAD is not a command the policy allows on its own": `git show` and `git merge-base` were in no safe pattern, so a review's ordinary reads waited for the owner.
+
+**Consequences.** The requirements matrix records the decision as O18, and the author's choices as P47 (the entry below). No screen changes.
+
+- Author: the owner, relayed on 2026-10-22 22:03 (Europe/Paris); written in this log by Opus 5.5 (claude-opus-5-5), lane `v2-j2-reviewer-policy`.
+
+## 2026-10-22: the reviewer's reads, and a compound command judged on every part (the author's choices, lane v2-j2-reviewer-policy)
+
+**Decision.** The lane applies the owner's decision of 22:03 (the entry above). The policy already split a compound command into its parts (milestone 2, decision 10, this log's entry of lane `v2-j2-contracts`): the capture asked because two of its parts were not allowed on their own, not because it was compound. Its choices:
+
+1. **The reviewer's reads are its own rows.** `REVIEWER_READS` in `session/policy.ts` (`git show`, `git merge-base`, `git rev-parse`, `rg`, `wc`), rule `reviewer.read`, checked after `run.safe` for the reviewer only. Milestone 1's safe commands already held `git log`, `git diff`, `git status`, `grep`, `cat`, `head`, `tail`, `ls`, `find` and `npm test`, and `npm run` of a script the base branch declares; they keep their rule `run.safe`. Reason: `DEFAULT_SAFE_COMMANDS` is shared by the author and the reader (`reader/service.ts`), and issue 219 (finding F2) already notes that the reader's Bash reads go around its 400-line cap. Adding the new reads there would widen both roles.
+2. **What still asks in the new reads**, by the same word rules as milestone 1's:
+   - `rg --pre` (it runs a program on every file it searches), `--pre-glob`, `--hostname-bin` (it runs a program), `--ignore-file`, `-f` and `--file` (they read a file);
+   - `wc --files0-from` (it reads a list of files);
+   - a path outside the workdir. The pattern is not taken for a path, except when `-e` or `--regexp` names it, or `rg --files` has none: every operand is then a path;
+   - for `git show`, `merge-base` and `rev-parse`: what milestone 1 already refused for git (`--output`, `-o`, `%(` and `%x` formats, global options other than `-C`, an operand outside the workdir).
+3. **A narrowing found by the table: `-e` inside a group of short options.** `grep -eroot /etc/passwd` was allowed, because only a bare `-e` made every operand a path. A group holding `e` (`-ie`, `-eroot`) now counts as `-e`, for `grep` and `rg`. It narrows every role and changes no existing row.
+4. **A deny in any part wins.** Before, the first part that was not allowed gave the verdict, so `make build; npm test > out.txt` asked for `make build` (a reviewer's redirection is `reviewer.edit`, a planning author's is `plan.before_go`). An "Allow once" of that ask would have run the write the policy denies. Now every part is evaluated, and a part's command and its redirections both: any deny wins, wherever it stands.
+5. **Only the risky parts ask, and the reason names each and no other.** One part that asks keeps its verdict as before (its own rule, or `shell.compound` naming the part). Several give the first one's rule and a reason listing every part that asks with its own reason ("2 parts of this command ask, the others are allowed: ..."). The allowed parts are not named.
+6. **Redirections and substitutions.** A substitution (`$(...)`, a backtick, `$` in double quotes) is still refused by the parser and asks as `shell.compound`. A redirection to a file keeps milestone 2's rule: it gets the verdict a `Write` of the target gets. For the reviewer that is `reviewer.edit`, a deny, which is stricter than the decision's "keep asking"; the lane reads "keep asking" as "never allowed" and does not soften a deny into an ask. `/dev/null` is a file outside the workdir: `git log 2>/dev/null` is denied to the reviewer, as before. A duplication (`2>&1`) writes no file and stays allowed.
+7. **The other roles, only where nothing widens.**
+   - The author: the split was already its own (decision 10), and its verdicts are unchanged except that a deny in a later part now wins (choice 4).
+   - The reader: its verdicts are the reviewer's rows with its asks refused (decision 28), but it does not get `REVIEWER_READS`, so its rights do not grow.
+   - The lead: its rows are not split. Its `head -n 400` cap is per command, and a list of capped reads would lift it; a list stays `lead.command`.
+   - `cd` stays an ask in a list: it would move what `inside()` resolves the relative paths against.
+
+**Files.** The lane is not in the plan's lane list, so it names its own: `v2/src/session/policy.ts`; `v2/test/session/reviewer-policy.test.ts` (new), `v2/test/session/claude-code/adapter.test.ts`; this log and `docs/v2/requirements-matrix.md`. No screen changed, so there is no visual loop and no capture.
+
+**Tests.**
+- `test/session/reviewer-policy.test.ts`, a table of commands with their expected verdict and rule, per role:
+  - the capture's command, with `&&`, for the reviewer, and its variants (`npm run typecheck && npm test 2>&1 | tail -40`, `rg ... | head; wc -l ...`);
+  - each new read alone, and milestone 1's reads and checks still `run.safe`; `npm run deploy`, not declared, asks;
+  - what still asks: `rg --pre`, `--hostname-bin`, `-f`, `--ignore-file`, `rg --files /etc`, `rg -eroot /etc/passwd`, `grep -eroot /etc/passwd`, `wc --files0-from`, paths outside, `git show --output`, `find -exec`;
+  - tricky quoting: a separator inside single or double quotes or escaped (`grep -n 'a|b'`, `git log --grep="x && y"`, `rg foo\;bar`), `'$(id)'` literal, `"$(id)"` and backticks asking, `git diff $(git merge-base main HEAD)`, a newline, `;;`, a lone `&`, `|&`, `cd sub && ...`, a brace or a glob, an input redirection;
+  - the reason of a mixed list names the asking parts only;
+  - a deny in a later part wins, for the reviewer and for a planning author;
+  - the author, the reader and the lead keep their verdicts on the new reads and on the capture's command.
+- `test/session/claude-code/adapter.test.ts`: through the Claude Code adapter, a reviewer's capture command is answered `allow_once` by the policy (`shell.compound_safe`) and makes no inbox request, while `git log -3; curl https://example.com` still does.
+- On the old code, 8 of the 9 new tests fail; the ninth, the other roles unchanged, passes on both. No row of `test/session/policy.test.ts` changed.
+
+**Followups.**
+- "Always in this project" on a compound request saves the whole command as its pattern (`patternOf` in `flow/engine.ts`), and a compound command is matched part by part, so that answer never matches again. Saving the asking part instead needs the verdict to carry it and the engine to read it; `flow/engine.ts` is not this lane's file.
+- No real run: as the brief asked, no proof or rehearsal ran against the live service on 8791 and 8792, and nothing of the demo checkout was touched. The next review in a proof shows the change.
+
+**Checks.**
+- `npm test`: 1249 node tests, 1241 pass and 8 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), 0 fail; 184 Vitest tests pass.
+- `npm run typecheck` is green.
+- `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-reviewer-policy`.
