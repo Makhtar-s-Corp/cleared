@@ -42,7 +42,7 @@ import { ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
 import type { FlowConfig, ProjectSettings } from './config.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
-import { atOrAfter, landingOf } from './ledger.ts';
+import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
 import { foldState } from './state.ts';
 
@@ -108,7 +108,9 @@ type Live = {
 type Watcher = { wait(ms: number): Promise<void>; close(): void };
 
 // A release the tick follows from the approval to its landing.
-type Following = { nextAttempt: number; inFlight: boolean; mergedAt?: string };
+// `inFlight`: a call to the lock, or the ticket's move at the end, is running.
+// `refused`: the lock refused the merge for good; what is left is the put back.
+type Following = { nextAttempt: number; inFlight: boolean; mergedAt?: string; refused?: string };
 type Candidate = {
   readonly item: string; readonly ticket: TicketId; readonly status: string; readonly session: SessionId;
   readonly pr: number; readonly announcement: string; readonly since: string;
@@ -155,6 +157,7 @@ export class FlowEngine {
   #timer: NodeJS.Timeout | undefined;
   #listeners = new Set<FlowListener>();
   #following = new Map<string, Following>();                        // by release item
+  #landed = new Set<string>();                                      // release items whose watch is closed: final
   #checked = new Map<string, number>();                             // when a release's checks were last read
   #files = new Map<SessionId, { seq: number; open: Map<string, string>; files: string[] }>();
 
@@ -273,21 +276,35 @@ export class FlowEngine {
   }
 
   // One step of a release's landing. Everything up to the journal is
-  // synchronous, so two calls never open or close the watch twice.
+  // synchronous, and `inFlight` covers what is not, so two calls never ask
+  // the lock, open or close the watch twice.
   #follow(c: Candidate): void {
+    if (this.#landed.has(c.item)) return;
     const tickets = this.registry.ticketStore;
     const steps = this.#store.events.after(c.session).flatMap(({ event }) => (event.type === 'STEP_STARTED' || event.type === 'STEP_FINISHED') && event.stepName === 'watch' ? [event.type] : []);
     if (steps.includes('STEP_FINISHED')) {
       this.#following.delete(c.item);
+      this.#landed.add(c.item);
       return;
     }
     let state = this.#following.get(c.item);
     if (!state) this.#following.set(c.item, (state = { nextAttempt: this.#now().getTime() + this.config.mergeRetryMs, inFlight: false }));
+    if (state.inFlight) return;
+    if (state.refused !== undefined) {
+      // A put back that failed is made again; the lock is not asked again.
+      const refused = state.refused;
+      state.inFlight = true;
+      void this.#track(this.#putBack(c.ticket, refused, 'merge_refused').then((moved) => {
+        state.inFlight = false;
+        if (moved) this.#following.delete(c.item);
+      }));
+      return;
+    }
     const landing = landingOf(this.#store.db, { ticket: c.ticket, pr: c.pr, since: c.since, ...(state.mergedAt ? { mergedHere: state.mergedAt } : {}) });
     if (landing.state === 'waiting') {
       // Lane 8's approval asks the lock first; the flow asks again one
       // interval after it first saw the approval, then at every interval.
-      if (steps.length > 0 || c.status !== tickets.states.go || state.inFlight || this.#now().getTime() < state.nextAttempt) return;
+      if (steps.length > 0 || c.status !== tickets.states.go || this.#now().getTime() < state.nextAttempt) return;
       state.inFlight = true;
       void this.#track(this.#merge(c, state));
       return;
@@ -299,27 +316,49 @@ export class FlowEngine {
       this.#emit({ type: 'release_merged', at: landing.mergedAt, project: this.config.project, ticket: c.ticket, pr: c.pr });
     }
     if (landing.state === 'merged') return;
-    this.#step(session, 'STEP_FINISHED', 'watch', new Date(landing.at));
-    this.#snapshot(c.session, c.ticket);
-    this.#following.delete(c.item);
+    state.inFlight = true;
+    void this.#track(this.#settleLanding(c, landing).then((closed) => {
+      state.inFlight = false;
+      if (closed) {
+        this.#following.delete(c.item);
+        this.#landed.add(c.item);
+      }
+    }));
+  }
+
+  // The end of a landing: the ticket's move first, then the `watch` step
+  // and the events. A move that fails leaves the watch open, so the next
+  // tick makes it again (the ticket stays a candidate while it is in go or
+  // Done). True when the landing is closed.
+  async #settleLanding(c: Candidate, landing: Extract<Landing, { at: string }>): Promise<boolean> {
+    const tickets = this.registry.ticketStore;
     const base = { at: landing.at, project: this.config.project, ticket: c.ticket, pr: c.pr };
-    if (landing.state === 'landed') {
-      void this.#track((async () => {
+    const status = (await tickets.get(c.ticket).catch(() => undefined))?.status;
+    try {
+      if (landing.state === 'landed') {
         // merge-pr.sh moves the card to Done when every shown pull request is merged; the flow does when it did not.
-        if ((await tickets.get(c.ticket))?.status === tickets.states.go) await tickets.move(c.ticket, tickets.states.done, SERVICE).catch(() => undefined);
-        this.#emit({ type: 'release_landed', ...base, health: landing.health });
-      })());
-    } else if (landing.state === 'rolled_back') {
-      const note = `Pull request #${c.pr} was rolled back by the release watch (${landing.note}): the change is no longer live, and the ticket is back in Todo.`;
-      this.#emit({ type: 'rolled_back', ...base, note: this.#clean(landing.note) });
-      void this.#track(this.#putBack(c.ticket, note, 'rolled_back'));
-    } else {
-      const note = `Pull request #${c.pr} is live, but its release watch did not end healthy: ${landing.note}. Nothing was reverted: look at the release and decide.`;
-      void this.#track((async () => {
+        if (status === tickets.states.go) await tickets.move(c.ticket, tickets.states.done, SERVICE);
+      } else if (landing.state === 'rolled_back') {
+        if (status === tickets.states.go || status === tickets.states.done) await tickets.move(c.ticket, tickets.states.todo, SERVICE);
+        const note = `Pull request #${c.pr} was rolled back by the release watch (${landing.note}): the change is no longer live, and the ticket is back in Todo.`;
         await tickets.comment(c.ticket, this.#clean(note), SERVICE).catch(() => undefined);
-        this.#emit({ type: 'release_unhealthy', ...base, note: this.#clean(landing.note) });
-      })());
+      } else {
+        await tickets.comment(c.ticket, this.#clean(`Pull request #${c.pr} is live, but its release watch did not end healthy: ${landing.note}. Nothing was reverted: look at the release and decide.`), SERVICE);
+      }
+    } catch (error) {
+      console.error(`cleared-v2: the end of the landing of ${c.ticket} failed, the next tick tries again (${error instanceof Error ? error.name : typeof error})`);
+      return false;
     }
+    this.#step({ id: c.session, ticket: c.ticket, project: this.config.project }, 'STEP_FINISHED', 'watch', new Date(landing.at));
+    this.#snapshot(c.session, c.ticket);
+    if (landing.state === 'landed') this.#emit({ type: 'release_landed', ...base, health: landing.health });
+    else if (landing.state === 'unhealthy') this.#emit({ type: 'release_unhealthy', ...base, note: this.#clean(landing.note) });
+    else {
+      const note = this.#clean(landing.note);
+      this.#emit({ type: 'rolled_back', ...base, note });
+      this.#emit({ type: 'ticket_put_back', at: this.#at(), project: this.config.project, ticket: c.ticket, reason: 'rolled_back', note: `Pull request #${c.pr} was rolled back by the release watch (${note}).` });
+    }
+    return true;
   }
 
   async #merge(c: Candidate, state: Following): Promise<void> {
@@ -335,8 +374,10 @@ export class FlowEngine {
       state.mergedAt = this.#now().toISOString();
       this.#follow(c);
     } else if (merge.outcome === 'refused') {
-      this.#following.delete(c.item);
-      await this.#putBack(c.ticket, `The lock refused to merge pull request #${c.pr}: ${merge.message || 'no reason given'}`, 'merge_refused');
+      state.refused = `The lock refused to merge pull request #${c.pr}: ${merge.message || 'no reason given'}`;
+      state.inFlight = true;
+      if (await this.#putBack(c.ticket, state.refused, 'merge_refused')) this.#following.delete(c.item);
+      state.inFlight = false;
     }
   }
 
@@ -763,12 +804,19 @@ export class FlowEngine {
     await this.#putBack(ticket, note, reason);
   }
 
-  async #putBack(ticket: TicketId, note: string, reason: PutBackReason): Promise<void> {
+  // True when the ticket was moved: `ticket_put_back` is said only then.
+  async #putBack(ticket: TicketId, note: string, reason: PutBackReason): Promise<boolean> {
     const tickets = this.registry.ticketStore;
     this.#active.delete(ticket);
     await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
-    await tickets.move(ticket, tickets.states.todo, SERVICE).catch(() => undefined);
+    try {
+      await tickets.move(ticket, tickets.states.todo, SERVICE);
+    } catch (error) {
+      console.error(`cleared-v2: ${ticket} could not be put back in Todo (${error instanceof Error ? error.name : typeof error})`);
+      return false;
+    }
     this.#emit({ type: 'ticket_put_back', at: this.#at(), project: this.config.project, ticket, reason, note: this.#clean(note) });
+    return true;
   }
 
   // ---- the author is done: the review starts ------------------------------
@@ -839,7 +887,10 @@ export class FlowEngine {
     const authorRow = this.#lastSession(id, 'author');
     const kept = authorRow ? this.#inputs.get(authorRow.id) : undefined;
     const adapter = this.registry.sessionAdapters[HARNESS];
-    if (!ticket || !adapter) return this.#putBack(id, 'The author could not be reopened: the ticket or the adapter is gone.', 'reopen_failed');
+    if (!ticket || !adapter) {
+      await this.#putBack(id, 'The author could not be reopened: the ticket or the adapter is gone.', 'reopen_failed');
+      return;
+    }
     await tickets.move(id, tickets.states.progress, SERVICE);
     const message = reviewRequestMessage(report, round);
     const began = this.#now();

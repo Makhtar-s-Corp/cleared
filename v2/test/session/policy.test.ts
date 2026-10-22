@@ -326,7 +326,9 @@ test('installs, deletions and network commands ask with their own rule', () => {
     { name: 'git checkout -- .', request: bash('git checkout -- .'), decision: 'ask', rule: 'delete.outside_ticket' },
     { name: 'git reset --hard', request: bash('git reset --hard HEAD~1'), decision: 'ask', rule: 'delete.outside_ticket' },
     { name: 'rm of a file outside the ticket', request: bash('rm README.md'), decision: 'ask', rule: 'delete.outside_ticket' },
-    { name: 'rm of a ticket file', request: bash('rm src/app.ts'), decision: 'ask', rule: 'default' },
+    // Milestone 2, decision 11: the author deletes a file its ticket changed without asking.
+    { name: 'rm of a ticket file', request: bash('rm src/app.ts'), decision: 'allow', rule: 'delete.ticket' },
+    { name: 'rm -r of a ticket file', request: bash('rm -r src/app.ts'), decision: 'ask', rule: 'delete.outside_ticket' },
     { name: 'wget', request: bash('wget https://example.org/x'), decision: 'ask', rule: 'net.undeclared' },
     { name: 'ssh', request: bash('ssh host.example.org'), decision: 'ask', rule: 'net.undeclared' },
     { name: 'nc', request: bash('nc example.org 80'), decision: 'ask', rule: 'net.undeclared' },

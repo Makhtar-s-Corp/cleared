@@ -267,3 +267,77 @@ test('the releases table of the tests is lib/release.mjs\'s, word for word', () 
   const v1 = readFileSync(new URL('../../../lib/release.mjs', import.meta.url), 'utf8');
   assert.ok(v1.includes(RELEASES_TABLE), 'support.ts RELEASES_TABLE must be copied from lib/release.mjs');
 });
+
+// The ticket store refuses the next move to `status` once, as a tracker that errors once would.
+function failOnce(t: Setup, status: string): { readonly failed: () => number } {
+  let failures = 0;
+  let armed = true;
+  const move = t.tickets.move.bind(t.tickets);
+  t.tickets.move = async (id, to, by) => {
+    if (armed && to === status) {
+      armed = false;
+      failures += 1;
+      throw new Error('the tracker did not answer');
+    }
+    return move(id, to, by);
+  };
+  return { failed: () => failures };
+}
+
+async function quietly<T>(run: () => Promise<T>): Promise<T> {
+  const log = console.error;
+  console.error = () => {};
+  try { return await run(); } finally { console.error = log; }
+}
+
+test('a Done move that fails after a healthy watch is made again by the next tick; the watch closes and release_landed is said once, after it', async () => {
+  const { t } = await landing({ answers: ['merged'] });
+  await tickAfter(t, 60_000);
+  const store = failOnce(t, 'Done');
+  releaseRow(t.store, { ticket: t.ticket.id, pr: 7, status: 'complete', mergedAt: iso(t.clock.now), endedAt: iso(t.clock.now + 1000) });
+  ledgerRow(t.store, { kind: 'release_watch_complete', ticket: t.ticket.id, pr: 7, at: iso(t.clock.now + 1000) });
+  await quietly(() => tickAfter(t, 30_000));
+  assert.equal(store.failed(), 1);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Ready to Ship');
+  assert.equal(steps(t).at(-1), '+watch', 'the watch stays open while the ticket is not Done');
+  assert.deepEqual(of(t, 'release_landed'), [], 'not said before the move');
+
+  await tickAfter(t, 30_000);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Done');
+  assert.equal(steps(t).filter((s) => s === '-watch').length, 1);
+  assert.equal(of(t, 'release_landed').length, 1);
+  await tickAfter(t, 30_000);
+  assert.equal(of(t, 'release_landed').length, 1);
+});
+
+test('a put back that fails after a rollback is made again by the next tick; rolled_back and ticket_put_back are said once, after it', async () => {
+  const { t } = await landing({ answers: ['merged'] });
+  await tickAfter(t, 60_000);
+  const store = failOnce(t, 'Todo');
+  ledgerRow(t.store, { kind: 'rollback_pushed', ticket: t.ticket.id, pr: 7, at: iso(t.clock.now + 1000), detail: 'abc reverted by def' });
+  await quietly(() => tickAfter(t, 30_000));
+  assert.equal(store.failed(), 1);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Ready to Ship');
+  assert.equal(steps(t).at(-1), '+watch');
+  assert.deepEqual(types(t).filter((x) => x === 'rolled_back' || x === 'ticket_put_back'), []);
+
+  await tickAfter(t, 30_000);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
+  assert.equal(steps(t).at(-1), '-watch');
+  assert.deepEqual(types(t).filter((x) => x === 'rolled_back' || x === 'ticket_put_back'), ['rolled_back', 'ticket_put_back']);
+  assert.deepEqual(of(t, 'ticket_put_back').map((e) => e.reason), ['rolled_back']);
+  assert.equal((await t.tickets.comments(t.ticket.id)).filter((c) => /rolled back/.test(c.body)).length, 1);
+});
+
+test('a put back that fails after a refused merge is made again without asking the lock again; ticket_put_back is said once', async () => {
+  const { t, asked } = await landing({ answers: ['refused'] });
+  const store = failOnce(t, 'Todo');
+  await quietly(() => tickAfter(t, 60_000));
+  assert.equal(store.failed(), 1);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Ready to Ship');
+  assert.deepEqual(of(t, 'ticket_put_back'), []);
+  await tickAfter(t, 30_000);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
+  assert.equal(asked.length, 1, 'the lock is asked once');
+  assert.deepEqual(of(t, 'ticket_put_back').map((e) => e.reason), ['merge_refused']);
+});

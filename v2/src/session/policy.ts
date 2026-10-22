@@ -500,6 +500,26 @@ function safeCommand(words: readonly string[], policy: Policy): boolean {
   return !unsafeWords(words, policy);
 }
 
+// An author deletes a file its ticket changed without asking (milestone 2,
+// decision 11): plain `rm`, with `-f` at most, every operand inside the
+// workdir and in ticketFiles, which the service fills from the edits the
+// ticket's sessions made. A recursive or any other option, an operand the
+// ticket did not change, or another role falls to the asks below.
+function ticketDeletion(words: readonly string[], policy: Policy): boolean {
+  if (policy.role !== 'author' || words[0] !== 'rm') return false;
+  const operands: string[] = [];
+  let options = true;
+  for (const word of words.slice(1)) {
+    if (options && word === '--') { options = false; continue; }
+    if (options && word.startsWith('-')) {
+      if (word === '-f' || word === '--force') continue;
+      return false;
+    }
+    operands.push(word);
+  }
+  return operands.length > 0 && operands.every((path) => inside(policy.workdir, path) && policy.ticketFiles.includes(relative(policy.workdir, path)));
+}
+
 function learned(request: ToolRequest, words: readonly string[] | undefined, policy: Policy): boolean {
   const input = request.input;
   const subject = words
@@ -565,6 +585,7 @@ export function evaluate(request: ToolRequest, policy: Policy, context: PolicyCo
   }
   if (words && safeCommand(words, policy)) return allow('run.safe');
   if (learned(request, words, policy)) return allow('learned');
+  if (words && ticketDeletion(words, policy)) return allow('delete.ticket');
 
   return asked(request, words, policy);
 }

@@ -56,11 +56,19 @@ test('ticketFiles holds the files the ticket\'s sessions edited, not an edit tha
   await until(() => t.store.events.after(author.id).some((e) => e.event.type === 'TOOL_CALL_RESULT' && e.event.toolCallId === 'e4'));
   assert.deepEqual(t.engine.policyFor(author.input).ticketFiles, ['src/entries.ts', 'test/new.test.ts']);
   const policy = t.engine.policyFor(author.input);
-  assert.notEqual(evaluate(rm('src/entries.ts'), policy).rule, 'delete.outside_ticket');
-  assert.notEqual(evaluate(rm('/workspace/src/entries.ts'), policy).rule, 'delete.outside_ticket');
-  assert.notEqual(evaluate(rm('test/new.test.ts'), policy).rule, 'delete.outside_ticket');
-  assert.equal(evaluate(rm('package.json'), policy).rule, 'delete.outside_ticket');
+  const allowed = { decision: 'allow', rule: 'delete.ticket' };
+  assert.deepEqual(evaluate(rm('src/entries.ts'), policy), allowed);
+  assert.deepEqual(evaluate(rm('/workspace/src/entries.ts'), policy), allowed);
+  assert.deepEqual(evaluate(rm('-f test/new.test.ts'), policy), allowed);
+  assert.deepEqual(evaluate(rm('-- src/entries.ts test/new.test.ts'), policy), allowed);
+  // Everything else still asks: a file the ticket did not change (or whose edit failed), one of
+  // them among ticket files, a recursive or other option, a path outside the workdir, a glob.
+  for (const args of ['package.json', 'src/entries.ts package.json', '-r src/entries.ts', '-rf src/entries.ts', '-i src/entries.ts', '../src/entries.ts', '/etc/hosts', 'src/*.ts']) {
+    assert.equal(evaluate(rm(args), policy).decision, 'ask', `rm ${args}`);
+  }
   assert.equal(evaluate(rm('src/entries.ts'), author.input.policy).rule, 'delete.outside_ticket', 'the policy of the start knew no file');
+  // A reviewer never deletes, even a file of the ticket.
+  assert.notEqual(evaluate(rm('src/entries.ts'), { ...policy, role: 'reviewer' }).decision, 'allow');
 
   await t.engine.send(author.id, 'go on', 'u1');
   await until(() => t.store.events.after(author.id).some((e) => e.event.type === 'TOOL_CALL_RESULT' && e.event.toolCallId === 'e5'));
