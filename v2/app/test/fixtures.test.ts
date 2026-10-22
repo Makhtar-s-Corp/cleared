@@ -109,11 +109,12 @@ test('the fixture source answers the lead and plan read routes, and refuses thei
     assert.equal(memory.handover?.generation, 2);
     assert.equal(memory.commitments.length, 2);
     const plans = await (await get('/plans')).json() as Plan[];
-    assert.equal(plans.length, 1);
-    const plan = plans[0] as Plan;
+    assert.ok(plans.some((p) => p.id === 'plan-entries' && p.state === 'approved'), 'the tower\'s plan under way');
+    const plan = plans.find((p) => p.state === 'proposed') as Plan;
     assert.equal(((await (await get(`/plans/${plan.id}`)).json()) as Plan).title, plan.title);
     assert.equal((await get('/plans/nope')).status, 404);
     const inbox = await (await get('/inbox')).json() as InboxItem[];
+    assert.equal(inbox.filter((i) => i.kind === 'plan').length, 1, 'one plan waits: the lead fixture\'s');
     const item = inbox.find((i) => i.kind === 'plan');
     assert.ok(item && item.kind === 'plan');
     assert.deepEqual([item.ticket, item.planId, item.itemCount, item.state], [LEAD_TICKET, plan.id, 5, 'waiting']);

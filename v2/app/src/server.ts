@@ -131,6 +131,7 @@ ${tab('lead', '/lead', t('nav_plans'))}
 </nav>
 ${options.source === 'fixtures' ? `<span class="source-pill">${escape(t('source_fixtures'))}</span>` : ''}
 <div class="right">
+<a class="lead-pill" id="lead-pill" href="/lead" hidden>${escape(t('lead_pill'))}</a>
 <details class="notify" id="notify" hidden>
 <summary class="icon" id="notify-summary" aria-label="${escape(t('notify_label'))}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></summary>
 <div class="menu" id="notify-menu"></div>
