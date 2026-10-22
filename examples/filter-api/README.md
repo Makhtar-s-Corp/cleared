@@ -4,6 +4,7 @@ A small web service that tells whether a text holds a word of its list. The gues
 
 - `node:http`, no framework, no runtime dependency. `typescript` and `@types/node` are needed only for `npm run typecheck`.
 - TypeScript run by Node's type stripping (Node 24), with no build step and erasable syntax only.
+- Licence: Apache-2.0 (`LICENSE` in the project's repository).
 
 ## Routes
 
