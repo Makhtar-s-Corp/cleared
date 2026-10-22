@@ -133,7 +133,8 @@ test('a two-service ticket: the contract step, sent back once and validated, the
   await t.engine.sendBackContract(item.id, 'Add an example for a flagged entry.', 'u1');
   assert.equal(t.inbox.item(item.id)?.state, 'handled');
   assert.deepEqual((t.inbox.item(item.id) as ContractItem).outcome?.decision, 'send_back');
-  await until(() => contract()?.id !== item.id, 'the second contract item');
+  await until(() => contract() !== undefined, 'the second contract item');
+  assert.notEqual(contract()?.id, item.id);
   await t.engine.settled();
   assert.ok(t.store.events.after(first.id).some(({ event }) => JSON.stringify(event).includes('Add an example for a flagged entry.')), 'the message reached the step\'s session');
   assert.equal(t.startedSessions.length, 1, 'the same session, resumed');

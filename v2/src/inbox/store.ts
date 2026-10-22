@@ -131,10 +131,12 @@ export class InboxStore {
 
   // A contract step's diff for the owner's validation (decision 26). Lane 23
   // adds it when the step ends and handles it from its Approve and Send back
-  // routes; one item per step and session, so a step sent back and run
-  // again proposes a new one.
+  // routes; numbered per step, so a step sent back proposes a new one,
+  // from the same session resumed or from a new one (lane 23).
   addContract(input: Base & Pick<ContractItem, 'sessionId' | 'step' | 'service' | 'path' | 'diff'>): ContractItem {
-    const id = `contract:${input.ticket}:${input.step}:${input.sessionId}`;
+    // A diff proposed again while the step's item waits is that item.
+    const n = Number((this.#db.prepare("SELECT COUNT(*) AS n FROM flow_inbox WHERE kind = 'contract' AND ticket = ? AND request_id = ? AND state = 'handled'").get(input.ticket, input.step) as Row).n) + 1;
+    const id = `contract:${input.ticket}:${input.step}:${n}`;
     this.#insert(id, 'contract', input, input.sessionId, input.step, this.#now().toISOString(),
       { sessionId: input.sessionId, step: input.step, service: input.service, path: input.path, diff: input.diff, outcome: null });
     return this.#get(id) as ContractItem;

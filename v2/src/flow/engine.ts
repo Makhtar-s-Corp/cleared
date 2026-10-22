@@ -887,7 +887,8 @@ export class FlowEngine {
     let read: StepChanges | undefined;
     if (step.kind === 'contract' || validated !== null) {
       if (!this.#effects.stepChanges) return this.#failStep(step, 'what it changed cannot be read: the flow has no reader of a step\'s branch');
-      const round = this.inbox.contracts({ ticket: id }).filter((item) => item.step === step.id).length + 1;
+      const proposed = [...this.inbox.contracts({ ticket: id }), ...this.inbox.contracts({ ticket: id, state: 'handled' })];
+      const round = proposed.filter((item) => item.step === step.id).length + 1;
       try {
         read = await this.#effects.stepChanges({
           ticket: id, service: this.#service(step.service), workdir: live.input.workdir,

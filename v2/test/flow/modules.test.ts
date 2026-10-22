@@ -47,9 +47,9 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule }, { store });
-  assert.equal(routeKeys(app).length, 17);
+  assert.equal(routeKeys(app).length, 20);
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code']);
-  assert.ok(!app.routes.some((r) => r.path.endsWith('/approve')), 'the approval route is lane 8\'s');
+  assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
 });
 
 test('a runtime without CLEARED_V2_PROJECT has no engine; a badly set up project is an error', () => {
