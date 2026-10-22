@@ -2945,13 +2945,13 @@ The lane's choices:
 5. **Reference data, cleaned, within a budget.** Each diff goes through the service's cleaner, sits between BEGIN and END lines, and is called reference data written by the ticket's sessions. The diffs shown share 96 KiB (`REVIEW_DIFF_BUDGET`) in equal parts. Each is cut at a line, the cut is said, and the file list stays whole. Reason: the card's 4 MB cut is no prompt's size.
 6. **No review on half the change.** When a service's change cannot be read, the review does not start: the ticket goes back to Todo with `review_failed` and the reason. Without the reader (only the tests' configurations lack it), the prompt says each other service's change could not be read. The reviewer is then asked to count as unmet a criterion only that change would meet.
 7. **The base.** In a workspace of several services, the reviewer's git commands name its own service's base. Before, they named the workspace's configured base.
-8. **One service, unchanged.** A ticket of one service, in a workspace of one service or of several, gets the review prompt as before, byte for byte, and no branch is read.
+8. **One service, unchanged.** A ticket of one service gets the review prompt as before and no branch is read. In a one-service workspace the prompt is the same byte for byte. In a workspace of several, the only difference is the base its git commands name, its service's own (choice 7).
 
 **Files.** The lane is not in the plan's lane list, so it names its own: `v2/src/flow/{engine,prompts,effects}.ts`; under `v2/test/flow/`, `review-services.test.ts` (new), `steps.test.ts`, `effects-services.test.ts` and `support.ts` (the cleaner as a setup option); this log and `docs/v2/requirements-matrix.md`. No screen changed, so there is no visual loop and no capture.
 
 **Tests.**
 - `test/flow/review-services.test.ts`:
-  - the prompt's text: two services, the contract validated or not, the provider as the checkout, a service with no change, one that could not be read, the budget's cut, the split of a diff by file, and one service byte for byte;
+  - the prompt's text: two services, the contract validated or not, the provider as the checkout, a service with no change, one that could not be read, the budget's cut, the split of a diff by file, and a single service unchanged;
   - on the fake adapter, LOCAL-10's shape (a train ticket on the guestbook and the filter API): the guestbook's reviewer gets the filter API's diff, the contract's diff and its own base;
   - an approved contract item is said validated, an unreadable branch puts the ticket back, the diffs go through the cleaner, and a one-service ticket reads no branch.
 - `test/flow/steps.test.ts`: after the steps, the reviewer gets the contract as validated and the filter API's diff.
