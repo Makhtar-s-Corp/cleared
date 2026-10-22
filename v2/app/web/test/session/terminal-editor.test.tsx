@@ -82,7 +82,11 @@ test('the terminal\'s frame names what runs: the harness first with Shell beside
   assert.match(shell, /<button[^>]*data-act="terminal_harness"[^>]*>Back to Claude Code<\/button>/);
   // A harness the adapter cannot resume: its reason, and the Shell; nothing to open again.
   const unsupported = html(<TerminalFrame t={en} status={{ kind: 'closed', reason: 'unsupported', detail: 'The codex harness cannot be resumed in a terminal yet: open the Shell instead.' }} mode="harness" harness="Codex" />);
-  assert.ok(visibleText(unsupported).some((line) => line.includes('open the Shell instead')));
+  const said = visibleText(unsupported);
+  assert.ok(said.includes('Codex cannot be resumed here'), 'the header says it, not "resumed on this session"');
+  assert.ok(!said.some((line) => line.includes('resumed on this session')));
+  assert.equal(said.filter((line) => /cannot be resumed/.test(line)).length, 2, 'the header, then the adapter\'s reason once');
+  assert.ok(said.includes('The codex harness cannot be resumed in a terminal yet: open the Shell instead.'));
   assert.match(unsupported, /data-act="terminal_shell"/);
   assert.doesNotMatch(unsupported, /data-act="terminal_open"/);
   // Given back: nothing to switch to.

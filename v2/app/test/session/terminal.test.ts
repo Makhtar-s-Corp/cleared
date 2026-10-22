@@ -155,7 +155,7 @@ test('the terminal\'s two modes: the harness first, the shell its second choice,
   assert.equal(otherMode('harness'), 'shell');
   assert.equal(otherMode('shell'), 'harness');
   for (const t of [en, fr]) {
-    for (const key of ['terminal_mode_harness', 'terminal_mode_shell', 'terminal_switch_shell', 'terminal_switch_harness', 'terminal_closed_unsupported']) {
+    for (const key of ['terminal_mode_harness', 'terminal_mode_shell', 'terminal_mode_unsupported', 'terminal_switch_shell', 'terminal_switch_harness', 'terminal_closed_unsupported']) {
       assert.ok(t(key) && t(key) !== key && !t(key).includes('{'), `${key}`);
     }
   }

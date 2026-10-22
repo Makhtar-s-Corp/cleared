@@ -32,14 +32,16 @@ export function TerminalFrame({ t, status, mode = DEFAULT_MODE, harness = '', ca
   const shell = mode === 'shell';
   const line = status.kind === 'opening' ? (shell ? t('terminal_opening') : t('terminal_opening_harness', { name }))
     : status.kind === 'open' ? (shell ? t('terminal_open', { cols: status.cols, rows: status.rows }) : t('terminal_open_harness', { name, cols: status.cols, rows: status.rows }))
+    : closed?.reason === 'unsupported' && closed.detail ? closed.detail     // the adapter's own reason, once
     : closedLine(status.reason, t, mode);
+  const unsupported = closed?.reason === 'unsupported';
   const given = closed?.reason === 'give_back';
   const canSwitch = !given && (shell ? canHarness : true);
   const again = closed && !given && closed.reason !== 'unsupported';
   return (
     <section className="term" aria-label={t('terminal_label')} data-terminal-state={status.kind} data-reason={closed?.reason} data-mode={mode}>
       <div className="term-head">
-        <p className="term-mode">{shell ? t('terminal_mode_shell') : t('terminal_mode_harness', { name })}</p>
+        <p className="term-mode">{shell ? t('terminal_mode_shell') : unsupported ? t('terminal_mode_unsupported', { name }) : t('terminal_mode_harness', { name })}</p>
         {canSwitch ? (
           <Button className="btn term-switch" data-act={shell ? 'terminal_harness' : 'terminal_shell'} onClick={onSwitch}>
             {shell ? t('terminal_switch_harness', { name }) : t('terminal_switch_shell')}
@@ -51,7 +53,7 @@ export function TerminalFrame({ t, status, mode = DEFAULT_MODE, harness = '', ca
         <p className="term-state" role="status">
           <span className="dot" data-state={status.kind} aria-hidden="true" />
           <span>{line}</span>
-          {closed?.detail ? <span className="term-detail">{closed.detail}</span> : null}
+          {closed?.detail && !unsupported ? <span className="term-detail">{closed.detail}</span> : null}
           {note ? <span className="term-detail bad">{note}</span> : null}
         </p>
         {again ? <Button className="btn" data-act="terminal_open" onClick={onOpen}>{t('terminal_open_again')}</Button> : null}

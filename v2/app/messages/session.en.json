@@ -144,6 +144,7 @@
   "terminal_label": "Terminal in the session's container",
   "terminal_mode_harness": "{name}, resumed on this session",
   "terminal_mode_shell": "Shell in the session's container",
+  "terminal_mode_unsupported": "{name} cannot be resumed here",
   "terminal_switch_shell": "Shell",
   "terminal_switch_harness": "Back to {name}",
   "terminal_opening_harness": "Resuming {name} on this session…",

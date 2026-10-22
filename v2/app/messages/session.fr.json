@@ -144,6 +144,7 @@
   "terminal_label": "Terminal dans le conteneur de la session",
   "terminal_mode_harness": "{name}, repris sur cette session",
   "terminal_mode_shell": "Shell dans le conteneur de la session",
+  "terminal_mode_unsupported": "{name} ne peut pas être repris ici",
   "terminal_switch_shell": "Shell",
   "terminal_switch_harness": "Revenir à {name}",
   "terminal_opening_harness": "Reprise de {name} sur cette session…",
