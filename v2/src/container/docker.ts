@@ -71,6 +71,11 @@ export const cliRunner: DockerRunner = commandRunner('docker');
 
 export const cliSpawner: DockerSpawner = (args) => spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
+// Starts util-linux's `script` with the given arguments: it gives the docker
+// client of a web terminal (Docker.terminal) the terminal `--tty` needs.
+// `script` runs its command with $SHELL, set here to sh.
+export const cliScripter: DockerSpawner = (args) => spawn('script', args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh' } });
+
 const CREATES = new Set(['create', 'build', 'network create', 'volume create']);
 const SESSION_CREATES = new Set(['create', 'network create', 'volume create']);
 // `image ls` prints no labels: each listed image is inspected, and its
@@ -204,13 +209,18 @@ function labelled<T extends { readonly labels: Readonly<Record<string, string>> 
 
 const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
 
+// One word of a command line for sh, quoted: `script` takes its command as one string.
+const shellWord = (word: string): string => `'${word.replace(/'/g, `'\\''`)}'`;
+
 export class Docker {
   private readonly runner: DockerRunner;
   private readonly spawner: DockerSpawner;
+  private readonly scripter: DockerSpawner;
 
-  constructor(runner: DockerRunner = cliRunner, spawner: DockerSpawner = cliSpawner) {
+  constructor(runner: DockerRunner = cliRunner, spawner: DockerSpawner = cliSpawner, scripter: DockerSpawner = cliScripter) {
     this.runner = runner;
     this.spawner = spawner;
+    this.scripter = scripter;
   }
 
   // Every command goes through here.
@@ -420,6 +430,22 @@ export class Docker {
     const args = ['start', '--attach', '--interactive', '--', id];
     assertLabelRule(args, owned);
     return this.spawner(args);
+  }
+
+  // A shell for a human in a running container (the web terminal of a
+  // session taken over, milestone 2 decision 32): `docker exec --interactive
+  // --tty` as the given user in the given folder, under the host's `script`,
+  // which gives the client the terminal --tty needs. The command line `script`
+  // runs is built from fixed words, the owned id and the checked user and
+  // folder only; what the human types goes to the returned process's input.
+  async terminal(session: string, name: string, options: { readonly user: string; readonly workdir: string; readonly command: readonly string[] }): Promise<ChildProcessWithoutNullStreams> {
+    check(USER.test(options.user), 'user', options.user);
+    check(absolute(options.workdir) && /^[A-Za-z0-9/_.-]+$/.test(options.workdir), 'workdir', options.workdir);
+    check(options.command.length > 0 && options.command.every((word) => !word.includes('\0')), 'command', options.command);
+    const { id, owned } = await this.owned(session, name);
+    const args = ['exec', '--interactive', '--tty', '--env', 'TERM=xterm-256color', '--user', options.user, '--workdir', options.workdir, '--', id, ...options.command];
+    assertLabelRule(args, owned);
+    return this.scripter(['--quiet', '--return', '--flush', '--command', ['docker', ...args].map(shellWord).join(' '), '/dev/null']);
   }
 
   // What the container printed, both streams.

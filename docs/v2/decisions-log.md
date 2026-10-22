@@ -2405,6 +2405,106 @@ A visual reference exists outside the repository. It is inspiration only; nothin
 - **The requirements matrix.** C7 and C12 (partial: the screens are lane 27's), C8 and M2 (the notifications), and this lane's own lines P32, P33 and P34.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-recipes-schedules`.
 
+## 2026-10-22: the web terminal in the session's container, the editor's save through the policy and the container, and the human's edits told to the session (the author's choices, lane v2-j2-terminal-editor-service)
+
+**Decision.** Lane 31 applies the service's part of decisions 32 and 33 of the [milestone 2 plan](milestone-2-plan.md). A session taken over gets a web terminal: a shell in its own container, opened by the user who took it over, journaled line by line, closed at Give back. The Editor tab's files route gains its save, judged as the session's own `Write` and written inside the container. At Give back the session is told every file the human changed, and the reviewer's prompt names them through lane 23's call, which `flow/human-edits.ts` now fills. No screen changes in this lane: lane 32 mounts the terminal and the editable editor, so there are no captures. The lane's choices:
+
+1. **The terminal's process** (`container/docker.ts` `terminal`, `terminal/container.ts`).
+   - **The command.** `docker exec --interactive --tty --env TERM=xterm-256color --user <the container's user> --workdir /workspace -- <id> sh -c '<shell>'`, run under util-linux's `script --quiet --return --flush --command '<that line>' /dev/null`, which gives the client the terminal `--tty` needs.
+     - The id comes from a labelled list and the label rule is asserted. The user is read from `docker inspect` and checked. The command line is built from fixed words, the owned id, the user and the folder, each quoted for `sh`.
+     - What is typed goes to the process's input only. The wrapper's test writes a line full of shell syntax and finds no new command line.
+   - **The shell** is `echo $$ > /tmp/.cleared-terminal.pid; exec bash -l`, so the close can find it. Ending the docker client does not end a process of `docker exec`: on this server, `bash -l` and a `sleep 600 &` were still in `docker top` after the client was killed.
+   - **The close** runs a fixed program in the container through the existing `exec`: `pkill -HUP -s <pid>`, then `pkill -KILL -s <pid>` a second later. A pid file that is not a number ends nothing. Then the client is killed.
+   - **The size.** The client's terminal starts at 0 by 0. The host sets it with `stty -F <the client's pts>` (found under `/proc` from the `script` process), and the kernel signals the client, which resizes the shell's terminal. **Section 8's unknown is closed:** a resize passes (`stty size` answered 30 100, then 40 132, in the real run), so no fixed 120 by 32 is needed.
+   - **The first line** of the stream is the service's own: "The session is paused. To run its harness here: claude --resume <id>". `TerminalOpened.resume` carries the same command.
+2. **The terminal's manager** (`terminal/terminals.ts`, `terminal/lines.ts`).
+   - One terminal per session; a second open answers 409.
+   - **The journal.** Each typed line is journaled at its Enter, carriage return or line feed, and the rest at the close, as `cleared.terminal_input` with the user. The line goes through the events' cleaner as a whole, so a key typed in three posts is masked once.
+   - **What the line is.** It is the keys, not what the shell made of them: Backspace and Ctrl-U are applied, escape sequences (arrows, function keys) are left out, Ctrl-C ends the line as `^C`, and empty lines are not journaled.
+   - **The output** is decoded as a stream of UTF-8, so a character split across two chunks is whole, and is never journaled. It is kept in memory only, its last 1 MiB of text, so that a stream that reconnects (`Last-Event-ID` or `?after=`) gets what it missed. `cleared.terminal_closed` carries the output's byte count.
+   - **When it closes:**
+     - after 15 minutes without input, by a sweep every 30 seconds; the session stays paused;
+     - at the shell's exit (`exit`);
+     - at the user's close (`closed`);
+     - at Give back (`give_back`);
+     - when its session is no longer taken over, for example after a restart (`closed`).
+3. **The terminal's routes** (`terminal/routes.ts`, registered by `modules/flow.ts`). The checks run in this order:
+   - the app's proof (401);
+   - the flow (503);
+   - a known user who is not `cleared` nor `lead` (403);
+   - the session (404);
+   - taken over (409);
+   - by this user (403);
+   - then one terminal at a time (409).
+   An input post is at most 4096 bytes (413). The stream is `data` frames (a `TerminalChunk`, its seq as the id), then one `closed` frame. The app's proxy (`app/src/proxy.ts`, unchanged) sends the user and the proof on every method, and passes `Last-Event-ID` on, so the stream reaches these checks as the posts do.
+4. **The app's gate** (`app/src/server.ts`).
+   - `/api/service/sessions/:id/terminal/*` is forwarded only when the request reached the app on a loopback socket, with a `Host` of `127.0.0.1`, `localhost` or `[::1]` at its port, and not the public origin's host.
+   - Every post needs the anti-forgery token, `Sec-Fetch-Site: same-origin` when sent, and an `Origin` equal to that loopback address; the public origin's `Origin` is refused even on the loopback `Host`.
+   - The stream needs the cookie, and refuses another `Sec-Fetch-Site` or `Origin`.
+   - `/api/me` gains `terminal: true | false`, true on the loopback address only.
+   - The editor's `PUT` is not a terminal route: it is a write like the others, allowed on the public origin.
+5. **The save** (`PUT /api/sessions/:id/files/<path>`, one route per depth, in `flow/files.ts`).
+   - **Who.** The owner account only (the first account, as Take over), never `cleared` nor `lead`, and never another account than the one that took the session over.
+   - **When.** On an author's session that this process started, live (`starting`, `working`, `waiting_human`), of a ticket in progress, with no review running. A reviewer's checkout answers 409.
+   - **The checks, in order:**
+     1. the files route's own refusals (`.git`, what the session's `Read` is refused);
+     2. the body: the text with no NUL and at most 2 MiB, the loaded hash, a `confirm` that is only `install.package` or `scripts.change`;
+     3. the current file, read in the container: a link is refused, a missing file answers 404, a file that is not UTF-8 or holds a NUL answers 415, and a file over 400 lines is read only (`editor.cut`);
+     4. the hash, where a stale one answers 409 with the current hash;
+     5. `evaluate()` with a `Write` of `/workspace/<path>` and the file's current text as `readFile`.
+   - **The verdicts.** A `deny` refuses with its rule and its message. An `ask` for `install.package` or `scripts.change` answers 403 with `confirmable: true`, and a second save carrying that rule writes. Any other `ask` is refused with `confirmable: false`; `.claude/**` and `CLAUDE.md` answer `default`, and `.git/**` is refused first by the files route.
+   - **The policy** is the author's as the engine's `policyFor` builds it for a `Write`: the role's rows, the workdir, the credential file and the "Always in this project" answers. The scripts, hosts and ticket files judge commands only. The tests compare each row with `evaluate()` under the engine's own `policyFor` of the session's start input.
+   - **The write** is a fixed program run by the image's `node` through the existing `exec`: `node -e <program> -- /workspace <path> <hash>`, with the text on its input.
+     - It checks the hash, writes a temporary file in the file's real folder (the mode kept), then checks the place again before the rename.
+     - The place: the folder's and the file's real paths stay inside the checkout, out of `.git` and `.claude`, the file is no `CLAUDE.md` and no link. Otherwise the temporary file is removed and the save refused.
+     - The host never writes. A test gives a container that answers "saved" without writing, and the host file is unchanged.
+   - **After a confirmed save,** the answer is journaled as `cleared.permission_answered` (`allow_once`, the user, the rule). Every save is journaled as `cleared.human_edit` (`via: editor`), with the counts of a line diff, never the content.
+6. **What the session is told** (`flow/takeover.ts`, `terminal/human.ts`, `flow/human-edits.ts`).
+   - **A live session** is told at once through the engine's `send`, as `cleared`: "<name> changed these files: <path> (+a, -r). Read them again before editing them."
+   - **At Take over,** the checkout's state is read in the container, never with git on the host: the commit, and the hash of each file that differs from it.
+   - **At Give back,** before the engine resumes the session:
+     1. the terminal is closed;
+     2. the same program compares the checkout with the take-over commit, so a commit made in the terminal, a change undone and a new file are found, and a link is hashed by where it points;
+     3. each file the terminal changed is journaled (`via: terminal`); an editor save made while taken over and left as saved is not counted again;
+     4. after the engine's `giveBack`, one notice names every file, the editor's first.
+   - **Why two messages.** The engine sends its own words at Give back (`GIVEN_BACK`), and the engine is lane 26's file in wave 10, so this lane cannot make it send one message. The notice follows within milliseconds, and the real runner queues a message sent as a turn starts (`images/session/runner/main.ts`). Reassigning the exported constant around the engine's call would work only through ES module live bindings and a lock, so it was not done.
+   - **A Give back that fails** (the resume) keeps the changes for the next Give back, and the state moves on, so nothing is journaled twice.
+   - **A session whose plan waits for its Go is told nothing,** at a save or at Give back. A message would make the author propose again (lane 17), and the Go tells it; the reviewer's prompt still names the files.
+   - **`humanEdits({ events })`** merges the `cleared.human_edit` events per path: the counts added up, the first `before`, the last `after`, and the last `by`, `at` and `via`.
+7. **The journal without the engine.** The terminal's and the save's events are appended through the store the flow module receives in `provide` (`terminal/human.ts`), since the engine's journal is its own. The engine's stream listeners see them at their next wake (15 seconds at most), not at once. The session's adapter reads them from the log as any event.
+8. **Files outside the lane's list.**
+   - `test/flow/steps-model.test.ts`: lane 23's test of the empty default now asserts the filled function.
+   - `test/flow/api.test.ts` and `test/flow/modules.test.ts`: the terminal routes and the save leave lane 17's exclusions, and the module counts 26 routes.
+   - `test/terminal/support.ts`: the local container of the tests.
+   - The requirements matrix.
+
+**Consequences.**
+- **Tests first.** Commit 1532793 holds them alone. Run against the code of `origin/v2` at 5d68c50, every new test file fails. The one test of `app/test/terminal-gate.test.ts` that passes there is the preview listener refusing a write, which already held. The new files are:
+  - `test/terminal/lines.test.ts`, `container.test.ts` and `routes.test.ts`;
+  - `test/flow/files-save.test.ts` and `human-edits.test.ts`;
+  - `app/test/terminal-gate.test.ts`;
+  - new cases in `test/container/docker.test.ts`, `test/flow/api.test.ts`, `test/flow/modules.test.ts` and `test/flow/steps-model.test.ts`.
+- **The labelled run on this server** (Docker 29.8.1, util-linux 2.41.5): two sessions started by the session runtime, labelled `cleared.dev=v2`, on a copy of the guestbook, with a dummy token file and no login (this lane never reads the owner's login file).
+  - In the terminal, `pwd` answered `/workspace` and `git status` answered "nothing to commit, working tree clean".
+  - `git push origin main` failed with "CONNECT tunnel failed, response 403": the forge is not on the session's allow list, and the container holds no credential.
+  - A one-line save of `src/server.ts` through the write program landed. A save through a link to a host folder found nothing there (`missing`), and the host file was unchanged. A save of `scripts/pre-commit` with `scripts -> .git/hooks` was refused, and no hook was written.
+  - After the close, `docker top` showed only the container's own `sleep infinity`; the shell and its `sleep 600 &` were gone.
+  - The Give back program found the saved file and the file the terminal created.
+  - From the other session's container, a host listener on `127.0.0.1` gave no answer (`ECONNREFUSED` on 127.0.0.1, `ENETUNREACH` on each host address).
+  - After the stop, no container was left with the run's session labels.
+  - **What the run did not show:** a real harness's next turn starting with the notice, which needs a real login. That turn is proven on the fake adapter (`test/flow/human-edits.test.ts`), and the proof's step 11 runs it for real.
+- **Section 8.** Whether the terminal runs under `script`, whether a resize passes and whether Give back leaves no process are closed by this run. How a save in the middle of a turn affects that turn, and how often the write program's window between its check and its rename loses a change, stay for the proof's step 11.
+- **Open, for other lanes:**
+  - **One message at Give back:** the engine's `giveBack` could take the notice from `flow/takeover.ts` (a fix lane after wave 10, when the engine is free).
+  - **A forgotten Take over** still holds the container (issue 213, item 2): the terminal closes after 15 minutes, but the session stays paused until Give back. A cap belongs to the engine.
+  - **The files route's reads** check the proof only (issue 213, item 4). The save checks the owner.
+  - **The terminal's counts** are against the take-over commit, so a file the session had left changed counts the session's lines too. The hashes say exactly whether the human changed it.
+  - **Lane 32** reads `Me.terminal`, mounts the terminal on the stream and the posts, and the editor on the `PUT`, with `FileWriteRefusal.confirmable` for the confirmation.
+- **Checks**, after the merge of `origin/v2` at 92793d5: `npm test` runs 1116 node tests, 1110 pass and 6 are skipped as before, and 154 Vitest tests pass; `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
+- **The requirements matrix.** B5.10f, D4, O9, O10 and C1 name this pull request and stay `partial` for lane 32's screens. P12 and P13 are `done`. The new lines P35 (the terminal's process) and P36 (what a human changed and how the session is told) record choices 1 and 6 (P32 to P34 are lane 26's, merged first as pull request 222).
+- Pull request: 224, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-terminal-editor-service`.
+
 ## 2026-10-22: the steps, the contract and knowledge gestures, the questions to the code, the recipes and the schedules on the screens (the author's choices, lane v2-j2-additions-screens)
 
 **Decision.** Lane 27 applies the app's part of decisions 26 to 29 of the [milestone 2 plan](milestone-2-plan.md). It adds:
@@ -2508,6 +2608,6 @@ The lane's choices:
   - **Polling cost.** The tower reads one steps route per live author's ticket every 10 seconds in a workspace of several services. A step on `SessionSummary` would save those reads (a change of `types.ts`).
   - **Issue 211, item 3** ("Rolled back" twice on a handled train) is left: lane 29's step 9 reads the line, and the chip is what files the train under "Handled today".
   - **Issue 213's nits** on the session screen ("Done when" twice, the editor's selected file) are left to a pass on that screen.
-- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request (225). M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P35 (choices 1 to 3) and P36 (choices 4 to 7) record the lane's choices; they were P32 and P33 before the merge of `origin/v2`, where lane 26 (pull request 222) took P32 to P34 first.
+- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request (225). M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P37 (choices 1 to 3) and P38 (choices 4 to 7) record the lane's choices. They were P32 and P33 in the first version of the pull request, then P35 and P36 after lane 26 (pull request 222) took P32 to P34; lane 31 (pull request 224) took P35 and P36 before this lane merged.
 - Pull request: 225, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-additions-screens`.
