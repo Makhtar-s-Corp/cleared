@@ -2508,5 +2508,6 @@ The lane's choices:
   - **Polling cost.** The tower reads one steps route per live author's ticket every 10 seconds in a workspace of several services. A step on `SessionSummary` would save those reads (a change of `types.ts`).
   - **Issue 211, item 3** ("Rolled back" twice on a handled train) is left: lane 29's step 9 reads the line, and the chip is what files the train under "Handled today".
   - **Issue 213's nits** on the session screen ("Done when" twice, the editor's selected file) are left to a pass on that screen.
-- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request. M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P35 (choices 1 to 3) and P36 (choices 4 to 7) record the lane's choices; they were P32 and P33 before the merge of `origin/v2`, where lane 26 (pull request 222) took P32 to P34 first.
+- **The requirements matrix.** C2, C7, C11, C12, M2, M8 and M9 name this pull request (225). M8 and M9 are `done`, the live runs being lane 29's. C7 is `done`, lane 26 being merged; C11 stays `partial` for the Plan tab's entry, and C12 for lane 26's restart note. The new lines P35 (choices 1 to 3) and P36 (choices 4 to 7) record the lane's choices; they were P32 and P33 before the merge of `origin/v2`, where lane 26 (pull request 222) took P32 to P34 first.
+- Pull request: 225, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-additions-screens`.
