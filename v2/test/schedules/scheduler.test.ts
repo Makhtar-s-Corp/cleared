@@ -241,3 +241,41 @@ test('a schedule is removed; an unknown one is not found', async () => {
   await t.at(OCT_22_0300 + 30_000);
   assert.deepEqual(t.posts, []);
 });
+
+test('a failure that repeats is told once, until a run goes well; an hourly schedule does not wake the owner every hour', async () => {
+  const t = await scheduler();
+  await t.schedules.create({ recipe: 'bump-dependency', parameters: { package: 'pg' }, every: 'hour :00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');
+  t.setRecipes([]);
+  for (let h = 1; h <= 3; h++) await t.at(Date.parse('2026-10-21T10:00:30.000Z') + h * 60 * MINUTE);
+  assert.equal(t.events.filter((e) => e.type === 'schedule_failed').length, 3, 'each run is still said and kept');
+  assert.deepEqual(t.queue(), ['health:schedule_failed'], 'one notification');
+  assert.equal(t.lead.events.length, 1, 'one event for the lead');
+  // A run that goes well, then a failure again: told again.
+  t.setRecipes([parseRecipe(BUMP, { file: '.cleared/recipes/bump-dependency.md', service: 'guestbook', services: ['guestbook'] })]);
+  await t.at(Date.parse('2026-10-21T14:00:30.000Z'));
+  t.setRecipes([]);
+  await t.at(Date.parse('2026-10-21T15:00:30.000Z'));
+  assert.equal(t.queue().length, 2);
+  assert.equal(t.lead.events.length, 2);
+  await t.settle();
+});
+
+test('a removed schedule\'s id is never given again, so its runs stay its own', async () => {
+  const t = await scheduler();
+  const first = await t.schedules.create({ recipe: 'tidy-docs', every: 'day 03:00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');
+  const second = await t.schedules.create({ recipe: 'tidy-docs', every: 'day 04:00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');
+  await t.at(OCT_22_0300 + 30_000);
+  t.schedules.remove(first.id);
+  t.schedules.remove(second.id);
+  const third = await t.schedules.create({ recipe: 'tidy-docs', every: 'day 05:00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');
+  assert.deepEqual([first.id, second.id, third.id], ['sch-1', 'sch-2', 'sch-3']);
+});
+
+test('a scheduled goal tells the lead the owner is away: it asks nothing and writes its assumptions in the plan', async () => {
+  const t = await scheduler();
+  await t.schedules.create({ goal: 'Make the README clear.', every: 'day 03:00', budgetUsd: 3, weekCapPercent: 85 }, 'u2');
+  await t.at(OCT_22_0300 + 30_000);
+  assert.match(t.posts[0]!.text, /away/);
+  assert.match(t.posts[0]!.text, /ask (?:the owner )?nothing/i);
+  assert.match(t.posts[0]!.text, /assumptions/);
+});

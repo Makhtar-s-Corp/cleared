@@ -2352,13 +2352,14 @@ A visual reference exists outside the repository. It is inspiration only; nothin
    - **`every`** is `day HH:MM`, `weekdays HH:MM`, a day of the week with `HH:MM`, or `hour :MM`, in the server's time zone. At the end of summer time, a daily run comes 25 hours after the one before.
    - **`at`** is an ISO time in the server's zone, or one with its offset, and must be to come. A schedule `at` a time is disabled once it has run.
    - **Creation checks** the recipe and its parameters, so a schedule is refused when it is made, not at 03:00. The budget is above 0 and at most $1000. The cap is 1 to 100 % of the seven-day window. The creator is the signed-in user.
-   - **Deleting** a schedule removes its row. Its runs stay in `schedule_runs`, so a plan it started keeps its budget.
+   - **Deleting** a schedule marks its row removed (`removed_at`), so its id is never given again, and its runs in `schedule_runs` stay its own: a plan it started keeps its budget.
 7. **The scheduler** (`schedules/scheduler.ts`) ticks each minute.
    - **A run starts once.** It is taken in one `UPDATE` that moves the schedule to its next run, so overlapping ticks never start it twice. After a stop of the service, a schedule catches up once, not once per missed period.
    - **The week check.** A run is skipped when the seven-day window is at or above the smaller of the schedule's cap and the runner's week stop. The window is read as the runner reads it: the query is copied, since the runner's `#stop` is private. A skip still moves the schedule to its next run.
    - **A failed run** (skipped, a recipe gone or refused, a start that failed) is kept in `schedule_runs` and said once as a `schedule_failed` event (`Scheduler.subscribe`). The lead gets a non-urgent event, which it tells the owner in the morning, and a notification is sent.
+   - **A failure that repeats is told once.** When the schedule's last run failed for the same reason, the lead and the owner are not told again until a run goes well, so an hourly schedule whose recipe is gone does not wake the owner every hour.
 8. **A goal schedule.**
-   - Its text tells the lead that the plan it proposes is approved for the creator, with the schedule's budget per ticket.
+   - Its text tells the lead that the plan it proposes is approved for the creator, with the schedule's budget per ticket, and that the owner is away: it asks nothing, and writes its assumptions in the plan's summary. In goal mode the lead would otherwise ask its questions first, and the plan would miss the night.
    - The plan the lead proposes for that goal (`goal-<seq>`) within six hours is approved for the creator at the next tick. A plan of another goal is left to the owner.
    - The plan says the creator's approval is the plan's; this applies it to goals too, so a goal schedule runs at night as a recipe does.
 9. **The budget on `Origin`** (`flow/events.ts`, `flow/engine.ts`).
@@ -2390,7 +2391,7 @@ A visual reference exists outside the repository. It is inspiration only; nothin
   - a run at the week stop is skipped with a `schedule_failed` and a `week_stop` notification;
   - a disabled schedule never runs;
   - the creator is the plan's approver;
-  - and beyond it: the summer time's end, a catch up once after a stop, a schedule `at` a time disabled once run, a goal schedule's plan approved for its creator, a recipe gone, the creation's refusals, the routes' guards, a recipe naming two services run in steps, a fast recipe on a `full` service run in the full lane, and the base read from git's objects, never the working tree.
+  - and beyond it: the summer time's end, a catch up once after a stop, a repeated failure told once, a removed schedule's id never given again, a schedule `at` a time disabled once run, a goal schedule's plan approved for its creator, a recipe gone, the creation's refusals, the routes' guards, a recipe naming two services run in steps, a fast recipe on a `full` service run in the full lane, and the base read from git's objects, never the working tree.
 - **Checks.** `npm test`: 1080 node tests, 1074 pass and 6 skipped; 154 Vitest tests pass. `npm run typecheck` and `npm run guard -- --base origin/v2` are green.
 - **No real run.** Nothing here calls a model or Docker. A schedule's real run belongs to the proof (lane 29).
 - **No screen changed.** The lane touches no file of the app, so it ran no visual loop and made no capture. Lane 27 draws "Run a recipe" and the schedules in the tower's plans card.

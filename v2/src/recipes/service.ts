@@ -137,7 +137,7 @@ export class Recipes {
 
   // A goal from a schedule, which the lead is told it plans for an absent owner.
   #scheduledGoal(text: string, scheduled: ScheduledBy): string {
-    return `This goal comes from schedule ${scheduled.schedule}, created by ${scheduled.createdBy}: the plan you propose for it is approved on their behalf, and each of its tickets has a budget of ${usd(scheduled.budgetUsd)}.\n\n${text}`;
+    return `This goal comes from schedule ${scheduled.schedule}, created by ${scheduled.createdBy}: the plan you propose for it is approved on their behalf, and each of its tickets has a budget of ${usd(scheduled.budgetUsd)}. The owner is away: ask nothing, and write the assumptions you make in the plan's summary.\n\n${text}`;
   }
 
   async #read(): Promise<readonly RecipeFile[]> {

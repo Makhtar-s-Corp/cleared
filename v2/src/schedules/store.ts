@@ -5,7 +5,8 @@
 //   schedules       a recipe or a goal, `at` a time or `every` period, the
 //                   budget of each ticket, the week-share cap, who created
 //                   it (whose approval its plans carry), enabled, and the
-//                   next and last run
+//                   next and last run; a removed schedule keeps its row,
+//                   with when it was removed, so its id is never given again
 //   schedule_runs   each run, ran or failed, with the plan it started (or
 //                   the goal it sent, until the lead's plan for it is
 //                   approved) and the budget it gave, which the flow's
@@ -18,7 +19,7 @@ export const SCHEDULE_TABLES: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS schedules (
   id TEXT PRIMARY KEY, project TEXT NOT NULL, recipe TEXT, goal TEXT, parameters TEXT NOT NULL,
   at TEXT, every TEXT, budget_usd REAL NOT NULL, week_cap_percent REAL NOT NULL, created_by TEXT NOT NULL,
-  enabled INTEGER NOT NULL, next_run_at TEXT, last_run_at TEXT, created_at TEXT NOT NULL
+  enabled INTEGER NOT NULL, next_run_at TEXT, last_run_at TEXT, created_at TEXT NOT NULL, removed_at TEXT
 )`,
   `CREATE TABLE IF NOT EXISTS schedule_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, schedule TEXT NOT NULL, project TEXT NOT NULL, at TEXT NOT NULL,
@@ -67,6 +68,7 @@ export class ScheduleStore {
   }
 
   add(input: NewSchedule, at: string): Schedule {
+    // Every row counts, a removed schedule's included: its runs stay its own.
     let n = Number((this.#db.prepare('SELECT COUNT(*) AS n FROM schedules').get() as Row).n) + 1;
     while (this.#db.prepare('SELECT 1 FROM schedules WHERE id = ?').get(`sch-${n}`)) n++;
     const id = `sch-${n}`;
@@ -77,16 +79,16 @@ export class ScheduleStore {
   }
 
   get(id: string): Schedule | undefined {
-    const row = this.#db.prepare('SELECT * FROM schedules WHERE id = ? AND project = ?').get(id, this.#project) as Row | undefined;
+    const row = this.#db.prepare('SELECT * FROM schedules WHERE id = ? AND project = ? AND removed_at IS NULL').get(id, this.#project) as Row | undefined;
     return row ? this.#schedule(row) : undefined;
   }
 
   list(): Schedule[] {
-    return (this.#db.prepare('SELECT * FROM schedules WHERE project = ? ORDER BY created_at, id').all(this.#project) as Row[]).map((row) => this.#schedule(row));
+    return (this.#db.prepare('SELECT * FROM schedules WHERE project = ? AND removed_at IS NULL ORDER BY created_at, id').all(this.#project) as Row[]).map((row) => this.#schedule(row));
   }
 
-  remove(id: string): boolean {
-    return Number(this.#db.prepare('DELETE FROM schedules WHERE id = ? AND project = ?').run(id, this.#project).changes) > 0;
+  remove(id: string, at: string): boolean {
+    return Number(this.#db.prepare('UPDATE schedules SET removed_at = ?, enabled = 0, next_run_at = NULL WHERE id = ? AND project = ? AND removed_at IS NULL').run(at, id, this.#project).changes) > 0;
   }
 
   setEnabled(id: string, enabled: boolean): void {
@@ -95,7 +97,7 @@ export class ScheduleStore {
 
   // The enabled schedules whose next run has come, oldest first.
   due(now: string): Schedule[] {
-    return (this.#db.prepare('SELECT * FROM schedules WHERE project = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at, id').all(this.#project, now) as Row[])
+    return (this.#db.prepare('SELECT * FROM schedules WHERE project = ? AND enabled = 1 AND removed_at IS NULL AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at, id').all(this.#project, now) as Row[])
       .map((row) => this.#schedule(row));
   }
 
@@ -112,6 +114,12 @@ export class ScheduleStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(run.schedule, this.#project, run.at, run.outcome, run.reason ?? null, run.note ?? null, run.plan ?? null, run.goal ?? null, run.message ?? null, run.budgetUsd, run.createdBy);
     return Number(result.lastInsertRowid);
+  }
+
+  // The schedule's last run, ran or failed, and why it failed.
+  lastRun(schedule: string): { readonly outcome: 'ran' | 'failed'; readonly reason: string | null } | undefined {
+    const row = this.#db.prepare('SELECT outcome, reason FROM schedule_runs WHERE project = ? AND schedule = ? ORDER BY id DESC LIMIT 1').get(this.#project, schedule) as Row | undefined;
+    return row ? { outcome: String(row.outcome) as 'ran' | 'failed', reason: str(row.reason) } : undefined;
   }
 
   setRunPlan(run: number, plan: string): void {

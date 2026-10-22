@@ -21,8 +21,9 @@
 // Each run is said once as a ScheduleEvent and kept in schedule_runs. A run
 // that failed (skipped by the week, a recipe gone or refused, a start that
 // failed) is a health notification (notify/sources.ts scheduleOccurrence)
-// and an event for the lead's next turn; a run that went well tells the
-// lead by its plan's service line and notifies nothing.
+// and an event for the lead's next turn, unless the schedule's last run
+// failed for the same reason; a run that went well tells the lead by its
+// plan's service line and notifies nothing.
 import type { DatabaseSync } from 'node:sqlite';
 import type { CreateScheduleBody, Schedule } from '../api/types.ts';
 import type { PlanLead, PlanRunner } from '../lead/plans/runner.ts';
@@ -107,7 +108,7 @@ export class Scheduler {
   }
 
   remove(id: string): boolean {
-    return this.store.remove(id);
+    return this.store.remove(id, this.#now().toISOString());
   }
 
   budgetOf(plan: string): number | undefined {
@@ -213,8 +214,11 @@ export class Scheduler {
   }
 
   #failed(schedule: Schedule, base: { schedule: string; at: string; budgetUsd: number; createdBy: UserId }, reason: 'week' | 'recipe' | 'start', note: string): ScheduleEvent {
+    const previous = this.store.lastRun(schedule.id);
     this.store.record({ ...base, outcome: 'failed', reason, note });
     const event = this.#emit({ type: 'schedule_failed', schedule: schedule.id, at: base.at, reason, note });
+    // The same failure as the last run's was told then: an hourly schedule does not wake the owner every hour.
+    if (previous?.outcome === 'failed' && previous.reason === reason) return event;
     this.#deps.lead.enqueue(`Schedule ${schedule.id} (${schedule.recipe ? `the recipe ${schedule.recipe}` : 'a goal'}, created by ${schedule.createdBy}) did not run: ${note} Tell the owner in the morning.`);
     try {
       const occurrence = scheduleOccurrence(event);
