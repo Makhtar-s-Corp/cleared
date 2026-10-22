@@ -491,3 +491,65 @@ test('the lead reads git and the workdir through head, and runs nothing else', (
   assert.equal(capped.decision, 'deny');
   if (capped.decision === 'deny') assert.match(capped.message, /limit of at most 400 lines/);
 });
+
+// Milestone 2, decision 28 (lane 25): the reader answers a question about
+// the code. The reviewer's rows (no edit, no commit, no push), the lead's
+// 400-line cap on a Read, and nothing that waits for a person: nobody
+// answers a reader's requests, so what would ask is refused, and an
+// "Always in this project" answer never widens what it may do.
+test('the reader\'s policy: one case per row', () => {
+  const reader = { role: 'reader' as const };
+  const read = (input: Record<string, unknown>): ToolRequest => ({ tool: 'Read', input: { file_path: '/workspace/guestbook/src/page.ts', ...input } });
+  check([
+    { name: 'a Read with a limit', request: read({ limit: 400 }), policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a Read with an offset and a limit', request: read({ offset: 400, limit: 200 }), policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a Read without a limit', request: read({}), policy: reader, decision: 'deny', rule: 'reader.read_cap' },
+    { name: 'a Read above the cap', request: read({ limit: 401 }), policy: reader, decision: 'deny', rule: 'reader.read_cap' },
+    { name: 'a Read with a limit that is not a count', request: read({ limit: '100' }), policy: reader, decision: 'deny', rule: 'reader.read_cap' },
+    { name: 'Glob', request: { tool: 'Glob', input: { pattern: '**/*.ts' } }, policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'Grep', request: { tool: 'Grep', input: { pattern: 'x', path: 'guestbook/src' } }, policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a safe command', request: bash('grep -rn health guestbook/src'), policy: reader, decision: 'allow', rule: 'run.safe' },
+    { name: 'Edit', request: { tool: 'Edit', input: { file_path: '/workspace/guestbook/src/page.ts', old_string: 'a', new_string: 'b' } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/notes.md', content: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'MultiEdit', request: { tool: 'MultiEdit', input: { file_path: '/workspace/a.ts', edits: [] } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'NotebookEdit', request: { tool: 'NotebookEdit', input: { notebook_path: '/workspace/a.ipynb', new_source: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'git commit', request: bash('git commit -m done'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'git push to a branch', request: bash('git push origin ticket-1'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'git push to the base', request: bash('git push origin main'), policy: reader, decision: 'deny', rule: 'push.base' },
+    { name: 'a secret', request: read({ file_path: '/workspace/guestbook/.env', limit: 10 }), policy: reader, decision: 'deny', rule: 'secret.read' },
+    { name: 'a question to a person', request: { tool: 'AskUserQuestion', input: { questions: [] } }, policy: reader, decision: 'deny', rule: 'reader.question' },
+    { name: 'an install, which would ask', request: bash('npm install left-pad'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'the network, which would ask', request: bash('curl https://example.com'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a fetch, which would ask', request: { tool: 'WebFetch', input: { url: 'https://example.com', prompt: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a subagent, which would ask', request: { tool: 'Task', input: { prompt: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a host tool, which a reader has none of', request: { tool: 'mcp__cleared__propose_plan', input: {} }, policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a redirection, which writes a file', request: bash('cat a > b'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'a compound command, which would ask', request: bash('ls; wget https://example.com'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a learned answer does not widen it', request: bash('make build'), policy: { ...reader, learned: [{ tool: 'Bash', pattern: 'make build' }] }, decision: 'deny', rule: 'reader.ask' },
+  ]);
+  const verdict = evaluate(bash('npm install left-pad'), { ...base, role: 'reader' });
+  assert.ok(verdict.decision === 'deny' && verdict.message.includes('npm install'), 'the refusal keeps the reason it would have asked for');
+});
+
+// Review followup of pull request 204 (issue 207, item 4): an author whose
+// session plan waits for its Go reads and runs the checks, and changes
+// nothing but its HANDOVER.md, which the runner's Stop hook asks for at the
+// end of every turn. The flow sets `planning` (flow/engine.ts, policyFor).
+test('an author before its Go changes nothing but its handover', () => {
+  const planning = { planning: true };
+  const edit = (path: string): ToolRequest => ({ tool: 'Edit', input: { file_path: path, old_string: 'a', new_string: 'b' } });
+  check([
+    { name: 'Edit', request: edit('/workspace/src/app.ts'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/src/new.ts', content: 'x' } }, policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'its handover', request: { tool: 'Write', input: { file_path: '/workspace/HANDOVER.md', content: 'x' } }, policy: planning, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a handover in a folder', request: { tool: 'Write', input: { file_path: '/workspace/src/HANDOVER.md', content: 'x' } }, policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'git commit', request: bash('git commit -m wip'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'git add', request: bash('git add src/app.ts'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'a branch push', request: bash('git push origin ticket-1'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'a delete', request: bash('rm src/app.ts'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'a read', request: { tool: 'Read', input: { file_path: '/workspace/src/app.ts' } }, policy: planning, decision: 'allow', rule: 'read.workdir' },
+    { name: 'the tests', request: bash('npm test'), policy: planning, decision: 'allow', rule: 'run.safe' },
+    { name: 'after the Go', request: edit('/workspace/src/app.ts'), policy: { planning: false }, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a reviewer is not concerned', request: edit('/workspace/src/app.ts'), policy: { role: 'reviewer', planning: true }, decision: 'deny', rule: 'reviewer.edit' },
+  ]);
+});

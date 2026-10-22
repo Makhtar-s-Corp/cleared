@@ -7,7 +7,9 @@
 // denied, not asked. The allow rules read each simple command a strict
 // shell-word parser finds, word for word, never a prefix of the raw text: a
 // list of simple commands each allowed on its own is allowed as a whole
-// (milestone 2, decision 10).
+// (milestone 2, decision 10). A reader's verdicts (decision 28) are the
+// reviewer's with the lead's cap on a Read, with no learned answer, and
+// what would ask is refused: nobody answers a reader's requests.
 import { posix } from 'node:path';
 import type { Role } from './contract.ts';
 
@@ -27,6 +29,9 @@ export type Policy = {
   readonly forbiddenHosts: readonly string[]; // production and anything the project names
   readonly ticketFiles: readonly string[];    // what the ticket branch changed so far, relative to the workdir
   readonly learned: readonly { readonly tool: string; readonly pattern: string }[]; // "always in this project" answers
+  // An author whose session plan waits for its Go (milestone 2, decision 22):
+  // it reads and runs the checks, and writes nothing but its HANDOVER.md.
+  readonly planning?: boolean;
 };
 
 export type ToolRequest = {
@@ -498,11 +503,20 @@ function denied(request: ToolRequest, policy: Policy): Verdict | undefined {
     if (commandWords(words).includes('printenv') || printsEnvironment(words))
       return deny('secret.read', 'the environment of a session holds its login and is never printed');
   }
-  if (policy.role === 'reviewer') {
-    if (EDIT_TOOLS.has(request.tool)) return deny('reviewer.edit', 'a reviewer reads and runs the checks; it does not edit');
+  if (policy.role === 'reviewer' || policy.role === 'reader') {
+    const rule = `${policy.role}.edit`;
+    if (EDIT_TOOLS.has(request.tool)) return deny(rule, `a ${policy.role} reads and runs the checks; it does not edit`);
     for (const words of commands) {
       const sub = gitCommand(words)?.rest[0];
-      if (sub === 'commit' || sub === 'push') return deny('reviewer.edit', `a reviewer does not run git ${sub}`);
+      if (sub === 'commit' || sub === 'push') return deny(rule, `a ${policy.role} does not run git ${sub}`);
+    }
+  }
+  if (policy.role === 'author' && policy.planning === true) {
+    const why = 'until its session plan has its Go, the session reads and runs the checks, and changes nothing but HANDOVER.md';
+    if (EDIT_TOOLS.has(request.tool) && !isHandover(request, policy)) return deny('plan.before_go', why);
+    for (const words of commands) {
+      const sub = gitCommand(words)?.rest[0];
+      if (sub === 'commit' || sub === 'push' || sub === 'add' || sub === 'checkout' || commandWords(words).includes('rm')) return deny('plan.before_go', why);
     }
   }
   return undefined;
@@ -542,6 +556,12 @@ function packageChange(request: ToolRequest, path: string, context: PolicyContex
   if (!same('scripts')) return 'scripts';
   if (!PACKAGE_DEPENDENCIES.every(same)) return 'dependencies';
   return 'none';
+}
+
+// An edit of HANDOVER.md at the root of the workdir.
+function isHandover(request: ToolRequest, policy: Policy): boolean {
+  const path = request.input.file_path ?? request.input.notebook_path;
+  return typeof path === 'string' && inside(policy.workdir, path) && relative(policy.workdir, path) === 'HANDOVER.md';
 }
 
 function allowedEdit(request: ToolRequest, policy: Policy, context: PolicyContext): Verdict | undefined {
@@ -766,7 +786,29 @@ function leadRows(request: ToolRequest, policy: Policy): Verdict | undefined {
 
 // ---------------------------------------------------------------- evaluate
 
+// The longest Read a reader may ask for, as the lead's: an answer about the
+// code reads it in parts.
+export const READER_READ_LINES = LEAD_READ_LINES;
+
+// A reader (decision 28): its own rows, then the rows every role has, with
+// no learned answer; an ask becomes a refusal that keeps its reason.
+function readerVerdict(request: ToolRequest, policy: Policy, context: PolicyContext): Verdict {
+  const refused = denied(request, policy);
+  if (refused) return refused;
+  if (request.tool === 'AskUserQuestion') return deny('reader.question', 'nobody answers a reader\'s questions: answer from what the code shows, and say what it does not');
+  const limit = request.input.limit;
+  if (request.tool === 'Read' && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > READER_READ_LINES))
+    return deny('reader.read_cap', `read with a limit of at most ${READER_READ_LINES} lines (the limit parameter), and an offset for the next part`);
+  const verdict = rules(request, { ...policy, learned: [] }, context);
+  return verdict.decision === 'ask' ? deny('reader.ask', `a reader reads only and waits for nobody: ${verdict.reason}`) : verdict;
+}
+
 export function evaluate(request: ToolRequest, policy: Policy, context: PolicyContext = {}): Verdict {
+  if (policy.role === 'reader') return readerVerdict(request, policy, context);
+  return rules(request, policy, context);
+}
+
+function rules(request: ToolRequest, policy: Policy, context: PolicyContext): Verdict {
   const refused = denied(request, policy);
   if (refused) return refused;
 
