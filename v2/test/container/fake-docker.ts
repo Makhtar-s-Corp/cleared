@@ -1,5 +1,5 @@
-// A fake `docker` CLI for the container tests: it keeps containers, networks
-// and volumes in memory, honours `--filter label=...` the way the CLI does,
+// A fake `docker` CLI for the container tests: it keeps containers, networks,
+// volumes and images in memory, honours `--filter label=...` the way the CLI does,
 // and records every argument list it receives. No test here needs Docker.
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
@@ -39,6 +39,7 @@ function matches(object: FakeObject, args: readonly string[]): boolean {
   return args.every((arg, index) => {
     if (arg !== '--filter') return true;
     const filter = args[index + 1] ?? '';
+    if (filter.startsWith('reference=')) return object.name === filter.slice('reference='.length);
     if (!filter.startsWith('label=')) throw new Error(`fake docker: unsupported filter ${filter}`);
     const pair = filter.slice('label='.length);
     const at = pair.indexOf('=');
@@ -59,7 +60,10 @@ export class FakeDocker {
   readonly containers: FakeObject[] = [];
   readonly networks: FakeObject[] = [];
   readonly volumes: FakeObject[] = [];
+  readonly images: FakeObject[] = [];
   readonly calls: Call[] = [];
+  // The working folder `image inspect` reports, by tag.
+  workdirOf: (tag: string) => string = () => '/app';
   // Return a result to replace the normal answer, for failure injection.
   intercept: (args: readonly string[]) => DockerResult | undefined = () => undefined;
   // Answer of `exec`, by command.
@@ -87,7 +91,7 @@ export class FakeDocker {
   }
 
   all(): FakeObject[] {
-    return [...this.containers, ...this.networks, ...this.volumes];
+    return [...this.containers, ...this.networks, ...this.volumes, ...this.images];
   }
 
   withLabel(key: string, value: string): FakeObject[] {
@@ -110,12 +114,27 @@ export class FakeDocker {
 
   private answer(args: readonly string[]): DockerResult {
     const [first, second] = args;
-    const verb = first === 'network' || first === 'volume' ? `${first} ${second}` : first;
+    const verb = first === 'network' || first === 'volume' || first === 'image' ? `${first} ${second}` : first;
     switch (verb) {
       case 'version':
         return ok('{"Client":{"Version":"29.8.1"},"Server":{"Version":"29.8.1"}}\n');
-      case 'build':
+      case 'build': {
+        // The tag names the image; a second build of a tag replaces it.
+        const tag = args[args.indexOf('--tag') + 1] ?? '';
+        const at = this.images.findIndex((image) => image.name === tag);
+        if (at >= 0) this.images.splice(at, 1);
+        this.images.push({ id: `sha256:${this.id()}`, name: tag, labels: labelsOf(args), args: [...args] });
         return ok('');
+      }
+      case 'image ls':
+        return this.list(this.images, args, (image) => ({ ID: image.id, Repository: image.name.split(':')[0], Tag: image.name.split(':')[1] ?? 'latest' }));
+      case 'image inspect': {
+        const found = targets(args).map((id) => this.images.find((image) => image.id === id));
+        if (found.some((image) => !image)) return fail('Error: No such image');
+        return ok(JSON.stringify(found.map((image) => ({ Id: image?.id, RepoTags: [image?.name], Config: { Labels: Object.keys(image?.labels ?? {}).length ? image?.labels : null, WorkingDir: this.workdirOf(image?.name ?? '') } }))));
+      }
+      case 'image rm':
+        return this.remove(this.images, targets(args), 'id');
       case 'network create': {
         const name = args[args.length - 1] ?? '';
         if (this.networks.some((n) => n.name === name)) return fail(`Error: network with name ${name} already exists`);
