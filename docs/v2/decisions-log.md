@@ -1978,4 +1978,14 @@ The choices the lane makes:
   - M5 names it too, `partial` until the multi-service proof's steps 6 to 10.
   - The new line P23 records choices 1 and 3.
   - Lanes 20 and 22, beside this one, may also add P lines; the orchestrator renumbers at merge.
+- **Review round 1 (Sonnet 5.5), taken on 2026-10-22: the Blocked chip.**
+  - **The blocking item.** The list's Blocked chip had the class `blocked`, the train's state, so it took the detail's blocked panel rule: its padding, its ring and its margin. It is now `train-chip-<state>`, and the panel rule is scoped to `.d-body .blocked`.
+  - **The check.** `app/web/test/inbox/train.test.tsx` checks that no chip's class holds a bare state. It failed on the previous `Inbox.tsx` and passes now.
+  - **The captures.** The blocked set was captured again at the four widths in both themes. A new `inbox-train-inbox-blocked-list-*` set shows the list with nothing selected at 768 and 390, where the chip was also wrong.
+  - **Followups taken:**
+    - the blocked card's two buttons are centred, and stacked under 400 px (2);
+    - the stop's state line lost its `aria-label` (4);
+    - a Change whose plan no longer waits drops its text (5).
+  - **Followup 6, said here:** the 768 and 390 captures are full-page, so the sticky action bar shows in the middle of the page. That comes from the capture, not from the screen.
+  - **Left:** followup 3, "Rolled back" twice on a handled train's card (the chip and the line). The line is what the multi-service proof's step 9 reads.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-inbox-train`.

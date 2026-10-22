@@ -22,7 +22,7 @@ import '@/screens/lead/lead.css';
 import {
   CHANGE_MAX, CHECKS, GRACE_MS, REFRESH_MS, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approvePlan, changeMessage, chosen, clock,
   decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle, kept, known, ordered, pausedLine,
-  planChange, planGo, planOf, readPlan, releaseSession, sameOrigin, sendBack, sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, stopLine, target,
+  planChange, planGo, planOf, readPlan, releaseSession, sameOrigin, sendBack, sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, target,
   ticketTitle, trainLine, stopState, undoApproval, verbOf, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
@@ -33,7 +33,7 @@ function Card({ item, current, view, t }: { readonly item: Item; readonly curren
       <a className={`item${current ? ' current' : ''}${item.state === 'handled' ? ' handled' : ''}`} href={`#${encodeURIComponent(item.id)}`} aria-current={current ? 'true' : undefined} data-item={item.id}>
         <span className="item-head">
           <span className="chip">{t(`kind_${item.kind}`)}</span>
-          {item.kind === 'release' && item.train && item.train.state !== 'waiting' ? <span className={`chip train-chip ${item.train.state}`} data-train-chip={item.train.state}>{t(`train_chip_${item.train.state}`)}</span> : null}
+          {item.kind === 'release' && item.train && item.train.state !== 'waiting' ? <span className={`chip train-chip train-chip-${item.train.state}`} data-train-chip={item.train.state}>{t(`train_chip_${item.train.state}`)}</span> : null}
           <span className="since">{elapsed(item.since, view.now, t)}</span>
         </span>
         <span className="item-title">{itemTitle(item, view)}</span>
@@ -128,7 +128,7 @@ function TrainBody({ train, t }: { readonly train: TrainState; readonly t: Trans
                 {stop.pr ? (isWebLink(stop.pr.url) ? <a className="stop-pr" href={stop.pr.url} rel="noopener noreferrer">{t('pr_link', { n: stop.pr.number })}</a> : <span className="stop-pr">{t('pr_link', { n: stop.pr.number })}</span>)
                   : <span className="stop-pr none">{t('train_no_pr')}</span>}
               </span>
-              <span className="stop-line" aria-label={stopLine(stop, train, t)}><span className="stop-state">{stopState(stop, train, t)}</span>{stop.at ? <><span className="sep" aria-hidden="true">·</span><time className="stop-time" dateTime={stop.at}>{clock(stop.at)}</time></> : null}</span>
+              <span className="stop-line"><span className="stop-state">{stopState(stop, train, t)}</span>{stop.at ? <><span className="sep" aria-hidden="true">·</span><time className="stop-time" dateTime={stop.at}>{clock(stop.at)}</time></> : null}</span>
               {stop.note ? <span className="stop-note">{stop.note}</span> : null}
             </span>
           </li>
@@ -402,7 +402,7 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
       // A blocked train can still be sent back, or completed by the lead;
       // a train that lands or landed was approved already.
       if (item.train?.blocked || item.train?.state === 'blocked') {
-        return <><p className="d-done">{t('blocked_done')}</p><div className="d-buttons">{act('send_back', t('send_back'), false, busy)}<Button asChild variant="ink" className="btn primary"><a href="/lead">{t('ask_lead')}</a></Button></div>{status}</>;
+        return <><p className="d-done">{t('blocked_done')}</p><div className="d-buttons">{act('send_back', t('send_back'), false, busy)}<Button asChild variant="ink" className="btn primary ask-lead"><a href="/lead">{t('ask_lead')}</a></Button></div>{status}</>;
       }
       if (item.train && !approvable(item)) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
       const versions = item.heads.map((h) => t('version', { pr: h.pr, head: h.head })).join(', ');
@@ -641,6 +641,8 @@ export default function Inbox() {
         else next.delete(item.id);
       });
       setNote(t(key));
+      // A Change whose plan no longer waits has nowhere to go: its text is dropped.
+      if (settled && gesture === 'plan_change') setMessage('');
       if (settled) context.inboxChanged();
       if (settled || key === 'approve_conflict' || gesture === 'approve_plan') {
         await load();

@@ -227,4 +227,10 @@ test('in the list, a train that is not waiting carries its state beside its kind
   const html = renderInbox(viewOf([...items, trainRelease(FIXTURE_NOW, 'waiting')], { selected: undefined, open: false }), en);
   assert.deepEqual([...html.matchAll(/data-train-chip="([a-z_]+)">([^<]*)</g)].map((m) => `${m[1]}:${m[2]}`),
     ['blocked:Blocked', 'landing:Landing', 'landed:Landed', 'rolled_back:Rolled back', 'halted:Halted']);
+  // The chip's class is train-chip-<state>, never the bare state: `.blocked`
+  // is the detail's panel, whose padding and ring a chip would take (review 1 of 208).
+  const classes = [...html.matchAll(/<span class="([^"]*)" data-train-chip=/g)].map((m) => (m[1] ?? '').split(' '));
+  assert.equal(classes.length, states.length);
+  for (const names of classes) for (const state of states) assert.ok(!names.includes(state), `the chip's class holds the bare state: ${names.join(' ')}`);
+  assert.deepEqual(classes.map((names) => names.find((name) => name.startsWith('train-chip-'))), states.map((state) => `train-chip-${state}`));
 });
