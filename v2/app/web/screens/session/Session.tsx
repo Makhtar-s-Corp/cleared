@@ -28,6 +28,7 @@ import { harnessName, terminalChoice } from '@/components/terminal/model.ts';
 import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useScreen } from '@/lib/context.tsx';
+import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import { formatModel, harnessSquare, liveDot } from '../tower/model.ts';
@@ -303,7 +304,6 @@ export function SessionIndex({ sessions, tickets, now, t }: { readonly sessions:
   );
 }
 
-const REFRESH_MS = 10_000;
 const TICK_MS = 20_000;
 
 function useEvery(ms: number, run: () => void): void {
@@ -317,7 +317,7 @@ function useEvery(ms: number, run: () => void): void {
 
 function Index() {
   const { t, api, now } = useScreen();
-  const [data, setData] = useState<{ sessions: SessionSummary[]; tickets: Ticket[] } | 'failed' | null>(null);
+  const [data, setData] = useKept<{ sessions: SessionSummary[]; tickets: Ticket[] } | 'failed' | null>('sessions', null);
   const refresh = useCallback(async () => {
     try {
       const [sessions, tickets] = await Promise.all([api<SessionSummary[]>('/sessions'), api<Ticket[]>('/tickets')]);
@@ -325,9 +325,10 @@ function Index() {
     } catch {
       setData('failed');
     }
-  }, [api]);
+  }, [api, setData]);
+  // Drawn from the cache, then again each time a resource it read changes.
   useEffect(() => { void refresh(); }, [refresh]);
-  useEvery(REFRESH_MS, () => void refresh());
+  useLive(() => void refresh());
   if (data === null) return null;
   if (data === 'failed') return <div className="index"><p className="empty error">{t('load_failed')}</p></div>;
   return <SessionIndex sessions={data.sessions} tickets={data.tickets} now={now()} t={t} />;
@@ -396,7 +397,7 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
 
   // The reviewer's session appears once it starts; who took this one over
   // follows the service; the steps move on; the clock moves on.
-  useEvery(REFRESH_MS, async () => {
+  useLive(async () => {
     void readSteps();
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
@@ -430,7 +431,7 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
   // The tab is in the address, so a reload keeps it.
   const select = (next: Tab, focus = false) => {
     setTab(next);
-    window.history.replaceState(null, '', `#${next}`);
+    window.history.replaceState(window.history.state, '', `#${next}`);
     if (focus) document.getElementById(`tab-${next}-button`)?.focus();
   };
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -528,8 +529,11 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
     event.preventDefault();
     const typed = text.trim();
     if (!typed) { document.getElementById('message')?.focus(); return; }
+    // The composer empties at once; a refused message comes back to it,
+    // before what was typed meanwhile.
     setSending(true);
-    if (await post('/messages', { text: typed }, 'send_failed')) setText('');
+    setText('');
+    if (!(await post('/messages', { text: typed }, 'send_failed'))) setText((current) => (current.trim() ? `${text} ${current}` : text));
     setSending(false);
     document.getElementById('message')?.focus();
   };
@@ -665,7 +669,7 @@ function Live({ loaded }: { readonly loaded: Loaded }) {
 // siblings first; then its agent, which follows the stream.
 function One({ id }: { readonly id: string }) {
   const context = useScreen();
-  const [loaded, setLoaded] = useState<Loaded | 'failed' | null>(null);
+  const [loaded, setLoaded] = useKept<Loaded | 'failed' | null>(`session:${id}`, null);
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -678,7 +682,7 @@ function One({ id }: { readonly id: string }) {
       }
     })();
     return () => { live = false; };
-  }, [context, id]);
+  }, [context, id, setLoaded]);
   const agents = useMemo(() => (loaded && loaded !== 'failed' ? {
     [sessionAgentId(id)]: new SessionAgent({
       sessionId: id, state: loaded.state,

@@ -77,11 +77,12 @@ export async function signedIn(app: Running, name = 'alex'): Promise<{ cookie: s
   return { cookie, csrf: body.csrf, id: user.id };
 }
 
-// The files a page names: its sheets (the shell's, then the screen's), the
-// bundle's entry and the screen's chunk, as Vite built them into dist/.
+// The files a page names: its sheets (the shell's, then every screen's, which
+// the page turns on for its screen), the bundle's entry and every screen's
+// chunk, as Vite built them into dist/ (one page for every screen, lane 34).
 export async function pageFiles(app: Running, path: string, cookie: string): Promise<{ readonly html: string; readonly styles: string[]; readonly scripts: string[]; readonly css: string; readonly js: string }> {
   const html = await (await fetch(`${app.base}${path}`, { headers: { cookie } })).text();
-  const styles = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1] as string);
+  const styles = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"[^>]*>/g)].map((m) => m[1] as string);
   const scripts = [...html.matchAll(/<script type="module" src="([^"]+)">|<link rel="modulepreload" href="([^"]+)">/g)].map((m) => (m[1] ?? m[2]) as string);
   const read = async (file: string, type: string) => {
     const response = await fetch(`${app.base}${file}`);

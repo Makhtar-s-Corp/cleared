@@ -18,8 +18,8 @@ test('the app serves the ask\'s page for an ask\'s address, and nothing for anot
     const page = await get(`/ask/${ASK_ID}`);
     assert.equal(page.status, 200);
     const html = await page.text();
-    assert.match(html, /data-screen="ask"/);
-    assert.match(html, /<title>Cleared · Question to the code<\/title>/);
+    assert.match(html, /data-screen="app"/, 'the one shell page (lane 34)');
+    assert.match(html, /<title>Cleared<\/title>/, 'the page names the screen in its title once drawn (shell/App.tsx)');
     for (const path of ['/ask', '/ask/', '/ask/a/b', `/ask/${'x'.repeat(65)}`]) assert.equal((await get(path)).status, 404, path);
     // Signed out, the page sends to the sign-in.
     assert.equal((await fetch(`${app.base}/ask/${ASK_ID}`, { redirect: 'manual' })).status, 303);

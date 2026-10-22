@@ -33,4 +33,12 @@ export type ScreenContext = {
   // A write carries the anti-forgery token. Rejects with ApiError.
   api<T>(path: string, init?: { readonly method?: 'GET' | 'POST'; readonly body?: unknown }): Promise<T>;
   inboxChanged(): void;                                    // asks the shell to recount the inbox
+  // The page's one document (lane 34): `live` calls `run` when a resource
+  // the screen read has a new value (lib/query.tsx, useLive), `navigate`
+  // moves to another of the app's addresses without loading a document.
+  // Absent outside the shell (a component's test): no redraw, and
+  // navigate falls back to the browser.
+  live?(run: () => void): () => void;
+  navigate?(href: string, options?: { readonly replace?: boolean }): void;
 };
+

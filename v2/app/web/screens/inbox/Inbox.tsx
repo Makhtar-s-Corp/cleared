@@ -16,12 +16,13 @@ import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
+import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
 import {
-  CHANGE_MAX, CHECKS, GRACE_MS, REFRESH_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
+  CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
   changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, target,
@@ -547,10 +548,10 @@ type Data = Pick<InboxView, 'items' | 'tickets' | 'sessions'>;
 export default function Inbox() {
   const context = useScreen();
   const { t, api } = context;
-  const [data, setData] = useState<Data | undefined>(undefined);
+  const [data, setData] = useKept<Data | undefined>('inbox', undefined);
   const [failed, setFailed] = useState(false);
   const [local, setLocal] = useState<ReadonlyMap<string, Local>>(restore);
-  const [plans, setPlans] = useState<ReadonlyMap<string, Plan>>(new Map());
+  const [plans, setPlans] = useKept<ReadonlyMap<string, Plan>>('inbox-plans', new Map());
   // On a phone the captures start in their phone frame; the switch changes the frame only.
   const [frame, setFrame] = useState<InboxView['frame']>(() => (window.matchMedia('(max-width: 767px)').matches ? 'phone' : 'desktop'));
   const [hash, setHash] = useState(() => location.hash);
@@ -595,13 +596,11 @@ export default function Inbox() {
     } catch {
       setFailed(true);
     }
-  }, [api, change]);
+  }, [api, change, setData, setPlans]);
 
-  useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [load]);
+  // Drawn from the cache, then again each time a resource it read changes.
+  useEffect(() => { void load(); }, [load]);
+  useLive(() => void load());
 
   const selected = itemFromHash(hash);
   const view: InboxView | undefined = data && {

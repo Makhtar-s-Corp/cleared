@@ -18,7 +18,7 @@ test('the app serves the lead\'s pages, catalog, stylesheet and scripts, and its
     for (const path of ['/lead', '/plans/plan-2']) {
       const page = await get(path);
       assert.equal(page.status, 200, path);
-      assert.match(await page.text(), /data-screen="lead"/, path);
+      assert.match(await page.text(), /data-screen="app"/, path);
     }
     const catalog = await (await get('/messages/lead.json')).json() as Record<string, string>;
     assert.equal(catalog.plan_approve, 'Approve the plan and start');

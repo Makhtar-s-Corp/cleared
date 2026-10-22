@@ -168,7 +168,7 @@ test('the app serves the inbox page, its catalog, its stylesheet and its script'
     const get = (path: string) => fetch(`${app.base}${path}`, { headers: { cookie } });
     const page = await get('/inbox');
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /data-screen="inbox"/);
+    assert.match(await page.text(), /data-screen="app"/, 'the one shell page (lane 34)');
     const catalog = await (await get('/messages/inbox.json')).json() as Record<string, string>;
     assert.equal(catalog.approve, 'Approve the release');
     assert.equal(catalog.plan_approve, 'Approve the plan and start', 'the plan panel\'s keys are in the inbox\'s catalog');

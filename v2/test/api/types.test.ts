@@ -63,11 +63,13 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/sessions/:id/terminal/close',
     'GET /api/sessions/:id/terminal/stream',
     'PUT /api/sessions/:id/files/*',
+    // The change stream of the interface overhaul (lane 34, api/events.ts).
+    'GET /api/events',
   ].sort());
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 51);
+  assert.equal(keys.length, 52);
   const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES];
   assert.deepEqual(ahead.filter((route) => !API_ROUTES.includes(route)), []);
   assert.equal(new Set(ahead).size, ahead.length, 'each route of a later lane is in one list');

@@ -12,6 +12,7 @@ import type { Translate } from '../lib/i18n.ts';
 import { draftFrom, planFrom } from '../screens/lead/model.ts';
 import { leadHref } from '../screens/tower/model.ts';
 import { signedIn, startApp } from '../../test/support.ts';
+import { placeOf } from '../lib/routes.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
 const shell = translator(loadCatalog('shell', 'en'));
@@ -25,8 +26,9 @@ test('the Plans tab opens /lead, and /lead and /plans/<id> mount the lead screen
       const page = await fetch(`${app.base}${path}`, { headers: { cookie } });
       assert.equal(page.status, 200, path);
       const html = await page.text();
-      assert.match(html, /<body data-screen="lead"/, path);
-      assert.match(html, /<title>Cleared · Lead<\/title>/);
+      // One shell page for every screen (lane 34): the page's router names the screen, and its title.
+      assert.match(html, /<body data-screen="app"/, path);
+      assert.equal(placeOf(path)?.screen, 'lead', path);
     }
     for (const path of ['/plans', '/plans/', '/plans/a/b', '/lead/x']) assert.equal((await fetch(`${app.base}${path}`, { headers: { cookie }, redirect: 'manual' })).status, 404, path);
     const signedOut = await fetch(`${app.base}/lead`, { redirect: 'manual' });

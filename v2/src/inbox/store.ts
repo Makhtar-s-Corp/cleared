@@ -28,16 +28,31 @@ type Row = Record<string, unknown>;
 export class InboxStore {
   #db: DatabaseSync;
   #now: () => Date;
+  #listeners = new Set<() => void>();
 
   constructor(db: DatabaseSync, now: () => Date = () => new Date()) {
     this.#db = db;
     this.#now = now;
   }
 
+  // Told after a write that changed a row (an item added, handled, its
+  // train or checks set), in the writer's turn: the service's change
+  // stream (api/events.ts) says "inbox" to the app. What a listener throws
+  // is dropped.
+  onChange(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => { this.#listeners.delete(listener); };
+  }
+
+  #changed<T extends { readonly changes: number | bigint }>(result: T): T {
+    if (Number(result.changes) > 0) for (const listener of [...this.#listeners]) { try { listener(); } catch { /* the write stands */ } }
+    return result;
+  }
+
   #insert(id: string, kind: NextInboxItem['kind'], base: Base, sessionId: string, requestId: string, since: string, payload: object): void {
-    this.#db.prepare(
+    this.#changed(this.#db.prepare(
       'INSERT OR IGNORE INTO flow_inbox (id, kind, ticket, project, session_id, request_id, since, state, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, kind, base.ticket, base.project, sessionId, requestId, since, 'waiting', JSON.stringify(payload));
+    ).run(id, kind, base.ticket, base.project, sessionId, requestId, since, 'waiting', JSON.stringify(payload)));
   }
 
   #get(id: string): NextInboxItem {
@@ -61,8 +76,8 @@ export class InboxStore {
   // Handles a waiting item of `kind` and writes what the person did into
   // it; true when this call handled it, so an item is answered once.
   #settle(id: string, kind: 'contract' | 'knowledge', by: UserId, outcome: object): boolean {
-    const result = this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ?, payload = json_set(payload, '$.outcome', json(?)) WHERE id = ? AND kind = ? AND state = 'waiting'")
-      .run(this.#now().toISOString(), by, JSON.stringify(outcome), id, kind);
+    const result = this.#changed(this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ?, payload = json_set(payload, '$.outcome', json(?)) WHERE id = ? AND kind = ? AND state = 'waiting'")
+      .run(this.#now().toISOString(), by, JSON.stringify(outcome), id, kind));
     return Number(result.changes) > 0;
   }
 
@@ -95,7 +110,7 @@ export class InboxStore {
 
   // A train's state as it lands: the card shows it, waiting or handled.
   setTrain(id: string, train: TrainState): void {
-    this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.train', json(?)) WHERE id = ? AND kind = 'release'").run(JSON.stringify(train), id);
+    this.#changed(this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.train', json(?)) WHERE id = ? AND kind = 'release'").run(JSON.stringify(train), id));
   }
 
   // A plan the lead proposed (milestone 2, section 5.1), under the lead's
@@ -229,7 +244,7 @@ export class InboxStore {
   // A release's checks, as the forge reports them now, while it waits: a
   // handled release keeps what the person saw (issue 157).
   setReleaseChecks(id: string, checks: ReleaseItem['pr']['checks']): void {
-    this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.pr.checks', ?) WHERE id = ? AND kind = 'release' AND state = 'waiting'").run(checks, id);
+    this.#changed(this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.pr.checks', ?) WHERE id = ? AND kind = 'release' AND state = 'waiting'").run(checks, id));
   }
 
   waitingReleases(): ReleaseItem[] {
@@ -238,8 +253,8 @@ export class InboxStore {
 
   // True when this call handled it: an item is handled once.
   handle(id: string, by: UserId | 'policy' | 'system'): boolean {
-    const result = this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ? WHERE id = ? AND state = 'waiting'")
-      .run(this.#now().toISOString(), by, id);
+    const result = this.#changed(this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ? WHERE id = ? AND state = 'waiting'")
+      .run(this.#now().toISOString(), by, id));
     return Number(result.changes) > 0;
   }
 
@@ -257,7 +272,7 @@ export class InboxStore {
 
   // A session that ends leaves nothing waiting on its behalf.
   handleSession(sessionId: SessionId, by: 'policy' | 'system'): void {
-    this.#db.prepare(`UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ? WHERE session_id = ? AND state = 'waiting' AND kind IN ${SESSION_KINDS}`)
-      .run(this.#now().toISOString(), by, sessionId);
+    this.#changed(this.#db.prepare(`UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ? WHERE session_id = ? AND state = 'waiting' AND kind IN ${SESSION_KINDS}`)
+      .run(this.#now().toISOString(), by, sessionId));
   }
 }

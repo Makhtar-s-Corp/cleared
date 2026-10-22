@@ -603,6 +603,10 @@ export type ApiRoutes = {
   'POST /api/plans/:id/reject': { readonly body: RejectPlanBody; readonly response: Plan };
   'POST /api/plans/:id/pause': { readonly body: null; readonly response: Plan };
   'POST /api/plans/:id/resume': { readonly body: null; readonly response: Plan };
+  // The interface overhaul (docs/v2/ui-overhaul-plan.md, U3, lane 34): what
+  // changed, as a stream of changeFrame() frames; the app refetches the
+  // resource an event names. Last-Event-ID resumes it.
+  'GET /api/events': { readonly body: null; readonly response: 'text/event-stream' };
 };
 
 export type ApiRoute = keyof ApiRoutes;
@@ -660,6 +664,7 @@ const routes = {
   'POST /api/plans/:id/reject': true,
   'POST /api/plans/:id/pause': true,
   'POST /api/plans/:id/resume': true,
+  'GET /api/events': true,
 } satisfies Record<ApiRoute, true>;
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
@@ -690,4 +695,19 @@ export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route)
 // type as the event name, the envelope as JSON on one data line.
 export function sseFrame(event: SessionEvent): string {
   return `id: ${event.seq}\nevent: ${event.event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+// The change stream (GET /api/events, lane 34): a thin event says which
+// resource changed, never what it holds, so nothing of a session's content
+// travels on it. `id` names the session, the ticket or the plan; null for
+// the inbox and the lead, which are one resource each. 'plan' is reserved:
+// the service says none yet (a plan moves with its tickets' events and the
+// lead's, and the app reads plans at the polling interval); the app
+// already refetches the plan an event would name.
+export type ChangeKind = 'session' | 'ticket' | 'inbox' | 'lead' | 'plan';
+export type ChangeEvent = { readonly kind: ChangeKind; readonly id: string | null; readonly at: string };
+
+// One change as one server-sent event: its number as the id, the event on one data line.
+export function changeFrame(seq: number, event: ChangeEvent): string {
+  return `id: ${seq}\nevent: change\ndata: ${JSON.stringify(event)}\n\n`;
 }

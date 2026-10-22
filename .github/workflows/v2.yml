@@ -87,19 +87,22 @@ jobs:
         # "denied" after grantPermissions) and passes on the full build.
         run: npx --no-install playwright-core install --with-deps chromium
       - name: Browser tests
-        # The eight browser tests of app/test, run with the installed package and its Chromium. The TAP output is kept
-        # for the summary.
+        # The browser tests of app/test, run with the installed package and its Chromium: eight, and lane 34's
+        # (the tab-switch budget, three runs in CI, and the session stack and the screens' boundary). The TAP output is
+        # kept for the summary. Every test that ran must pass, none may be skipped, and there must be at least as many tests
+        # as listed files, so an emptied file or a failed run fails the job without a fixed count to keep up to date.
         run: |
           set -o pipefail
           export CLEARED_V2_PLAYWRIGHT="$PWD/node_modules/playwright-core"
           export CLEARED_V2_CHROME="$(node -p "require('$CLEARED_V2_PLAYWRIGHT').chromium.executablePath()")"
-          node --test --test-reporter=tap \
-            app/test/choices-browser.test.ts \
-            app/test/notify/browser.test.ts \
-            app/test/session/tabs-browser.test.ts \
-            app/test/session/terminal-browser.test.ts | tee "$RUNNER_TEMP/browser.tap"
-          skipped=$(grep -E '^# skipped ' "$RUNNER_TEMP/browser.tap" | awk '{print $3}')
-          test "$skipped" = 0 || { echo "::error::$skipped browser test(s) skipped"; exit 1; }
+          files="app/test/choices-browser.test.ts app/test/notify/browser.test.ts app/test/session/tabs-browser.test.ts
+            app/test/session/terminal-browser.test.ts app/test/foundation/budget-browser.test.ts
+            app/test/foundation/stack-browser.test.ts"
+          node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap"
+          count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{print $3}'; }
+          test "$(count skipped)" = 0 || { echo "::error::$(count skipped) browser test(s) skipped"; exit 1; }
+          test "$(count pass)" = "$(count tests)" || { echo "::error::$(count pass) of $(count tests) browser tests passed"; exit 1; }
+          test "$(count tests)" -ge "$(echo $files | wc -w)" || { echo "::error::fewer browser tests than listed files"; exit 1; }
       - name: Job summary
         # A test prints a line "measure <name> <value>"; the TAP stream carries it as "# measure ...", and it is copied here.
         if: always()
