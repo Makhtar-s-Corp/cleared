@@ -100,3 +100,36 @@ test('a release remembers the session its approval step runs on', () => {
   assert.equal(inbox.waitingFor('reviewer-session'), 0, 'it is not a request of that session');
   assert.equal(inbox.releaseSession('nope'), undefined);
 });
+
+const release = {
+  ticket: 'LOCAL-2', project: 'guestbook', title: 'Held for review', announcement: 'Held.', requestedAt: '2026-10-21T10:05:00.000Z',
+  pr: { number: 7, url: 'https://example.invalid/filter-api/pull/7', checks: 'pending' as const }, heads: [{ pr: 7, head: 'b'.repeat(40) }, { pr: 7, head: 'a'.repeat(40) }],
+  captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } }, sessions: [],
+};
+
+test('a release item of a train keeps the train, and the train\'s state as it lands, waiting or handled (lane 16)', () => {
+  const { inbox } = make();
+  const train = { state: 'waiting' as const, compatibility: 'guestbook consumes filter-api and is changed in this ticket.', blocked: null, services: [
+    { service: 'filter-api', pr: { number: 7, url: 'https://example.invalid/filter-api/pull/7' }, state: 'waiting' as const, at: null, head: 'b'.repeat(40), note: null },
+    { service: 'guestbook', pr: { number: 7, url: 'https://example.invalid/guestbook/pull/7' }, state: 'waiting' as const, at: null, head: 'a'.repeat(40), note: null },
+  ] };
+  const item = inbox.addRelease({ ...release, train });
+  assert.deepEqual(item.train, train);
+  inbox.handle(item.id, 'u1');
+  const landing = { ...train, state: 'landing' as const, services: [{ ...train.services[0]!, state: 'merged' as const, at: '2026-10-21T10:10:00.000Z' }, train.services[1]!] };
+  inbox.setTrain(item.id, landing);
+  const shown = inbox.list().find((i) => i.id === item.id) as typeof item;
+  assert.equal(shown.state, 'handled');
+  assert.deepEqual(shown.train, landing, 'a handled card still shows how its train lands');
+});
+
+test('a release item keeps its groups and flags when there are some, and has neither field when there are none', () => {
+  const { inbox } = make();
+  const none = inbox.addRelease({ ...release, groups: [], flags: [] });
+  assert.equal('groups' in none, false);
+  assert.equal('flags' in none, false);
+  assert.equal('train' in none, false, 'a one-service release has no train');
+  const some = inbox.addRelease({ ...release, requestedAt: '2026-10-21T10:06:00.000Z', groups: [{ intent: 'Hold flagged entries', files: ['src/check.ts'] }], flags: [{ kind: 'contract', files: ['contract/openapi.yaml'], detail: 'the contract of filter-api' }] });
+  assert.deepEqual(some.groups, [{ intent: 'Hold flagged entries', files: ['src/check.ts'] }]);
+  assert.deepEqual(some.flags, [{ kind: 'contract', files: ['contract/openapi.yaml'], detail: 'the contract of filter-api' }]);
+});

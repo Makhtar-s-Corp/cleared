@@ -25,9 +25,13 @@ export type PutBackReason =
   | 'release_refused'       // the lock refused the request for approval
   | 'merge_refused'         // the lock refused the merge for good
   | 'rolled_back'           // the release watch reverted the merge
+  | 'train_halted'          // a release train could not land its next service (lane 16)
   | 'restart';              // the service restarted while the ticket ran
 
 type Base = { readonly at: string; readonly project: string; readonly ticket: TicketId };
+// A ticket of a workspace of several services lands as a train (lane 16):
+// its landing events name the service; absent for one service.
+type OfService = { readonly service?: string };
 
 export type FlowEvent =
   | Base & { readonly type: 'ticket_started'; readonly by: UserId; readonly origin: Origin | null; readonly session: SessionId }
@@ -35,12 +39,14 @@ export type FlowEvent =
   | Base & { readonly type: 'review_verdict'; readonly session: SessionId; readonly verdict: 'pass' | 'changes_requested'; readonly round: number }
   | Base & { readonly type: 'release_requested'; readonly session: SessionId; readonly item: string; readonly pr: number; readonly url: string }
   | Base & { readonly type: 'release_approved'; readonly item: string; readonly pr: number; readonly by: UserId }
-  | Base & { readonly type: 'release_merged'; readonly pr: number }
+  | Base & OfService & { readonly type: 'release_merged'; readonly pr: number }
   // 'unwatched': the project configures no health check, so the release is live at its merge.
-  | Base & { readonly type: 'release_landed'; readonly pr: number; readonly health: 'healthy' | 'unwatched' }
+  // A train says it once, when its last service landed, with its services in landing order.
+  | Base & OfService & { readonly type: 'release_landed'; readonly pr: number; readonly health: 'healthy' | 'unwatched'; readonly services?: readonly string[] }
   // Live, but the watch ended without a healthy verdict and nothing was reverted: the owner decides.
-  | Base & { readonly type: 'release_unhealthy'; readonly pr: number; readonly note: string }
-  | Base & { readonly type: 'rolled_back'; readonly pr: number; readonly note: string }
+  | Base & OfService & { readonly type: 'release_unhealthy'; readonly pr: number; readonly note: string }
+  // A train says it once, naming the service whose watch failed.
+  | Base & OfService & { readonly type: 'rolled_back'; readonly pr: number; readonly note: string }
   | Base & { readonly type: 'ticket_put_back'; readonly reason: PutBackReason; readonly note: string }
   | Base & { readonly type: 'question_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string }
   | Base & { readonly type: 'permission_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly tool: string }

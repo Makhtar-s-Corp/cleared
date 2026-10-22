@@ -2,7 +2,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SESSION_PREVIEW_ROUTE, SERVICE_USER_HEADER, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, SERVICE_USER_HEADER, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createApiRoutes } from '../../src/api/routes.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
@@ -42,8 +42,12 @@ async function call(method: string, path: string, headers: Record<string, string
 test('the service declares every route of the API but the approval, which is lane 8\'s', () => {
   const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
   const declared = routes.map((r) => `${r.method} ${r.path}`).sort();
-  // The preview is lane 15's (container/preview.ts).
-  const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r)).sort();
+  // The preview is lane 15's (container/preview.ts). Written ahead by lane
+  // 16: the session plan's Go and Change, served by lane 17 (flow/plan-gate.ts),
+  // which removes them from here; the files, takeover and giveback, served by
+  // lane 20 (flow/files.ts, flow/takeover.ts), which removes them from here.
+  const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES];
+  const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r) && !ahead.includes(r)).sort();
   assert.deepEqual(declared, wanted);
 });
 

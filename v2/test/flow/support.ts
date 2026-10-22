@@ -14,6 +14,8 @@ import type { AgUiEvent, SessionEvent } from '../../src/session/events.ts';
 import { applyTables, openStore, type Store } from '../../src/store/db.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
+import type { ServiceLock } from '../../src/release/lock.ts';
+import type { ServiceConfig } from '../../src/workspace/config.ts';
 
 export const REPORT_PASS = 'I read the change.\n\nVerdict: “no blocking issues”\nDefects: none\nTo verify: nothing\nQuestions for the user: None.';
 export const REPORT_FIX = 'I read the change.\n\nVerdict: “fix before merge”\nDefects: src/entries.ts:3 sorts the wrong way\nTo verify: nothing\nQuestions for the user: None.';
@@ -105,6 +107,7 @@ export type Setup = Awaited<ReturnType<typeof setup>>;
 export type SetupOptions = {
   scripts?: Scripts; config?: Partial<FlowConfig>; effects?: Partial<FlowEffects>; adapterless?: boolean;
   ledger?: boolean;                       // the v1 events table the lock and the release watch write; true by default
+  locks?: (service: ServiceConfig) => ServiceLock;   // the lock of each service of a workspace of several
 };
 
 export async function setup(options: SetupOptions = {}) {
@@ -126,7 +129,7 @@ export async function setup(options: SetupOptions = {}) {
   };
   const deps = {
     store, inbox, registry, config: { ...CONFIG, ...options.config }, effects: fakeEffects(calls, options.effects),
-    now: () => new Date(clock.now),
+    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}),
   };
   const engine = new FlowEngine(deps);
   const flowEvents: FlowEvent[] = [];
