@@ -23,6 +23,8 @@
   "devDependencies": {
     "@ag-ui/client": "1.0.2",
     "@ag-ui/core": "1.0.3",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/lang-json": "6.0.2",
     "@copilotkit/react-core": "1.77.2",
     "@phosphor-icons/react": "2.1.10",
     "@radix-ui/react-popover": "1.2.0",
@@ -34,6 +36,7 @@
     "@types/react-dom": "19.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "codemirror": "6.0.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "rxjs": "7.8.1",
