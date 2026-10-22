@@ -670,3 +670,84 @@ test('a context measure that never answers does not hold the session: it gives u
   assert.equal(out.filter((line) => line.type === 'context').length, 0);
   assert.ok(logs.some((text) => /context measure failed: no answer within 20 ms/.test(text)), logs.join('\n'));
 });
+
+// Take over with the harness attached (owner request of 2026-10-22 17:26):
+// the runner hands its harness to a human without ending, and takes the
+// session back from its transcript.
+function releasable() {
+  const options: Options[] = [];
+  const prompts: string[] = [];
+  const queries: ReturnType<typeof fakeQuery>['seen'][] = [];
+  const query: QueryFn = (args) => {
+    const own = queries.length + 1;
+    options.push(args.options as Options);
+    const fake = fakeQuery(async function* (message) {
+      prompts.push(String((message.message as { content: string }).content));
+      yield result(`answer ${own}`);
+    });
+    queries.push(fake.seen);
+    return fake.query(args);
+  };
+  return { query, options, prompts, queries };
+}
+const answered = (out: RunnerOutput[], text: string) => out.some((line) => line.type === 'sdk' && (line.message as { result?: string }).result === text);
+
+test('release hands the harness over: the query closes and the runner stays up; reload resumes the same session from its transcript', async () => {
+  const q = releasable();
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(q.query, source.lines, out));
+  source.send(start);
+  source.send({ type: 'user', uuid: 'u-1', text: 'Work.' });
+  await until(() => answered(out, 'answer 1'));
+
+  source.send({ type: 'release' });
+  await until(() => out.some((line) => line.type === 'released'));
+  assert.equal(q.queries[0]?.closes, 1, 'the harness process of the session ended');
+  assert.ok(!out.some((line) => line.type === 'exit'), 'the runner, the container\'s command, does not end');
+  // A second release says it again and closes nothing more.
+  source.send({ type: 'release' });
+  await until(() => out.filter((line) => line.type === 'released').length === 2);
+  assert.equal(q.queries.length, 1);
+
+  // A turn sent while released waits for the reload, then goes to the new query.
+  source.send({ type: 'user', uuid: 'u-2', text: 'Carry on.' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(q.queries.length, 1, 'no query while the human holds the harness');
+  source.send({ type: 'reload' });
+  await until(() => answered(out, 'answer 2'));
+  assert.equal(q.queries.length, 2);
+  assert.equal(q.options[1]?.resume, start.sessionId, 'the same session, read again from its transcript');
+  assert.equal(q.options[1]?.sessionId, undefined);
+  assert.equal(q.options[1]?.canUseTool, q.options[0]?.canUseTool);
+  assert.deepEqual(q.prompts, ['Work.', 'Carry on.']);
+  source.end();
+  assert.equal(await done, 0);
+});
+
+test('a reload with nothing released changes nothing; stop while released, and the end of the input, end the runner', async () => {
+  const q = releasable();
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(q.query, source.lines, out));
+  source.send(start);
+  source.send({ type: 'reload' });
+  source.send({ type: 'user', uuid: 'u-1', text: 'Work.' });
+  await until(() => answered(out, 'answer 1'));
+  assert.equal(q.queries.length, 1);
+  source.send({ type: 'release' });
+  await until(() => out.some((line) => line.type === 'released'));
+  source.send({ type: 'stop' });
+  assert.equal(await done, 0);
+  assert.deepEqual(out.at(-1), { type: 'exit', code: 0 });
+
+  const other = releasable();
+  const input = lineSource();
+  const lines: RunnerOutput[] = [];
+  const ended = run(deps(other.query, input.lines, lines));
+  input.send(start);
+  input.send({ type: 'release' });
+  await until(() => lines.some((line) => line.type === 'released'));
+  input.end();
+  assert.equal(await ended, 0);
+});

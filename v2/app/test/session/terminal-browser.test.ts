@@ -1,8 +1,9 @@
 // The web terminal and the editable editor in a real browser, against the
 // session fixture's source (decisions 32 and 33, lane 32), on the app's
 // loopback address, where the terminal is offered:
-//   - Take over mounts the terminal; `ls` and Enter reach the input route;
-//     the fixture's shell answers in the stream;
+//   - Take over mounts the terminal on the session's harness (owner request
+//     of 2026-10-22 17:26); a line typed to it and, after Shell, `ls` and
+//     Enter reach the input route; the fixture's stand-ins answer;
 //   - the editor opens a changed file, saves it with the hash it loaded,
 //     shows a stale hash's conflict with Reload, and a refusal's rule and
 //     reason;
@@ -86,11 +87,21 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
     await page.locator('#timeline [data-row]').first().waitFor();
     assert.equal(await page.evaluate(() => typeof (document.querySelector('meta[property="csp-nonce"]') as HTMLMetaElement | null)?.nonce), 'string');
 
-    // Take over: the web terminal opens, beside the command that stays the fallback.
+    // Take over: the web terminal opens on the session's harness (owner request of 2026-10-22 17:26), no command to copy.
     await page.locator('#takeover').click();
-    await page.locator('[data-terminal-state="open"]').waitFor();
-    await page.locator('#resume-command').waitFor();
+    await page.locator('[data-terminal-state="open"][data-mode="harness"]').waitFor();
     const rows = page.locator('#tab-terminal .xterm-rows');
+    await rows.getByText('resumed on this session').waitFor();
+    assert.equal(await page.locator('#resume-command').count(), 0, 'no command to run on the server');
+    assert.doesNotMatch(await page.locator('#tab-terminal').innerText(), /docker exec|on the server/);
+    await page.locator('#tab-terminal .term-host').click();
+    await page.keyboard.type('what changed?');
+    await page.keyboard.press('Enter');
+    await rows.getByText('stand-in for the harness').waitFor();
+
+    // Shell, the second choice: the harness leaves, a shell opens in the same container.
+    await page.locator('#tab-terminal [data-act="terminal_shell"]').click();
+    await page.locator('[data-terminal-state="open"][data-mode="shell"]').waitFor();
     await rows.getByText('24-bit colour').waitFor();
     await rows.getByText('256 colours').waitFor();
     await page.locator('#tab-terminal .term-host').click();
@@ -98,8 +109,9 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
     await page.keyboard.press('Enter');
     await rows.getByText('upcoming.test.mjs').waitFor();
     const typed = base.calls.filter((c) => c.path.endsWith('/terminal/input')).map((c) => (c.body as { data: string }).data).join('');
-    assert.equal(typed, 'ls\r', 'the keys as typed, Enter as a carriage return');
-    assert.deepEqual(base.calls.filter((c) => c.path.endsWith('/terminal/open')).map((c) => Object.keys(c.body as object).sort()), [['cols', 'rows']]);
+    assert.equal(typed, 'what changed?\rls\r', 'the keys as typed, Enter as a carriage return');
+    assert.deepEqual(base.calls.filter((c) => c.path.endsWith('/terminal/open')).map((c) => (c.body as { mode: string }).mode), ['harness', 'shell']);
+    assert.equal(base.calls.filter((c) => c.path.endsWith('/terminal/close')).length, 1, 'the harness closed before the shell opened');
     // A selection across the coloured lines: xterm writes its colours as style attributes there.
     const box = await page.locator('#tab-terminal .xterm-screen').boundingBox();
     assert.ok(box);
@@ -169,7 +181,7 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
   assert.deepEqual(away, []);
 });
 
-test('on the public origin the terminal is not offered: the command and why', { skip }, async () => {
+test('on the public origin the terminal is not offered: why, and no command', { skip }, async () => {
   const fixture = sessionFixture(FIXTURE_NOW);
   const source = sessionSource(fixture);
   const app = await startApp({ source, extra: { publicOrigin: 'https://cleared.example.invalid' } });
@@ -193,8 +205,11 @@ test('on the public origin the terminal is not offered: the command and why', { 
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/sessions/${AUTHOR_ID}`);
     await page.locator('#takeover').click();
-    await page.locator('#resume-command').waitFor();
-    assert.match(await page.locator('#tab-terminal .takeover').innerText(), /this machine/);
+    await page.locator('#tab-terminal .takeover').waitFor();
+    const notice = await page.locator('#tab-terminal .takeover').innerText();
+    assert.match(notice, /this machine/);
+    assert.doesNotMatch(notice, /docker exec|on the server/, 'no command to run on the server');
+    assert.equal(await page.locator('#resume-command').count(), 0);
     assert.equal(await page.locator('.term-host').count(), 0, 'no web terminal');
     assert.equal(source.calls.filter((c) => c.path.includes('/terminal/')).length, 0);
   } finally {

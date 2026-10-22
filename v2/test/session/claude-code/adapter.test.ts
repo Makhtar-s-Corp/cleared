@@ -14,6 +14,7 @@ import { Docker, LABEL, SESSION_LABEL } from '../../../src/container/docker.ts';
 import { parseServices } from '../../../src/container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../../../src/container/session-runtime.ts';
 import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../../../src/session/adapters/claude-code.ts';
+import { INTERACTIVE_LAUNCH, LOGIN_TOKEN_PROGRAM } from '../../../src/session/adapters/claude-code/interactive.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
 import { HostToolRefused, NotImplemented, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
@@ -95,7 +96,7 @@ async function setup() {
   let n = 0;
   const adapter = createClaudeCodeAdapter({
     log, cleaner: () => createCleaner({ secrets: [['sk', 'ant', 'oat01', 'TOKENVALUEFORTESTS'].join('-')] }), docker,
-    runtime: { stateDir: join(dir, 'state'), loginFile: join(dir, 'claude.token'), hostAddresses: ['192.0.2.10'], user: '1000:1000', maxBudgetUsd: 1, stopTimeoutMs: 200 },
+    runtime: { stateDir: join(dir, 'state'), loginFile: join(dir, 'claude.token'), hostAddresses: ['192.0.2.10'], user: '1000:1000', maxBudgetUsd: 1, stopTimeoutMs: 200, releaseTimeoutMs: 200 },
     newId: () => (n++ === 0 ? SESSION : `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`),
     now: () => new Date('2026-10-21T20:00:00.000Z'),
   });
@@ -436,5 +437,75 @@ test('a host call answered after the session stopped writes nothing to a runner 
     await settle();
     assert.ok(!runner.received.some((line) => line.type === 'host_result'));
     assert.deepEqual(custom(t.log, 'cleared.host_call'), []);
+  } finally { t.cleanup(); }
+});
+
+// Take over with the harness attached (owner request of 2026-10-22 17:26):
+// the runner hands Claude Code over, the human runs it resumed on the same
+// session in the container, and Give back takes it back from the transcript.
+test('interactive hands the runner\'s harness over and gives Claude Code resumed on the session, with no login on any word; Give back reloads it', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    await runner.waitFor((line) => line.type === 'user');
+    const asking = t.adapter.interactive?.(SESSION);
+    assert.ok(asking, 'the Claude Code adapter has an interactive resume');
+    await runner.waitFor((line) => line.type === 'release');
+    runner.say({ type: 'released' });
+    const resume = await asking;
+    assert.deepEqual(resume, {
+      supported: true, name: 'Claude Code',
+      command: ['sh', '-c', INTERACTIVE_LAUNCH, 'claude-code', SESSION, 'claude-haiku-5-5', LOGIN_TOKEN_PROGRAM, LOGIN_FILE_MOUNT],
+    });
+    // The launcher resumes the same session (no fork), on the session's model.
+    assert.match(INTERACTIVE_LAUNCH, /exec claude --resume "\$1" --model "\$2"/);
+    assert.doesNotMatch(INTERACTIVE_LAUNCH, /fork-session/);
+    // The login is read inside the container, into the harness's environment only: no word carries it.
+    assert.ok(resume.supported && !resume.command.some((word) => /CLAUDE_CODE_OAUTH_TOKEN=\S/.test(word) || word.includes('sk-ant')));
+    assert.ok(!JSON.stringify(t.log.all).includes('release'), 'the hand-over is no event of the session');
+
+    // Asked again (Shell, then the harness again): nothing more to release.
+    assert.equal((await t.adapter.interactive?.(SESSION))?.supported, true);
+    assert.equal(runner.received.filter((line) => line.type === 'release').length, 1);
+
+    // Give back: the same runner reloads the session from its transcript before the next turn.
+    const resumed = await t.adapter.resume(SESSION);
+    assert.equal(resumed, handle, 'the same container and runner');
+    await resumed.send({ text: 'Carry on.', by: 'cleared' });
+    const reload = await runner.waitFor((line) => line.type === 'reload');
+    const next = await runner.waitFor((line) => line.type === 'user' && line.text === 'Carry on.');
+    assert.ok(runner.received.indexOf(reload) < runner.received.indexOf(next));
+    assert.equal(t.runners.length, 1);
+    // A resume with nothing handed over reloads nothing.
+    await t.adapter.resume(SESSION);
+    assert.equal(runner.received.filter((line) => line.type === 'reload').length, 1);
+    const stopping = handle.stop();
+    await runner.waitFor((line) => line.type === 'stop');
+    runner.exit(0);
+    await stopping;
+  } finally { t.cleanup(); }
+});
+
+test('a runner that does not hand its harness over (an image before this change) makes it unsupported, with the reason; so does a stopped or unknown session', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    const silent = await t.adapter.interactive?.(SESSION);
+    assert.equal(silent?.supported, false);
+    assert.match(silent?.supported === false ? silent.reason : '', /did not hand its harness over.*session image/);
+    await runner.waitFor((line) => line.type === 'release');
+    // Nothing was handed over, so Give back has nothing to reload.
+    await t.adapter.resume(SESSION);
+    assert.equal(runner.received.some((line) => line.type === 'reload'), false);
+    const unknown = await t.adapter.interactive?.('11111111-2222-4333-8444-555555555555');
+    assert.match(unknown?.supported === false ? unknown.reason : '', /no running session/);
+    const stopping = handle.stop();
+    await runner.waitFor((line) => line.type === 'stop');
+    runner.exit(0);
+    await stopping;
+    const stopped = await t.adapter.interactive?.(SESSION);
+    assert.match(stopped?.supported === false ? stopped.reason : '', /no running session/);
   } finally { t.cleanup(); }
 });

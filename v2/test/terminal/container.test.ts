@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { END_TERMINAL, giveCommand, readCommand, takeCommand, TERMINAL_SHELL, writeCommand } from '../../src/terminal/container.ts';
+import { END_TERMINAL, giveCommand, readCommand, takeCommand, TERMINAL_WRAP, SHELL_COMMAND, terminalCommand, writeCommand } from '../../src/terminal/container.ts';
 import { LocalContainer } from './support.ts';
 
 const SESSION = '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b';
@@ -48,10 +48,14 @@ function checkout(): { dir: string; outside: string; container: LocalContainer; 
 
 const leftovers = (dir: string): string[] => readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((name) => name.split('/').at(-1)?.startsWith('.cleared-save-'));
 
-test('the terminal\'s shell writes its id where the close finds it, and the close ends its whole session', () => {
-  assert.match(TERMINAL_SHELL, /^echo \$\$ > \/tmp\/\.cleared-terminal\.pid; exec bash -l$/);
+test('the terminal\'s program writes its id where the close finds it, and the close ends its whole session', () => {
+  // The shell, or the harness the adapter gives (owner request of 2026-10-22 17:26), each its own words after the wrapper's.
+  assert.equal(TERMINAL_WRAP, 'echo $$ > /tmp/.cleared-terminal.pid; exec "$@"');
+  assert.deepEqual(terminalCommand(['claude', '--resume', 'id']), ['sh', '-c', TERMINAL_WRAP, 'sh', 'claude', '--resume', 'id']);
+  assert.deepEqual(SHELL_COMMAND, ['bash', '-l']);
   assert.equal(END_TERMINAL[0], 'sh');
-  assert.match(END_TERMINAL[2], /pkill -HUP -s "\$p"; sleep 1; pkill -KILL -s "\$p"/);
+  // A hang-up first, as a closed terminal sends: up to 5 seconds for the harness to leave and keep its transcript, then a kill.
+  assert.match(END_TERMINAL[2], /pkill -HUP -s "\$p"; i=0; while \[ \$i -lt 50 \] && pgrep -s "\$p" >\/dev\/null; do sleep 0\.1; i=\$\(\(i\+1\)\); done; pkill -KILL -s "\$p"/);
   assert.match(END_TERMINAL[2], /\*\[!0-9\]\*\) exit 0/, 'a pid file that is not a number ends nothing');
 });
 

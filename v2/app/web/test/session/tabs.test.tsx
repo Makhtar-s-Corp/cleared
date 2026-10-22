@@ -74,15 +74,15 @@ test('the left card says the plan in short, and the ticket names the service the
   assert.ok(!visibleText(html(<LeftCards view={viewOf()} t={en} />)).includes('on filter-api'));
 });
 
-test('a session taken over by you: the status says so, and the Terminal tab gives the command with the container', () => {
+test('a session taken over by you: the status says so, and the Terminal tab gives no command to run on the server', () => {
   const at = FIXTURE_NOW.toISOString();
   const view = viewOf({ summary: { ...(viewOf().summary), takenOver: { by: USER, at } } });
   assert.ok(visibleText(html(<StatusHead view={view} t={en} />)).includes('Taken over by you'));
   const notice = html(<TakeoverNotice view={view} t={en} />);
   const text = visibleText(notice);
-  assert.ok(text.includes(`docker exec -it cleared-v2-${AUTHOR_ID}-session claude --resume ${AUTHOR_ID}`));
+  assert.ok(!text.some((line) => /docker exec|on the server|claude --resume/.test(line)));
   assert.ok(text.some((line) => line.includes('paused')));
-  assert.match(notice, /<code[^>]*id="resume-command"/);
+  assert.doesNotMatch(notice, /id="resume-command"/);
   assert.equal(html(<TakeoverNotice view={viewOf()} t={en} />), '', 'nothing when nobody took it over');
 });
 
@@ -133,7 +133,6 @@ test('the tabs\' words come from the catalog, French included, and nothing is st
     html(<BrowserTab view={{ kind: 'here_only' }} t={t} />),
   ];
   const allowed = strings([SESSION_PLAN, view.thread.state?.files, AUTHOR_ID, parseCriteria(view.ticket?.body ?? '').criteria.map((c) => c.text)]);
-  allowed.add(`docker exec -it cleared-v2-${AUTHOR_ID}-session claude --resume ${AUTHOR_ID}`);
   for (const markup of parts(sentinel)) {
     assert.doesNotMatch(markup, / style="/);
     for (const text of visibleText(markup)) assert.ok(/^«[a-z_]+»/.test(text) || allowed.has(text) || /^[+−]\d+$/.test(text), `not from the catalog: ${text}`);

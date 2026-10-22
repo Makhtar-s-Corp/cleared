@@ -1,7 +1,8 @@
 // The web terminal and the editable editor as HTML (decisions 32 and 33,
 // lane 32): each state of the terminal's frame (opening, open, closed and
-// why, with Open again), the command and why when the web terminal is not
-// offered, and each state of the editor (read only and why, clean, changed,
+// why, with Open again), what runs in it (the session's harness first,
+// Shell its second choice: owner request of 2026-10-22 17:26), why when
+// the web terminal is not offered, with no command to run on the server, and each state of the editor (read only and why, clean, changed,
 // saving, saved, conflict with Reload, refused with the rule's reason,
 // confirmation); in both languages, with no inline style. The packages
 // themselves mount in the browser only (terminal-browser.test.ts).
@@ -40,9 +41,11 @@ const engineFile: SessionFile = { path: ENGINE, text: engineText, lines: engineT
 const noInlineStyle = (markup: string) => assert.doesNotMatch(markup, /\sstyle=|<style/, 'no inline style');
 
 test('the terminal\'s frame: opening, open with its size, and the host the terminal mounts in', () => {
-  const opening = html(<TerminalFrame t={en} status={{ kind: 'opening' }} />);
+  const opening = html(<TerminalFrame t={en} status={{ kind: 'opening' }} mode="shell" harness="Claude Code" />);
   assert.match(opening, /data-terminal-state="opening"/);
   assert.ok(visibleText(opening).includes('Opening a shell in the session\'s container…'));
+  const resuming = html(<TerminalFrame t={en} status={{ kind: 'opening' }} mode="harness" harness="Claude Code" />);
+  assert.ok(visibleText(resuming).includes('Resuming Claude Code on this session…'));
   assert.match(opening, /<div[^>]*class="term-host"[^>]*>/);
   assert.match(opening, /aria-label="Terminal in the session&#39;s container"/);
   const open = html(<TerminalFrame t={en} status={{ kind: 'open', cols: 100, rows: 30 }} />);
@@ -67,15 +70,41 @@ test('the terminal\'s frame, closed: the reason, and Open again except after Giv
   assert.doesNotMatch(given, /data-act="terminal_open"/, 'given back: nothing to open');
 });
 
-test('the Terminal tab without the web terminal: the command, and why', () => {
+test('the terminal\'s frame names what runs: the harness first with Shell beside it, the shell with the way back', () => {
+  const harness = html(<TerminalFrame t={en} status={{ kind: 'open', cols: 100, rows: 30 }} mode="harness" harness="Claude Code" />);
+  assert.match(harness, /data-mode="harness"/);
+  assert.ok(visibleText(harness).includes('Claude Code, resumed on this session'));
+  assert.match(harness, /<button[^>]*data-act="terminal_shell"[^>]*>Shell<\/button>/, 'Shell, the second choice');
+  assert.doesNotMatch(harness, /data-act="terminal_harness"/);
+  const shell = html(<TerminalFrame t={en} status={{ kind: 'open', cols: 100, rows: 30 }} mode="shell" harness="Claude Code" />);
+  assert.match(shell, /data-mode="shell"/);
+  assert.ok(visibleText(shell).includes('Shell in the session\'s container'));
+  assert.match(shell, /<button[^>]*data-act="terminal_harness"[^>]*>Back to Claude Code<\/button>/);
+  // A harness the adapter cannot resume: its reason, and the Shell; nothing to open again.
+  const unsupported = html(<TerminalFrame t={en} status={{ kind: 'closed', reason: 'unsupported', detail: 'The codex harness cannot be resumed in a terminal yet: open the Shell instead.' }} mode="harness" harness="Codex" />);
+  assert.ok(visibleText(unsupported).some((line) => line.includes('open the Shell instead')));
+  assert.match(unsupported, /data-act="terminal_shell"/);
+  assert.doesNotMatch(unsupported, /data-act="terminal_open"/);
+  // Given back: nothing to switch to.
+  assert.doesNotMatch(html(<TerminalFrame t={en} status={{ kind: 'closed', reason: 'give_back' }} mode="harness" harness="Claude Code" />), /data-act="terminal_(shell|harness)"/);
+  for (const markup of [harness, shell, unsupported]) {
+    noInlineStyle(markup);
+    assert.doesNotMatch(markup, /docker exec|on the server/);
+  }
+});
+
+test('the Terminal tab without the web terminal: why, and no command to run on the server', () => {
   const view = viewOf({ takenOver: { by: USER, at: AT } });
   const here = html(<TakeoverNotice view={view} t={en} why="here_only" />);
-  assert.match(here, /id="resume-command"/);
+  assert.doesNotMatch(here, /id="resume-command"|docker exec|on the server|<pre/);
   assert.ok(visibleText(here).some((line) => /this machine/.test(line)), 'why: the web terminal opens on the loopback address only');
   const plain = html(<TakeoverNotice view={view} t={en} />);
   assert.ok(!visibleText(plain).some((line) => /this machine/.test(line)), 'no why when the web terminal is there');
   const other = html(<TakeoverNotice view={viewOf({ takenOver: { by: 'someone-else', at: AT } })} t={en} why="other" />);
   assert.ok(visibleText(other).some((line) => /teammate/.test(line)));
+  const web = html(<TakeoverNotice view={view} t={en} web />);
+  assert.doesNotMatch(web, /id="resume-command"|docker exec|on the server|<pre/, 'beside the web terminal, no command either');
+  assert.ok(visibleText(web).some((line) => /harness/.test(line)));
 });
 
 function states(): Record<string, EditorState> {
@@ -144,9 +173,10 @@ test('the Editor tab: Edit on an open session\'s file, the reason when it stays 
 test('every string comes from the catalog, and the French one is complete', () => {
   const all = states();
   const markups = [
-    html(<TerminalFrame t={sentinel} status={{ kind: 'opening' }} />),
-    html(<TerminalFrame t={sentinel} status={{ kind: 'open', cols: 80, rows: 24 }} />),
-    html(<TerminalFrame t={sentinel} status={{ kind: 'closed', reason: 'idle' }} />),
+    html(<TerminalFrame t={sentinel} status={{ kind: 'opening' }} mode="harness" harness="Claude Code" />),
+    html(<TerminalFrame t={sentinel} status={{ kind: 'open', cols: 80, rows: 24 }} mode="harness" harness="Claude Code" />),
+    html(<TerminalFrame t={sentinel} status={{ kind: 'open', cols: 80, rows: 24 }} mode="shell" harness="Claude Code" />),
+    html(<TerminalFrame t={sentinel} status={{ kind: 'closed', reason: 'idle' }} mode="harness" harness="Claude Code" />),
     ...Object.values(all).map((state) => html(<EditorFrame t={sentinel} state={state} taken stale />)),
   ];
   for (const markup of markups) for (const line of visibleText(markup)) assert.match(line, /«[a-z_]+»/, `a string written in the component: ${line}`);
@@ -155,8 +185,8 @@ test('every string comes from the catalog, and the French one is complete', () =
     const markup = html(<EditorFrame t={fr} state={state} taken={false} stale={false} />);
     for (const line of visibleText(markup)) assert.ok(!/\b(Save|Saved|Reload|the file)\b/.test(line), `French: ${line}`);
   }
-  for (const reason of ['idle', 'give_back', 'exit', 'closed', 'lost', 'refused'] as const) {
-    const markup = html(<TerminalFrame t={fr} status={{ kind: 'closed', reason }} />);
+  for (const reason of ['idle', 'give_back', 'exit', 'closed', 'lost', 'refused', 'unsupported'] as const) {
+    const markup = html(<TerminalFrame t={fr} status={{ kind: 'closed', reason }} mode="harness" harness="Claude Code" />);
     assert.ok(!visibleText(markup).some((line) => /\b(the|terminal was)\b/.test(line)), reason);
   }
 });
