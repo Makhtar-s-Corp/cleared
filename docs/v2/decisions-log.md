@@ -1766,6 +1766,6 @@ The choices the lane makes:
 - **Not run here.** A real session on the two examples. The multi-service proof (lane 29) briefs its sessions this way.
 - **For lane 24.** An approved knowledge item of level `service` or `contract` has to be written where a briefing reads it. `lib/memory`'s briefing reads committed files and approved decisions, not an approved `lesson` entry. Lane 24 either writes it as an approved decision of that level (its context is `levelContext` in `workspace/briefing.ts`), or lands it in a committed file, as its skill does.
 - **For lane 23.** A ticket's contract step runs on the providing service, whose own contract comes first in its briefing.
-- **The requirements matrix.** M1 is done (lane 14's model and this lane's levels). M4's note names the contract level. P19 records choices 1, 5 and 7.
+- **The requirements matrix.** M1 is done (lane 14's model and this lane's levels, pull request 202). M4's note names the contract level. P19 records choices 1, 5 and 7.
 - **Checks.** `npm test`, `npm run typecheck` and `npm run guard` are green.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-memory-levels`, at the orchestrator's request.
