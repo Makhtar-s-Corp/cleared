@@ -814,3 +814,53 @@ The choices the lane makes:
 - **The engine is built on the first API request**, as in milestone 1 (`runtime.ts` builds it lazily, and a module's `provide` has no registry). So after a restart, the recovery, the idle stop and the landing tick start only when the app first asks the service something. A service restarted at night with no browser open does nothing until then. Lane 5's module, which subscribes to the flow at start, needs the engine built at start too: a follow-up for it.
 - The real merge through the lock, against GitHub, was not run by this lane: it is outward facing, and the milestone proof runs it.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-flow-landing`.
+
+## 2026-10-22: the lead engine, its thread, its commitments and its context cycle (milestone 2, lane 5)
+
+**Decision.** Lane `v2-j2-lead-core` implements decisions 3, 4 and 8 and section 4 of the [milestone 2 plan](milestone-2-plan.md) in `v2/src/lead/` (`config`, `store`, `engine`, `prompts`, `tools`, `routes`, `briefing`) and `v2/src/modules/lead.ts`, on the fake adapter. The lane's choices:
+
+1. **One turn at a time.** The engine sends a turn only after the previous `RUN_FINISHED`, because the real adapter folds a message sent mid turn into the running turn. Owner lines come first, then the flow's events. A line the lead must answer (an owner's message or goal, or a line the service adds such as "Plan P approved") has a `turn` state in `lead_messages`: `queued`, `sent`, `done`. A line still `sent` when its generation ends is sent again to the next generation, saying it has no answer yet. So a refresh or a restart in the middle of an owner turn loses nothing.
+2. **The reply** of an owner turn is the turn's last assistant text, cleaned. The texts of opening, event and handover turns stay on the session. Only `tell_owner` writes to the thread from those turns, and it is refused in a turn the owner started.
+3. **The opening turn.** The adapter sends `StartInput.prompt` as the first turn, so each generation starts with a short "Ready." turn. That turn also gives the first measure of the briefing's share. The share of the opening turn never triggers a refresh: the handover point counts only once the generation has served a turn. Otherwise a threshold below the base share (the doctor's 5 %) would refresh in a loop. A harness that plays no opening turn (lane 1's `exampleLeadScript`) is ready at its first measure.
+4. **When the measure comes.** The runner measures after a turn's result. So the end of a turn waits up to 2 seconds for that measure before the next turn is sent. If the measure arrives sooner, the wait ends there. This keeps the handover at the end of the turn that crossed 40 %. A measure at or above the threshold during a turn interrupts the turn at once, in the same handler. A handover turn is never interrupted.
+5. **Machine handover.** The service writes the handover itself in three cases: the lead does not call `handover` in the turn that asked for it, the generation fails (`RUN_ERROR`, the stream ends), or the service restarted. A generation that fails before serving a turn is replaced only after the 60-second retry delay, so a session that dies at once cannot loop. A generation that cannot start leaves the lead `down`; a tick starts it later.
+6. **The briefing** (`CLAUDE.md` in the lead's workdir) puts the lead's rules first, as the only instructions. Then, under lib/memory's reference line and quoted line by line, come: the open commitments read from the table, the last handover record (the lead's account, the structured parts, the thread's last ten messages) and the memory. The handover summary, the messages and the commitments come from a model, the owner or a team, and they carry across generations. That is an injection path, so they are data: a heading in them opens nothing. The briefing says the structured parts win over the summary.
+7. **The byte budget** (advisor point C9). With every part full, the parts add up to more than the 20 KB of the acceptance:
+   - the rules, about 4 KB;
+   - the memory, 12 000 bytes, lib/memory's own budget for the `lead` role;
+   - the summary, 4 KB;
+   - the messages, 6 KB, the newest kept;
+   - the structured parts.
+
+   The acceptance's 20 KB applies to a fresh generation, which has no handover, and a test asserts it with a full memory budget. A refreshed generation's briefing can reach about 35 KB, which is about 9 000 tokens, under 5 % of a 200 000-token window, well below the 40 % handover point. Commitments are never cut, since the property test needs every open one in every briefing. `commit` keeps them bounded instead: one sentence of at most 300 characters, and at most 20 open. Order of cuts: lib/memory cuts its own entries; the summary is cut at 4 KB; the messages are cut to the newest that fit in 6 KB.
+8. **The goal id** is `goal-<seq>`, the thread seq of the owner's goal line. It is said in the goal turn, which tells the lead to propose its plan with this id (lane 7's `propose_plan.goal`).
+9. **The lead's workdir** is `<workdirs>/lead`, cloned again from the base at each generation. `ticketCheckout` reuses a checkout as it is, so the old clone is removed first. The lead edits nothing, so a `CLAUDE.md` the project commits is replaced in that clone, not refused. lib/memory runs in a child process of the lane's own, for the lead's `briefing` (role `lead`, budget 12 000) and for `search`. `workspace/briefing.ts` knows only `briefing` and `capture`, and it is not this lane's file.
+10. **Host tools.**
+    - Every handler, lane 7's included, refuses a call that comes from a session other than the live generation's.
+    - `answer_question` turns the list into `Decision.answers`, keyed by question text, and refuses a question the request did not ask (issue 163).
+    - `message_session` and `answer_question` act only on an author's or a reviewer's session, never the lead's own.
+    - `ticket`, `session` and `search_memory` answer cleaned text.
+    - `search_memory` keeps approved decisions first, then the glossary and the lessons.
+    - The policy's `lead.tools` row allows any `mcp__cleared__*` name (issue 163). The host gives the session only the bound tools, and the fake adapter answers an unknown name with a failure; what lane 4's runner does with one is its own.
+11. **The thread and the stream.** A question row in `lead_messages` takes its state from its inbox item, so there is one source of truth. The stream sends the thread after `?after=` or `Last-Event-ID`, then a state frame, then each message and state change. Its listener is set before the backlog is read, and a message already sent is not sent twice.
+12. **For lane 7** (it may edit only `modules/lead.ts` and `prompts.ts` of the lead), the engine gives these registration points:
+    - `LeadExtensions`: `tools` (`propose_plan`, `start_ticket`), `state` lines for the compact state, and `handover` sections for the structured record;
+    - `enqueue(text, urgent)` for plan events;
+    - `serviceLine(text)` for "Plan P approved";
+    - `planLine(planId, text)` for a `plan` row in the thread;
+    - `publishPlan(plan)` for a `plan` frame.
+
+    `createLeadRuntime` takes the extensions.
+
+**Consequences.**
+- **Gaps across lanes, named here and in the pull request; this lane did not edit the files involved:**
+  - *Answering the lead's question through the session route.* `FlowEngine.answer` (`v2/src/flow/engine.ts`, `#liveSession`, line 1005) knows only the sessions the flow started. The lead's session has a row in `sessions` but none in the flow's live map, so `POST /api/sessions/:id/requests/:requestId/answer` answers 409 for it. The owner answers through `POST /api/lead/messages`, which answers the pending question when one waits (decision 8). The acceptance's "answered from the answer route" is met through that route, not through the session route. Until `FlowEngine.answer` hands a session it does not own to `LeadEngine.answer` (already written), the inbox and lane 8 cannot answer a lead question through the session route. Lane 10 links the question to `/lead`, so it is not blocked.
+  - *`stop_session`.* `FlowEngine` has no public stop: `#stopTicket` and `#close` are private. The port's `stopSession` is optional and the tool refuses while it is missing. `flowPort` picks up a public `stopSession(id, reason, by)` by name once `engine.ts` has one.
+  - *Restart and the inbox.* The flow's constructor runs `inbox.handleRequests('system')`, which also handles the lead's waiting question. The lead runtime builds the flow engine first, so nothing the lead adds afterwards is cleared. Keeping the question across a restart is lane 7's narrowing.
+  - *Lazy start.* A module's `provide` has no registry, so the lead starts on the first request to a lead route, as the flow's engine does (lane 2's entry). A service that restarts at night does nothing until a browser asks; lane 9's 15-second poll of `GET /api/lead` starts it. A start hook for modules would be a change to `registry.ts` and `main.ts`, a lane of its own.
+  - *Listings.* `GET /api/sessions` lists the lead's sessions (role `lead`, ticket `lead`). Lane 9 and the tower should leave them out or show them as the lead.
+  - *The config volume.* The adapter's `stop()` keeps the session's config volume so that `resume` works (`claude-code.ts`, header). The plan wants it removed for a lead generation, which is never resumed. Removing it is lane 4's file.
+- **Edit outside the lane's files:** `v2/test/modules/registry.test.ts` lines 10 to 26, because the lead module is no longer empty. Lanes 7 and 8 of milestone 1 made the same kind of edit.
+- **The doctor's `lead` check** (`v2/scripts/doctor-lead.ts`) is written. It runs a real generation on the doctor's model: a commit, a refresh forced at 5 %, then the commitment asked of generation 2. **It was not run.** Lane 4's runner, which carries the host tools and the context line, is not in `v2` yet, and the check needs it. It runs once lane 4 is merged and `doctor.ts` imports the list.
+- **No screen changed:** the lane touches no file of the app, so no capture was made.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-lead-core`.

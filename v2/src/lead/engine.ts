@@ -196,6 +196,20 @@ export class LeadEngine {
     await Promise.allSettled([...this.#tracked]);
   }
 
+  // Stops the live generation's session and starts no other: for the
+  // doctor, which removes its container. Its row stays live, as after a
+  // stop of the service.
+  async stop(): Promise<void> {
+    const gen = this.#gen;
+    this.#closed = true;
+    if (!gen) return;
+    gen.ending = true;
+    if (gen.settle) clearTimeout(gen.settle);
+    this.#gen = undefined;
+    await gen.handle.stop().catch((error) => console.error(`cleared-v2: the lead's session could not be stopped (${errorName(error)})`));
+    this.#markStopped(gen.id);
+  }
+
   // A generation that could not start is tried again; commitments whose
   // time came wake the lead; the next turn is sent if one waits.
   async tick(): Promise<void> {
