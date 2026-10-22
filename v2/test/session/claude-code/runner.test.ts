@@ -792,3 +792,21 @@ test('a session waiting for a new login is released too, and a reload starts its
   source.end();
   assert.equal(await done, 0);
 });
+
+test('a reload that arrives before the runner has parked (a Give back during the hand-over) still takes the session back', async () => {
+  const q = releasable();
+  const source = lineSource();
+  const out: RunnerOutput[] = [];
+  const done = run(deps(q.query, source.lines, out));
+  source.send(start);
+  source.send({ type: 'user', uuid: 'u-1', text: 'Work.' });
+  await until(() => answered(out, 'answer 1'));
+  source.send({ type: 'release' });
+  source.send({ type: 'reload' });
+  source.send({ type: 'user', uuid: 'u-2', text: 'Carry on.' });
+  await until(() => answered(out, 'answer 2'));
+  assert.equal(q.queries.length, 2);
+  assert.equal(q.options[1]?.resume, start.sessionId);
+  source.end();
+  assert.equal(await done, 0);
+});

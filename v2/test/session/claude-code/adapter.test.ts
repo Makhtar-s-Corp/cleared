@@ -496,9 +496,9 @@ test('a runner that does not hand its harness over (an image before this change)
     assert.equal(silent?.supported, false);
     assert.match(silent?.supported === false ? silent.reason : '', /did not hand its harness over.*session image/);
     await runner.waitFor((line) => line.type === 'release');
-    // Nothing was handed over, so Give back has nothing to reload.
+    // A release was sent: Give back reloads, in case the runner parks late (an older runner ignores the line).
     await t.adapter.resume(SESSION);
-    assert.equal(runner.received.some((line) => line.type === 'reload'), false);
+    await runner.waitFor((line) => line.type === 'reload');
     const unknown = await t.adapter.interactive?.('11111111-2222-4333-8444-555555555555');
     assert.match(unknown?.supported === false ? unknown.reason : '', /no running session/);
     const stopping = handle.stop();
@@ -507,5 +507,29 @@ test('a runner that does not hand its harness over (an image before this change)
     await stopping;
     const stopped = await t.adapter.interactive?.(SESSION);
     assert.match(stopped?.supported === false ? stopped.reason : '', /no running session/);
+  } finally { t.cleanup(); }
+});
+
+test('a Give back while the runner is still handing its harness over reloads it, and no harness is started beside it', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    const asking = t.adapter.interactive?.(SESSION);
+    await runner.waitFor((line) => line.type === 'release');
+    // Give back lands before the runner said released.
+    const resumed = await t.adapter.resume(SESSION);
+    assert.equal(resumed, handle);
+    runner.say({ type: 'released' });
+    const answer = await asking;
+    assert.equal(answer?.supported, false, 'the session was given back: no harness for the human');
+    assert.match(answer?.supported === false ? answer.reason : '', /given back/);
+    const release = runner.received.findIndex((line) => line.type === 'release');
+    const reload = runner.received.findIndex((line) => line.type === 'reload');
+    assert.ok(release >= 0 && reload > release, 'release, then reload: the runner takes the session back');
+    const stopping = handle.stop();
+    await runner.waitFor((line) => line.type === 'stop');
+    runner.exit(0);
+    await stopping;
   } finally { t.cleanup(); }
 });

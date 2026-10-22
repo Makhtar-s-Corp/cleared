@@ -2723,7 +2723,8 @@ The lane's choices:
    - `stop` and the end of the input end a released runner.
    - An image built before this lane ignores the two lines. Its adapter then answers unsupported ("rebuild the session image") after `releaseTimeoutMs` (15 seconds by default).
 3. **Claude Code's interactive resume** (`session/adapters/claude-code.ts`, `claude-code/interactive.ts`).
-   - `interactive()` asks the runner to release, waits for `released`, and answers Claude Code with `interactiveCommand(id, model)`. `resume()` sends `reload` before any turn when the harness was handed over. The engine's `giveBack` already calls `resume()`, so the engine is not edited.
+   - `interactive()` asks the runner to release, waits for `released`, and answers Claude Code with `interactiveCommand(id, model)`. `resume()` sends `reload` before any turn once a release was sent. The engine's `giveBack` already calls `resume()`, so the engine is not edited.
+   - **A Give back during the hand-over.** The release is recorded as sent before it is written, so a Give back that lands before the runner says `released` still reloads it (the runner keeps a `reload` that comes before it parks). `interactive()` then answers unsupported ("given back"), so no `claude --resume` starts beside the reloaded runner. A timeout keeps the release as sent too.
    - **The launcher** is `sh -c` with positional words: the session, its model, the login's program, the login file's mount point, and the config's program. Nothing is quoted into the script.
    - **The login.** It reads the login file inside the container, as the runner's `loginToken` does: a token, or only the access token of a credentials file. It puts the token in the harness's environment only: never a word of a command line (the host's `ps` and `docker inspect` would show it), never printed. Without a login it exits 3 with a sentence.
    - It sets the runner's git identity and execs `claude --resume "$1" --model "$2"`, on the same session id (`--fork-session` is not given) and on the session's model.
@@ -2753,7 +2754,7 @@ The lane's choices:
   - `test/session/interactive.test.ts`;
   - `test/session/claude-code/interactive.test.ts`: the launcher run by this machine's `sh` and `node`, with a stand-in `claude` and a test login file;
   - `test/terminal/harness.test.ts`.
-  The new cases are in `test/session/claude-code/{runner,adapter}.test.ts`, `test/terminal/{routes,container}.test.ts`, `app/test/session/{terminal,tabs,fixture-human,terminal-browser}.test.ts` and `app/web/test/session/{terminal-editor,tabs}.test.tsx`. Two tests were added after the labelled run, each failing first: the release during a login wait, and the first run's config. Lane 20's `app/test/session/tabs-browser.test.ts` asserted the server command; it now asserts the harness attached and no command.
+  The new cases are in `test/session/claude-code/{runner,adapter}.test.ts`, `test/terminal/{routes,container}.test.ts`, `app/test/session/{terminal,tabs,fixture-human,terminal-browser}.test.ts` and `app/web/test/session/{terminal-editor,tabs}.test.tsx`. Three tests were added later, each failing first: the release during a login wait and the first run's config (both found by the labelled run), and a Give back during the hand-over (found by the review before the pull request). Lane 20's `app/test/session/tabs-browser.test.ts` asserted the server command; it now asserts the harness attached and no command.
 - **The labelled run on this server** (Docker 29.8.1). A probe image `cleared-v2-session:takeover-probe` was built from this branch's `images/session` and labelled `cleared.dev=v2`. The real Claude Code adapter, terminal and docker wrapper ran one session on a temporary checkout, with a dummy login file written for the run (never a real login), so every API call was refused.
   - The first turn was refused, and the runner said it waits for a new login.
   - **The release.** `interactive()` answered `supported` while the runner waited. `ps` in the container then showed only `node /opt/cleared/runner/main.ts`: the runner's harness was gone, and the container was still up.
@@ -2780,7 +2781,7 @@ The lane's choices:
   - **The proof's step 11** also closes what this run could not: a harness turn on the real login, and whether the harness's first screen asks anything else.
   - **Issue 226, item 1** is fixed here (choice 4).
 - **Checks.**
-  - `npm test`: 1193 node tests pass and 8 are skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 184 Vitest tests pass.
+  - `npm test`: 1195 node tests pass and 8 are skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), and 184 Vitest tests pass.
   - With `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME`, the 8 browser tests pass.
   - `npm run typecheck` and `npm run guard -- --base origin/v2` are green. The guard ran without a private-term list (`CLEARED_REPO` unset).
 - **The requirements matrix.** O16 (the owner's request, `partial` until the proof's step 11 runs a real turn), P42 (the adapter's interactive resume) and P43 (the terminal's modes and the screen) are new. B5.10f, D4, O9 and C1 name this pull request. P39 says the server command it kept was removed.

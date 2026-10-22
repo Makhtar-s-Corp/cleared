@@ -101,7 +101,9 @@ type Session = {
   exitSeen: boolean;                              // the runner printed its exit line
   exited: Promise<void>;
   handle: SessionHandle | undefined;
-  released: boolean;                              // the runner handed its harness to a human: resume() reloads it
+  // The runner's harness and a human: 'sent' once release is written (resume()
+  // then reloads, even if the runner parks late), 'done' once it said released.
+  release: 'none' | 'sent' | 'done';
   onReleased: Set<() => void>;
 };
 
@@ -244,7 +246,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     session.child = child;
     session.closed = false;
     session.exitSeen = false;
-    session.released = false;
+    session.release = 'none';
     session.exited = new Promise<void>((done) => {
       child.on('close', (code: number | null) => {
         if (session.child === child) {
@@ -353,7 +355,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       const id = newId();
       const session: Session = {
         id, input, cleaner: options.cleaner(), mapper: createMapper({ sessionId: id }), wake: new Set(), pending: new Map(),
-        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined, released: false, onReleased: new Set(),
+        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined, release: 'none', onReleased: new Set(),
       };
       sessions.set(id, session);
       await launch(session, false);
@@ -368,8 +370,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       if (!session.closed && session.handle) {
         // Given back after a human ran the harness: the runner reads the
         // session again from its transcript, before any turn it is sent.
-        if (session.released) {
-          session.released = false;
+        if (session.release !== 'none') {
+          session.release = 'none';
           write(session, { type: 'reload' });
         }
         return session.handle;
@@ -381,7 +383,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     async interactive(id): Promise<InteractiveResume> {
       const session = sessions.get(id);
       if (!session || session.closed || !session.child) return { supported: false, reason: `There is no running session ${id} here to resume in a terminal.` };
-      if (!session.released) {
+      if (session.release !== 'done') {
         const child = session.child;
         const released = await new Promise<boolean>((resolve) => {
           const done = (value: boolean) => { session.onReleased.delete(wake); clearTimeout(timer); resolve(value); };
@@ -389,12 +391,19 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
           const timer = setTimeout(() => done(false), runtime.releaseTimeoutMs ?? 15_000);
           timer.unref();
           session.onReleased.add(wake);
-          write(session, { type: 'release' });
+          if (session.release === 'none') {
+            session.release = 'sent';
+            write(session, { type: 'release' });
+          }
         });
-        if (!released || session.child !== child) {
+        // Given back meanwhile: the runner reloads, and no harness starts beside it.
+        if (session.release === 'none' || session.child !== child) {
+          return { supported: false, reason: 'The session was given back while its harness was being handed over: take it over again to resume it here.' };
+        }
+        if (!released) {
           return { supported: false, reason: 'The session\'s runner did not hand its harness over in time: rebuild the session image if it predates this version, or open the Shell instead.' };
         }
-        session.released = true;
+        session.release = 'done';
       }
       return { supported: true, name: INTERACTIVE_NAME, command: interactiveCommand(id, session.input.model) };
     },
