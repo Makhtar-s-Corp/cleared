@@ -1138,3 +1138,65 @@ The choices the lane makes:
   - a fade at the bottom of the scrolling list, which would be a gradient;
   - a sticky "plan waits" chip on a phone, replaced by the plan message's link.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-lead-screen`.
+
+## 2026-10-22: the inbox's plan item and the lead's question, against inbox.png (milestone 2, lane 10)
+
+**Decision.** Lane `v2-j2-inbox-plan` adds the lead's two kinds of item to the inbox of milestone 1 (plan, section 7.2): the plan the lead proposes, and the question the lead asks. It edits `screens/inbox.ts`, `screens/inbox.css`, the inbox catalogs, the inbox fixture and the inbox tests. The lane's choices:
+
+1. **The list follows the capture's order:** releases, permissions, plans, then questions, each oldest first. The plan card reads "Plan · 25 min", its title, and "5 tickets · 2 h 15 · 3.9 % of the week". Until the week is measured it reads "…, about $3.05", the plan panel's cost (section 5.2). One ticket is in the singular.
+2. **The detail reads the plan.** The inbox item carries only the plan's totals, so the page reads `GET /api/plans` with the list whenever a plan item is in it.
+   - The plan is matched by the item's `planId`, never by its id: the service writes `plan:<id>`, lane 1's fixture `plan-item-<id>`.
+   - `readPlan` checks the plan's shape before lane 8's panel draws it. The panel writes the plan's states into attributes and looks them up in maps, so a state it does not know would blank it (issue 177, item 2, which stays open on `plan-panel.ts`).
+   - A plan not read yet, or not readable, shows what the item says: the title, the summary, the ticket count, the work and the share. Approve still works there.
+3. **The panel without its buttons.** The inbox's bar holds the gestures, as for a release, so the phone keeps its sticky bar and the gestures share the screen's busy state and its messages.
+   - "Approve the plan and start" is `data-act="approve_plan"`, the selector for lane 11's `proof-inbox.ts`.
+   - "Change the plan" is a link to `/plans/<id>`. Section 5.4 has it focus the reply field, which only the lead's screen has. There is no reject in the inbox.
+   - The panel's own eyebrow is hidden in the detail, whose eyebrow says the plan's state ("Plan to approve", or "Running · 0 of 5 landed") with "Lead" and "Open on the lead's screen".
+   - The page loads `screens/lead.css` before its own sheet, since lane 8 left the panel's rules unscoped for this. `inbox.css` flattens the panel into the detail.
+4. **Approve** calls `POST /api/plans/:id/approve` at once, with no grace (decision 6). The plan the service answers replaces the one shown, and the bar says "Approved by you at HH:MM. The tickets start in order, the first ones now." Nothing is kept in `sessionStorage`: the service's list already shows the plan as handled.
+   - A refusal reads the list and the plan again, and the reread plan says what happened.
+   - 409 says the plan changed meanwhile (approved elsewhere, replaced, or not approved). 404 says it no longer exists, and 503 that the service runs without the lead.
+   - This rereading also covers issue 175, item 2. An approval the service wrote but answered with a failure shows the plan running, and the bar says the plan changed meanwhile instead of "Try again".
+5. **A handled plan** reads "Lead · Running · 0 of 5 landed" in the list. Its detail is the panel with each item's state and ticket, and no button. A handled plan not read reads "Lead · no longer waits for you".
+6. **The lead's question** is shown read only, its choices as lines, with one outlined link to `/lead`: "The lead waits for your answer on its screen." The session answer route refuses the lead's session (issue 168, item 3; lanes 5, 7 and 8), and the inbox would have reported that refusal as a request settled without the person.
+7. **The lead's ticket is never shown.** `inbox.ts` repeats `LEAD_TICKET`, as it does `TODO_STATE`, and a test keeps the two equal. "Lead" stands in the id slot and leads the item's line.
+8. **The catalogs.** Every key of `PLAN_PANEL_KEYS` is copied into `inbox.en` and `inbox.fr`. A test checks that each one is word for word the lead's. The inbox's own new keys carry no `plan_` prefix, so that prefix stays the panel's. The French inbox called the lead "Responsable", and now says "Lead", as the tower and the lead's screen do.
+9. **The fixture** adds the capture's plan, with the guestbook's content of the plan's question 5: five items, 25 minutes old, 2 h 15 of work as the critical path two at a time, 3.9 % of the week. It goes after milestone 1's items, so the list holds the capture's four waiting items. The lead's question is a separate export (`leadQuestion`). `inboxSource` answers `GET /api/plans`, `GET /api/plans/:id` and `POST /api/plans/:id/approve` as lane 7's routes do: the item is handled, and a second approval is a 409.
+
+**Consequences.**
+- **Tests first.** They failed on the code before this lane: the missing exports, and "3 waiting" where the capture has four. They cover:
+  - the card and its three forms;
+  - the panel in the detail, and the fallback;
+  - the shape check;
+  - the handled and approved states;
+  - the lead's question;
+  - the sentinel never shown;
+  - the redraw key;
+  - the failures;
+  - the catalog, French included, and the escaping.
+  Through the app and the fixture service, Approve calls the plan's route with the signed-in user and no body, the item leaves what waits, and a second approval is a 409.
+- **Chromium, against the fixture service.** Clicking Approve wrote the plan, and the detail turned to "Running" with no page error. A plan approved from another tab before the click gave the 409 line, the plan read again as Running, no button, and "3 waiting".
+- **Captures**, none committed, in `/tmp/cleared-captures/j2/`. They replace the stale inbox captures of lane 1:
+  - `inbox-<width>-<theme>.png` with the plan selected, at 1440, 1280, 768 and 390, light and dark, with no horizontal overflow;
+  - `inbox-end-390-<theme>.png`, the phone scrolled to its sticky bar;
+  - `inbox-list-{768,390}-<theme>.png`;
+  - `inbox-lead-question-<width>-<theme>.png`;
+  - `inbox-plan-approved-{1440,390}-<theme>.png`;
+  - `inbox-reference.png`, rendered from `/tmp/cleared-reference/inbox.html`.
+  The app ran on an ephemeral `127.0.0.1` port with an in-memory ledger.
+- **The art director's pass** was run once, by Sonnet 5.5 in a fresh session. Taken:
+  - the lead's choices as lines, not faded buttons;
+  - one way to the lead's screen, in the bar, outlined, since it only opens a page;
+  - the plan's totals in one column on a phone.
+  Not taken:
+  - **Within lane 8's shared panel** (a label above the items, stronger key figures, 14 px item titles, the phone row layout): the panel stays the same on both screens, and those changes belong to lane 8's file.
+  - **An upward shadow on the sticky bar:** milestone 1's inbox removed it.
+  - **A success mark on the approved line, and a lighter summary box in dark:** the release's approved line and announcement look the same, and the two kinds stay alike.
+- **Fixtures mode.** Lane 1's `fixtures/source.ts` answers every write with a 404. Under `CLEARED_V2_APP_SOURCE=fixtures`, Approve on its plan therefore says the plan no longer exists, as milestone 1's release gestures there are refused. That source is not this lane's file.
+- **Not run live.** Lane 7's routes are in `v2`, but a proposed plan needs a lead generation proposing one. The fake adapter behind the service is lane 11's, in this wave.
+- **Left for other lanes:**
+  - the tower's plan card still links to `/plans/<id>`, which lane 9 chose because this detail did not exist (`tower.ts`, lane 9's file);
+  - issue 177, item 2, in `plan-panel.ts`;
+  - answering the lead's question from the inbox (issue 168, item 3).
+- This entry is the only change outside the lane's files.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-inbox-plan`.
