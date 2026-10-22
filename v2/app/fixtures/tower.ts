@@ -5,7 +5,7 @@
 // are the capture's, and the two plans are the capture's shape with the
 // guestbook's content: one proposed for 25 minutes, one with 3 of 6 landed.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { CreateTicketBody, InboxItem, LeadState, Plan, PlanItem, ReleaseItem, SessionSummary, TrainState, Workspace } from '../../src/api/types.ts';
+import type { CreateTicketBody, InboxItem, LeadState, Plan, PlanItem, Recipe, ReleaseItem, Schedule, SessionSummary, TicketStep, TrainState, Workspace } from '../../src/api/types.ts';
 import type { Harness, Role, SessionId } from '../../src/session/contract.ts';
 import { createFakeAdapter, type FakeStep } from '../../src/session/adapters/fake.ts';
 import type { SessionPhase, SessionState } from '../../src/session/events.ts';
@@ -351,4 +351,48 @@ export function towerSource(now: () => Date, rest?: DataSource): TowerSource {
       });
     },
   };
+}
+
+// ------------------------------------------- lane 27: steps, recipes and schedules
+
+// The steps of LOCAL-163 in the workspace of two services (decision 26): the
+// contract of the filter API validated, the filter API's own step running in
+// LOCAL-163's live session, then the guestbook's step and the integration.
+// The tower reads them per ticket of its live sessions (step 2 of 4).
+export function ticketSteps(sessions: readonly SessionSummary[], ticket = 'LOCAL-163'): TicketStep[] {
+  const live = sessions.find((s) => s.ticket === ticket && s.role === 'author')?.id ?? null;
+  const step = (position: number, kind: TicketStep['kind'], service: string, after: readonly number[], state: TicketStep['state'], session: string | null, costUsd: number | null): TicketStep =>
+    ({ id: `${ticket}:${position}`, ticket, kind, service, position, after, state, session, costUsd });
+  return [
+    step(1, 'contract', 'filter-api', [], 'done', `${ticket}-contract`, 0.21),
+    step(2, 'service', 'filter-api', [1], 'running', live, 0.34),
+    step(3, 'service', 'guestbook', [1], 'waiting', null, null),
+    step(4, 'integration', 'guestbook', [2, 3], 'waiting', null, null),
+  ];
+}
+
+// The recipes of the guestbook's repository (decision 29): a ticket recipe
+// with a required and an optional parameter, and a goal recipe with none.
+export const RECIPES: readonly Recipe[] = [
+  {
+    name: 'dependency-update', service: 'guestbook', kind: 'ticket', lane: 'full', size: 's', services: ['guestbook'],
+    parameters: [{ name: 'package', description: 'The package to update', required: true }, { name: 'version', description: 'The version to reach; the latest when empty', required: false }],
+    body: 'Update {{package}} to {{version}}.\n\nAcceptance criteria\n- [ ] the tests pass\n- [ ] the lock file changes only for {{package}}',
+  },
+  {
+    name: 'weekly-review', service: 'guestbook', kind: 'goal', services: ['guestbook'], parameters: [],
+    body: 'Read the open tickets of the week and propose a plan for the ones that stalled.',
+  },
+];
+
+// The schedules (decision 29): the dependency update every night at 03:00,
+// the weekly review on Monday mornings, and a one-off run switched off.
+export function schedulesFixture(now: Date): Schedule[] {
+  const on = (days: number, hours: number, minutes: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, hours, minutes).toISOString();
+  const base = { createdBy: 'user-demo', createdAt: minutesBefore(now, 3 * 24 * 60).toISOString() } as const;
+  return [
+    { ...base, id: 'schedule-1', recipe: 'dependency-update', goal: null, parameters: { package: 'pg' }, at: null, every: 'day 03:00', budgetUsd: 0.5, weekCapPercent: 60, enabled: true, nextRunAt: on(1, 3, 0), lastRunAt: on(0, 3, 0) },
+    { ...base, id: 'schedule-2', recipe: 'weekly-review', goal: null, parameters: {}, at: null, every: 'week mon 08:00', budgetUsd: 1, weekCapPercent: 50, enabled: true, nextRunAt: on(5, 8, 0), lastRunAt: null },
+    { ...base, id: 'schedule-3', recipe: null, goal: 'Read the error log of the night and open a ticket for each new error', parameters: {}, at: on(2, 6, 30), every: null, budgetUsd: 0.3, weekCapPercent: 60, enabled: false, nextRunAt: null, lastRunAt: null },
+  ];
 }

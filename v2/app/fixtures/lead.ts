@@ -181,6 +181,22 @@ export function servicePlan(now: Date): Plan {
   };
 }
 
+// The same plan with its second item in steps across the two services
+// (decision 26, lane 23's PlanItem.steps): the contract of the filter API,
+// a step per service after it, then the integration on the guestbook, each
+// with its estimate; the item's estimate is their critical path (lane 27).
+export function stepsPlan(now: Date): Plan {
+  const plan = servicePlan(now);
+  const estimate = (minutes: number, costUsd: number): Estimate => ({ minutes, costUsd, weekPercent: null, samples: 4 });
+  const steps: NonNullable<PlanItem['steps']> = [
+    { position: 1, kind: 'contract', service: 'filter-api', after: [], estimate: estimate(10, 0.15) },
+    { position: 2, kind: 'service', service: 'filter-api', after: [1], estimate: estimate(15, 0.25) },
+    { position: 3, kind: 'service', service: 'guestbook', after: [1], estimate: estimate(20, 0.30) },
+    { position: 4, kind: 'integration', service: 'guestbook', after: [2, 3], estimate: estimate(10, 0.20) },
+  ];
+  return { ...plan, items: plan.items.map((item) => (item.position === 2 ? { ...item, steps, estimate: estimate(40, 0.90) } : item)) };
+}
+
 // ------------------------------------------------- lane 8: the screen's other states
 
 // The lead screen's other states (milestone 2, lane 8), beside what lane 1
