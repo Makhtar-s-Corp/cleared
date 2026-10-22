@@ -15,6 +15,7 @@ import { FlowError, type FlowEngine } from '../flow/engine.ts';
 import type { Decision, UserId } from '../session/contract.ts';
 import { TicketError } from '../tickets/contract.ts';
 import { publicWorkspace } from '../workspace/config.ts';
+import { changeHub, streamChanges } from './events.ts';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, sseFrame, type CreateTicketBody } from './types.ts';
 
 export type ApiDeps = {
@@ -226,7 +227,12 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
     { method: 'GET', path: '/api/workspace', handle: guarded(false, (engine, _u, c) => send(c.response, 200, publicWorkspace(workspaceOf(engine.config)))) },
   ];
 
-  return [...sessionRoutes, ...ticketRoutes, ...inboxRoutes, ...workspaceRoutes];
+  // What changed, for the app's cache (api/events.ts, lane 34).
+  const changeRoutes: Route[] = [
+    { method: 'GET', path: '/api/events', handle: guarded(false, (engine, _u, c) => streamChanges(changeHub(engine), c.response, c.request, header(c.request, 'last-event-id'))) },
+  ];
+
+  return [...sessionRoutes, ...ticketRoutes, ...inboxRoutes, ...workspaceRoutes, ...changeRoutes];
 
   // The event stream: what is stored after the number given, then what
   // comes. The Last-Event-ID of a reconnect wins over a stale ?after.

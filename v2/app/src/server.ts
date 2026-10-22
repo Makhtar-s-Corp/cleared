@@ -4,9 +4,18 @@
 // user. It holds no key and signs nothing (plan, section 7).
 //
 // The pages are React, bundled by Vite into dist/ (npm run build): the
-// server writes each page's HTML (its language, title and screen, the
-// bundle's file names from dist/.vite/manifest.json) and serves dist/ as
-// files. The service and this server are not built: Node runs them.
+// server writes the page's HTML (its language, the bundle's file names
+// from dist/.vite/manifest.json) and serves dist/ as files. The service and
+// this server are not built: Node runs them.
+//
+// One document for the whole app (docs/v2/ui-overhaul-plan.md, U1, lane
+// 34): every screen's address answers the same shell page, and the page's
+// router draws the screen, so moving between screens loads no document.
+// The page names every screen's chunk and sheet; a screen's sheets carry
+// media="not all" and the screens they belong to (data-screens), and the
+// page turns on those of the screen it shows (web/lib/sheets.ts), so each
+// screen keeps the cascade it had on a page of its own. An address that is
+// no screen's still answers 404.
 //
 // Every write needs the session cookie, the session's anti-forgery token in
 // X-CSRF-Token, an Origin equal to the app's own address (or
@@ -155,9 +164,22 @@ export function readBundle(distDir: string = DIST_DIR): Bundle {
   return { script: `/${entry.file}`, styles: (entry.css ?? []).map((file) => `/${file}`), screens };
 }
 
-function head(language: Language, title: string, bundle: Bundle, nonce: string, screen?: string): string {
-  const own = screen ? bundle.screens[screen] : undefined;
-  const sheets = [...bundle.styles, ...(own?.styles ?? [])].map((href) => `<link rel="stylesheet" href="${escape(href)}">`).join('\n');
+// The screens' sheets, each once, in an order that keeps each screen's
+// own (the chunks it imports first), with the screens that use it.
+export function screenSheets(bundle: Bundle): { readonly href: string; readonly screens: readonly string[] }[] {
+  const sheets = new Map<string, string[]>();
+  for (const [screen, own] of Object.entries(bundle.screens).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const href of own.styles) if (!bundle.styles.includes(href)) sheets.set(href, [...(sheets.get(href) ?? []), screen]);
+  }
+  return [...sheets].map(([href, screens]) => ({ href, screens }));
+}
+
+function head(language: Language, title: string, bundle: Bundle, nonce: string, app = false): string {
+  const sheets = [
+    ...bundle.styles.map((href) => `<link rel="stylesheet" href="${escape(href)}">`),
+    ...(app ? screenSheets(bundle).map(({ href, screens }) => `<link rel="stylesheet" href="${escape(href)}" media="not all" data-screens="${escape(screens.join(' '))}">`) : []),
+  ].join('\n');
+  const chunks = app ? Object.values(bundle.screens).map((own) => `\n<link rel="modulepreload" href="${escape(own.script)}">`).join('') : '';
   return `<!doctype html>
 <html lang="${language}">
 <head>
@@ -170,7 +192,7 @@ function head(language: Language, title: string, bundle: Bundle, nonce: string, 
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 ${sheets}
 <script src="/theme.js"></script>
-<script type="module" src="${escape(bundle.script)}"></script>${own ? `\n<link rel="modulepreload" href="${escape(own.script)}">` : ''}
+<script type="module" src="${escape(bundle.script)}"></script>${chunks}
 </head>`;
 }
 
@@ -186,12 +208,13 @@ export function loginPage(t: Translate, language: Language, bundle: Bundle, nonc
 `;
 }
 
-// A screen's page: the shell and the screen are drawn by the bundle
-// (web/shell/App.tsx); the body says which screen, and what the header
-// shows before /api/me answers.
-export function shellPage(t: Translate, language: Language, bundle: Bundle, nonce: string, options: { readonly screen: Exclude<Screen, 'shell'>; readonly project: string; readonly user: User; readonly source: DataSource['kind']; readonly preview?: string | undefined }): string {
-  return `${head(language, `${t('app_name')} · ${t(`title_${options.screen}`)}`, bundle, nonce, options.screen)}
-<body data-screen="${options.screen}" data-source="${options.source}" data-project="${escape(options.project)}" data-user="${escape(options.user.name)}"${options.preview ? ` data-preview="${escape(options.preview)}"` : ''}>
+// The shell page, the same for every screen's address: the shell and the
+// screens are drawn by the bundle (web/shell/App.tsx, its router naming the
+// screen from the address, and the title with it); the body says what the
+// header shows before /api/me answers.
+export function shellPage(t: Translate, language: Language, bundle: Bundle, nonce: string, options: { readonly project: string; readonly user: User; readonly source: DataSource['kind']; readonly preview?: string | undefined }): string {
+  return `${head(language, t('app_name'), bundle, nonce, true)}
+<body data-screen="app" data-source="${options.source}" data-project="${escape(options.project)}" data-user="${escape(options.user.name)}"${options.preview ? ` data-preview="${escape(options.preview)}"` : ''}>
 <div id="root"></div>
 </body>
 </html>
@@ -417,7 +440,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     if (page) {
       const mine = await session(request);
       if (!mine) return redirect(response, '/login');
-      return sendPage(response, 200, (nonce) => shellPage(shellT, options.language, built(), nonce, { screen: page.screen, project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
+      return sendPage(response, 200, (nonce) => shellPage(shellT, options.language, built(), nonce, { project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
     }
 
     if (await serveFile(request, response, path)) return;

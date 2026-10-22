@@ -7,6 +7,12 @@
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
 //     [--screens tower,inbox,sessions,session,lead] [--widths 1440,390] [--themes light,dark]
+//     [--via load|click]
+//
+// --via load (the default) opens each screen's address as a page; --via
+// click opens the tower, then reaches each screen by a click on a link of
+// the page, which the app answers without a document load (lane 34): the
+// two sets are the same pixels when switching changes nothing.
 //
 // The clock is the fixtures' (FIXTURE_NOW), in the source and in the page,
 // so two runs on the same code give the same pixels. A page error or a
@@ -42,7 +48,7 @@ async function listen(server: Server): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[] }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
+export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
   const themes = options.themes ?? ['light', 'dark'];
@@ -76,8 +82,22 @@ export async function capture(options: { readonly out: string; readonly screens?
         const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
         const paths: Readonly<Record<CaptureScreen, string>> = { tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead' };
+        let documents = 0;
+        page.on('load', () => { documents += 1; });
         for (const screen of screens) {
-          await page.goto(`${app.base}${paths[screen as CaptureScreen]}`);
+          const path = paths[screen as CaptureScreen];
+          if (options.via === 'click') {
+            const before = documents;
+            await page.evaluate((href) => {
+              const link = document.createElement('a');
+              link.href = href;
+              document.body.append(link);
+              link.click();
+              link.remove();
+            }, path);
+            await page.waitForURL(`${app.base}${path}`);
+            if (documents !== before) errors.push(`${w} ${theme}: ${screen} loaded a document`);
+          } else await page.goto(`${app.base}${path}`);
           await settle(page);
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
           await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
@@ -108,12 +128,16 @@ async function settle(page: import('playwright-core').Page): Promise<void> {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { out: { type: 'string' }, screens: { type: 'string' }, widths: { type: 'string' }, themes: { type: 'string' } } });
+  const { values } = parseArgs({ options: { out: { type: 'string' }, screens: { type: 'string' }, widths: { type: 'string' }, themes: { type: 'string' }, via: { type: 'string' } } });
+  if (values.via !== undefined && values.via !== 'load' && values.via !== 'click') {
+    console.error('capture-screens: --via is load or click');
+    process.exit(64);
+  }
   if (!values.out) {
     console.error('capture-screens: --out <folder> is required');
     process.exit(64);
   }
-  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']) });
+  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load' });
   for (const file of result.files) console.log(file);
   for (const error of result.errors) console.error(`page error: ${error}`);
   for (const url of result.away) console.error(`request off the app's origin: ${url}`);

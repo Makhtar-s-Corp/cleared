@@ -14,12 +14,13 @@ import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
-import { useScreen } from '@/lib/context.tsx';
+import { useGo, useScreen } from '@/lib/context.tsx';
+import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
-  DRAFT_MAX, REFRESH_MS, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, loadTower, needId, needSentence, needTitle, pickedFor, planProgress,
+  DRAFT_MAX, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, loadTower, needId, needSentence, needTitle, pickedFor, planProgress,
   recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, towerModel, towerSummary,
   type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
@@ -147,11 +148,12 @@ export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: 
 
 function LeadSide({ lead, t, draft, onDraft }: { readonly lead: LeadCardModel | null; readonly t: Translate; readonly draft: string; readonly onDraft?: (value: string) => void }) {
   const state = leadState(lead, t);
+  const go = useGo();
   // The lead card's field opens the lead's screen with what was typed; the
   // message is sent from there, where its answer shows.
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    location.assign(leadHref('lead', draft));
+    go(leadHref('lead', draft));
   };
   return (
     <section className="side-card" aria-labelledby="lead-title">
@@ -245,10 +247,11 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
 export default function Tower() {
   const context = useScreen();
   const { t } = context;
+  const go = useGo();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [note, setNote] = useState<{ readonly text: string; readonly kind: 'ok' | 'error' } | null>(null);
-  const [model, setModel] = useState<TowerModel | null>(null);
+  const [model, setModel] = useKept<TowerModel | null>('tower', null);
   const [failed, setFailed] = useState<string | null>(null);
   const [leadDraft, setLeadDraft] = useState('');
   const [picked, setPicked] = useState<readonly string[]>([]);
@@ -271,14 +274,15 @@ export default function Tower() {
       if (!live()) return;
       setFailed(t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed'));
     }
-  }, [context, t]);
+  }, [context, t, setModel]);
 
+  // Drawn from the cache, then again each time a resource it read changes.
   useEffect(() => {
     let live = true;
     void refresh(() => live);
-    const timer = setInterval(() => void refresh(() => live), REFRESH_MS);
-    return () => { live = false; clearInterval(timer); };
+    return () => { live = false; };
   }, [refresh]);
+  useLive(() => void refresh());
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -314,7 +318,7 @@ export default function Tower() {
     setAsking(true);
     try {
       const asked = await startAsk(context.api, askBody(text, model?.askServices ?? [], pickedFor(title, picked)));
-      location.assign(askHref(asked.id));
+      go(askHref(asked.id));
     } catch (error) {
       setNote({ text: t(askFailure(error, 'ask')), kind: 'error' });
       setAsking(false);
@@ -349,7 +353,7 @@ export default function Tower() {
       <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} recipes={model?.recipes ?? []} recipeOpen={recipeOpen} busy={asking}
         onTitle={(value) => { setTitle(value); if (!value.trim()) setPicked([]); }} onBody={setBody} onSubmit={(event) => void submit(event)}
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
-        onLead={(kind) => location.assign(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)} />
+        onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       {recipeOpen && model && model.recipes.length > 0 ? (
         <RecipeForm t={t} recipes={model.recipes} picked={recipe} values={values} note={recipeNote.text} link={recipeNote.link} busy={running}

@@ -12,10 +12,15 @@
 // (a new one starts and stays starting; a follow-up runs), the recipes with
 // their run, and the schedules. Lane 32's too: the web terminal of a
 // session taken over (a stand-in shell) and the editor's save, kept in
-// memory (fixtureHuman of fixtures/session.ts).
+// memory (fixtureHuman of fixtures/session.ts). Lane 34's change stream
+// (GET /api/events) is answered as the service does: open, a comment every
+// KEEPALIVE_MS, and an event for each fixture write (a decision, a take
+// over, a give back, a new ticket, an ask) and for each changed() a test
+// or a lane's fixture calls.
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { leadFrame, sseFrame, type Ask, type ContractItem, type CreateTicketBody, type KnowledgeItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { KEEPALIVE_MS } from '../../src/api/events.ts';
+import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
@@ -54,7 +59,9 @@ function ticketBody(value: unknown, project: string): CreateTicketBody | undefin
   return { title: title.trim(), ...(typeof body === 'string' ? { body } : {}), project };
 }
 
-export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string } = {}): Promise<DataSource> {
+export type FixtureSource = DataSource & { changed(kind: ChangeKind, id: string | null): void };
+
+export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
   const fixture = await towerFixture(now(), options.project === undefined ? {} : { project: options.project });
   const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
@@ -83,9 +90,33 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     return Number.isInteger(from) && from >= 0 ? from : 0;
   };
 
+  // The change stream's clients, and what each write says to them.
+  const listeners = new Set<ServerResponse>();
+  let seq = 0;
+  const changed = (kind: ChangeKind, id: string | null) => {
+    seq += 1;
+    const frame = changeFrame(seq, { kind, id, at: now().toISOString() });
+    for (const listener of listeners) listener.write(frame);
+  };
+
   async function handle(request: IncomingMessage, response: ServerResponse, method: string, url: URL, user: string): Promise<void> {
     const parts = url.pathname.split('/').slice(2);              // after '/api'
     const [collection, id, sub] = parts;
+    if (method === 'GET' && collection === 'events' && parts.length === 1) {
+      response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
+      response.write(': stream open\n\n');
+      listeners.add(response);
+      const keepalive = setInterval(() => response.write(': keepalive\n\n'), KEEPALIVE_MS);
+      keepalive.unref();
+      response.on('close', () => { clearInterval(keepalive); listeners.delete(response); });
+      return;
+    }
+    if (method !== 'GET') response.once('finish', () => {
+      if (response.statusCode >= 300) return;
+      if (collection === 'contracts' || collection === 'knowledge') changed('inbox', null);
+      else if (collection === 'sessions' && id) changed('session', decodeURIComponent(id));
+      else if (collection === 'tickets') changed('ticket', id ? decodeURIComponent(id) : null);
+    });
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, fixture.sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
     if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...decided, ...lead.inbox]);
@@ -215,6 +246,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
 
   return {
     kind: 'fixtures',
+    changed,
     forward(request, response, forward) {
       handle(request, response, forward.method, new URL(forward.path, 'http://fixtures'), forward.user.id).catch(() => {
         if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });

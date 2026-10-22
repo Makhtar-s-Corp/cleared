@@ -67,7 +67,7 @@ test('the app serves the screen\'s page, catalog, stylesheet and script, and for
     const get = (path: string) => fetch(`${app.base}${path}`, { headers: { cookie } });
     const page = await get(`/sessions/${AUTHOR_ID}`);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /data-screen="session"/);
+    assert.match(await page.text(), /data-screen="app"/, 'the one shell page (lane 34)');
     assert.equal((await get('/sessions')).status, 200);
     const catalog = await (await get('/messages/session.json')).json() as Record<string, string>;
     assert.equal(catalog.allow_once, 'Allow once');

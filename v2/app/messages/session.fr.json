@@ -106,6 +106,7 @@
   "role_author": "Auteur",
   "role_reviewer": "Relecteur",
   "role_reader": "Lecteur",
+  "role_lead": "Lead",
   "reader_title": "Une question au code",
   "open_ask": "Ouvrir la question",
   "open_session": "Ouvrir la session",
