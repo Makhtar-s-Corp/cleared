@@ -10,11 +10,11 @@
 // shown versions, and Undo is the service's Undo route.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { InboxItem, ReleaseItem } from '../../../src/api/types.ts';
-import { GRACE_MS, RELEASE_HEAD, inboxFixture, inboxSource } from '../../fixtures/inbox.ts';
+import type { InboxItem, Plan, PlanItemInbox, ReleaseItem } from '../../../src/api/types.ts';
+import { GRACE_MS, PLAN_ID, RELEASE_HEAD, inboxFixture, inboxSource } from '../../fixtures/inbox.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { ApiError, type ScreenContext } from '../../public/screen.ts';
-import { answerRequest, approve, failure, sendBack, undoApproval } from '../../public/screens/inbox.ts';
+import { answerRequest, approve, approvePlan, failure, ordered, readPlan, sendBack, undoApproval } from '../../public/screens/inbox.ts';
 import { signedIn, startApp, type Running } from '../support.ts';
 
 // The shell's api() as the browser runs it: same origin, the cookie, and the
@@ -116,7 +116,7 @@ test('a permission and a question are answered through the session\'s request ro
       ['/api/sessions/fixture-author/requests/request-161/answer', user],
       ['/api/sessions/fixture-164/requests/question-164/answer', user],
     ]);
-    assert.ok((await api<InboxItem[]>('/inbox')).every((i) => i.kind === 'release' || i.state === 'handled'));
+    assert.ok((await api<InboxItem[]>('/inbox')).every((i) => i.kind === 'release' || i.kind === 'plan' || i.state === 'handled'));
   });
 });
 
@@ -130,6 +130,38 @@ test('a request settled without the person, then answered from the inbox, reads 
   });
 });
 
+const planOf = async (api: ScreenContext['api']) => (await api<InboxItem[]>('/inbox')).find((i): i is PlanItemInbox => i.kind === 'plan') as PlanItemInbox;
+
+test('Approve calls the plan\'s route with the signed-in user, at once, and the plan leaves what waits', async () => {
+  await withApp(async ({ api, source, user }) => {
+    const item = await planOf(api);
+    assert.equal(item.state, 'waiting');
+    assert.ok(ordered(await api<InboxItem[]>('/inbox')).waiting.some((i) => i.id === item.id));
+    const plan = await approvePlan(api, item);
+    assert.deepEqual(source.calls, [{ method: 'POST', path: `/api/plans/${PLAN_ID}/approve`, user, body: null }], 'no grace: starting a ticket is reversible (decision 6)');
+    assert.equal(plan.state, 'approved');
+    assert.equal(plan.approvedBy, user);
+    assert.deepEqual(plan.items.map((i) => i.state), ['running', 'running', 'waiting', 'waiting', 'waiting']);
+    const after = await api<InboxItem[]>('/inbox');
+    assert.ok(!ordered(after).waiting.some((i) => i.id === item.id), 'the item left the list of what waits');
+    assert.ok(ordered(after).handled.some((i) => i.id === item.id), 'and is handled today');
+    assert.equal(readPlan(await api<Plan>(`/plans/${PLAN_ID}`))?.state, 'approved', 'the plan the detail reads again is the approved one');
+  });
+});
+
+test('a second approval of the same plan is refused, and reads as a plan that changed meanwhile', async () => {
+  await withApp(async ({ api, source }) => {
+    const item = await planOf(api);
+    await approvePlan(api, item);
+    const error = await approvePlan(api, item).then(() => undefined, (e: unknown) => e);
+    assert.ok(error instanceof ApiError && error.status === 409);
+    assert.deepEqual(failure(error, 'approve_plan'), { key: 'approve_plan_conflict', settled: false });
+    assert.equal(source.plans.find((p) => p.id === PLAN_ID)?.state, 'approved');
+    const gone = await approvePlan(api, { ...item, planId: 'plan-gone' }).then(() => undefined, (e: unknown) => e);
+    assert.deepEqual(failure(gone, 'approve_plan'), { key: 'approve_plan_gone', settled: false });
+  });
+});
+
 test('the app serves the inbox page, its catalog, its stylesheet and its script', async () => {
   await withApp(async ({ app }) => {
     const { cookie } = await signedIn(app);
@@ -139,6 +171,7 @@ test('the app serves the inbox page, its catalog, its stylesheet and its script'
     assert.match(await page.text(), /data-screen="inbox"/);
     const catalog = await (await get('/messages/inbox.json')).json() as Record<string, string>;
     assert.equal(catalog.approve, 'Approve the release');
+    assert.equal(catalog.plan_approve, 'Approve the plan and start', 'the plan panel\'s keys are in the inbox\'s catalog');
     const css = await get('/screens/inbox.css');
     assert.equal(css.status, 200);
     assert.doesNotMatch(await css.text(), /gradient|prefers-color-scheme/i);

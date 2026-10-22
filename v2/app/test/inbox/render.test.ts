@@ -31,7 +31,7 @@ const text = (view: InboxView, t: Translate = en) => visibleText(renderInbox(vie
 test('the list reads as the capture: what waits, with its time, then what was handled today', () => {
   const shown = text(viewOf());
   for (const expected of [
-    'Inbox', '3 waiting',
+    'Inbox', '4 waiting',
     'Release', '12 min', RELEASE_TITLE, `${RELEASE_TICKET} · Reviewed by Sonnet, checks green`,
     'Permission', '3 min', 'Install date-fns to group dates by week', 'LOCAL-161 · author paused',
     'Question', '1 h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
@@ -39,7 +39,7 @@ test('the list reads as the capture: what waits, with its time, then what was ha
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   const html = renderInbox(viewOf(), en);
   const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(order.map((id) => id?.split(':')[0]), ['release', 'permission', 'question', 'permission'], 'release first, then by kind; handled last');
+  assert.deepEqual(order.map((id) => id?.split(':')[0]), ['release', 'permission', 'plan', 'question', 'permission'], 'release first, then by kind; handled last');
 });
 
 test('two releases with the same title, from two tickets, are told apart in the list by their ticket', () => {
@@ -170,7 +170,7 @@ test('an item handled earlier has no button', () => {
 test('an empty inbox says so in one sentence, and an unknown choice falls back to the list', () => {
   const empty = text(viewOf({ items: [] }));
   assert.ok(empty.includes('Nothing waits for you.'));
-  assert.ok(empty.includes('What a session asks you, and every release to approve, comes here.'));
+  assert.ok(empty.includes('What a session or the lead asks you, every plan and every release to approve, comes here.'));
   const gone = renderInbox(viewOf({ selected: 'release:gone', open: true }), en);
   assert.ok(visibleText(gone).includes('This item is no longer in the inbox.'));
 });
