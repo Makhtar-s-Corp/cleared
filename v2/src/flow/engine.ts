@@ -92,6 +92,10 @@ export class FlowError extends Error {
 }
 
 const HARNESS = 'claude-code' as const;
+// Decision 15 of milestone 2: a plan item the lead puts in the fast lane is
+// a ticket with this label, and its author is Haiku (unless Haiku reviews).
+export const QUICK_LABEL = 'Quick';
+export const QUICK_MODEL = 'claude-haiku-5-5';
 const SERVICE: Actor = { kind: 'agents', id: 'cleared-v2' };
 const FLOW_USER = 'cleared';                                       // the author of the message that reopens a session
 
@@ -545,7 +549,7 @@ export class FlowEngine {
       const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author' });
       const workspaceDone = this.#now();
       const prompt = origin?.note ? `${authorPrompt(ticket)}\n\n${origin.note}` : authorPrompt(ticket);
-      const live = await this.#launch(adapter, ticket, 'author', this.config.authorModel, prepared.workdir, prepared.briefing, settings, prompt);
+      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt);
       const session = { id: live.id, ticket: ticketId, project: this.config.project };
       this.#step(session, 'STEP_STARTED', 'workspace', began);
       this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
@@ -559,6 +563,10 @@ export class FlowEngine {
       await this.#putBack(ticketId, `The flow could not start: ${name(error)}`, 'start_failed');
       throw error;
     }
+  }
+
+  #authorModel(ticket: Ticket): string {
+    return ticket.labels.includes(QUICK_LABEL) && this.config.reviewerModel !== QUICK_MODEL ? QUICK_MODEL : this.config.authorModel;
   }
 
   // start() in the background, for the routes: a person's click does not
@@ -924,7 +932,7 @@ export class FlowEngine {
     try {
       const settings = kept?.settings ?? (await this.#effects.settings());
       const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author' });
-      const live = await this.#launch(adapter, ticket, 'author', this.config.authorModel, prepared.workdir, prepared.briefing, settings, `${authorPrompt(ticket)}\n\n${message}`);
+      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, `${authorPrompt(ticket)}\n\n${message}`);
       this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
       this.#snapshot(live.id, id);
       this.#supervise(live, 0);

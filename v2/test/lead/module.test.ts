@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { createRuntime } from '../../src/flow/runtime.ts';
 import { createLeadRuntime } from '../../src/lead/engine.ts';
 import { LEAD_TABLES } from '../../src/lead/store.ts';
+import { PLAN_TABLES } from '../../src/lead/plans/store.ts';
 import { INBOX_TABLE } from '../../src/inbox/store.ts';
 import lead from '../../src/modules/lead.ts';
 import { defaultRegistry } from '../../src/modules/registry.ts';
@@ -13,10 +14,11 @@ import { fakeEffects } from '../flow/support.ts';
 import { leadAdapter, opening, until, type Generation } from './support.ts';
 
 test('the lead module declares its tables and the five lead routes; it provides no slot', () => {
-  assert.deepEqual(lead.tables, LEAD_TABLES);
+  // Lane 7 adds the plans' tables and routes to the module.
+  assert.deepEqual(lead.tables, [...LEAD_TABLES, ...PLAN_TABLES]);
   assert.deepEqual(LEAD_TABLES.map((sql) => /CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)/.exec(sql)?.[1]).filter((name) => name?.startsWith('lead_')),
     ['lead_generations', 'lead_messages', 'lead_commitments', 'lead_handovers', 'lead_queue']);
-  assert.deepEqual(lead.routes.map((r) => `${r.method} ${r.path}`).sort(),
+  assert.deepEqual(lead.routes.map((r) => `${r.method} ${r.path}`).filter((r) => r.includes('/api/lead')).sort(),
     ['GET /api/lead', 'GET /api/lead/memory', 'GET /api/lead/messages', 'GET /api/lead/stream', 'POST /api/lead/messages']);
   assert.deepEqual(lead.provide({ store: undefined as never }), {});
 });
