@@ -16,10 +16,17 @@
 //                      tool_use_result (a read's file, a command's stdout)
 //   result             the end of the turn: per-turn usage, the session's
 //                      total cost and its usage per model so far
-// Everything else (rate_limit_event, hook and status frames) maps to nothing.
+//   rate_limit_event   the plan's windows: `unifiedWindows` (not in sdk.d.ts)
+//                      holds five_hour and seven_day, each a utilization as
+//                      a fraction and a reset time in seconds
+//   system/compact_boundary  Claude Code compacted the context on its own
+// Everything else (hook and status frames) maps to nothing. Of the runner's
+// own lines (milestone 2, lane 4), `context` is the session's context share
+// and `login` the state of its login; `host_call` and `measure` are the
+// adapter's.
 import type { RunnerOutput } from '../../../../images/session/runner/main.ts';
 import type { Answer, SessionId, StopReason } from '../../contract.ts';
-import { toolArgs, toolResult, type AgUiEvent, type Question, type SessionPhase, type SessionState, type ToolInput, type ToolOutput, type Usage } from '../../events.ts';
+import { toolArgs, toolResult, type AgUiEvent, type ContextShare, type CustomValue, type Question, type SessionPhase, type SessionState, type ToolInput, type ToolOutput, type Usage } from '../../events.ts';
 import type { ToolRequest, Verdict } from '../../policy.ts';
 
 export const WORKDIR = '/workspace';
@@ -180,7 +187,22 @@ export type Mapper = {
   interrupting(): void;
   // A copy of the state, for a STATE_SNAPSHOT on reconnect.
   state(): SessionState;
+  // The running turn's id, or undefined between turns.
+  turn(): string | undefined;
 };
+
+const RATE_WINDOWS = ['five_hour', 'seven_day'] as const;
+
+// A rate limit window as cleared.rate_limit says it: the event's
+// utilization is a fraction (0.26 is 26 %, as
+// in the CLI 2.1.306 code, which shows Math.round(utilization * 100)) and
+// its reset time is in seconds (the CLI shows new Date(resets_at * 1000)).
+function rateWindow(window: (typeof RATE_WINDOWS)[number], raw: Record<string, unknown> | undefined): CustomValue['cleared.rate_limit'] | undefined {
+  const utilization = num(raw?.utilization);
+  if (utilization === undefined) return undefined;
+  const resetsAt = num(raw?.resetsAt);
+  return { window, usedPercent: Math.round(utilization * 1000) / 10, resetsAt: resetsAt === undefined ? null : new Date(resetsAt * 1000).toISOString() };
+}
 
 export function createMapper(options: { readonly sessionId: SessionId }): Mapper {
   const { sessionId } = options;
@@ -188,6 +210,8 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
   let run: string | undefined;                    // the running turn's id
   let runs = 0;
   let interrupted = false;
+  let loginWait = false;                          // a login error ended the turn; the runner waits for a new token
+  const rates = new Map<string, string>();        // the last rate limit said per window
   const calls = new Map<string, { name: string; input: ToolInput }>();
   const waiting = new Set<string>();              // asked requests and questions
   const questions = new Set<string>();
@@ -296,6 +320,8 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
     const waitingForMessage = (event: AgUiEvent) => end([event], 'waiting_human', 'Waiting for a message', total);
 
     if (interrupted) return waitingForMessage(finished('cancelled', 'cancelled'));
+    // A login error is not the session failing: the runner resumes it once the login is renewed.
+    if (loginWait) return end([finished('cancelled', 'cancelled')], 'waiting_human', 'Waiting for a new login', total);
     if (subtype === 'success' && frame.is_error !== true) {
       const reason = str(frame.stop_reason) ?? 'end_turn';
       return waitingForMessage(finished((STOP_REASONS.has(reason) ? reason : 'end_turn') as StopReason, 'success'));
@@ -308,13 +334,61 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
     return waitingForMessage({ type: 'RUN_ERROR', message, code: subtype === 'success' ? 'api_error' : subtype ?? 'error' });
   }
 
+  function rateLimits(frame: Record<string, unknown>): AgUiEvent[] {
+    const info = record(frame.rate_limit_info);
+    const unified = record(info?.unifiedWindows);
+    const measures = unified
+      ? RATE_WINDOWS.map((window) => rateWindow(window, record(unified[window])))
+      : RATE_WINDOWS.filter((window) => info?.rateLimitType === window).map((window) => rateWindow(window, info));
+    return measures.flatMap((value): AgUiEvent[] => {
+      if (value === undefined) return [];
+      const key = JSON.stringify(value);
+      if (rates.get(value.window) === key) return [];
+      rates.set(value.window, key);
+      return [{ type: 'CUSTOM', name: 'cleared.rate_limit', value }];
+    });
+  }
+
+  function compacted(frame: Record<string, unknown>): AgUiEvent[] {
+    const metadata = record(frame.compact_metadata);
+    const trigger = metadata?.trigger;
+    const preTokens = num(metadata?.pre_tokens);
+    if ((trigger !== 'manual' && trigger !== 'auto') || preTokens === undefined) return [];
+    const postTokens = num(metadata?.post_tokens);
+    return [{ type: 'CUSTOM', name: 'cleared.compacted', value: postTokens === undefined ? { trigger, preTokens } : { trigger, preTokens, postTokens } }];
+  }
+
+  function context(line: Extract<RunnerOutput, { type: 'context' }>): AgUiEvent[] {
+    const percent = num(line.percentage);
+    const totalTokens = num(line.totalTokens);
+    const maxTokens = num(line.maxTokens);
+    if (percent === undefined || totalTokens === undefined || maxTokens === undefined) return [];
+    const share: ContextShare = { percent, totalTokens, maxTokens };
+    const rawMaxTokens = num(line.rawMaxTokens);
+    const autoCompactThreshold = num(line.autoCompactThreshold);
+    state = { ...state, context: share };
+    return [
+      {
+        type: 'CUSTOM', name: 'cleared.context_usage', value: {
+          ...share, ...(rawMaxTokens === undefined ? {} : { rawMaxTokens }), ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
+          isAutoCompactEnabled: line.isAutoCompactEnabled === true,
+        },
+      },
+      // add, not replace: the state has no context until the first measure.
+      { type: 'STATE_DELTA', delta: [{ op: 'add', path: '/context', value: share }] },
+    ];
+  }
+
   function sdk(message: unknown): AgUiEvent[] {
     const frame = record(message);
     if (!frame) return [];
     switch (frame.type) {
+      case 'rate_limit_event':
+        return rateLimits(frame);
       case 'command_lifecycle':
         return frame.state === 'started' ? begin(str(frame.command_uuid)) : [];
       case 'system': {
+        if (frame.subtype === 'compact_boundary') return compacted(frame);
         // An init without user messages is the CLI starting on a resumed
         // session, not a turn.
         const uuids = Array.isArray(frame.user_message_uuids) ? frame.user_message_uuids : [];
@@ -364,6 +438,15 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
           ];
         case 'error':
           return [{ type: 'RUN_ERROR', message: line.message, code: 'runner' }];
+        case 'context':
+          return context(line);
+        case 'login':
+          if (line.state === 'renewed') {
+            loginWait = false;
+            return [];
+          }
+          loginWait = true;
+          return [change({ phase: 'waiting_human', status: 'Waiting for a new login' })];
         case 'exit': {
           if (line.code !== 0) return end([{ type: 'RUN_ERROR', message: `the runner exited with code ${line.code}`, code: 'runner_exit' }], 'failed', 'Stopped on an error');
           const open: AgUiEvent[] = run === undefined ? [] : [{
@@ -402,6 +485,9 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
     },
     state() {
       return state;
+    },
+    turn() {
+      return run;
     },
   };
 }

@@ -16,7 +16,7 @@ import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../../../src/container/session-
 import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../../../src/session/adapters/claude-code.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
-import { NotImplemented, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
+import { HostToolRefused, NotImplemented, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../../src/session/policy.ts';
 import { FakeDocker } from '../../container/fake-docker.ts';
@@ -126,7 +126,7 @@ test('start creates the labelled session, attaches the runner and sends start, t
 
     const runner = t.runners[0] as FakeRunner;
     const start = await runner.waitFor((line) => line.type === 'start');
-    assert.deepEqual(start, { type: 'start', sessionId: SESSION, model: 'claude-haiku-5-5', resume: false, maxBudgetUsd: 1 });
+    assert.deepEqual(start, { type: 'start', sessionId: SESSION, model: 'claude-haiku-5-5', resume: false, role: 'author', maxBudgetUsd: 1 });
     const first = await runner.waitFor((line) => line.type === 'user');
     assert.equal(first.text, 'Show the newest entry first.');
     assert.equal(runner.received.indexOf(start), 0);
@@ -257,7 +257,7 @@ test('stop removes the containers and networks, keeps the volume, ends the strea
     const resumed = await t.adapter.resume(SESSION);
     assert.equal(resumed.id, SESSION);
     const second = t.runners[1] as FakeRunner;
-    assert.deepEqual(await second.waitFor((l) => l.type === 'start'), { type: 'start', sessionId: SESSION, model: 'claude-haiku-5-5', resume: true, maxBudgetUsd: 1 });
+    assert.deepEqual(await second.waitFor((l) => l.type === 'start'), { type: 'start', sessionId: SESSION, model: 'claude-haiku-5-5', resume: true, role: 'author', maxBudgetUsd: 1 });
     assert.equal(second.received.some((l) => l.type === 'user'), false, 'a resume sends no prompt');
     // The stream goes on with the same seq numbering.
     const before = t.log.all.length;
@@ -336,5 +336,105 @@ test('a tool check is denied by the policy before the tool runs, and only a deny
     assert.deepEqual(custom(t.log, 'cleared.permission_answered'), ['c-env', 'c-environ', 'c-printenv'].map((requestId) => ({ requestId, decision: 'reject_once', by: 'policy', rule: 'secret.read' })));
     assert.deepEqual(custom(t.log, 'cleared.permission_request'), []);
     await handle.stop();
+  } finally { t.cleanup(); }
+});
+
+// Milestone 2 (lane 4): the host tools.
+const secret = ['sk', 'ant', 'oat01', 'TOKENVALUEFORTESTS'].join('-');
+function leadInput(workdir: string, calls: { name: string; input: unknown; context: HostCallContext }[]): StartInput {
+  const schema = { type: 'object', properties: { word: { type: 'string', description: 'A word.' } }, required: ['word'] } as const;
+  const tool = (name: string, handle: (input: unknown) => Promise<unknown>): HostTool => ({
+    name, description: `The ${name} tool.`, inputSchema: schema,
+    async handle(value, context) { calls.push({ name, input: value, context }); return handle(value); },
+  });
+  return {
+    ...input(workdir), ticket: 'lead', role: 'lead',
+    policy: { ...input(workdir).policy, role: 'lead' },
+    tools: [
+      tool('ping', async (value) => `pong ${(value as { word: string }).word}`),
+      tool('state', async () => ({ plans: 0, live: ['s-1'] })),
+      tool('fulfil', async () => { throw new HostToolRefused('This commitment is not open.'); }),
+      tool('commit', async () => { throw new Error(`the database at /var/lib/x is locked ${secret}`); }),
+    ],
+  };
+}
+
+test('a lead starts with its role and its tools (without the handlers); each host call runs the handler and answers the runner', async () => {
+  const t = await setup();
+  try {
+    const calls: { name: string; input: unknown; context: HostCallContext }[] = [];
+    const handle = await t.adapter.start(leadInput(t.workdir, calls));
+    const runner = t.runners[0] as FakeRunner;
+    const start = await runner.waitFor((line) => line.type === 'start');
+    assert.equal(start.role, 'lead');
+    assert.deepEqual((start.tools as { name: string }[]).map((tool) => tool.name), ['ping', 'state', 'fulfil', 'commit']);
+    assert.deepEqual(Object.keys((start.tools as Record<string, unknown>[])[0] ?? {}).sort(), ['description', 'inputSchema', 'name']);
+
+    runner.sdk({ type: 'command_lifecycle', state: 'started', command_uuid: 'turn-1' });
+    runner.say({ type: 'host_call', callId: 'c-1', toolUseId: 'toolu_1', name: 'ping', input: { word: 'plum' } });
+    runner.say({ type: 'host_call', callId: 'c-2', toolUseId: 'toolu_2', name: 'state', input: {} });
+    runner.say({ type: 'host_call', callId: 'c-3', toolUseId: '', name: 'fulfil', input: { word: 'x' } });
+    runner.say({ type: 'host_call', callId: 'c-4', toolUseId: 'toolu_4', name: 'commit', input: { word: secret } });
+    runner.say({ type: 'host_call', callId: 'c-5', toolUseId: 'toolu_5', name: 'search_memory', input: { query: 'x' } });
+    const results = await Promise.all(['c-1', 'c-2', 'c-3', 'c-4', 'c-5'].map((callId) => runner.waitFor((line) => line.type === 'host_result' && line.callId === callId)));
+    assert.deepEqual(results, [
+      { type: 'host_result', callId: 'c-1', ok: true, text: 'pong plum' },
+      { type: 'host_result', callId: 'c-2', ok: true, text: '{"plans":0,"live":["s-1"]}' },
+      { type: 'host_result', callId: 'c-3', ok: false, text: 'This commitment is not open.' },
+      { type: 'host_result', callId: 'c-4', ok: false, text: 'The host could not run this tool.' },
+      // A name the start input did not give is not answered by any handler (issue 163).
+      { type: 'host_result', callId: 'c-5', ok: false, text: 'No host tool is named search_memory.' },
+    ]);
+    assert.deepEqual(calls.map((call) => [call.name, call.context]), [
+      ['ping', { sessionId: SESSION, turn: 'turn-1' }], ['state', { sessionId: SESSION, turn: 'turn-1' }],
+      ['fulfil', { sessionId: SESSION, turn: 'turn-1' }], ['commit', { sessionId: SESSION, turn: 'turn-1' }],
+    ]);
+    await settle();
+    // Each call is recorded when it is answered: an unknown name at once.
+    const recorded = custom(t.log, 'cleared.host_call') as { toolCallId: string }[];
+    assert.deepEqual([...recorded].sort((a, b) => a.toolCallId.replace('c-3', 'toolu_3').localeCompare(b.toolCallId.replace('c-3', 'toolu_3'))), [
+      { toolCallId: 'toolu_1', name: 'ping', input: { word: 'plum' }, outcome: 'ok' },
+      { toolCallId: 'toolu_2', name: 'state', input: {}, outcome: 'ok' },
+      // Without a tool use id, the call's own id.
+      { toolCallId: 'c-3', name: 'fulfil', input: { word: 'x' }, outcome: 'refused', message: 'This commitment is not open.' },
+      { toolCallId: 'toolu_4', name: 'commit', input: { word: '[removed: secret]' }, outcome: 'failed', message: 'The host could not run this tool.' },
+      { toolCallId: 'toolu_5', name: 'search_memory', input: { query: 'x' }, outcome: 'failed', message: 'No host tool is named search_memory.' },
+    ]);
+    // The failure's own message and the secret stay on the host.
+    assert.ok(!JSON.stringify(t.log.all).includes('/var/lib/x') && !JSON.stringify(t.log.all).includes(secret));
+    await handle.stop();
+  } finally { t.cleanup(); }
+});
+
+test('the runner\'s context line is stored as cleared.context_usage and the context of the state', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    await runner.waitFor((line) => line.type === 'start');
+    runner.say({ type: 'context', after: 'turn', detail: 'summary', ms: 4, totalTokens: 62_000, maxTokens: 200_000, rawMaxTokens: 200_000, percentage: 31, isAutoCompactEnabled: true, autoCompactThreshold: 167_000 });
+    await settle();
+    assert.deepEqual(custom(t.log, 'cleared.context_usage'), [{ percent: 31, totalTokens: 62_000, maxTokens: 200_000, rawMaxTokens: 200_000, autoCompactThreshold: 167_000, isAutoCompactEnabled: true }]);
+    assert.deepEqual(events(t.log).at(-1), { type: 'STATE_DELTA', delta: [{ op: 'add', path: '/context', value: { percent: 31, totalTokens: 62_000, maxTokens: 200_000 } }] });
+    await handle.stop();
+  } finally { t.cleanup(); }
+});
+
+test('a host call answered after the session stopped writes nothing to a runner that is gone', async () => {
+  const t = await setup();
+  try {
+    let release: (value: string) => void = () => {};
+    const slow: HostTool = { name: 'ping', description: 'Ping.', inputSchema: { type: 'object', properties: {} }, handle: () => new Promise<string>((resolve) => { release = resolve; }) };
+    const handle = await t.adapter.start({ ...input(t.workdir), role: 'lead', tools: [slow] });
+    const runner = t.runners[0] as FakeRunner;
+    runner.say({ type: 'host_call', callId: 'c-1', toolUseId: 't-1', name: 'ping', input: {} });
+    await settle();
+    const stopping = handle.stop();
+    runner.exit(0);
+    await stopping;
+    release('late');
+    await settle();
+    assert.ok(!runner.received.some((line) => line.type === 'host_result'));
+    assert.deepEqual(custom(t.log, 'cleared.host_call'), []);
   } finally { t.cleanup(); }
 });
