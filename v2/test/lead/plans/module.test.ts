@@ -17,5 +17,5 @@ test('the lead\'s rules carry the plan paragraph of section 4.4', () => {
   for (const phrase of [/propose_plan/, /goal id/, /start_ticket/, /1 to 12 items/, /nothing is stacked/, /At night nothing goes live/, /fast for a small change/, /do not give your own/, /same goal/])
     assert.match(LEAD_RULES, phrase);
   assert.ok(Buffer.byteLength(LEAD_RULES) < 5 * 1024);
-  assert.doesNotMatch(LEAD_RULES, /—/);
+  assert.doesNotMatch(LEAD_RULES, /\u2014/);
 });
