@@ -1,6 +1,7 @@
 // The service's HTTP and server-sent events routes (docs/v2/milestone-1-plan.md,
 // lane 7), the handlers of the shapes in types.ts. The approval route
-// (POST /api/tickets/:id/approve) is lane 8's and is not declared here.
+// (POST /api/tickets/:id/approve) is lane 8's and is not declared here, nor
+// is a session's preview (GET /api/sessions/:id/preview/*), lane 15's.
 //
 // Every request is checked for the proof first (SERVICE_PROOF_HEADER): only
 // the app holds it, a session's container does not. A request that writes
@@ -9,9 +10,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sameProof } from '../modules/users.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
+import { workspaceOf } from '../flow/config.ts';
 import { FlowError, type FlowEngine } from '../flow/engine.ts';
 import type { Decision, UserId } from '../session/contract.ts';
 import { TicketError } from '../tickets/contract.ts';
+import { publicWorkspace } from '../workspace/config.ts';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, sseFrame, type CreateTicketBody } from './types.ts';
 
 export type ApiDeps = {
@@ -82,6 +85,18 @@ function decision(value: unknown): Decision {
     }
     default: throw new HttpError(400, 'the decision is not one a person can give');
   }
+}
+
+// The services a new ticket names: each a service of the workspace, once.
+function serviceNames(value: unknown, engine: FlowEngine): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((name) => typeof name !== 'string')) throw new HttpError(400, 'services is a list of service names');
+  if (value.length === 0) throw new HttpError(400, 'services names at least one service, or is left out');
+  const workspace = workspaceOf(engine.config);
+  const known = new Set(workspace.services.map((service) => service.name));
+  for (const name of value as string[]) if (!known.has(name)) throw new HttpError(400, `${name.slice(0, 100)} is not a service of workspace ${workspace.id}`);
+  if (new Set(value).size !== value.length) throw new HttpError(400, 'services names a service more than once');
+  return value as string[];
 }
 
 export function createApiRoutes(deps: ApiDeps): Route[] {
@@ -162,7 +177,11 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
         if (labels !== undefined && (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string' || l.length > 100)))
           throw new HttpError(400, 'labels is a list of short texts');
         if (project !== engine.config.project) throw new HttpError(400, `this service runs project ${engine.config.project}, not ${project}`);
-        const input: CreateTicketBody = { title, project, ...(bodyText === undefined ? {} : { body: bodyText }), ...(labels === undefined ? {} : { labels: labels as string[] }) };
+        const services = serviceNames(body.services, engine);
+        const input: CreateTicketBody = {
+          title, project, ...(bodyText === undefined ? {} : { body: bodyText }), ...(labels === undefined ? {} : { labels: labels as string[] }),
+          ...(services === undefined ? {} : { services }),
+        };
         const ticket = await engine.registry.ticketStore.create(input, { kind: 'human', id: user as UserId });
         void engine.begin(ticket.id, user as UserId);
         send(c.response, 200, ticket);
@@ -202,7 +221,12 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
     { method: 'GET', path: '/api/inbox', handle: guarded(false, (engine, _u, c) => send(c.response, 200, engine.inbox.list())) },
   ];
 
-  return [...sessionRoutes, ...ticketRoutes, ...inboxRoutes];
+  // The tickets module serves it (modules/tickets.ts).
+  const workspaceRoutes: Route[] = [
+    { method: 'GET', path: '/api/workspace', handle: guarded(false, (engine, _u, c) => send(c.response, 200, publicWorkspace(workspaceOf(engine.config)))) },
+  ];
+
+  return [...sessionRoutes, ...ticketRoutes, ...inboxRoutes, ...workspaceRoutes];
 
   // The event stream: what is stored after the number given, then what
   // comes. The Last-Event-ID of a reconnect wins over a stale ?after.

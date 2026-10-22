@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FlowConfigError, loadFlowConfig, parseConf, projectSettings } from '../../src/flow/config.ts';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FlowConfigError, loadFlowConfig, parseConf, projectSettings, workspaceOf } from '../../src/flow/config.ts';
+import { publicWorkspace } from '../../src/workspace/config.ts';
 
 const conf = `
 # a comment
@@ -61,4 +65,141 @@ test('CLEARED_V2_MERGE_RETRY_SECONDS spaces the merge retries, 60 seconds by def
   assert.equal(loadFlowConfig({ ...env, CLEARED_V2_MERGE_RETRY_SECONDS: '15' })?.mergeRetryMs, 15_000);
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_MERGE_RETRY_SECONDS: '0' }), FlowConfigError);
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_MERGE_RETRY_SECONDS: '2.5' }), FlowConfigError);
+});
+
+// ---------------------------------------------------------------- the workspace (milestone 2, lane 14, decision 18)
+
+const M1_ENV = {
+  CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO_URL: 'https://github.com/example-org/cleared-example-guestbook.git',
+  CLEARED_V2_REPO: 'example-org/cleared-example-guestbook', CLEARED_V2_STATE_DIR: '/state', CLEARED_V2_BASE: 'trunk',
+};
+
+test('the milestone 1 variables make a one-service workspace, and the flow configuration is the one milestone 1 had', () => {
+  const config = loadFlowConfig(M1_ENV);
+  assert.ok(config);
+  const { workspace, ...rest } = config;
+  // The fields and values of the milestone 1 FlowConfig, unchanged.
+  assert.deepEqual(rest, {
+    project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://github.com/example-org/cleared-example-guestbook.git',
+    repo: 'example-org/cleared-example-guestbook', base: 'trunk', workdirRoot: '/state/work', authorModel: 'claude-opus-5-5',
+    reviewerModel: 'claude-sonnet-5-5', idleMs: 15 * 60_000, maxReviewRounds: 2, budgetUsd: undefined, mergeRetryMs: 60_000,
+  });
+  // Its id is the old project value, so every existing row stays in it.
+  assert.deepEqual(workspace, {
+    id: 'guestbook', name: 'guestbook', file: null,
+    services: [{
+      name: 'guestbook', kind: 'repository', repo: 'example-org/cleared-example-guestbook', url: 'https://github.com/example-org/cleared-example-guestbook.git',
+      base: 'trunk', path: null, dir: '/srv/guestbook', healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null,
+      brokerSocket: null, brokerState: null,
+    }],
+  });
+  assert.deepEqual(workspaceOf(config), workspace);
+  // A FlowConfig written without its workspace (the tests' literals) reads as the same one-service workspace.
+  assert.deepEqual(workspaceOf(rest), workspace);
+  // The [session] services test containers keep their name and meaning.
+  assert.deepEqual(projectSettings(parseConf('[merge]\nverdict = ok\n[session]\nservices = postgres:16\n')).services.map((s) => s.alias), ['postgres']);
+});
+
+const TWO = `
+[workspace]
+id = guestbook
+name = Guestbook and its filter
+
+[service guestbook]
+kind = repository
+repository = example-org/cleared-example-guestbook
+url = https://github.com/example-org/cleared-example-guestbook.git
+dir = /srv/guestbook
+health_url = http://127.0.0.1:8793/health
+consumes = filter-api
+run = Dockerfile:3000
+
+[service filter-api]
+kind = folder
+repository = example-org/cleared-examples
+url = https://github.com/example-org/cleared-examples.git
+base = develop
+path = filter-api
+contract = openapi:contract/openapi.yaml
+sensitivity = reviewer:claude-sonnet-5-5
+broker_socket = /state/filter-api/broker.sock
+broker_state = /state/filter-api
+`;
+
+function withWorkspaceFile(text: string, run: (env: NodeJS.ProcessEnv) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), 'cleared-v2-workspace-'));
+  try {
+    const file = join(dir, 'workspace.conf');
+    writeFileSync(file, text);
+    run({ CLEARED_V2_WORKSPACE: file, CLEARED_V2_STATE_DIR: '/state' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('a two-service workspace file parses with its kinds, consumes, run, contract and sensitivity', () => {
+  withWorkspaceFile(TWO, (env) => {
+    const config = loadFlowConfig(env);
+    assert.ok(config);
+    const workspace = workspaceOf(config);
+    assert.equal(workspace.id, 'guestbook');
+    assert.equal(workspace.name, 'Guestbook and its filter');
+    assert.equal(workspace.file, env.CLEARED_V2_WORKSPACE);
+    const [guestbook, filter] = workspace.services;
+    assert.deepEqual(guestbook, {
+      name: 'guestbook', kind: 'repository', repo: 'example-org/cleared-example-guestbook', url: 'https://github.com/example-org/cleared-example-guestbook.git',
+      base: 'main', path: null, dir: '/srv/guestbook', healthUrl: 'http://127.0.0.1:8793/health', sensitivity: 'normal', consumes: ['filter-api'],
+      run: { dockerfile: 'Dockerfile', port: 3000 }, contract: null, brokerSocket: null, brokerState: null,
+    });
+    assert.deepEqual(filter, {
+      name: 'filter-api', kind: 'folder', repo: 'example-org/cleared-examples', url: 'https://github.com/example-org/cleared-examples.git',
+      base: 'develop', path: 'filter-api', dir: '/state/services/filter-api/checkout', healthUrl: null, sensitivity: 'reviewer:claude-sonnet-5-5', consumes: [],
+      run: null, contract: { format: 'openapi', path: 'contract/openapi.yaml' }, brokerSocket: '/state/filter-api/broker.sock', brokerState: '/state/filter-api',
+    });
+    // The milestone 1 fields name the workspace and its first service, until the flow publishes per service (lane 16).
+    assert.equal(config.project, 'guestbook');
+    assert.equal(config.projectDir, '/srv/guestbook');
+    assert.equal(config.repo, 'example-org/cleared-example-guestbook');
+    assert.equal(config.base, 'main');
+    // The public shape leaves out the server's paths.
+    const shown = publicWorkspace(workspace);
+    assert.deepEqual(Object.keys(shown.services[1] as object).sort(), ['base', 'consumes', 'contract', 'healthUrl', 'kind', 'name', 'path', 'repo', 'run', 'sensitivity', 'url']);
+    assert.ok(!JSON.stringify(shown).includes('/srv/') && !JSON.stringify(shown).includes('/state/'));
+  });
+  // run also reads as the Dockerfile and the port separated by a space.
+  withWorkspaceFile(TWO.replace('run = Dockerfile:3000', 'run = Dockerfile 3000'), (env) =>
+    assert.deepEqual(workspaceOf(loadFlowConfig(env)!).services[0]?.run, { dockerfile: 'Dockerfile', port: 3000 }));
+});
+
+test('the workspace file refuses an unknown kind, a service that consumes itself, a sensitivity naming no user, and the author model as a reviewer', () => {
+  const refused = (text: string, pattern: RegExp) => withWorkspaceFile(text, (env) =>
+    assert.throws(() => loadFlowConfig(env), (error: unknown) => error instanceof FlowConfigError && pattern.test(error.message), pattern.source));
+  refused(TWO.replace('kind = folder', 'kind = submodule'), /\[service filter-api\] kind/);
+  refused(TWO.replace('consumes = filter-api', 'consumes = guestbook'), /guestbook consumes itself/);
+  refused(TWO.replace('sensitivity = reviewer:claude-sonnet-5-5', 'sensitivity = human:'), /names no user/);
+  refused(TWO.replace('sensitivity = reviewer:claude-sonnet-5-5', 'sensitivity = reviewer:claude-opus-5-5'), /author model/);
+  // The author model is the configured one, not a constant.
+  withWorkspaceFile(TWO.replace('sensitivity = reviewer:claude-sonnet-5-5', 'sensitivity = reviewer:claude-opus-5-5'), (env) =>
+    assert.equal(workspaceOf(loadFlowConfig({ ...env, CLEARED_V2_AUTHOR_MODEL: 'claude-sonnet-5-5', CLEARED_V2_REVIEWER_MODEL: 'claude-opus-5-5' })!).services[1]?.sensitivity, 'reviewer:claude-opus-5-5'));
+  // And what else a file can get wrong.
+  refused(TWO.replace('sensitivity = reviewer:claude-sonnet-5-5', 'sensitivity = strict'), /sensitivity/);
+  refused(TWO.replace('consumes = filter-api', 'consumes = payments'), /consumes payments, which is not a service/);
+  refused(`${TWO}\n[service payments]\nrepository = example-org/payments\nurl = https://example.invalid/p.git\nconsumes = guestbook\n`.replace('consumes = filter-api', 'consumes = payments'), /cycle/);
+  refused(TWO.replace('contract = openapi:contract/openapi.yaml', 'contract = protobuf:filter.proto'), /OpenAPI/);
+  refused(TWO.replace('run = Dockerfile:3000', 'run = Dockerfile'), /run/);
+  refused(TWO.replace('path = filter-api', 'path = ../filter-api'), /path/);
+  refused(TWO.replace('path = filter-api\n', ''), /folder.*path/);
+  refused(TWO.replace('dir = /srv/guestbook', 'dir = srv/guestbook'), /dir/);
+  refused(TWO.replace('health_url = http://127.0.0.1:8793/health', 'health_url = ftp://x'), /health_url/);
+  refused(TWO.replace('repository = example-org/cleared-example-guestbook', 'repository = guestbook'), /owner\/name/);
+  refused(TWO.replace('run = Dockerfile:3000', 'runs = Dockerfile:3000'), /unknown key runs/);
+  refused(TWO.replace('[workspace]\nid = guestbook\n', '[workspace]\n'), /\[workspace\] id/);
+  refused('[workspace]\nid = guestbook\n', /no \[service/);
+  refused(`${TWO}\n[agents]\nx = 1\n`, /unknown section/);
+  withWorkspaceFile(TWO, (env) => {
+    assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_PROJECT: 'another' }), /CLEARED_V2_PROJECT/);
+    assert.equal(loadFlowConfig({ ...env, CLEARED_V2_PROJECT: 'guestbook' })?.project, 'guestbook');
+    assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_WORKSPACE: 'relative.conf' }), /absolute/);
+    assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_WORKSPACE: '/nonexistent/workspace.conf' }), /cannot read/);
+  });
 });

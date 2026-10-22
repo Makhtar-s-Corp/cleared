@@ -2,7 +2,10 @@
 // build against it and lane 7 implements it. Changing this file after wave 1
 // is a lane of its own (docs/v2/milestone-1-plan.md, section 10). Milestone
 // 2 adds the lead, its thread and the plans (docs/v2/milestone-2-plan.md,
-// sections 5.1 and 7.1), implemented by lanes 5 and 7.
+// sections 5.1 and 7.1), implemented by lanes 5 and 7. The replanned
+// milestone 2 adds the workspace and its services, and the shapes of wave 6
+// (the release train, the preview route), written by lane 14 one wave ahead
+// (docs/v2/milestone-2-plan.md, section 4: decisions 18, 20 and 21).
 //
 // The app calls the service on loopback, forwarding /api/service/* to these
 // routes. Every request carries the shared proof the service checks
@@ -31,9 +34,13 @@ export type SessionSummary = {
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly lastSeq: number;                                 // the seq of its last stored event
+  readonly service?: string;                                // the workspace service it works on; absent before lane 15 starts sessions per service
 };
 
-export type SessionDetail = SessionSummary & { readonly state: SessionState };
+// previewKey: the unguessable segment of the session's preview address
+// (decision 20), issued by the service when the session's containers start
+// (lane 15); absent or null while the session has no preview.
+export type SessionDetail = SessionSummary & { readonly state: SessionState; readonly previewKey?: string | null };
 
 type InboxBase = {
   readonly id: string;
@@ -70,6 +77,52 @@ export type ReleaseItem = InboxBase & {
   readonly requestedAt: string;
   readonly captures: { readonly before: Capture; readonly after: Capture };
   readonly sessions: readonly { readonly role: Role; readonly model: string; readonly minutes: number; readonly rounds?: number }[];
+  readonly train?: TrainState;                              // a ticket of several services (decision 21, lane 16); absent for one service
+};
+
+// ---------------------------------------------------------------- the workspace (decisions 18 and 21)
+
+// A service of the workspace, as GET /api/workspace shows it: a repository,
+// or a folder of a monorepo (`path` inside `repo`). The server's own paths
+// (its checkout, its release broker) are not shown.
+export type Service = {
+  readonly name: string;
+  readonly kind: 'repository' | 'folder';
+  readonly repo: string;                                    // owner/name
+  readonly url: string;
+  readonly base: string;                                    // the base branch
+  readonly path: string | null;                             // folder only
+  readonly healthUrl: string | null;
+  // full: never the fast lane; reviewer:<model>: that model reviews its
+  // sessions; human:<user>: that user approves its releases (decision 24).
+  readonly sensitivity: 'normal' | 'full' | `reviewer:${string}` | `human:${string}`;
+  readonly consumes: readonly string[];                     // the services it calls: they land before it
+  readonly run: { readonly dockerfile: string; readonly port: number } | null;   // how a sibling of it runs (decision 20)
+  readonly contract: { readonly format: 'openapi'; readonly path: string } | null; // OpenAPI 3 only in milestone 2
+};
+
+// A workspace: its id is the `project` value of every row it holds.
+export type Workspace = { readonly id: string; readonly name: string; readonly services: readonly Service[] };
+
+// One service of a release train, in landing order: providers before
+// consumers (their `consumes`), then their position.
+export type TrainServiceState = 'waiting' | 'merged' | 'healthy' | 'failed' | 'reverted';
+export type TrainStop = {
+  readonly service: string;
+  readonly pr: { readonly number: number; readonly url: string } | null;
+  readonly state: TrainServiceState;
+  readonly at: string | null;                               // when it reached that state
+};
+
+// The release card's train (decision 21): blocked before approval when the
+// ticket changes a contract without a step on every consumer, with the
+// proposal; then waiting, landing service by service with the health read
+// between landings, landed, or rolled back newest first.
+export type TrainState = {
+  readonly state: 'blocked' | 'waiting' | 'landing' | 'landed' | 'rolled_back';
+  readonly services: readonly TrainStop[];
+  readonly compatibility: string | null;                    // the line: who consumes whom, and what this ticket changes
+  readonly blocked: { readonly reason: string; readonly proposal: string } | null;
 };
 
 // Milestone 2, section 5.1: a plan waiting for the owner's approval. It is
@@ -220,7 +273,8 @@ export type NotificationRoutes = {
 // Request bodies.
 export type SendMessageBody = { readonly text: string };
 export type AnswerBody = { readonly decision: Decision };
-export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string };
+// services: the names of the workspace's services the ticket touches (lane 14).
+export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string; readonly services?: readonly string[] };
 export type MoveTicketBody = { readonly status: string };
 export type ApproveBody = { readonly requestedAt: string; readonly heads: readonly { readonly pr: number; readonly head: string }[] };
 export type LeadMessageBody = { readonly text: string; readonly goal?: true };   // goal: the text is a goal
@@ -242,6 +296,11 @@ export type ApiRoutes = {
   'POST /api/tickets/:id/move': { readonly body: MoveTicketBody; readonly response: Ticket };
   'POST /api/tickets/:id/approve': { readonly body: ApproveBody; readonly response: { readonly accepted: true; readonly by: UserId } };
   'GET /api/inbox': { readonly body: null; readonly response: InboxItem[] };
+  // The replanned milestone 2: the workspace (lane 14), and the trial
+  // environment of a session (decision 20), served by lane 15 from its
+  // `run` sibling under the session's previewKey, every answer sandboxed.
+  'GET /api/workspace': { readonly body: null; readonly response: Workspace };
+  'GET /api/sessions/:id/preview/*': { readonly body: null; readonly response: 'the sibling\'s answer' };
   // Milestone 2. `messages` answers the thread after `?after=<seq>`.
   'GET /api/lead': { readonly body: null; readonly response: LeadState };
   'GET /api/lead/messages': { readonly body: null; readonly response: LeadMessage[] };
@@ -272,6 +331,8 @@ const routes = {
   'POST /api/tickets/:id/move': true,
   'POST /api/tickets/:id/approve': true,
   'GET /api/inbox': true,
+  'GET /api/workspace': true,
+  'GET /api/sessions/:id/preview/*': true,
   'GET /api/lead': true,
   'GET /api/lead/messages': true,
   'GET /api/lead/stream': true,
@@ -285,6 +346,9 @@ const routes = {
   'POST /api/plans/:id/resume': true,
 } satisfies Record<ApiRoute, true>;
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
+
+// The preview route: lane 15 serves it (container/preview.ts), not the flow's API.
+export const SESSION_PREVIEW_ROUTE: ApiRoute = 'GET /api/sessions/:id/preview/*';
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));

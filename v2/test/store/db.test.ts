@@ -77,7 +77,7 @@ test('sessions and learned policy rules are kept per project', withDir((dir) => 
   try {
     const record = { id: 's1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author' as const, harness: 'claude-code' as const, model: 'claude-opus-5-5', status: 'running', createdAt: '2026-10-21T10:00:00.000Z', updatedAt: '2026-10-21T10:00:00.000Z' };
     store.sessions.put(record);
-    assert.deepEqual(store.sessions.get('s1'), record);
+    assert.deepEqual(store.sessions.get('s1'), { ...record, service: null, previewKey: null });
     store.sessions.put({ ...record, status: 'stopped', updatedAt: '2026-10-21T11:00:00.000Z' });
     assert.equal(store.sessions.get('s1')?.status, 'stopped');
     assert.deepEqual(store.sessions.list({ ticket: 'LOCAL-1' }).map((s) => s.id), ['s1']);

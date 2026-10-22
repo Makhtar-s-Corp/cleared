@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type Plan, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PREVIEW_ROUTE, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace } from '../../src/api/types.ts';
+import type { Ticket } from '../../src/tickets/contract.ts';
 import type { SessionEvent } from '../../src/session/events.ts';
 
 test('the API lists every route the app lanes build against, once', () => {
@@ -29,11 +30,16 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/plans/:id/pause',
     'POST /api/plans/:id/reject',
     'POST /api/plans/:id/resume',
+    // Milestone 2 replanned, lane 14: the workspace, and the preview route lane 15 serves.
+    'GET /api/workspace',
+    'GET /api/sessions/:id/preview/*',
   ].sort());
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 23);
+  assert.equal(keys.length, 25);
+  assert.equal(SESSION_PREVIEW_ROUTE, 'GET /api/sessions/:id/preview/*');
+  assert.ok(!MILESTONE_2_ROUTES.includes(SESSION_PREVIEW_ROUTE) && !MILESTONE_2_ROUTES.includes('GET /api/workspace'), 'the lead module\'s routes only');
   assert.deepEqual([...MILESTONE_2_ROUTES].sort(), API_ROUTES.filter((route) => /\/api\/(lead|plans)/.test(route)).sort());
 });
 
@@ -75,4 +81,34 @@ test('the shapes the app renders type check with real values', () => {
   assert.equal(summary.lastSeq, 12);
   assert.deepEqual(items.map((item) => item.kind), ['permission', 'question', 'release', 'plan']);
   assert.equal(status.reason, 'insecure');
+});
+
+test('the workspace shapes of wave 5 and the train of wave 6 type check with real values', () => {
+  const workspace: Workspace = {
+    id: 'guestbook', name: 'Guestbook and its filter',
+    services: [
+      { name: 'guestbook', kind: 'repository', repo: 'example-org/cleared-example-guestbook', url: 'https://example.invalid/guestbook.git', base: 'main', path: null, healthUrl: 'http://127.0.0.1:8793/health', sensitivity: 'normal', consumes: ['filter-api'], run: { dockerfile: 'Dockerfile', port: 3000 }, contract: null },
+      { name: 'filter-api', kind: 'folder', repo: 'example-org/cleared-examples', url: 'https://example.invalid/examples.git', base: 'main', path: 'filter-api', healthUrl: null, sensitivity: 'human:demo', consumes: [], run: null, contract: { format: 'openapi', path: 'contract/openapi.yaml' } },
+    ],
+  };
+  const ticket: Ticket = {
+    id: 'LOCAL-3', title: 'Held for review', body: '', labels: [], project: 'guestbook', status: 'Todo', createdAt: '2026-10-23T08:00:00.000Z', updatedAt: '2026-10-23T08:00:00.000Z',
+    services: [{ name: 'filter-api', branch: 'cleared/LOCAL-3', pr: 12, state: 'open' }, { name: 'guestbook', branch: null, pr: null, state: 'open' }],
+  };
+  const summary: SessionSummary = { id: 's1', project: 'guestbook', ticket: 'LOCAL-3', role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: 'working', status: 'Running the tests', startedAt: '2026-10-23T08:00:00.000Z', updatedAt: '2026-10-23T08:01:00.000Z', lastSeq: 3, service: 'filter-api' };
+  const detail: SessionDetail = { ...summary, state: { status: 'Running the tests', phase: 'working', steps: [], files: [], checks: [], usage: {} }, previewKey: 'k'.repeat(32) };
+  const train: TrainState = {
+    state: 'landing',
+    services: [
+      { service: 'filter-api', pr: { number: 12, url: 'https://example.invalid/filter-api/pull/12' }, state: 'healthy', at: '2026-10-23T09:00:00.000Z' },
+      { service: 'guestbook', pr: { number: 7, url: 'https://example.invalid/guestbook/pull/7' }, state: 'waiting', at: null },
+    ],
+    compatibility: 'the guestbook consumes the filter API and is changed in this ticket',
+    blocked: null,
+  };
+  const release = { kind: 'release', train } as Pick<ReleaseItem, 'kind' | 'train'>;
+  assert.deepEqual(workspace.services.map((s) => s.name), ['guestbook', 'filter-api']);
+  assert.equal(ticket.services?.length, 2);
+  assert.equal(detail.previewKey?.length, 32);
+  assert.deepEqual(release.train?.services.map((s) => s.service), ['filter-api', 'guestbook'], 'providers land first');
 });
