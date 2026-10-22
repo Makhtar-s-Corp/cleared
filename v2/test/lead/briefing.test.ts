@@ -70,3 +70,44 @@ test('a memory that cannot be read leaves the generation briefed without it', as
   assert.equal(t.lead.state().generation, 1);
   assert.match(t.briefings[0] ?? '', /memory could not be read/i);
 });
+
+// ---- the service pages' first lines (decision 25, lane 19) --------------------
+
+async function leadMemory(services: number, line: string) {
+  const { mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { projectCheckout } = await import('../../src/workspace/checkout.ts');
+  const { realLeadEffects } = await import('../../src/lead/briefing.ts');
+  const { AGENTS_CONF, remote, tempDir } = await import('../workspace/git.ts');
+  const root = tempDir('lead-levels');
+  const workspace = await projectCheckout({ url: remote({ 'docs/project.md': `# Guestbook\n${'w'.repeat(10_500)}\n` }), dir: join(root, 'guestbook'), base: 'main' });
+  const filter = await projectCheckout({ url: remote({ '.cleared/agents.conf': AGENTS_CONF, 'docs/project.md': `\n# ${line}\nThe rest of the page.\n` }), dir: join(root, 'filter-api'), base: 'main' });
+  const env = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
+  delete env.ORCH_LEDGER;
+  mkdirSync(join(root, 'state'), { recursive: true });
+  const list = [{ name: 'guestbook', dir: workspace.dir }, { name: 'billing', dir: join(root, 'billing') },
+    ...Array.from({ length: services }, (_v, i) => ({ name: i === 0 ? 'filter-api' : `filter-${i}`, dir: filter.dir }))];
+  const effects = realLeadEffects({ projectDir: workspace.dir, repoUrl: 'unused', base: 'main', workdir: join(root, 'lead'), env, services: list });
+  return effects.memory();
+}
+
+test('the lead\'s memory ends with the first line of each other service\'s page, the workspace\'s own page not repeated', async () => {
+  const memory = await leadMemory(1, 'Filter API: it checks the words of an entry.');
+  assert.match(memory[0]?.content ?? '', /^# Guestbook/);
+  const services = memory.filter((entry) => entry.type === 'services');
+  assert.deepEqual(services.map((entry) => entry.content), ['filter-api: Filter API: it checks the words of an entry.']);
+  const text = renderLeadBriefing({ generation: 1, at: 'now', commitments: [], handover: null, memory });
+  assert.match(text, /\n### The services' pages, first lines\n--- BEGIN MEMORY DATA ---\n {4}\| filter-api: Filter API: it checks the words of an entry\.\n/);
+  assert.ok(!text.includes('billing'), 'a service whose checkout is not on this server has no line');
+});
+
+test('with a full list of services, the lead\'s memory stays in its budget and the briefing under 20 KB', async () => {
+  const memory = await leadMemory(15, `Filter API ${'x'.repeat(300)}`);
+  const bytes = memory.reduce((n, entry) => n + Buffer.byteLength(entry.content), 0);
+  assert.ok(bytes <= 12_000, `${bytes} bytes of memory`);
+  const services = memory.find((entry) => entry.type === 'services')?.content ?? '';
+  assert.ok(services.split('\n').every((line) => Buffer.byteLength(line) <= 160), 'each line is cut');
+  assert.match(services, /and \d+ more services\.$/);
+  const text = renderLeadBriefing({ generation: 1, at: 'now', commitments: [], handover: null, memory });
+  assert.ok(Buffer.byteLength(text) < 20 * 1024, `${Buffer.byteLength(text)} bytes`);
+});

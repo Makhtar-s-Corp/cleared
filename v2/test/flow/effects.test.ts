@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { checksOf, realEffects } from '../../src/flow/effects.ts';
+import { LESSON_HEADINGS } from '../../src/workspace/handover.ts';
+import type { ServiceConfig, WorkspaceConfig } from '../../src/workspace/config.ts';
+import type { Ticket } from '../../src/tickets/contract.ts';
 import { CONFIG } from './support.ts';
 import { remote, tempDir } from '../workspace/git.ts';
 
@@ -135,4 +139,86 @@ test('mergeRelease that gets no answer in time is unavailable, and asked again l
   const merge = await flow.mergeRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' });
   assert.equal(merge.outcome, 'unavailable');
   assert.match(merge.message, /did not answer/);
+});
+
+// ---- the memory levels (decision 25, lane 19) ---------------------------------
+
+const MEMORY_FILES = {
+  'docs/project.md': '# Guestbook\nA page that lists and adds entries.\n',
+  'docs/glossary.md': '## Entry\nOne message of a visitor.\n',
+  '.cleared/prompts/author/lessons.md': 'Run the tests before you commit.\n',
+};
+const MEMORY_TICKET: Ticket = { id: 'LOCAL-1', title: 'Newest entry first', body: 'Sort the Entry list.', labels: [], project: 'guestbook', status: 'Todo', createdAt: 'x', updatedAt: 'x' };
+
+test('a one-service workspace briefs its session as milestone 1 did, byte for byte', async () => {
+  // test/workspace/fixtures/briefing-m1.md is the CLAUDE.md the code of
+  // origin/v2 at 596d085 wrote for this project and this ticket.
+  const { config, flow } = await effects({ '.cleared/agents.conf': CONF, 'package.json': PACKAGE, ...MEMORY_FILES });
+  const prepared = await flow.prepareWorkdir({ ticket: MEMORY_TICKET, role: 'author' });
+  const expected = readFileSync(new URL('../workspace/fixtures/briefing-m1.md', import.meta.url), 'utf8');
+  assert.equal(readFileSync(join(prepared.workdir, 'CLAUDE.md'), 'utf8'), expected);
+  assert.equal(existsSync(join(config.workdirRoot, '..', 'state', 'services')), false, 'no service level read over the workspace\'s own checkout');
+});
+
+const HANDOVER = ['## Done', 'The severity.', '## Tried and failed, and why', 'Nothing.', '## Left to do', 'Nothing.',
+  '## Where the artifacts are (screenshots, logs, branches)', 'cleared/LOCAL-2', '## Open questions', 'None.', ''].join('\n');
+
+// The proof's workspace: the guestbook first, consuming the filter API,
+// which provides the contract.
+function twoServices() {
+  const root = tempDir('flow-levels');
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
+  delete env.ORCH_LEDGER;
+  const service = (name: string, files: Record<string, string>, more: Partial<ServiceConfig> = {}): ServiceConfig => ({
+    name, kind: 'repository', repo: `example-org/${name}`, url: remote(files), base: 'main', path: null, dir: join(root, 'services', name, 'checkout'),
+    healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: null, brokerState: null, ...more,
+  });
+  const guestbook = service('guestbook', { '.cleared/agents.conf': CONF, ...MEMORY_FILES }, { consumes: ['filter-api'] });
+  const filter = service('filter-api', {
+    '.cleared/agents.conf': CONF, 'docs/project.md': '# Filter API\nIt checks the words of an entry.\n',
+    'contract/openapi.yaml': 'openapi: 3.0.3\n', 'contract/openapi.md': '# The check contract\nPOST /check answers a severity.\n',
+  }, { contract: { format: 'openapi', path: 'contract/openapi.yaml' } });
+  const workspace: WorkspaceConfig = { id: 'guestbook', name: 'Guestbook and filter API', services: [guestbook, filter], file: join(root, 'workspace.conf') };
+  const config = { ...CONFIG, projectDir: guestbook.dir, repoUrl: guestbook.url, workdirRoot: join(root, 'work'), workspace };
+  return { root, env, guestbook, filter, flow: realEffects(config, { env }) };
+}
+
+const ticketOn = (...names: string[]): Ticket => ({ ...MEMORY_TICKET, id: 'LOCAL-2', services: names.map((name) => ({ name, branch: 'cleared/LOCAL-2', pr: null, state: 'open' as const })) });
+
+test('a session on a service of several is briefed with the workspace, its service and the contract it provides, in that order', async () => {
+  const { flow, filter } = twoServices();
+  const prepared = await flow.prepareWorkdir({ ticket: ticketOn('filter-api'), role: 'author', service: filter });
+  const text = readFileSync(join(prepared.workdir, 'CLAUDE.md'), 'utf8');
+  const at = ['A page that lists and adds entries.', '## Memory of the service filter-api', 'It checks the words of an entry.', '## Memory of the contract of filter-api', 'POST /check answers a severity.']
+    .map((piece) => text.indexOf(piece));
+  assert.ok(at.every((n, i) => n > 0 && (i === 0 || n > (at[i - 1] as number))), `in order: ${at.join(', ')}`);
+  assert.match(text, /`## Lessons for the service`[^\n]*memory of the service filter-api/);
+  // What the engine is given keeps the contract's five fields, the workspace's page first.
+  assert.match(prepared.briefing.projectPage, /A page that lists/);
+});
+
+test('a session on the consuming service is briefed with the contract it calls, the provider cloned for it', async () => {
+  const { flow, guestbook, filter } = twoServices();
+  const prepared = await flow.prepareWorkdir({ ticket: ticketOn('guestbook'), role: 'author', service: guestbook });
+  const text = readFileSync(join(prepared.workdir, 'CLAUDE.md'), 'utf8');
+  assert.ok(!text.includes('## Memory of the service guestbook'), 'the guestbook\'s checkout is the workspace\'s: its page is not briefed twice');
+  assert.ok(!text.includes('It checks the words of an entry.'), 'the provider\'s own page is not the contract\'s');
+  assert.match(text, /## Memory of the contract of filter-api\n### Page\n--- BEGIN MEMORY DATA ---\n {4}\| # The check contract/);
+  assert.equal(existsSync(join(filter.dir, 'contract', 'openapi.md')), true);
+});
+
+test('the handover of a session on a service files its lessons in that service\'s memory and in its contract\'s', async () => {
+  const { env, flow, filter } = twoServices();
+  const { workdir } = await flow.prepareWorkdir({ ticket: ticketOn('filter-api'), role: 'author', service: filter });
+  writeFileSync(join(workdir, 'HANDOVER.md'), `${HANDOVER}${LESSON_HEADINGS.service}\nKeep words.txt sorted.\n${LESSON_HEADINGS.contract}\nA severity is low or high.\n`);
+  await flow.captureHandover({ workdir, role: 'author', model: 'claude-opus-5-5', ticket: 'LOCAL-2', sessionId: '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f' });
+  const lessons = (file: string) => {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try { return db.prepare("SELECT content FROM memory_entries WHERE type = 'lesson' AND source_who LIKE 'agent:%'").all().map((row) => row.content); }
+    finally { db.close(); }
+  };
+  const state = env.CLEARED_STATE_DIR as string;
+  assert.deepEqual(lessons(join(state, 'services', 'filter-api', 'memory', 'ledger.db')), ['Keep words.txt sorted.']);
+  assert.deepEqual(lessons(join(state, 'contracts', 'filter-api', 'memory', 'ledger.db')), ['A severity is low or high.']);
+  assert.deepEqual(lessons(join(state, 'ledger.db')), []);
 });
