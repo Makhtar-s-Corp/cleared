@@ -64,6 +64,18 @@ export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
   'pwd',
 ];
 
+// The reviewer's own reads, on top of the safe commands (owner decision of
+// 2026-10-22 22:03): what a review runs to find the ticket's change and read
+// it. The reviewer's only, so that neither the author nor the reader, whose
+// policy is built from DEFAULT_SAFE_COMMANDS, gains them.
+export const REVIEWER_READS: readonly string[] = [
+  'git show', 'git show *',
+  'git merge-base *',
+  'git rev-parse *',
+  'rg *',
+  'wc', 'wc *',
+];
+
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -588,45 +600,179 @@ function allowedRead(request: ToolRequest, policy: Policy): Verdict | undefined 
   return paths.every((path) => typeof path === 'string' && inside(policy.workdir, path)) ? allow('read.workdir') : undefined;
 }
 
+// The options a read may take, by program (review round 1 of pull request
+// 240): an allowlist, never a list of the dangerous ones. `flags` are the
+// short options without a value, `values` those with one (the rest of the
+// group, or the next word); `long` names each long option whole, with
+// whether it takes a value. GNU programs and git's parse-options take any
+// unambiguous prefix of a long option (`wc --files0=` is `--files0-from=`),
+// so a long option matches only by its whole name: an abbreviation asks.
+// `--` ends the options. `digits`: the old count form, `head -20`.
+type OptionSpec = {
+  readonly flags: string;
+  readonly values: string;
+  readonly long: Readonly<Record<string, 'flag' | 'value' | 'optional'>>;
+  readonly digits?: boolean;
+};
+
+const longs = (kind: 'flag' | 'value' | 'optional', names: string) => Object.fromEntries(names.split(' ').map((name) => [`--${name}`, kind]));
+
+const READ_OPTIONS: Readonly<Record<string, OptionSpec>> = {
+  cat: { flags: 'AbeEnstTuv', values: '', long: longs('flag', 'show-all number-nonblank show-ends number squeeze-blank show-tabs show-nonprinting') },
+  head: { flags: 'qvz', values: 'cn', digits: true, long: { ...longs('flag', 'quiet silent verbose zero-terminated'), ...longs('value', 'bytes lines') } },
+  // No -f or -F: a tail that follows never ends.
+  tail: { flags: 'qvz', values: 'cn', digits: true, long: { ...longs('flag', 'quiet silent verbose zero-terminated'), ...longs('value', 'bytes lines') } },
+  ls: {
+    flags: 'aAbBcCdfFgGhHiklLmnNopqQrRsStuUvxXZ1', values: 'ITw',
+    long: {
+      ...longs('flag', 'all almost-all author escape ignore-backups directory file-type full-time group-directories-first no-group human-readable si dereference-command-line dereference-command-line-symlink-to-dir inode kibibytes dereference numeric-uid-gid literal hide-control-chars show-control-chars quote-name reverse recursive size context zero'),
+      ...longs('value', 'block-size format hide indicator-style ignore quoting-style sort time time-style tabsize width'),
+      ...longs('optional', 'color classify hyperlink'),
+    },
+  },
+  // No --files0-from: it reads the names of the files to count from a file.
+  wc: { flags: 'cmlLw', values: '', long: { ...longs('flag', 'bytes chars lines max-line-length words'), ...longs('value', 'total') } },
+  // No -f, --file or --exclude-from: they read a file.
+  grep: {
+    flags: 'abcEFGhHiIlLnoPqrRsTUvVwxyzZ', values: 'ABCDdem', digits: true,
+    long: {
+      ...longs('flag', 'extended-regexp fixed-strings basic-regexp perl-regexp ignore-case no-ignore-case word-regexp line-regexp null-data no-messages invert-match count files-with-matches files-without-match only-matching quiet silent byte-offset line-number no-line-number line-buffered with-filename no-filename initial-tab null text recursive dereference-recursive'),
+      ...longs('value', 'max-count label after-context before-context context binary-files devices directories include exclude exclude-dir regexp'),
+      ...longs('optional', 'color colour'),
+    },
+  },
+  // No --pre or --pre-glob (a program run on every file), --hostname-bin (a
+  // program), -z or --search-zip (decompression programs), -f, --file or
+  // --ignore-file (a file read). ripgrep takes no abbreviation of a long
+  // option; the whole-name match holds whatever its version does.
+  rg: {
+    flags: 'acFHiIlLnNopqsSuUvwx0bPV', values: 'ABCeEgjmMrtT',
+    long: {
+      ...longs('flag', 'files type-list count count-matches files-with-matches files-without-match fixed-strings hidden no-hidden ignore-case smart-case case-sensitive line-number no-line-number no-heading heading no-ignore no-ignore-vcs no-ignore-parent no-ignore-dot no-ignore-global no-ignore-exclude no-ignore-files word-regexp line-regexp invert-match only-matching json vimgrep stats multiline multiline-dotall pcre2 no-pcre2 null null-data trim quiet text binary no-binary follow no-follow unrestricted column no-column no-filename with-filename passthru one-file-system no-messages crlf no-config byte-offset max-columns-preview no-require-git glob-case-insensitive line-buffered block-buffered no-unicode'),
+      ...longs('value', 'after-context before-context context context-separator glob iglob max-count max-columns max-depth max-filesize type type-not regexp replace color colors sort sortr encoding threads engine path-separator'),
+    },
+  },
+  // git's own parse-options takes abbreviations too.
+  'git merge-base': { flags: 'a', values: '', long: longs('flag', 'all octopus independent is-ancestor fork-point') },
+  'git rev-parse': {
+    flags: 'q', values: '',
+    long: {
+      ...longs('flag', 'verify quiet show-toplevel show-prefix show-cdup git-dir absolute-git-dir git-common-dir is-inside-work-tree is-inside-git-dir is-bare-repository symbolic symbolic-full-name revs-only no-revs flags no-flags all'),
+      ...longs('optional', 'abbrev-ref short branches tags remotes'),
+    },
+  },
+};
+
+// The operands of a command under its spec, and the options that named a
+// value; undefined when a word is an option the spec does not have.
+function readOptions(args: readonly string[], spec: OptionSpec): { operands: string[]; named: string[] } | undefined {
+  const operands: string[] = [];
+  const named: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i] as string;
+    if (word === '--') {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (!word.startsWith('-') || word === '-') {
+      operands.push(word);
+    } else if (word.startsWith('--')) {
+      const [name = '', value] = word.split(/=(.*)/s);
+      const kind = spec.long[name];
+      if (kind === undefined || (kind === 'flag' && value !== undefined)) return undefined;
+      if (kind === 'value' && value === undefined && ++i >= args.length) return undefined;
+      named.push(name);
+    } else if (!(spec.digits === true && /^-[0-9]+$/.test(word))) {
+      for (let at = 1; at < word.length; at++) {
+        const letter = word[at] as string;
+        if (spec.flags.includes(letter)) continue;
+        if (!spec.values.includes(letter)) return undefined;
+        named.push(`-${letter}`);
+        if (at === word.length - 1 && ++i >= args.length) return undefined;
+        break;
+      }
+    }
+  }
+  return { operands, named };
+}
+
+// find's start points, then its expression, word by word: the tests and the
+// actions that only print. Not -exec, -execdir, -ok, -okdir, -delete,
+// -fprint*, -fls (they run or write), nor -files0-from (start points read
+// from a file). find takes no abbreviation of a primary.
+const FIND_ALONE = new Set(['-print', '-print0', '-ls', '-prune', '-quit', '-empty', '-true', '-false', '-readable', '-writable', '-executable', '-nouser', '-nogroup', '-depth', '-mount', '-xdev', '-noleaf', '-follow', '-daystart', '-ignore_readdir_race', '-noignore_readdir_race', '-not', '-and', '-a', '-or', '-o', '(', ')', '!', ',']);
+const FIND_VALUE = new Set(['-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename', '-regex', '-iregex', '-lname', '-ilname', '-type', '-xtype', '-size', '-mtime', '-mmin', '-atime', '-amin', '-ctime', '-cmin', '-perm', '-user', '-group', '-uid', '-gid', '-links', '-inum', '-maxdepth', '-mindepth', '-regextype', '-printf', '-used', '-fstype']);
+const FIND_PATH = new Set(['-newer', '-anewer', '-cnewer', '-samefile']);
+
+function findUnsafe(args: readonly string[], policy: Policy): boolean {
+  let i = 0;
+  while (args[i] === '-H' || args[i] === '-L' || args[i] === '-P') i++;
+  for (; i < args.length && !(args[i] as string).startsWith('-') && !['(', ')', '!', ','].includes(args[i] as string); i++)
+    if (!inside(policy.workdir, args[i] as string)) return true;
+  for (; i < args.length; i++) {
+    const word = args[i] as string;
+    if (FIND_ALONE.has(word)) continue;
+    if (!FIND_VALUE.has(word) && !FIND_PATH.has(word)) return true;
+    const value = args[++i];
+    if (value === undefined || (FIND_PATH.has(word) && !inside(policy.workdir, value))) return true;
+  }
+  return false;
+}
+
+// Long options of git log, show and diff that write a file, read one or run
+// a program: refused with every prefix of their name too, although those
+// commands refuse an abbreviation (git 2.47, checked by the lane).
+const GIT_UNSAFE_LONG = ['--output', '--output-indicator-new', '--no-index', '--ext-diff', '--orderfile'];
+
 // Words of a safe command that would make it write, run or reach outside.
 function unsafeWords(words: readonly string[], policy: Policy): boolean {
-  const [program] = words;
+  const [program = ''] = words;
   const args = words.slice(1);
   if (program === 'git') {
     const git = gitCommand(words);
     if (!git || git.risky) return true;
     const [sub = '', ...rest] = git.rest;
+    const spec = READ_OPTIONS[`git ${sub}`];
+    if (spec) {
+      const read = readOptions(rest, spec);
+      return !read || read.operands.some((path) => !inside(policy.workdir, path));
+    }
     const { options, operands } = gitArguments(sub, rest);
     // A file read through git: a path outside the workdir (git diff reads
     // two paths without --no-index when one is outside), a message file.
     if (operands.some((path) => !inside(policy.workdir, path))) return true;
     if (sub === 'commit' && options.some((word) => /^--(?:file|template|reuse-message|reedit-message)(?:=|$)/.test(word) || /^-[A-Za-z]*[FtCc]/.test(word))) return true;
-    return options.some((word) =>
-      word === '--no-index' || word.startsWith('--output') || word === '-o' || ((word.startsWith('--format') || word.startsWith('--pretty')) && /%\(|%x/.test(word)));
+    return options.some((word) => {
+      const name = word.split('=')[0] as string;
+      return (name.length > 2 && GIT_UNSAFE_LONG.some((unsafe) => unsafe.startsWith(name))) || name.startsWith('--output') || word === '-o' || word.startsWith('-O') ||
+        ((word.startsWith('--format') || word.startsWith('--pretty')) && /%\(|%x/.test(word));
+    });
   }
-  if (program === 'find') {
-    const firstExpression = args.findIndex((word) => word.startsWith('-') || word === '(' || word === '!');
-    const starts = firstExpression < 0 ? args : args.slice(0, firstExpression);
-    if (starts.some((path) => !inside(policy.workdir, path))) return true;
-    return args.some((word) => ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fls'].includes(word) || word.startsWith('-fprint'));
-  }
-  if (program === 'grep') {
-    if (args.some((word) => word === '-f' || word.startsWith('--file') || /^-[A-Za-z]*f/.test(word))) return true;
-    const operands = args.filter((word) => !word.startsWith('-'));
-    const named = args.some((word) => word === '-e' || word.startsWith('--regexp'));
-    return (named ? operands : operands.slice(1)).some((path) => !inside(policy.workdir, path));
-  }
-  if (program === 'cat' || program === 'head' || program === 'tail' || program === 'ls')
-    return args.filter((word) => !word.startsWith('-')).some((path) => !inside(policy.workdir, path));
-  return false;
+  if (program === 'find') return findUnsafe(args, policy);
+  const spec = READ_OPTIONS[program];
+  if (!spec) return false;
+  const read = readOptions(args, spec);
+  if (!read) return true;
+  // grep and rg: the first operand is the pattern, unless -e or --regexp
+  // named one, or rg --files looks for none.
+  const searches = program === 'grep' || program === 'rg';
+  const patternNamed = read.named.some((option) => option === '-e' || option === '--regexp' || option === '--files');
+  const paths = searches && !patternNamed ? read.operands.slice(1) : read.operands;
+  return paths.some((path) => !inside(policy.workdir, path));
+}
+
+const folded = (words: readonly string[]) => (words[0] === 'git' ? ['git', ...(gitCommand(words)?.rest ?? [])] : words);
+
+// A command one of the patterns matches, with none of its unsafe words.
+function matches(words: readonly string[], patterns: readonly string[], policy: Policy): boolean {
+  const command = folded(words);
+  return patterns.some((pattern) => globWords(splitPattern(pattern), command)) && !unsafeWords(words, policy);
 }
 
 function safeCommand(words: readonly string[], policy: Policy): boolean {
-  const folded = words[0] === 'git' ? ['git', ...(gitCommand(words)?.rest ?? [])] : words;
-  if (folded[0] === 'npm' && folded[1] === 'run' && folded[2] !== undefined && policy.scripts.includes(folded[2]) && (folded.length === 3 || folded[3] === '--'))
-    return true;
-  if (!policy.safeCommands.some((pattern) => globWords(splitPattern(pattern), folded))) return false;
-  return !unsafeWords(words, policy);
+  const [program, run, script, rest] = folded(words);
+  if (program === 'npm' && run === 'run' && script !== undefined && policy.scripts.includes(script) && (rest === undefined || rest === '--')) return true;
+  return matches(words, policy.safeCommands, policy);
 }
 
 // An author deletes a file its ticket changed without asking (milestone 2,
@@ -696,25 +842,43 @@ function asked(request: ToolRequest, words: readonly string[] | undefined, polic
 
 const GENERIC = 'default';
 
-// A list of simple commands: allowed when each part is allowed on its own
-// and each file it writes is one an Edit may write without asking; else the
-// verdict of the first part that is not, with its own rule when it has one.
+// One part of a list: its command, then each file it writes, which must be
+// one an Edit may write without asking. A deny of either wins; else the
+// first ask, with its own rule when it has one.
+function part(request: ToolRequest, command: SimpleCommand, policy: Policy, context: PolicyContext): Verdict {
+  const verdict = simple(request, command.words, policy);
+  let asked: Verdict | undefined =
+    verdict.decision !== 'ask' ? undefined : verdict.rule === GENERIC ? ask('shell.compound', `${command.words.join(' ')} is not a command the policy allows on its own`) : verdict;
+  for (const target of command.writes) {
+    const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
+    if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
+    if (edit.decision === 'deny') return edit;
+    asked ??= edit.decision === 'ask' && edit.rule !== GENERIC
+      ? ask(edit.rule, `the redirection to ${target}: ${edit.reason}`)
+      : ask('shell.compound', `the redirection writes ${target}, which an edit could not write without asking`);
+  }
+  return asked ?? allow('shell.compound_safe');
+}
+
+// A list of simple commands, split part by part (owner decision of
+// 2026-10-22 22:03): allowed when every part is; denied when any part is,
+// wherever it stands, so that an "Allow once" given to an earlier part never
+// runs a later one the policy denies; else it asks for the parts that ask
+// and names them, and only them, with the rule of the first.
 function compound(request: ToolRequest, command: string, policy: Policy, context: PolicyContext): Verdict {
   const list = parseList(command);
   if (!list) return ask('shell.compound', 'shell syntax the policy does not read word for word');
-  for (const part of list) {
-    const verdict = simple(request, part.words, policy);
-    if (verdict.decision === 'ask')
-      return verdict.rule === GENERIC ? ask('shell.compound', `${part.words.join(' ')} is not a command the policy allows on its own`) : verdict;
-    for (const target of part.writes) {
-      const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
-      if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
-      if (edit.decision === 'deny') return edit;
-      if (edit.decision === 'ask' && edit.rule !== GENERIC) return ask(edit.rule, `the redirection to ${target}: ${edit.reason}`);
-      return ask('shell.compound', `the redirection writes ${target}, which an edit could not write without asking`);
-    }
+  const asks: { readonly words: readonly string[]; readonly verdict: Extract<Verdict, { decision: 'ask' }> }[] = [];
+  for (const command of list) {
+    const verdict = part(request, command, policy, context);
+    if (verdict.decision === 'deny') return verdict;
+    if (verdict.decision === 'ask') asks.push({ words: command.words, verdict });
   }
-  return allow('shell.compound_safe');
+  const [first] = asks;
+  if (!first) return allow('shell.compound_safe');
+  if (asks.length === 1) return first.verdict;
+  const reasons = asks.map(({ words, verdict }) => (verdict.reason.startsWith(words.join(' ')) ? verdict.reason : `${words.join(' ')}: ${verdict.reason}`));
+  return ask(first.verdict.rule, `${asks.length} parts of this command ask, the others are allowed: ${reasons.join('; ')}`);
 }
 
 // ---------------------------------------------------------------- lead
@@ -841,6 +1005,7 @@ function rules(request: ToolRequest, policy: Policy, context: PolicyContext): Ve
 // The verdict of one simple command, after the deny rules.
 function simple(request: ToolRequest, words: readonly string[], policy: Policy): Verdict {
   if (safeCommand(words, policy)) return allow('run.safe');
+  if (policy.role === 'reviewer' && matches(words, REVIEWER_READS, policy)) return allow('reviewer.read');
   if (learned(request, words, policy)) return allow('learned');
   if (ticketDeletion(words, policy)) return allow('delete.ticket');
   return asked(request, words, policy);
