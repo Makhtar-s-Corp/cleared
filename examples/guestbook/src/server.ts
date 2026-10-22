@@ -2,9 +2,20 @@
 //   GET  /         the page
 //   POST /entries  adds an entry from a form, then back to / (303)
 //   GET  /health   200 {"status":"ok"} while the database answers, else 503
+// With a filter (FILTER_URL), an entry is checked by the filter API before
+// it is stored; /health still checks the database only, so a filter that is
+// down never fails the guestbook's release watch.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Filter, FilterVerdict } from './filter.ts';
 import { LIMITS, renderPage, type FormState } from './page.ts';
 import type { Store } from './store.ts';
+
+export type AppOptions = {
+  // The filter API's client; none when FILTER_URL is unset.
+  readonly filter?: Filter;
+  // The proof's provoked failure (config.ts, PROOF_BREAK_HEALTH).
+  readonly breakHealth?: boolean;
+};
 
 export const MAX_BODY_BYTES = 16 * 1024;
 
@@ -69,7 +80,7 @@ async function page(store: Store, response: ServerResponse, status = 200, form: 
   send(response, status, 'text/html', renderPage(await store.list(), form));
 }
 
-async function addEntry(store: Store, request: IncomingMessage, response: ServerResponse): Promise<void> {
+async function addEntry(store: Store, options: AppOptions, request: IncomingMessage, response: ServerResponse): Promise<void> {
   const type = (request.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase();
   if (type !== 'application/x-www-form-urlencoded') {
     request.resume();
@@ -86,27 +97,43 @@ async function addEntry(store: Store, request: IncomingMessage, response: Server
     await page(store, response, 400, entry.form);
     return;
   }
+  if (options.filter) {
+    const { name, message } = entry;
+    let verdict: FilterVerdict;
+    try {
+      verdict = await options.filter.check(`${name}\n${message}`);
+    } catch {
+      // Nothing goes in unchecked: the visitor keeps the form and tries again.
+      await page(store, response, 503, { error: 'The filter did not answer. Try again in a moment.', name, message });
+      return;
+    }
+    if (!verdict.ok) {
+      await page(store, response, 400, { error: `The entry holds words the filter refuses: ${verdict.words.join(', ')}.`, name, message });
+      return;
+    }
+  }
   await store.add(entry.name, entry.message);
   response.writeHead(303, { location: '/', 'content-length': '0', 'cache-control': 'no-store' });
   response.end();
 }
 
-async function route(store: Store, request: IncomingMessage, response: ServerResponse): Promise<void> {
+async function route(store: Store, options: AppOptions, request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = requestPath(request.url ?? '/');
   if (path === undefined) return sendText(response, 400, 'Bad request.');
   const allow = ROUTES[path];
   if (allow === undefined) return sendText(response, 404, 'Not found.');
   if (!allow.split(', ').includes(request.method ?? '')) return sendJson(response, 405, { error: 'method not allowed' }, { allow });
   if (path === '/health') {
+    if (options.breakHealth) return sendJson(response, 503, { status: 'broken', reason: 'PROOF_BREAK_HEALTH' });
     return (await store.ping()) ? sendJson(response, 200, { status: 'ok' }) : sendJson(response, 503, { status: 'unavailable' });
   }
-  if (path === '/entries') return addEntry(store, request, response);
+  if (path === '/entries') return addEntry(store, options, request, response);
   return page(store, response);
 }
 
-export function createApp(store: Store): Server {
+export function createApp(store: Store, options: AppOptions = {}): Server {
   return createServer((request, response) => {
-    route(store, request, response).catch(() => {
+    route(store, options, request, response).catch(() => {
       // The database failed during a page or an insert: say so, without its details.
       if (response.headersSent) response.destroy();
       else sendText(response, 500, 'The database did not answer. Try again in a moment.');
