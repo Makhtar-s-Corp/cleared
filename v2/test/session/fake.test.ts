@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeAdapter, exampleScript, type FakeStep } from '../../src/session/adapters/fake.ts';
 import { adapterFactories } from '../../src/session/adapters/index.ts';
-import { NotImplemented, type SessionHandle, type StartInput } from '../../src/session/contract.ts';
-import { toolArgs, toolResult, type SessionEvent } from '../../src/session/events.ts';
+import { HostToolRefused, NotImplemented, type HostTool, type SessionHandle, type StartInput } from '../../src/session/contract.ts';
+import { toolArgs, toolResult, type AgUiEvent, type CustomValue, type SessionEvent } from '../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 
@@ -165,4 +165,82 @@ test('an interrupt with no message left in the script ends the session and its r
   assert.notEqual(events, 'stuck', 'the reader ends');
   if (events !== 'stuck') assert.equal(events.at(-1)?.event.type, 'RUN_FINISHED');
   await assert.rejects(handle.send({ text: 'late', by: 'u1' }), /stopped/);
+}));
+
+// Milestone 2: the fake plays a scripted lead (host tool calls with scripted
+// inputs, a scripted context share, a question through AskUserQuestion).
+const customs = <N extends keyof CustomValue>(events: readonly SessionEvent[], name: N): CustomValue[N][] =>
+  events.flatMap(({ event }) => (event.type === 'CUSTOM' && event.name === name ? [event.value as CustomValue[N]] : []));
+
+test('a scripted lead calls its host tools, which the host answers, refuses or fails', withStore(async (store) => {
+  const calls: unknown[] = [];
+  const tool = (name: string, handle: HostTool['handle']): HostTool => ({ name, description: `the ${name} tool`, inputSchema: { type: 'object', properties: {} }, handle });
+  const tools = [
+    tool('state', async (input, context) => { calls.push({ input, context }); return 'one plan, two sessions'; }),
+    tool('fulfil', async () => { throw new HostToolRefused('the commitment c9 is not open'); }),
+    tool('broken', async () => { throw new Error(`a detail with ${apiKey}`); }),
+  ];
+  const adapter = createFakeAdapter({
+    log: store.events, newId: () => 'lead-1',
+    script: [
+      { emit: { type: 'RUN_STARTED', threadId: 'lead-1', runId: 'turn-1' } },
+      { hostCall: { toolCallId: 'h1', name: 'state', input: {} } },
+      { hostCall: { toolCallId: 'h2', name: 'fulfil', input: { id: 'c9', note: 'done' } } },
+      { hostCall: { toolCallId: 'h3', name: 'broken', input: {} } },
+      { hostCall: { toolCallId: 'h4', name: 'missing', input: {} } },
+      { emit: { type: 'RUN_FINISHED', threadId: 'lead-1', runId: 'turn-1', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.02 } } },
+    ],
+  });
+  await adapter.start({ ...input, role: 'lead', ticket: 'lead', tools });
+  const events = store.events.after('lead-1');
+  assert.deepEqual(calls, [{ input: {}, context: { sessionId: 'lead-1', turn: 'turn-1' } }]);
+  assert.deepEqual(customs(events, 'cleared.host_call').map((c) => [c.toolCallId, c.name, c.outcome, c.message]), [
+    ['h1', 'state', 'ok', undefined],
+    ['h2', 'fulfil', 'refused', 'the commitment c9 is not open'],
+    ['h3', 'broken', 'failed', 'the host could not run this tool'],
+    ['h4', 'missing', 'failed', 'no host tool is named missing'],
+  ]);
+  assert.ok(!JSON.stringify(events).includes(apiKey), 'a failure says nothing of its error');
+  const starts = events.flatMap(({ event }) => (event.type === 'TOOL_CALL_START' ? [event.toolCallName] : []));
+  assert.deepEqual(starts, ['mcp__cleared__state', 'mcp__cleared__fulfil', 'mcp__cleared__broken', 'mcp__cleared__missing']);
+  const results = events.flatMap(({ event }) => (event.type === 'TOOL_CALL_RESULT' ? [JSON.parse(event.content).ok] : []));
+  assert.deepEqual(results, [true, false, false, false]);
+  assert.equal(events.at(-1)?.event.type, 'RUN_FINISHED', 'start returns once every call is answered');
+}));
+
+test('a scripted lead reports its context share and asks a question that an answer settles', withStore(async (store) => {
+  const usage = (percent: number): CustomValue['cleared.context_usage'] => ({ totalTokens: percent * 2000, maxTokens: 200_000, percent, isAutoCompactEnabled: true });
+  const adapter = createFakeAdapter({
+    log: store.events, newId: () => 'lead-2',
+    script: [
+      { emit: { type: 'RUN_STARTED', threadId: 'lead-2', runId: 'turn-1' } },
+      { context: usage(12) },
+      { question: { requestId: 'q1', questions: [{ question: 'Pages or one long list?', options: [{ label: 'Pages of 20' }, { label: 'One long list' }] }] } },
+      { context: usage(45) },
+      { emit: { type: 'RUN_FINISHED', threadId: 'lead-2', runId: 'turn-1', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.03 } } },
+    ],
+  });
+  const handle = await adapter.start({ ...input, role: 'lead', ticket: 'lead' });
+  let events = store.events.after('lead-2');
+  assert.deepEqual(customs(events, 'cleared.context_usage').map((c) => c.percent), [12]);
+  const delta = events.find(({ event }) => event.type === 'STATE_DELTA')?.event as Extract<AgUiEvent, { type: 'STATE_DELTA' }>;
+  assert.deepEqual(delta.delta, [{ op: 'add', path: '/context', value: { percent: 12, totalTokens: 24_000, maxTokens: 200_000 } }]);
+  assert.deepEqual(customs(events, 'cleared.question').map((q) => q.requestId), ['q1']);
+  assert.notEqual(events.at(-1)?.event.type, 'RUN_FINISHED', 'the turn waits for the answer');
+
+  await assert.rejects(handle.answer('q2', { decision: { kind: 'answer', answers: {} }, by: 'u1' }), /no pending request q2/);
+  await handle.answer('q1', { decision: { kind: 'answer', answers: { 'Pages or one long list?': 'Pages of 20' } }, by: 'u1' });
+  events = store.events.after('lead-2');
+  assert.deepEqual(customs(events, 'cleared.answered'), [{ requestId: 'q1', by: 'u1' }]);
+  assert.deepEqual(customs(events, 'cleared.permission_answered'), [], 'a question is answered, not allowed');
+  assert.deepEqual(customs(events, 'cleared.context_usage').map((c) => c.percent), [12, 45]);
+  assert.equal(events.at(-1)?.event.type, 'RUN_FINISHED');
+}));
+
+test('a message from the lead or from cleared is attributed to it', withStore(async (store) => {
+  const handle = await createFakeAdapter({ log: store.events, script: [{ awaitMessage: true }, { awaitMessage: true }], newId: () => 's' }).start(input);
+  await handle.send({ text: 'Integrate the base branch first.', by: 'lead' });
+  await handle.send({ text: 'The review asks for a change.', by: 'cleared' });
+  const names = store.events.after('s').flatMap(({ event }) => (event.type === 'TEXT_MESSAGE_START' ? [event.name] : []));
+  assert.deepEqual(names, ['lead', 'cleared']);
 }));
