@@ -6,7 +6,7 @@
 // SessionEvent is defined in events.ts; Policy in policy.ts, which imports
 // Role from here. Both imports are type-only, so the cycle has no runtime
 // effect under type stripping.
-import type { ServiceSpec } from '../container/services.ts';
+import type { ServiceSpec, SiblingSpec } from '../container/services.ts';
 import type { SessionEvent } from './events.ts';
 import type { Policy } from './policy.ts';
 
@@ -34,6 +34,12 @@ export type StartInput = {
   readonly policy: Policy;                                 // section 5
   readonly prompt: string;                                 // the first user turn: the ticket and its criteria
   readonly services?: readonly ServiceSpec[];              // the project's test services, run beside the session
+  // Milestone 2 (decision 20): the workspace service the session works on;
+  // the other services (and its own, when it runs) as siblings on its
+  // network; the host folder of the project's skills, mounted read only.
+  readonly service?: string;
+  readonly siblings?: readonly SiblingSpec[];
+  readonly skills?: string;
   readonly tools?: readonly HostTool[];                    // milestone 2: the host's tools, the lead's (lead/contract.ts)
 };
 

@@ -7,16 +7,16 @@ const SESSION = '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b';
 const OTHER = '9a8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d';
 
 const CREATES = new Set(['create', 'build', 'network create', 'volume create']);
-const LISTS = new Set(['ps', 'network ls', 'volume ls']);
-const TARGETED = new Set(['start', 'stop', 'rm', 'exec', 'inspect', 'logs', 'network rm', 'network inspect', 'volume rm']);
+const LISTS = new Set(['ps', 'network ls', 'volume ls', 'image ls']);
+const TARGETED = new Set(['start', 'stop', 'rm', 'exec', 'inspect', 'logs', 'network rm', 'network inspect', 'volume rm', 'image inspect', 'image rm']);
 
 const verbOf = (args: readonly string[]): string =>
-  args[0] === 'network' || args[0] === 'volume' ? `${args[0]} ${args[1]}` : (args[0] ?? '');
+  args[0] === 'network' || args[0] === 'volume' || args[0] === 'image' ? `${args[0]} ${args[1]}` : (args[0] ?? '');
 
 const hasPair = (args: readonly string[], flag: string, value: string): boolean =>
   args.some((arg, index) => arg === flag && args[index + 1] === value);
 
-// The ids a list printed: container and network rows carry an ID, volume rows a Name.
+// The ids a list printed: container, network and image rows carry an ID, volume rows a Name.
 function listedIds(call: Call): string[] {
   return call.result.stdout.split('\n').filter(Boolean).map((line) => {
     const row = JSON.parse(line) as { ID?: string; Name?: string };
@@ -59,6 +59,9 @@ async function everyMethod(docker: Docker): Promise<void> {
   // attach spawns `docker start --attach --interactive`: recorded like the other calls.
   await docker.version();
   await docker.build({ context: '/images/session', tag: 'cleared-v2-session:test' });
+  await docker.build({ context: '/work/ticket', dockerfile: '/state/ticket-layer/Dockerfile', tag: `cleared-v2-${SESSION}-sib-api:ticket`, network: 'none', session: SESSION });
+  await docker.image('cleared-v2-session:test');
+  await docker.images(SESSION);
   await docker.createNetwork({ name: `cleared-v2-${SESSION}`, session: SESSION, internal: true });
   await docker.createVolume({ name: `cleared-v2-${SESSION}-config`, session: SESSION });
   await docker.createContainer(spec(`cleared-v2-${SESSION}-session`, { command: ['sleep', 'infinity'], interactive: true }));
@@ -97,7 +100,7 @@ test('removing a session never touches an unlabelled object or another session',
   }
 
   const removed = await docker.removeSession(SESSION);
-  assert.deepEqual(removed, { containers: 1, networks: 1 });
+  assert.deepEqual(removed, { containers: 1, networks: 1, images: 0 });
   assert.equal(await docker.removeVolumes(SESSION), 1);
 
   assert.deepEqual(fake.withLabel('cleared.session', SESSION), []);
@@ -150,6 +153,12 @@ test('the gate refuses a command line that breaks the label rule', () => {
     ['container', 'prune', '-f'],
     ['kill', '--', 'abc'],
     ['pull', 'postgres:16'],
+    ['image', 'ls'],
+    ['image', 'ls', '--filter', 'reference=x'],
+    ['image', 'rm', '--', 'other'],
+    ['image', 'inspect', '--', 'other'],
+    ['image', 'prune', '-af'],
+    ['rmi', 'abc'],
     [],
   ];
   for (const args of refused) assert.throws(() => assertLabelRule(args, owned), LabelRuleError, args.join(' '));
@@ -160,8 +169,76 @@ test('the gate refuses a command line that breaks the label rule', () => {
     ['ps', '-a', '--filter', `label=${LABEL}`],
     ['rm', '-f', '--', 'abc'],
     ['exec', '--', 'abc', 'rm', '-rf', '/tmp/x'],
+    ['image', 'ls', '--filter', `label=${LABEL}`],
+    ['image', 'rm', '--force', '--', 'abc'],
   ];
   for (const args of accepted) assert.doesNotThrow(() => assertLabelRule(args, owned), args.join(' '));
+});
+
+// Milestone 2, decision 20: a sibling's ticket layer is built with no
+// network, for the session, so that it goes with the session.
+test('a build may run with no network and carry the session label', async () => {
+  const fake = new FakeDocker();
+  await new Docker(fake.runner).build({ context: '/work/ticket', dockerfile: '/state/layer/Dockerfile', tag: `cleared-v2-${SESSION}-sib-api:ticket`, network: 'none', session: SESSION });
+  const args = fake.calls[0]?.args ?? [];
+  const end = args.indexOf('--');
+  assert.ok(hasPair(args, '--network', 'none') && args.indexOf('--network') < end, args.join(' '));
+  assert.ok(hasPair(args, '--label', LABEL) && hasPair(args, '--label', `cleared.session=${SESSION}`), args.join(' '));
+  assert.deepEqual(args.slice(end), ['--', '/work/ticket']);
+  const plain = new FakeDocker();
+  await new Docker(plain.runner).build({ context: '/images/fake', tag: 'cleared-v2-fake:1' });
+  assert.ok(!(plain.calls[0]?.args ?? []).includes('--network'), 'a base image is built with the default network');
+  await assert.rejects(new Docker(plain.runner).build({ context: '/x', tag: 'x:1', session: '--all' }));
+});
+
+test('a session\'s images are removed with it, each confirmed labelled by inspect before the removal', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/a', tag: `cleared-v2-${SESSION}-sib-api:ticket`, network: 'none', session: SESSION });
+  await docker.build({ context: '/b', tag: `cleared-v2-${OTHER}-sib-api:ticket`, network: 'none', session: OTHER });
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'production:latest', labels: {} });
+  const removed = await docker.removeSession(SESSION);
+  assert.deepEqual(removed, { containers: 0, networks: 0, images: 1 });
+  assert.deepEqual(fake.images.map((image) => image.name).sort(), [`cleared-v2-${OTHER}-sib-api:ticket`, 'cleared-v2-base-api:cafe0b1ec7ed', 'production:latest'].sort());
+  assertLog(fake.calls);
+  const rm = fake.calls.findIndex((call) => verbOf(call.args) === 'image rm');
+  assert.ok(rm > 0 && verbOf(fake.calls[rm - 1]?.args ?? []) === 'image inspect', 'inspected just before the removal');
+
+  // A CLI that ignored the filters lists the unlabelled image: inspect
+  // shows it has no label, and nothing is removed.
+  const broken = new FakeDocker();
+  broken.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'production:latest', labels: {} });
+  broken.honourFilters = false;
+  await assert.rejects(new Docker(broken.runner).removeSession(SESSION), LabelRuleError);
+  assert.ok(!broken.calls.some((call) => verbOf(call.args) === 'image rm'));
+  assert.equal(broken.images.length, 1);
+});
+
+test('an image is found by its tag among the labelled images, with its working folder', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'node:24-slim', labels: {} });
+  const found = await docker.image('cleared-v2-base-api:cafe0b1ec7ed');
+  assert.equal(found?.workdir, '/app');
+  assert.equal(found?.labels['cleared.dev'], 'v2');
+  assert.equal(await docker.image('node:24-slim'), undefined, 'an image without the label is not one of ours');
+  assert.equal(await docker.image('cleared-v2-missing:1'), undefined);
+  await assert.rejects(docker.image('--all'));
+  assertLog(fake.calls);
+});
+
+test('a labelled image is removed by its tag; an unlabelled one never is', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'node:24-slim', labels: {} });
+  assert.equal(await docker.removeImage('cleared-v2-base-api:cafe0b1ec7ed'), true);
+  assert.equal(await docker.removeImage('node:24-slim'), false);
+  assert.equal(await docker.removeImage('cleared-v2-base-api:cafe0b1ec7ed'), false, 'already gone');
+  assert.deepEqual(fake.images.map((image) => image.name), ['node:24-slim']);
+  assertLog(fake.calls);
 });
 
 test('a session id that could be read as an option or a pattern is refused', async () => {
