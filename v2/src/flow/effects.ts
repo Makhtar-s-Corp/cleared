@@ -10,6 +10,7 @@ import { readBriefing, writeBriefing } from '../workspace/briefing.ts';
 import { git, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
+import type { ServiceConfig } from '../workspace/config.ts';
 import { parseConf, projectSettings, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
@@ -32,11 +33,22 @@ export type EffectsOptions = {
   readonly mergeTimeoutMs?: number;
 };
 
+// A diff the release card reads is cut here: the flags need the files and
+// their lines, not a whole generated folder.
+const MAX_DIFF = 4 * 1024 * 1024;
+
 export function realEffects(config: FlowConfig, options: EffectsOptions = {}): FlowEffects {
   const env = options.env ?? process.env;
-  const baseRef = `refs/remotes/origin/${config.base}`;
-  const forge = () => forgeEnvironments(config.projectDir, env);
-  const refresh = async () => projectCheckout({ url: config.repoUrl, dir: config.projectDir, base: config.base, env: (await forge()).git });
+  // The service a call is for: a service of a workspace of several, else the
+  // one-service workspace's, which the milestone 1 fields name.
+  const of = (service?: ServiceConfig) => service
+    ? { dir: service.dir, url: service.url, base: service.base, repo: service.repo }
+    : { dir: config.projectDir, url: config.repoUrl, base: config.base, repo: config.repo };
+  const forge = (service?: ServiceConfig) => forgeEnvironments(of(service).dir, env);
+  const refresh = async (service?: ServiceConfig) => {
+    const { dir, url, base } = of(service);
+    return projectCheckout({ url, dir, base, env: (await forge(service)).git });
+  };
 
   // Runs the lock's client with `args`, `input` on its stdin; its exit code
   // and the end of what it said on stderr.
@@ -57,32 +69,38 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     });
 
   return {
-    // The project's settings as committed at the base branch, after a fetch.
-    async settings() {
+    // The service's settings as committed at its base branch, after a fetch.
+    // Each service repository keeps its own .cleared/agents.conf (decision 18).
+    async settings(service) {
       // Fetched first: on a fresh service the project is not cloned yet, and
       // a changed verdict phrase or host on the base is read as it is now.
-      await refresh();
-      const conf = await git(config.projectDir, ['show', `${baseRef}:.cleared/agents.conf`]);
+      await refresh(service);
+      const { dir, base } = of(service);
+      const baseRef = `refs/remotes/origin/${base}`;
+      const conf = await git(dir, ['show', `${baseRef}:.cleared/agents.conf`]);
       let scripts: string[] = [];
       try {
-        const pkg = JSON.parse(await git(config.projectDir, ['show', `${baseRef}:package.json`])) as { scripts?: Record<string, unknown> };
+        const pkg = JSON.parse(await git(dir, ['show', `${baseRef}:package.json`])) as { scripts?: Record<string, unknown> };
         scripts = Object.keys(pkg.scripts ?? {});
       } catch { /* no package.json at the base: no script to run */ }
       return projectSettings(parseConf(conf), scripts);
     },
 
-    async refreshProject() {
-      await refresh();
+    async refreshProject(service) {
+      await refresh(service);
     },
 
     // The author's first call clones or fetches the project; the reviewer
-    // works in the checkout that exists.
-    async prepareWorkdir({ ticket, role }) {
-      if (role === 'author') await refresh();
-      const workdir = join(config.workdirRoot, ticket.id);
-      await ticketCheckout({ project: config.projectDir, workdir, base: config.base, branch: ticketBranch(ticket.id) });
-      const briefing = await readBriefing({ project: config.projectDir, env, role, ticket: { id: ticket.id, title: ticket.title, body: ticket.body } });
-      await writeBriefing({ project: config.projectDir, base: config.base, workdir }, briefing);
+    // works in the checkout that exists. A service of a workspace of several
+    // has its checkout under <workdirs>/<ticket>/<service>, on the same branch
+    // as the ticket's other services.
+    async prepareWorkdir({ ticket, role, service }) {
+      if (role === 'author') await refresh(service);
+      const { dir, base } = of(service);
+      const workdir = service ? join(config.workdirRoot, ticket.id, service.name) : join(config.workdirRoot, ticket.id);
+      await ticketCheckout({ project: dir, workdir, base, branch: ticketBranch(ticket.id) });
+      const briefing = await readBriefing({ project: dir, env, role, ticket: { id: ticket.id, title: ticket.title, body: ticket.body } });
+      await writeBriefing({ project: dir, base, workdir }, briefing);
       return { workdir, briefing };
     },
 
@@ -91,21 +109,35 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     },
 
     async publish(input) {
-      const environments = await forge();
+      const environments = await forge(input.service);
+      const { dir, base, repo } = of(input.service);
       return publish({
-        project: config.projectDir, workdir: input.workdir, base: config.base, branch: input.branch, repo: config.repo, ticket: input.ticket,
+        project: dir, workdir: input.workdir, base, branch: input.branch, repo, ticket: input.ticket,
         report: input.report, gitEnv: environments.git, ghEnv: environments.gh,
       });
     },
 
     // gh exits 8 while a check is pending, and prints the list all the same.
-    async prChecks(pr) {
-      const { gh } = await forge();
+    async prChecks(pr, service) {
+      const { gh } = await forge(service);
+      const { dir, repo } = of(service);
       const stdout = await new Promise<string>((resolve, reject) => {
-        execFile('gh', ['pr', 'checks', String(pr), '--repo', config.repo, '--json', 'bucket'], { cwd: config.projectDir, env: gh, timeout: 15_000, encoding: 'utf8' },
+        execFile('gh', ['pr', 'checks', String(pr), '--repo', repo, '--json', 'bucket'], { cwd: dir, env: gh, timeout: 15_000, encoding: 'utf8' },
           (error, out) => (error && (error as { code?: unknown }).code !== 8 ? reject(error) : resolve(out)));
       });
       return checksOf(JSON.parse(stdout) as { bucket: string }[]);
+    },
+
+    // What the published head changes against the base, read in the
+    // service's own checkout, where publish fetched the head: from their
+    // merge base, as the pull request shows it.
+    async changes({ head, service }) {
+      if (!/^[0-9a-f]{40}$/.test(head)) throw new Error('not a commit');
+      const { dir, base } = of(service);
+      const range = `refs/remotes/origin/${base}...${head}`;
+      const files = (await git(dir, ['diff', '--no-color', '--no-ext-diff', '--no-renames', '--name-only', range, '--'])).split('\n').filter(Boolean);
+      const diff = (await git(dir, ['diff', '--no-color', '--no-ext-diff', '--no-renames', range, '--'])).slice(0, MAX_DIFF);
+      return { files, diff };
     },
 
     // `release-request.mjs request_release <ticket> <pr> --ask`, the

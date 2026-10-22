@@ -1,0 +1,73 @@
+// The flow's effects for a service of a workspace of several (lane 16):
+// each service is cloned into its own checkout and read at its own base
+// branch; a ticket's checkout per service is <workdirs>/<ticket>/<service>,
+// on the same branch name on every service; what a published head changes
+// is read against that service's base. Two temporary repositories, no forge.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { realEffects } from '../../src/flow/effects.ts';
+import type { ServiceConfig } from '../../src/workspace/config.ts';
+import type { Ticket } from '../../src/tickets/contract.ts';
+import { CONFIG } from './support.ts';
+import { gitIn, remote, tempDir } from '../workspace/git.ts';
+
+const conf = (verdict: string, hosts: string) => `[merge]\nverdict = ${verdict}\n[session]\nhosts = ${hosts}\n[guard]\nterms = none\nallowed = none\n`;
+
+const TICKET: Ticket = { id: 'LOCAL-4', title: 'Held for review', body: 'Hold it.', labels: [], project: 'guestbook', status: 'Todo', createdAt: 'x', updatedAt: 'x' };
+
+function world() {
+  const root = tempDir('flow-services');
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
+  delete env.ORCH_LEDGER;
+  const service = (name: string, files: Record<string, string>, base = 'main'): ServiceConfig => ({
+    name, kind: 'repository', repo: `example-org/${name}`, url: remote(files), base, path: null, dir: join(root, 'services', name, 'checkout'),
+    healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: null, brokerState: null,
+  });
+  const guestbook = service('guestbook', { '.cleared/agents.conf': conf('no blocking issues', 'registry.npmjs.org'), 'src/page.ts': 'export const page = 1;\n' });
+  const filter = service('filter-api', { '.cleared/agents.conf': conf('ship it', 'example.invalid'), 'contract/openapi.yaml': 'openapi: 3.1.0\n', 'package.json': '{"scripts":{"test":"node --test"}}' });
+  const config = { ...CONFIG, projectDir: guestbook.dir, repoUrl: guestbook.url, workdirRoot: join(root, 'work') };
+  return { root, env, guestbook, filter, flow: realEffects(config, { env }) };
+}
+
+test('each service is read at its own base branch, from its own checkout', async () => {
+  const { flow, guestbook, filter } = world();
+  assert.deepEqual(await flow.settings(guestbook), { verdict: 'no blocking issues', safeCommands: [], hosts: ['registry.npmjs.org'], services: [], scripts: [] });
+  assert.deepEqual(await flow.settings(filter), { verdict: 'ship it', safeCommands: [], hosts: ['example.invalid'], services: [], scripts: ['test'] });
+  assert.match(readFileSync(join(filter.dir, 'contract', 'openapi.yaml'), 'utf8'), /openapi/);
+});
+
+test('a ticket gets a checkout per service under <workdirs>/<ticket>/<service>, on the same branch on each', async () => {
+  const { flow, guestbook, filter, root } = world();
+  const one = await flow.prepareWorkdir({ ticket: TICKET, role: 'author', service: guestbook });
+  const two = await flow.prepareWorkdir({ ticket: TICKET, role: 'author', service: filter });
+  assert.equal(one.workdir, join(root, 'work', 'LOCAL-4', 'guestbook'));
+  assert.equal(two.workdir, join(root, 'work', 'LOCAL-4', 'filter-api'));
+  for (const workdir of [one.workdir, two.workdir]) assert.equal(gitIn(workdir, ['rev-parse', '--abbrev-ref', 'HEAD']), 'cleared/LOCAL-4');
+  assert.match(readFileSync(join(two.workdir, 'contract', 'openapi.yaml'), 'utf8'), /openapi/, 'the filter API\'s own files');
+  // The reviewer works in the same checkout.
+  assert.equal((await flow.prepareWorkdir({ ticket: TICKET, role: 'reviewer', service: filter })).workdir, two.workdir);
+});
+
+test('without a service, the ticket\'s checkout is <workdirs>/<ticket>, as in milestone 1', async () => {
+  const { flow, root } = world();
+  assert.equal((await flow.prepareWorkdir({ ticket: TICKET, role: 'author' })).workdir, join(root, 'work', 'LOCAL-4'));
+});
+
+test('what a head changes is read in its service\'s checkout, against that service\'s base: the files and the diff', async () => {
+  const { flow, filter } = world();
+  const { workdir } = await flow.prepareWorkdir({ ticket: TICKET, role: 'author', service: filter });
+  writeFileSync(join(workdir, 'contract', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: {}\n');
+  writeFileSync(join(workdir, 'words.txt'), 'held\n');
+  gitIn(workdir, ['add', 'contract/openapi.yaml', 'words.txt']);
+  gitIn(workdir, ['commit', '-q', '-m', 'Hold flagged entries']);
+  const head = gitIn(workdir, ['rev-parse', 'HEAD']);
+  // publish fetches the branch out of the ticket checkout into the service's checkout first.
+  gitIn(filter.dir, ['fetch', '-q', workdir, `cleared/LOCAL-4:refs/cleared/publish/LOCAL-4`]);
+  const changed = await (flow.changes as NonNullable<typeof flow.changes>)({ ticket: TICKET.id, head, service: filter });
+  assert.deepEqual([...changed.files].sort(), ['contract/openapi.yaml', 'words.txt']);
+  assert.match(changed.diff, /^diff --git a\/contract\/openapi\.yaml b\/contract\/openapi\.yaml/m);
+  assert.match(changed.diff, /\+info: \{\}/);
+  await assert.rejects((flow.changes as NonNullable<typeof flow.changes>)({ ticket: TICKET.id, head: '--output=x', service: filter }), /not a commit/);
+});

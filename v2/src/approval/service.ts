@@ -23,6 +23,7 @@ import type { MergeOutcome, ServiceLock } from '../release/lock.ts';
 import { TrainStore, type Train } from '../release/store.ts';
 import type { Ticket } from '../tickets/contract.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
+import { loadFlowConfig } from '../flow/config.ts';
 
 // The tables the approval writer and the review recorder use besides the
 // tickets': the ledger's runs and events, as lib/ledger.mjs creates them.
@@ -332,5 +333,25 @@ export class TrainApprovals {
     const undone = await this.#writer(first.service).undo(ticket, by);
     if (undone.undone) this.#trains.setApprover(train.item, null);
     return undone;
+  }
+}
+
+// The train approvals of the environment's workspace, when it has several
+// services; undefined for a one-service workspace, or one the flow cannot
+// read (the flow module stops the service on that).
+export function trainApprovals(db: DatabaseSync, env: NodeJS.ProcessEnv = process.env): TrainApprovals | undefined {
+  let workspace: WorkspaceConfig | undefined;
+  try {
+    workspace = loadFlowConfig(env)?.workspace;
+  } catch {
+    return undefined;
+  }
+  if (!workspace || workspace.services.length < 2) return undefined;
+  const environment = approvalEnvironment(db, env);
+  try {
+    return new TrainApprovals({ db, workspace, environment, env, locks: serviceLocks(db, workspace, { env, environment }) });
+  } catch (error) {
+    console.error(`cleared-v2: ${(error as Error).message}: the trains' approvals are refused`);
+    return undefined;
   }
 }
