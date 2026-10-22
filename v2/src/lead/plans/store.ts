@@ -3,7 +3,7 @@
 // item rows are the truth of where each item stands; the runner (runner.ts)
 // moves them, from the flow's events and from the tickets themselves.
 import type { DatabaseSync } from 'node:sqlite';
-import type { Estimate, Plan, PlanItem, PlanItemState, PlanState } from '../../api/types.ts';
+import type { Estimate, Plan, PlanItem, PlanItemState, PlanState, ServiceSensitivity } from '../../api/types.ts';
 import type { UserId } from '../../session/contract.ts';
 import type { TicketId } from '../../tickets/contract.ts';
 
@@ -36,6 +36,19 @@ export type NewPlan = {
   readonly totals: Estimate;
   readonly items: readonly Pick<PlanItem, 'title' | 'body' | 'lane' | 'size' | 'after' | 'estimate'>[];
 };
+
+// A service of the workspace as the plans read it: its name and its
+// sensitivity (decision 24), from the ledger's `services` table.
+export type PlanService = { readonly name: string; readonly sensitivity: ServiceSensitivity };
+
+// The services an item's body names, in the workspace's order, matched as
+// whole names whatever their case (a dash is part of a name, so
+// "filter-api-v2" is not "filter-api"); when it names none, the
+// workspace's first service, where its ticket runs.
+export function itemServices(body: string, services: readonly PlanService[]): PlanService[] {
+  const named = services.filter((service) => new RegExp(`(?<![A-Za-z0-9_-])${service.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_-])`, 'i').test(body));
+  return named.length > 0 ? named : services.slice(0, 1);
+}
 
 type Row = Record<string, unknown>;
 const str = (row: Row, key: string): string | null => (row[key] === null || row[key] === undefined ? null : String(row[key]));
@@ -70,16 +83,32 @@ export class PlanStore {
     }
   }
 
-  #item(row: Row): StoredItem {
+  // The workspace's services, in the order they were first recorded (the
+  // workspace file's). None when the ledger has no `services` table: a
+  // store opened on the plans' tables alone, as before the workspace.
+  services(): PlanService[] {
+    try {
+      return (this.#db.prepare('SELECT name, sensitivity FROM services WHERE workspace = ? ORDER BY rowid').all(this.#project) as Row[])
+        .map((row) => ({ name: String(row.name), sensitivity: String(row.sensitivity) as ServiceSensitivity }));
+    } catch (error) {
+      if (/no such table/.test((error as Error).message)) return [];
+      throw error;
+    }
+  }
+
+  #item(row: Row, services: readonly PlanService[]): StoredItem {
+    const named = itemServices(String(row.body), services);
     return {
       position: Number(row.position), title: String(row.title), body: String(row.body), lane: String(row.lane) as PlanItem['lane'],
       size: String(row.size) as PlanItem['size'], after: JSON.parse(String(row.after)) as number[], estimate: JSON.parse(String(row.estimate)) as Estimate,
       ticket: str(row, 'ticket'), state: String(row.state) as PlanItemState, putBacks: Number(row.put_backs), note: str(row, 'note'),
+      ...(named.length > 0 ? { sensitivity: named.map((service) => ({ service: service.name, sensitivity: service.sensitivity })) } : {}),
     };
   }
 
   #plan(row: Row): StoredPlan {
-    const items = (this.#db.prepare('SELECT * FROM plan_items WHERE plan_id = ? ORDER BY position').all(String(row.id)) as Row[]).map((r) => this.#item(r));
+    const services = this.services();
+    const items = (this.#db.prepare('SELECT * FROM plan_items WHERE plan_id = ? ORDER BY position').all(String(row.id)) as Row[]).map((r) => this.#item(r, services));
     return {
       id: String(row.id), project: String(row.project), goal: String(row.goal), title: String(row.title), summary: String(row.summary), items,
       maxParallel: Number(row.max_parallel), totals: JSON.parse(String(row.totals)) as Estimate, state: String(row.state) as PlanState,
