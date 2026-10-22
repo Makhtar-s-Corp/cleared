@@ -29,6 +29,7 @@ export type EffectsOptions = {
   readonly env?: NodeJS.ProcessEnv;
   readonly releaseRequest?: string;       // the lock's client; release-request.mjs of the repository by default
   readonly requestTimeoutMs?: number;
+  readonly mergeTimeoutMs?: number;
 };
 
 export function realEffects(config: FlowConfig, options: EffectsOptions = {}): FlowEffects {
@@ -36,6 +37,24 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   const baseRef = `refs/remotes/origin/${config.base}`;
   const forge = () => forgeEnvironments(config.projectDir, env);
   const refresh = async () => projectCheckout({ url: config.repoUrl, dir: config.projectDir, base: config.base, env: (await forge()).git });
+
+  // Runs the lock's client with `args`, `input` on its stdin; its exit code
+  // and the end of what it said on stderr.
+  const lock = (args: readonly string[], input: string, limit: number, extra: NodeJS.ProcessEnv) =>
+    new Promise<{ code: number | null; stderr: string; timedOut: boolean }>((resolve, reject) => {
+      const script = options.releaseRequest ?? join(CLEARED, 'release-request.mjs');
+      const child = spawn(process.execPath, ['--no-warnings', script, ...args], {
+        env: { ...env, CLEARED_REPO: config.projectDir, ...extra }, stdio: ['pipe', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-1000); });
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, limit);
+      child.on('error', (error) => { clearTimeout(timer); reject(error); });
+      child.on('close', (code) => { clearTimeout(timer); resolve({ code, stderr, timedOut }); });
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(input);
+    });
 
   return {
     // The project's settings as committed at the base branch, after a fetch.
@@ -94,28 +113,30 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     // Then the request time the lock recorded for these versions
     // (<state>/validations/<ticket>.json, which ask-validation.sh writes).
     async requestRelease(input) {
-      const script = options.releaseRequest ?? join(CLEARED, 'release-request.mjs');
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(process.execPath, ['--no-warnings', script, 'request_release', input.ticket, String(input.pr), '--ask'], {
-          env: { ...env, CLEARED_REPO: config.projectDir }, stdio: ['pipe', 'ignore', 'pipe'],
-        });
-        let stderr = '';
-        child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-1000); });
-        const limit = options.requestTimeoutMs ?? 60_000;
-        let timedOut = false;
-        const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, limit);
-        child.on('error', (error) => { clearTimeout(timer); reject(error); });
-        child.on('close', (code) => {
-          clearTimeout(timer);
-          if (timedOut) reject(new Error(`the lock did not answer the release request within ${Math.round(limit / 1000)} seconds`));
-          else if (code === 0) resolve();
-          else reject(new Error(`the lock refused the release request (exit ${code}): ${stderr.trim() || 'no message'}`));
-        });
-        child.stdin.on('error', () => undefined);
-        child.stdin.end(input.announcement);
-      });
+      const limit = options.requestTimeoutMs ?? 60_000;
+      const run = await lock(['request_release', input.ticket, String(input.pr), '--ask'], input.announcement, limit, {});
+      if (run.timedOut) throw new Error(`the lock did not answer the release request within ${Math.round(limit / 1000)} seconds`);
+      if (run.code !== 0) throw new Error(`the lock refused the release request (exit ${run.code}): ${run.stderr.trim() || 'no message'}`);
       const record = readApprovalRecord(stateDirectory(env), input.ticket);
       return record && record.versions.some((v) => v.pr === input.pr) ? { requestedAt: record.at } : {};
+    },
+
+    // `release-request.mjs request_release <ticket> <pr>`, without --ask:
+    // the broker runs merge-pr.sh, which merges once every check holds. The
+    // client's exit says what happened (release-request.mjs and
+    // serve/release-broker.mjs): 0 merged; 5 not now (merge-pr.sh's 3 or 5,
+    // or the broker busy with another release); 1 refused for good
+    // (merge-pr.sh's 6); anything else, the broker could not be asked.
+    // ORCH_FROM_QUEUE makes merge-pr.sh answer "not now" without writing
+    // v1's merge-queue file, which no v1 wake reads any more: the flow's
+    // tick is the queue.
+    async mergeRelease(input) {
+      const limit = options.mergeTimeoutMs ?? 15 * 60_000;
+      const run = await lock(['request_release', input.ticket, String(input.pr)], input.announcement, limit, { ORCH_FROM_QUEUE: '1' });
+      const said = run.stderr.trim().split('\n').at(-1)?.trim() ?? '';
+      if (run.timedOut) return { outcome: 'unavailable', message: `the lock did not answer within ${Math.round(limit / 1000)} seconds` };
+      const outcome = run.code === 0 ? 'merged' : run.code === 5 ? 'queued' : run.code === 1 ? 'refused' : 'unavailable';
+      return { outcome, message: said };
     },
   };
 }

@@ -9,7 +9,7 @@ import { remote, tempDir } from '../workspace/git.ts';
 const CONF = '[merge]\nverdict = no blocking issues\n[session]\nsafe_commands = npm ci, npm test\nhosts = registry.npmjs.org\n[guard]\nterms = none\nallowed = none\n';
 const PACKAGE = JSON.stringify({ scripts: { test: 'node --test', typecheck: 'tsc --noEmit' } });
 
-async function effects(files: Record<string, string> = { '.cleared/agents.conf': CONF, 'package.json': PACKAGE }, extra: { releaseRequest?: string; requestTimeoutMs?: number } = {}) {
+async function effects(files: Record<string, string> = { '.cleared/agents.conf': CONF, 'package.json': PACKAGE }, extra: { releaseRequest?: string; requestTimeoutMs?: number; mergeTimeoutMs?: number } = {}) {
   const root = tempDir('flow-effects');
   const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
   delete env.ORCH_LEDGER;
@@ -98,4 +98,41 @@ test('the checks of a pull request, as the release card says them, from the buck
   assert.equal(checksOf([{ bucket: 'pass' }, { bucket: 'pending' }]), 'pending');
   assert.equal(checksOf([{ bucket: 'pending' }, { bucket: 'fail' }]), 'failed');
   assert.equal(checksOf([{ bucket: 'cancel' }]), 'failed');
+});
+
+// A stand-in for release-request.mjs that records what it was given and exits with `code`.
+function lockStub(code: number, stderr = '', wait = false) {
+  const root = tempDir('flow-merge');
+  const out = join(root, 'out.json');
+  const stub = join(root, 'release-request.mjs');
+  writeFileSync(stub, `import { writeFileSync } from 'node:fs';
+let input = ''; for await (const c of process.stdin) input += c;
+writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args: process.argv.slice(2), input, repo: process.env.CLEARED_REPO, queue: process.env.ORCH_FROM_QUEUE }));
+process.stderr.write(${JSON.stringify(stderr)});
+${wait ? 'setTimeout(() => {}, 60000);' : `process.exit(${code});`}`);
+  return { stub, out };
+}
+
+test('mergeRelease asks the lock to merge, without --ask, the announcement on stdin, as a retry of the queue', async () => {
+  const { stub, out } = lockStub(0);
+  const { config, flow } = await effects(undefined, { releaseRequest: stub });
+  assert.deepEqual(await flow.mergeRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'Ticket LOCAL-1: Newest first' }), { outcome: 'merged', message: '' });
+  assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), { args: ['request_release', 'LOCAL-1', '7'], input: 'Ticket LOCAL-1: Newest first', repo: config.projectDir, queue: '1' });
+});
+
+test('mergeRelease reads the client\'s exit: 5 queued, 1 refused for good, anything else unavailable, with the last line it said', async () => {
+  const cases: [number, string][] = [[5, 'queued'], [1, 'refused'], [69, 'unavailable'], [64, 'unavailable'], [3, 'unavailable']];
+  for (const [code, outcome] of cases) {
+    const { stub } = lockStub(code, `merge-pr.sh: something\n#7 is not put live: exit ${code}\n`);
+    const { flow } = await effects(undefined, { releaseRequest: stub });
+    assert.deepEqual(await flow.mergeRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' }), { outcome, message: `#7 is not put live: exit ${code}` }, `exit ${code}`);
+  }
+});
+
+test('mergeRelease that gets no answer in time is unavailable, and asked again later', async () => {
+  const { stub } = lockStub(0, '', true);
+  const { flow } = await effects(undefined, { releaseRequest: stub, mergeTimeoutMs: 200 });
+  const merge = await flow.mergeRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' });
+  assert.equal(merge.outcome, 'unavailable');
+  assert.match(merge.message, /did not answer/);
 });

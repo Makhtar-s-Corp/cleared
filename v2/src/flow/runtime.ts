@@ -7,9 +7,9 @@ import { homedir } from 'node:os';
 import { createApiRoutes } from '../api/routes.ts';
 import type { Registry, Route } from '../modules/registry.ts';
 import { proofPath, readOrCreateProof } from '../modules/users.ts';
-import { adapterFactories } from '../session/adapters/index.ts';
+import { adapterFactories, type AdapterFactory } from '../session/adapters/index.ts';
 import { cleanText, createCleaner, secretValues, type CleanOptions } from '../session/clean.ts';
-import type { SessionAdapter } from '../session/contract.ts';
+import type { Harness, SessionAdapter, StartInput } from '../session/contract.ts';
 import { ledgerPath, type Store } from '../store/db.ts';
 import { InboxStore } from '../inbox/store.ts';
 import { loadFlowConfig, type FlowConfig } from './config.ts';
@@ -28,6 +28,7 @@ export type Runtime = {
 export type RuntimeOptions = {
   readonly env?: NodeJS.ProcessEnv;
   readonly effects?: (config: FlowConfig) => FlowEffects;
+  readonly factories?: Readonly<Partial<Record<Harness, AdapterFactory>>>;
 };
 
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
@@ -50,6 +51,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       clean: (text) => cleanText(text, cleanOptions()),
     });
     engine.startTimer();
+    // What the last process left running is stopped and put back (decision 12 of milestone 2).
+    const recovering = engine;
+    void recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
     return engine;
   }
 
@@ -64,7 +68,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     adapters() {
       if (!store) return {};
       const log = store.events;
-      return Object.fromEntries(Object.entries(adapterFactories).map(([harness, make]) => [harness, make({ log, cleaner: () => createCleaner(cleanOptions()) })]));
+      // The adapters are made before the engine (the sessions module provides
+      // them): the policy of each evaluation asks the engine once it exists.
+      const policy = (input: StartInput) => (engine ? engine.policyFor(input) : input.policy);
+      return Object.fromEntries(Object.entries(options.factories ?? adapterFactories).map(([harness, make]) => [harness, make({ log, cleaner: () => createCleaner(cleanOptions()), policy })]));
     },
     engine: engineOf,
     proof: proofOf,
