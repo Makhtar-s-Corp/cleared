@@ -2,16 +2,20 @@
 // the stub lane 8 fills, the tower bar's New goal and Ask the lead, and
 // what makes the app installable on a Home Screen (manifest, service
 // worker, icons).
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderBar, renderHeader } from './render.tsx';
+import { loadCatalog } from '../../src/catalog.ts';
+import { translator } from '../lib/i18n.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import type { Translate } from '../public/i18n.ts';
-import { draftFrom, planFrom } from '../public/screens/lead.ts';
-import { leadHref, renderBar } from '../public/screens/tower.ts';
-import { signedIn, startApp } from './support.ts';
+import type { Translate } from '../lib/i18n.ts';
+import { draftFrom, planFrom } from '../screens/lead/model.ts';
+import { leadHref } from '../screens/tower/model.ts';
+import { signedIn, startApp } from '../../test/support.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
-const PUBLIC = new URL('../public/', import.meta.url).pathname;
+const shell = translator(loadCatalog('shell', 'en'));
+const PUBLIC = new URL('../../public/', import.meta.url).pathname;
 
 test('the Plans tab opens /lead, and /lead and /plans/<id> mount the lead screen', async () => {
   const app = await startApp();
@@ -22,12 +26,8 @@ test('the Plans tab opens /lead, and /lead and /plans/<id> mount the lead screen
       assert.equal(page.status, 200, path);
       const html = await page.text();
       assert.match(html, /<body data-screen="lead"/, path);
-      assert.match(html, /<a href="\/lead" aria-current="page">Plans<\/a>/, path);
       assert.match(html, /<title>Cleared · Lead<\/title>/);
     }
-    const tower = await (await fetch(`${app.base}/`, { headers: { cookie } })).text();
-    assert.match(tower, /<a href="\/lead">Plans<\/a>/);
-    assert.ok(tower.indexOf('>Plans<') > tower.indexOf('>Tickets<'), 'after Tickets, as the capture orders the tabs');
     for (const path of ['/plans', '/plans/', '/plans/a/b', '/lead/x']) assert.equal((await fetch(`${app.base}${path}`, { headers: { cookie }, redirect: 'manual' })).status, 404, path);
     const signedOut = await fetch(`${app.base}/lead`, { redirect: 'manual' });
     assert.equal(signedOut.status, 303);
@@ -37,19 +37,17 @@ test('the Plans tab opens /lead, and /lead and /plans/<id> mount the lead screen
   } finally {
     await app.close();
   }
+  assert.match(renderHeader('lead', shell), /<a href="\/lead" aria-current="page">Plans<\/a>/);
+  const tower = renderHeader('tower', shell);
+  assert.match(tower, /<a href="\/lead">Plans<\/a>/);
+  assert.ok(tower.indexOf('>Plans<') > tower.indexOf('>Tickets<'), 'after Tickets, as the capture orders the tabs');
 });
 
-test('the header carries the notifications button, hidden until the page knows what it can offer', async () => {
-  const app = await startApp();
-  try {
-    const { cookie } = await signedIn(app);
-    const html = await (await fetch(`${app.base}/`, { headers: { cookie } })).text();
-    assert.match(html, /<details class="notify" id="notify" hidden>/);
-    assert.match(html, /<summary class="icon" id="notify-summary" aria-label="Notifications">/);
-    assert.ok(html.indexOf('id="notify"') < html.indexOf('id="clock"'), 'before the clock');
-  } finally {
-    await app.close();
-  }
+test('the header carries the notifications button, hidden until the page knows what it can offer', () => {
+  const html = renderHeader('tower', shell);
+  assert.match(html, /<div class="notify" id="notify" hidden="">/);
+  assert.match(html, /<button type="button" class="icon" id="notify-summary" aria-label="Notifications"/);
+  assert.ok(html.indexOf('id="notify"') < html.indexOf('id="clock"'), 'before the clock');
 });
 
 test('the manifest, the service worker and the icons are served without a session, and every page links them', async () => {
@@ -107,8 +105,8 @@ test('the tower bar\'s New goal and Ask the lead open /lead with the typed text 
   const long = new URLSearchParams(leadHref('goal', 'Goal', 'é'.repeat(20_000)).split('?')[1]).get('draft') ?? '';
   assert.equal(long.length, 2000, 'cut at the draft limit, whatever the description holds');
   const bar = renderBar(sentinel);
-  assert.match(bar, /<button class="chip-button" type="button" data-lead="goal">«bar_new_goal»<\/button>/);
-  assert.match(bar, /<button class="chip-button" type="button" data-lead="lead">«bar_ask_lead»<\/button>/);
+  assert.match(bar, /<button type="button" class="chip-button" data-lead="goal">«bar_new_goal»<\/button>/);
+  assert.match(bar, /<button type="button" class="chip-button" data-lead="lead">«bar_ask_lead»<\/button>/);
   assert.doesNotMatch(bar, /aria-disabled|data-later/, 'the two buttons work now');
 });
 

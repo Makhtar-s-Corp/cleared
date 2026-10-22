@@ -2,17 +2,18 @@
 // card, its detail with lane 8's plan panel and Approve, its handled state)
 // and the lead's question, which is answered on the lead's screen. The lead's
 // ticket is a sentinel that the screen never shows.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderInbox } from '../render.tsx';
 import assert from 'node:assert/strict';
-import type { InboxItem, Plan, PlanItemInbox, QuestionItem } from '../../../src/api/types.ts';
-import { LEAD_TICKET as SERVICE_LEAD_TICKET } from '../../../src/lead/contract.ts';
-import { LEAD_QUESTION_TEXT, PLAN_ID, PLAN_TITLE, inboxFixture, leadQuestion, planItemOf, proposedPlan } from '../../fixtures/inbox.ts';
-import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { loadCatalog } from '../../src/catalog.ts';
-import { translator, type Translate } from '../../public/i18n.ts';
-import { ApiError } from '../../public/screen.ts';
-import { LEAD_TICKET, afterPlanRefusal, detailKey, failure, ordered, readPlan, renderInbox, type InboxView, type Local } from '../../public/screens/inbox.ts';
-import { strings, visibleText } from '../session/support.ts';
+import type { InboxItem, Plan, PlanItemInbox, QuestionItem } from '../../../../src/api/types.ts';
+import { LEAD_TICKET as SERVICE_LEAD_TICKET } from '../../../../src/lead/contract.ts';
+import { LEAD_QUESTION_TEXT, PLAN_ID, PLAN_TITLE, inboxFixture, leadQuestion, planItemOf, proposedPlan } from '../../../fixtures/inbox.ts';
+import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
+import { loadCatalog } from '../../../src/catalog.ts';
+import { translator, type Translate } from '../../lib/i18n.ts';
+import { ApiError } from '../../lib/screen.ts';
+import { LEAD_TICKET, afterPlanRefusal, detailKey, failure, ordered, readPlan, type InboxView, type Local } from '../../screens/inbox/model.ts';
+import { strings, visibleText } from '../render.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
 const en = translator(loadCatalog('inbox', 'en'));
@@ -67,7 +68,7 @@ test('the plan\'s detail is lane 8\'s plan panel under the inbox\'s eyebrow, wit
   assert.match(html, /<a class="d-link" href="\/plans\/plan-3">/);
   assert.doesNotMatch(html, /data-plan-action=/, 'the panel\'s own buttons are left out: the inbox\'s bar holds the gestures');
   assert.deepEqual(acts(html), ['approve_plan']);
-  assert.match(html, /<a class="btn" href="\/plans\/plan-3">Change the plan<\/a>/, 'Change goes to the lead\'s screen, where the reply field is');
+  assert.match(html, /<a href="\/plans\/plan-3" class="btn">Change the plan<\/a>/, 'Change goes to the lead\'s screen, where the reply field is');
   assert.equal([...html.matchAll(/class="item-state /g)].length, 0, 'a proposed plan shows no item state');
 });
 
@@ -123,7 +124,7 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the lead\'s session');
   assert.deepEqual(acts(html), [], 'no Send: the answer is given on the lead\'s screen');
-  assert.match(html, /<a class="btn" href="\/lead">Answer on the lead&#39;s screen<\/a>/);
+  assert.match(html, /<a href="\/lead" class="btn">Answer on the lead&#39;s screen<\/a>/);
   assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the lead\'s screen, in the bar');
   assert.match(html, /class="questions waits read"/);
   for (const option of html.matchAll(/<button[^>]*data-option=[^>]*>/g)) assert.match(option[0], /disabled/);

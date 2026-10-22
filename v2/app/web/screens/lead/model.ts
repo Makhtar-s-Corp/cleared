@@ -132,6 +132,8 @@ export function otherPlans(plans: readonly Plan[], shown: Plan | undefined): Pla
 
 // ------------------------------------------------------------------ reply
 
+export type SideOptions = { readonly busy?: boolean; readonly note?: string | null };
+
 export type ComposerMode = 'message' | 'goal' | 'answer';
 export type Reply = { readonly kind: ComposerMode; readonly body: LeadMessageBody };
 

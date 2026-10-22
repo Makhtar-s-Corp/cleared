@@ -23,6 +23,8 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    // A diff that changes package-lock.json can pass Node's 1 MB default.
+    maxBuffer: 256 * 1024 * 1024,
     env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
   });
 }
@@ -134,8 +136,12 @@ try {
   let clean = guard(`${present.length} v2 files`, ['--tree', snapshot]);
   if (base) {
     // Added and removed lines only (no context): what this change brings, not the text around it.
+    // The lock file is left out of this strict pass: npm writes it (registry addresses, integrity
+    // hashes, version ranges), and the strict "assigned secret" rule reads a dependency named
+    // js-tokens with a range ("js-tokens": "^3.0.0 || ^4.0.0") as a secret. The tree pass above
+    // still checks the whole lock file.
     const changes = join(work, 'changes.diff');
-    writeFileSync(changes, git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`]));
+    writeFileSync(changes, git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`, '--', '.', ':(exclude)v2/package-lock.json']));
     clean = guard(`the lines changed since ${base}`, ['--strict', changes]) && clean;
   }
   status = clean ? 0 : 1;

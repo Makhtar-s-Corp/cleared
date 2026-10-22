@@ -1,16 +1,17 @@
 // The inbox as HTML: the fixture inbox against the capture, each kind's
 // detail and its buttons, the states a gesture leaves behind, the catalog in
 // both languages, the escaping, and the rule that the page has no inline style.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderInbox } from '../render.tsx';
 import assert from 'node:assert/strict';
-import type { InboxItem, ReleaseItem } from '../../../src/api/types.ts';
-import { QUESTION_TEXT, RELEASE_TICKET, RELEASE_TITLE, inboxFixture } from '../../fixtures/inbox.ts';
-import { AUTHOR_ID } from '../../fixtures/session.ts';
-import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { loadCatalog } from '../../src/catalog.ts';
-import { translator, type Translate } from '../../public/i18n.ts';
-import { renderInbox, type InboxView, type Local } from '../../public/screens/inbox.ts';
-import { strings, visibleText } from '../session/support.ts';
+import type { InboxItem, ReleaseItem } from '../../../../src/api/types.ts';
+import { QUESTION_TEXT, RELEASE_TICKET, RELEASE_TITLE, inboxFixture } from '../../../fixtures/inbox.ts';
+import { AUTHOR_ID } from '../../../fixtures/session.ts';
+import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
+import { loadCatalog } from '../../../src/catalog.ts';
+import { translator, type Translate } from '../../lib/i18n.ts';
+import { type InboxView, type Local } from '../../screens/inbox/model.ts';
+import { strings, visibleText } from '../render.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
 const en = translator(loadCatalog('inbox', 'en'));
@@ -78,12 +79,12 @@ test('a release shows its announcement, the before and after, the sessions line,
   assert.match(html, /<a href="https:\/\/example\.invalid\/guestbook\/pull\/42"[^>]*>PR #42<\/a>/);
   assert.match(html, /<img[^>]*src="\/api\/service\/captures\/before-desktop\.svg"/);
   assert.match(html, /<img[^>]*src="\/api\/service\/captures\/after-desktop\.svg"/);
-  assert.match(html, /<button[^>]*data-frame="desktop"[^>]*aria-pressed="true"/);
+  assert.match(html, /<button[^>]*aria-pressed="true"[^>]*data-frame="desktop"/);
   assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['send_back', 'approve']);
   assert.match(html, /aria-label="Approve the release: pull request 42 at 3f9c2a1d5e7b40c8a6f1d2e3b4c5a6978d0e1f2a"/, 'every version it approves is in its accessible name');
   const phone = renderInbox({ ...view, frame: 'phone' }, en);
   assert.match(phone, /<img[^>]*src="\/api\/service\/captures\/after-phone\.svg"/);
-  assert.match(phone, /<button[^>]*data-frame="phone"[^>]*aria-pressed="true"/);
+  assert.match(phone, /<button[^>]*aria-pressed="true"[^>]*data-frame="phone"/);
 });
 
 test('a release with no capture says so instead of an empty frame, and a capture from elsewhere is not shown', () => {

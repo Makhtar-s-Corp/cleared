@@ -30,5 +30,5 @@ export type ButtonProps = ComponentProps<'button'> & VariantProps<typeof buttonV
 
 export function Button({ className, variant, asChild = false, type = 'button', ...props }: ButtonProps) {
   const Comp = asChild ? Slot : 'button';
-  return <Comp data-slot="button" className={cn(buttonVariants({ variant }), className)} {...(asChild ? {} : { type })} {...props} />;
+  return <Comp {...(asChild ? {} : { type })} data-slot="button" className={cn(buttonVariants({ variant }), className)} {...props} />;
 }

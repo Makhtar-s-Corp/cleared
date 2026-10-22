@@ -1,15 +1,16 @@
 // The session screen as HTML: the fixture session against the capture, the
 // catalog in both languages, the escaping, and the rule that the page has
 // no inline style.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderIndex, renderSession, strings, visibleText } from '../render.tsx';
 import assert from 'node:assert/strict';
-import { AUTHOR_ID, ANSWER_TEXT, QUESTION_TEXT, TICKET_BODY, TICKET_TITLE, USER, sessionFixture } from '../../fixtures/session.ts';
-import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { loadCatalog } from '../../src/catalog.ts';
-import { translator, type Translate } from '../../public/i18n.ts';
-import { applyAll, emptyModel, parseCriteria, renderIndex, renderSession, timeline, type SessionView } from '../../public/screens/session.ts';
-import type { SessionSummary } from '../../../src/api/types.ts';
-import { modelOf, strings, tool, visibleText } from './support.ts';
+import { AUTHOR_ID, ANSWER_TEXT, QUESTION_TEXT, TICKET_BODY, TICKET_TITLE, USER, sessionFixture } from '../../../fixtures/session.ts';
+import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
+import { loadCatalog } from '../../../src/catalog.ts';
+import { translator, type Translate } from '../../lib/i18n.ts';
+import { applyAll, emptyModel, parseCriteria, threadOf, timeline, type SessionModel, type SessionView } from '../../screens/session/model.ts';
+import type { SessionSummary } from '../../../../src/api/types.ts';
+import { modelOf, tool } from '../../../test/session/support.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
 const en = translator(loadCatalog('session', 'en'));
@@ -18,7 +19,12 @@ function viewOf(overrides: Partial<SessionView> = {}): SessionView {
   const fixture = sessionFixture(FIXTURE_NOW);
   const model = emptyModel();
   applyAll(model, fixture.store.events.after(AUTHOR_ID));
-  return { summary: fixture.sessions[0] as SessionSummary, model, ticket: fixture.ticket, siblings: fixture.sessions, me: 'demo-id', language: 'en', now: FIXTURE_NOW, ...overrides };
+  return { summary: fixture.sessions[0] as SessionSummary, thread: threadOf(model), ticket: fixture.ticket, siblings: fixture.sessions, me: 'demo-id', language: 'en', now: FIXTURE_NOW, ...overrides };
+}
+
+// A view on a model: the thread the session's agent would hold for it.
+function on(model: SessionModel, overrides: Partial<SessionView> = {}): SessionView {
+  return viewOf({ thread: threadOf(model), ...overrides });
 }
 
 const count = (html: string, pattern: RegExp) => [...html.matchAll(pattern)].length;
@@ -55,7 +61,7 @@ test('the composer has Send and Interrupt, and the hand over is disabled with it
 test('an ended session cannot be written to or interrupted', () => {
   const fixture = sessionFixture(FIXTURE_NOW);
   const model = modelOf([{ type: 'STATE_SNAPSHOT', snapshot: { status: 'Done', phase: 'done', steps: [], files: [], checks: [], usage: {} } }]);
-  const html = renderSession(viewOf({ model, summary: { ...(fixture.sessions[0] as SessionSummary), phase: 'done' } }), en);
+  const html = renderSession(on(model, { summary: { ...(fixture.sessions[0] as SessionSummary), phase: 'done' } }), en);
   assert.match(html, /<input[^>]*id="message"[^>]*disabled/);
   assert.match(html, /<button[^>]*id="send"[^>]*disabled/);
   assert.match(html, /<button[^>]*id="interrupt"[^>]*disabled/);
@@ -64,8 +70,8 @@ test('an ended session cannot be written to or interrupted', () => {
 
 test('every word on the screen comes from the catalog or from the data', () => {
   const view = viewOf();
-  const rows = timeline(view.model);
-  const allowed = strings([view.ticket, view.summary, view.model.state, rows]);
+  const rows = view.thread.rows;
+  const allowed = strings([view.ticket, view.summary, view.thread.state, rows]);
   const parsed = parseCriteria(TICKET_BODY);
   for (const text of [...parsed.description, ...parsed.criteria.map((c) => c.text)]) allowed.add(text);
   for (const row of rows) allowed.add(`${String(new Date(row.at).getHours()).padStart(2, '0')}:${String(new Date(row.at).getMinutes()).padStart(2, '0')}`);
@@ -77,7 +83,7 @@ test('every word on the screen comes from the catalog or from the data', () => {
     assert.ok(allowed.has(rest), `not from the catalog nor the data: ${JSON.stringify(rest)}`);
   }
   assert.doesNotMatch(html, /\sstyle=/, 'no inline style: the page runs under default-src \'self\'');
-  assert.doesNotMatch(html, /<style|<script|https?:\/\//, 'nothing inline, nothing from another site');
+  assert.doesNotMatch(html.replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, ''), /<style|<script|https?:\/\//, 'nothing inline, nothing from another site (an icon\'s SVG namespace is a name, not an address)');
 });
 
 test('the French screen has no English sentence left', () => {
@@ -105,7 +111,7 @@ test('what the data says is escaped, never markup', () => {
     { type: 'RUN_ERROR', message: evil },
   ]);
   const html = renderSession({
-    ...viewOf(), model, ticket: { ...fixture.ticket, title: evil, body: `${evil}\n\n- [ ] ${evil}` },
+    ...viewOf(), thread: threadOf(model), ticket: { ...fixture.ticket, title: evil, body: `${evil}\n\n- [ ] ${evil}` },
     summary: { ...(fixture.sessions[0] as SessionSummary), model: evil }, siblings: [{ ...(fixture.sessions[0] as SessionSummary), model: evil }],
   }, en);
   assert.ok(!html.includes('<img'));
@@ -127,14 +133,14 @@ test('the policy refusal and the answered requests read as sentences', () => {
     { type: 'CUSTOM', name: 'cleared.permission_request', value: { requestId: 'r4', toolCallId: 't4', tool: 'Bash', input: { kind: 'execute', command: 'touch c' }, suggestion: { decision: 'ask', rule: 'default', reason: 'x' } } },
     { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: 'r4', decision: 'cancelled', by: 'policy', rule: 'interrupt' } },
   ]);
-  const html = renderSession(viewOf({ model }), en);
+  const html = renderSession(on(model), en);
   const text = visibleText(html);
   assert.ok(text.includes('Blocked by the rules: pushing to the base branch.'), 'the policy refusal, with its rule in words');
   assert.ok(text.includes('Allowed once by you'));
   assert.ok(text.includes('Denied by a teammate'));
   assert.ok(text.includes('Cancelled when the turn was interrupted'));
   assert.equal(count(html, /data-answer=/g), 0, 'no button for an answered request');
-  const unknown = renderSession(viewOf({ model: modelOf([{ type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: 'r9', decision: 'reject_once', by: 'policy', rule: 'future.rule' } }]) }), en);
+  const unknown = renderSession(on(modelOf([{ type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: 'r9', decision: 'reject_once', by: 'policy', rule: 'future.rule' } }])), en);
   assert.ok(visibleText(unknown).includes('Blocked by the rules (future.rule).'), 'a rule the catalog does not know is named as it is');
 });
 
@@ -185,6 +191,6 @@ test('an ended session shows its duration up to its last event, not the stale su
   const summary = { ...(fixture.sessions[0] as SessionSummary), phase: 'done' as const, startedAt: new Date(2026, 9, 21, 8, 50, 0).toISOString(), updatedAt: new Date(2026, 9, 21, 9, 24, 0).toISOString() };
   // the last event is stored at 09:00:01 local
   const model = modelOf([{ type: 'STATE_SNAPSHOT', snapshot: { status: 'Done', phase: 'done', steps: [], files: [], checks: [], usage: {} } }]);
-  const text = visibleText(renderSession(viewOf({ model, summary }), en));
+  const text = visibleText(renderSession(on(model, { summary }), en));
   assert.ok(text.includes('10 min'), 'from 08:50 to the last event, 10 min');
 });

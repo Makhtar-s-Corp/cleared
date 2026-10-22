@@ -20,6 +20,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Every opt-out of the front end's packages: Scarf's install report (pulled in
+    # by CopilotKit; v2/.npmrc also runs no install script) and CopilotKit's telemetry.
+    env:
+      SCARF_ANALYTICS: 'false'
+      DO_NOT_TRACK: '1'
+      COPILOTKIT_TELEMETRY_DISABLED: 'true'
     defaults:
       run:
         working-directory: v2
@@ -34,10 +40,15 @@ jobs:
           cache-dependency-path: v2/package-lock.json
       - name: Install
         run: npm ci
-      - name: Tests
-        run: npm test
       - name: Types
-        run: npx tsc --noEmit
+        # The service, the app's server and the React front end (tsc -p app/web).
+        run: npm run typecheck
+      - name: Build
+        # Vite builds the front end into app/dist, which the app serves.
+        run: npm run build
+      - name: Tests
+        # node --test for the service and the app's server, then Vitest for the components.
+        run: npm test
       - name: Private terms and secrets guard
         # github.base_ref is empty on a push. A push checks from the commit before it, or from HEAD~1 when that
         # commit is all zeros (a new branch). The checkout has fetch-depth 0, so the commit is present.

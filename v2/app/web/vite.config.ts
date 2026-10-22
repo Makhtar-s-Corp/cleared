@@ -11,6 +11,7 @@
 // Google Fonts) and the prebuilt chat (Lucide icons, its own stylesheet)
 // are replaced by an empty module and never reach the bundle. Telemetry's
 // switches are set here too, although nothing bundled reads them.
+/// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
@@ -35,6 +36,13 @@ export default defineConfig({
     'process.env.SCARF_ANALYTICS': JSON.stringify('false'),
   },
   oxc: { jsx: { runtime: 'automatic' } },
+  // The components' tests (npm test runs them after node --test): rendered
+  // to HTML under Node, as the tests of the HTML renderers did before.
+  test: {
+    include: ['test/**/*.test.tsx'],
+    environment: 'node',
+    css: false,
+  },
   build: {
     outDir: here('../dist'),
     emptyOutDir: true,
@@ -46,5 +54,7 @@ export default defineConfig({
       // Radix marks its modules "use client" for React Server Components, which this page does not use.
       onwarn(warning, warn) { if (warning.code !== 'MODULE_LEVEL_DIRECTIVE') warn(warning); },
     },
+    // CopilotKit's headless core and AG-UI's client (with zod) are one chunk, loaded by the session and lead screens only.
+    chunkSizeWarningLimit: 700,
   },
 });

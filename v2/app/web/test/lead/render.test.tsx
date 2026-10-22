@@ -3,15 +3,16 @@
 // states: the header line, the thread, the question bubble, the plan panel
 // with its items, chips, estimates, footer and buttons, the memory panel,
 // and which plan /lead shows.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderLead, renderMemory, renderPlanPanel, renderThread } from '../render.tsx';
 import assert from 'node:assert/strict';
-import type { LeadState, Plan } from '../../../src/api/types.ts';
-import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { leadFixture, otherPlans, waitingForAnswer } from '../../fixtures/lead.ts';
-import { loadCatalog } from '../../src/catalog.ts';
-import { translator, type Translate } from '../../public/i18n.ts';
-import { choosePlan, headerLine, renderLead, renderMemory, renderThread, type LeadView } from '../../public/screens/lead.ts';
-import { formatDuration, renderPlanPanel } from '../../public/plan-panel.ts';
+import type { LeadState, Plan } from '../../../../src/api/types.ts';
+import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
+import { leadFixture, otherPlans, waitingForAnswer } from '../../../fixtures/lead.ts';
+import { loadCatalog } from '../../../src/catalog.ts';
+import { translator, type Translate } from '../../lib/i18n.ts';
+import { choosePlan, headerLine, type LeadView } from '../../screens/lead/model.ts';
+import { formatDuration } from '../../plan-panel/model.ts';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
 const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('lead', 'fr') });

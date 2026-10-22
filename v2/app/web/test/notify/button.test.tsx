@@ -1,10 +1,11 @@
 // The header's notifications button, as pure functions: what it shows for a
 // service status, a browser and this device's subscription.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderNotifyMenu } from '../render.tsx';
 import assert from 'node:assert/strict';
-import { loadCatalog } from '../../src/catalog.ts';
-import { translator, type Translate } from '../../public/i18n.ts';
-import { notifyView, renderNotifyMenu, urlKey, type NotifyBrowser, type NotifyStatus } from '../../public/notify.ts';
+import { loadCatalog } from '../../../src/catalog.ts';
+import { translator, type Translate } from '../../lib/i18n.ts';
+import { notifyView, urlKey, type NotifyBrowser, type NotifyStatus } from '../../shell/notify.ts';
 
 const sentinel: Translate = (key, values) => `«${key}${Object.entries(values ?? {}).map(([name, value]) => ` ${name}=${value}`).join('')}»`;
 const ready: NotifyStatus = { available: true, reason: null, publicKey: 'BKey', devices: 2 };
@@ -21,7 +22,7 @@ test('off on this device: the count of devices told, and the button that turns i
   const html = renderNotifyMenu(view, sentinel);
   assert.match(html, /«notify_off»/);
   assert.match(html, /«notify_devices_other n=2»/);
-  assert.match(html, /<button class="primary" id="notify-toggle" type="button" data-action="on">«notify_turn_on»<\/button>/);
+  assert.match(html, /<button type="button" class="primary" id="notify-toggle" data-action="on">«notify_turn_on»<\/button>/);
 });
 
 test('on for this device: the count includes it, and the button turns it off', () => {
@@ -29,7 +30,7 @@ test('on for this device: the count includes it, and the button turns it off', (
   assert.deepEqual(view, { show: true, on: true, state: 'notify_on', devices: 1, action: 'off', note: null });
   const html = renderNotifyMenu(view, sentinel);
   assert.match(html, /«notify_devices_one n=1»/);
-  assert.match(html, /<button class="plain" id="notify-toggle" type="button" data-action="off">«notify_turn_off»<\/button>/);
+  assert.match(html, /<button type="button" class="plain" id="notify-toggle" data-action="off">«notify_turn_off»<\/button>/);
 });
 
 test('an iPhone outside the Home Screen gets the note, and no button that cannot work', () => {

@@ -5,17 +5,18 @@
 // Resume call the plan routes and the panel shows the plan they answer.
 // Run against the app with lane 8's stand-in for the service's lead and
 // plan routes, so the writes carry the signed-in user as in production.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderPlanPanel } from '../render.tsx';
 import assert from 'node:assert/strict';
-import type { LeadMessage, Plan } from '../../../src/api/types.ts';
-import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { leadFixture, leadSource, otherPlans, waitingForAnswer } from '../../fixtures/lead.ts';
-import { loadCatalog } from '../../src/catalog.ts';
-import { translator } from '../../public/i18n.ts';
-import { ApiError, type ScreenContext } from '../../public/screen.ts';
-import { composerMode, gestureFailure, planGesture, replyFor, sendReply } from '../../public/screens/lead.ts';
-import { renderPlanPanel } from '../../public/plan-panel.ts';
-import { signedIn, startApp, type Running } from '../support.ts';
+import type { LeadMessage, Plan } from '../../../../src/api/types.ts';
+import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
+import { leadFixture, leadSource, otherPlans, waitingForAnswer } from '../../../fixtures/lead.ts';
+import { loadCatalog } from '../../../src/catalog.ts';
+import { translator } from '../../lib/i18n.ts';
+import { ApiError, type ScreenContext } from '../../lib/screen.ts';
+import { composerMode, gestureFailure, planGesture, replyFor, sendReply } from '../../screens/lead/model.ts';
+
+import { signedIn, startApp, type Running } from '../../../test/support.ts';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
 

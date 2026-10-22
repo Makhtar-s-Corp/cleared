@@ -3,7 +3,7 @@
 // approve or send back, a permission to allow or deny, a question to answer,
 // the lead's plan to approve (model.ts says what each gesture calls).
 import { ArrowLeft } from '@phosphor-icons/react';
-import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { InboxItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionSummary } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -50,6 +50,14 @@ export function List({ view, t }: { readonly view: InboxView; readonly t: Transl
       {handled.length > 0 ? <><h2 className="handled-title">{t('handled_title')}</h2>{list(handled)}</> : null}
     </>
   );
+}
+
+// The grace's bar, drawn through the element's style object: the page
+// carries no style attribute (no inline style under its Content-Security-Policy).
+function GraceFill({ share }: { readonly share: number }) {
+  const fill = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { if (fill.current) fill.current.style.transform = `scaleX(${share})`; }, [share]);
+  return <div className="grace-fill" ref={fill} />;
 }
 
 const Fact = ({ label, children }: { readonly label: string; readonly children: ReactNode }) => <><dt>{label}</dt><dd>{children}</dd></>;
@@ -220,7 +228,7 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
         return (
           <>
             <div className="grace" data-due={local.dueAt}>
-              <div className="grace-track" role="presentation"><div className="grace-fill" style={{ transform: `scaleX(${Math.min(1, left / (GRACE_MS / 1000))})` }} /></div>
+              <div className="grace-track" role="presentation"><GraceFill share={Math.min(1, left / (GRACE_MS / 1000))} /></div>
               <span className="grace-text" aria-label={t('grace_label')}>{t('grace_text', { n: left })}</span>{act('undo', t('undo'), true)}
             </div>
             {status}

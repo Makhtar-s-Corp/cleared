@@ -2,16 +2,17 @@
 // plans card, the plan card under Needs you, the grey line's plan count and
 // week share, the lead's own sessions and questions, and the "Lead · always
 // on" pill of the shell's header.
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderHeader, renderTower, renderTowerBody } from './render.tsx';
 import assert from 'node:assert/strict';
-import type { InboxItem, LeadMessage, LeadState, Plan, PlanItem, SessionSummary } from '../../src/api/types.ts';
-import { FIXTURE_NOW, towerFixture } from '../fixtures/tower.ts';
-import { loadCatalog } from '../src/catalog.ts';
-import { translator, type Translate } from '../public/i18n.ts';
-import { leadPillShown } from '../public/app.ts';
-import { ApiError } from '../public/screen.ts';
-import { lastLeadLine, loadTower, renderTower, renderTowerBody, towerModel, type TowerData } from '../public/screens/tower.ts';
-import { signedIn, startApp } from './support.ts';
+import type { InboxItem, LeadMessage, LeadState, Plan, PlanItem, SessionSummary } from '../../../src/api/types.ts';
+import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
+import { loadCatalog } from '../../src/catalog.ts';
+import { translator, type Translate } from '../lib/i18n.ts';
+import { leadPillShown } from '../shell/model.ts';
+import { ApiError } from '../lib/screen.ts';
+import { lastLeadLine, loadTower, towerModel, type TowerData } from '../screens/tower/model.ts';
+import { signedIn, startApp } from '../../test/support.ts';
 
 const en: Translate = translator(loadCatalog('tower', 'en'));
 const fr: Translate = translator(loadCatalog('tower', 'fr'));
@@ -212,16 +213,22 @@ test('the pill shows only while a generation of the lead is live, or refreshing 
   assert.equal(leadPillShown(null), false);
 });
 
-test('the server renders the pill hidden in the header, so no page render calls the service', async () => {
+test('the shell draws the pill hidden in the header, so no page render calls the service', async () => {
   const app = await startApp();
   try {
     const { cookie } = await signedIn(app);
     for (const path of ['/', '/inbox', '/lead']) {
       const html = await (await fetch(`${app.base}${path}`, { headers: { cookie } })).text();
-      assert.match(html, /<a class="lead-pill" id="lead-pill" href="\/lead" hidden>Lead · always on<\/a>/, path);
-      assert.ok(html.indexOf('id="lead-pill"') < html.indexOf('id="notify"'), 'first in the header\'s right group, as the capture');
+      assert.doesNotMatch(html, /lead-pill/, `${path}: the server writes no header; the shell draws it`);
     }
   } finally {
     await app.close();
   }
+  const shell = translator(loadCatalog('shell', 'en'));
+  for (const screen of ['tower', 'inbox', 'lead'] as const) {
+    const html = renderHeader(screen, shell);
+    assert.match(html, /<a class="lead-pill" id="lead-pill" href="\/lead" hidden="">Lead · always on<\/a>/, screen);
+    assert.ok(html.indexOf('id="lead-pill"') < html.indexOf('id="notify"'), 'first in the header\'s right group, as the capture');
+  }
+  assert.match(renderHeader('tower', shell, { leadOn: true }), /<a class="lead-pill" id="lead-pill" href="\/lead">Lead · always on<\/a>/);
 });

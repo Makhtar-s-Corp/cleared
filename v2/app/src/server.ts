@@ -97,7 +97,7 @@ export function readBundle(distDir: string = DIST_DIR): Bundle {
   try {
     manifest = JSON.parse(readFileSync(join(distDir, '.vite', 'manifest.json'), 'utf8')) as Record<string, ManifestChunk>;
   } catch {
-    throw new BuildMissing(`the web app is not built: run npm run build in v2/ (no ${join(distDir, '.vite', 'manifest.json')})`);
+    throw new BuildMissing('the web app is not built: run npm run build in v2/');
   }
   const entry = Object.values(manifest).find((chunk) => chunk.isEntry);
   if (!entry) throw new BuildMissing('the web app\'s build has no entry: run npm run build in v2/');

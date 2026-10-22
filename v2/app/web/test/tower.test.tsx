@@ -1,9 +1,10 @@
-import test from 'node:test';
+import { test } from 'vitest';
+import { renderBar, renderTower } from './render.tsx';
 import assert from 'node:assert/strict';
-import { FIXTURE_NOW, towerFixture } from '../fixtures/tower.ts';
-import { loadCatalog } from '../src/catalog.ts';
-import { translator, type Translate } from '../public/i18n.ts';
-import { formatModel, newTicket, renderBar, renderTower, towerModel, type TowerData } from '../public/screens/tower.ts';
+import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
+import { loadCatalog } from '../../src/catalog.ts';
+import { translator, type Translate } from '../lib/i18n.ts';
+import { formatModel, newTicket, towerModel, type TowerData } from '../screens/tower/model.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
 

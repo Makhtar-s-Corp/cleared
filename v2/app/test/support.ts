@@ -76,3 +76,19 @@ export async function signedIn(app: Running, name = 'alex'): Promise<{ cookie: s
   const body = await me.json() as { csrf: string };
   return { cookie, csrf: body.csrf, id: user.id };
 }
+
+// The files a page names: its sheets (the shell's, then the screen's), the
+// bundle's entry and the screen's chunk, as Vite built them into dist/.
+export async function pageFiles(app: Running, path: string, cookie: string): Promise<{ readonly html: string; readonly styles: string[]; readonly scripts: string[]; readonly css: string; readonly js: string }> {
+  const html = await (await fetch(`${app.base}${path}`, { headers: { cookie } })).text();
+  const styles = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1] as string);
+  const scripts = [...html.matchAll(/<script type="module" src="([^"]+)">|<link rel="modulepreload" href="([^"]+)">/g)].map((m) => (m[1] ?? m[2]) as string);
+  const read = async (file: string, type: string) => {
+    const response = await fetch(`${app.base}${file}`);
+    if (response.status !== 200 || !(response.headers.get('content-type') ?? '').startsWith(type)) throw new Error(`${file}: ${response.status} ${response.headers.get('content-type')}`);
+    return response.text();
+  };
+  const css = (await Promise.all(styles.map((file) => read(file, 'text/css')))).join('\n');
+  const js = (await Promise.all(scripts.map((file) => read(file, 'text/javascript')))).join('\n');
+  return { html, styles, scripts, css, js };
+}
