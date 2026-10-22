@@ -3044,4 +3044,5 @@ It is not in the lane list of the [milestone 2 plan](milestone-2-plan.md): the l
 - `npm run typecheck` is green.
 - `npm run guard -- --base origin/v2` is green. It ran without a private-term list (`CLEARED_REPO` unset).
 
+- Pull request: 240, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-reviewer-policy`.
