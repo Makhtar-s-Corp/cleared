@@ -1,0 +1,305 @@
+[
+  {
+    "label": "tower",
+    "href": "/",
+    "via": "goto-fallback-goto",
+    "ttfb": 3,
+    "dcl": 98,
+    "load": 99,
+    "contentMs": 409,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "inbox",
+    "href": "/inbox",
+    "via": "click",
+    "ttfb": 5,
+    "dcl": 63,
+    "load": 65,
+    "contentMs": 531,
+    "blank": false,
+    "requests": 23
+  },
+  {
+    "label": "sessions",
+    "href": "/sessions",
+    "via": "click",
+    "ttfb": 8,
+    "dcl": 51,
+    "load": 53,
+    "contentMs": null,
+    "blank": true,
+    "requests": 22
+  },
+  {
+    "label": "lead",
+    "href": "/lead",
+    "via": "click-fallback-goto",
+    "ttfb": 3,
+    "dcl": 26,
+    "load": 27,
+    "contentMs": 215,
+    "blank": false,
+    "requests": 23
+  },
+  {
+    "label": "tower-back",
+    "href": "/",
+    "via": "click",
+    "ttfb": 5,
+    "dcl": 24,
+    "load": 24,
+    "contentMs": 186,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "session",
+    "href": "/sessions/8256bb5b-a89c-4794-8ece-cf76e6a647ca",
+    "via": "goto-fallback-goto",
+    "ttfb": 3,
+    "dcl": 33,
+    "load": 34,
+    "contentMs": 263,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "session-tab-plan",
+    "href": "#plan",
+    "via": "tab",
+    "contentMs": 73,
+    "requests": 0
+  },
+  {
+    "label": "session-tab-editor",
+    "href": "#editor",
+    "via": "tab",
+    "contentMs": 70,
+    "requests": 3
+  },
+  {
+    "label": "session-tab-browser",
+    "href": "#browser",
+    "via": "tab",
+    "contentMs": 69,
+    "requests": 0
+  },
+  {
+    "label": "session-tab-terminal",
+    "href": "#terminal",
+    "via": "tab",
+    "contentMs": 59,
+    "requests": 0
+  },
+  {
+    "label": "author-to-reviewer",
+    "href": "/sessions/207a3fd8-c455-46e1-b7c2-26ffd390f6d7",
+    "via": "click",
+    "contentMs": 216,
+    "requests": 25
+  },
+  {
+    "label": "tower",
+    "href": "/",
+    "via": "goto-fallback-goto",
+    "ttfb": 7,
+    "dcl": 25,
+    "load": 25,
+    "contentMs": 138,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "inbox",
+    "href": "/inbox",
+    "via": "click",
+    "ttfb": 6,
+    "dcl": 45,
+    "load": 46,
+    "contentMs": 371,
+    "blank": false,
+    "requests": 23
+  },
+  {
+    "label": "sessions",
+    "href": "/sessions",
+    "via": "click",
+    "ttfb": 28,
+    "dcl": 155,
+    "load": 157,
+    "contentMs": null,
+    "blank": true,
+    "requests": 22
+  },
+  {
+    "label": "lead",
+    "href": "/lead",
+    "via": "click-fallback-goto",
+    "ttfb": 3,
+    "dcl": 23,
+    "load": 24,
+    "contentMs": 211,
+    "blank": false,
+    "requests": 23
+  },
+  {
+    "label": "tower-back",
+    "href": "/",
+    "via": "click",
+    "ttfb": 4,
+    "dcl": 24,
+    "load": 24,
+    "contentMs": 192,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "session",
+    "href": "/sessions/8256bb5b-a89c-4794-8ece-cf76e6a647ca",
+    "via": "goto-fallback-goto",
+    "ttfb": 2,
+    "dcl": 25,
+    "load": 25,
+    "contentMs": 162,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "session-tab-plan",
+    "href": "#plan",
+    "via": "tab",
+    "contentMs": 70,
+    "requests": 0
+  },
+  {
+    "label": "session-tab-editor",
+    "href": "#editor",
+    "via": "tab",
+    "contentMs": 82,
+    "requests": 3
+  },
+  {
+    "label": "session-tab-browser",
+    "href": "#browser",
+    "via": "tab",
+    "contentMs": 64,
+    "requests": 0
+  },
+  {
+    "label": "session-tab-terminal",
+    "href": "#terminal",
+    "via": "tab",
+    "contentMs": 71,
+    "requests": 0
+  },
+  {
+    "label": "author-to-reviewer",
+    "href": "/sessions/207a3fd8-c455-46e1-b7c2-26ffd390f6d7",
+    "via": "click",
+    "contentMs": 217,
+    "requests": 25
+  },
+  {
+    "label": "tower",
+    "href": "/",
+    "via": "goto-fallback-goto",
+    "ttfb": 12,
+    "dcl": 28,
+    "load": 29,
+    "contentMs": 135,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "inbox",
+    "href": "/inbox",
+    "via": "goto-fallback-goto",
+    "ttfb": 2,
+    "dcl": 22,
+    "load": 24,
+    "contentMs": 130,
+    "blank": false,
+    "requests": 23
+  },
+  {
+    "label": "sessions",
+    "href": "/sessions",
+    "via": "goto-fallback-goto",
+    "ttfb": 5,
+    "dcl": 41,
+    "load": 42,
+    "contentMs": null,
+    "blank": true,
+    "requests": 22
+  },
+  {
+    "label": "lead",
+    "href": "/lead",
+    "via": "goto-fallback-goto",
+    "ttfb": 5,
+    "dcl": 23,
+    "load": 24,
+    "contentMs": 233,
+    "blank": false,
+    "requests": 23
+  },
+  {
+    "label": "tower-back",
+    "href": "/",
+    "via": "goto-fallback-goto",
+    "ttfb": 4,
+    "dcl": 25,
+    "load": 26,
+    "contentMs": 206,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "session",
+    "href": "/sessions/8256bb5b-a89c-4794-8ece-cf76e6a647ca",
+    "via": "goto-fallback-goto",
+    "ttfb": 3,
+    "dcl": 36,
+    "load": 37,
+    "contentMs": 200,
+    "blank": false,
+    "requests": 25
+  },
+  {
+    "label": "session-tab-plan",
+    "href": "#plan",
+    "via": "tab",
+    "contentMs": 67,
+    "requests": 0
+  },
+  {
+    "label": "session-tab-editor",
+    "href": "#editor",
+    "via": "tab",
+    "contentMs": 78,
+    "requests": 3
+  },
+  {
+    "label": "session-tab-browser",
+    "href": "#browser",
+    "via": "tab",
+    "contentMs": 56,
+    "requests": 0
+  },
+  {
+    "label": "session-tab-terminal",
+    "href": "#terminal",
+    "via": "tab",
+    "contentMs": 82,
+    "requests": 0
+  },
+  {
+    "label": "author-to-reviewer",
+    "href": "/sessions/207a3fd8-c455-46e1-b7c2-26ffd390f6d7",
+    "via": "click",
+    "contentMs": 247,
+    "requests": 25
+  }
+]
