@@ -1234,3 +1234,4 @@ The choices the lane makes:
 - The order and the proofs of the milestones do not change.
 
 - Author: the owner, relayed on 2026-10-22 06:45 (Europe/Paris); written in this log.
+- A second owner complement (a workspace is several services; a ticket can span several repositories) is recorded in [complement-multi-depots.md](complement-multi-depots.md); milestone 2 is being replanned to include it.
