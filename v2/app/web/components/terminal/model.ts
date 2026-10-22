@@ -7,14 +7,20 @@
 //     then one TerminalClosed); a chunk is written once, by its seq, so a
 //     reconnection that replays what was missed writes nothing twice.
 //   - The terminal is the signed-in user's who took the session over, on
-//     the app's loopback address only (Me.terminal); elsewhere the tab shows
-//     the command that resumes the session on the server, and why.
+//     the app's loopback address only (Me.terminal); elsewhere the tab says
+//     why, and gives no command to run on the server (owner request of
+//     2026-10-22 17:26).
+//   - It runs the session's own harness first, resumed on the session
+//     through its adapter; Shell, the second choice, closes it and opens a
+//     shell in the container, and a button goes back. A harness its adapter
+//     cannot resume says why, with the Shell beside it.
 //   - xterm writes <style> elements and colour attributes the page's policy
 //     refuses without its nonce: the two shims of lib/style-nonce.ts are
 //     held while a terminal is mounted, installed once for the screen, so
 //     a second mount (React's StrictMode, another terminal) can never remove
 //     them from under a live one.
-import { TERMINAL_INPUT_MAX_BYTES, type TerminalChunk, type TerminalClosed } from '../../../../src/api/types.ts';
+import { TERMINAL_INPUT_MAX_BYTES, type TerminalChunk, type TerminalClosed, type TerminalMode } from '../../../../src/api/types.ts';
+import type { Harness } from '../../../../src/session/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError } from '../../lib/screen.ts';
 import { installStyleAttributeCssom, installStyleNonce } from '../../lib/style-nonce.ts';
@@ -116,20 +122,30 @@ export class InputBatcher {
 
 export type TerminalChoice =
   | { readonly kind: 'web' }                                                // the web terminal
-  | { readonly kind: 'command'; readonly why: 'here_only' | 'other' }      // the command on the server, and why
+  | { readonly kind: 'notice'; readonly why: 'here_only' | 'other' }       // the notice only, and why
   | { readonly kind: 'none' };                                              // not taken over
 
 export function terminalChoice(options: { readonly offered: boolean | undefined; readonly takeover: TakeoverView }): TerminalChoice {
-  if (options.takeover.kind === 'other') return { kind: 'command', why: 'other' };
+  if (options.takeover.kind === 'other') return { kind: 'notice', why: 'other' };
   if (options.takeover.kind !== 'mine') return { kind: 'none' };
-  return options.offered === true ? { kind: 'web' } : { kind: 'command', why: 'here_only' };
+  return options.offered === true ? { kind: 'web' } : { kind: 'notice', why: 'here_only' };
 }
+
+// ------------------------------------------------------------------ modes
+
+export const DEFAULT_MODE: TerminalMode = 'harness';
+export const otherMode = (mode: TerminalMode): TerminalMode => (mode === 'harness' ? 'shell' : 'harness');
+
+// The harness's name before the service says it (TerminalOpened.name).
+const HARNESS_NAMES: Readonly<Record<Harness, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+export const harnessName = (harness: Harness): string => HARNESS_NAMES[harness] ?? harness;
 
 // ----------------------------------------------------------------- stream
 
 // lost: the stream gave up (the terminal ended while it was away);
-// refused: the open was refused, with the service's reason.
-export type CloseReason = TerminalClosed['reason'] | 'lost' | 'refused';
+// refused: the open was refused, with the service's reason;
+// unsupported: the harness cannot be resumed here, with the adapter's reason.
+export type CloseReason = TerminalClosed['reason'] | 'lost' | 'refused' | 'unsupported';
 export type TerminalStatus =
   | { readonly kind: 'opening' }
   | { readonly kind: 'open'; readonly cols: number; readonly rows: number }
@@ -137,19 +153,23 @@ export type TerminalStatus =
 
 export const freshChunk = (lastSeq: number, chunk: Pick<TerminalChunk, 'seq'>): boolean => chunk.seq > lastSeq;
 
-export const closedLine = (reason: CloseReason, t: Translate): string => t(`terminal_closed_${reason}`);
+// The harness's own exit is said apart from the shell's.
+export const closedLine = (reason: CloseReason, t: Translate, mode: TerminalMode = 'shell'): string =>
+  t(reason === 'exit' && mode === 'harness' ? 'terminal_closed_exit_harness' : `terminal_closed_${reason}`);
 
 // ----------------------------------------------------------------- routes
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type OpenResult =
-  | { readonly kind: 'opened'; readonly cols: number; readonly rows: number; readonly resume: string }
-  | { readonly kind: 'attach' }                                             // already open: a reload of the page
+  | { readonly kind: 'opened'; readonly cols: number; readonly rows: number; readonly mode: TerminalMode; readonly name?: string }
+  | { readonly kind: 'attach'; readonly mode: TerminalMode }               // already open, in that mode: a reload of the page
+  | { readonly kind: 'unsupported'; readonly reason: string }              // the harness cannot be resumed here: the Shell can
   | { readonly kind: 'refused'; readonly reason: string };
 
+type ErrorBody = { error?: unknown; mode?: unknown };
+const errorText = (body: ErrorBody, status: number): string => (typeof body.error === 'string' ? body.error : String(status));
 async function errorOf(response: Response): Promise<string> {
-  const body = await response.json().catch(() => ({})) as { error?: unknown };
-  return typeof body.error === 'string' ? body.error : String(response.status);
+  return errorText(await response.json().catch(() => ({})) as ErrorBody, response.status);
 }
 
 // The terminal's routes through the app (/api/service/...), each post with
@@ -167,17 +187,20 @@ export function terminalApi(session: string, csrf: string, fetcher: Fetch = (url
   };
   return {
     streamUrl: `${root}/stream`,
-    async open(size: { readonly cols: number; readonly rows: number }): Promise<OpenResult> {
-      const response = await post('open', size);
+    async open(size: { readonly cols: number; readonly rows: number }, mode: TerminalMode): Promise<OpenResult> {
+      const response = await post('open', { ...size, mode });
       if (response.ok) {
-        const opened = await response.json() as { cols: number; rows: number; resume: string };
-        return { kind: 'opened', cols: opened.cols, rows: opened.rows, resume: opened.resume };
+        const opened = await response.json() as { cols: number; rows: number; mode?: TerminalMode; name?: string };
+        return { kind: 'opened', cols: opened.cols, rows: opened.rows, mode: opened.mode ?? mode, ...(opened.name ? { name: opened.name } : {}) };
       }
-      if (response.status === 409) return { kind: 'attach' };
-      return { kind: 'refused', reason: await errorOf(response) };
+      const body = await response.json().catch(() => ({})) as ErrorBody;
+      if (response.status === 409) return { kind: 'attach', mode: body.mode === 'harness' || body.mode === 'shell' ? body.mode : mode };
+      if (response.status === 501) return { kind: 'unsupported', reason: errorText(body, response.status) };
+      return { kind: 'refused', reason: errorText(body, response.status) };
     },
     input: (data: string) => accepted('input', { data }),
     resize: (size: { readonly cols: number; readonly rows: number }) => accepted('resize', size),
+    close: () => accepted('close', {}),
   };
 }
 

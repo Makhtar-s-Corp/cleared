@@ -1,7 +1,10 @@
 // The web terminal's routes (docs/v2/milestone-2-plan.md, decision 32, lane
 // 31), registered by the flow module:
 //
-//   POST /api/sessions/:id/terminal/open    { cols, rows } -> TerminalOpened
+//   POST /api/sessions/:id/terminal/open    { cols, rows, mode? } -> TerminalOpened
+//        mode: 'harness' (the default: the session's own harness, resumed on
+//        the session through its adapter; 501 with why when the adapter
+//        cannot) or 'shell' (owner request of 2026-10-22 17:26)
 //   POST /api/sessions/:id/terminal/input   { data }, at most TERMINAL_INPUT_MAX_BYTES
 //   POST /api/sessions/:id/terminal/resize  { cols, rows }
 //   POST /api/sessions/:id/terminal/close
@@ -12,11 +15,11 @@
 // The checks, in this order: the app's proof (401); the flow (503); a user
 // the service knows, and never the flow's own identity nor the lead's (403);
 // the session (404); a session taken over (409); by this user (403); then
-// one terminal at a time (409). The app answers these routes only on its
+// one terminal at a time (409, with the mode of the one open). The app answers these routes only on its
 // loopback address, with its anti-forgery checks (app/src/server.ts); no
 // host tool of the lead or of an author names them.
 import type { IncomingMessage } from 'node:http';
-import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, TERMINAL_INPUT_MAX_BYTES, type TerminalChunk, type TerminalClosed } from '../api/types.ts';
+import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, TERMINAL_INPUT_MAX_BYTES, TERMINAL_MODES, type TerminalChunk, type TerminalClosed, type TerminalMode } from '../api/types.ts';
 import type { FlowEngine } from '../flow/engine.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
@@ -81,6 +84,11 @@ export async function humanUser(context: RouteContext, proof: string): Promise<U
 }
 
 const size = (body: Record<string, unknown>) => ({ cols: body.cols as number, rows: body.rows as number });
+const modeOf = (body: Record<string, unknown>): TerminalMode => {
+  if (body.mode === undefined) return 'harness';
+  if (!TERMINAL_MODES.includes(body.mode as TerminalMode)) throw new HttpError(400, `mode is ${TERMINAL_MODES.join(' or ')}`);
+  return body.mode as TerminalMode;
+};
 
 export function terminalRoutes(deps: TerminalRouteDeps): Route[] {
   const route = (run: (human: HumanSide, user: UserId, id: SessionId, context: RouteContext) => Promise<void>): Route['handle'] => async (context) => {
@@ -99,7 +107,10 @@ export function terminalRoutes(deps: TerminalRouteDeps): Route[] {
     } catch (error) {
       if (context.response.headersSent) { context.response.end(); return; }
       if (error instanceof HttpError) answer(context, error.status, { error: error.message });
-      else if (error instanceof TerminalError) answer(context, error.kind === 'conflict' ? 409 : 400, { error: error.message });
+      else if (error instanceof TerminalError) {
+        const status = error.kind === 'conflict' ? 409 : error.kind === 'unsupported' ? 501 : 400;
+        answer(context, status, { error: error.message, ...(error.mode ? { mode: error.mode } : {}) });
+      }
       else throw error;
     }
   };
@@ -108,7 +119,8 @@ export function terminalRoutes(deps: TerminalRouteDeps): Route[] {
     {
       method: 'POST', path: '/api/sessions/:id/terminal/open',
       handle: route(async (human, user, id, context) => {
-        answer(context, 200, await human.terminals.open(id, user, size(await readBody(context.request))));
+        const body = await readBody(context.request);
+        answer(context, 200, await human.openTerminal(id, user, size(body), modeOf(body)));
       }),
     },
     {

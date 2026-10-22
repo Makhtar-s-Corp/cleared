@@ -98,10 +98,24 @@ export type Answer = {
 // ACP StopReason values, plus 'error' for a harness process that died.
 export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled' | 'error';
 
+// The harness's own interactive program, resumed on a session for the human
+// who took it over, at the web terminal in the session's container (owner
+// request of 2026-10-22 17:26): what to run there (fixed words, the session
+// and its model, never a secret), and the harness's name; or why this
+// harness has none, said in the terminal, where the Shell is offered instead.
+export type InteractiveResume =
+  | { readonly supported: true; readonly name: string; readonly command: readonly string[] }
+  | { readonly supported: false; readonly reason: string };
+
 export interface SessionAdapter {
   readonly harness: Harness;
   start(input: StartInput): Promise<SessionHandle>;        // ACP: initialize, then session/new
   resume(id: SessionId): Promise<SessionHandle>;           // ACP: session/resume (sessionCapabilities.resume) or session/load
+  // Optional: an adapter without it has no interactive resume. When it
+  // answers supported, the session's own harness process has been handed
+  // over (only one harness writes the session at a time), and resume()
+  // takes it back from the transcript the human's harness left.
+  interactive?(id: SessionId): Promise<InteractiveResume>;
 }
 
 export interface SessionHandle {
@@ -118,6 +132,21 @@ export interface SessionHandle {
 // whatever the harness calls the tool.
 export type ToolKind = 'read' | 'edit' | 'delete' | 'move' | 'search' | 'execute' | 'think' | 'fetch' | 'switch_mode' | 'other';
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+// The adapter's interactive resume, or why there is none: an adapter
+// without the method (Codex and Cursor until theirs come) or with no
+// adapter at all is unsupported, and so is one that fails, whose error
+// stays on the host.
+export async function interactiveResume(adapter: SessionAdapter | undefined, id: SessionId): Promise<InteractiveResume> {
+  if (!adapter) return { supported: false, reason: 'This session has no harness adapter here: open the Shell instead.' };
+  if (!adapter.interactive) return { supported: false, reason: `The ${adapter.harness} harness cannot be resumed in a terminal yet: open the Shell instead.` };
+  try {
+    return await adapter.interactive(id);
+  } catch (error) {
+    console.error(`cleared-v2: the ${adapter.harness} harness of session ${id} could not be resumed in a terminal (${error instanceof Error ? error.name : typeof error})`);
+    return { supported: false, reason: `The ${adapter.harness} harness could not be resumed in a terminal: open the Shell instead.` };
+  }
+}
 
 // What a later milestone brings, asked for too early.
 export class NotImplemented extends Error {

@@ -24,9 +24,15 @@ test('the tower\'s fixture source: the terminal of a session taken over, its str
 
     assert.equal((await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 80, rows: 24 } })).status, 409, 'not taken over');
     assert.equal((await api(`/sessions/${id}/takeover`, { method: 'POST' })).status, 200);
-    const opened = await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 100, rows: 30 } });
-    assert.deepEqual(await opened.json(), { opened: true, cols: 100, rows: 30, resume: `claude --resume ${author.id}` });
-    assert.equal((await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 100, rows: 30 } })).status, 409, 'one at a time');
+    // Take over opens the session's harness first (owner request of 2026-10-22 17:26), the shell on request.
+    const harness = await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 100, rows: 30 } });
+    assert.deepEqual(await harness.json(), { opened: true, cols: 100, rows: 30, mode: 'harness', name: 'Claude Code' });
+    const again = await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 100, rows: 30, mode: 'shell' } });
+    assert.equal(again.status, 409, 'one at a time');
+    assert.equal((await again.json() as { mode: string }).mode, 'harness', 'the open says which terminal is open');
+    assert.equal((await api(`/sessions/${id}/terminal/close`, { method: 'POST' })).status, 200);
+    const opened = await api(`/sessions/${id}/terminal/open`, { method: 'POST', body: { cols: 100, rows: 30, mode: 'shell' } });
+    assert.deepEqual(await opened.json(), { opened: true, cols: 100, rows: 30, mode: 'shell' });
     assert.equal((await api(`/sessions/${id}/terminal/input`, { method: 'POST', body: { data: 'ls\r' } })).status, 200);
     assert.equal((await api(`/sessions/${id}/terminal/input`, { method: 'POST', body: { data: 'x'.repeat(4097) } })).status, 413);
 
@@ -38,6 +44,7 @@ test('the tower\'s fixture source: the terminal of a session taken over, its str
     while (!text.includes('upcoming.test.mjs')) text += new TextDecoder().decode((await reader.read()).value);
     assert.match(text, /^id: 1\nevent: data\ndata: \{"seq":1,/);
     assert.match(text, /256 colours/);
+    assert.doesNotMatch(text, /docker exec|on the server|claude --resume/);
 
     // The save: the loaded hash writes, the same hash again is stale.
     const path = 'src/engine/upcoming.mjs';

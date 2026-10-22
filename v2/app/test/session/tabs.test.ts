@@ -7,7 +7,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SessionPlan } from '../../../src/api/types.ts';
-import { sessionNames } from '../../../src/container/session-runtime.ts';
 import { STEP_NAMES } from '../../../src/session/events.ts';
 import { AUTHOR_ID, FIXTURE_FILES, PREVIEW_KEY, SESSION_PLAN, USER, sessionFixture } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
@@ -15,8 +14,9 @@ import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { applyAll, emptyModel, threadOf } from '../../web/screens/session/model.ts';
 import {
-  CHANGE_MAX, DEFAULT_TAB, TABS, browserView, changeProblem, containerName, cutNote, diffCounts, goLine, lineDiff, nextTab, planView, resumeCommand, serviceLine, tabOf, takeoverOf,
+  CHANGE_MAX, DEFAULT_TAB, TABS, browserView, changeProblem, cutNote, diffCounts, goLine, lineDiff, nextTab, planView, serviceLine, tabOf, takeoverOf,
 } from '../../web/screens/session/tabs.ts';
+import * as tabs from '../../web/screens/session/tabs.ts';
 
 const en = translator(loadCatalog('session', 'en'));
 const fr = translator(loadCatalog('session', 'fr'));
@@ -79,9 +79,10 @@ test('the Plan tab: the plan, its confidence and reason; Go and Change while it 
   assert.equal(changeProblem('Test the empty list too.'), undefined);
 });
 
-test('the Terminal tab: Take over for the author of a live session, and the command with its container once taken over', () => {
-  assert.equal(containerName(AUTHOR_ID), sessionNames(AUTHOR_ID).container, 'the container\'s name is the runtime\'s');
-  assert.equal(resumeCommand('s-1'), 'docker exec -it cleared-v2-s-1-session claude --resume s-1');
+test('the Terminal tab: Take over for the author of a live session; no command to run on the server once taken over', () => {
+  // The owner's request of 2026-10-22 17:26: the docker exec command is gone from the screen.
+  assert.equal('resumeCommand' in tabs, false);
+  assert.equal('containerName' in tabs, false);
   assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'author', ended: false }), { kind: 'free', can: true });
   assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'reviewer', ended: false }), { kind: 'free', can: false });
   assert.deepEqual(takeoverOf({ takenOver: null, me: USER, role: 'author', ended: true }), { kind: 'free', can: false });

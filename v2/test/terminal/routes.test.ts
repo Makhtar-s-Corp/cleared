@@ -92,17 +92,17 @@ test('the terminal routes ask for the proof, a person who took the session over,
 
     assert.equal((await post(h, `/api/sessions/${h.session}/takeover`, as('u1'))).status, 200);
     await h.engine.settled();
-    assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, as('u2'), { cols: 80, rows: 24 })).status, 403, 'another signed-in account');
-    assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 0, rows: 24 })).status, 400, 'a size that is not one');
-    const opened = await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 100, rows: 30 });
-    assert.deepEqual(opened, { status: 200, json: { opened: true, cols: 100, rows: 30, resume: `claude --resume ${h.session}` } });
+    assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, as('u2'), { cols: 80, rows: 24, mode: 'shell' })).status, 403, 'another signed-in account');
+    assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 0, rows: 24, mode: 'shell' })).status, 400, 'a size that is not one');
+    const opened = await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 100, rows: 30, mode: 'shell' });
+    assert.deepEqual(opened, { status: 200, json: { opened: true, cols: 100, rows: 30, mode: 'shell' } });
     assert.deepEqual(h.container.terminals[0]?.sizes, [{ cols: 100, rows: 30 }]);
-    assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 100, rows: 30 })).status, 409, 'a second open');
+    assert.equal((await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 100, rows: 30, mode: 'shell' })).status, 409, 'a second open');
     assert.equal(h.container.terminals.length, 1);
     assert.equal((await post(h, `/api/sessions/${h.session}/terminal/input`, as('u1'), { data: 'x'.repeat(TERMINAL_INPUT_MAX_BYTES + 1) })).status, 413);
     assert.deepEqual(await post(h, `/api/sessions/${h.session}/terminal/resize`, as('u1'), { cols: 120, rows: 40 }), { status: 200, json: { accepted: true } });
     assert.deepEqual(h.container.terminals[0]?.sizes.at(-1), { cols: 120, rows: 40 });
-    assert.deepEqual(terminalEvents(h)[0], { name: 'cleared.terminal_opened', value: { by: 'u1', cols: 100, rows: 30 } });
+    assert.deepEqual(terminalEvents(h)[0], { name: 'cleared.terminal_opened', value: { by: 'u1', cols: 100, rows: 30, mode: 'shell' } });
   } finally {
     await h.close();
   }
@@ -111,7 +111,7 @@ test('the terminal routes ask for the proof, a person who took the session over,
 test('a typed line reaches the shell\'s input and the journal once, cleaned as a whole even when typed in three posts; the output is never journaled', async () => {
   const h = await harness();
   try {
-    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24 });
+    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24, mode: 'shell' });
     // A key of the guard's patterns, made here so that no line of the file holds one.
     const secret = ['sk', 'ant', 'api', 'abcdefghijklmnopqrstuvwxyzABCDEFGH'].join('-');
     for (const data of [`export KEY=${secret.slice(0, 9)}`, secret.slice(9, 30), `${secret.slice(30)}`]) {
@@ -162,13 +162,13 @@ test('the stream sends the output in order, what a reconnection missed, then the
   const h = await harness();
   try {
     assert.equal((await stream(h)).status, 409, 'no terminal open');
-    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24 });
+    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24, mode: 'shell' });
     const terminal = h.container.terminals[0]!;
     terminal.print('one\r\n');
     const first = await stream(h);
     assert.equal(first.status, 200);
     await until(() => first.frames().includes('one'), 'the kept output');
-    assert.match(first.frames(), /^id: 1\nevent: data\ndata: \{"seq":1,"data":".*claude --resume/m, 'the first line names the resume command');
+    assert.match(first.frames(), /^id: 1\nevent: data\ndata: \{"seq":1,"data":".*A shell in the session's container/m, 'the first line says what runs');
     terminal.print('two\r\n');
     await until(() => first.frames().includes('two'), 'the live output');
     const again = await stream(h, { 'last-event-id': '2' });
@@ -186,7 +186,7 @@ test('the stream sends the output in order, what a reconnection missed, then the
 test('15 minutes without input close the terminal, and the session stays paused; the shell\'s exit closes it too', async () => {
   const h = await harness();
   try {
-    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24 });
+    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24, mode: 'shell' });
     h.clock.now += 14 * 60_000;
     await post(h, `/api/sessions/${h.session}/terminal/input`, as('u1'), { data: 'ls\r' });
     h.clock.now += 14 * 60_000;
@@ -198,7 +198,7 @@ test('15 minutes without input close the terminal, and the session stays paused;
     assert.deepEqual(terminalEvents(h).at(-1), { name: 'cleared.terminal_closed', value: { by: 'system', reason: 'idle', outputBytes: 0 } });
     assert.equal(h.engine.takenOver(h.session)?.by, 'u1', 'still taken over');
 
-    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24 });
+    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24, mode: 'shell' });
     h.container.terminals[1]!.exit();
     await until(() => h.human.terminals.openBy(h.session) === undefined, 'the close at the exit');
     assert.equal((terminalEvents(h).at(-1)?.value as { reason: string }).reason, 'exit');
@@ -210,7 +210,7 @@ test('15 minutes without input close the terminal, and the session stays paused;
 test('Give back closes the terminal before the session resumes', async () => {
   const h = await harness();
   try {
-    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24 });
+    await post(h, `/api/sessions/${h.session}/terminal/open`, as('u1'), { cols: 80, rows: 24, mode: 'shell' });
     await post(h, `/api/sessions/${h.session}/terminal/input`, as('u1'), { data: 'git status\r' });
     assert.equal((await post(h, `/api/sessions/${h.session}/giveback`, as('u1'))).status, 200);
     assert.equal(h.container.terminals[0]?.ended, 1);

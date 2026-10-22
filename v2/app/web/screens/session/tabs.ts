@@ -2,8 +2,9 @@
 // lane 20), as pure functions the tests run under Node:
 //   Plan: the session plan (lane 17) with its confidence, Go and Change;
 //   Terminal: the timeline and the composer of milestone 1; once the owner
-//     took the session over, the command that resumes it on the server
-//     (lane 32 mounts the web terminal beside it: components/terminal/);
+//     took the session over, the web terminal on its harness (no command to
+//     run on the server: owner request of 2026-10-22 17:26; lane 32's
+//     components/terminal/);
 //   Editor: the changed files and a file's diff against the ticket's base,
 //     opened for editing by lane 32 (components/editor/);
 //   Browser: the session's trial environment from the preview listener's
@@ -65,12 +66,6 @@ export function changeProblem(text: string): 'empty' | 'too_long' | undefined {
 }
 
 // --------------------------------------------------------------- terminal
-
-export const containerName = (session: string): string => `cleared-v2-${session}-session`;
-
-// What resumes the session in a terminal on the server (decision 30): the
-// harness's own session id is Cleared's (images/session/runner/main.ts).
-export const resumeCommand = (session: string): string => `docker exec -it ${containerName(session)} claude --resume ${session}`;
 
 export type TakeoverView =
   | { readonly kind: 'free'; readonly can: boolean }        // can: Take over is offered
