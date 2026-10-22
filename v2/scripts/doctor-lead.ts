@@ -3,9 +3,10 @@
 // is named. One check: a real generation of the lead on this server, in a
 // container labelled cleared.dev=v2, on the doctor's model (claude-haiku-5-5
 // by default), with one owner message, one commit, a refresh forced by a
-// threshold of 2 % (so it comes after the first real turn, regardless of
-// actual token window size), and the next generation answering a question
-// about the commitment from its briefing.
+// threshold derived from the measured opening share plus 1%, and the next
+// generation answering a question about the commitment from its briefing.
+// This ensures the first owner turn triggers a refresh regardless of actual
+// token window size (opening is 8% on 200k, 2.3% on 1M).
 //
 // It needs lane 4's runner (the host tools and the context line); before
 // that runner is in the image, the commit never reaches the host and the
@@ -62,12 +63,20 @@ const realGeneration: DoctorLeadCheck = {
     const scratch = mkdtempSync(join(tmpdir(), 'cleared-doctor-lead-'));
     const store = openStore(':memory:');
     applyTables(store.db, [INBOX_TABLE, ...LEAD_TABLES]);
+
+    let measuredOpeningPercent: number | undefined;
     const log = {
       append: (entry: Parameters<typeof store.events.append>[0]) => {
         const event = store.events.append(entry);
         const e = event.event;
-        if (e.type === 'CUSTOM') say(`event ${e.name} ${JSON.stringify(e.value).slice(0, 300)}`);
-        else if (e.type === 'RUN_FINISHED') say(`event RUN_FINISHED ${JSON.stringify(e.result)}`);
+        if (e.type === 'CUSTOM') {
+          if (e.name === 'cleared.context_usage' && measuredOpeningPercent === undefined) {
+            // Record the opening share on first measure
+            measuredOpeningPercent = (e.value as { percent?: number }).percent;
+            say(`opening share ${measuredOpeningPercent}%, derive threshold from this`);
+          }
+          say(`event ${e.name} ${JSON.stringify(e.value).slice(0, 300)}`);
+        } else if (e.type === 'RUN_FINISHED') say(`event RUN_FINISHED ${JSON.stringify(e.result)}`);
         else if (e.type === 'RUN_ERROR') say(`event RUN_ERROR ${e.message.slice(0, 300)}`);
         else if (e.type === 'TEXT_MESSAGE_CONTENT') say(`event text ${e.delta.slice(0, 200).replace(/\s+/g, ' ')}`);
         return event;
@@ -75,10 +84,17 @@ const realGeneration: DoctorLeadCheck = {
       after: store.events.after,
     };
     let workdirs = 0;
+
+    // Thresholds derived from opening: use fixed percentages that work across window sizes
+    // Opening is typically 8% on 200k window, 2.3% on 1M window
+    // Use: handover at opening + 0.5%, threshold at opening + 1%
+    // This fails on old code where it was hardcoded at 40%/50%
+    const config = { enabled: true, model, contextPercent: 50, handoverPercent: 40, batchMs: 60_000 };
+
     const lead = new LeadEngine({
       store: { db: store.db, events: log, sessions: store.sessions }, inbox: new InboxStore(store.db), flow: quietFlow(),
       adapter: createClaudeCodeAdapter({ log, runtime, cleaner: () => createCleaner({ servicePaths: [runtime.stateDir, homedir(), scratch] }) }),
-      config: { enabled: true, model, contextPercent: 2, handoverPercent: 1, batchMs: 60_000 },
+      config,
       project: { name: 'doctor', base: 'main', workdir: join(scratch, 'lead') },
       effects: {
         async prepareWorkdir() {
@@ -95,12 +111,20 @@ const realGeneration: DoctorLeadCheck = {
     try {
       await lead.start();
       if (!await until(() => lead.state().phase === 'idle', 240_000)) return { ok: false, detail: `the first generation did not become idle (${lead.state().phase})` };
-      say(`generation 1 idle, context ${JSON.stringify(lead.state().context)}`);
+      say(`generation 1 idle, context ${JSON.stringify(lead.state().context)}, opening ${measuredOpeningPercent}%`);
+
+      // Update config thresholds based on measured opening
+      if (measuredOpeningPercent !== undefined) {
+        config.contextPercent = measuredOpeningPercent + 1;
+        config.handoverPercent = measuredOpeningPercent + 0.5;
+        say(`adjusted thresholds: handover ${config.handoverPercent}%, threshold ${config.contextPercent}%`);
+      }
+
       await lead.post('Promise me that tomorrow at 08:00 you will remind me to check the texts of the page. Record it with the commit tool, then answer in one sentence.', 'doctor');
       if (!await until(() => lead.store.openCommitments().length > 0, 240_000)) return { ok: false, detail: 'no commitment was recorded: is lane 4\'s runner in the image?' };
       const commitment = lead.store.openCommitments()[0];
       say(`commitment ${commitment?.id}: ${commitment?.text}`);
-      if (!await until(() => lead.state().generation === 2 && lead.state().phase === 'idle', 300_000)) return { ok: false, detail: `no refresh at 5 % (generation ${lead.state().generation}, ${lead.state().phase})` };
+      if (!await until(() => lead.state().generation === 2 && lead.state().phase === 'idle', 300_000)) return { ok: false, detail: `no refresh at ${config.contextPercent}% (generation ${lead.state().generation}, ${lead.state().phase})` };
       say(`generation 2 idle after a refresh; handover ${JSON.stringify(lead.memory().handover)}`);
       const before = lead.messages().length;
       await lead.post('Which commitment do you have open? Give its id and what it says.', 'doctor');
