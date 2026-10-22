@@ -5,13 +5,15 @@
 import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import type { FlowConfig } from '../../src/flow/config.ts';
 import { parseServices } from '../../src/container/services.ts';
+import { RUNS_TABLES } from '../../src/approval/review.ts';
 import { InboxStore, INBOX_TABLE } from '../../src/inbox/store.ts';
 import { MemoryApprovalWriter, MemoryReviewRecorder, MemoryUsers } from '../../src/modules/registry.ts';
 import { createFakeAdapter, type FakeStep } from '../../src/session/adapters/fake.ts';
 import type { SessionAdapter, SessionHandle, SessionId, StartInput } from '../../src/session/contract.ts';
 import type { AgUiEvent, SessionEvent } from '../../src/session/events.ts';
-import { openStore, type Store } from '../../src/store/db.ts';
+import { applyTables, openStore, type Store } from '../../src/store/db.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
+import type { FlowEvent } from '../../src/flow/events.ts';
 
 export const REPORT_PASS = 'I read the change.\n\nVerdict: “no blocking issues”\nDefects: none\nTo verify: nothing\nQuestions for the user: None.';
 export const REPORT_FIX = 'I read the change.\n\nVerdict: “fix before merge”\nDefects: src/entries.ts:3 sorts the wrong way\nTo verify: nothing\nQuestions for the user: None.';
@@ -87,6 +89,7 @@ export function fakeEffects(calls: Calls, overrides: Partial<FlowEffects> = {}):
     async publish(input) { calls.push(`publish:${input.ticket}`); return { url: 'https://example.invalid/pull/7', number: 7, head: 'abc123', created: true }; },
     async requestRelease(input) { calls.push(`requestRelease:${input.ticket}:${input.pr}`); return {}; },
     async prChecks() { return 'passed'; },
+    async mergeRelease(input) { calls.push(`mergeRelease:${input.ticket}:${input.pr}`); return { outcome: 'merged', message: '' }; },
     ...overrides,
   };
 }
@@ -94,14 +97,20 @@ export function fakeEffects(calls: Calls, overrides: Partial<FlowEffects> = {}):
 export const CONFIG: FlowConfig = {
   project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://example.invalid/guestbook.git', repo: 'example-org/cleared-example-guestbook',
   base: 'main', workdirRoot: '/work', authorModel: 'claude-opus-5-5', reviewerModel: 'claude-sonnet-5-5',
-  idleMs: 15 * 60 * 1000, maxReviewRounds: 2, budgetUsd: undefined,
+  idleMs: 15 * 60 * 1000, maxReviewRounds: 2, budgetUsd: undefined, mergeRetryMs: 60_000,
 };
 
 export type Setup = Awaited<ReturnType<typeof setup>>;
 
-export async function setup(options: { scripts?: Scripts; config?: Partial<FlowConfig>; effects?: Partial<FlowEffects>; adapterless?: boolean } = {}) {
+export type SetupOptions = {
+  scripts?: Scripts; config?: Partial<FlowConfig>; effects?: Partial<FlowEffects>; adapterless?: boolean;
+  ledger?: boolean;                       // the v1 events table the lock and the release watch write; true by default
+};
+
+export async function setup(options: SetupOptions = {}) {
   const store = openStore(':memory:');
   store.db.exec(INBOX_TABLE);
+  if (options.ledger !== false) applyTables(store.db, [...RUNS_TABLES, RELEASES_TABLE]);
   const clock = { now: Date.parse('2026-10-21T10:00:00.000Z') };
   const tickets = new MemoryTicketStore({ now: () => new Date(clock.now).toISOString() });
   const users = new MemoryUsers();
@@ -120,8 +129,44 @@ export async function setup(options: { scripts?: Scripts; config?: Partial<FlowC
     now: () => new Date(clock.now),
   };
   const engine = new FlowEngine(deps);
+  const flowEvents: FlowEvent[] = [];
+  engine.subscribe((event) => { flowEvents.push(event); });
   const ticket: Ticket = await tickets.create({ title: 'Newest entry first', body: 'The guestbook lists entries newest first.', project: 'guestbook' }, { kind: 'human', id: 'u1' });
-  return { deps, store, clock, tickets, users, recorder, approvals, calls, startedSessions, inbox, registry, engine, ticket };
+  return { deps, store, clock, tickets, users, recorder, approvals, calls, startedSessions, inbox, registry, engine, ticket, flowEvents };
+}
+
+// lib/release.mjs's table of the releases it watches, as it creates it (a
+// test of landing.test.ts keeps the two texts the same).
+export const RELEASES_TABLE = `CREATE TABLE IF NOT EXISTS releases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ticket TEXT NOT NULL, pr INTEGER NOT NULL,
+  merge_sha TEXT NOT NULL UNIQUE, title TEXT NOT NULL, merged_at TEXT NOT NULL,
+  status TEXT NOT NULL, failures INTEGER NOT NULL DEFAULT 0, last_health TEXT,
+  rollback_sha TEXT, planned_rollback_sha TEXT, rollback_pushed_at TEXT, ended_at TEXT, notified_at TEXT,
+  watch_pid INTEGER
+)`;
+
+// A release as lib/release.mjs keeps it: one row per merge, its status the watch's verdict.
+export function releaseRow(store: Store, row: { ticket: string; pr: number; status: string; mergedAt: string; lastHealth?: string; endedAt?: string }): void {
+  store.db.prepare('INSERT INTO releases (ticket, pr, merge_sha, title, merged_at, status, last_health, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(row.ticket, row.pr, `${row.ticket}-${row.pr}-${row.mergedAt}`, 'Newest entry first', row.mergedAt, row.status, row.lastHealth ?? null, row.endedAt ?? null);
+}
+
+// A row of the v1 ledger's events table, as merge-pr.sh and lib/release.mjs write it.
+export function ledgerRow(store: Store, row: { kind: string; ticket: string; pr: number; at: string; detail?: string }): void {
+  store.db.prepare('INSERT INTO events (at, kind, ticket, detail, value, source) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(row.at, row.kind, row.ticket, row.detail ?? '', row.pr, 'dispatcher');
+}
+
+// Runs the ticket of `t` to the release waiting in the inbox, then the
+// human's approval as lane 8 writes it, and the tick that notices it.
+export async function approved(t: Setup, afterMs = 0): Promise<void> {
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release item', 5000);
+  await t.engine.settled();
+  t.clock.now += afterMs;
+  await t.tickets.recordApproval(t.ticket.id, { kind: 'human', id: 'u1' });
+  await t.engine.tick();
+  await t.engine.settled();
 }
 
 // Waits, in short real turns, until a condition holds.

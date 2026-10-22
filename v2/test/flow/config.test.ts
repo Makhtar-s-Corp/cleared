@@ -54,3 +54,11 @@ test('loadFlowConfig reads the environment and refuses what is missing or unsafe
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_PROJECT_DIR: 'relative' }), FlowConfigError);
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_REPO: 'not-owner-name' }), FlowConfigError);
 });
+
+test('CLEARED_V2_MERGE_RETRY_SECONDS spaces the merge retries, 60 seconds by default', () => {
+  const env = { CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO_URL: 'https://example.invalid/g.git', CLEARED_V2_REPO: 'example-org/g', CLEARED_V2_STATE_DIR: '/state' };
+  assert.equal(loadFlowConfig(env)?.mergeRetryMs, 60_000);
+  assert.equal(loadFlowConfig({ ...env, CLEARED_V2_MERGE_RETRY_SECONDS: '15' })?.mergeRetryMs, 15_000);
+  assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_MERGE_RETRY_SECONDS: '0' }), FlowConfigError);
+  assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_MERGE_RETRY_SECONDS: '2.5' }), FlowConfigError);
+});

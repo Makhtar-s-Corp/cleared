@@ -14,28 +14,45 @@
 // ticket store and recorders), so the tests run a whole ticket on the fake
 // adapter without git, gh, Docker or the broker.
 //
+// After the approval (docs/v2/milestone-2-plan.md, decision 12) the tick
+// follows the landing: a merge the lock queued is asked again every
+// CLEARED_V2_MERGE_RETRY_SECONDS, the `watch` step runs from the merge to
+// the release watch's verdict (read from the ledger, ledger.ts), and a
+// landed ticket is Done. A new engine stops what the last process left
+// running (recover). Everything that happens is said on the event bus
+// (events.ts, subscribe), after it is written.
+//
 // Where the steps are filed: the events of a session belong to that
 // session, so `workspace`, `author` and `waiting_human` go to the author's,
 // `review`, `release` and `approval` to the reviewer's (the last session of
-// the ticket). `workspace` is written after the adapter has started the
-// session, with the time it began, because the session's id does not exist
-// before.
+// the ticket), and `watch` with them. `workspace` is written after the
+// adapter has started the session, with the time it began, because the
+// session's id does not exist before.
+import { posix } from 'node:path';
 import type { PermissionItem, ReleaseItem, SessionDetail, SessionSummary } from '../api/types.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
 import type { Answer, Briefing, Decision, Role, SessionAdapter, SessionHandle, SessionId, StartInput, UserId } from '../session/contract.ts';
-import type { AgUiEvent, SessionEvent, SessionPhase, StepName } from '../session/events.ts';
+import { readToolInput, readToolOutput, type AgUiEvent, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
 import { ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
 import type { FlowConfig, ProjectSettings } from './config.ts';
+import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
+import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
 import { foldState } from './state.ts';
 
 export type { ProjectSettings } from './config.ts';
+export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
+
+// What the lock answered a merge (effects.ts mergeRelease): merged; not now
+// (a check still runs, the host is busy, another release goes on); refused
+// for good, with merge-pr.sh's reason; or the lock could not be asked.
+export type MergeOutcome = { readonly outcome: 'merged' | 'queued' | 'refused' | 'unavailable'; readonly message: string };
 
 // What the flow does outside this process.
 export type FlowEffects = {
@@ -47,10 +64,12 @@ export type FlowEffects = {
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
   prChecks(pr: number): Promise<ReleaseItem['pr']['checks']>;      // the pull request's checks on the forge now
+  // The lock's merge (`request_release` without --ask), after the human's approval.
+  mergeRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
 };
 
 export type FlowDeps = {
-  readonly store: Pick<Store, 'events' | 'sessions' | 'policyRules'>;
+  readonly store: Pick<Store, 'db' | 'events' | 'sessions' | 'policyRules'>;
   readonly inbox: InboxStore;
   readonly registry: Registry;
   readonly config: FlowConfig;
@@ -88,6 +107,25 @@ type Live = {
 
 type Watcher = { wait(ms: number): Promise<void>; close(): void };
 
+// A release the tick follows from the approval to its landing.
+// `inFlight`: a call to the lock, or the ticket's move at the end, is running.
+// `refused`: the lock refused the merge for good; what is left is the put back.
+type Following = { nextAttempt: number; inFlight: boolean; mergedAt?: string; refused?: string };
+type Candidate = {
+  readonly item: string; readonly ticket: TicketId; readonly status: string; readonly session: SessionId;
+  readonly pr: number; readonly announcement: string; readonly since: string;
+};
+
+const LIVE_PHASES: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
+const CHECKS_MS = 60_000;                                           // the forge is asked for a release's checks at most this often
+const LANDING_HORIZON_MS = 2 * 24 * 3600_000;                       // a Done ticket's release is followed for so long after its approval
+
+// A path the ticket changed, relative to the workdir; undefined outside it.
+function ticketPath(path: string): string | undefined {
+  const rel = posix.isAbsolute(path) ? posix.relative(WORKDIR_MOUNT, path) : posix.normalize(path);
+  return rel === '' || rel === '.' || rel.startsWith('..') || posix.isAbsolute(rel) ? undefined : rel;
+}
+
 const name = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 // What "Always in this project" remembers for a request: the thing asked.
@@ -117,6 +155,11 @@ export class FlowEngine {
   #handlers = new Set<Promise<unknown>>();
   #watchers = new Map<SessionId, Set<{ wake: () => void }>>();
   #timer: NodeJS.Timeout | undefined;
+  #listeners = new Set<FlowListener>();
+  #following = new Map<string, Following>();                        // by release item
+  #landed = new Set<string>();                                      // release items whose watch is closed: final
+  #checked = new Map<string, number>();                             // when a release's checks were last read
+  #files = new Map<SessionId, { seq: number; open: Map<string, string>; files: string[] }>();
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -145,9 +188,10 @@ export class FlowEngine {
     for (const set of this.#watchers.values()) for (const watcher of set) watcher.wake();
   }
 
-  // The idle stop, and the notice that a release was approved. A session
-  // that waits for the human is not idle: the request in the inbox would be
-  // lost with it, and the wait is the human's.
+  // The idle stop, the notice that a release was approved, and the
+  // landing of what was approved. A session that waits for the human is
+  // not idle: the request in the inbox would be lost with it, and the wait
+  // is the human's.
   async tick(): Promise<void> {
     const now = this.#now().getTime();
     for (const live of [...this.#live.values()]) {
@@ -155,31 +199,187 @@ export class FlowEngine {
       if (now - live.lastActivity < this.config.idleMs) continue;
       const minutes = Math.round(this.config.idleMs / 60_000);
       await this.#stopTicket(live, 'idle', `No activity for ${minutes} minutes: the session was stopped.`,
-        `The session stopped after ${minutes} minutes without activity. Move the ticket to Todo to start it again.`);
+        `The session stopped after ${minutes} minutes without activity. Move the ticket to Todo to start it again.`, 'stopped', 'idle');
     }
+    const tickets = this.registry.ticketStore;
     for (const release of this.inbox.waitingReleases()) {
-      const ticket = await this.registry.ticketStore.get(release.ticket);
-      if (ticket && ticket.status === this.registry.ticketStore.states.validate) {
+      const ticket = await tickets.get(release.ticket);
+      if (ticket && ticket.status === tickets.states.validate) {
         // The card says whether the checks are green: the lock queues a
         // release whose checks still run, so the owner waits for them.
-        const checks = await this.#effects.prChecks(release.pr.number).catch(() => undefined);
+        // Asked once a minute per release, not at every tick (issue 157).
+        if (now - (this.#checked.get(release.id) ?? -Infinity) < CHECKS_MS) continue;
+        this.#checked.set(release.id, now);
+        const checks = await this.#effects.prChecks(release.pr.number).catch((error: unknown) => {
+          console.error(`cleared-v2: the checks of pull request #${release.pr.number} could not be read (${error instanceof Error ? error.name : typeof error})`);
+          return undefined;
+        });
         if (checks && checks !== release.pr.checks) this.inbox.setReleaseChecks(release.id, checks);
         continue;
       }
-      const history = ticket ? await this.registry.ticketStore.history(ticket.id) : [];
+      this.#checked.delete(release.id);
+      // The human's move to go since the request, whatever the ticket's
+      // state now: the lock may have merged and moved it to Done before
+      // this tick.
+      const history = ticket ? await tickets.history(ticket.id) : [];
+      const approval = history.filter((h) => h.status === tickets.states.go && h.by.kind === 'human' && atOrAfter(h.at, release.requestedAt)).at(-1);
       const by = history.at(-1)?.by;
-      this.#settleRelease(release.id, release.ticket, release.project, by?.kind === 'human' ? by.id : 'system');
+      const approvedBy = approval?.by.id;
+      if (this.#settleRelease(release.id, release.ticket, release.project, approvedBy ?? (by?.kind === 'human' ? by.id : 'system')) && approvedBy)
+        this.#emit({ type: 'release_approved', at: this.#at(), project: release.project, ticket: release.ticket, item: release.id, pr: release.pr.number, by: approvedBy });
     }
+    for (const candidate of await this.#landings()) this.#follow(candidate);
   }
 
   // A release item ends when its approval does, or when a newer one replaces
   // it: its approval step closes on the session it started on.
-  #settleRelease(id: string, ticket: TicketId, project: string, by: UserId | 'system'): void {
-    if (!this.inbox.handle(id, by)) return;
+  #settleRelease(id: string, ticket: TicketId, project: string, by: UserId | 'system'): boolean {
+    if (!this.inbox.handle(id, by)) return false;
     const sessionId = this.inbox.releaseSession(id);
-    if (!sessionId) return;
+    if (!sessionId) return true;
     this.#step({ id: sessionId, ticket, project }, 'STEP_FINISHED', 'approval');
     this.#snapshot(sessionId, ticket);
+    return true;
+  }
+
+  // ---- the landing ---------------------------------------------------------
+
+  // The releases to follow: the last release item of each ticket in the go
+  // state, and of each ticket the lock already put in Done (merge-pr.sh does
+  // at the merge, before the watch has said anything) if it was approved
+  // within the horizon. Read from the tables at every tick, so that a new
+  // engine goes on where the last one stopped; the `watch` step on the
+  // release's session says how far it went.
+  async #landings(): Promise<Candidate[]> {
+    const tickets = this.registry.ticketStore;
+    const project = this.config.project;
+    const latest = new Map<TicketId, Record<string, unknown>>();
+    const since = new Date(this.#now().getTime() - LANDING_HORIZON_MS).toISOString();
+    const recent = this.#store.db.prepare("SELECT * FROM flow_inbox WHERE kind = 'release' AND project = ? AND state = 'handled' AND handled_at > ? ORDER BY since, id").all(project, since) as Record<string, unknown>[];
+    for (const row of recent) latest.set(String(row.ticket), row);
+    const last = this.#store.db.prepare("SELECT * FROM flow_inbox WHERE kind = 'release' AND ticket = ? AND state = 'handled' ORDER BY since DESC, id DESC LIMIT 1");
+    for (const ticket of await tickets.list({ status: tickets.states.go, project })) {
+      const row = last.get(ticket.id) as Record<string, unknown> | undefined;
+      if (row) latest.set(ticket.id, row);
+    }
+    const out: Candidate[] = [];
+    for (const [id, row] of latest) {
+      const ticket = await tickets.get(id);
+      if (!ticket || (ticket.status !== tickets.states.go && ticket.status !== tickets.states.done)) continue;
+      const approval = (await tickets.history(id)).filter((h) => h.status === tickets.states.go && h.by.kind === 'human').at(-1);
+      const session = String(row.request_id);
+      if (!approval || !session) continue;
+      const payload = JSON.parse(String(row.payload)) as Pick<ReleaseItem, 'pr' | 'announcement'>;
+      out.push({ item: String(row.id), ticket: id, status: ticket.status, session, pr: payload.pr.number, announcement: payload.announcement, since: approval.at });
+    }
+    return out;
+  }
+
+  // One step of a release's landing. Everything up to the journal is
+  // synchronous, and `inFlight` covers what is not, so two calls never ask
+  // the lock, open or close the watch twice.
+  #follow(c: Candidate): void {
+    if (this.#landed.has(c.item)) return;
+    const tickets = this.registry.ticketStore;
+    const steps = this.#store.events.after(c.session).flatMap(({ event }) => (event.type === 'STEP_STARTED' || event.type === 'STEP_FINISHED') && event.stepName === 'watch' ? [event.type] : []);
+    if (steps.includes('STEP_FINISHED')) {
+      this.#following.delete(c.item);
+      this.#landed.add(c.item);
+      return;
+    }
+    let state = this.#following.get(c.item);
+    if (!state) this.#following.set(c.item, (state = { nextAttempt: this.#now().getTime() + this.config.mergeRetryMs, inFlight: false }));
+    if (state.inFlight) return;
+    if (state.refused !== undefined) {
+      // A put back that failed is made again; the lock is not asked again.
+      const refused = state.refused;
+      state.inFlight = true;
+      void this.#track(this.#putBack(c.ticket, refused, 'merge_refused').then((moved) => {
+        state.inFlight = false;
+        if (moved) this.#following.delete(c.item);
+      }));
+      return;
+    }
+    const landing = landingOf(this.#store.db, { ticket: c.ticket, pr: c.pr, since: c.since, ...(state.mergedAt ? { mergedHere: state.mergedAt } : {}) });
+    if (landing.state === 'waiting') {
+      // Lane 8's approval asks the lock first; the flow asks again one
+      // interval after it first saw the approval, then at every interval.
+      if (steps.length > 0 || c.status !== tickets.states.go || this.#now().getTime() < state.nextAttempt) return;
+      state.inFlight = true;
+      void this.#track(this.#merge(c, state));
+      return;
+    }
+    const session = { id: c.session, ticket: c.ticket, project: this.config.project };
+    if (steps.length === 0) {
+      this.#step(session, 'STEP_STARTED', 'watch', new Date(landing.mergedAt));
+      this.#snapshot(c.session, c.ticket);
+      this.#emit({ type: 'release_merged', at: landing.mergedAt, project: this.config.project, ticket: c.ticket, pr: c.pr });
+    }
+    if (landing.state === 'merged') return;
+    state.inFlight = true;
+    void this.#track(this.#settleLanding(c, landing).then((closed) => {
+      state.inFlight = false;
+      if (closed) {
+        this.#following.delete(c.item);
+        this.#landed.add(c.item);
+      }
+    }));
+  }
+
+  // The end of a landing: the ticket's move first, then the `watch` step
+  // and the events. A read or a move that fails leaves the watch open, so the next
+  // tick makes it again (the ticket stays a candidate while it is in go or
+  // Done). True when the landing is closed.
+  async #settleLanding(c: Candidate, landing: Extract<Landing, { at: string }>): Promise<boolean> {
+    const tickets = this.registry.ticketStore;
+    const base = { at: landing.at, project: this.config.project, ticket: c.ticket, pr: c.pr };
+    try {
+      // A read that fails is retried like a move; a ticket that is gone has nothing to move.
+      const status = (await tickets.get(c.ticket))?.status;
+      if (landing.state === 'landed') {
+        // merge-pr.sh moves the card to Done when every shown pull request is merged; the flow does when it did not.
+        if (status === tickets.states.go) await tickets.move(c.ticket, tickets.states.done, SERVICE);
+      } else if (landing.state === 'rolled_back') {
+        if (status === tickets.states.go || status === tickets.states.done) await tickets.move(c.ticket, tickets.states.todo, SERVICE);
+        const note = `Pull request #${c.pr} was rolled back by the release watch (${landing.note}): the change is no longer live, and the ticket is back in Todo.`;
+        await tickets.comment(c.ticket, this.#clean(note), SERVICE).catch(() => undefined);
+      } else {
+        await tickets.comment(c.ticket, this.#clean(`Pull request #${c.pr} is live, but its release watch did not end healthy: ${landing.note}. Nothing was reverted: look at the release and decide.`), SERVICE);
+      }
+    } catch (error) {
+      console.error(`cleared-v2: the end of the landing of ${c.ticket} failed, the next tick tries again (${error instanceof Error ? error.name : typeof error})`);
+      return false;
+    }
+    this.#step({ id: c.session, ticket: c.ticket, project: this.config.project }, 'STEP_FINISHED', 'watch', new Date(landing.at));
+    this.#snapshot(c.session, c.ticket);
+    if (landing.state === 'landed') this.#emit({ type: 'release_landed', ...base, health: landing.health });
+    else if (landing.state === 'unhealthy') this.#emit({ type: 'release_unhealthy', ...base, note: this.#clean(landing.note) });
+    else {
+      const note = this.#clean(landing.note);
+      this.#emit({ type: 'rolled_back', ...base, note });
+      this.#emit({ type: 'ticket_put_back', at: this.#at(), project: this.config.project, ticket: c.ticket, reason: 'rolled_back', note: `Pull request #${c.pr} was rolled back by the release watch (${note}).` });
+    }
+    return true;
+  }
+
+  async #merge(c: Candidate, state: Following): Promise<void> {
+    let merge: MergeOutcome;
+    try {
+      merge = await this.#effects.mergeRelease({ ticket: c.ticket, pr: c.pr, announcement: c.announcement });
+    } catch (error) {
+      merge = { outcome: 'unavailable', message: name(error) };
+    }
+    state.inFlight = false;
+    state.nextAttempt = this.#now().getTime() + this.config.mergeRetryMs;
+    if (merge.outcome === 'merged') {
+      state.mergedAt = this.#now().toISOString();
+      this.#follow(c);
+    } else if (merge.outcome === 'refused') {
+      state.refused = `The lock refused to merge pull request #${c.pr}: ${merge.message || 'no reason given'}`;
+      state.inFlight = true;
+      if (await this.#putBack(c.ticket, state.refused, 'merge_refused')) this.#following.delete(c.item);
+      state.inFlight = false;
+    }
   }
 
   // Waits until no event is being handled. For tests and for a clean stop.
@@ -192,6 +392,30 @@ export class FlowEngine {
     const done = () => { this.#handlers.delete(promise); };
     promise.then(done, done);
     return promise;
+  }
+
+  // ---- the event bus -----------------------------------------------------
+
+  // `listener` hears every FlowEvent from now on; the function returned stops it.
+  subscribe(listener: FlowListener): () => void {
+    this.#listeners.add(listener);
+    return () => { this.#listeners.delete(listener); };
+  }
+
+  #emit(event: FlowEvent): void {
+    const failed = (error: unknown) => console.error(`cleared-v2: a flow listener failed on ${event.type} (${error instanceof Error ? error.name : typeof error})`);
+    for (const listener of [...this.#listeners]) {
+      try {
+        const result = listener(event);
+        if (result instanceof Promise) result.catch(failed);
+      } catch (error) {
+        failed(error);
+      }
+    }
+  }
+
+  #at(): string {
+    return this.#now().toISOString();
   }
 
   // ---- reading -----------------------------------------------------------
@@ -300,9 +524,10 @@ export class FlowEngine {
   // ---- starting a ticket --------------------------------------------------
 
   // Starts the flow of a ticket in Todo: the workspace, then the author.
-  // The caller is a person (the API routes): the service moving a ticket to
+  // The caller is a person (the API routes), or the plan runner for the
+  // person who approved the plan (`origin`): the service moving a ticket to
   // Todo itself, when it puts one back, never starts anything.
-  async start(ticketId: TicketId, by: UserId): Promise<void> {
+  async start(ticketId: TicketId, by: UserId, origin?: Origin): Promise<void> {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(ticketId);
     if (!ticket) throw new FlowError('not_found', `unknown ticket ${ticketId}`);
@@ -319,26 +544,65 @@ export class FlowEngine {
       const settings = await this.#effects.settings();
       const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author' });
       const workspaceDone = this.#now();
-      const live = await this.#launch(adapter, ticket, 'author', this.config.authorModel, prepared.workdir, prepared.briefing, settings, authorPrompt(ticket));
+      const prompt = origin?.note ? `${authorPrompt(ticket)}\n\n${origin.note}` : authorPrompt(ticket);
+      const live = await this.#launch(adapter, ticket, 'author', this.config.authorModel, prepared.workdir, prepared.briefing, settings, prompt);
       const session = { id: live.id, ticket: ticketId, project: this.config.project };
       this.#step(session, 'STEP_STARTED', 'workspace', began);
       this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
       this.#step(session, 'STEP_STARTED', 'author', workspaceDone);
       this.#snapshot(live.id, ticketId);
-      await tickets.comment(ticketId, `Started by ${by}.`, SERVICE).catch(() => undefined);
+      const comment = origin ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}.` : `Started by ${by}.`;
+      await tickets.comment(ticketId, comment, SERVICE).catch(() => undefined);
+      this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: ticketId, by, origin: origin ?? null, session: live.id });
       this.#supervise(live, 0);
     } catch (error) {
-      this.#active.delete(ticketId);
-      await tickets.comment(ticketId, this.#clean(`The flow could not start: ${name(error)}`), SERVICE).catch(() => undefined);
-      await tickets.move(ticketId, tickets.states.todo, SERVICE).catch(() => undefined);
+      await this.#putBack(ticketId, `The flow could not start: ${name(error)}`, 'start_failed');
       throw error;
     }
   }
 
   // start() in the background, for the routes: a person's click does not
   // wait for a clone. A failure becomes a note on the ticket (start wrote it).
-  begin(ticketId: TicketId, by: UserId): Promise<void> {
-    return this.#track(this.start(ticketId, by).catch(() => undefined));
+  begin(ticketId: TicketId, by: UserId, origin?: Origin): Promise<void> {
+    return this.#track(this.start(ticketId, by, origin).catch(() => undefined));
+  }
+
+  // ---- after a restart -----------------------------------------------------
+
+  // What the last process left running cannot go on: its sessions died
+  // with it (the adapter keeps no StartInput to resume them). Each author or
+  // reviewer session of this project still marked live, and not live here,
+  // is stopped with a RUN_ERROR `restart` and its requests are handled; each
+  // ticket left In Progress or In Review that this engine does not run goes
+  // back to Todo with a note. The lead's sessions are the lead engine's.
+  // Run once by the runtime after it builds the engine; a second run finds
+  // nothing.
+  async recover(): Promise<void> {
+    const tickets = this.registry.ticketStore;
+    const project = this.config.project;
+    const note = 'The service restarted while this ticket ran: its sessions were stopped, and the ticket is back in Todo. Move it to Todo to start it again.';
+    const back = new Set<TicketId>();
+    for (const row of this.#store.sessions.list()) {
+      if (row.project !== project || (row.role !== 'author' && row.role !== 'reviewer')) continue;
+      if (!LIVE_PHASES.has(row.status) || this.#live.has(row.id)) continue;
+      const session = { id: row.id, ticket: row.ticket, project };
+      const waits = this.#store.events.after(row.id).filter(({ event }) => (event.type === 'STEP_STARTED' || event.type === 'STEP_FINISHED') && event.stepName === 'waiting_human');
+      if (waits.at(-1)?.event.type === 'STEP_STARTED') this.#step(session, 'STEP_FINISHED', 'waiting_human');
+      this.#journal(session, { type: 'RUN_ERROR', message: 'The service restarted: this session was stopped.', code: 'restart' });
+      this.#store.sessions.put({ ...row, status: 'stopped', updatedAt: this.#at() });
+      this.inbox.handleSession(row.id, 'system');
+      this.#snapshot(row.id, row.ticket);
+      this.#emit({ type: 'session_stopped', at: this.#at(), project, ticket: row.ticket, session: row.id, role: row.role, phase: 'stopped', reason: 'restart' });
+      back.add(row.ticket);
+    }
+    for (const status of [tickets.states.progress, tickets.states.review])
+      for (const ticket of await tickets.list({ status, project })) back.add(ticket.id);
+    for (const id of back) {
+      if (this.#active.has(id)) continue;
+      const ticket = await tickets.get(id);
+      if (!ticket || ticket.project !== project || (ticket.status !== tickets.states.progress && ticket.status !== tickets.states.review)) continue;
+      await this.#putBack(id, note, 'restart');
+    }
   }
 
   async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string): Promise<Live> {
@@ -354,6 +618,43 @@ export class FlowEngine {
     this.#inputs.set(live.id, { input, settings });
     this.#flowOf(ticket.id).add(live.id);
     return live;
+  }
+
+  // The policy of a session at each evaluation (decision 11), which the
+  // runtime gives the adapters: the "Always in this project" answers as they
+  // are now, and the files the ticket's sessions edited so far, so that the
+  // deletion rule knows them. The lead's is its own (lane 5).
+  policyFor(input: StartInput): Policy {
+    if (input.role === 'lead' || input.project !== this.config.project) return input.policy;
+    return { ...input.policy, learned: this.#store.policyRules.learned(input.project), ticketFiles: this.#ticketFiles(input.ticket) };
+  }
+
+  // An edit counts once its result says it was made: a refused or failed
+  // edit changed nothing. Read incrementally, since this runs at every tool call.
+  #ticketFiles(ticket: TicketId): string[] {
+    const out = new Set<string>();
+    for (const row of this.#store.sessions.list({ ticket })) {
+      if (row.role === 'lead') continue;
+      let seen = this.#files.get(row.id);
+      if (!seen) this.#files.set(row.id, (seen = { seq: 0, open: new Map(), files: [] }));
+      for (const { seq, event } of this.#store.events.after(row.id, seen.seq)) {
+        seen.seq = seq;
+        if (event.type === 'TOOL_CALL_ARGS') {
+          const input = readToolInput(event);
+          const path = input?.kind === 'edit' ? ticketPath(input.path) : undefined;
+          if (path) seen.open.set(event.toolCallId, path);
+        } else if (event.type === 'TOOL_CALL_RESULT') {
+          const path = seen.open.get(event.toolCallId);
+          if (path === undefined) continue;
+          seen.open.delete(event.toolCallId);
+          const output = readToolOutput(event);
+          const failed = output.kind === 'execute' ? output.isError : 'ok' in output && output.ok === false;
+          if (!failed && !seen.files.includes(path)) seen.files.push(path);
+        }
+      }
+      for (const path of seen.files) out.add(path);
+    }
+    return [...out];
   }
 
   #policy(role: Role, settings: ProjectSettings): Policy {
@@ -374,12 +675,12 @@ export class FlowEngine {
           live.lastActivity = this.#now().getTime();
           this.#notify(live.id);
           await this.#track(this.#onEvent(live, event).catch(async (error) => {
-            await this.#stopTicket(live, 'error', `The flow failed: ${name(error)}`, `The flow failed on this ticket: ${name(error)}`).catch(() => undefined);
+            await this.#stopTicket(live, 'error', `The flow failed: ${name(error)}`, `The flow failed on this ticket: ${name(error)}`, 'stopped', 'failed').catch(() => undefined);
           }));
         }
-        if (!live.closed) await this.#stopTicket(live, 'error', 'The session ended without finishing its turn.', 'The session ended without finishing its turn.', 'failed');
+        if (!live.closed) await this.#stopTicket(live, 'error', 'The session ended without finishing its turn.', 'The session ended without finishing its turn.', 'failed', 'failed');
       } catch (error) {
-        if (!live.closed) await this.#stopTicket(live, 'error', `The session's stream failed: ${name(error)}`, `The session's stream failed: ${name(error)}`, 'failed').catch(() => undefined);
+        if (!live.closed) await this.#stopTicket(live, 'error', `The session's stream failed: ${name(error)}`, `The session's stream failed: ${name(error)}`, 'failed', 'failed').catch(() => undefined);
       }
     })();
     void run;
@@ -390,20 +691,25 @@ export class FlowEngine {
     const session = { id: live.id, ticket: live.input.ticket, project: live.input.project };
     if (event.type === 'CUSTOM') {
       switch (event.name) {
-        case 'cleared.permission_request':
-          this.inbox.addPermission({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, tool: event.value.tool, input: event.value.input, suggestion: event.value.suggestion });
+        case 'cleared.permission_request': {
+          const item = this.inbox.addPermission({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, tool: event.value.tool, input: event.value.input, suggestion: event.value.suggestion });
           this.#waitStarts(live);
+          this.#emit({ type: 'permission_raised', at: this.#at(), project: session.project, ticket: session.ticket, session: live.id, requestId: event.value.requestId, item: item.id, tool: event.value.tool });
           return;
-        case 'cleared.question':
-          this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions: event.value.questions });
+        }
+        case 'cleared.question': {
+          const item = this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions: event.value.questions });
           this.#waitStarts(live);
+          this.#emit({ type: 'question_raised', at: this.#at(), project: session.project, ticket: session.ticket, session: live.id, requestId: event.value.requestId, item: item.id });
           return;
+        }
         case 'cleared.permission_answered':
         case 'cleared.answered': {
           // A request the inbox never saw (a policy deny the adapter reports alone) is ignored.
           const item = this.inbox.find(live.id, event.value.requestId);
-          if (item) this.inbox.handle(item.id, event.value.by);
+          const handled = item ? this.inbox.handle(item.id, event.value.by) : false;
           this.#waitEnds(live);
+          if (item && handled) this.#answered(item.id, session.ticket, live.id, event.value.requestId, event.value.by);
           return;
         }
         default:
@@ -411,7 +717,7 @@ export class FlowEngine {
       }
     }
     if (event.type === 'RUN_ERROR') {
-      await this.#stopTicket(live, undefined, undefined, `The session failed: ${event.message}`, 'failed');
+      await this.#stopTicket(live, undefined, undefined, `The session failed: ${event.message}`, 'failed', 'failed');
       return;
     }
     if (event.type !== 'RUN_FINISHED') return;
@@ -420,7 +726,7 @@ export class FlowEngine {
     const spent = this.#spent(session.ticket);
     if (budget !== undefined && spent > budget) {
       await this.#stopTicket(live, 'budget', `The ticket's budget of $${budget} is spent.`,
-        `The ticket's budget of $${budget} is spent ($${spent.toFixed(2)}). The sessions were stopped. Raise the budget or reduce the ticket, then move it to Todo.`);
+        `The ticket's budget of $${budget} is spent ($${spent.toFixed(2)}). The sessions were stopped. Raise the budget or reduce the ticket, then move it to Todo.`, 'stopped', 'budget');
       return;
     }
     if (event.outcome.type === 'cancelled') {
@@ -428,7 +734,7 @@ export class FlowEngine {
       return;
     }
     if (event.result.stopReason !== 'end_turn') {
-      await this.#stopTicket(live, undefined, undefined, `The session stopped with "${event.result.stopReason}" before it finished.`, 'failed');
+      await this.#stopTicket(live, undefined, undefined, `The session stopped with "${event.result.stopReason}" before it finished.`, 'failed', 'failed');
       return;
     }
     // A turn that ends while the inbox still holds a request of this session is not the end of the work.
@@ -453,6 +759,10 @@ export class FlowEngine {
     this.#snapshot(live.id, live.input.ticket);
   }
 
+  #answered(item: string, ticket: TicketId, session: SessionId, requestId: string, by: UserId | 'policy' | 'system'): void {
+    this.#emit({ type: 'request_answered', at: this.#at(), project: this.config.project, ticket, session, requestId, item, by });
+  }
+
   #waitEnds(live: Live): void {
     if (this.inbox.waitingFor(live.id) > 0 || !live.waitOpen) return;
     live.lastActivity = this.#now().getTime();
@@ -464,7 +774,7 @@ export class FlowEngine {
 
   // ---- ending a session ---------------------------------------------------
 
-  async #close(live: Live, phase: 'done' | 'stopped' | 'failed'): Promise<void> {
+  async #close(live: Live, phase: 'done' | 'stopped' | 'failed', reason = ''): Promise<void> {
     if (live.closed) return;
     live.closed = true;
     this.#live.delete(live.id);
@@ -476,28 +786,38 @@ export class FlowEngine {
     this.inbox.handleSession(live.id, 'system');
     await live.handle.stop().catch(() => undefined);
     this.#notify(live.id);
+    if (phase !== 'done')
+      this.#emit({ type: 'session_stopped', at: this.#at(), project: live.input.project, ticket: live.input.ticket, session: live.id, role: live.input.role, phase, reason: this.#clean(reason) });
   }
 
   // The ticket cannot go on: every live session of it stops, the reason is
   // written to the session and to the ticket, and the ticket goes back to
   // Todo. `code` is the RUN_ERROR code the session screen shows; undefined
   // when the adapter already wrote its own RUN_ERROR.
-  async #stopTicket(from: Live, code: string | undefined, runMessage: string | undefined, note: string, phase: 'stopped' | 'failed' = 'stopped'): Promise<void> {
+  async #stopTicket(from: Live, code: string | undefined, runMessage: string | undefined, note: string, phase: 'stopped' | 'failed', reason: PutBackReason): Promise<void> {
     const ticket = from.input.ticket;
     for (const live of [...this.#live.values()].filter((l) => l.input.ticket === ticket)) {
       if (live.closed) continue;
       if (code !== undefined && runMessage !== undefined)
         this.#journal({ id: live.id, ticket, project: live.input.project }, { type: 'RUN_ERROR', message: this.#clean(runMessage), code });
-      await this.#close(live, live.id === from.id ? phase : 'stopped');
+      await this.#close(live, live.id === from.id ? phase : 'stopped', note);
     }
-    await this.#putBack(ticket, note);
+    await this.#putBack(ticket, note, reason);
   }
 
-  async #putBack(ticket: TicketId, note: string): Promise<void> {
+  // True when the ticket was moved: `ticket_put_back` is said only then.
+  async #putBack(ticket: TicketId, note: string, reason: PutBackReason): Promise<boolean> {
     const tickets = this.registry.ticketStore;
     this.#active.delete(ticket);
     await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
-    await tickets.move(ticket, tickets.states.todo, SERVICE).catch(() => undefined);
+    try {
+      await tickets.move(ticket, tickets.states.todo, SERVICE);
+    } catch (error) {
+      console.error(`cleared-v2: ${ticket} could not be put back in Todo (${error instanceof Error ? error.name : typeof error})`);
+      return false;
+    }
+    this.#emit({ type: 'ticket_put_back', at: this.#at(), project: this.config.project, ticket, reason, note: this.#clean(note) });
+    return true;
   }
 
   // ---- the author is done: the review starts ------------------------------
@@ -507,6 +827,7 @@ export class FlowEngine {
     const session = { id: author.id, ticket: id, project };
     this.#step(session, 'STEP_FINISHED', 'author');
     await this.#close(author, 'done');
+    this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: author.id });
     try {
       await this.#effects.captureHandover({ workdir: author.input.workdir, role: 'author', model: author.input.model, ticket: id, sessionId: author.id });
     } catch (error) {
@@ -532,7 +853,7 @@ export class FlowEngine {
       this.#snapshot(live.id, ticket.id);
       this.#supervise(live, 0);
     } catch (error) {
-      await this.#putBack(ticket.id, `The review could not start: ${name(error)}`);
+      await this.#putBack(ticket.id, `The review could not start: ${name(error)}`, 'review_failed');
     }
   }
 
@@ -546,14 +867,15 @@ export class FlowEngine {
     this.#step(session, 'STEP_FINISHED', 'review');
     await this.#close(reviewer, 'done');
     if (report === undefined || parsed === undefined) {
-      await this.#putBack(id, 'The review gave no verdict (no "Verdict:" line in its report), so nothing was published. Move the ticket to Todo to run it again.');
+      await this.#putBack(id, 'The review gave no verdict (no "Verdict:" line in its report), so nothing was published. Move the ticket to Todo to run it again.', 'no_verdict');
       return;
     }
     const round = this.#flowRows(id).filter((row) => row.role === 'reviewer').length;
     this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: reviewer.id, verdict: parsed.verdict, round } });
+    this.#emit({ type: 'review_verdict', at: this.#at(), project, ticket: id, session: reviewer.id, verdict: parsed.verdict, round });
     if (parsed.verdict === 'pass') return this.#publishAndAsk(reviewer, report, round);
     if (round >= this.config.maxReviewRounds) {
-      await this.#putBack(id, `The review still asked for changes after ${round} review rounds, so the ticket goes back to Todo. The last report:\n\n${report}`);
+      await this.#putBack(id, `The review still asked for changes after ${round} review rounds, so the ticket goes back to Todo. The last report:\n\n${report}`, 'too_many_rounds');
       return;
     }
     await this.#reopenAuthor(reviewer, report, round);
@@ -566,7 +888,10 @@ export class FlowEngine {
     const authorRow = this.#lastSession(id, 'author');
     const kept = authorRow ? this.#inputs.get(authorRow.id) : undefined;
     const adapter = this.registry.sessionAdapters[HARNESS];
-    if (!ticket || !adapter) return this.#putBack(id, 'The author could not be reopened: the ticket or the adapter is gone.');
+    if (!ticket || !adapter) {
+      await this.#putBack(id, 'The author could not be reopened: the ticket or the adapter is gone.', 'reopen_failed');
+      return;
+    }
     await tickets.move(id, tickets.states.progress, SERVICE);
     const message = reviewRequestMessage(report, round);
     const began = this.#now();
@@ -604,7 +929,7 @@ export class FlowEngine {
       this.#snapshot(live.id, id);
       this.#supervise(live, 0);
     } catch (error) {
-      await this.#putBack(id, `The author could not be reopened after the review: ${name(error)}`);
+      await this.#putBack(id, `The author could not be reopened after the review: ${name(error)}`, 'reopen_failed');
     }
   }
 
@@ -625,7 +950,7 @@ export class FlowEngine {
       published = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report });
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
-      await this.#putBack(id, `The branch was not published: ${name(error)}`);
+      await this.#putBack(id, `The branch was not published: ${name(error)}`, 'publish_refused');
       return;
     }
     const reviewedAt = this.#now().toISOString();
@@ -646,11 +971,11 @@ export class FlowEngine {
       requestedAt = asked.requestedAt ?? (await tickets.history(id)).at(-1)?.at ?? this.#now().toISOString();
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
-      await this.#putBack(id, `The release could not be requested: ${name(error)}`);
+      await this.#putBack(id, `The release could not be requested: ${name(error)}`, 'release_refused');
       return;
     }
     for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
-    this.inbox.addRelease({
+    const item = this.inbox.addRelease({
       ticket: id, project, title: ticket.title, announcement, requestedAt,
       pr: { number: published.number, url: published.url, checks: 'pending' },
       heads: [{ pr: published.number, head: published.head }],
@@ -662,6 +987,7 @@ export class FlowEngine {
     this.#active.delete(id);
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
+    this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: published.number, url: published.url });
   }
 
   #releaseSessions(ticket: TicketId, rounds: number): { role: Role; model: string; minutes: number; rounds?: number }[] {
@@ -698,7 +1024,7 @@ export class FlowEngine {
     if (asks !== (decision.kind === 'answer')) throw new FlowError('invalid', asks ? 'a question is answered with an answer' : 'a permission request is answered with allow or reject');
     const answer: Answer = { decision, by };
     await live.handle.answer(requestId, answer);
-    this.inbox.handle(item.id, by);
+    if (this.inbox.handle(item.id, by)) this.#answered(item.id, item.ticket, id, requestId, by);
     if (decision.kind === 'allow_always' && item.kind === 'permission') {
       const pattern = patternOf(item);
       if (pattern) this.#store.policyRules.learn({ project: item.project, tool: item.tool, pattern, by, at: this.#now().toISOString() });
