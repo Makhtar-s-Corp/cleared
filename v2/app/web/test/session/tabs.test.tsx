@@ -38,7 +38,7 @@ test('the tab strip: four tabs, one selected, each naming its panel; Take over o
   assert.match(markup, /role="tablist"/);
   assert.match(markup, /<button[^>]*id="takeover"/);
   for (const word of ['Plan', 'Terminal', 'Editor', 'Browser', 'Take over']) assert.ok(visibleText(markup).includes(word), word);
-  assert.doesNotMatch(html(<TabStrip tab="plan" t={en} takeover={{ kind: 'free', can: false }} />), /id="takeover"/, 'no Take over for a reviewer or an ended session');
+  assert.doesNotMatch(html(<TabStrip tab="plan" t={en} takeover={{ kind: 'free', can: false }} />), /id="takeover"/, 'no Take over for a lead\'s or an ended session');
   const mine = html(<TabStrip tab="terminal" t={en} takeover={{ kind: 'mine', at: FIXTURE_NOW.toISOString() }} />);
   assert.match(mine, /<button[^>]*id="giveback"/);
   assert.doesNotMatch(mine, /id="takeover"/);

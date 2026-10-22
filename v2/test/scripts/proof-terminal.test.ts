@@ -7,35 +7,39 @@
 // `npm test` (the guestbook's tests import pg).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SHELL_LINES, testOutcome } from '../../scripts/proof-terminal.ts';
+import { SHELL_LINES, atPrompt, lineOutcome } from '../../scripts/proof-terminal.ts';
 import { shellAnswer } from '../../scripts/proof-rehearsal-multi.ts';
 
-test('the Shell\'s lines: git status, then npm ci, then npm test, each waited for before the next', () => {
+const PROMPT = 'node@5c3a6323c2d6:/workspace$';
+
+test('the Shell\'s lines: git status, then npm ci, then npm test; only git status must answer, with "On branch"', () => {
   assert.deepEqual(SHELL_LINES.map((l) => l.line), ['git status', 'npm ci', 'npm test']);
   const [status, ci, tests] = SHELL_LINES;
-  assert.ok(status!.required, 'git status must answer');
-  assert.match('On branch cleared/LOCAL-14\nChanges not staged for commit:', status!.done);
-  assert.doesNotMatch('fatal: not a git repository', status!.done);
-  assert.match('added 14 packages, and audited 15 packages in 3s', ci!.done);
-  assert.match('up to date, audited 15 packages in 1s', ci!.done);
-  assert.match('npm error code E403', ci!.done);
-  assert.match('ℹ tests 41\nℹ suites 0\nℹ pass 39\nℹ fail 2', tests!.done);
+  assert.ok(status!.required);
+  assert.match('On branch cleared/LOCAL-14\nChanges not staged for commit:', status!.expect as RegExp);
+  assert.doesNotMatch('fatal: not a git repository', status!.expect as RegExp);
   assert.equal(ci!.required, false, 'a red install or test is the author\'s work in progress, not the proof\'s');
   assert.equal(tests!.required, false);
   for (const line of SHELL_LINES) assert.ok(line.timeoutMs >= 30_000);
 });
 
-test('what npm test said: the counts of node\'s summary, or that it gave none', () => {
-  assert.equal(testOutcome('ℹ tests 41\nℹ pass 39\nℹ fail 2\nℹ cancelled 0'), 'pass 39, fail 2');
-  assert.equal(testOutcome('ℹ pass 41\nℹ fail 0'), 'pass 41, fail 0');
-  assert.equal(testOutcome('npm error Missing script: "test"'), 'no summary');
-  assert.equal(testOutcome(String((shellAnswer('npm test') as { text: string }).text)), 'not run by the rehearsal\'s stand-in shell');
+test('a line has answered once the prompt is back on the last row', () => {
+  assert.equal(atPrompt(`${PROMPT} git status\nOn branch cleared/LOCAL-14\n${PROMPT} `), true);
+  assert.equal(atPrompt(`On branch cleared/LOCAL-14\n${PROMPT} npm test`), false, 'just typed');
+  assert.equal(atPrompt(`${PROMPT} npm test\n\n> test\n▶ test/server.test.ts\n`), false, 'running');
+  assert.equal(atPrompt(`ℹ fail 2\n${PROMPT}\n\n\n`), true, 'empty rows under the prompt');
+  assert.equal(atPrompt('rehearsal:/workspace$ '), true, 'the rehearsal\'s stand-in prompt');
 });
 
-test('the rehearsal\'s stand-in shell answers each line in a way the step recognises', () => {
-  for (const { line, done } of SHELL_LINES.slice(1)) {
-    const answer = shellAnswer(line);
+test('what each line said', () => {
+  assert.equal(lineOutcome('npm ci', `added 14 packages, and audited 15 packages in 3s\n${PROMPT}`), 'installed');
+  assert.equal(lineOutcome('npm ci', `npm error code E403\n${PROMPT}`), 'failed');
+  assert.equal(lineOutcome('npm test', `ℹ tests 41\nℹ pass 39\nℹ fail 2\n${PROMPT}`), 'pass 39, fail 2');
+  assert.equal(lineOutcome('npm test', `✖ test/store.test.ts (72ms)\n  'test failed'\n${PROMPT}`), 'some tests failed (the summary scrolled out of the rows)');
+  assert.equal(lineOutcome('npm test', PROMPT), 'no summary on the screen');
+  for (const line of ['npm ci', 'npm test']) {
+    const answer = shellAnswer(line) as { kind: string; text: string };
     assert.equal(answer.kind, 'text', line);
-    assert.match((answer as { text: string }).text, done, line);
+    assert.equal(lineOutcome(line, `${answer.text}\nrehearsal:/workspace$ `), 'not run by the rehearsal\'s stand-in shell', line);
   }
 });

@@ -16,7 +16,8 @@
 //      card is blocked before approval with the proposal, and has no Approve;
 //   11 create the fourth ticket, on the guestbook alone; Take over its working
 //      session (the web terminal opens on its harness, pull request 230), open
-//      the Shell and type git status and npm test, change one line in the
+//      the Shell and type git status, npm ci and npm test, each after the
+//      one before has answered (proof-terminal.ts), change one line in the
 //      Editor tab and save it, Give back; see the session's next turn begin
 //      with the notice, and the change in the ticket's diff.
 // Every session proposes its session plan first (decision 22): the proof
@@ -57,6 +58,7 @@ import { sessionNames, siblingAddress } from '../src/container/session-runtime.t
 import type { Ticket } from '../src/tickets/contract.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
 import { answerFor } from './proof-inbox.ts';
+import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
 import { humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type MultiResult, type Step } from './proof-report.ts';
 import { MULTI_TICKETS, startMultiRehearsal, type MultiWorld } from './proof-rehearsal-multi.ts';
 
@@ -468,14 +470,28 @@ if (signedIn) {
     }
     await page.locator('[data-terminal-state="open"][data-mode="shell"]').first().waitFor({ timeout: 60_000 });
     await page.locator('.term-host').first().click();
-    for (const line of ['git status', 'npm test']) {
+    // One line at a time, each typed once the one before has answered: the
+    // prompt back on the last row, and "On branch" for git status, before
+    // npm test scrolls it out of the rows (proof-terminal.ts). npm ci comes
+    // first in a checkout with no node_modules. A red install or test is recorded.
+    const rows = () => page.locator('.term-host').first().innerText().catch(() => '');
+    const answered: string[] = [];
+    for (const { line, expect, timeoutMs, required } of SHELL_LINES) {
       await page.keyboard.type(line, { delay: 20 });
       await page.keyboard.press('Enter');
       gesture(`typed ${line} in the web terminal`);
-      await sleep(1_500);
+      await sleep(500);
+      const seen = await until(`the answer to ${line}`, async () => {
+        const text = await rows();
+        return atPrompt(text) && (!expect || expect.test(text)) ? text : undefined;
+      }, timeoutMs, 500, false).catch((error: unknown) => {
+        if (required) throw error;
+        return undefined;
+      });
+      if (line === 'git status') await capture('takeover-terminal');
+      answered.push(`${line}: ${seen === undefined ? `no answer within ${Math.round(timeoutMs / 60_000)} min` : lineOutcome(line, seen)}`);
     }
-    await page.locator('.term-host').filter({ hasText: /On branch|branch/ }).first().waitFor({ timeout: 30_000 });
-    await capture('takeover-terminal');
+    await capture('takeover-tests');
     // The editor: one line changed in src/page.ts, saved.
     page.on('response', (response: any) => {
       if (response.request().method() === 'PUT' && /\/files\//.test(response.url())) saves.push({ at: now(), status: response.status(), kept: null });
@@ -508,7 +524,7 @@ if (signedIn) {
     // as not kept.
     for (const s of saves) s.kept = s.status === 200;
     const facts = ledger((db) => humanFacts(db, session.id, times.give_back_at ?? null));
-    return `taken over: ${harnessShown}; then the Shell button, git status and npm test typed, ${facts?.lines ?? '?'} lines journaled; ${saves.length} editor save(s) (${saves.map((x) => x.status).join(', ')}); given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
+    return `taken over: ${harnessShown}; then the Shell button, ${SHELL_LINES.map((l) => l.line).join(', ')} typed (${answered.join('; ')}), ${facts?.lines ?? '?'} lines journaled; ${saves.length} editor save(s) (${saves.map((x) => x.status).join(', ')}); given back; the notice's turn at ${facts?.noticeTurnAt ?? '?'}; src/page.ts in the card of ${card.ticket}`;
   });
 }
 

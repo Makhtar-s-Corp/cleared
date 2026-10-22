@@ -192,8 +192,11 @@ test('the idle rule counts from the Give back, not from the take over', async ()
 // reviewer's session too. Its interrupted turn is no verdict; Give back
 // tells it to carry on with the review, and its report is read as before.
 test('a reviewer\'s session is taken over, left alone while paused, and given back to finish its review', async () => {
-  const reviewer: readonly FakeStep[] = [started, ...text('r1', 'I read the diff.'), permission, { awaitMessage: true }, { awaitMessage: true }, ...text('r2', REPORT_PASS), finished(0.1)];
-  const h = await harness({ scripts: { author: [started, finished(0.2)], reviewers: [reviewer] } });
+  // The fake adapter resumes a session with the `reopen` script: there the
+  // reviewer takes the Give back's words, then reports.
+  const reviewer: readonly FakeStep[] = [started, ...text('r1', 'I read the diff.'), permission, { awaitMessage: true }, finished(0.1)];
+  const reopen: readonly FakeStep[] = [{ awaitMessage: true }, started, ...text('r2', REPORT_PASS), finished(0.1)];
+  const h = await harness({ scripts: { author: [started, finished(0.2)], reviewers: [reviewer], reopen } });
   try {
     await h.engine.start(h.ticket.id, 'u1');
     await until(() => { const r = h.startedSessions.find((s) => s.input.role === 'reviewer'); return !!r && h.inbox.waitingFor(r.id) > 0; }, 'the reviewer\'s permission');
@@ -213,14 +216,17 @@ test('a reviewer\'s session is taken over, left alone while paused, and given ba
     assert.ok(!events(h, id).some((e) => e.type === 'CUSTOM' && e.name === 'cleared.review_verdict'), 'the interrupted turn is no verdict');
     assert.equal((await h.tickets.get(h.ticket.id))?.status, 'In Review');
 
+    // The statuses the reviewer's row takes from the Give back on.
+    const statuses: string[] = [];
+    const put = h.store.sessions.put.bind(h.store.sessions);
+    h.store.sessions.put = (row) => { if (row.id === id) statuses.push(row.status); return put(row); };
     assert.deepEqual(await post(h, `/api/sessions/${id}/giveback`, as('u1')), { status: 200, json: { accepted: true } });
-    await h.engine.settled();
     assert.deepEqual(h.resumed, [id], 'resumed under its own id');
-    assert.equal(h.store.sessions.get(id)?.status, 'reviewing', 'a reviewer given back is reviewing, not working');
     assert.ok(events(h, id).some((e) => e.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(e.delta) && /review/.test(e.delta) && !/Carry on with the ticket/.test(e.delta)), 'told to carry on with its review');
-    await h.engine.send(id, 'Give your verdict.', 'u1');
     await until(() => events(h, id).some((e) => e.type === 'CUSTOM' && e.name === 'cleared.review_verdict'), 'the verdict');
     await h.engine.settled();
+    assert.equal(statuses[0], 'reviewing', `a reviewer given back is reviewing (${statuses.join(', ')})`);
+    assert.ok(!statuses.includes('working'), `never working (${statuses.join(', ')})`);
   } finally {
     await h.close();
   }

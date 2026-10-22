@@ -1,7 +1,8 @@
 // Take over and Give back (docs/v2/milestone-2-plan.md, decisions 30 and
 // 32, lane 20): brief 5.10's "Open in terminal" and "Give back to Cleared".
 //
-//   POST /api/sessions/:id/takeover pauses an author's live session: the
+//   POST /api/sessions/:id/takeover pauses an author's or a reviewer's live
+//   session (the reviewer's by the owner's decision of 2026-10-22 22:01): the
 //   engine interrupts its turn, settles what waited for the human as
 //   cancelled and records who took it over and when (`takenOver`). The
 //   session screen then opens the web terminal (lanes 31 and 32) on the
@@ -48,6 +49,14 @@ export const TAKEN_OVER = 'takeover';
 export const GIVEN_BACK = [
   'The owner, who had taken over this session, gave the session back to you.',
   'Carry on with the ticket where you left off: what the owner did with you meanwhile, if anything, is in the conversation above. The owner may have changed files of the checkout: read again any file before you edit it.',
+].join('\n');
+
+// What a reviewer is told instead (owner decision of 2026-10-22 22:01: a
+// reviewer's session is taken over too): its review goes on, and ends with
+// the report its first message asked for, which the flow reads.
+export const GIVEN_BACK_REVIEW = [
+  'The owner, who had taken over this session, gave the session back to you.',
+  'Carry on with the review where you left off, and end it with the report and the verdict line asked for at the start: what the owner did with you meanwhile, if anything, is in the conversation above. The owner may have changed files of the checkout: read again any file you judge.',
 ].join('\n');
 
 export type TakeoverDeps = {
