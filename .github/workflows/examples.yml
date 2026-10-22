@@ -1,0 +1,79 @@
+name: examples
+
+# The tests and types of the two example projects of Cleared v2
+# (examples/guestbook/ and examples/filter-api/), which no other workflow of
+# this repository runs: each example's own checks.yml runs only once the
+# example is the root of its own repository. The guestbook's tests need
+# Postgres, given as a service container.
+on:
+  push:
+    branches: [v2]
+    paths: ['examples/**', '.github/workflows/examples.yml']
+  pull_request:
+    branches: [v2]
+    paths: ['examples/**', '.github/workflows/examples.yml']
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: examples-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guestbook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          # No password: the service is reachable from this job only.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
+    defaults:
+      run:
+        working-directory: examples/guestbook
+    steps:
+      # Pinned to commits: actions/checkout v4.4.0 and actions/setup-node v4.4.0.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/guestbook/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Types
+        run: npm run typecheck
+
+  filter-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/filter-api
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/filter-api/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Types
+        run: npm run typecheck

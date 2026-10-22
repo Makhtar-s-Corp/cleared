@@ -1,0 +1,6 @@
+# The words the filter refuses, one per line, compared whole and whatever
+# their case. A demo list: the proof's tickets add to it.
+spam
+scam
+phishing
+jackpot
