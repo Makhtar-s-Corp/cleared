@@ -386,6 +386,18 @@ export type PlanItem = {
   readonly state: PlanItemState;
   // The services its body names, with their sensitivity (decision 24, lane 18): the plan panel's chips.
   readonly sensitivity?: readonly { readonly service: string; readonly sensitivity: ServiceSensitivity }[];
+  // Its steps across services, when the lead gave some (decision 26, lane 23): the item's estimate adds theirs.
+  readonly steps?: readonly PlanStep[];
+};
+
+// A step of a plan item (decision 26, lane 23): the ticket step it becomes,
+// with its estimate by kind; `after` holds the item's step positions it waits for.
+export type PlanStep = {
+  readonly position: number;
+  readonly kind: TicketStep['kind'];
+  readonly service: string;
+  readonly after: readonly number[];
+  readonly estimate: Estimate;
 };
 
 export type PlanState = 'proposed' | 'superseded' | 'rejected' | 'approved' | 'paused' | 'done';

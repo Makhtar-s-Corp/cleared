@@ -79,4 +79,6 @@ test('a ticket of a one-service workspace produces the events, inbox items, call
   assert.deepEqual(before, fixture, 'the configuration as milestone 1 writes it');
   const spelled = await run({ workspace: workspaceOf(CONFIG) });
   assert.deepEqual(spelled, fixture, 'the same configuration with its one-service workspace spelled out');
+  // Lane 23: with the steps on, a one-service ticket runs its one service step and nothing else changes.
+  assert.deepEqual(await run({ steps: true }), fixture, 'the same configuration with the ticket\'s steps on');
 });

@@ -26,6 +26,9 @@ export type PlanItemInput = {
   readonly lane: 'fast' | 'full';
   readonly size: 'xs' | 's' | 'm' | 'l';
   readonly after: readonly number[];               // the 1-based positions this item waits for
+  // The steps of a ticket across services (decision 26, lane 23), each
+  // with the 1-based positions of the item's steps it waits for.
+  readonly steps?: readonly { readonly kind: 'contract' | 'service' | 'integration'; readonly service: string; readonly after: readonly number[] }[];
 };
 
 export type LeadToolInput = {
@@ -110,7 +113,16 @@ export const LEAD_TOOLS: readonly LeadToolDefinition[] = [
           lane: { type: 'string', enum: ['fast', 'full'], description: 'fast for a small change the fast lane may take, full otherwise.' },
           size: { type: 'string', enum: ['xs', 's', 'm', 'l'], description: 'The size of the change.' },
           after: { type: 'array', items: { type: 'number' }, description: 'The positions this ticket starts after, once they are live. Empty when it is independent.' },
-        }),
+          steps: {
+            type: 'array',
+            description: 'For a ticket across services only: its steps, in order, the first is step 1. Leave it out for a ticket of one service.',
+            items: object({
+              kind: { type: 'string', enum: ['contract', 'service', 'integration'], description: 'contract: the providing service changes its contract file only, which the owner validates; service: one service\'s change; integration: the consuming service tested against the others, real.' },
+              service: text('The service the step works on.'),
+              after: { type: 'array', items: { type: 'number' }, description: 'The steps of this ticket it starts after. Empty for the first.' },
+            }),
+          },
+        }, ['title', 'body', 'lane', 'size', 'after']),
       },
     }),
   },

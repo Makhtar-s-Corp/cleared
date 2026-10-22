@@ -59,7 +59,11 @@ test('each tool takes the input of section 3.2', () => {
     search_memory: object({ query: 'string' }, ['query']),
     propose_plan: object({
       goal: 'string', title: 'string', summary: 'string',
-      items: [object({ title: 'string', body: 'string', lane: ['fast', 'full'], size: ['xs', 's', 'm', 'l'], after: ['number'] }, ['title', 'body', 'lane', 'size', 'after'])],
+      items: [object({
+        title: 'string', body: 'string', lane: ['fast', 'full'], size: ['xs', 's', 'm', 'l'], after: ['number'],
+        // Lane 23: the steps of a ticket across services, optional.
+        steps: [object({ kind: ['contract', 'service', 'integration'], service: 'string', after: ['number'] }, ['kind', 'service', 'after'])],
+      }, ['title', 'body', 'lane', 'size', 'after'])],
     }, ['goal', 'title', 'summary', 'items']),
     start_ticket: object({ id: 'string', reason: 'string' }, ['id', 'reason']),
     stop_session: object({ id: 'string', reason: 'string' }, ['id', 'reason']),

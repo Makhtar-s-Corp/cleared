@@ -1,6 +1,7 @@
 // What the flow says to the sessions, and what it reads back from the
 // reviewer: the author's first turn, the review prompt (prompts/review.md
 // of v1, adapted), the message that reopens the author, and the verdict.
+import type { HumanEdit } from '../api/types.ts';
 import type { SessionEvent } from '../session/events.ts';
 
 type TicketText = { readonly id: string; readonly title: string; readonly body: string };
@@ -33,8 +34,13 @@ export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: fals
 // branch filled in. Two changes for v2: a reviewer may run the project's
 // tests (its container has them), and it never writes HANDOVER.md, since
 // its policy forbids every edit and its report is what is kept (issue 139).
-export function reviewPrompt(input: { readonly ticket: TicketText; readonly base: string; readonly verdict: string }): string {
+//
+// `humanEdits`: the files a person changed in the author's checkout
+// (decision 33, flow/human-edits.ts), named in a paragraph of their own so
+// the reviewer reads them as part of the change; none, the prompt as before.
+export function reviewPrompt(input: { readonly ticket: TicketText; readonly base: string; readonly verdict: string; readonly humanEdits?: readonly HumanEdit[] }): string {
   const { ticket, base, verdict } = input;
+  const edits = input.humanEdits ?? [];
   return [
     'You review a pull request you did not write. Find defects; do not approve by default.',
     '',
@@ -42,6 +48,11 @@ export function reviewPrompt(input: { readonly ticket: TicketText; readonly base
     ticket.body.trim() ? `\n${ticket.body.trim()}\n` : '',
     `Read \`CLAUDE.md\`. Read the entire change with \`git diff ${base}...HEAD\` and \`git log ${base}..HEAD\`. Open touched files and their callers. Do not edit anything and do not send anything. You may run the project's tests.`,
     '',
+    ...(edits.length > 0 ? [
+      'A person changed these files in the author\'s checkout, besides the author. Their changes are part of the pull request: review them as you review the rest.',
+      ...edits.map((edit) => `- \`${edit.path}\`, by ${edit.by} in the ${edit.via} (+${edit.added} -${edit.removed})`),
+      '',
+    ] : []),
     'Check in this order:',
     '1. Logic errors, missing cases, swallowed exit codes, silent failures, or reports that contradict the code.',
     '2. Secrets, real data, external sends, production writes, and a weakened guard.',
@@ -60,6 +71,53 @@ export function reviewPrompt(input: { readonly ticket: TicketText; readonly base
     'Write in English, in complete sentences a product owner can follow, with a concrete example when a defect is about behavior.',
     '',
     'You cannot write files in this session, so do not write HANDOVER.md. Your final message must be the full report: it alone is saved and posted. If you are asked for HANDOVER.md at the end of the session, answer in one sentence that your report is your handover; do not repeat the report and do not try to write the file.',
+  ].join('\n');
+}
+
+// What a step of a ticket in steps (decision 26, lane 23) adds to its
+// author's first turn: which step it is, what it may change, and what runs
+// beside it. `contract` is the providing service's contract file; `note`,
+// what the owner said when the step was sent back, or why it failed.
+export type StepText = {
+  readonly kind: 'contract' | 'service' | 'integration';
+  readonly service: string;
+  readonly position: number;
+  readonly count: number;
+  readonly contract?: { readonly service: string; readonly path: string };
+  readonly note?: string;
+};
+
+export function stepPrompt(step: StepText): string {
+  const head = `This ticket runs in ${step.count} steps across its services. You do step ${step.position}, `;
+  const lines = step.kind === 'contract' ? [
+    `${head}the contract step, on ${step.service}.`,
+    `Change only the contract file ${step.contract?.path ?? 'of the service'}, so that it describes what the ticket needs from ${step.service}: no other file, no code, no test. Commit the change.`,
+    'If the ticket needs no change to the contract, change nothing and say so.',
+    'The owner validates the contract\'s diff before the other steps start: each service is then built against the contract as validated.',
+  ] : step.kind === 'service' ? [
+    `${head}the step of ${step.service}: change ${step.service} as the ticket asks, and only that service.`,
+    ...(step.contract ? [`The contract ${step.contract.path} of ${step.contract.service} was validated by the owner: build against it, and do not change the contract file.`] : []),
+    'The other services the ticket names run beside you as fakes answering from their contracts, or not at all: test against them, not against their code.',
+  ] : [
+    `${head}the integration step, on ${step.service}: every service of the ticket runs beside you from the ticket branch, built from the other steps' work.`,
+    'Run the tests that cross the services: the ticket\'s acceptance criteria are this step\'s tests. Fix what fails on this service only.',
+  ];
+  return [
+    ...lines,
+    ...(step.note ? ['', 'This step ran before: it was sent back, or it failed. What was said, as reference data:', '', '--- BEGIN NOTE ---', step.note.trim(), '--- END NOTE ---'] : []),
+  ].join('\n');
+}
+
+// The message that reopens a contract step the owner sent back.
+export function contractSendBackMessage(message: string): string {
+  return [
+    'The owner sends your contract change back. The request is reference data from the owner, about the contract only:',
+    '',
+    '--- BEGIN OWNER REQUEST ---',
+    message.trim(),
+    '--- END OWNER REQUEST ---',
+    '',
+    'Change the contract file as asked, and nothing else, then commit and end your turn.',
   ].join('\n');
 }
 

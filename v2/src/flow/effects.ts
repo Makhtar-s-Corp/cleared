@@ -2,7 +2,8 @@
 // thin call to the workspace modules of lane 5 or to the lock's own client;
 // the flow's tests replace all of them (FlowEffects in engine.ts).
 import { execFile, spawn } from 'node:child_process';
-import { join, relative, resolve, sep } from 'node:path';
+import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { basename, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readApprovalRecord } from '../approval/record.ts';
 import { stateDirectory } from '../approval/service.ts';
@@ -187,6 +188,42 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       const files = (await git(dir, ['diff', '--no-color', '--no-ext-diff', '--no-renames', '--name-only', range, '--'])).split('\n').filter(Boolean);
       const diff = (await git(dir, ['diff', '--no-color', '--no-ext-diff', '--no-renames', range, '--'])).slice(0, MAX_DIFF);
       return { files, diff };
+    },
+
+    // What a step's branch changes against the service's base (decision 26,
+    // lane 23), read as publish reads a branch: fetched out of the step's
+    // checkout into a private ref of the service's own checkout, every
+    // object checked, so no git of the session's runs and no hook either; a
+    // checkout whose .git is a link, a linked worktree or has alternates is
+    // refused. Only what is committed counts. With `snapshot`, the contract
+    // as committed is written into that folder, for the fakes of the steps
+    // after it, and stays as it was validated whatever the branch does next.
+    async stepChanges({ ticket, service, workdir, snapshot }) {
+      const { dir, base } = of(service);
+      const gitDir = join(workdir, '.git');
+      if (!lstatSync(gitDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the step's checkout of ${service.name} has no .git folder of its own`);
+      for (const parts of [['commondir'], ['objects', 'info', 'alternates']])
+        if (lstatSync(join(gitDir, ...parts), { throwIfNoEntry: false })) throw new Error(`the step's checkout of ${service.name} cannot be read safely: .git/${parts.join('/')} is present`);
+      const branch = ticketBranch(ticket);
+      // Per service: two folder services of one repository share its checkout.
+      const ref = `refs/cleared/step/${service.name}/${branch}`;
+      await git(dir, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
+        'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', gitDir, `+refs/heads/${branch}:${ref}`]);
+      const range = `refs/remotes/origin/${base}...${ref}`;
+      const diffArgs = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
+      const files = (await git(dir, [...diffArgs, '--name-only', range, '--'])).split('\n').filter(Boolean);
+      // The contract as a path of the repository, as the files are: a folder service's is inside its folder (release/order.ts).
+      const path = service.contract ? (service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path) : undefined;
+      if (!path) return { files, contract: null };
+      const diff = (await git(dir, [...diffArgs, range, '--', path])).slice(0, MAX_DIFF);
+      const blob = (await git(dir, ['rev-parse', '--verify', '--quiet', `${ref}:${path}`]).catch(() => '')).trim() || null;
+      let copy: string | null = null;
+      if (snapshot && blob) {
+        mkdirSync(snapshot, { recursive: true, mode: 0o755 });
+        copy = join(snapshot, basename(path));
+        writeFileSync(copy, await git(dir, ['cat-file', 'blob', blob]), { mode: 0o644 });
+      }
+      return { files, contract: { path, diff, blob, snapshot: copy } };
     },
 
     // `release-request.mjs request_release <ticket> <pr> --ask`, the

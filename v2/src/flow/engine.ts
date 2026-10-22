@@ -45,6 +45,15 @@
 // `reviewer:<model>` names the reviewer, and `full` keeps a Quick ticket
 // off Haiku.
 //
+// A ticket of several services runs in steps (decision 26, lane 23,
+// flow/steps.ts; FlowConfig.steps): a contract step on the providing
+// service, whose diff the owner validates in the inbox, then a step per
+// service in parallel (at most the plan's maxParallel at once), then the
+// integration on the consumer, each an author session in its service's
+// checkout with the siblings its kind wants; once every step is done, the
+// review, the publish and the train follow as above. A step that fails puts
+// the ticket back and keeps the steps that are done.
+//
 // The owner can take an author's session over (decision 30, lane 20,
 // flow/takeover.ts): the turn is interrupted, what waited for the human is
 // settled as cancelled, and the session is paused, said by `takenOver` on
@@ -52,7 +61,8 @@
 // paused session alone: no idle stop, no Go of the delay, no review, no
 // message; a restart stops it as any live session.
 import { posix } from 'node:path';
-import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver } from '../api/types.ts';
+import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver, TicketStep } from '../api/types.ts';
+import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
@@ -76,7 +86,9 @@ import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
 import { GIVEN_BACK, TAKEN_OVER } from './takeover.ts';
-import { authorPrompt, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage } from './prompts.ts';
+import { authorPrompt, contractSendBackMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt } from './prompts.ts';
+import { humanEdits } from './human-edits.ts';
+import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
 import { foldState, sessionPlanOf } from './state.ts';
 
 export type { ProjectSettings } from './config.ts';
@@ -102,6 +114,20 @@ export type FlowEffects = {
   // What a published head changes against the base: its files, and the diff
   // the release card's flags are read from (release/flags.ts). Absent: none.
   changes?(input: { readonly ticket: TicketId; readonly head: string; readonly service?: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
+  // What the runtime plans as the siblings of a session on `service`
+  // (container/services.ts planSiblings), which a step adapts to its kind
+  // (flow/steps.ts stepSiblings). Absent: the runtime plans them itself.
+  siblings?(input: { readonly ticket: TicketId; readonly service: ServiceConfig; readonly workdir: string }): Promise<readonly SiblingSpec[]>;
+  // What a step's branch changes against the service's base, read as publish
+  // reads a branch (never with git in the session's checkout): its files,
+  // and for a service with a contract, the contract file's diff and blob id;
+  // with `snapshot` (a folder), the contract as committed, copied into it.
+  stepChanges?(input: { readonly ticket: TicketId; readonly service: ServiceConfig; readonly workdir: string; readonly snapshot?: string }): Promise<StepChanges>;
+};
+
+export type StepChanges = {
+  readonly files: readonly string[];
+  readonly contract: { readonly path: string; readonly diff: string; readonly blob: string | null; readonly snapshot: string | null } | null;
 };
 
 export type FlowDeps = {
@@ -160,6 +186,8 @@ type Candidate = {
   readonly pr: number; readonly announcement: string; readonly since: string;
 };
 
+// A ticket's steps at once when no plan says otherwise: the plans' default (lead/plans/runner.ts).
+const STEP_PARALLEL = 2;
 const LIVE_PHASES: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
 const CHECKS_MS = 60_000;                                           // the forge is asked for a release's checks at most this often
 const LANDING_HORIZON_MS = 2 * 24 * 3600_000;                       // a Done ticket's release is followed for so long after its approval
@@ -220,6 +248,10 @@ export class FlowEngine {
   #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
   #origins = new Map<TicketId, Origin>();                           // the plan item a ticket's current flow runs for
   #paused = new Map<SessionId, TakenOver>();                        // sessions the owner took over, until Give back (lane 20)
+  #steps: StepStore;                                                // the ticket's steps (lane 23)
+  #stepOf = new Map<SessionId, string>();                           // the step an author session works on
+  #launching = new Set<string>();                                   // steps whose session is being started
+  #finishing = new Set<TicketId>();                                 // tickets whose last step is done: the review starts once
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -232,6 +264,7 @@ export class FlowEngine {
     this.#workspace = workspaceOf(deps.config);
     this.#locks = deps.locks;
     this.#trains = new TrainStore(deps.store.db, this.#now);
+    this.#steps = new StepStore(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -683,9 +716,15 @@ export class FlowEngine {
     this.#flows.set(ticketId, new Set());
     if (origin) this.#origins.set(ticketId, origin);
     else this.#origins.delete(ticketId);
+    this.#finishing.delete(ticketId);
     const began = this.#now();
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
+      const steps = this.#stepPlan(ticket, origin);
+      if (steps && steps.length > 1) {
+        await this.#startSteps(ticket, by, origin, steps);
+        return;
+      }
       const settings = await this.#settings(ticket);
       const prepared = await this.#prepare(ticket, 'author');
       const workspaceDone = this.#now();
@@ -701,10 +740,314 @@ export class FlowEngine {
       const comment = origin ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}.` : `Started by ${by}.`;
       await tickets.comment(ticketId, comment, SERVICE).catch(() => undefined);
       this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: ticketId, by, origin: origin ?? null, session: live.id });
+      // A one-service ticket's one step is its author's (lane 23): nothing else changes.
+      if (steps) {
+        const step = this.#steps.ensure(ticketId, this.config.project, steps)[0] as Step;
+        this.#steps.resume(ticketId);
+        this.#steps.update(step.id, { state: 'running', session: live.id });
+        this.#stepOf.set(live.id, step.id);
+      }
       this.#supervise(live, 0);
     } catch (error) {
       await this.#putBack(ticketId, `The flow could not start: ${name(error)}`, 'start_failed');
       throw error;
+    }
+  }
+
+  // ---- a ticket in steps (decision 26, lane 23) ----------------------------
+
+  // The steps of a ticket when the steps are on: the ones it kept from an
+  // earlier start, else its plan item's, else deriveSteps'.
+  #stepPlan(ticket: Ticket, origin?: Origin): StepSpec[] | undefined {
+    if (this.config.steps !== true) return undefined;
+    const kept = this.#steps.list(ticket.id);
+    if (kept.length > 0) return kept.map(({ kind, service, after }) => ({ kind, service, after }));
+    if (origin?.steps && origin.steps.length > 0) return [...origin.steps];
+    return deriveSteps(this.#workspace.services, this.#servicesOf(ticket).map((service) => service.name));
+  }
+
+  async #startSteps(ticket: Ticket, by: UserId, origin: Origin | undefined, specs: readonly StepSpec[]): Promise<void> {
+    this.#steps.ensure(ticket.id, this.config.project, specs);
+    this.#steps.resume(ticket.id);
+    const comment = origin ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}.` : `Started by ${by}.`;
+    await this.registry.ticketStore.comment(ticket.id, comment, SERVICE).catch(() => undefined);
+    await this.#runSteps(ticket.id, by);
+  }
+
+  // The flow's tick of a ticket in steps: each waiting step whose steps
+  // before it are done starts, in position order, at most the plan's
+  // maxParallel sessions at once and never two on one service's checkout;
+  // once every step is done, the review. The sessions are watched once all
+  // of them have started, so a step that ends at once does not race the
+  // start of the next. `by`: the ticket's start, said by its first session.
+  async #runSteps(id: TicketId, by?: UserId): Promise<void> {
+    const started: Live[] = [];
+    let failed: { readonly step: Step; readonly why: string } | undefined;
+    for (;;) {
+      if (!this.#active.has(id)) break;
+      const steps = this.#steps.list(id);
+      if (steps.length === 0 || steps.some((step) => step.state === 'failed')) break;
+      if (steps.every((step) => step.state === 'done')) {
+        await this.#stepsDone(id);
+        break;
+      }
+      const limit = Math.max(1, this.#origins.get(id)?.maxParallel ?? STEP_PARALLEL);
+      if (steps.filter((step) => step.state === 'running').length >= limit) break;
+      const next = steps.find((step) => step.state === 'waiting'
+        && step.after.every((position) => steps.find((other) => other.position === position)?.state === 'done')
+        && !steps.some((other) => other.id !== step.id && other.service === step.service && (other.state === 'running' || other.state === 'validating')));
+      if (!next) break;
+      // Running before the first wait, so a second tick never starts it too.
+      this.#steps.update(next.id, { state: 'running' });
+      try {
+        started.push(await this.#launchStep(id, next, steps.length, by && started.length === 0 && this.#flowOf(id).size === 0 ? by : undefined));
+      } catch (error) {
+        failed = { step: next, why: `its session could not start: ${name(error)}` };
+        break;
+      }
+    }
+    if (failed) return this.#failStep(failed.step, failed.why);
+    for (const live of started) if (!live.closed) this.#supervise(live, 0);
+  }
+
+  // A step's session, in its service's checkout, with the siblings its kind
+  // wants and the validated contracts, told which step it does.
+  async #launchStep(id: TicketId, step: Step, count: number, by: UserId | undefined): Promise<Live> {
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
+    const ticket = await this.#ticketOf(id);
+    const service = this.#service(step.service);
+    const began = this.#now();
+    const scoped = this.#several ? service : undefined;
+    const settings = await this.#effects.settings(scoped);
+    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : {}) });
+    const workdirs = this.#workdirs.get(id) ?? new Map<string, string>();
+    this.#workdirs.set(id, workdirs);
+    workdirs.set(service.name, prepared.workdir);
+    const workspaceDone = this.#now();
+    const steps = this.#steps.list(id);
+    const validated = new Map(steps.flatMap((s) => (s.kind === 'contract' && s.state === 'done' && s.contract ? [[s.service, s.contract] as const] : [])));
+    const contract = this.#stepContract(step, steps);
+    const tools = this.config.authorTools === true;
+    const note = this.#origins.get(id)?.note;
+    const prompt = [
+      authorPrompt(ticket, { plan: tools, report: tools }),
+      stepPrompt({ kind: step.kind, service: step.service, position: step.position, count, ...(contract ? { contract } : {}), ...(step.note ? { note: step.note } : {}) }),
+      ...(note ? [note] : []),
+    ].join('\n\n');
+    const planned = this.#effects.siblings ? await this.#effects.siblings({ ticket: id, service, workdir: prepared.workdir }) : undefined;
+    const siblings = planned ? stepSiblings(planned, { kind: step.kind, own: service.name, validated, ...(settings.serviceUrls ? { urls: settings.serviceUrls } : {}) }) : undefined;
+    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined,
+      { service: service.name, ...(siblings ? { siblings } : {}) });
+    this.#steps.update(step.id, { state: 'running', session: live.id });
+    this.#stepOf.set(live.id, step.id);
+    const session = { id: live.id, ticket: id, project: this.config.project };
+    this.#step(session, 'STEP_STARTED', 'workspace', began);
+    this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
+    this.#step(session, 'STEP_STARTED', 'author', workspaceDone);
+    this.#snapshot(live.id, id);
+    if (by) this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: id, by, origin: this.#origins.get(id) ?? null, session: live.id });
+    return live;
+  }
+
+  // The contract a step's prompt names: its own for the contract step and
+  // for its provider's service step, else that of a provider it consumes
+  // whose contract step the ticket has.
+  #stepContract(step: Step, steps: readonly Step[]): { readonly service: string; readonly path: string } | undefined {
+    const of = (name: string) => {
+      const path = this.#service(name).contract?.path;
+      return path ? { service: name, path } : undefined;
+    };
+    if (step.kind === 'contract') return of(step.service);
+    if (step.kind === 'integration') return undefined;
+    const contracts = steps.filter((s) => s.kind === 'contract').map((s) => s.service);
+    if (contracts.includes(step.service)) return of(step.service);
+    const provider = this.#service(step.service).consumes.find((name) => contracts.includes(name));
+    return provider ? of(provider) : undefined;
+  }
+
+  // A step's author ended its work. The contract step's change is read:
+  // the contract file alone, proposed in the inbox, or nothing changed and
+  // the step is done; a step on a service whose contract was validated is
+  // read too, and refused if it changed it. Then the next steps.
+  async #stepDone(live: Live, step: Step): Promise<void> {
+    const { ticket: id, project } = live.input;
+    this.#step({ id: live.id, ticket: id, project }, 'STEP_FINISHED', 'author');
+    await this.#close(live, 'done');
+    this.#stepOf.delete(live.id);
+    this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: live.id });
+    try {
+      await this.#effects.captureHandover({ workdir: live.input.workdir, role: 'author', model: live.input.model, ticket: id, sessionId: live.id });
+    } catch (error) {
+      await this.registry.ticketStore.comment(id, this.#clean(`The author's handover could not be stored: ${name(error)}`), SERVICE).catch(() => undefined);
+    }
+    if (!this.#active.has(id)) return;
+    const steps = this.#steps.list(id);
+    const validated = step.kind === 'contract' ? null : steps.find((s) => s.kind === 'contract' && s.service === step.service && s.state === 'done')?.blob ?? null;
+    let read: StepChanges | undefined;
+    if (step.kind === 'contract' || validated !== null) {
+      if (!this.#effects.stepChanges) return this.#failStep(step, 'what it changed cannot be read: the flow has no reader of a step\'s branch');
+      const proposed = [...this.inbox.contracts({ ticket: id }), ...this.inbox.contracts({ ticket: id, state: 'handled' })];
+      const round = proposed.filter((item) => item.step === step.id).length + 1;
+      try {
+        read = await this.#effects.stepChanges({
+          ticket: id, service: this.#service(step.service), workdir: live.input.workdir,
+          ...(step.kind === 'contract' ? { snapshot: posix.join(this.config.workdirRoot, id, '.validated', `step-${step.position}-${round}`) } : {}),
+        });
+      } catch (error) {
+        return this.#failStep(step, `what it changed could not be read: ${name(error)}`);
+      }
+    }
+    const cost = this.#stepCost(step);
+    const minutes = this.#stepMinutes(step);
+    if (step.kind === 'contract') {
+      const contract = read?.contract;
+      if (!contract) return this.#failStep(step, `${step.service} has no contract file to change`);
+      const others = (read?.files ?? []).filter((file) => file !== contract.path);
+      if (others.length > 0)
+        return this.#failStep(step, `it changed ${others.join(', ')} besides the contract ${contract.path}. The contract step changes the contract file only: take those changes off the ticket branch before the ticket starts again.`);
+      if (contract.diff.trim() === '') {
+        this.#steps.update(step.id, { state: 'done', contract: contract.snapshot, blob: contract.blob, cost, minutes });
+      } else {
+        this.#steps.update(step.id, { state: 'validating', contract: contract.snapshot, blob: contract.blob, cost, minutes });
+        this.inbox.addContract({ ticket: id, project, sessionId: live.id, step: step.id, service: step.service, path: contract.path, diff: this.#clean(contract.diff) });
+        return;
+      }
+    } else {
+      if (validated !== null && read?.contract && read.contract.blob !== validated)
+        return this.#failStep(step, `it changed the validated contract ${read.contract.path} of ${step.service}. A change to the contract goes through the contract step: take it off the ticket branch before the ticket starts again.`);
+      this.#steps.update(step.id, { state: 'done', cost, minutes });
+    }
+    await this.#runSteps(id);
+  }
+
+  // Every step is done: the ticket goes to review, once.
+  async #stepsDone(id: TicketId): Promise<void> {
+    if (this.#finishing.has(id)) return;
+    this.#finishing.add(id);
+    const tickets = this.registry.ticketStore;
+    const ticket = await tickets.get(id);
+    if (!ticket) return;
+    await tickets.move(id, tickets.states.review, SERVICE);
+    const author = this.#lastSession(id, 'author');
+    await this.#startReview(ticket, (author ? this.#inputs.get(author.id)?.input.workdir : undefined) ?? '');
+  }
+
+  // A step that cannot go on: it fails with its note, which its next run
+  // reads; the ticket's other sessions stop, and the ticket goes back to
+  // Todo, keeping the steps that are done.
+  async #failStep(step: Step, why: string): Promise<void> {
+    const note = this.#clean(this.#stepNote(step, why));
+    this.#steps.update(step.id, { state: 'failed', note });
+    for (const live of [...this.#live.values()].filter((l) => l.input.ticket === step.ticket)) await this.#close(live, 'stopped', note);
+    await this.#putBack(step.ticket, note, 'step_failed');
+  }
+
+  #stepNote(step: Step, why: string): string {
+    const what = stepName(step, this.#steps.list(step.ticket).length);
+    return `${what[0]?.toUpperCase() ?? ''}${what.slice(1)} failed: ${why}`;
+  }
+
+  // What a step's sessions spent, to the cent; null before any ran.
+  #stepCost(step: Pick<Step, 'sessions'>): number | null {
+    if (step.sessions.length === 0) return null;
+    let total = 0;
+    for (const session of step.sessions)
+      for (const { event } of this.#store.events.after(session)) if (event.type === 'RUN_FINISHED') total += event.result.total_cost_usd ?? 0;
+    return Math.round(total * 100) / 100;
+  }
+
+  // How long a step's sessions ran, the history of the plans' step
+  // estimates (lead/plans/estimates.ts): from each one's start to its last change.
+  #stepMinutes(step: Pick<Step, 'sessions'>): number {
+    let ms = 0;
+    for (const id of step.sessions) {
+      const row = this.#store.sessions.get(id);
+      if (row) ms += Math.max(0, Date.parse(row.updatedAt) - Date.parse(row.createdAt));
+    }
+    return Math.round(ms / 600) / 100;
+  }
+
+  // The ticket's steps (GET /api/tickets/:id/steps): none for a ticket that
+  // never ran in steps, undefined for a ticket the store does not know.
+  async ticketSteps(id: TicketId): Promise<TicketStep[] | undefined> {
+    const steps = this.#steps.list(id);
+    if (steps.length === 0 && !(await this.registry.ticketStore.get(id))) return undefined;
+    return steps.map((step) => publicStep(step, this.#stepCost(step)));
+  }
+
+  // The contract item and its step, or why it cannot be answered.
+  #contractItem(id: string): Step {
+    const item = this.inbox.item(id);
+    if (!item || item.kind !== 'contract') throw new FlowError('not_found', `unknown contract item ${id}`);
+    if (item.state !== 'waiting') throw new FlowError('conflict', `contract item ${id} is already answered`);
+    const step = this.#steps.get(item.step);
+    if (!step || step.ticket !== item.ticket || step.kind !== 'contract') throw new FlowError('conflict', `contract item ${id} names a step its ticket ${item.ticket} does not have`);
+    if (step.state !== 'validating') throw new FlowError('conflict', `the contract step of ${item.ticket} is ${step.state}, not waiting for its validation`);
+    return step;
+  }
+
+  // Approve (POST /api/contracts/:id/approve): the contract is validated as
+  // proposed, and the steps after it start if the ticket runs, in the
+  // background, since a click does not wait for clones and containers; a
+  // ticket put back meanwhile goes on from them when it starts again.
+  async approveContract(id: string, by: UserId): Promise<void> {
+    const step = this.#contractItem(id);
+    if (!this.inbox.handleContract(id, by, { decision: 'approve' })) throw new FlowError('conflict', `contract item ${id} is already answered`);
+    this.#steps.update(step.id, { state: 'done' });
+    this.#background(this.#runSteps(step.ticket), step.ticket);
+  }
+
+  #background(work: Promise<void>, ticket: TicketId): void {
+    void this.#track(work.catch((error: unknown) => console.error(`cleared-v2: the steps of ${ticket} could not go on (${error instanceof Error ? error.name : typeof error})`)));
+  }
+
+  // Send back (POST /api/contracts/:id/sendback): the contract step's
+  // session is resumed with the message, or, when it cannot be, a new one
+  // runs the step with it, in the background; a ticket put back runs it
+  // when it starts again.
+  async sendBackContract(id: string, message: string, by: UserId): Promise<void> {
+    if (message.trim() === '') throw new FlowError('invalid', 'a Send back says what to change in the contract');
+    const step = this.#contractItem(id);
+    if (!this.inbox.handleContract(id, by, { decision: 'send_back', message })) throw new FlowError('conflict', `contract item ${id} is already answered`);
+    if (!this.#active.has(step.ticket)) {
+      this.#steps.update(step.id, { state: 'waiting', note: message });
+      return;
+    }
+    this.#steps.update(step.id, { state: 'running', note: message });
+    this.#background((async () => {
+      if (await this.#reopenStep(step, contractSendBackMessage(message), by)) return;
+      this.#steps.update(step.id, { state: 'waiting' });
+      await this.#runSteps(step.ticket);
+    })(), step.ticket);
+  }
+
+  // The step's last session resumed in its container, then told `text`; false when either fails.
+  async #reopenStep(step: Step, text: string, by: UserId): Promise<boolean> {
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    const kept = step.session ? this.#inputs.get(step.session) : undefined;
+    if (!adapter || !kept || !step.session) return false;
+    let handle: SessionHandle;
+    try { handle = await adapter.resume(step.session); } catch { return false; }
+    const lastSeq = this.#store.events.after(step.session).at(-1)?.seq ?? 0;
+    const live: Live = { id: step.session, input: kept.input, settings: kept.settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
+    this.#live.set(live.id, live);
+    this.#stepOf.set(live.id, step.id);
+    this.#flowOf(step.ticket).add(live.id);
+    this.#setPhase(live, 'working');
+    this.#step({ id: live.id, ticket: step.ticket, project: live.input.project }, 'STEP_STARTED', 'author');
+    this.#snapshot(live.id, step.ticket);
+    this.#supervise(live, lastSeq);
+    try {
+      await handle.send({ text, by });
+      return true;
+    } catch {
+      live.closed = true;
+      this.#live.delete(live.id);
+      this.#stepOf.delete(live.id);
+      await handle.stop().catch(() => undefined);
+      this.#setPhase(live, 'done');
+      return false;
     }
   }
 
@@ -769,13 +1112,15 @@ export class FlowEngine {
 
   // `author`: the author's host tools, with its session plan to propose
   // first (`plan`), or not again after a review (`report`, lane 17).
-  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report'): Promise<Live> {
-    // A train ticket's session works on the first service the ticket names (decision 20, lane 15's runtime).
-    const service = this.#several ? this.#servicesOf(ticket)[0]?.name : undefined;
+  // `step`: the service and the siblings of a step's session (lane 23).
+  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report', step?: { readonly service: string; readonly siblings?: readonly SiblingSpec[] }): Promise<Live> {
+    // A train ticket's session works on the first service the ticket names (decision 20, lane 15's runtime), a step's on its own.
+    const service = step?.service ?? (this.#several ? this.#servicesOf(ticket)[0]?.name : undefined);
     const tools = author ? this.#authorTools(ticket, author === 'plan') : undefined;
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness: HARNESS, model, workdir, briefing,
       policy: this.#policy(role, settings, tools), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
+      ...(step?.siblings ? { siblings: step.siblings } : {}),
     };
     const handle = await adapter.start(input);
     // The fake adapter plays a first turn's host calls inside start(): the gate may exist already.
@@ -902,7 +1247,8 @@ export class FlowEngine {
         await this.#go(live, 'lead');
         return true;
       }
-      const service = this.#several ? this.#servicesOf(await this.#ticketOf(live.input.ticket))[0]?.name : undefined;
+      // The session's own service: a step's, or the ticket's first (#launch).
+      const service = this.#several ? live.input.service : undefined;
       this.inbox.addSessionPlan({ ticket: session.ticket, project: session.project, sessionId: live.id, plan: gate.plan, ...(service ? { service } : {}) });
       this.#setPhase(live, 'waiting_human');
       this.#snapshot(live.id, live.input.ticket);
@@ -1129,8 +1475,17 @@ export class FlowEngine {
   // written to the session and to the ticket, and the ticket goes back to
   // Todo. `code` is the RUN_ERROR code the session screen shows; undefined
   // when the adapter already wrote its own RUN_ERROR.
+  // A step's session that stops so fails its step, named in the note; a
+  // failure of its own is the step's (lane 23).
   async #stopTicket(from: Live, code: string | undefined, runMessage: string | undefined, note: string, phase: 'stopped' | 'failed', reason: PutBackReason): Promise<void> {
     const ticket = from.input.ticket;
+    const stepId = this.#stepOf.get(from.id);
+    const step = stepId ? this.#steps.get(stepId) : undefined;
+    if (step && step.state === 'running' && this.#steps.list(ticket).length > 1) {
+      note = this.#clean(this.#stepNote(step, note));
+      this.#steps.update(step.id, { state: 'failed', note });
+      if (reason === 'failed') reason = 'step_failed';
+    }
     for (const live of [...this.#live.values()].filter((l) => l.input.ticket === ticket)) {
       if (live.closed) continue;
       if (code !== undefined && runMessage !== undefined)
@@ -1145,6 +1500,7 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     this.#active.delete(ticket);
     this.#origins.delete(ticket);
+    this.#steps.hold(ticket);
     await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
     try {
       await tickets.move(ticket, tickets.states.todo, SERVICE);
@@ -1158,11 +1514,17 @@ export class FlowEngine {
 
   // ---- the author is done: the review starts ------------------------------
 
+  // A step's author of a ticket in steps ends its step (lane 23); a
+  // one-service ticket's one step is done with its author.
   async #authorDone(author: Live): Promise<void> {
     const { ticket: id, project } = author.input;
+    const stepId = this.#stepOf.get(author.id);
+    const step = stepId ? this.#steps.get(stepId) : undefined;
+    if (step && step.state === 'running' && this.#steps.list(id).length > 1) return this.#stepDone(author, step);
     const session = { id: author.id, ticket: id, project };
     this.#step(session, 'STEP_FINISHED', 'author');
     await this.#close(author, 'done');
+    if (step) this.#steps.update(step.id, { state: 'done', cost: this.#stepCost(step) ?? 0, minutes: this.#stepMinutes(step) });
     this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: author.id });
     try {
       await this.#effects.captureHandover({ workdir: author.input.workdir, role: 'author', model: author.input.model, ticket: id, sessionId: author.id });
@@ -1185,8 +1547,10 @@ export class FlowEngine {
       const prepared = this.#several
         ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
         : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer' });
+      // The files a person changed in the author's checkouts (decision 33): every author session of the flow, a ticket in steps having several.
+      const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
       const live = await this.#launch(adapter, ticket, 'reviewer', this.#reviewerModel(ticket), prepared.workdir || workdir, prepared.briefing, settings,
-        reviewPrompt({ ticket, base: this.config.base, verdict: settings.verdict }));
+        reviewPrompt({ ticket, base: this.config.base, verdict: settings.verdict, humanEdits: edits }));
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
       this.#snapshot(live.id, ticket.id);
       this.#supervise(live, 0);
@@ -1317,7 +1681,7 @@ export class FlowEngine {
     }
     for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
     const changed = await this.#changes(id, published.head);
-    const card = flags({ diff: changed?.diff ?? '', ...this.#report(id) });
+    const card = flags({ diff: changed?.diff ?? '', ...this.#report(id), ...this.#guarded(ticket, [reviewer.settings]) });
     const item = this.inbox.addRelease({
       ticket: id, project, title: ticket.title, announcement, requestedAt,
       pr: { number: published.number, url: published.url, checks: 'pending' },
@@ -1343,6 +1707,14 @@ export class FlowEngine {
       console.error(`cleared-v2: what ${ticket} changes could not be read (${error instanceof Error ? error.name : typeof error})`);
       return undefined;
     }
+  }
+
+  // What the card's flags read beside the diff (issue 205): the contract
+  // files of the ticket's services, and their `[merge] guarded_paths`.
+  #guarded(ticket: Ticket, settings: readonly (ProjectSettings | undefined)[]): { contracts: string[]; guarded: string[] } {
+    // As paths of the repository, as the diff's are: a folder service's contract is inside its folder (release/order.ts).
+    const contracts = this.#servicesOf(ticket).flatMap((service) => (service.contract ? [service.kind === 'folder' && service.path ? posix.join(service.path, service.contract.path) : service.contract.path] : []));
+    return { contracts: [...new Set(contracts)], guarded: [...new Set(settings.flatMap((s) => s?.guardedPaths ?? []))] };
   }
 
   // The author's report of its changes: the last `cleared.changes` event of its last session.
@@ -1411,7 +1783,8 @@ export class FlowEngine {
     if (skipped.length > 0) await tickets.comment(id, `Not in the release: ${skipped.join(', ')}, whose branch has no commit of its own.`, SERVICE).catch(() => undefined);
     for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
     const first = stops[0] as Stop;
-    const card = flags({ diff: published.map((p) => p.diff).join(''), ...this.#report(id) });
+    const settings = await Promise.all(published.map((p) => this.#effects.settings(p.service).catch(() => undefined)));
+    const card = flags({ diff: published.map((p) => p.diff).join(''), ...this.#report(id), ...this.#guarded(ticket, settings) });
     const train = {
       ticket: id, project, state: compat.blocked ? 'blocked' as const : 'waiting' as const, stops, compatibility: compat.line, blocked: compat.blocked, announcement,
     };

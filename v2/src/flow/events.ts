@@ -8,8 +8,17 @@ import type { TicketId } from '../tickets/contract.ts';
 
 // Who asked for a ticket to start beyond the person: a plan's item
 // (lane 7). `note` is added to the author's prompt, for a ticket put back
-// and started again.
-export type Origin = { readonly plan: string; readonly item: number; readonly note?: string };
+// and started again. `steps`: the item's steps, when the lead gave some
+// (decision 26, lane 23); `maxParallel`: the plan's limit of sessions at
+// once, which the ticket's steps keep to.
+export type Origin = {
+  readonly plan: string; readonly item: number; readonly note?: string;
+  readonly steps?: readonly StepSpec[]; readonly maxParallel?: number;
+};
+
+// A step of a ticket as a plan item or the flow gives it: its kind, its
+// service, and the 1-based positions it waits for.
+export type StepSpec = { readonly kind: 'contract' | 'service' | 'integration'; readonly service: string; readonly after: readonly number[] };
 
 // Why the flow put a ticket back in Todo.
 export type PutBackReason =
@@ -26,6 +35,7 @@ export type PutBackReason =
   | 'merge_refused'         // the lock refused the merge for good
   | 'rolled_back'           // the release watch reverted the merge
   | 'train_halted'          // a release train could not land its next service (lane 16)
+  | 'step_failed'           // a step of the ticket failed; its done steps are kept (lane 23)
   | 'restart';              // the service restarted while the ticket ran
 
 type Base = { readonly at: string; readonly project: string; readonly ticket: TicketId };

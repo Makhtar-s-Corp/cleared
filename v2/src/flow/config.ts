@@ -41,6 +41,11 @@ export type FlowConfig = {
   // written without it (milestone 1's, the tests' literals) runs the flow
   // as milestone 1 did, with no tool and no gate.
   readonly authorTools?: boolean;
+  // A ticket runs in steps (decision 26, lane 23): a contract step, a step
+  // per service, an integration step, each its own author session.
+  // loadFlowConfig always sets it; a configuration written without it runs
+  // one author per ticket, as before.
+  readonly steps?: boolean;
 };
 
 // How long a high-confidence session plan waits for a Go before it starts
@@ -55,6 +60,11 @@ export type ProjectSettings = {
   readonly services: readonly ServiceSpec[]; // [session] services, started beside each session
   readonly scripts: readonly string[];      // the scripts of package.json on the base branch
   readonly planGoMinutes?: number;          // [session] plan_go_minutes, when set: the session plan's delay (PLAN_GO_MINUTES otherwise)
+  // [session] service_urls, when set: for each service it consumes, the
+  // variable its code reads that service's address from (`filter-api:FILTER_URL`),
+  // given to its sibling in a step's trial environment (lane 23).
+  readonly serviceUrls?: Readonly<Record<string, string>>;
+  readonly guardedPaths?: readonly string[]; // [merge] guarded_paths, when set: the release card's `config` flag reads them (lane 23)
 };
 
 const list = (value: string | undefined): string[] => (value ?? '').split(',').map((word) => word.trim()).filter(Boolean);
@@ -72,10 +82,28 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
     throw error;
   }
   const planGoMinutes = positive(sections.session?.plan_go_minutes, '[session] plan_go_minutes', false);
+  const serviceUrls = urlVariables(sections.session?.service_urls);
+  const guardedPaths = list(sections.merge?.guarded_paths);
   return {
     verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts,
     ...(planGoMinutes === undefined ? {} : { planGoMinutes }),
+    ...(serviceUrls === undefined ? {} : { serviceUrls }),
+    ...(guardedPaths.length === 0 ? {} : { guardedPaths }),
   };
+}
+
+// `<service>:<VARIABLE>` pairs, the variable an upper-case name ending in
+// _URL, so that no setting of a service can name PATH or NODE_OPTIONS.
+function urlVariables(value: string | undefined): Record<string, string> | undefined {
+  const pairs = list(value);
+  if (pairs.length === 0) return undefined;
+  const out: Record<string, string> = {};
+  for (const pair of pairs) {
+    const match = /^([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?):([A-Z][A-Z0-9_]*_URL)$/.exec(pair);
+    if (!match) throw new FlowConfigError(`[session] service_urls: "${pair}" is not <service>:<VARIABLE_URL>, a service name and an upper-case variable ending in _URL`);
+    out[match[1] as string] = match[2] as string;
+  }
+  return out;
 }
 
 function positive(value: string | undefined, name: string, integer: boolean): number | undefined {
@@ -117,6 +145,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
     workspace,
     authorTools: true,
+    steps: true,
   };
 }
 

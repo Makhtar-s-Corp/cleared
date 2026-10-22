@@ -9,7 +9,7 @@ import lead from '../../../src/modules/lead.ts';
 
 test('the lead module declares the plans\' tables and the eleven routes of section 7.1', () => {
   for (const table of PLAN_TABLES) assert.ok(lead.tables.includes(table));
-  assert.deepEqual(PLAN_TABLES.map((sql) => /CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)/.exec(sql)?.[1]), ['plans', 'plan_items', 'plan_items_ticket']);
+  assert.deepEqual(PLAN_TABLES.map((sql) => /CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)/.exec(sql)?.[1]), ['plans', 'plan_items', 'plan_items_ticket', 'plan_steps']);
   assert.deepEqual(lead.routes.map((r) => `${r.method} ${r.path}`).sort(), [...MILESTONE_2_ROUTES].sort());
 });
 

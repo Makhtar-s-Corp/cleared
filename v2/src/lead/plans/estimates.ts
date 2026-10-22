@@ -10,7 +10,8 @@
 //   defaults below. The plan's time is its critical path: the runner's own
 //   rule (ready items in position order, at most maxParallel at once) played
 //   on the estimates, not their sum.
-import type { Estimate, PlanItem } from '../../api/types.ts';
+import type { DatabaseSync } from 'node:sqlite';
+import type { Estimate, PlanItem, PlanStep } from '../../api/types.ts';
 import { QUICK_LABEL } from '../../flow/engine.ts';
 import type { SessionEvent } from '../../session/events.ts';
 import type { Store } from '../../store/db.ts';
@@ -84,6 +85,67 @@ function median(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] as number : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+}
+
+// ---- the steps of an item (decision 26, lane 23) ------------------------
+
+type StepKind = PlanStep['kind'];
+export type StepSample = Sample & { readonly kind: StepKind };
+
+// What a step costs by default, from its item's size: a contract step is a
+// small change to one file; the integration step is a run of the tests that
+// cross the services, with a fix, at most a small change; a service step
+// is the item's own size.
+export function stepSize(size: Size, kind: StepKind): Size {
+  if (kind === 'contract') return 'xs';
+  if (kind === 'integration') return size === 'xs' ? 'xs' : 's';
+  return size;
+}
+
+// The medians of the done steps of the same kind, item size and lane, with
+// three samples or more; else the default of the step's size.
+export function stepEstimate(samples: readonly StepSample[], size: Size, lane: Lane, kind: StepKind): Estimate {
+  const same = samples.filter((s) => s.kind === kind && s.size === size && s.lane === lane);
+  if (same.length < MIN_SAMPLES) return { ...DEFAULT_ESTIMATES[stepSize(size, kind)], weekPercent: null, samples: same.length };
+  return { minutes: Math.max(1, Math.round(median(same.map((s) => s.minutes)))), costUsd: cents(median(same.map((s) => s.costUsd))), weekPercent: null, samples: same.length };
+}
+
+// The steps of the project's done tickets that carry a size, from the
+// flow's ticket_steps (flow/steps.ts): each done step with its cost and
+// minutes. None before the table exists.
+export async function stepHistoryOf(deps: { readonly tickets: TicketStore; readonly db: DatabaseSync }, project: string): Promise<StepSample[]> {
+  let read: ReturnType<DatabaseSync['prepare']>;
+  try {
+    read = deps.db.prepare("SELECT kind, cost, minutes FROM ticket_steps WHERE ticket = ? AND project = ? AND state = 'done' AND cost IS NOT NULL AND minutes IS NOT NULL");
+  } catch (error) {
+    if (/no such table/.test((error as Error).message)) return [];
+    throw error;
+  }
+  const out: StepSample[] = [];
+  for (const ticket of await deps.tickets.list({ status: deps.tickets.states.done, project })) {
+    const size = ticket.labels.find((label) => label.startsWith('size:'))?.slice(5);
+    if (!size || !SIZES.has(size)) continue;
+    const lane: Lane = ticket.labels.includes(QUICK_LABEL) ? 'fast' : 'full';
+    for (const row of read.all(ticket.id, project) as Record<string, unknown>[])
+      out.push({ kind: String(row.kind) as StepKind, size: size as Size, lane, minutes: Number(row.minutes), costUsd: Number(row.cost) });
+  }
+  return out;
+}
+
+// An item with steps: each step's estimate by kind; the item's cost their
+// sum, its minutes their critical path, the ticket's steps running at most
+// `maxParallel` at once (the flow's own limit, two when the plan runs none).
+export function itemOfSteps(steps: readonly { readonly kind: StepKind; readonly service: string; readonly after: readonly number[] }[], samples: readonly StepSample[], size: Size, lane: Lane, maxParallel: number): { readonly steps: PlanStep[]; readonly estimate: Estimate } {
+  const out = steps.map((step, index) => ({ position: index + 1, kind: step.kind, service: step.service, after: [...step.after], estimate: stepEstimate(samples, size, lane, step.kind) }));
+  return {
+    steps: out,
+    estimate: {
+      minutes: criticalPath(out.map((step) => ({ after: step.after, minutes: step.estimate.minutes })), maxParallel > 0 ? maxParallel : 2),
+      costUsd: cents(out.reduce((total, step) => total + step.estimate.costUsd, 0)),
+      weekPercent: null,
+      samples: Math.min(...out.map((step) => step.estimate.samples)),
+    },
+  };
 }
 
 export function estimateFor(samples: readonly Sample[], size: Size, lane: Lane): Estimate {

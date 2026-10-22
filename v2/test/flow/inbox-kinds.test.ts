@@ -38,6 +38,10 @@ test('a contract item is added, listed, handled once with its outcome, and refus
   assert.deepEqual(handled.outcome, { decision: 'send_back', message: 'Add an example for severity.', by: 'u1', at: '2026-10-22T20:01:00.000Z' });
   assert.deepEqual(inbox.contracts(), [], 'nothing waits');
   assert.deepEqual(inbox.contracts({ ticket: 'LOCAL-3', state: 'handled' }).map((i) => i.id), [item.id]);
+  // Sent back, the step's session resumed proposes again: a new item (lane 23).
+  const again = inbox.addContract({ ...base, sessionId: 's1', step: 'step-1', service: 'filter-api', path: 'contract/openapi.yaml', diff: 'y' });
+  assert.notEqual(again.id, item.id);
+  assert.deepEqual(inbox.contracts().map((i) => i.id), [again.id]);
   // A sent-back step proposes again: a new item.
   clock.now += 60_000;
   const second = inbox.addContract({ ...base, sessionId: 's2', step: 'step-1', service: 'filter-api', path: 'contract/openapi.yaml', diff: 'y' });
