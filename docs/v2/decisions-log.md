@@ -3073,3 +3073,31 @@ The fixture source's reviewer case (`fixture-human.test.ts`) was added after tha
 
 - Pull request: 242, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-takeover-real-harness`.
+
+## 2026-10-22: the interface foundation's dependencies and the browser job (the author's choices, lane 33, `v2-j2-deps-ui-foundation`)
+
+**Decision.** On 2026-10-22 at 22:48 (Europe/Paris), lane 33 of the interface overhaul (`docs/v2/ui-overhaul-plan.md`, section 7) adds four packages to `v2/`, for the plan's decisions U1, U2 and U5, and a `browser` job to `.github/workflows/v2.yml`. No screen changes, no devtools package, nothing imports the new packages yet. Versions are exact and were published at least two weeks before the lane.
+- **`@tanstack/react-router` 1.170.41**, MIT, published 2026-09-30, in `dependencies`. Reason: client routing in code, with intent preloading and typed search parameters, so that a screen change needs no reload (U1).
+- **`@tanstack/react-query` 5.104.1**, MIT, published 2026-10-02, in `dependencies`. Reason: the shared cache, one key per resource, stale-while-revalidate and optimistic mutations (U2).
+- **`cmdk` 1.1.1**, MIT, published 2025-03-14, in `dependencies`. Reason: the command palette, behind shadcn's `Command` (`components/ui/command.tsx`, lane 35) (U8).
+- **`playwright-core` 1.64.0**, Apache-2.0, published 2026-10-07, in `devDependencies`. Reason: drives the browser tests that CI skipped, with the Chromium that the browser job installs for it (U5).
+
+`v2/package.json` has no place for a comment, so the reasons live here, as lane 30's entry keeps its packages'. The three runtime packages sit in `dependencies` as the plan's lane 33 names them; decision 12 of the React port kept the React set in `devDependencies`, and the service and the app's server still import none of them.
+
+**The lock file.** `npm install --package-lock-only` adds 22 packages and removes none. Their licences: MIT for 19 (among them `@tanstack/history` 1.162.4, `@tanstack/query-core` 5.104.1, `@tanstack/router-core` 1.171.34, `@tanstack/react-store` 0.11.2 with its nested `@tanstack/store` 0.11.2, `@radix-ui/react-dialog` 1.3.1 (cmdk's dependency, with a nested `@radix-ui/react-slot` 1.5.0 beside the root's 1.4.0), `cookie-es` 3.1.1, `seroval` 1.7.0, `seroval-plugins` 1.6.12, `use-sync-external-store` 1.7.0 and the optional wasm fallback of Tailwind's oxide with its `@emnapi` and `@napi-rs` packages), 0BSD for `tslib` 2.8.1, Unlicense for `isbot` 5.2.2 (the router's dependency; public domain, which Apache-2.0 can ship) and Apache-2.0 for `playwright-core`. The only other change is the removal of `"dev": true` on the packages the runtime dependencies now use. `v2/.npmrc` still runs no install script.
+
+**The page's policy (the check).** The app serves `default-src 'self'` with `style-src 'self' 'nonce-<value>'` (`v2/app/src/server.ts`).
+- *Source.* No code of `cmdk`, `@tanstack/react-router`, `@tanstack/react-query` or their core packages creates a `<style>` element, calls `insertRule`, `replaceSync` or `adoptedStyleSheets`, or writes a style attribute as text. `cmdk` gives its visually hidden label a `style` object through React's `style` prop, and sets one custom property with `style.setProperty`; both go through the CSS object model, which the policy allows.
+- *Probe.* A scratch page outside the repository, built with Vite 8 from the three packages (a `Command` with an input, a group and items, a query, a router with a `Link` that preloads on intent), served with the app's policy and a nonce, in Playwright's Chromium 156: 3 items rendered, 0 `<style>` elements, 0 `securitypolicyviolation` events, 0 page errors. The control, the same page with a `<style>` element that has no nonce, records 1 violation (`style-src-elem`), so the listener does see violations. Nothing of the probe is committed.
+
+**The browser job.** It runs the eight browser tests that the verify job skips without `CLEARED_V2_PLAYWRIGHT` (`choices-browser` 2, `notify/browser` 1, `session/tabs-browser` 3, `session/terminal-browser` 2), with `CLEARED_V2_PLAYWRIGHT` set to the installed `v2/node_modules/playwright-core` and `CLEARED_V2_CHROME` to the Chromium that package installs. A skipped test fails the job. The job summary lists the totals from the TAP output and each line a test prints as `measure <name> <value>` (the TAP stream carries it as `# measure`); this lane prints none, and lane 34's tab-switch test is the first to print one.
+- *Full Chromium, not the headless shell.* The first run used the headless shell. Seven tests passed; the notifications test failed after 30 s waiting for its toggle, because the shell keeps `Notification.permission` at `denied` after `grantPermissions`. The full build, installed into an empty browsers folder, passed all eight: 8 pass, 0 fail, 0 skipped. The job installs the full build with `playwright-core install --with-deps chromium`.
+
+**Checks.** On this server: `npm ci`, `npm run typecheck`, `npm run build`, `npm test` (1250 tests: 1240 pass, 10 skipped, 0 fail; 184 Vitest tests pass), and `npm run guard -- --base origin/v2` (444 files, nothing refused). The browser job's steps were run by hand, in the same order and with the same environment, on the fresh install; the job itself runs on the pull request.
+
+**Followups.**
+- Lane 34's tab-switch test prints its measures in the form the job summary reads.
+- If a later Chromium build changes the notifications test's result, the headless shell's refusal is the first thing to recheck.
+
+- Pull request: NUMBER (filled in by the second commit of this lane).
+- Author: Haiku 5.5 (claude-haiku-5-5), lane `v2-j2-deps-ui-foundation`.

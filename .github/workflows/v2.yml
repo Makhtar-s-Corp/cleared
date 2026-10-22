@@ -55,3 +55,69 @@ jobs:
         env:
           GUARD_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1') }}
         run: npm run guard -- --base "$GUARD_BASE"
+
+  # The browser tests that the verify job skips: each runs only when CLEARED_V2_PLAYWRIGHT names an installed
+  # playwright-core. Here it is the dev dependency of v2/package.json, and the Chromium headless shell it drives
+  # is installed by the same package. A skipped browser test fails this job, so none can pass unrun.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SCARF_ANALYTICS: 'false'
+      DO_NOT_TRACK: '1'
+      COPILOTKIT_TELEMETRY_DISABLED: 'true'
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        # The app serves app/dist, which the browser tests load.
+        run: npm run build
+      - name: Chromium
+        # --with-deps installs the shared libraries the browser needs on the runner. The full Chromium build, not the
+        # headless shell: the notifications test is refused its permission by the shell (Notification.permission stays
+        # "denied" after grantPermissions) and passes on the full build.
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Browser tests
+        # The eight browser tests of app/test, run with the installed package and its Chromium. The TAP output is kept
+        # for the summary.
+        run: |
+          set -o pipefail
+          export CLEARED_V2_PLAYWRIGHT="$PWD/node_modules/playwright-core"
+          export CLEARED_V2_CHROME="$(node -p "require('$CLEARED_V2_PLAYWRIGHT').chromium.executablePath()")"
+          node --test --test-reporter=tap \
+            app/test/choices-browser.test.ts \
+            app/test/notify/browser.test.ts \
+            app/test/session/tabs-browser.test.ts \
+            app/test/session/terminal-browser.test.ts | tee "$RUNNER_TEMP/browser.tap"
+          skipped=$(grep -E '^# skipped ' "$RUNNER_TEMP/browser.tap" | awk '{print $3}')
+          test "$skipped" = 0 || { echo "::error::$skipped browser test(s) skipped"; exit 1; }
+      - name: Job summary
+        # A test prints a line "measure <name> <value>"; the TAP stream carries it as "# measure ...", and it is copied here.
+        if: always()
+        run: |
+          {
+            echo "## Browser tests"
+            echo
+            if [ -s "$RUNNER_TEMP/browser.tap" ]; then
+              grep -E '^# (tests|pass|fail|skipped) ' "$RUNNER_TEMP/browser.tap" | sed 's/^# /- /'
+            else
+              echo "- no result: the test run did not finish"
+            fi
+            echo
+            echo "### Measures"
+            echo
+            if grep -q '^# measure ' "$RUNNER_TEMP/browser.tap" 2>/dev/null; then
+              grep '^# measure ' "$RUNNER_TEMP/browser.tap" | sed 's/^# /- /'
+            else
+              echo "- none in this run"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
