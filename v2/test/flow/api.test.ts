@@ -2,8 +2,9 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { API_ROUTES, MILESTONE_2_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, SERVICE_USER_HEADER, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, ASK_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, SERVICE_USER_HEADER, TERMINAL_ROUTES, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createApiRoutes } from '../../src/api/routes.ts';
+import { planGateRoutes } from '../../src/flow/plan-gate.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
@@ -40,13 +41,22 @@ async function call(method: string, path: string, headers: Record<string, string
 }
 
 test('the service declares every route of the API but the approval, which is lane 8\'s', () => {
-  const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
+  // The flow's API: the routes of api/routes.ts, and the session plan's Go
+  // and Change (lane 17, flow/plan-gate.ts, which the flow module registers).
+  const routes = [...createApiRoutes({ engine: () => t.engine, proof: () => PROOF }), ...planGateRoutes({ engine: () => t.engine, proof: () => PROOF })];
   const declared = routes.map((r) => `${r.method} ${r.path}`).sort();
   // The preview is lane 15's (container/preview.ts). Written ahead by lane
-  // 16: the session plan's Go and Change, served by lane 17 (flow/plan-gate.ts),
-  // which removes them from here; the files, takeover and giveback, served by
-  // lane 20 (flow/files.ts, flow/takeover.ts), which removes them from here.
-  const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES];
+  // 16: the files, takeover and giveback, served by lane 20 (flow/files.ts,
+  // flow/takeover.ts), which removes them from here. Written ahead by lane
+  // 17: the ticket's steps and the contract item's Approve and Send back,
+  // served by lane 23 (flow/), which removes them from here; the knowledge
+  // items and the skill, lane 24's (knowledge/); the questions to the code,
+  // lane 25's (reader/); the recipes and the schedules, lane 26's
+  // (recipes/, schedules/), each of which rewrites this comment to name its
+  // module; the web terminal and the editor's save, served by lane 31
+  // (terminal/, flow/files.ts), which removes them from here.
+  const ahead = [...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES];
+  assert.ok(SESSION_PLAN_ROUTES.every((route) => declared.includes(route)), 'lane 17 serves the Go and the Change');
   const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r) && !ahead.includes(r)).sort();
   assert.deepEqual(declared, wanted);
 });
