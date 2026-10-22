@@ -2785,5 +2785,5 @@ The lane's choices:
   - With `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME`, the 8 browser tests pass.
   - `npm run typecheck` and `npm run guard -- --base origin/v2` are green. The guard ran without a private-term list (`CLEARED_REPO` unset).
 - **The requirements matrix.** O16 (the owner's request, `partial` until the proof's step 11 runs a real turn), P42 (the adapter's interactive resume) and P43 (the terminal's modes and the screen) are new. B5.10f, D4, O9 and C1 name this pull request. P39 says the server command it kept was removed.
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 230, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-takeover-harness-direct`.
