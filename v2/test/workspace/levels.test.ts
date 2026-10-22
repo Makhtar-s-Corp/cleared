@@ -99,7 +99,7 @@ test('the briefing reads the workspace, then the service, then the contract, wit
 });
 
 test('the three levels share one byte budget: what the workspace and the service use is not given to the contract', async () => {
-  const page = `# The check contract\n${'A long contract page. '.repeat(40)}\n`;
+  const page = `# The check contract\n${'A long contract page. '.repeat(25)}\n`;
   // Alone, the contract page fits the budget; after the other two levels it does not.
   const alone = await three({ budget: 1600, contractPage: page });
   const only = await readLeveledBriefing({ ...alone.base, role: 'author', ticket: TICKET, levels: [alone.levels[1] as never] });
@@ -130,8 +130,8 @@ test('each level writes only its own ledger, even with ORCH_LEDGER set for the w
   const workspace = rows(join(t.state, 'ledger.db'));
   const service = rows(join(t.state, 'services', 'filter-api', 'memory', 'ledger.db'));
   const contract = rows(join(t.state, 'contracts', 'filter-api', 'memory', 'ledger.db'));
-  assert.deepEqual(workspace.map((r) => r.content), ['# Guestbook\nThe workspace: a guestbook and the filter it calls.\n', 'Workspace lesson: run every service\'s tests.\n']);
-  assert.deepEqual(service.map((r) => r.content), ['# Filter API\nThe service: it checks an entry\'s words.\n', 'Service lesson: keep words.txt sorted.\n']);
+  assert.deepEqual(workspace.map((r) => r.content), ['Workspace lesson: run every service\'s tests.\n', '# Guestbook\nThe workspace: a guestbook and the filter it calls.\n']);
+  assert.deepEqual(service.map((r) => r.content), ['Service lesson: keep words.txt sorted.\n', '# Filter API\nThe service: it checks an entry\'s words.\n']);
   assert.deepEqual(contract.map((r) => r.content), ['# The check contract\nPOST /check answers allowed, and a severity.\n']);
 });
 
@@ -176,9 +176,12 @@ test('a handover with the three lessons sections files each in its level, as pro
   assert.deepEqual(lesson(join(t.state, 'contracts', 'filter-api', 'memory', 'ledger.db')), [{ type: 'lesson', content: 'The severity is one of low, high.', ...source }]);
   // The handover itself stays the ticket's, in the workspace level.
   assert.equal(rows(join(t.state, 'ledger.db')).filter((r) => r.type === 'handover').length, 1);
-  // A filed lesson is a proposal: the next briefing does not carry it.
+  // A filed lesson is a proposal: the next briefing does not carry it as a
+  // lesson (the ticket's own handover, which holds it, is briefed in full).
   const read = await readLeveledBriefing({ ...t.base, role: 'author', ticket: TICKET, levels: t.levels });
-  assert.ok(!JSON.stringify(read).includes('Keep words.txt sorted.'));
+  assert.deepEqual(read.workspace.lessons, ['Workspace lesson: run every service\'s tests.\n']);
+  assert.deepEqual(read.levels.map((l) => l.briefing?.lessons), [['Service lesson: keep words.txt sorted.\n'], []]);
+  assert.match(read.workspace.lastHandover ?? '', /## Lessons for the service\nKeep words\.txt sorted\./);
 });
 
 test('lessons for a level the session has not are filed in the workspace\'s', async () => {

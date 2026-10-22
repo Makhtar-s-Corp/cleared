@@ -82,7 +82,7 @@ async function leadMemory(services: number, line: string) {
   const root = tempDir('lead-levels');
   const workspace = await projectCheckout({ url: remote({ 'docs/project.md': `# Guestbook\n${'w'.repeat(10_500)}\n` }), dir: join(root, 'guestbook'), base: 'main' });
   const filter = await projectCheckout({ url: remote({ '.cleared/agents.conf': AGENTS_CONF, 'docs/project.md': `\n# ${line}\nThe rest of the page.\n` }), dir: join(root, 'filter-api'), base: 'main' });
-  const env = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
   delete env.ORCH_LEDGER;
   mkdirSync(join(root, 'state'), { recursive: true });
   const list = [{ name: 'guestbook', dir: workspace.dir }, { name: 'billing', dir: join(root, 'billing') },
