@@ -74,6 +74,7 @@ test('a browser in English gets English; Français in the account menu redraws t
     assert.match(await page.locator('#tower-body').innerText(), /Sessions en cours/, 'the screen redrawn in French too');
     assert.equal(await page.evaluate(() => localStorage.getItem('cleared.language')), 'fr');
     assert.ok((await page.context().cookies()).some((cookie: { name: string; value: string }) => cookie.name === 'cleared_lang' && cookie.value === 'fr'));
+    console.log(`measure language_switch_ms ${took}`);
     assert.ok(took < 2000, `the switch took ${took} ms`);
 
     await page.keyboard.press('Escape');

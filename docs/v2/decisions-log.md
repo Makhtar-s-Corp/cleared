@@ -3752,3 +3752,70 @@ The browser job on GitHub's runner read 46.0, 75.7, 58.9 and 83.9 ms over this p
 - LOCAL-17, which a stopped run had started, is in the state LOCAL-13, LOCAL-15 and LOCAL-16 were put back to (the entry above): Todo since 04:14Z, no live session or container, no waiting release, plan, session plan or permission item. Nothing of it is approved or deployed.
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-final`.
+
+## 2026-10-23: the interface in French and in English from catalogs, the language from the browser, one formatter for durations and dates (the author's choices, lane i18n, `v2-j2-ui-durations`)
+
+**Decision.** On 2026-10-23 at 08:30 (Europe/Paris) the owner approved a small lane: durations in a human format through one formatter, the session statuses still in English on Sessions translated, "Lead" capitalised everywhere and "Relecteur" kept as it is. At 08:40 the owner widened it into the i18n lane (requirement O23): every visible word from a French or an English catalog, the page's language from the browser with French as the fallback, a language choice in the account menu, durations, relative dates and numbers through Intl, and a test that fails on any visible text from no catalog and on any key missing in one language. The branch keeps its name.
+
+- **One formatter** (`app/web/lib/time.ts`). A duration is "42 min" under an hour, "10 h 30" under a day and "2 j 4 h" past it. In English: "42 min", "10h 30m", "2d 4h". An age under a minute is "à l'instant" ("just now"). A date is said relative to now: "il y a 3 min", "il y a 2 h" the same day, "hier" ("yesterday", by `Intl.RelativeTimeFormat`) the day before, then "il y a 3 j". Calendar days are counted in the page's time zone. The numbers go through `Intl.NumberFormat` in the catalog's `locale`, with the minutes after the hours padded in French ("10 h 05") and not in English ("10h 5m"). A decimal ("3,9" or "3.9") goes the same way. Removed: the tower's `duration` and `about`, the inbox's `elapsed` and `took`, the plan panel's `formatDuration`, the session's `duration`, the Lead's `ago`, five copies of `clock`, the tower's decimal mark, and the catalog keys they used. The sessions index said "1562 min" for a session started the day before.
+- **Statuses** (`app/web/lib/status.ts`). A session's phase says its own word: "Démarrage", "Au travail", "En relecture", "Terminée", "Arrêtée", "Arrêtée sur une erreur", "En pause". The four phrases the service builds for a tool are translated by their shape: "Lit src/page.ts", "Modifie…", "Cherche…", "Lance npm test". This applies only when what follows is a path, a pattern or a command, so a harness's own sentence ("Reading the diff of…") stays as written, like every other data text. A ticket state with one of the tracker's default names is translated ("À faire", "En cours", "En relecture", "À approuver", "Prêt à livrer", "Terminé"); a state a workspace named itself stays as named. The sessions index, the tower's rows and the session's status all use it. The `status_*` keys moved to the shell's catalog, which every screen holds.
+- **Lead.** Every catalog value says "Lead" ("le Lead", "the Lead"). French no longer says "chef de projet". "Relecteur" is untouched.
+- **The language of a page** (`app/src/catalog.ts`, `languageOf`). The person's choice comes first, from the `cleared_lang` cookie. Then the browser's `Accept-Language`, by weight. Then `CLEARED_V2_APP_LANGUAGE`, which becomes that fallback (French by default). The server answers the sign-in page, the shell page, `/api/me` and the catalogs in that language. There is no per-account preference on the server, so none was added. The account menu at the sidebar's foot offers Français and English, each named in its own language (`lang` set), as two segments 44 px tall on a phone. A choice is kept in `localStorage` (`cleared.language`) and in the cookie (one year, `SameSite=Lax`, `Secure` on https). It sets `<html lang>` and redraws the shell, the screens and the sessions kept mounted, in the page and with no reload. If the cookie is lost, the stored choice wins at the next load and is written back. `app/web/lib/language.ts` holds it.
+- **Every word from a catalog** (`app/web/test/i18n.test.tsx`). It replaces lane 37's `french.test.tsx` and lane 35's `shell/french.test.tsx`, which looked for English. Every screen of the old test is drawn on the fixtures in French and in English: the sign-in page with its errors, the tower full and empty, the sessions index full and empty, the sidebar open and folded, a session, every session phase, the Lead full and empty, a question to the code, the inbox (every kind × 13 local states), and the palette and the sheet on every screen. Each text a person reads or hears must come from one of five sources:
+  - a sentence or template of that language's catalogs;
+  - the fixtures' data and the forms the app gives it;
+  - a text with no word, an id or a hash;
+  - a key cap;
+  - pieces joined by " · ", by sentences, or by the catalog's own connectors ("et", "puis").
+  A marked key fails. In French, a status in the service's English fails. A static scan keeps every `.tsx` from writing a word between tags or in a visible attribute. On the code before, it fails on the statuses and found two hard-coded words:
+  - cmdk's default "Suggestions", which named the palette's list; it is now `palette_results`;
+  - "Ctrl", written by `keyLabel`; it is now `key_cap_ctrl`, and `keyLabel` and `Keys` take the translator.
+  The catalog test already held every key in both languages. The new test repeats it.
+- **Tests first.**
+  - `durations.test.tsx` draws every screen in both languages at the fixtures' clock and a day and two hours later, and fails on any "<n> min" with n of 60 or more. On the code before it failed on "1585 min".
+  - `app/test/time.test.ts` is the formatter's and the statuses' table.
+  - `app/test/language.test.ts` covers the server's choice.
+  - `app/test/language-page.test.ts` covers the page's memory.
+  - `app/test/i18n-browser.test.ts` (added to the browser job) covers a browser in English, the switch to French in the page, a reload, a lost cookie, and a browser in German.
+  - Issue 257, item 1: the inbox's long French test has a 60 s timeout.
+
+**Impeccable.** 4.7.0, installed in the lane's worktree with the owner's command. Its paths are in the shared exclude file and in no commit. The installer's hooks file was emptied before any edit, and `DO_NOT_TRACK=1` was set.
+- `init` wrote PRODUCT.md from the plan and the owner's two requests, with no interview: section 6 fixes init's inputs.
+- `document` recorded the incumbent sheet (lanes 35 and 38) in DESIGN.md.
+- The detector, run on the changed files, reports Geist only (the brief).
+- `audit` and `critique` were run on the captures:
+  - the language segments follow the inbox's switch, with the same tokens and the same contrast pair;
+  - on a phone they sit under the theme's item, at 44 px;
+  - the rail's tooltip on the avatar shows while the menu is open at 1280 and 768, as it did for the theme's item before. That is left to the shell's owner.
+- `polish`: no dead key or formatter left; each language's catalogs lost 24 keys the old formatters used.
+
+**Captures.** All are on the fixtures source, in both themes, at 1440, 1280, 768 and 390.
+- Before, at origin/v2 `f16f9b1`: `docs/v2/ui-overhaul/before/durations/{fr,en}/`, tower, sessions, session and inbox. The English set was taken with `--language en`.
+- After: `docs/v2/ui-overhaul/after/durations/{fr,en}/`, the same screens plus `account` (the menu with its language choice). The browser asks for the language too: the capture script now sets the context's locale, since the page follows the browser.
+- 144 files. Each was looked at for secrets and names before the commit: none.
+- Copies are in `/tmp/cleared-captures/j2/overhaul/durations/`.
+
+**Measures.** The budget test (`budget-browser.test.ts`, `CI=true`: three runs of twenty switches, 1440x900, the fixtures) ran twice on origin/v2 `f16f9b1` and on this head, alternating, between 09:12 and 09:13, load average 1.6 to 2.9:
+
+| Version | Median of the runs' p95 | Runs' p95 | Documents | Requests per switch, at most |
+| --- | --- | --- | --- | --- |
+| `f16f9b1` (origin/v2) | 23.3 and 25.4 ms | 22.2, 23.3, 25.5; 26.0, 21.3, 25.4 | 0 | 1 |
+| this lane's head | 23.8 and 22.6 ms | 21.9, 23.8, 25.3; 22.6, 24.6, 21.3 | 0 | 1 |
+
+A language switch, from the click on Français to the sidebar drawn in French, took 88 to 95 ms over three runs, as seen by Playwright from outside the page.
+
+**What the lane touched beyond its screens, and why.**
+- `v2/app/src/{catalog,config,server}.ts`: the page's language per request.
+- `v2/scripts/capture-screens.ts`: the `account` capture and the browser's locale.
+- `.github/workflows/v2.yml`: `i18n-browser.test.ts` in the browser job's list.
+- Other lanes' tests:
+  - their translators now hold the shell's catalog, as the app's do;
+  - their English durations read "2h 15m";
+  - their sentences read "the Lead";
+  - `keys.test.ts` passes a translator to `keyLabel`;
+  - `shell-browser.test.ts` skips templates with under two letters of their own: "{n}s" matched "Sessions".
+- `app/test/notify/browser.test.ts` times out on this server, on origin/v2 too (`#notify-toggle[data-action=on]` never shows). It is not this lane's; CI runs it.
+
+**Left.** The tower's schedule line says a weekday through `toLocaleDateString` and the Lead's thread a day and a month the same way; both are Intl already. The rail tooltip over the open account menu goes to the shell's owner.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-durations` (i18n).
