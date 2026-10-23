@@ -4061,3 +4061,20 @@ The rehearsal skips the workflows and the watchers: its forge and its brokers ar
 Run 5's reviewer request stays allowed.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
+
+## 2026-10-23: Owner decision: the demo stopped and the 48-hour proof launched (step C)
+
+**Decision.** On 2026-10-23 at 18:49 (Europe/Paris) the owner approved, in writing: « Go, coupe la démo et lance la 48 h ». This lifts the cancellation of step C ordered at 08:12 the same day. Step C, as planned: stop the demo, restart the proof service in one-service mode, check that the inbox holds nothing the 48-hour proof's morning rule would answer, then launch the 48-hour proof ([milestone-2-plan.md](milestone-2-plan.md), section 2.1).
+
+**What was done**, by the ops session:
+- The last multi-service run (12/12, on `5ad2da2`) left two release cards waiting: LOCAL-31 (the blocked train of step 10) and LOCAL-32 (the takeover's card of step 11). Both were set aside (`POST /api/tickets/:id/set-aside`): their trains halted, nothing approved or merged. LOCAL-13, LOCAL-15 and LOCAL-16 were not touched and stay in Todo. No lead plan holds them, so the night cannot start them and the morning has nothing of theirs to approve.
+- The demo (8796 to 8799) was stopped with its `stop.sh` (proxy, app, service). Its lead session's two containers, labelled `cleared.dev=v2`, were removed by name, without their volumes. Its two networks were kept. Nothing was pruned.
+- The proof service was restarted in one-service mode on Cleared `5ad2da2`, the head of v2. A signed-in read of `/api/workspace` shows one service, with base `proof-run`. The guestbook's release broker merges into `origin/proof-run`, and its deploy watcher deploys `proof-run`. The guard was clean.
+- The 48-hour proof's driver was launched at 18:54 (Europe/Paris), and the goal was sent at 18:54:11. The morning rule starts on 2026-10-24 at 08:00 (CEST). The lead's memory is read at the end, on 2026-10-25 at 17:54 (CET): summer time ends during the run.
+
+**Consequences.**
+- The demo stays down for the 48 hours. Restarting it after the run is a new decision.
+- Nothing is pushed to the main branch of either proof repository: their heads are still `2127dd2` (filter API) and `0d7fbb5` (guestbook). The run merges into `proof-run` and rolls back there only.
+- The morning rule answers every waiting item, whatever its ticket. The guard protects only the launch. The only items expected are the run's own.
+- At the launch, 10 of Docker's 31 address-pool subnets were free. Two sets of networks are kept until a decision: the empty pair of session `abccbe43`, and the demo lead's pair.
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h`. Nothing was pushed to any main.
