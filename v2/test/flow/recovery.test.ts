@@ -79,20 +79,26 @@ test('recovery leaves a ticket this engine is running', async () => {
 
 test('after the recovery, the containers and networks of every session the ledger says is not live are released, its own project\'s only (issue 265)', async () => {
   const t = await setup();
+  const ID = {'s-left-working': '00000000-0000-4000-8000-000000000001', 's-stopped': '00000000-0000-4000-8000-000000000002', 's-done': '00000000-0000-4000-8000-000000000003', 's-lead-old': '00000000-0000-4000-8000-000000000004', 's-lead-live': '00000000-0000-4000-8000-000000000005', 's-other': '00000000-0000-4000-8000-000000000006'} as const;
   const at = new Date(t.clock.now).toISOString();
   const row = (id: string, status: string, over: { project?: string; role?: 'author' | 'reviewer' | 'lead' } = {}) =>
     t.store.sessions.put({ id, project: over.project ?? 'guestbook', ticket: t.ticket.id, role: over.role ?? 'author', harness: 'claude-code', model: 'claude-opus-5-5', status, createdAt: at, updatedAt: at });
-  row('s-left-working', 'working');                  // the last process left it working: stopped by the recovery, then released
-  row('s-stopped', 'stopped');                       // stopped long ago, its containers still running
-  row('s-done', 'done');
-  row('s-lead-old', 'stopped', { role: 'lead' });    // a stopped lead
-  row('s-lead-live', 'working', { role: 'lead' });   // the lead engine's own, live
-  row('s-other', 'stopped', { project: 'elsewhere' });
+  row(ID['s-left-working'], 'working');                  // the last process left it working: stopped by the recovery, then released
+  row(ID['s-stopped'], 'stopped');                       // stopped long ago, its containers still running
+  row(ID['s-done'], 'done');
+  row(ID['s-lead-old'], 'stopped', { role: 'lead' });    // a stopped lead
+  row(ID['s-lead-live'], 'working', { role: 'lead' });   // the lead engine's own, live
+  row(ID['s-other'], 'stopped', { project: 'elsewhere' });
   const asked: string[][] = [];
   const engine = new FlowEngine({ ...t.deps, release: async (sessions) => { asked.push([...sessions]); return { containers: [], networks: [] }; } });
   await engine.recover();
   assert.equal(asked.length, 1);
-  assert.deepEqual([...(asked[0] ?? [])].sort(), ['s-done', 's-lead-old', 's-left-working', 's-stopped']);
+  assert.deepEqual([...(asked[0] ?? [])].sort(), [ID['s-left-working'], ID['s-stopped'], ID['s-done'], ID['s-lead-old']].sort());
+  // A row whose id is not a session id is never handed to Docker.
+  row('not-a-uuid', 'stopped');
+  asked.length = 0;
+  await new FlowEngine({ ...t.deps, release: async (sessions) => { asked.push([...sessions]); return { containers: [], networks: [] }; } }).recover();
+  assert.ok(!asked.flat().includes('not-a-uuid'));
   // A release that fails does not fail the recovery.
   const failing = new FlowEngine({ ...t.deps, release: async () => { throw new Error('docker is not there'); } });
   await failing.recover();

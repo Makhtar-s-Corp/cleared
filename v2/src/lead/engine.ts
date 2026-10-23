@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { LeadMemory, LeadMessage, LeadPhase, LeadState, LeadStreamFrame, Plan, SessionDetail, SessionSummary } from '../api/types.ts';
-import { Docker } from '../container/docker.ts';
+import { Docker, isSessionId } from '../container/docker.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { FlowEngine } from '../flow/engine.ts';
 import type { FlowListener } from '../flow/events.ts';
@@ -189,7 +189,7 @@ export class LeadEngine {
   // Docker's address pool filled up (issue 265). A failure is said and the
   // lead starts all the same.
   async #releaseStopped(): Promise<void> {
-    const stopped = this.store.endedSessions();
+    const stopped = this.store.endedSessions().filter(isSessionId);
     if (!this.#deps.release || stopped.length === 0) return;
     try {
       const { containers, networks } = await this.#deps.release(stopped);

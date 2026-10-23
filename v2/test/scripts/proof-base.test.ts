@@ -5,12 +5,13 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BaseError, FROZEN_BRANCH, RUN_BRANCH, closeStale, defaultBranchOf, frozenCommits, readBaseSettings, reader, recreate, refusal, runCommand, ticketChangesIn, type BaseSettings, type Run,
 } from '../../scripts/proof-base.ts';
+import { rehearsalWorkspace } from '../../scripts/proof-rehearsal-multi.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'cleared-proof-base-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -72,8 +73,8 @@ test('the guards: never main or master, never the default branch, never the froz
 });
 
 test('the default branch as ls-remote --symref says it', () => {
-  assert.equal(defaultBranchOf('ref: refs/heads/main\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n'), 'main');
-  assert.equal(defaultBranchOf('0123456789abcdef0123456789abcdef01234567\tHEAD\n'), null);
+  assert.equal(defaultBranchOf(`ref: refs/heads/main\tHEAD\n${'f'.repeat(40)}\tHEAD\n`), 'main');
+  assert.equal(defaultBranchOf(`${'f'.repeat(40)}\tHEAD\n`), null);
 });
 
 test('a frozen base that already holds a change of the proof\'s tickets is refused', async () => {
@@ -129,4 +130,50 @@ test('the open pull requests into the run branch are closed, and only those', as
     ['gh', 'pr', 'close', '7'],
     ['gh', 'pr', 'close', '9'],
   ]);
+});
+
+test('two runs in a row start from the same commit: what the first run merged into the run branch is gone at the second', async () => {
+  const w = world('twice');
+  const settings = settingsFor([{ service: 'guestbook', clone: w.clone }]);
+  const repo = settings.repos[0] as BaseSettings['repos'][number];
+  const starts: string[] = [];
+  for (const run of [1, 2]) {
+    const { commits, defaults } = await frozenCommits(runCommand, settings);
+    await recreate(runCommand, repo, settings, commits.guestbook as string, defaults.guestbook ?? null);
+    starts.push(git(w.origin, 'rev-parse', `refs/heads/${RUN_BRANCH}`));
+    // The run merges a ticket into the run branch, as the brokers do.
+    const work = join(root, `twice-run-${run}`);
+    git(root, 'clone', '--quiet', '--branch', RUN_BRANCH, w.origin, work);
+    git(work, 'commit', '--quiet', '--allow-empty', '-m', `Merge pull request #${run}`);
+    git(work, 'push', '--quiet', 'origin', `HEAD:refs/heads/${RUN_BRANCH}`);
+  }
+  assert.deepEqual(starts, [w.frozen, w.frozen]);
+  assert.equal(git(w.origin, 'rev-parse', 'refs/heads/main'), w.main);
+});
+
+// The only pushes the proof's scripts make, each line as written: a test
+// fails as soon as one of them pushes anything else, or names main.
+const ALLOWED_PUSHES: Readonly<Record<string, readonly string[]>> = {
+  // The run branch, recreated at the frozen commit (guarded by recreate).
+  'proof-base.ts': ["await run('git', ['push', '--quiet', '--force', settings.remote, `${commit}:refs/heads/${settings.run}`], repo.clone);"],
+  // The rehearsal's seeding of its temporary bare copy: the run branch an earlier run moved on.
+  'proof-rehearsal-multi.ts': ["git(seed, 'push', '--quiet', p.origin, `HEAD:refs/heads/${RUN_BRANCH}`);"],
+  // The rehearsals' stand-in brokers, into their temporary bare copies' base (the run branch for the multi-service proof).
+  'proof-rehearsal.ts': ["await git('push', '--quiet', 'origin', base);", "await git('push', '--quiet', 'origin', base);"],
+};
+
+test('no proof script pushes to main: every push of scripts/proof-*.ts is one of the allowed lines', () => {
+  const dir = new URL('../../scripts/', import.meta.url);
+  const files = readdirSync(dir).filter((name) => /^proof-.*\.ts$/.test(name));
+  assert.ok(files.includes('proof-j2-multi.ts') && files.includes('proof-base.ts'));
+  for (const file of files) {
+    const pushes = readFileSync(new URL(file, dir), 'utf8').split('\n').map((line) => line.trim()).filter((line) => /['"`]push['"`]/.test(line) && !line.startsWith('//'));
+    assert.deepEqual(pushes, [...(ALLOWED_PUSHES[file] ?? [])], `${file} pushes something not allowed`);
+    for (const line of pushes) assert.doesNotMatch(line, /\bmain\b|\bmaster\b/, `${file}: ${line}`);
+  }
+});
+
+test('the multi-service rehearsal\'s workspace names the run branch as every service\'s base, never main', () => {
+  const text = rehearsalWorkspace({ root: '/tmp/rehearsal', ports: { guestbook: 3000, 'filter-api': 3001 } });
+  assert.deepEqual([...text.matchAll(/^base = (.+)$/gm)].map((m) => m[1]), [RUN_BRANCH, RUN_BRANCH]);
 });

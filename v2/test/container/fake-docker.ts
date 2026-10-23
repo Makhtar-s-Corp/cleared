@@ -11,6 +11,7 @@ export type FakeObject = {
   readonly labels: Record<string, string>;
   state?: string;
   readonly args?: readonly string[];
+  readonly subnet?: string;                 // a network's IPAM subnet, when the test gives one
 };
 
 export type Call = { readonly args: readonly string[]; readonly options: RunOptions; readonly result: DockerResult };
@@ -204,8 +205,9 @@ export class FakeDocker {
         }]));
       }
       case 'network inspect': {
-        const network = this.networks.find((n) => n.id === targets(args)[0]);
-        return network ? ok(JSON.stringify([{ Id: network.id, Name: network.name, IPAM: { Config: [{ Gateway: '172.30.0.1' }] } }])) : fail('Error: No such network');
+        const found = targets(args).map((id) => this.networks.find((n) => n.id === id));
+        if (found.length === 0 || found.some((n) => !n)) return fail('Error: No such network');
+        return ok(JSON.stringify(found.map((n) => ({ Id: n?.id, Name: n?.name, IPAM: { Config: [{ Gateway: '172.30.0.1', ...(n?.subnet ? { Subnet: n.subnet } : {}) }] } }))));
       }
       case 'logs':
         return ok('{"at":"2026-10-21T00:00:00.000Z","listening":"172.30.0.2:3128"}\n');
