@@ -3317,4 +3317,5 @@ The browser test itself, on the full Chromium build the CI installs and in CI mo
 
 **For later lanes.** Lane 38: `scripts/proof-j1.ts` clicks `a.tab` for the Reviewer, which is now the filter (`[data-filter="reviewer"]`) in the same view; with the stream down, a hidden kept view's resources are still polled by the cache's poller, since the shell subscribes each screen's reader for the life of its mount (a reader that pauses with its view is the shell's to add). Lane 35: the session's title in the tab strip (the ticket's) and a shortcut for the thread's filter.
 
+- Pull request: 251, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-session-continuity`.
