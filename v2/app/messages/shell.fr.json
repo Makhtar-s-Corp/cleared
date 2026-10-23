@@ -207,5 +207,8 @@
   "locale": "fr",
   "time_minute_digits": "2",
   "palette_results": "Résultats",
-  "key_cap_ctrl": "Ctrl"
+  "key_cap_ctrl": "Ctrl",
+  "language_label": "Langue",
+  "language_en": "English",
+  "language_fr": "Français"
 }

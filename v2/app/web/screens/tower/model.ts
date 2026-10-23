@@ -17,7 +17,7 @@ import type {
 import type { Harness, Role } from '../../../../src/session/contract.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
-import { ago, clock, duration, estimate } from '../../lib/time.ts';
+import { ago, clock, decimal, duration, estimate } from '../../lib/time.ts';
 import { requestReason, requestTitle, type Request } from '../../lib/request.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
@@ -401,14 +401,11 @@ export function heading(count: number, t: Translate): string {
 
 export const plural = (n: number, key: string, t: Translate) => t(n === 1 ? `${key}_one` : `${key}_other`, { n });
 
-// A number with the catalog's decimal mark.
-const decimal = (value: string, t: Translate) => value.replace('.', t('decimal_mark'));
-
 export function planDetail(values: Readonly<Record<string, string>>, t: Translate): string {
   const n = Number(values.n);
   const time = estimate(Number(values.minutes), t);
   const key = `plan_proposes_${values.week === undefined ? 'cost' : 'week'}_${n === 1 ? 'one' : 'other'}`;
-  return t(key, { n, time, week: decimal(values.week ?? '', t), cost: decimal(values.cost ?? '', t) });
+  return t(key, { n, time, week: values.week === undefined ? '' : decimal(Number(values.week), t, 0, 1), cost: decimal(Number(values.cost), t, 2, 2) });
 }
 
 // Where New goal and Ask the lead go: the lead's screen, with what was

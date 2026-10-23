@@ -21,6 +21,10 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const locale = (t: Translate) => (t('locale') === 'fr' ? 'fr' : 'en');
 const number = (n: number, t: Translate, digits = 1) => new Intl.NumberFormat(locale(t), { minimumIntegerDigits: digits, useGrouping: false }).format(n);
 
+// A decimal number in the catalog's locale: "3,9" in French, "3.9" in English.
+export const decimal = (value: number, t: Translate, min: number, max: number): string =>
+  new Intl.NumberFormat(locale(t), { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: false }).format(value);
+
 // 42 min, 1 h, 10 h 30, 1 j, 2 j 4 h: rounded to the minute, never negative.
 // Past a day the minutes are dropped.
 export function duration(minutes: number, t: Translate): string {

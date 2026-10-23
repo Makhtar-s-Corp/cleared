@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog } from '../src/catalog.ts';
 import { translator } from '../web/lib/i18n.ts';
-import { ago, clock, duration, estimate, lasted, since } from '../web/lib/time.ts';
+import { ago, clock, decimal, duration, estimate, lasted, since } from '../web/lib/time.ts';
 import { sessionStatus, ticketState } from '../web/lib/status.ts';
 
 const en = translator(loadCatalog('shell', 'en'));
@@ -101,4 +101,12 @@ test('a harness\'s own sentence that starts as a tool\'s phrase stays as written
   assert.equal(s('Reading the diff of src/screens/Envelope.jsx'), 'Reading the diff of src/screens/Envelope.jsx');
   assert.equal(s('Running the docs tests · 12 passed so far'), 'Running the docs tests · 12 passed so far');
   assert.equal(s('Running npm test 2>&1 | tail -8'), 'Lance npm test 2>&1 | tail -8');
+});
+
+test('a decimal number in the catalog\'s locale, through Intl', () => {
+  assert.equal(decimal(3.94, fr, 0, 1), '3,9');
+  assert.equal(decimal(3.94, en, 0, 1), '3.9');
+  assert.equal(decimal(3.9, en, 2, 2), '3.90');
+  assert.equal(decimal(1234.5, fr, 2, 2), '1234,50', 'no grouping in a sentence');
+  assert.equal(duration(90, fr), '1 h 30');
 });

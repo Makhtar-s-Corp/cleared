@@ -5,7 +5,8 @@
 // router names the screen from the address (shell/App.tsx).
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { catalogOf, isLanguage } from '@/lib/catalogs.ts';
+import { catalogOf } from '@/lib/catalogs.ts';
+import { browserStore, rememberLanguage, startLanguage, storedLanguage } from '@/lib/language.ts';
 import { translator } from '@/lib/i18n.ts';
 import { placeOf } from '@/lib/routes.ts';
 import { sheetsReady } from '@/lib/sheets.ts';
@@ -14,8 +15,12 @@ import { Login } from '@/shell/Login.tsx';
 import './styles/app.css';
 
 const data = document.body.dataset;
+// The server's <html lang> (the choice's cookie, else the browser's
+// languages, else the setting); a choice this browser stored wins, and is
+// told to the server again if its cookie was lost.
 const lang = document.documentElement.lang;
-const language = isLanguage(lang) ? lang : 'fr';
+const language = startLanguage(lang, storedLanguage(browserStore()));
+if (language !== lang) rememberLanguage(language, browserStore(), document, location.protocol === 'https:');
 const root = createRoot(document.getElementById('root')!);
 const app = data.screen === 'app';
 // The first screen's sheets, on and loaded before anything is drawn (review of 248, F1).

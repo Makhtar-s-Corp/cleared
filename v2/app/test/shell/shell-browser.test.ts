@@ -191,7 +191,8 @@ function englishOf(text: string): string | undefined {
   const en = all('en');
   const fr = all('fr');
   for (const [key, value] of Object.entries(en)) {
-    if (fr[key] === value) continue;
+    // A template with under two letters of its own ("{n}s") says nothing of a language.
+    if (fr[key] === value || (value.replace(/\{[a-z_]+\}/g, '').match(/\p{L}/gu) ?? []).length < 2) continue;
     const literal = value.split(/\{[a-z_]+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+?');
     if (new RegExp(`^${literal}$`).test(text)) return key;
   }

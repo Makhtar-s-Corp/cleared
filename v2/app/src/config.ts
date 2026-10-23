@@ -3,7 +3,9 @@
 //   CLEARED_V2_APP_PORT      default 8792
 //   CLEARED_V2_APP_SOURCE    service (default) or fixtures
 //   CLEARED_V2_PORT          the service's port, default 8791 (src/config.ts)
-//   CLEARED_V2_APP_LANGUAGE  fr (default, the owner's decision of 2026-10-23) or en
+//   CLEARED_V2_APP_LANGUAGE  fr (default) or en: the language of a page when
+//                            neither the person's choice nor the browser's
+//                            languages name one (catalog.ts, languageOf)
 //   CLEARED_V2_APP_PROJECT   the project name in the header; else the last
 //                            part of CLEARED_REPO or ORCH_REPO
 //   CLEARED_V2_APP_ORIGIN    the address the browser uses when it is not the
