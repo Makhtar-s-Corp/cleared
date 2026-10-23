@@ -4152,3 +4152,19 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - plan-1 stays paused, and its tickets stay inactive. Resuming it, or cancelling its items, is a later decision.
 - The demo stays stopped. Nothing is pushed to the main branch of either proof repository (`2127dd2`, `0d7fbb5`). The run merges into `proof-run` only.
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
+
+## 2026-10-23: Orchestrator decision: the two orphan pairs of networks removed by name
+
+**Decision.** On 2026-10-23 at 20:05 (Europe/Paris), the orchestrator, not the owner, decided in writing to remove the two orphan pairs of Docker networks named in the entry above. The principle is the one applied that morning to the five stopped leads' resources: by name, only a network labelled `cleared.dev=v2` with no container attached, with `docker network rm <name>`. No prune, no volume, nothing else, and nothing of the 48-hour run in progress.
+
+**What was done**, by the ops session:
+- Each network was read with `docker network inspect` (name, `cleared.dev` label, attached containers), then again just before its removal:
+  - `cleared-v2-abccbe43-f1f7-4d2f-ae47-749c0ea4c615` and its `-out`: label `v2`, no container. They belong to a stopped session of LOCAL-23, whose containers the service had released without its networks.
+  - `cleared-v2-90cd8204-69a3-4ab3-a614-99a45343dff3` and its `-out`: label `v2`, no container. They belong to the demo's lead, stopped with the demo at 18:53.
+- All four were removed. Docker's address pool went from 6 to 10 free subnets out of 31.
+- The 48-hour run's networks were not touched: its two sessions' pairs, its lead's pair and `cleared-guestbook`.
+
+**Consequences.**
+- The 48-hour run has room for three more sessions at a time, beyond the two that are live.
+- When the service cannot release a stopped session's networks (« the stopped sessions' containers and networks could not be released »), they are still removed by hand on a written decision, as here.
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
