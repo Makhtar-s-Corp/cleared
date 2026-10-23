@@ -168,3 +168,15 @@ test('a role other than author or reviewer, or one the proof could not read, get
   assert.equal(answerFor('npm test'), 'allow_once');
   assert.equal(answerFor('npm install x'), 'reject_once');
 });
+
+test('everything but a declared check keeps the checkout rule\'s answer, run 5\'s requests among them', () => {
+  for (const command of [
+    'npm test', 'npm test 2>&1 | tail -20', 'npm run typecheck; npm test', 'npm ci', 'git status', 'ls -la src', 'npm install date-fns', 'curl https://example.invalid',
+    'git push origin main', 'cat ~/.ssh/id_ed25519', 'npm test > /tmp/out', 'echo $(id) | tail', 'node -e "fetch(1)"', '',
+    // Run 5's second request of the reviewer: checks and reads, refused by the split that does not read quotes (decisions log of 2026-10-23).
+    'npm test 2>&1 | tail -15; npm run typecheck 2>&1 | tail -5; git ls-files; grep -rn "findWords\\|words:" --include=* -r src README.md | grep -v "^src/words.ts" | head',
+    'git cherry-pick -n 7a17274 && git status --short', 'getent hosts filter-api postgres', 'FILTER_URL=http://filter-api:8795 npm test',
+  ]) {
+    for (const role of ['reviewer', 'author', 'lead', undefined]) assert.equal(permissionAnswer({ role, command, checks }).decision, answerFor(command), `${role}: ${command}`);
+  }
+});
