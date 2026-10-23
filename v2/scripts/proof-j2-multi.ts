@@ -69,7 +69,7 @@ import { RELAY } from '../src/container/preview.ts';
 import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
 import { sessionNames, siblingAddress } from '../src/container/session-runtime.ts';
 import type { Ticket } from '../src/tickets/contract.ts';
-import { BaseError, baseModeOf, closeStale, frozenCommits, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, type BaseMode, type BaseSettings } from './proof-base.ts';
+import { BaseError, StartRefusal, baseModeOf, checksRunOn, closeStale, frozenCommits, readWatchers, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, watcherRefusal, workflowsAt, type BaseMode, type BaseSettings } from './proof-base.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
 import { chooseAnswers, declaredChecks, permissionAnswer } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
@@ -370,7 +370,21 @@ async function prepareBase(settings: BaseSettings): Promise<string> {
   const workspace = await api<Workspace>('/workspace');
   const { commits, defaults } = await frozenCommits(runCommand, settings);
   const refused = refusal(settings, Object.fromEntries(workspace.services.map((s) => [s.name, s.base])), defaults);
-  if (refused) throw new BaseError(refused);
+  if (refused) throw new StartRefusal(refused);
+  // A real run's checks and deploys follow the run branch (issue 277): the
+  // rehearsal's forge and brokers are stand-ins, and it has no watcher.
+  if (!REHEARSAL) {
+    for (const repo of settings.repos) {
+      const workflows = await workflowsAt(runCommand, repo.clone, commits[repo.service] as string);
+      if (!checksRunOn(workflows, settings.run)) {
+        throw new StartRefusal(`no workflow of ${repo.service}'s ${settings.frozen} (${workflows.map((w) => w.path).join(', ') || 'none'}) runs on both a push and a pull request to ${settings.run}: its release card would wait for checks that never come; add ${settings.run} to the branches of its checks workflow on ${settings.frozen} (issue 277)`);
+      }
+    }
+    const watchers = await readWatchers();
+    const stray = watcherRefusal(watchers, settings.repos.map((r) => r.service), settings.run);
+    if (stray) throw new StartRefusal(stray);
+    log(`base: checks and watchers on ${settings.run} for ${settings.repos.map((r) => r.service).join(', ')}`);
+  }
   for (const repo of settings.repos) {
     const read = fileAt(runCommand, repo.clone, commits[repo.service] as string);
     const found = await ticketChangesIn(repo.service, read);
@@ -424,7 +438,8 @@ if (signedIn && baseSettings) {
     save();
     await browser.close();
     if (world) await world.stop();
-    process.exit(1);
+    // A refusal of the start check is a setting to fix, as a missing one is (64).
+    process.exit(error instanceof StartRefusal ? 64 : 1);
   }
 }
 

@@ -11,7 +11,15 @@ Each proof repository (the guestbook's and the filter API's) has two branches be
 
 The service's workspace (`base`), each release broker's machine settings (`[lanes] base`) and each deploy watcher (`--branch`) name `proof-run`. `main` is in none of them.
 
-Before its first ticket, the proof does four things, in this order (`v2/scripts/proof-base.ts`):
+Before its first ticket, a real run checks its setup, then does four things, in this order (`v2/scripts/proof-base.ts`).
+
+**The start check** (issue #277) stops the run with code 64 and says why when:
+- a service's base in the workspace is not `proof-run` (the guards below);
+- no workflow of a repository's `proof-base` runs on both a push and a pull request to `proof-run`. The reader knows `on:` as a list, or as events filtered on `branches` and `branches-ignore`; an event filtered on anything else (paths, tags, types) does not count. Without such a workflow, the release card waits for checks that never come;
+- a deploy watcher of one of the run's services deploys another branch (its `--branch`, `main` by default), a service has no watcher, or the service of a running watcher cannot be read. The watchers are read from `/proc` on the machine the proof runs on: each `deploy/watch.ts` process, and the `cleared.example` label its script sets.
+
+The four things:
+
 
 1. **The earlier runs' tickets are set aside.** A ticket with one of the proof's four titles that is not Done, and is not in Todo, or has a live session, or has anything waiting in the inbox, gets `POST /api/tickets/:id/set-aside`. Its sessions stop, everything of it that waits is settled, a train not yet approved is halted, and it goes back to Todo without starting again. The proof then reads the API again. If one of those tickets is still open, the run stops before ticket 1 and says which one.
 2. **The open pull requests into `proof-run` are closed** (`gh pr list --base proof-run`, then `gh pr close` for each). They were opened against a run branch that is about to be recreated. Pull requests into any other branch are left alone.

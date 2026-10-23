@@ -4006,3 +4006,29 @@ A bare `npm test` or `npm run typecheck` was already allowed by the checkout rul
 - `test/scripts/proof-report.test.ts`: the report's permissions section.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
+
+## 2026-10-23: the proof's checkout rule reads a command with the service's parser, and a real run's start check reads the checks and the watchers (review 1 of pull request 279, followup 1; issue 277)
+
+**Decision 1: the checkout rule parses a command.** Followup 1 of review 1 of pull request 279: the exact rule of the entry above would not have changed step 10 of run 5. At the owner's request, the checkout rule (`insideCheckout`, `scripts/proof-inbox.ts`) now reads a command with the service's own shell parser (`parseList`, `src/session/policy.ts`) instead of splitting its text:
+- Quotes are understood, and every part of a list joined by `;`, `&&`, `||` or `|` is judged word for word, with the files its output redirections write.
+- Whatever the parser refuses is denied: a substitution, an expansion, a here-document, an input redirection, a subshell, a newline, a lone `&`.
+- `parseList` and `parseCommand` take an opt-in `globs` that only the driver passes. With it, an unquoted `*`, `?` or `[` is read in a word with no slash that does not start with a dot, so it names files of the current folder only. The policy never passes it, and its behaviour is unchanged (its tests pass as they were).
+- Newly allowed: `git ls-files`; `cd` into a folder of the checkout; `npm test` or `npm run <script>` with npm's options from a list, and after `--` the runner's options from a list (a name to match, a reporter) and files; `npx tsc --noEmit` with `-p` or `--project` inside the checkout. `npx tsc` fetches a package from the registry when the checkout has no TypeScript, as `npm ci` does: the egress proxy bounds it.
+- Newly refused: `cd` alone (home) and `cd -`; an option whose value after `=` names a path outside the checkout (`--output=/tmp/x`, `--script-shell=/bin/sh`); `--require`, `--import` or any option not in the runner's list after `--`; a newline between two commands, which the first rule split and judged.
+- Run 5's reviewer request on the third ticket (`npm test 2>&1 | tail -15; npm run typecheck 2>&1 | tail -5; git ls-files; grep -rn "findWords\|words:" --include=* -r src README.md | grep -v "^src/words.ts" | head`) is allowed once.
+- Its other request and the earlier runs' reviewer requests stay refused: a scratch file written to `/tmp` through a here-document and run with `node`, or `${DATABASE_URL:+set}`.
+- Followups 2 and 4 of the same review: the comments say "declared in the frozen base" (the script that runs is the checkout's), and the refusal's rule is named `refused`.
+
+**Decision 2: a real run's start check (issue 277).** Before anything is set aside or recreated, a real run stops with code 64 (`StartRefusal`) and a clear message:
+- when no workflow of a proof repository's frozen base runs on both a push and a pull request to the run branch (`checksRunOn`, `workflowsAt`). The workflows are read without a YAML library: the top-level `on:` as a list, or as events filtered on `branches` and `branches-ignore` with GitHub's patterns. An event filtered on anything else (paths, tags, types, a flow mapping) does not count, so an unsure reading refuses;
+- when a deploy watcher of one of the run's services deploys another branch (its `--branch`, `main` by default), when a service has no watcher, or when the service of a running watcher cannot be read (`readWatchers`, `watcherRefusal`). Watchers are read from `/proc`: each `deploy/watch.ts` process, and the `cleared.example` label of the script it runs;
+- when a service's base in the workspace is not the run branch (`refusal`, as before; it now stops with 64 too).
+
+The rehearsal skips the workflows and the watchers: its forge and its brokers are stand-ins, and it has no watcher. A sanity check on the proof host, read only, found both watchers on `proof-run` and both repositories' checks running on it.
+
+**Tests.**
+- `test/scripts/proof-inbox.test.ts`: the reviewers' refused requests of run 5 and the earlier runs, verbatim from the ledger, allowed or refused as above; the common forms; the refusals.
+- `test/scripts/proof-base.test.ts`: the recorded workflows of both proof repositories, with branches `[main]` refused and `[main, proof-run]` accepted, and this repository's example, still on main, refused; the filters, and the unsure readings refused; the workflows of a commit read from a clone; the watchers read from a stand-in `/proc`; each refusal.
+- The guard of the proof scripts' pushes lists the line that reads the workflow event `push`, which is not a git push.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
