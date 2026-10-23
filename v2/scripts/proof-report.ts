@@ -383,9 +383,47 @@ export type MultiResult = {
   readonly gestures: readonly { readonly at: string; readonly what: string }[];
   readonly stand_ins: readonly string[];
   readonly proposal: string | null;                         // the blocked card's proposal (step 10)
+  // The questions the sessions of the proof's tickets asked, and what the proof chose (proof-inbox.ts, chooseAnswers).
+  readonly questions: readonly AnsweredQuestion[];
+  // The clean base the run started from (proof-base.ts), when it reset one.
+  readonly base: BaseReport | null;
+};
+
+export type AnsweredQuestion = {
+  readonly at: string;
+  readonly ticket: string;
+  readonly session: string;
+  readonly question: string;
+  readonly options: readonly string[];
+  readonly answer: string;
+  readonly how: 'recommended' | 'first' | 'free';
+};
+
+export type BaseReport = {
+  readonly frozen: string;                                  // the frozen base branch, only ever read
+  readonly run: string;                                     // the run branch, recreated from it
+  readonly repos: readonly { readonly service: string; readonly commit: string; readonly closed: readonly number[] }[];
+  readonly setAside: readonly string[];                     // the earlier runs' tickets put back to a clean state
 };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function questionLines(questions: readonly AnsweredQuestion[]): string[] {
+  const out = ['## Session questions', ''];
+  if (questions.length === 0) return [...out, 'No session of the proof\'s tickets asked a question.', ''];
+  out.push(row('At', 'Ticket', 'Session', 'Question', 'Options', 'Answer', 'Chosen as'), row('---', '---', '---', '---', '---', '---', '---'));
+  for (const q of questions) out.push(row(q.at, q.ticket, q.session.slice(0, 8), q.question, q.options.join(' / ') || 'none', q.answer, q.how));
+  return [...out, ''];
+}
+
+function baseLines(base: BaseReport | null): string[] {
+  const out = ['## The clean base', ''];
+  if (!base) return [...out, 'The run did not reset a base: it ran on the services\' branches as it found them.', ''];
+  out.push(`Each run branch \`${base.run}\` was recreated from the frozen \`${base.frozen}\`.`, '', row('Service', 'Commit', 'Pull requests of earlier runs closed'), row('---', '---', '---'));
+  for (const r of base.repos) out.push(row(r.service, r.commit.slice(0, 12), r.closed.map((n) => `#${n}`).join(', ') || 'none'));
+  out.push('', `Earlier runs' tickets put back to a clean state: ${base.setAside.join(', ') || 'none'}.`, '');
+  return out;
+}
 
 function sessionPlanLines(plans: readonly SessionPlanFact[]): string[] {
   const out = ['## Session plans', ''];
@@ -466,6 +504,8 @@ export function renderMultiDurations(r: MultiResult): string {
     `saves: ${r.saves.length}, answered 200: ${saves((n) => n === 200)}, 409: ${saves((n) => n === 409)}, refused: ${saves((n) => n !== 200 && n !== 409)}; kept after Give back: ${r.saves.filter((s) => s.kept === true).length}`,
     '',
     ...sessionPlanLines(r.sessionPlans),
+    ...questionLines(r.questions),
+    ...baseLines(r.base),
     '## The owner',
     '',
     row('Measure', 'Value'),

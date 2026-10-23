@@ -356,6 +356,8 @@ test('the multi-service durations: the steps, the steps of each ticket, the trai
     human: { openedAt: '2026-10-23T09:40:02.000Z', lines: 2, closed: { at: '2026-10-23T09:42:00.000Z', reason: 'give_back', outputBytes: 900 }, edits: [{ path: 'src/page.ts', via: 'editor', added: 1, removed: 1, at: '2026-10-23T09:41:00.000Z' }], noticeTurnAt: '2026-10-23T09:42:03.000Z' },
     saves: [{ at: '2026-10-23T09:41:00.000Z', status: 200, kept: true }],
     sessionPlans: [], gestures: [{ at: '2026-10-23T09:00:05.000Z', what: 'created LOCAL-1' }], stand_ins: ['the containers: a docker stand-in'], proposal: 'Extend the ticket to the guestbook, or keep the contract backward compatible.',
+    questions: [{ at: '2026-10-23T09:20:00.000Z', ticket: 'LOCAL-3', session: '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b', question: 'Should the positions count from 0 or from 1?', options: ['From 1', 'From 0 (Recommended)'], answer: 'From 0 (Recommended)', how: 'recommended' }],
+    base: { frozen: 'proof-base', run: 'proof-run', repos: [{ service: 'guestbook', commit: 'a'.repeat(40), closed: [] }, { service: 'filter-api', commit: 'b'.repeat(40), closed: [7, 9] }], setAside: ['LOCAL-20', 'LOCAL-22'] },
   };
   const text = renderMultiDurations(result);
   for (const expected of [
@@ -363,7 +365,14 @@ test('the multi-service durations: the steps, the steps of each ticket, the trai
     '| LOCAL-1 | 1 | contract | filter-api | done | $0.20 | 2 min |', '| LOCAL-1 | landed | filter-api #101: merged 2026-10-23T09:10:00.000Z, healthy 2026-10-23T09:10:20.000Z; guestbook #102: merged 2026-10-23T09:11:00.000Z, healthy 2026-10-23T09:11:30.000Z | 40 s |',
     'The fake answered 3 calls (check 3); its first answer at 2026-10-23T09:04:00.000Z.', 'take over → terminal open | 2 s', 'give back → the notice\'s turn | 3 s', 'lines typed, journaled | 2',
     '| src/page.ts | editor | +1 -1 |', 'saves: 1, answered 200: 1, 409: 0, refused: 0; kept after Give back: 1', 'Extend the ticket to the guestbook, or keep the contract backward compatible.', 'the containers: a docker stand-in',
+    '## Session questions', '| 2026-10-23T09:20:00.000Z | LOCAL-3 | 0b7f3c1e | Should the positions count from 0 or from 1? | From 1 / From 0 (Recommended) | From 0 (Recommended) | recommended |',
+    '## The clean base', 'Each run branch `proof-run` was recreated from the frozen `proof-base`.', '| guestbook | aaaaaaaaaaaa | none |', '| filter-api | bbbbbbbbbbbb | #7, #9 |',
+    'Earlier runs\' tickets put back to a clean state: LOCAL-20, LOCAL-22.',
   ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
+  // A run that asked nothing and reset no base says so.
+  const bare = renderMultiDurations({ ...result, questions: [], base: null });
+  assert.ok(bare.includes('No session of the proof\'s tickets asked a question.'));
+  assert.ok(bare.includes('The run did not reset a base'));
 });
 
 function baseResult(over: Partial<ProofResult> = {}): ProofResult {

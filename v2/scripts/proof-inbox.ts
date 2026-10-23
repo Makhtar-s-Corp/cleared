@@ -5,6 +5,8 @@
 // for the next. The morning of the milestone 2 proof (scripts/proof-j2.ts):
 // the permissions the night left, then the session plans' Go, then the
 // plan, then the releases.
+import { RECOMMENDED } from '../app/web/components/choices/model.ts';
+import type { Question } from '../src/session/events.ts';
 
 // Work inside the checkout is allowed once; anything else is denied (issue
 // 157, item 4: the proof allowed once almost every request). The proof
@@ -149,4 +151,32 @@ export function morningAction(entries: readonly InboxEntry[], options: { readonl
 // What the morning leaves to the owner and the report counts.
 export function leftForOwner(entries: readonly InboxEntry[]): { readonly knowledge: number; readonly contract: number } {
   return { knowledge: entries.filter((e) => e.kind === 'knowledge').length, contract: entries.filter((e) => e.kind === 'contract').length };
+}
+
+// ---- the multi-service proof, a session's question -------------------------------
+
+// A question a session of one of the proof's tickets asks (AskUserQuestion's
+// shape, src/session/events.ts) is answered as the owner who trusts the
+// team would: the option the asker marked "(Recommended)", else the first
+// one; one option even for a multiple choice. A question with no option
+// gets FREE_ANSWER, typed in its free field. The labels are the API's, so
+// the choice does not depend on the language the page is shown in.
+export const FREE_ANSWER = 'Go with what you judge best, and say in your report what you chose.';
+
+export type QuestionChoice = {
+  readonly question: string;
+  readonly options: readonly string[];
+  readonly answer: string;
+  readonly how: 'recommended' | 'first' | 'free';
+};
+
+export function chooseAnswers(questions: readonly Question[]): QuestionChoice[] {
+  return questions.map((q) => {
+    const options = (q.options ?? []).map((o) => o.label);
+    const recommended = options.find((label) => RECOMMENDED.test(label));
+    if (recommended !== undefined) return { question: q.question, options, answer: recommended, how: 'recommended' };
+    const [first] = options;
+    if (first !== undefined) return { question: q.question, options, answer: first, how: 'first' };
+    return { question: q.question, options, answer: FREE_ANSWER, how: 'free' };
+  });
 }

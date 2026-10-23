@@ -39,7 +39,8 @@ export type PutBackReason =
   | 'rolled_back'           // the release watch reverted the merge
   | 'train_halted'          // a release train could not land its next service (lane 16)
   | 'step_failed'           // a step of the ticket failed; its done steps are kept (lane 23)
-  | 'restart';              // the service restarted while the ticket ran
+  | 'restart'               // the service restarted while the ticket ran
+  | 'set_aside';            // the owner set the ticket aside (FlowEngine.setAside)
 
 type Base = { readonly at: string; readonly project: string; readonly ticket: TicketId };
 // A ticket of a workspace of several services lands as a train (lane 16):

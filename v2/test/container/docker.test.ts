@@ -354,3 +354,50 @@ test('the terminal runs docker exec --interactive --tty on the owned id under sc
   await assert.rejects(docker.terminal(OTHER, name, { user: '1000:1000', workdir: '/workspace', command: ['bash'] }), /no container named/, 'another session\'s container is not found');
   assert.equal(scripted.length, 1);
 });
+
+test('releaseStopped removes by name the containers, then the networks, of the stopped sessions only; never a volume, an image nor a prune (issue 265)', async () => {
+  const fake = new FakeDocker();
+  const ours = (session: string, extra: Record<string, string> = {}) => ({ [LABEL.split('=')[0] as string]: 'v2', 'cleared.session': session, ...extra });
+  const STOPPED = SESSION;
+  const LIVE = OTHER;
+  fake.containers.push(
+    { id: 'c1', name: `cleared-v2-${STOPPED}-session`, labels: ours(STOPPED), state: 'exited' },
+    { id: 'c2', name: `cleared-v2-${STOPPED}-egress`, labels: ours(STOPPED), state: 'running' },
+    { id: 'c3', name: `cleared-v2-${STOPPED}-sib-filter-api`, labels: ours(STOPPED), state: 'running' },
+    { id: 'c4', name: `cleared-v2-${LIVE}-session`, labels: ours(LIVE), state: 'running' },
+    // The stopped session's label on a name that is not its own: left alone.
+    { id: 'c5', name: 'cleared-guestbook', labels: ours(STOPPED), state: 'running' },
+    // The same name without the label: the labelled list never returns it.
+    { id: 'c6', name: `cleared-v2-${STOPPED}-svc-db`, labels: { 'cleared.session': STOPPED }, state: 'running' },
+  );
+  fake.networks.push(
+    { id: 'n1', name: `cleared-v2-${STOPPED}`, labels: ours(STOPPED) },
+    { id: 'n2', name: `cleared-v2-${STOPPED}-out`, labels: ours(STOPPED) },
+    { id: 'n3', name: `cleared-v2-${LIVE}`, labels: ours(LIVE) },
+    { id: 'n4', name: 'bridge-of-someone-else', labels: {} },
+  );
+  fake.volumes.push({ id: `cleared-v2-${STOPPED}-config`, name: `cleared-v2-${STOPPED}-config`, labels: ours(STOPPED) });
+  const docker = new Docker(fake.runner);
+  const released = await docker.releaseStopped([STOPPED]);
+  assert.deepEqual(released, {
+    containers: [`cleared-v2-${STOPPED}-session`, `cleared-v2-${STOPPED}-egress`, `cleared-v2-${STOPPED}-sib-filter-api`],
+    networks: [`cleared-v2-${STOPPED}`, `cleared-v2-${STOPPED}-out`],
+  });
+  assert.deepEqual(fake.containers.map((c) => c.id), ['c4', 'c5', 'c6']);
+  assert.deepEqual(fake.networks.map((n) => n.id), ['n3', 'n4']);
+  assert.equal(fake.volumes.length, 1, 'the config volume stays');
+  const lines = fake.calls.map((c) => c.args.join(' '));
+  assert.deepEqual(fake.calls.map((c) => verbOf(c.args)), ['ps', 'rm', 'network ls', 'network rm']);
+  for (const call of fake.calls.filter((c) => LISTS.has(verbOf(c.args)))) assert.ok(hasPair(call.args, '--filter', `label=${LABEL}`), call.args.join(' '));
+  assert.ok(!lines.some((line) => /--volumes|volume rm|image rm|prune/.test(line)), lines.join('\n'));
+  assert.deepEqual(fake.calls[1]?.args, ['rm', '--force', '--', `cleared-v2-${STOPPED}-session`, `cleared-v2-${STOPPED}-egress`, `cleared-v2-${STOPPED}-sib-filter-api`]);
+  assert.deepEqual(fake.calls[3]?.args, ['network', 'rm', '--', `cleared-v2-${STOPPED}`, `cleared-v2-${STOPPED}-out`]);
+});
+
+test('releaseStopped with no session asks Docker nothing, and refuses what is not a session id before any call', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  assert.deepEqual(await docker.releaseStopped([]), { containers: [], networks: [] });
+  await assert.rejects(docker.releaseStopped([SESSION, '--all']), /not a session id/);
+  assert.equal(fake.calls.length, 0);
+});

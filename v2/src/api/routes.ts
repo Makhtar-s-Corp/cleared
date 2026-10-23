@@ -216,6 +216,12 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
         send(c.response, 200, moved);
       }),
     },
+    // The owner sets a ticket aside: out of the flow, nothing of it waiting,
+    // in Todo, and not started again (FlowEngine.setAside).
+    {
+      method: 'POST', path: '/api/tickets/:id/set-aside',
+      handle: guarded(true, async (engine, user, c) => send(c.response, 200, await engine.setAside(param(c, 'id'), user as UserId))),
+    },
   ];
 
   const inboxRoutes: Route[] = [

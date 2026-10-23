@@ -150,6 +150,9 @@ export type FlowDeps = {
   // its broker, its validations, its review reports. Built from the
   // environment when absent (approval/service.ts serviceLocks).
   readonly locks?: (service: ServiceConfig) => ServiceLock;
+  // Releases the containers and networks of stopped sessions, by name
+  // (Docker.releaseStopped): after the restart recovery (issue 265).
+  readonly release?: (sessions: readonly SessionId[]) => Promise<{ readonly containers: readonly string[]; readonly networks: readonly string[] }>;
 };
 
 export type FlowErrorKind = 'not_found' | 'conflict' | 'invalid' | 'unavailable';
@@ -250,6 +253,7 @@ export class FlowEngine {
   #trains: TrainStore;
   #runner: TrainRunner;
   #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
+  #release: FlowDeps['release'];
   #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
   #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
   #origins = new Map<TicketId, Origin>();                           // the plan item a ticket's current flow runs for
@@ -269,6 +273,7 @@ export class FlowEngine {
     this.#clean = deps.clean ?? ((text) => text);
     this.#workspace = workspaceOf(deps.config);
     this.#locks = deps.locks;
+    this.#release = deps.release;
     this.#trains = new TrainStore(deps.store.db, this.#now);
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
@@ -1008,6 +1013,44 @@ export class FlowEngine {
     void this.#track(work.catch((error: unknown) => console.error(`cleared-v2: the steps of ${ticket} could not go on (${error instanceof Error ? error.name : typeof error})`)));
   }
 
+  // Set aside (POST /api/tickets/:id/set-aside): the owner takes a ticket
+  // out of the flow without starting it again, which a move to Todo would.
+  // Its live sessions stop, everything of it that waits in the inbox is
+  // settled, a train not yet approved is halted, its running steps wait,
+  // and it is back in Todo with a comment. Nothing is merged or reverted:
+  // an approved ticket, a done one and a train that lands are refused. The
+  // multi-service proof sets its earlier runs' tickets aside, so that each
+  // run starts with nothing of theirs open (scripts/proof-base.ts).
+  async setAside(id: TicketId, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
+    const tickets = this.registry.ticketStore;
+    const ticket = await tickets.get(id);
+    if (!ticket || ticket.project !== this.config.project) throw new FlowError('not_found', `unknown ticket ${id}`);
+    if (ticket.status === tickets.states.go || ticket.status === tickets.states.done) throw new FlowError('conflict', `${id} is in “${ticket.status}”: it is not set aside`);
+    if (this.#trains.latest(id)?.state === 'landing') throw new FlowError('conflict', `the train of ${id} is landing: it is not set aside`);
+    const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
+    // No step of it starts while its sessions stop.
+    this.#active.delete(id);
+    let sessions = 0;
+    for (const live of [...this.#live.values()].filter((l) => l.input.ticket === id && !l.closed)) {
+      this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'RUN_ERROR', message: 'The owner set the ticket aside: this session was stopped.', code: 'set_aside' });
+      await this.#close(live, 'stopped', note);
+      sessions++;
+    }
+    let items = 0;
+    for (const item of this.inbox.items()) {
+      if (item.ticket !== id || item.state !== 'waiting') continue;
+      if (item.kind === 'release' ? this.#settleRelease(item.id, id, ticket.project, by) : this.inbox.handle(item.id, by)) items++;
+    }
+    this.#trains.haltActive(id);
+    if (ticket.status !== tickets.states.todo) await this.#putBack(id, note, 'set_aside');
+    else {
+      this.#origins.delete(id);
+      this.#steps.hold(id);
+      await tickets.comment(id, note, SERVICE).catch(() => undefined);
+    }
+    return { sessions, items };
+  }
+
   // Send back (POST /api/contracts/:id/sendback): the contract step's
   // session is resumed with the message, or, when it cannot be, a new one
   // runs the step with it, in the background; a ticket put back runs it
@@ -1113,6 +1156,26 @@ export class FlowEngine {
       const ticket = await tickets.get(id);
       if (!ticket || ticket.project !== project || (ticket.status !== tickets.states.progress && ticket.status !== tickets.states.review)) continue;
       await this.#putBack(id, note, 'restart');
+    }
+    await this.#releaseStopped();
+  }
+
+  // What the last process left of the sessions this ledger says are not
+  // live (stopped, done, failed, or just stopped above): their containers,
+  // which may still run, and their networks, which fill Docker's address
+  // pool (issue 265). Only the ids of this ledger's own rows are named, so
+  // another instance's sessions on the same host are never touched; the
+  // volumes stay. A failure is said and the service goes on.
+  async #releaseStopped(): Promise<void> {
+    const release = this.#release;
+    if (!release) return;
+    const stopped = this.#store.sessions.list().filter((row) => row.project === this.config.project && !LIVE_PHASES.has(row.status) && !this.#live.has(row.id)).map((row) => row.id);
+    if (stopped.length === 0) return;
+    try {
+      const { containers, networks } = await release(stopped);
+      if (containers.length + networks.length > 0) console.error(`cleared-v2: released ${containers.length} container(s) and ${networks.length} network(s) of stopped sessions`);
+    } catch (error) {
+      console.error(`cleared-v2: the stopped sessions' containers and networks could not be released (${error instanceof Error ? error.name : typeof error})`);
     }
   }
 

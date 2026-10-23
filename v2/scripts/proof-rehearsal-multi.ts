@@ -38,6 +38,7 @@ import type { FakeStep } from '../src/session/adapters/fake.ts';
 import type { RehearsalScript } from '../src/session/adapters/index.ts';
 import { END_TERMINAL, GIVE_PROGRAM, READ_PROGRAM, SHELL_COMMAND, TAKE_PROGRAM, WRITE_PROGRAM, terminalCommand } from '../src/terminal/container.ts';
 import { guestbookHeading } from './proof-guestbook-heading.ts';
+import { FROZEN_BRANCH, RUN_BRANCH, breaksHealth, type BaseSettings } from './proof-base.ts';
 import { buildApp, freePort, listening, plannedAuthor, startBroker, writeGhStub } from './proof-rehearsal.ts';
 
 const V2 = fileURLToPath(new URL('../', import.meta.url));
@@ -76,9 +77,10 @@ export const MULTI_TICKETS = [
 // ---- the workspace file -----------------------------------------------------------
 
 // Where the rehearsal keeps each service: its bare copy (the remote), its
-// checkout on the "server", its broker's socket and state folder.
+// checkout on the "server", its broker's clone, socket and state folder,
+// and the clone the proof recreates its run branch from (proof-base.ts).
 export const servicePaths = (root: string, name: string) => ({
-  origin: join(root, 'origins', `${name}.git`), dir: join(root, 'services', name, 'checkout'), clone: join(root, 'locks', name),
+  origin: join(root, 'origins', `${name}.git`), dir: join(root, 'services', name, 'checkout'), clone: join(root, 'locks', name), base: join(root, 'base', name),
   socket: join(root, 'brokers', name, 'broker.sock'), state: join(root, 'brokers', name, 'state'),
 });
 
@@ -89,7 +91,7 @@ export const servicePaths = (root: string, name: string) => ({
 export function rehearsalWorkspace(options: { readonly root: string; readonly ports: Readonly<Record<ServiceName, number>> }): string {
   const section = (name: ServiceName, extra: string[]) => {
     const p = servicePaths(options.root, name);
-    return [`[service ${name}]`, 'kind = repository', `repository = rehearsal/${name}`, `url = ${p.origin}`, 'base = main', `dir = ${p.dir}`, 'sensitivity = normal', ...extra,
+    return [`[service ${name}]`, 'kind = repository', `repository = rehearsal/${name}`, `url = ${p.origin}`, `base = ${RUN_BRANCH}`, `dir = ${p.dir}`, 'sensitivity = normal', ...extra,
       `broker_socket = ${p.socket}`, `broker_state = ${p.state}`, ''];
   };
   return [
@@ -121,6 +123,18 @@ const NOTE = { path: 'notes/{ticket}.md', text: '# {ticket}\n\n{title}: written 
 const title = (n: number) => (MULTI_TICKETS[n - 1] as (typeof MULTI_TICKETS)[number]).title.split(',')[0]?.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&') ?? '';
 const of = (n: number, step: string) => `^Ticket \\S+: ${title(n)}[\\s\\S]*${step}`;
 
+// The question ticket 3's author asks while it works: the proof answers it
+// with the option marked recommended, the second one, and records it.
+export const T3_QUESTION: FakeStep = {
+  question: {
+    requestId: 't3-offsets',
+    questions: [{
+      question: 'Should the positions count characters from 0 or from 1?', header: 'Offsets',
+      options: [{ label: 'From 1', description: 'As a person counts.' }, { label: 'From 0 (Recommended)', description: 'As String.prototype.indexOf answers.' }],
+    }],
+  },
+};
+
 // The authors of each ticket and step (decisions 22 and 26): each proposes
 // its plan with a high confidence, then works at the Go. Ticket 4's working
 // turn stays open, so the session works when the owner takes it over; its
@@ -144,7 +158,7 @@ export function multiScript(): RehearsalScript {
       { when: of(2, 'the integration step'), service: 'guestbook', files: [], steps: planned('t2-integration', [], 'The end-to-end test across both services') },
       // Ticket 3: the filter API alone changes the contract the guestbook consumes.
       // A ticket of one service has one step and the author's prompt alone (flow/engine.ts start).
-      { when: of(3, ''), service: 'filter-api', files: [{ path: 'contract/openapi.yaml', replace: [ACCEPTED, `${ACCEPTED}\n                    positions: {}`] }, NOTE], steps: planned('t3-filter', ['contract/openapi.yaml', NOTE.path], 'POST /check answers the positions') },
+      { when: of(3, ''), service: 'filter-api', files: [{ path: 'contract/openapi.yaml', replace: [ACCEPTED, `${ACCEPTED}\n                    positions: {}`] }, NOTE], steps: planned('t3-filter', ['contract/openapi.yaml', NOTE.path], 'POST /check answers the positions', { work: [T3_QUESTION] }) },
       // Ticket 4: works until the owner takes it over.
       { when: of(4, ''), service: 'guestbook', files: [{ path: 'src/page.ts', replace: ['export', '// The count of entries above the list (rehearsal).\nexport'] }], steps: planned('t4-guestbook', ['src/page.ts'], 'The count above the list', { hold: true }) },
     ],
@@ -162,10 +176,9 @@ export function multiScript(): RehearsalScript {
 // ---- the guestbook's watch ----------------------------------------------------------
 
 // The provoked failure (examples/guestbook/src/config.ts): /health answers
-// 503 once the merged config turns PROOF_BREAK_HEALTH on.
-export function breaksHealth(configText: string): boolean {
-  return /^export const PROOF_BREAK_HEALTH: boolean = true;/m.test(configText);
-}
+// 503 once the merged config turns PROOF_BREAK_HEALTH on (proof-base.ts,
+// whose check of the frozen base reads it too).
+export { breaksHealth };
 
 // ---- the containers' stand-in ---------------------------------------------------------
 
@@ -342,6 +355,7 @@ export type MultiWorld = {
   readonly ledger: string;
   readonly docker: string;                                  // the docker stand-in, for the proof's own reading of the fake
   readonly standIns: readonly string[];
+  readonly base: BaseSettings;                              // the clean base, on the bare copies
   stop(): Promise<void>;
 };
 
@@ -390,6 +404,13 @@ export async function startMultiRehearsal(options: { readonly log: (line: string
     git(seed, 'commit', '--quiet', '-m', `The example ${name}, for the rehearsal`);
     mkdirSync(join(root, 'origins'), { recursive: true, mode: 0o700 });
     git(root, 'clone', '--quiet', '--bare', seed, p.origin);
+    // The clean base as the real proof repositories keep it: the frozen
+    // branch, and a run branch an earlier run left a commit on, which the
+    // proof recreates from the frozen one before its first ticket.
+    git(p.origin, 'branch', FROZEN_BRANCH, 'main');
+    git(seed, 'commit', '--quiet', '--allow-empty', '-m', 'What an earlier run merged');
+    git(seed, 'push', '--quiet', p.origin, `HEAD:refs/heads/${RUN_BRANCH}`);
+    git(root, 'clone', '--quiet', p.origin, p.base);
     mkdirSync(join(root, 'locks'), { recursive: true, mode: 0o700 });
     git(root, 'clone', '--quiet', p.origin, p.clone);
     mkdirSync(p.state, { recursive: true, mode: 0o700 });
@@ -432,7 +453,7 @@ coalesce_minutes = 1
   for (const name of SERVICES) {
     const p = servicePaths(root, name);
     brokers.push(await startBroker({
-      socket: p.socket, state: p.state, ledger, forge, origin: p.origin, clone: p.clone, watchMs, log: options.log, repo: `rehearsal/${name}`, name,
+      socket: p.socket, state: p.state, ledger, forge, origin: p.origin, clone: p.clone, watchMs, log: options.log, repo: `rehearsal/${name}`, name, base: RUN_BRANCH,
       ...(name === 'guestbook' ? { watch: ({ clone }) => (breaksHealth(readFileSync(join(clone, 'src', 'config.ts'), 'utf8')) ? 'failing' : 'healthy') } : {}),
     }));
   }
@@ -471,10 +492,11 @@ coalesce_minutes = 1
 
   return {
     root, appUrl: `http://127.0.0.1:${appPort}`, serviceUrl: `http://127.0.0.1:${servicePort}`, owner: OWNER, passwordFile, ledger, docker,
+    base: { frozen: FROZEN_BRANCH, run: RUN_BRANCH, remote: 'origin', repos: SERVICES.map((name) => ({ service: name, clone: servicePaths(root, name).base })), deployMs: 60_000 },
     standIns: [
       'the forge: a bare copy of each example as its remote, and a gh stand-in that opens, lists and passes pull requests per repository in a file',
       'the locks: two stand-in brokers, one socket and one state folder each on the one ledger, that merge an approved branch into the bare copy and write the release watch\'s rows themselves; the guestbook\'s watch fails twice and reverts its merge when the merged src/config.ts turns PROOF_BREAK_HEALTH on, instead of probing a deployed /health',
-      'the deployments: nothing is deployed and no /health is probed',
+      'the deployments: nothing is deployed and no /health is probed; the clean base recreates the run branch on the bare copies, closes no pull request (the forge stand-in has none of an earlier run) and waits for no watcher',
       'the containers: a docker stand-in answers the labelled lists and inspections of a session\'s containers, runs the service\'s own programs (the editor\'s read and save, the checkout at Take over and Give back) on the session\'s checkout on this machine, and relays the preview; no container, no network and no image exist',
       'the trial environment: a loopback stand-in for the session\'s siblings, the guestbook\'s page and the filter API\'s fake; the fake is images/fake/fake.ts built from the contract the owner validated, and the page checks one sample entry with it at each load',
       'the harness in the terminal: the fake adapter\'s scripted sessions have no interactive harness, so Take over shows the harness as unsupported and step 11 goes to the Shell; Take over attached to a live Claude Code harness, then the Shell beside it, is shown by the real run only',

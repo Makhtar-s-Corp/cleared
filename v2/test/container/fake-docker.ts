@@ -104,9 +104,10 @@ export class FakeDocker {
     return ok(kept.map((object) => JSON.stringify(row(object)) + '\n').join(''));
   }
 
-  private remove(objects: FakeObject[], ids: readonly string[], key: 'id' | 'name'): DockerResult {
+  // A container or a network is named by its id or its name, as the CLI takes either.
+  private remove(objects: FakeObject[], ids: readonly string[], key: 'id' | 'name', byName = false): DockerResult {
     for (const ref of ids) {
-      const at = objects.findIndex((object) => object[key] === ref);
+      const at = objects.findIndex((object) => object[key] === ref || (byName && object.name === ref));
       if (at < 0) return fail(`Error: No such object: ${ref}`);
       objects.splice(at, 1);
     }
@@ -184,9 +185,9 @@ export class FakeDocker {
         }
         return ok(targets(args).join('\n') + '\n');
       case 'rm':
-        return this.remove(this.containers, targets(args), 'id');
+        return this.remove(this.containers, targets(args), 'id', true);
       case 'network rm':
-        return this.remove(this.networks, targets(args), 'id');
+        return this.remove(this.networks, targets(args), 'id', true);
       case 'volume rm':
         return this.remove(this.volumes, targets(args), 'name');
       case 'exec':

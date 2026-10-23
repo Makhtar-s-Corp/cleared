@@ -76,3 +76,34 @@ test('recovery leaves a ticket this engine is running', async () => {
   assert.equal((await t.tickets.get(t.ticket.id))?.status, 'In Progress');
   assert.equal(t.store.sessions.get(t.startedSessions[0]!.id)?.status, 'working');
 });
+
+test('after the recovery, the containers and networks of every session the ledger says is not live are released, its own project\'s only (issue 265)', async () => {
+  const t = await setup();
+  const at = new Date(t.clock.now).toISOString();
+  const row = (id: string, status: string, over: { project?: string; role?: 'author' | 'reviewer' | 'lead' } = {}) =>
+    t.store.sessions.put({ id, project: over.project ?? 'guestbook', ticket: t.ticket.id, role: over.role ?? 'author', harness: 'claude-code', model: 'claude-opus-5-5', status, createdAt: at, updatedAt: at });
+  row('s-left-working', 'working');                  // the last process left it working: stopped by the recovery, then released
+  row('s-stopped', 'stopped');                       // stopped long ago, its containers still running
+  row('s-done', 'done');
+  row('s-lead-old', 'stopped', { role: 'lead' });    // a stopped lead
+  row('s-lead-live', 'working', { role: 'lead' });   // the lead engine's own, live
+  row('s-other', 'stopped', { project: 'elsewhere' });
+  const asked: string[][] = [];
+  const engine = new FlowEngine({ ...t.deps, release: async (sessions) => { asked.push([...sessions]); return { containers: [], networks: [] }; } });
+  await engine.recover();
+  assert.equal(asked.length, 1);
+  assert.deepEqual([...(asked[0] ?? [])].sort(), ['s-done', 's-lead-old', 's-left-working', 's-stopped']);
+  // A release that fails does not fail the recovery.
+  const failing = new FlowEngine({ ...t.deps, release: async () => { throw new Error('docker is not there'); } });
+  await failing.recover();
+});
+
+test('a session this engine runs is never released by its recovery', async () => {
+  const t = await setup();
+  const asked: string[][] = [];
+  const engine = new FlowEngine({ ...t.deps, release: async (sessions) => { asked.push([...sessions]); return { containers: [], networks: [] }; } });
+  await engine.start(t.ticket.id, 'u1');
+  await engine.recover();
+  const live = t.startedSessions[0]?.id as string;
+  assert.ok(!asked.flat().includes(live));
+});

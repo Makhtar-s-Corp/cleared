@@ -558,6 +558,8 @@ export type ApiRoutes = {
   'POST /api/tickets': { readonly body: CreateTicketBody; readonly response: Ticket };
   'GET /api/tickets/:id': { readonly body: null; readonly response: Ticket };
   'POST /api/tickets/:id/move': { readonly body: MoveTicketBody; readonly response: Ticket };
+  // The owner sets a ticket aside: out of the flow, nothing of it waiting, in Todo, not started again.
+  'POST /api/tickets/:id/set-aside': { readonly body: null; readonly response: { readonly sessions: number; readonly items: number } };
   'POST /api/tickets/:id/approve': { readonly body: ApproveBody; readonly response: { readonly accepted: true; readonly by: UserId } };
   'GET /api/inbox': { readonly body: null; readonly response: NextInboxItem[] };   // the replanned kinds included (inbox/store.ts list)
   // The replanned milestone 2: the workspace (lane 14), and the trial
@@ -632,6 +634,7 @@ const routes = {
   'POST /api/tickets': true,
   'GET /api/tickets/:id': true,
   'POST /api/tickets/:id/move': true,
+  'POST /api/tickets/:id/set-aside': true,
   'POST /api/tickets/:id/approve': true,
   'GET /api/inbox': true,
   'GET /api/workspace': true,

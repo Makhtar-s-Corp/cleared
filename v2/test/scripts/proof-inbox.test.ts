@@ -6,7 +6,7 @@
 // plan, then the releases whose checks are green.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answerFor, inboxAction, insideCheckout, leftForOwner, morningAction, type InboxEntry } from '../../scripts/proof-inbox.ts';
+import { FREE_ANSWER, answerFor, chooseAnswers, inboxAction, insideCheckout, leftForOwner, morningAction, type InboxEntry } from '../../scripts/proof-inbox.ts';
 
 const target = 'rm -r /tmp/cleared-proof-scratch';
 
@@ -103,4 +103,22 @@ test('a knowledge item is left to the owner and a contract item to the multi-ser
   // They do not hold the releases back.
   assert.deepEqual(morningAction([...entries.slice(0, 2), release('release:2', 'passed')], { releases: true, plan: true }), { kind: 'release', id: 'release:2' });
   assert.deepEqual(leftForOwner([...entries, { id: 'knowledge:k2', kind: 'knowledge', ticket: 'LOCAL-3' }]), { knowledge: 2, contract: 1 });
+});
+
+test('a session\'s question: the option marked recommended, else the first; one option of a multiple choice; a fixed free answer when there is no option', () => {
+  assert.deepEqual(chooseAnswers([
+    { question: 'Offsets from 0 or 1?', header: 'Offsets', options: [{ label: 'From 1' }, { label: 'From 0 (Recommended)', description: 'As indexOf answers.' }] },
+    { question: 'Which name for the column?', options: [{ label: 'held' }, { label: 'on_hold' }] },
+    { question: 'Which states to show?', multiSelect: true, options: [{ label: 'Held' }, { label: 'Refused (recommended)' }, { label: 'Shown' }] },
+    { question: 'Anything else the owner wants?' },
+  ]), [
+    { question: 'Offsets from 0 or 1?', options: ['From 1', 'From 0 (Recommended)'], answer: 'From 0 (Recommended)', how: 'recommended' },
+    { question: 'Which name for the column?', options: ['held', 'on_hold'], answer: 'held', how: 'first' },
+    { question: 'Which states to show?', options: ['Held', 'Refused (recommended)', 'Shown'], answer: 'Refused (recommended)', how: 'recommended' },
+    { question: 'Anything else the owner wants?', options: [], answer: FREE_ANSWER, how: 'free' },
+  ]);
+  // The label is sent back as written, "(Recommended)" kept, as the inbox's button carries it.
+  assert.equal(chooseAnswers([{ question: 'q', options: [{ label: 'A' }, { label: 'B (Recommended)' }] }])[0]?.answer, 'B (Recommended)');
+  assert.deepEqual(chooseAnswers([]), []);
+  assert.deepEqual(chooseAnswers([{ question: 'q', options: [] }])[0]?.how, 'free');
 });

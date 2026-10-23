@@ -482,6 +482,27 @@ export class Docker {
     return { containers: containers.length, networks: networks.length, images: images.length };
   }
 
+  // Releases the containers and networks of sessions that are stopped (issue
+  // 265): one labelled list of each, then, by name, the rows whose
+  // `cleared.session` is one of `sessions` and whose name is that
+  // session's (`cleared-v2-<id>` or under it). The containers go first, so
+  // that no network is still in use; never a volume, an image or a prune.
+  async releaseStopped(sessions: readonly string[]): Promise<{ containers: string[]; networks: string[] }> {
+    for (const session of sessions) assertSessionId(session);
+    const wanted = new Set(sessions);
+    const ours = (row: { readonly name: string; readonly labels: Readonly<Record<string, string>> }): boolean => {
+      const session = row.labels[SESSION_LABEL];
+      if (session === undefined || !wanted.has(session) || row.labels[LABEL_KEY] !== LABEL_VALUE) return false;
+      const name = row.name.replace(/^\//, '');
+      return name === `cleared-v2-${session}` || name.startsWith(`cleared-v2-${session}-`);
+    };
+    const containers = wanted.size === 0 ? [] : (await this.containers()).filter(ours).map((row) => row.name.replace(/^\//, ''));
+    if (containers.length > 0) await this.must(['rm', '--force', '--', ...containers], new Set(containers));
+    const networks = wanted.size === 0 ? [] : (await this.networks()).filter(ours).map((row) => row.name);
+    if (networks.length > 0) await this.must(['network', 'rm', '--', ...networks], new Set(networks));
+    return { containers, networks };
+  }
+
   async removeVolumes(session: string): Promise<number> {
     assertSessionId(session);
     const volumes = (await this.volumes(session)).map((row) => row.name);

@@ -15,6 +15,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { contractPort, readContract } from '../../images/fake/fake.ts';
+import { Docker } from '../container/docker.ts';
 import type { PreviewTarget } from '../container/preview.ts';
 import { planSiblings } from '../container/services.ts';
 import { exportBase } from '../workspace/checkout.ts';
@@ -28,7 +29,7 @@ import { ledgerPath, type Store } from '../store/db.ts';
 import { InboxStore } from '../inbox/store.ts';
 import { loadFlowConfig, workspaceOf, type FlowConfig } from './config.ts';
 import { realEffects } from './effects.ts';
-import { FlowEngine, type FlowEffects } from './engine.ts';
+import { FlowEngine, type FlowDeps, type FlowEffects } from './engine.ts';
 
 export type Runtime = {
   // Called by the sessions module with the store; reads and checks the configuration.
@@ -46,6 +47,7 @@ export type RuntimeOptions = {
   readonly env?: NodeJS.ProcessEnv;
   readonly effects?: (config: FlowConfig) => FlowEffects;
   readonly factories?: Readonly<Partial<Record<Harness, AdapterFactory>>>;
+  readonly release?: FlowDeps['release'];   // a real Docker's releaseStopped otherwise
 };
 
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
@@ -69,6 +71,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       // A step's siblings are planned as a session's are, then adapted to its kind (lane 23).
       effects: made.siblings ? made : { ...made, siblings: ({ ticket, service, workdir }) => siblingsOf({ ticket, service: service.name, workdir }, flow) },
       clean: (text) => cleanText(text, cleanOptions()),
+      release: options.release ?? ((sessions) => new Docker().releaseStopped(sessions)),
     });
     engine.startTimer();
     // What the last process left running is stopped and put back (decision 12 of milestone 2).
