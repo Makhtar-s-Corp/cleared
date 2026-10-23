@@ -40,7 +40,7 @@ async function withShell(run: (page: any, base: string) => Promise<void>, langua
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: language === 'fr' ? 'fr-FR' : 'en-US' });
     await context.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event: any) => {
         (window.violations ??= []).push(`${event.violatedDirective} ${event.blockedURI}`);

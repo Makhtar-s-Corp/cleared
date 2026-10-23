@@ -51,9 +51,9 @@ test('a session taken over stays among the live ones, says by whom and since whe
   assert.ok(taken, 'the taken-over session is live');
   assert.deepEqual(taken.takenOver, { you: true, minutes: 6 });
   assert.equal(taken.service, 'filter-api');
-  assert.equal(takenOverText(taken.takenOver!, t), 'Taken over by you · 6 min');
-  assert.equal(takenOverText({ you: false, minutes: 6 }, t), 'Taken over by another account · 6 min');
-  assert.equal(takenOverText(taken.takenOver!, fr), 'Repris en main par vous · 6 min');
+  assert.equal(takenOverText(taken.takenOver!, t), 'Taken over by you · 6\u00a0min');
+  assert.equal(takenOverText({ you: false, minutes: 6 }, t), 'Taken over by another account · 6\u00a0min');
+  assert.equal(takenOverText(taken.takenOver!, fr), 'Repris en main par vous · 6\u00a0min');
   assert.equal(liveDot(taken.phase, taken.role, taken.takenOver), 'live taken');
   assert.equal(liveDot('working', 'author', null), 'live');
   // Seen by another account, it does not say "you".

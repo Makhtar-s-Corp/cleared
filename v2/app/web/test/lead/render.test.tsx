@@ -33,19 +33,19 @@ test('the screen is Plans, as the sidebar, the top bar and the title say; the le
 
 test('the header line says the lead is always on, its context share and when it was refreshed from memory', async () => {
   const { state } = await view();
-  assert.deepEqual(headerLine(state, FIXTURE_NOW, en), { text: 'Always on · context 45% · refreshed from memory 10 min ago', tone: 'on' });
-  assert.equal(headerLine({ ...state, phase: 'working' }, FIXTURE_NOW, en).text, 'Always on · context 45% · refreshed from memory 10 min ago');
+  assert.deepEqual(headerLine(state, FIXTURE_NOW, en), { text: 'Always on · context 45% · refreshed from memory 10\u00a0min ago', tone: 'on' });
+  assert.equal(headerLine({ ...state, phase: 'working' }, FIXTURE_NOW, en).text, 'Always on · context 45% · refreshed from memory 10\u00a0min ago');
   assert.deepEqual(headerLine({ ...state, phase: 'starting', context: null, refreshedAt: null }, FIXTURE_NOW, en), { text: 'Starting', tone: 'quiet' });
   assert.deepEqual(headerLine({ ...state, phase: 'refreshing' }, FIXTURE_NOW, en), { text: 'Refreshing from memory', tone: 'quiet' });
   assert.deepEqual(headerLine({ ...state, phase: 'down' }, FIXTURE_NOW, en), { text: 'The Lead is not running', tone: 'down' });
-  assert.equal(headerLine({ ...state, context: null }, FIXTURE_NOW, en).text, 'Always on · refreshed from memory 10 min ago', 'no measure yet: no share');
+  assert.equal(headerLine({ ...state, context: null }, FIXTURE_NOW, en).text, 'Always on · refreshed from memory 10\u00a0min ago', 'no measure yet: no share');
   assert.equal(headerLine({ ...state, refreshedAt: new Date(FIXTURE_NOW.getTime() - 3 * 3_600_000).toISOString() }, FIXTURE_NOW, en).text, 'Always on · context 45% · refreshed from memory 3h ago');
-  assert.equal(headerLine(state, FIXTURE_NOW, fr).text, 'Toujours actif · contexte 45 % · rechargé depuis la mémoire il y a 10 min');
+  assert.equal(headerLine(state, FIXTURE_NOW, fr).text, 'Toujours actif · contexte 45\u202f% · rechargé depuis la mémoire il y a 10\u00a0min');
 });
 
 test('the down state is a danger pill in the lead card, the live states are not', async () => {
   const live = renderLead(await view(), en);
-  assert.match(live, /<p class="lead-line" id="lead-line">Always on · context 45% · refreshed from memory 10 min ago<\/p>/);
+  assert.match(live, /<p class="lead-line" id="lead-line">Always on · context 45% · refreshed from memory 10\u00a0min ago<\/p>/);
   assert.doesNotMatch(live, /lead-down/);
   const v = await view();
   const down = renderLead({ ...v, state: { ...v.state, phase: 'down' } }, en);
@@ -102,7 +102,7 @@ test('the plan panel against the capture: five numbered items, After lines, lane
   assert.deepEqual([...html.matchAll(/<p class="plan-after">([^<]+)<\/p>/g)].map((m) => m[1]), ['After 1', 'After 2']);
   assert.equal(count(html, /<span class="lane full">Full circuit<\/span>/), 3);
   assert.equal(count(html, /<span class="lane fast">Fast lane<\/span>/), 2);
-  assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['40 min · 1.2%', '50 min · 1.6%', '30 min · 0.8%', '10 min · 0.2%', '5 min · 0.1%']);
+  assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['40\u00a0min · 1.2%', '50\u00a0min · 1.6%', '30\u00a0min · 0.8%', '10\u00a0min · 0.2%', '5\u00a0min · 0.1%']);
   assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 2h of work', '3.9% of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets']);
   assert.match(html, /<button type="button" class="plain plan-change" data-plan-action="change">Change the plan<\/button>/);
   assert.match(html, /<button type="button" class="primary plan-go" data-plan-action="approve">Approve the plan and start<\/button>/);
@@ -113,9 +113,9 @@ test('the plan panel against the capture: five numbered items, After lines, lane
 test('without the week\'s share an estimate is in dollars, and below three samples the footer says the estimates are defaults', () => {
   const { running } = otherPlans(FIXTURE_NOW);
   const html = renderPlanPanel(running, en);
-  assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['12 min · $0.30', '12 min · $0.30', '5 min · $0.15', '5 min · $0.15', '30 min · $0.80']);
-  assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 42 min of work', 'About\u00a0$1.70', 'Up to 2 sessions at a time', 'Default estimates: not enough history yet']);
-  assert.match(renderPlanPanel(running, fr, { language: 'fr' }), /12 min · 0,30\u00a0\$/);
+  assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['12\u00a0min · $0.30', '12\u00a0min · $0.30', '5\u00a0min · $0.15', '5\u00a0min · $0.15', '30\u00a0min · $0.80']);
+  assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 42\u00a0min of work', 'About\u00a0$1.70', 'Up to 2 sessions at a time', 'Default estimates: not enough history yet']);
+  assert.match(renderPlanPanel(running, fr, { language: 'fr' }), /12\u00a0min · 0,30\u00a0\$/);
   assert.match(renderPlanPanel({ ...running, maxParallel: 1 }, en), /<li class="plan-fact">One session at a time<\/li>/);
 });
 
@@ -151,13 +151,13 @@ test('a gesture on its way disables the panel\'s buttons, and a failure is said 
 });
 
 test('durations read as the capture writes them', () => {
-  assert.equal(estimate(5, en), '5 min');
-  assert.equal(estimate(40, en), '40 min');
+  assert.equal(estimate(5, en), '5\u00a0min');
+  assert.equal(estimate(40, en), '40\u00a0min');
   assert.equal(estimate(60, en), '1h');
   assert.equal(estimate(120, en), '2h');
-  assert.equal(estimate(135, en), '2h 15m');
-  assert.equal(estimate(62, en), '1h 2m');
-  assert.equal(estimate(0.4, en), '1 min', 'never zero');
+  assert.equal(estimate(135, en), '2h\u00a015m');
+  assert.equal(estimate(62, en), '1h\u00a02m');
+  assert.equal(estimate(0.4, en), '1\u00a0min', 'never zero');
 });
 
 test('which plan the screen shows: the one in the address, else one to approve, else one running or paused, else the last done', () => {

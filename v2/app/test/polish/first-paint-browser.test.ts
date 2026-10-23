@@ -36,7 +36,7 @@ test('on a slow link, the first screen is drawn once its sheets are on and loade
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US' });
     const page = await context.newPage();
     await page.goto(`${app.base}/login`);
     await page.fill('#name', 'owner');

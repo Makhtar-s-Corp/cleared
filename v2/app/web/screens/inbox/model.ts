@@ -49,7 +49,7 @@ import { requestAsk, requestFold, requestFoldOpen, requestReason, requestTitle, 
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
 import type { Focus } from '../../shell/keys.ts';
 import { planStateLine } from '../../plan-panel/model.ts';
-import { clock, duration, estimate, since } from '../../lib/time.ts';
+import { clock, duration, estimate, fixed, since } from '../../lib/time.ts';
 
 // The local tracker's default name of the state a ticket is sent back to
 // (DEFAULT_STATES.todo of src/tickets/contract.ts, which the browser cannot
@@ -485,8 +485,7 @@ export function recommendation(item: QuestionItem): string | undefined {
   return undefined;
 }
 
-export const decimals = (value: number, digits: number, language: 'en' | 'fr') =>
-  new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
+export const decimals = fixed;
 
 // "5 tickets · 2 h 15 · 3.9 % of the week", or the cost until the week is
 // measured (section 5.2), as the plan panel's footer says it.

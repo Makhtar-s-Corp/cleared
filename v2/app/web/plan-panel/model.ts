@@ -7,7 +7,7 @@
 // out whole, so a test can read the list from this file.
 import type { Plan, PlanItem, PlanState, PlanStep, ServiceSensitivity } from '../../../src/api/types.ts';
 import type { Translate } from '../lib/i18n.ts';
-import { estimate } from '../lib/time.ts';
+import { estimate, fixed } from '../lib/time.ts';
 
 export const PLAN_PANEL_KEYS = [
   'plan_state_proposed', 'plan_state_approved', 'plan_state_paused', 'plan_state_done', 'plan_state_superseded', 'plan_state_rejected',
@@ -100,8 +100,7 @@ export function chipText(c: ServiceChip, t: Translate): string {
 }
 
 
-export const decimals = (value: number, digits: number, language: 'en' | 'fr') =>
-  new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
+export const decimals = fixed;
 
 // The share of the week when the harness reports it, else the cost
 // (section 5.2: "$0.30" in place of "1.2 %" until the week is measured).

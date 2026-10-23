@@ -35,7 +35,7 @@ async function withInbox(run: (page: any, base: string, open: (viewport: { width
   const errors: string[] = [];
   try {
     await app.directory.add('owner', PASSWORD);
-    const context = await browser.newContext({ viewport: WIDTHS[0] });
+    const context = await browser.newContext({ viewport: WIDTHS[0], locale: 'fr-FR' });
     await context.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event: any) => { (window.violations ??= []).push(`${event.violatedDirective} ${event.blockedURI}`); });
     });

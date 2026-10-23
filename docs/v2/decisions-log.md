@@ -3801,15 +3801,19 @@ The browser job on GitHub's runner read 46.0, 75.7, 58.9 and 83.9 ms over this p
 - `audit` and `critique` were run on the captures:
   - the language segments follow the inbox's switch, with the same tokens and the same contrast pair;
   - on a phone they sit under the theme's item, at 44 px;
-  - the rail's tooltip on the avatar shows while the menu is open at 1280 and 768, as it did for the theme's item before. That is left to the shell's owner.
+  - the rail's tooltip on the avatar showed while the menu was open at 1280 and 768; the art director's item 5 below removes it.
 - `polish`: no dead key or formatter left; each language's catalogs lost 24 keys the old formatters used.
 
 **Captures.** All are on the fixtures source, in both themes, at 1440, 1280, 768 and 390.
 - Before, at origin/v2 `f16f9b1`: `docs/v2/ui-overhaul/before/durations/{fr,en}/`, tower, sessions, session and inbox. The English set was taken with `--language en`.
 - After: `docs/v2/ui-overhaul/after/durations/{fr,en}/`, the same screens plus `account` (the menu with its language choice). The browser asks for the language too: the capture script now sets the context's locale, since the page follows the browser.
 - `sessions-day-later-1440-light.png`, before and after, in French: the sessions index with the page's clock a day and two hours after the fixtures'. Before, it says "1585 min"; after, "1 j 2 h". A script in the author's scratchpad took it (the fixtures' data at their clock, the page's clock moved), not the repository's capture script.
-- 146 files. Each was looked at for secrets and names before the commit: none.
-- Copies are in `/tmp/cleared-captures/j2/overhaul/durations/`, and the six the orchestrator asked for are in `/tmp/cleared-captures/j2/overhaul/i18n/`: `i18n-before-{fr,en}.png` (the tower at `f16f9b1`), `i18n-after-{fr,en}.png` (the tower with the account menu and its language choice open), `durations-{before,after}.png` (the sessions index a day later).
+- 148 files. Each was looked at for secrets and names before the commit: none.
+- `tower-day-later-1440-light.png`, before and after, in French, taken the same way after the art director's look: "26 h 57" becomes "1 j 2 h", "rafraîchi il y a 26 h…" becomes "rafraîchi hier", "Mise en productic" is whole, and the English status "Waiting for your permissi…" reads "En pause, attend votre réponse".
+- Copies are in `/tmp/cleared-captures/j2/overhaul/durations/`. The six the orchestrator asked for are in `/tmp/cleared-captures/j2/overhaul/i18n/`:
+  - `i18n-before-{fr,en}.png`: the tower at `f16f9b1`;
+  - `i18n-after-{fr,en}.png`: the tower, 1440 light, after the art director's items;
+  - `durations-{before,after}.png`: the tower a day later.
 
 **Measures.** The budget test (`budget-browser.test.ts`, `CI=true`: three runs of twenty switches, 1440x900, the fixtures) ran twice on origin/v2 `f16f9b1` and on this head, alternating, between 09:12 and 09:13, load average 1.6 to 2.9:
 
@@ -3832,6 +3836,25 @@ A language switch, from the click on Français to the sidebar drawn in French, t
   - `shell-browser.test.ts` skips templates with under two letters of their own: "{n}s" matched "Sessions".
 - `app/test/notify/browser.test.ts` times out on this server, on origin/v2 too (`#notify-toggle[data-action=on]` never shows). It is not this lane's; CI runs it.
 
-**Left.** The tower's schedule line says a weekday through `toLocaleDateString` and the Lead's thread a day and a month the same way; both are Intl already. The rail tooltip over the open account menu goes to the shell's owner.
+**Left.** The tower's schedule line says a weekday through `toLocaleDateString`, and the Lead's thread says a day and a month the same way. Both are Intl already, and `time.ts`'s header names them as the formatter's one exception.
+
+**The art director's look** (`/tmp/cleared-reviews/i18n-ad.md`, a fresh Sonnet 5.5 session, head `7ec1e75`). All eight BEFORE MERGE items are applied, and the after captures were taken again on the result.
+1. `boundary_failed` no longer agrees with a screen's gender or number: "Chargement impossible\u00a0: {screen}." and "Could not load {screen}.".
+2. The tower's rows give the kind its width up to 160 px (`fit-content(160px)`): "Mise en production" is whole, and "Connaissance" and "Autorisation" fit too.
+3. A number keeps its unit. The `time_*` keys hold no-break spaces, between the number and its unit and between the hours and the minutes ("10\u00a0h\u00a030", "10h\u00a030m"), and so does `login_throttled`. French "%" follows a narrow no-break space in all 11 templates. `time.test.ts` fails on a breaking space inside a duration.
+4. On a phone the tower's facts stack, one per line, and the " · " separators are hidden (they are now `.fact-sep` spans).
+5. A button whose menu is open shows no tooltip (`[data-tip][aria-expanded="true"]::after`). This covers the avatar and the notifications.
+6. The other private `Intl.NumberFormat`s go through `time.ts`:
+   - `fixed` for amounts and shares, in ask, the plan panel, the inbox, the session's steps and the tower's schedules;
+   - `count` for token counts, in ask and the session's status.
+   The header names the two `toLocaleDateString` dates as the one exception.
+7. French quotes around the Lead's last message: the tower's rule used U+202F, which drew no visible space ("«Understood"). It now uses U+00A0.
+8. `notify_no_subject`, `notify_config` and `notify_store` say what the person can do, with no README and no file mode: "Notifications are not set up on the service. Ask whoever runs it." In French: "… Signalez-le à la personne qui l'administre.". The README's notifications section stays the operator's reference.
+
+The LATER items are in the pull request's body as follow-ups.
+
+**Owner-facing decision: "Go" stays "Go" in French** (`cmd_go`, the plan gate's "Go donné…"). The art director's LATER list asked to log it, so that no later lane "fixes" it. Go is the product's word for letting a session start: a gesture, used as a name in both languages.
+
+**The browser job was red on pull request 263.** Seven tests failed: the boundary's French sentence, the inbox's French requests and the shell's French sheet. They started the app with French as its setting, but GitHub's Chromium asks for `en-US`, which the app now honours. On this server the headless shell does not send that header, so they passed here. Every browser test's context now names its locale: `fr-FR` where the test reads French, `en-US` elsewhere.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-durations` (i18n).

@@ -44,10 +44,10 @@ test('what waits comes first, releases then permissions then questions, each old
 test('elapsed time reads as the capture does, through the app\'s one formatter', () => {
   const at = (ms: number) => new Date(FIXTURE_NOW.getTime() - ms).toISOString();
   assert.equal(since(at(20_000), FIXTURE_NOW, en), 'just now');
-  assert.equal(since(at(12 * 60_000), FIXTURE_NOW, en), '12 min');
+  assert.equal(since(at(12 * 60_000), FIXTURE_NOW, en), '12\u00a0min');
   assert.equal(since(at(60 * 60_000), FIXTURE_NOW, en), '1h');
-  assert.equal(since(at(195 * 60_000), FIXTURE_NOW, en), '3h 15m');
-  assert.equal(since(at(50 * 3600_000), FIXTURE_NOW, en), '2d 2h');
+  assert.equal(since(at(195 * 60_000), FIXTURE_NOW, en), '3h\u00a015m');
+  assert.equal(since(at(50 * 3600_000), FIXTURE_NOW, en), '2d\u00a02h');
   assert.equal(since(at(-60_000), FIXTURE_NOW, en), 'just now', 'a clock a little ahead of ours is not negative');
 });
 

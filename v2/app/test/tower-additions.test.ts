@@ -90,8 +90,8 @@ test('a contract and a knowledge item need the owner, with what each waits for, 
   assert.deepEqual(knowledge.map((card) => needTitle(card, t)), [knowledgeItem(FIXTURE_NOW).text, knowledgeItem(FIXTURE_NOW).text]);
   assert.deepEqual(knowledge.map((card) => needSentence(card, t)), ['Proposed for guestbook: approve it to keep it.', 'Proposed for the whole workspace: approve it to keep it.']);
   assert.equal(needSentence(knowledge[0]!, fr), 'Proposé pour guestbook\u00a0: approuvez-le pour le garder.');
-  assert.equal(t('need_contract', { age: '3 min' }), 'Contract · 3 min');
-  assert.equal(t('need_knowledge', { age: '3 min' }), 'Knowledge · 3 min');
+  assert.equal(t('need_contract', { age: '3\u00a0min' }), 'Contract · 3\u00a0min');
+  assert.equal(t('need_knowledge', { age: '3\u00a0min' }), 'Knowledge · 3\u00a0min');
   // A handled one needs nobody.
   assert.equal(towerModel({ ...base, inbox: [{ ...contractItem(FIXTURE_NOW), state: 'handled' }] }, FIXTURE_NOW).needs.length, 0);
 });

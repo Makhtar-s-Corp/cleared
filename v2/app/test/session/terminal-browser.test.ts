@@ -69,7 +69,7 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
     const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
     const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
     browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-US' });
     await context.addInitScript(() => {
       const seen: string[] = [];
       (window as unknown as { violations: string[] }).violations = seen;
@@ -191,7 +191,7 @@ test('on the public origin the terminal is not offered: why, and no command', { 
     const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
     const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
     browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
-    const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
+    const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-US' })).newPage();
     // The page asks /api/me, which says terminal: false for a request that came through the public origin.
     await page.route('**/api/me', async (route: any) => {
       const answer = await route.fetch();

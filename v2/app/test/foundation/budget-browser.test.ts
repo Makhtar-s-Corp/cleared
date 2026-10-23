@@ -51,7 +51,7 @@ test('twenty switches among the five screens: under 100 ms at p95, no document, 
   try {
     await app.directory.add('owner', PASSWORD);
     for (let r = 0; r < RUNS; r += 1) {
-      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US' });
       await context.addInitScript(PROBE);
       await context.addInitScript(BUSY_WATCH);
       await context.addInitScript(() => {

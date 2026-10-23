@@ -14,14 +14,16 @@ import { sessionStatus, ticketState } from '../web/lib/status.ts';
 const en = translator(loadCatalog('shell', 'en'));
 const fr = translator(loadCatalog('shell', 'fr'));
 const NOW = new Date(2026, 9, 23, 14, 30);
+// The catalogs' no-break spaces, written as plain ones in the tables below.
+const nb = (text: string) => text.replace(/(\d) (?=min|[hjs]\b|\d)/g, '$1\u00a0').replace(/([hjd]) (?=\d)/g, '$1\u00a0');
 const before = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000).toISOString();
 
 test('a duration: minutes under an hour, hours and minutes under a day, days and hours past it', () => {
   const minutes = [0, 1, 42, 59, 60, 61, 125, 630, 1439, 1440, 1500, 3120, 3125, 20000];
-  assert.deepEqual(minutes.map((m) => duration(m, fr)), ['0 min', '1 min', '42 min', '59 min', '1 h', '1 h 01', '2 h 05', '10 h 30', '23 h 59', '1 j', '1 j 1 h', '2 j 4 h', '2 j 4 h', '13 j 21 h']);
-  assert.deepEqual(minutes.map((m) => duration(m, en)), ['0 min', '1 min', '42 min', '59 min', '1h', '1h 1m', '2h 5m', '10h 30m', '23h 59m', '1d', '1d 1h', '2d 4h', '2d 4h', '13d 21h']);
-  assert.equal(duration(41.6, fr), '42 min', 'rounded to the minute');
-  assert.equal(duration(-5, fr), '0 min', 'never negative');
+  assert.deepEqual(minutes.map((m) => duration(m, fr)), ['0 min', '1 min', '42 min', '59 min', '1 h', '1 h 01', '2 h 05', '10 h 30', '23 h 59', '1 j', '1 j 1 h', '2 j 4 h', '2 j 4 h', '13 j 21 h'].map(nb));
+  assert.deepEqual(minutes.map((m) => duration(m, en)), ['0 min', '1 min', '42 min', '59 min', '1h', '1h 1m', '2h 5m', '10h 30m', '23h 59m', '1d', '1d 1h', '2d 4h', '2d 4h', '13d 21h'].map(nb));
+  assert.equal(duration(41.6, fr), nb('42 min'), 'rounded to the minute');
+  assert.equal(duration(-5, fr), nb('0 min'), 'never negative');
 });
 
 test('no duration says more than 59 minutes', () => {
@@ -34,32 +36,32 @@ test('no duration says more than 59 minutes', () => {
 });
 
 test('an estimate is never zero; an age under a minute is now; a run under a minute is in seconds', () => {
-  assert.equal(estimate(0, fr), '1 min');
-  assert.equal(estimate(135, fr), '2 h 15');
+  assert.equal(estimate(0, fr), nb('1 min'));
+  assert.equal(estimate(135, fr), nb('2 h 15'));
   assert.equal(since(before(0.5), NOW, fr), 'à l\'instant');
-  assert.equal(since(before(12), NOW, fr), '12 min');
-  assert.equal(since(before(26 * 60 + 2), NOW, fr), '1 j 2 h');
-  assert.equal(since(before(26 * 60 + 2), NOW, en), '1d 2h');
-  assert.equal(lasted(42_000, fr), '42 s');
-  assert.equal(lasted(42_000, en), '42s');
-  assert.equal(lasted(18 * 60_000 + 5_000, fr), '18 min');
-  assert.equal(lasted(90 * 60_000, en), '1h 30m');
+  assert.equal(since(before(12), NOW, fr), nb('12 min'));
+  assert.equal(since(before(26 * 60 + 2), NOW, fr), nb('1 j 2 h'));
+  assert.equal(since(before(26 * 60 + 2), NOW, en), nb('1d 2h'));
+  assert.equal(lasted(42_000, fr), nb('42 s'));
+  assert.equal(lasted(42_000, en), nb('42s'));
+  assert.equal(lasted(18 * 60_000 + 5_000, fr), nb('18 min'));
+  assert.equal(lasted(90 * 60_000, en), nb('1h 30m'));
 });
 
 test('a date relative to now: just now, minutes, hours today, yesterday, then days', () => {
   assert.equal(ago(before(0.2), NOW, fr), 'à l\'instant');
-  assert.equal(ago(before(3), NOW, fr), 'il y a 3 min');
-  assert.equal(ago(before(3), NOW, en), '3 min ago');
-  assert.equal(ago(before(150), NOW, fr), 'il y a 2 h');
-  assert.equal(ago(before(150), NOW, en), '2h ago');
+  assert.equal(ago(before(3), NOW, fr), nb('il y a 3 min'));
+  assert.equal(ago(before(3), NOW, en), nb('3 min ago'));
+  assert.equal(ago(before(150), NOW, fr), nb('il y a 2 h'));
+  assert.equal(ago(before(150), NOW, en), nb('2h ago'));
   // 14:30 now: 20 h back is yesterday at 18:30, and 40 h back the day before.
   assert.equal(ago(before(20 * 60), NOW, fr), 'hier');
   assert.equal(ago(before(20 * 60), NOW, en), 'yesterday');
-  assert.equal(ago(before(40 * 60), NOW, fr), 'il y a 2 j');
-  assert.equal(ago(before(40 * 60), NOW, en), '2d ago');
+  assert.equal(ago(before(40 * 60), NOW, fr), nb('il y a 2 j'));
+  assert.equal(ago(before(40 * 60), NOW, en), nb('2d ago'));
   // Past midnight, 50 minutes back is still minutes, not yesterday.
   const early = new Date(2026, 9, 23, 0, 20);
-  assert.equal(ago(new Date(early.getTime() - 50 * 60_000).toISOString(), early, fr), 'il y a 50 min');
+  assert.equal(ago(new Date(early.getTime() - 50 * 60_000).toISOString(), early, fr), nb('il y a 50 min'));
   assert.equal(ago(new Date(early.getTime() - 3 * 3600_000).toISOString(), early, fr), 'hier');
   assert.equal(ago(new Date(NOW.getTime() + 60_000).toISOString(), NOW, fr), 'à l\'instant', 'a clock a little ahead');
 });
@@ -108,5 +110,18 @@ test('a decimal number in the catalog\'s locale, through Intl', () => {
   assert.equal(decimal(3.94, en, 0, 1), '3.9');
   assert.equal(decimal(3.9, en, 2, 2), '3.90');
   assert.equal(decimal(1234.5, fr, 2, 2), '1234,50', 'no grouping in a sentence');
-  assert.equal(duration(90, fr), '1 h 30');
+  assert.equal(duration(90, fr), nb('1 h 30'));
+});
+
+// A number keeps its unit (plan 5.4, lane i18n's art director): no line breaks between them.
+test('a duration never breaks between a number and its unit, nor between the hours and the minutes', () => {
+  for (let m = 0; m < 3 * 24 * 60; m += 13) {
+    for (const t of [en, fr]) {
+      const said = duration(m, t);
+      assert.doesNotMatch(said, /\d \D|\D \d/, `${m} min reads "${said}" with a breaking space`);
+    }
+  }
+  assert.equal(duration(630, fr), '10\u00a0h\u00a030');
+  assert.equal(duration(630, en), nb('10h\u00a030m'));
+  assert.equal(ago(before(3), NOW, fr), 'il y a 3\u00a0min');
 });

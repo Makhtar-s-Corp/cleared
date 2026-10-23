@@ -64,7 +64,7 @@ test('one thread of the ticket: the author\'s steps, the handover row, the revie
   assert.ok(visibleText(html(<Timeline view={view} t={fr} />)).includes('Sonnet a commencé la relecture à 09:37. Le travail de l\'auteur est au-dessus.'));
   const status = visibleText(html(<StatusHead view={view} t={en} />));
   assert.deepEqual(status.slice(0, 1), ['Reading the diff of src/screens/Envelope.jsx']);
-  assert.deepEqual([status[1], /^4 min/.test(status[2] ?? '')], ['Reviewer · Sonnet ·', true], 'the status says whose it is when the ticket has two');
+  assert.deepEqual([status[1], /^4\u00a0min/.test(status[2] ?? '')], ['Reviewer · Sonnet ·', true], 'the status says whose it is when the ticket has two');
 });
 
 test('each step opens its detail: a command said by its intent, the command folded one a line; two edits of one file as one row', () => {

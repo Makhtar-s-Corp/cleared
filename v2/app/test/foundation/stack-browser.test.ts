@@ -32,13 +32,14 @@ const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
 const ENGINE = 'src/engine/upcoming.mjs';
 
-async function signedInPage(app: Running, run: (page: any, errors: string[]) => Promise<void>, start = '/'): Promise<void> {
+// The browser asks for the app's language (lane i18n: a page follows the browser's languages first).
+async function signedInPage(app: Running, run: (page: any, errors: string[]) => Promise<void>, start = '/', locale = 'en-US'): Promise<void> {
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale });
     // A policy violation fails the test as loudly as a page error (review of 248, F7).
     await context.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event) => {
@@ -162,9 +163,9 @@ test('a screen that throws says so, in its language, and offers to try again; th
     await signedInPage(fr, async (page) => {
       const failed = page.locator('[data-failed="session"]');
       await failed.waitFor();
-      assert.match(await failed.innerText(), /Sessions ne s'est pas chargé\./, 'the screen\'s name from the French catalog, not a mark');
+      assert.match(await failed.innerText(), /Chargement impossible\u00a0: Sessions\./, 'the screen\'s name from the French catalog, not a mark');
       assert.equal(await page.locator('#boundary-retry').innerText(), 'Réessayer');
-    }, '/sessions');
+    }, '/sessions', 'fr-FR');
   } finally {
     await fr.close();
   }
@@ -173,7 +174,7 @@ test('a screen that throws says so, in its language, and offers to try again; th
     await signedInPage(app, async (page) => {
       const failed = page.locator('[data-failed="session"]');
       await failed.waitFor();
-      assert.match(await failed.innerText(), /Sessions did not load\./, 'the screen\'s name, translated');
+      assert.match(await failed.innerText(), /Could not load Sessions\./, 'the screen\'s name, translated');
       assert.equal(await page.locator('#boundary-retry').innerText(), 'Try again');
       assert.equal(await page.locator('#nav a[href="/lead"]').count(), 1, 'the sidebar stays');
       await page.locator('#boundary-retry').click();

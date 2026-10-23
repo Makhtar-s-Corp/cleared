@@ -8,7 +8,11 @@
 // "hier"; the units are the `time_*` keys of the shell's catalog, which
 // every screen's translator holds. Pure, so the tests run it under Node;
 // app/test/time.test.ts is its table, and web/test/durations.test.tsx reads
-// every screen for a duration in minutes above 59.
+// every screen for a duration in minutes above 59. The app's numbers go
+// through here too (fixed, count, decimal). Two dates do not: the tower's
+// next scheduled run names its weekday and the Lead's thread its day and
+// month through Date.toLocaleDateString in the page's language, Intl as
+// well, but outside this file.
 import type { Translate } from './i18n.ts';
 
 const HOUR = 60;
@@ -20,6 +24,13 @@ const pad = (n: number) => String(n).padStart(2, '0');
 // A translator without the shell's catalog (a test's) counts in English.
 const locale = (t: Translate) => (t('locale') === 'fr' ? 'fr' : 'en');
 const number = (n: number, t: Translate, digits = 1) => new Intl.NumberFormat(locale(t), { minimumIntegerDigits: digits, useGrouping: false }).format(n);
+
+// A number with fixed decimals in a language ("3,90" or "3.90"), never grouped inside a sentence.
+export const fixed = (value: number, digits: number, language: 'en' | 'fr'): string =>
+  new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
+
+// A count in a language, grouped as the language groups ("35 500" or "35,500").
+export const count = (value: number, language: 'en' | 'fr'): string => new Intl.NumberFormat(language).format(value);
 
 // A decimal number in the catalog's locale: "3,9" in French, "3.9" in English.
 export const decimal = (value: number, t: Translate, min: number, max: number): string =>

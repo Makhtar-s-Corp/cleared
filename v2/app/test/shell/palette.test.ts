@@ -26,7 +26,7 @@ test('what waits for you first, then the screen\'s gestures, the screens, the se
   const list = await items('tower', ['new_ticket']);
   assert.deepEqual(groups(list), ['waiting', 'actions', 'goto', 'sessions', 'general']);
   const waiting = list.filter((item) => item.group === 'waiting');
-  assert.deepEqual(waiting.map((item) => item.detail), ['Permission · 3 min · LOCAL-161', 'Release · 12 min · LOCAL-158', 'Plan · 25 min · Goal'], 'what blocks a session first (lane 37)');
+  assert.deepEqual(waiting.map((item) => item.detail), ['Permission · 3\u00a0min · LOCAL-161', 'Release · 12\u00a0min · LOCAL-158', 'Plan · 25\u00a0min · Goal'], 'what blocks a session first (lane 37)');
   assert.equal(waiting[1]!.label, '“Comings and goings” replaces “Departures and arrivals”');
   assert.equal(waiting[0]!.label, 'Install date-fns', 'a request by its intent, as the inbox says it');
   assert.match((waiting[0]!.run as { href: string }).href, /^\/inbox#/);
@@ -100,7 +100,7 @@ test('the groups keep their order, but a ticket\'s number puts the sessions firs
 test('a word the person typed outranks a scatter of its letters, and the groups follow their best match (art director, item 2)', async () => {
   // "upcoming": the session's title holds it; the long Knowledge title only scatters its letters.
   const session = rank('session-fixture-1', 'upcoming', ['Upcoming: group entries by week', 'LOCAL-161 · Author', 'LOCAL-161', '161'], 0.4);
-  const scatter = rank('waiting-knowledge', 'upcoming', ['The archive page reuses the list\'s heading: a heading changes in both templates.', 'Knowledge · 50 min · LOCAL-158', 'LOCAL-158'], 0.6);
+  const scatter = rank('waiting-knowledge', 'upcoming', ['The archive page reuses the list\'s heading: a heading changes in both templates.', 'Knowledge · 50\u00a0min · LOCAL-158', 'LOCAL-158'], 0.6);
   assert.ok(session > scatter, `${session} > ${scatter}`);
   assert.deepEqual(groupOrder('upcoming', { waiting: scatter, sessions: session, goto: 0 }), ['sessions', 'waiting', 'actions', 'goto', 'general']);
   assert.deepEqual(groupOrder('', { sessions: 1 }), GROUPS, 'no query: the fixed order');

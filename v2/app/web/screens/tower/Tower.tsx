@@ -34,7 +34,7 @@ import './tower.css';
 
 // A line of facts, each kept whole on a line (lane 38's art director: no fact cut, no line ending on its "·").
 function Facts({ text }: { readonly text: string }) {
-  return <>{text.split(' · ').map((fact, i) => <Fragment key={i}>{i > 0 ? ' · ' : null}<span className="fact">{fact}</span></Fragment>)}</>;
+  return <>{text.split(' · ').map((fact, i) => <Fragment key={i}>{i > 0 ? <span className="fact-sep">{' · '}</span> : null}<span className="fact">{fact}</span></Fragment>)}</>;
 }
 
 // The services a new ticket names: a chip per service of a workspace of

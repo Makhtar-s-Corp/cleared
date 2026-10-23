@@ -285,16 +285,16 @@ test('times, durations, numbers and plurals in each language', () => {
   const at = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
   const fr = tOf('inbox', 'fr');
   const en = tOf('inbox', 'en');
-  assert.deepEqual([0, 12, 60, 195, 3000].map((m) => since(at(m), FIXTURE_NOW, fr)), ['à l\'instant', '12 min', '1 h', '3 h 15', '2 j 2 h']);
-  assert.deepEqual([0, 12, 60, 195, 3000].map((m) => since(at(m), FIXTURE_NOW, en)), ['just now', '12 min', '1h', '3h 15m', '2d 2h']);
-  assert.deepEqual([34, 60, 135].map((m) => duration(m, fr)), ['34 min', '1 h', '2 h 15']);
-  assert.equal(estimate(135, en), '2h 15m');
+  assert.deepEqual([0, 12, 60, 195, 3000].map((m) => since(at(m), FIXTURE_NOW, fr)), ['à l\'instant', '12\u00a0min', '1\u00a0h', '3\u00a0h\u00a015', '2\u00a0j\u00a02\u00a0h']);
+  assert.deepEqual([0, 12, 60, 195, 3000].map((m) => since(at(m), FIXTURE_NOW, en)), ['just now', '12\u00a0min', '1h', '3h\u00a015m', '2d\u00a02h']);
+  assert.deepEqual([34, 60, 135].map((m) => duration(m, fr)), ['34\u00a0min', '1\u00a0h', '2\u00a0h\u00a015']);
+  assert.equal(estimate(135, en), '2h\u00a015m');
   const plan = inboxFixture(FIXTURE_NOW).items.find((item) => item.kind === 'plan');
   assert.ok(plan?.kind === 'plan');
   const base = { items: [], tickets: [], sessions: [], selected: undefined, open: false, me: { id: 'u', name: 'demo' }, now: FIXTURE_NOW, local: new Map(), frame: 'desktop' } as const;
   assert.equal(planLine({ ...plan, itemCount: 1 }, { ...base, language: 'fr' }, fr).split(' · ')[0], '1 ticket', 'the singular');
-  assert.equal(planLine(plan, { ...base, language: 'fr' }, fr), '5 tickets · 2 h 15 · 3,9 % de la semaine', 'a decimal comma and a space before %');
-  assert.equal(planLine(plan, { ...base, language: 'en' }, en), '5 tickets · 2h 15m · 3.9% of the week');
+  assert.equal(planLine(plan, { ...base, language: 'fr' }, fr), '5 tickets · 2\u00a0h\u00a015 · 3,9\u202f% de la semaine', 'a decimal comma and a space before %');
+  assert.equal(planLine(plan, { ...base, language: 'en' }, en), '5 tickets · 2h\u00a015m · 3.9% of the week');
   assert.equal(fr('handled_group', { n: 3 }), 'Traité · 3');
 });
 
@@ -313,7 +313,7 @@ test('the test reads a word from no catalog: a hard-coded word, English in Frenc
   assert.throws(() => assertCatalog('sign-in', html(<Login t={tOf('shell', 'en')} />), 'fr', data), /is from no fr catalog/);
   assert.throws(() => assertCatalog('marked', html(<p>{tOf('inbox', 'fr')('no_such_key')}</p>), 'fr', data), /missing from the fr catalog/);
   assert.throws(() => assertCatalog('planted', html(<p><span>Stopped</span></p>), 'fr', new Set(['Stopped'])), /service's English/);
-  assert.doesNotThrow(() => assertCatalog('planted', html(<p><span>LOCAL-161 · 12:05</span><span>{tOf('tower', 'fr')('need_release', { age: '3 min' })}</span></p>), 'fr', data));
+  assert.doesNotThrow(() => assertCatalog('planted', html(<p><span>LOCAL-161 · 12:05</span><span>{tOf('tower', 'fr')('need_release', { age: '3\u00a0min' })}</span></p>), 'fr', data));
 });
 
 // What no render above reaches (a failure's note, a state the fixtures do

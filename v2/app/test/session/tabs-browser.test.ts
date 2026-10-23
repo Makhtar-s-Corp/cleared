@@ -55,7 +55,7 @@ async function browse(
     const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
     const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
     browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
-    const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+    const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'en-US' })).newPage();
     page.on('pageerror', (error: Error) => errors.push(error.message));
     page.on('request', (request: { url(): string }) => { if (!request.url().startsWith(app.base) && !request.url().startsWith(previewBase)) away.push(request.url()); });
     await page.goto(`${app.base}/login`);

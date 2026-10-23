@@ -209,6 +209,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip]) { position: relative; }
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip])::after { content: attr(data-tip); position: absolute; left: calc(100% + var(--space-3)); top: 50%; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font: var(--weight-regular) var(--text-sm)/1.4 var(--sans); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-4px, -50%); transition: opacity var(--motion) var(--ease), transform var(--motion) var(--ease); }
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip]):is(:hover, :focus-visible)::after { opacity: 1; transform: translate(0, -50%); }
+/* A button whose menu is open shows the menu, not its tooltip over the menu's corner (lane i18n's art director). */
+.app [data-tip][aria-expanded="true"]::after { display: none; }
 /* The open sidebar's buttons at its right edge put theirs below. */
 .app[data-sidebar="open"] .side-head .icon[data-tip]::after { left: auto; right: 0; top: calc(100% + var(--space-1)); transform: translateY(-4px); }
 .app[data-sidebar="open"] .side-head .icon[data-tip]:is(:hover, :focus-visible)::after { transform: none; }

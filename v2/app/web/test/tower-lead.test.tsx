@@ -49,7 +49,7 @@ test('the lead card is live: its state line, then the last thing the lead said t
   });
   const html = renderTower(model, en);
   const words = text(html);
-  assert.ok(words.includes('Always on · context 31% · refreshed 10 min ago'));
+  assert.ok(words.includes('Always on · context 31% · refreshed 10\u00a0min ago'));
   assert.match(html, /<q>LOCAL-161 is paused on a permission\. I moved LOCAL-163 ahead so the machine stays busy\.<\/q>/, 'quoted in the reader\'s language by the browser');
   assert.match(html, /<form class="lead-ask" id="lead-ask"[^>]*>\s*<input id="lead-ask-input"[^>]*placeholder="Message the Lead…"/);
   assert.doesNotMatch(words, /Comes in milestone 2|milestone 2/, 'the milestone 1 sentences are gone');
@@ -159,7 +159,7 @@ test('a proposed plan is a card under Needs you, after what the teams wait for, 
   assert.equal(card?.href, '/plans/plan-readable');
   const html = renderTower(model, en);
   assert.match(html, /<a class="need row" href="\/plans\/plan-readable"/);
-  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe Lead proposes 5 tickets, about 2h of work and 4% of the week.\nGoal\n25 min'), 'its kind, its title, its line, then whose and how long');
+  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe Lead proposes 5 tickets, about 2h of work and 4% of the week.\nGoal\n25\u00a0min'), 'its kind, its title, its line, then whose and how long');
 });
 
 test('a plan without the week share says its cost, one ticket reads in the singular, and French says it in French', () => {
@@ -168,10 +168,10 @@ test('a plan without the week share says its cost, one ticket reads in the singu
     title: 'A goal', summary: 'A summary.', itemCount: count, totals: { minutes, costUsd: 3.9, weekPercent, samples: 2 },
   });
   const render = (inbox: InboxItem[], t: Translate) => text(renderTowerBody(towerModel({ sessions: [], inbox, tickets: [], lead: null, leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), t));
-  assert.match(render([proposal(5, 135, null)], en), /The Lead proposes 5 tickets, about 2h 15m of work, about \$3\.90\./);
-  assert.match(render([proposal(1, 40, null)], en), /The Lead proposes 1 ticket, about 40 min of work, about \$3\.90\./);
+  assert.match(render([proposal(5, 135, null)], en), /The Lead proposes 5 tickets, about 2h\u00a015m of work, about \$3\.90\./);
+  assert.match(render([proposal(1, 40, null)], en), /The Lead proposes 1 ticket, about 40\u00a0min of work, about \$3\.90\./);
   assert.match(render([proposal(3, 60, 1.25)], en), /The Lead proposes 3 tickets, about 1h of work and 1\.3% of the week\./);
-  assert.match(render([proposal(3, 60, 1.25)], fr), /Le Lead propose 3 tickets, environ 1 h de travail et 1,3 % de la semaine\./);
+  assert.match(render([proposal(3, 60, 1.25)], fr), /Le Lead propose 3 tickets, environ 1\u00a0h de travail et 1,3\u202f% de la semaine\./);
   assert.match(render([proposal(5, 135, null)], fr), /environ 3,90 \$/);
 });
 
@@ -204,7 +204,7 @@ test('the grey line gives the week left when the harness measures it', async () 
   const words = text(renderTower(towerModel({ ...data, weekLeft: 76 }, FIXTURE_NOW), en));
   assert.ok(words.includes('4 sessions running · 1 plan in progress · 2 landed today · Claude 76% left'));
   const french = text(renderTower(towerModel({ ...data, weekLeft: 76 }, FIXTURE_NOW), fr));
-  assert.match(french, /Claude\u00a0: 76 % restants/);
+  assert.match(french, /Claude\u00a0: 76\u202f% restants/);
 });
 
 test('the pill shows only while a generation of the lead is live, or refreshing between two', () => {

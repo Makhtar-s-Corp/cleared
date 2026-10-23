@@ -16,7 +16,7 @@ import type { ChoiceStatus } from '../../components/choices/model.ts';
 import type { Filter, TicketPart } from './ticket.ts';
 import { hasMark, type Translate } from '../../lib/i18n.ts';
 import { sessionStatus } from '../../lib/status.ts';
-import { clock, lasted } from '../../lib/time.ts';
+import { clock, count, lasted } from '../../lib/time.ts';
 
 export const EVENT_NAMES = [
   'RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR',
@@ -492,7 +492,7 @@ export function statusMeta(view: SessionView, t: Translate): string {
   const time = duration(end - Date.parse(view.summary.startedAt), t);
   const usage = view.thread.state?.usage ?? {};
   const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-  return tokens > 0 ? t('elapsed_usage', { time, tokens: tokens.toLocaleString(view.language) }) : t('elapsed_only', { time });
+  return tokens > 0 ? t('elapsed_usage', { time, tokens: count(tokens, view.language) }) : t('elapsed_only', { time });
 }
 
 export function who(by: string | undefined, view: Pick<SessionView, 'me'>, t: Translate): string {

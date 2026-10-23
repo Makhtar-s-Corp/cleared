@@ -17,7 +17,7 @@ import type {
 import type { Harness, Role } from '../../../../src/session/contract.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
-import { ago, clock, decimal, duration, estimate } from '../../lib/time.ts';
+import { ago, clock, decimal, duration, estimate, fixed } from '../../lib/time.ts';
 import { requestReason, requestTitle, type Request } from '../../lib/request.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
@@ -322,7 +322,7 @@ const dayOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date
 // browser shows times; "Off" for one switched off.
 export function scheduleLine(row: ScheduleRow, now: Date, language: 'en' | 'fr', t: Translate): string {
   if (!row.enabled) return t('schedule_off');
-  const budget = t('schedule_budget', { amount: new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }).format(row.budgetUsd) });
+  const budget = t('schedule_budget', { amount: fixed(row.budgetUsd, 2, language) });
   if (!row.nextRunAt) return `${t('schedule_none')} · ${budget}`;
   const next = new Date(row.nextRunAt);
   const time = clock(row.nextRunAt);
