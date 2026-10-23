@@ -87,7 +87,8 @@ test('the checks: a check named by its command is said by its intent, the comman
   const markup = html(<RightCards view={ticketView()} t={en} />);
   const checks = /<ul class="checks">[\s\S]*?<\/ul>/.exec(markup)?.[0] ?? '';
   const text = visibleText(checks);
-  assert.deepEqual(text.filter((line) => !line.startsWith('·') && !/[|&]|^npm|^git|^tail/.test(line)), ['Run the project\'s tests', 'Commit the changes', 'Review']);
+  // Each check's name, then its state at the end of its line (lane 38).
+  assert.deepEqual(text.filter((line) => !/[|&]|^npm|^git|^tail/.test(line)), ['Run the project\'s tests', 'passed', 'Commit the changes', 'passed', 'Review', 'pending']);
   assert.equal([...checks.matchAll(/<details>/g)].length, 2, 'two checks named by commands, folded');
   assert.ok(text.includes('npm test 2>&1') && text.includes('tail -8'), 'the raw command, one a line');
   const changes = visibleText(/<ul class="changes">[\s\S]*?<\/ul>/.exec(markup)?.[0] ?? '');
@@ -118,7 +119,7 @@ test('the Editor holds the ticket\'s changes, or its last turn\'s', () => {
   const files = [{ path: 'src/screens/Envelope.jsx', added: 15, removed: 2 }, { path: 'test/envelope.test.mjs', added: 13, removed: 0 }];
   const all = html(<EditorTab t={en} files={files} mode="diff" scope={{ value: 'all', all: 2, last: 1 }} />);
   assert.deepEqual([...all.matchAll(/data-scope="([a-z]+)" aria-pressed="(true|false)"/g)].map((m) => [m[1], m[2]]), [['all', 'true'], ['last', 'false']]);
-  assert.ok(visibleText(all).includes('All changes') && visibleText(all).includes('Last turn'));
+  assert.ok(visibleText(all).includes('All') && visibleText(all).includes('Last turn'));
   const last = html(<EditorTab t={fr} files={files.slice(0, 1)} mode="diff" scope={{ value: 'last', all: 2, last: 1 }} />);
   assert.match(last, /data-scope="last" aria-pressed="true"/);
   assert.ok(visibleText(last).includes('Dernier tour'));

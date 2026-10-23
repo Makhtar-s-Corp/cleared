@@ -243,7 +243,7 @@
   "edits_count": "{n} edits",
   "step_show_diff": "Show the changes",
   "editor_scope": "Which changes",
-  "editor_scope_all": "All changes",
+  "editor_scope_all": "All",
   "editor_scope_last": "Last turn",
   "giveback_note": "Hands the session back and tells it what you changed.",
   "earlier_one": "{who} · 1 step",

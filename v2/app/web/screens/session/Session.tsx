@@ -364,7 +364,7 @@ export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; rea
 
 // A check, said by its intent when its name is a command, the command folded under.
 function CheckRow({ check, t }: { readonly check: { readonly name: string; readonly state: 'passed' | 'pending' | 'failed' }; readonly t: Translate }) {
-  const head = (name: string) => <><span className={`light ${check.state}`} aria-hidden="true" /><span className="check-name">{name}</span><span className="state">· {t(`check_${check.state}`)}</span></>;
+  const head = (name: string) => <><span className={`light ${check.state}`} aria-hidden="true" /><span className="check-name">{name}</span><span className="state">{t(`check_${check.state}`)}</span></>;
   if (!looksLikeCommand(check.name)) return <li className="check">{head(check.name)}</li>;
   return (
     <li className="check">
