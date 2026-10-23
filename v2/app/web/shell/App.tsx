@@ -16,7 +16,7 @@
 // screen keeps its scroll, has its title, turns on its own sheets
 // (lib/sheets.ts) and fails alone (lib/boundary.tsx).
 import { RouterProvider, useRouterState, type AnyRouter } from '@tanstack/react-router';
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
 import type { LeadState, NextInboxItem, SessionSummary } from '../../../src/api/types.ts';
 import { json, serviceApi } from '@/lib/api.ts';
 import { ScreenBoundary } from '@/lib/boundary.tsx';
@@ -39,7 +39,6 @@ import {
   SIDEBAR_KEY, applyTheme, currentTheme, hrefOf, leadDot, sessionGroups, sessionRows, sidebarMode, toggledSidebar, waitingCount,
   OPEN_FROM, RAIL_FROM, type SessionRow, type Theme,
 } from './model.ts';
-import { Palette } from './Palette.tsx';
 import { GESTURES, paletteItems, type PaletteItem } from './palette.ts';
 import { ShortcutSheet, pressTab, useShortcuts, walkRows } from './Shortcuts.tsx';
 import { Sidebar } from './Sidebar.tsx';
@@ -80,7 +79,10 @@ export function App({ start }: { readonly start: ShellStart }) {
     stream.start();
     const release = interceptLinks(router, cache);
     // Every screen's chunk, once the first screen has drawn: a switch then waits for none.
-    const warm = setTimeout(() => { for (const name of SCREEN_NAMES) void loadScreen(name).catch(() => {}); }, 0);
+    const warm = setTimeout(() => {
+      for (const name of SCREEN_NAMES) void loadScreen(name).catch(() => {});
+      void loadPalette().catch(() => {});
+    }, 0);
     return () => {
       clearTimeout(warm);
       release();
@@ -208,6 +210,11 @@ function shownGesture(selector: string): HTMLElement | null {
 }
 
 type Overlay = 'palette' | 'sheet' | null;
+
+// The palette is a chunk of its own (cmdk and what it brings), loaded once
+// the first screen has drawn, so the first draw does not wait for it.
+const loadPalette = () => import('./Palette.tsx');
+const Palette = lazy(loadPalette);
 
 function Shell({ shared }: { readonly shared: Shared }) {
   const { start, cache, router } = shared;
@@ -388,7 +395,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
           </main>
         </div>
       </div>
-      {overlay === 'palette' ? <Palette t={towerT} items={items} dark={theme === 'dark'} onRun={runItem} onClose={() => setOverlay(null)} /> : null}
+      {overlay === 'palette' ? <Suspense fallback={null}><Palette t={towerT} items={items} dark={theme === 'dark'} onRun={runItem} onClose={() => setOverlay(null)} /></Suspense> : null}
       {overlay === 'sheet' ? <ShortcutSheet t={t} screen={place.screen} mac={mac} onClose={() => setOverlay(null)} /> : null}
     </>
   );

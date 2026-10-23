@@ -162,7 +162,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .side-sessions { flex: 1; min-height: 0; overflow-y: auto; margin: var(--space-2) calc(-1 * var(--space-2)) 0; padding: 0 var(--space-2); border-top: 1px solid var(--hairline); }
 .side-title { margin: var(--space-3) var(--space-2) var(--space-1); color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .side-group + .side-group { margin-top: var(--space-2); }
-.side-group h3 { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) var(--space-2) 2px; color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.side-group-title { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) var(--space-2) 2px; color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
 .side-session { display: flex; align-items: center; gap: var(--space-2); min-height: 30px; padding: 0 var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); }
 .side-session:hover { background: var(--tab-fill); color: var(--text); text-decoration: none; }
 .side-session[aria-current="page"] { background: var(--selected); color: var(--text); }
@@ -209,6 +209,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 /* the palette and the shortcut sheet: a dialog over the app */
 .overlay { position: fixed; inset: 0; z-index: 50; display: flex; justify-content: center; align-items: flex-start; padding: 12vh var(--space-3) var(--space-3); background: rgba(10,10,10,.36); animation: fade var(--motion) var(--ease); }
 :root[data-theme="dark"] .overlay { background: rgba(0,0,0,.55); }
+.dialog:focus { outline: none; }
 .dialog { display: flex; flex-direction: column; width: min(640px, 100%); max-height: min(560px, 76vh); overflow: hidden; border-radius: 12px; background: var(--popover); box-shadow: var(--e-menu); animation: rise var(--motion) var(--ease); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
@@ -255,9 +256,9 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 /* empty states: what is not there, and the one thing to do about it */
 .empty { padding: var(--space-3); border-radius: 10px; border: 1px dashed var(--dashed); color: var(--text-muted); font-size: var(--text-md); line-height: 1.5; }
 .empty.error { color: var(--danger-text); border-color: currentColor; }
-.empty-state { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; padding: var(--space-2) var(--space-3); border-radius: 10px; background: var(--sunken); color: var(--text-muted); font-size: var(--text-md); }
+.empty-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-height: 56px; padding: var(--space-2) var(--space-3); border-radius: 10px; background: var(--sunken); color: var(--text-muted); font-size: var(--text-md); }
 .empty-state > svg { flex: none; color: var(--text-faint); }
-.empty-state .empty-text { flex: 1; min-width: 0; }
+.empty-state .empty-text { flex: 1 1 14ch; min-width: 0; }
 .empty-state .chip-button { flex: none; background: var(--surface); }
 .quiet-line { color: var(--text-muted); font-size: var(--text-md); }
 /* small parts the screens share: a note, a dot, the lead's mark */
@@ -342,4 +343,9 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .empty-state { flex-wrap: wrap; }
 }
 @media (min-width: 768px) { .source-pill .short, .menu-theme { display: none; } }
+/* A touch screen wider than a phone (a tablet with the rail): 44 px targets, the look unchanged. */
+@media (pointer: coarse) and (min-width: 768px) {
+  .nav-item, .app[data-sidebar="rail"] .nav-item, .side-session, .search, .person, .icon, .chip-button { min-height: 44px; }
+  .icon, .app[data-sidebar="rail"] .person { width: 44px; height: 44px; }
+}
 @media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } .live { animation: none; } }

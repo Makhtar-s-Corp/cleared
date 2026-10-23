@@ -13,7 +13,7 @@ import type { Translate } from '@/lib/i18n.ts';
 import type { ScreenName } from '@/lib/routes.ts';
 import { Keys } from './Kbd.tsx';
 import { resolveKey, sheetRows, type Action, type Chord, type Focus, type Scope } from './keys.ts';
-import { trapTab, useFocusBack } from './Palette.tsx';
+import { trapTab, useFocusBack } from './dialog.ts';
 
 // The session screen's tabs in the order 1 to 4 press them (TABS in screens/session/tabs.ts).
 export const SESSION_TABS = ['plan', 'terminal', 'editor', 'browser'] as const;
@@ -98,8 +98,9 @@ const SCOPES: readonly Scope[] = ['global', 'list', 'session', 'field'];
 
 export function ShortcutSheet({ t, screen, mac, onClose }: { readonly t: Translate; readonly screen: ScreenName; readonly mac: boolean; readonly onClose: () => void }) {
   useFocusBack();
-  const close = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { close.current?.focus(); }, []);
+  // The dialog itself takes the focus: Tab reaches its button, Esc closes it.
+  const box = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { box.current?.focus(); }, []);
   const rows = sheetRows(screen);
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape' || event.key === '?') { event.preventDefault(); event.stopPropagation(); onClose(); return; }
@@ -107,10 +108,10 @@ export function ShortcutSheet({ t, screen, mac, onClose }: { readonly t: Transla
   };
   return (
     <div className="overlay" data-overlay="sheet" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="dialog sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" id="shortcuts" onKeyDown={keyDown}>
+      <div className="dialog sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" id="shortcuts" tabIndex={-1} ref={box} onKeyDown={keyDown}>
         <div className="sheet-head">
           <h2 id="sheet-title">{t('keys_title')}</h2>
-          <Button variant="ghost" className="icon" id="sheet-close" aria-label={t('keys_close')} ref={close} onClick={onClose}><X size={16} aria-hidden="true" /></Button>
+          <Button variant="ghost" className="icon" id="sheet-close" aria-label={t('keys_close')} onClick={onClose}><X size={16} aria-hidden="true" /></Button>
         </div>
         <div className="sheet-body">
           {SCOPES.map((scope) => {

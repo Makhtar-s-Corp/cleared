@@ -94,11 +94,11 @@ export function Sidebar(props: SidebarProps) {
       </nav>
       {props.groups.length > 0 ? (
         <section className="side-sessions" aria-labelledby="side-sessions-title">
-          <h2 className="side-title" id="side-sessions-title">{t('side_sessions')}</h2>
+          <p className="side-title" id="side-sessions-title">{t('side_sessions')}</p>
           {props.groups.map((group) => (
             <div className="side-group" key={group.key} data-group={group.key}>
-              <h3><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`side_group_${group.key}`)}</h3>
-              <ul>
+              <p className="side-group-title" id={`side-group-${group.key}`}><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`side_group_${group.key}`)}</p>
+              <ul aria-labelledby={`side-group-${group.key}`}>
                 {group.rows.slice(0, GROUP_MAX).map((row) => (
                   <li key={row.id}>
                     <a className="side-session" href={`/sessions/${encodeURIComponent(row.id)}`} onClick={() => props.onPick?.(`/sessions/${encodeURIComponent(row.id)}`)} aria-current={props.session === row.id ? 'page' : undefined} title={`${row.ticket} · ${row.title}`}>

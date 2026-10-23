@@ -9,6 +9,12 @@
 //     [--screens tower,inbox,sessions,session,lead] [--widths 1440,390] [--themes light,dark]
 //     [--via load|click]
 //
+// Four more captures, named only (lane 35): palette and sheet (the tower
+// with the command palette or the shortcut sheet open, by their keys), and
+// tower-empty and lead-empty (the tower and the lead screen with their
+// lists answered empty in the page: no session, nothing waiting, no plan,
+// no message).
+//
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
 // the page, which the app answers without a document load (lane 34): the
@@ -38,7 +44,13 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export type CaptureScreen = typeof SCREENS[number];
+export const EXTRAS = ['palette', 'sheet', 'tower-empty', 'lead-empty'] as const;
+export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
+// What an empty capture answers empty, in the page.
+const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
+const answerEmpty = (route: any) => (/\/lead\/stream/.test(route.request().url())
+  ? route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': empty\n\n' })
+  : route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
 const ACCOUNT = 'owner';
 
 // playwright-core is read untyped, as the proof scripts read it: its types need the DOM's,
@@ -58,7 +70,7 @@ export async function capture(options: { readonly out: string; readonly screens?
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
   const themes = options.themes ?? ['light', 'dark'];
-  for (const s of screens) if (!(SCREENS as readonly string[]).includes(s)) throw new Error(`unknown screen ${s}`);
+  for (const s of screens) if (![...SCREENS, ...EXTRAS].includes(s as CaptureScreen)) throw new Error(`unknown screen ${s}`);
   for (const w of widths) if (!WIDTHS[w]) throw new Error(`unknown width ${w}`);
   mkdirSync(options.out, { recursive: true });
 
@@ -87,12 +99,17 @@ export async function capture(options: { readonly out: string; readonly screens?
         await page.waitForURL(`${app.base}/`);
         const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
-        const paths: Readonly<Record<CaptureScreen, string>> = { tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead' };
+        const paths: Readonly<Record<CaptureScreen, string>> = {
+          tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
+          palette: '/', sheet: '/', 'tower-empty': '/', 'lead-empty': '/lead',
+        };
         let documents = 0;
         page.on('load', () => { documents += 1; });
         for (const screen of screens) {
           const path = paths[screen as CaptureScreen];
-          if (options.via === 'click') {
+          const empty = screen.endsWith('-empty');
+          if (empty) await page.route(EMPTY, answerEmpty);
+          if (options.via === 'click' && !empty) {
             const before = documents;
             await page.evaluate((href: string) => {
               const link = document.createElement('a');
@@ -105,9 +122,20 @@ export async function capture(options: { readonly out: string; readonly screens?
             if (documents !== before) errors.push(`${w} ${theme}: ${screen} loaded a document`);
           } else await page.goto(`${app.base}${path}`);
           await settle(page);
+          if (screen === 'palette' || screen === 'sheet') {
+            await page.locator('#screen').focus();
+            await page.keyboard.press(screen === 'palette' ? 'Control+k' : 'Shift+Slash');
+            await page.locator(screen === 'palette' ? '#palette' : '#shortcuts').waitFor();
+            await page.waitForTimeout(250);
+          }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
           await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
+          if (screen === 'palette' || screen === 'sheet') await page.keyboard.press('Escape');
+          if (empty) {
+            await page.unroute(EMPTY);
+            await page.goto(`${app.base}/`);
+          }
         }
         await context.close();
       }

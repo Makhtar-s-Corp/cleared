@@ -4,10 +4,11 @@
 // not cmdk's (components/ui/command.tsx says why): focus stays in it, Esc
 // or a click outside closes it, and the focus goes back where it was.
 import { ArrowRight, Broadcast, Circle, Keyboard, ListChecks, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useMemo, useState, type KeyboardEvent } from 'react';
 import { defaultFilter } from 'cmdk';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command.tsx';
 import type { Translate } from '@/lib/i18n.ts';
+import { trapTab, useFocusBack } from './dialog.ts';
 import { Keys } from './Kbd.tsx';
 import { GROUP_LABEL, groupOrder, rank, type PaletteItem } from './palette.ts';
 
@@ -23,27 +24,7 @@ function iconOf(item: PaletteItem, dark: boolean): Icon | null {
   }
 }
 
-// Keeps Tab inside the dialog: its one field and its list are all it holds.
-export function trapTab(event: KeyboardEvent<HTMLElement>): void {
-  if (event.key !== 'Tab') return;
-  const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('input, button, [href], [tabindex]:not([tabindex="-1"])')];
-  if (focusable.length === 0) return;
-  const first = focusable[0]!;
-  const last = focusable[focusable.length - 1]!;
-  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-}
-
-// The element the focus goes back to when a dialog closes.
-export function useFocusBack(): void {
-  const back = useRef<Element | null>(typeof document === 'undefined' ? null : document.activeElement);
-  useEffect(() => () => {
-    const element = back.current;
-    if (element instanceof HTMLElement && element.isConnected) element.focus({ preventScroll: true });
-  }, []);
-}
-
-export function Palette({ t, items, dark, onRun, onClose }: {
+export default function Palette({ t, items, dark, onRun, onClose }: {
   readonly t: Translate; readonly items: readonly PaletteItem[]; readonly dark: boolean;
   readonly onRun: (item: PaletteItem) => void; readonly onClose: () => void;
 }) {
