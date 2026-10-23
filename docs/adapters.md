@@ -697,7 +697,7 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 
 | Need | Claude Code | Cursor (this adapter) |
 | --- | --- | --- |
-| Process | one runner per session, stdin and stdout kept | one `docker exec` per message, the prompt on its standard input, resumed on the chat id kept in `<state>/cursor-chats/<session>.chat` |
+| Process | one runner per session, stdin and stdout kept | one `docker exec` per message, the prompt on its standard input, resumed on the chat id from Cursor's first line (held in memory; also written to `<state>/cursor-chats/<session>.chat`, which nothing reads back yet: a restarted service does not resume a session, as with Claude Code) |
 | Login | the mounted file, read in the container into the harness's environment | the mounted Cursor API key file (`CLEARED_CURSOR_API_KEY_FILE`, else `<state>/cursor.key`), read in the container into `CURSOR_API_KEY`; never `--api-key` |
 | Guard | policy asked before every call, an ask waits in the inbox | **two layers, failing closed** (below) |
 | Usage | tokens, cost, context share, rate windows | the model only, `total_cost_usd: null`; nothing estimated |
@@ -710,6 +710,8 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 2. Evaluates every `tool_call` Cursor reports with the unchanged policy (`policy.ts`). Only an allow lets the turn go on. A deny, **and an ask**, end the turn: the program is killed in the container, the thread shows the refusal (`cleared.permission_answered`, rule from the policy) and an error with the code `policy_stop`, and the session waits for the next message. This layer sees a call when it starts, so it is a tripwire, not a prevention; layer 1 is what refuses.
 
 **Failures** are classified by exit code and a stderr pattern into fixed sentences (`cursor_login`, `cursor_not_installed`, `cursor_exit`, `cursor_launch`). The program's own words are never journaled.
+
+**Reachability.** The adapter is registered as `cursor` and the terminal route picks the adapter by the session's own harness, so a Take over of a Cursor session reaches it. But the flow and the lead start every session as `claude-code` (`HARNESS` in `flow/engine.ts` and `lead/engine.ts`), so no ticket can name `cursor` yet: choosing a harness per project or ticket is a later lane. Until then a trial starts a session through the adapter directly (`createCursorAdapter(...).start({ harness: 'cursor', ... })`).
 
 **Image.** The session image does not contain Cursor. No pinned, verifiable install source was found (the documented install is `curl https://cursor.com/install | bash`, unpinned), so nothing was added to `images/session/Dockerfile`. A turn in an image without it ends with `cursor_not_installed`. `CursorRuntime.image` names an image that has it.
 
@@ -731,7 +733,9 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 5. Confirm the egress hosts (`CURSOR_HOSTS` in `cursor.ts`) and install Cursor in a session image.
 6. Confirm Cursor reads the generated `CLAUDE.md` or an `AGENTS.md` for the briefing.
 7. Whether the CLI runs hooks: if it does, a `beforeShellExecution` hook would give a true ask and make layer 2 a real gate.
-8. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
+8. `dockerLauncher.start` has no test (it needs a Docker fake for `startSession`): it runs `sleep infinity` as the container's command, which assumes the image has no runner entrypoint, and Cursor must honour the egress proxy variables the container sets.
+9. Known side effects on the other harness: the policy now denies a Claude Code author's edits under any `.cursor/` folder, and the Cursor launcher overwrites a tracked `.cursor/cli.json` in the checkout.
+10. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
 
 ## v1 adapter contract
 

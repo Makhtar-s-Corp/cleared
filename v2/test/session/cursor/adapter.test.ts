@@ -61,7 +61,8 @@ class FakeLauncher implements CursorLauncher {
     for (const wake of this.waiting.splice(0)) wake(turn);
     return turn.process;
   }
-  async endTurn() { this.calls.push('endTurn'); }
+  // As in the container: ending the program closes its docker client.
+  async endTurn() { this.calls.push('endTurn'); this.turns.at(-1)?.exit(143); }
   async stop(session: string) { this.calls.push(`stop ${session}`); }
   async nextTurn(index: number): Promise<FakeTurn> {
     for (let i = 0; i < 500; i++) {
@@ -251,7 +252,7 @@ test('an adapter given the wrong harness, a resume of an unknown session, and a 
   } finally { t.done(); }
 });
 
-test('a chat id is validated and kept across a service restart in the state folder only', async () => {
+test('a malformed chat id is not written to the state folder', async () => {
   const t = await setup();
   try {
     const handle = await t.adapter.start(input(t.workdir));

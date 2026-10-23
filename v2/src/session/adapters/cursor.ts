@@ -5,7 +5,8 @@
 //   - no long-lived process: each message is one `agent -p --output-format
 //     stream-json` process in the session's container (a `docker exec`),
 //     resumed on the chat Cursor named in its first line; the chat id is kept
-//     in the state folder so a restarted service finds it (cursor/interactive.ts);
+//     in the state folder (nothing reads it back yet: a restarted service
+//     does not resume a session, as Claude Code's does not);
 //   - no channel on which a call waits for a human in print mode. The guard is
 //     therefore two layers and it fails closed:
 //       1. the policy compiled into Cursor's own permissions file, deny first,
@@ -106,6 +107,10 @@ export type CursorOptions = {
   readonly now?: () => Date;
 };
 
+// A turn's own process and the reason it is being ended: per turn, since the
+// close of an ended turn can arrive after the next one has begun.
+type Turn = { readonly child: ChildProcessWithoutNullStreams; ending: 'interrupt' | 'blocked' | undefined };
+
 type Session = {
   readonly id: SessionId;
   readonly input: StartInput;
@@ -114,8 +119,7 @@ type Session = {
   readonly wake: Set<() => void>;
   readonly queue: string[];
   chat: string | undefined;                       // Cursor's chat id
-  child: ChildProcessWithoutNullStreams | undefined;
-  ending: 'interrupt' | 'blocked' | undefined;    // why the running turn is being ended
+  turn: Turn | undefined;                         // the running turn
   closed: boolean;
   handedOver: boolean;                            // a human has the chat (Take over)
   turnDone: Promise<void>;
@@ -178,10 +182,11 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
     const message = verdict.decision === 'deny'
       ? verdict.message
       : 'This call needs a person\'s approval, and a Cursor turn has no way to wait for one: it was stopped. Ask for an allowed alternative.';
-    session.ending = 'blocked';
+    const turn = session.turn;
+    if (turn) turn.ending = 'blocked';
     emit(session, session.mapper.blocked(call.callId, verdict, message));
     void launcher.endTurn(session.id).catch(() => undefined);
-    session.child?.kill();
+    turn?.child.kill();
     return false;
   }
 
@@ -201,13 +206,13 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       emit(session, session.mapper.turnFailed('The Cursor program could not be started.', 'cursor_launch'));
       return;
     }
-    session.child = child;
-    session.ending = undefined;
+    const turn: Turn = { child, ending: undefined };
+    session.turn = turn;
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
     child.stdin.on('error', () => undefined);
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (raw) => {
-      if (session.child !== child || session.ending !== undefined) return;
+      if (session.turn !== turn || turn.ending !== undefined) return;
       let line: unknown;
       try { line = JSON.parse(raw); } catch { return; }
       if (typeof line !== 'object' || line === null || Array.isArray(line)) return;
@@ -219,16 +224,26 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
     child.stdin.end(text);
     await new Promise<void>((done) => {
       child.on('close', (code: number | null) => {
-        if (session.child === child) session.child = undefined;
-        if (session.ending === 'interrupt') emit(session, session.mapper.cancelled('waiting_human', 'Waiting for a message'));
-        else if (session.ending === undefined) {
+        if (session.turn === turn) session.turn = undefined;
+        if (turn.ending === 'interrupt') emit(session, session.mapper.cancelled('waiting_human', 'Waiting for a message'));
+        else if (turn.ending === undefined) {
           const { message, code: reason } = failure(code, stderr);
           emit(session, session.mapper.turnFailed(message, reason));
         }
-        session.ending = undefined;
         done();
       });
     });
+  }
+
+  // Ends the running turn: the program itself in the container, then the
+  // docker client. The turn's close handler may clear session.turn while
+  // the container answers, so the turn is kept before the wait.
+  async function endRunningTurn(session: Session): Promise<void> {
+    const turn = session.turn;
+    if (!turn) return;
+    turn.ending = 'interrupt';
+    await launcher.endTurn(session.id).catch(() => undefined);
+    turn.child.kill();
   }
 
   // One turn at a time, in the order the messages came.
@@ -279,18 +294,12 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       async interrupt() {
         open();
         session.queue.length = 0;
-        if (session.child) {
-          session.ending = 'interrupt';
-          await launcher.endTurn(session.id).catch(() => undefined);
-          session.child.kill();
-        }
+        await endRunningTurn(session);
       },
       async stop() {
         session.queue.length = 0;
-        if (session.child) {
-          session.ending = 'interrupt';
-          await launcher.endTurn(session.id).catch(() => undefined);
-          session.child.kill();
+        if (session.turn) {
+          await endRunningTurn(session);
           await Promise.race([session.turnDone, new Promise<void>((resolve) => setTimeout(resolve, runtime.stopTimeoutMs ?? 15_000).unref())]);
         }
         await launcher.stop(session.id);
@@ -312,7 +321,7 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       const id = newId();
       const session: Session = {
         id, input, cleaner: options.cleaner(), mapper: createCursorMapper({ sessionId: id }), wake: new Set(), queue: [],
-        chat: undefined, child: undefined, ending: undefined, closed: true, handedOver: false, turnDone: Promise.resolve(), handle: undefined,
+        chat: undefined, turn: undefined, closed: true, handedOver: false, turnDone: Promise.resolve(), handle: undefined,
       };
       sessions.set(id, session);
       await launcher.start(id, input);
@@ -339,12 +348,10 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       const session = sessions.get(id);
       if (!session || session.closed) return { supported: false, reason: `There is no running session ${id} here to resume in a terminal.` };
       if (session.chat === undefined) return { supported: false, reason: 'Cursor has not started a chat for this session yet: there is nothing to resume. Open the Shell instead.' };
-      if (session.child) {
+      if (session.turn) {
         // One writer at a time: the running turn ends, then the human has the chat.
         session.queue.length = 0;
-        session.ending = 'interrupt';
-        await launcher.endTurn(id).catch(() => undefined);
-        session.child.kill();
+        await endRunningTurn(session);
         await Promise.race([session.turnDone, new Promise<void>((resolve) => setTimeout(resolve, runtime.interruptTimeoutMs ?? 15_000).unref())]);
       }
       session.handedOver = true;
