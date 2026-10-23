@@ -36,7 +36,7 @@
 // reads every kind GET /api/inbox answers (NextInboxItem): api/types.ts
 // belongs to no lane in wave 8, so InboxItem keeps its four kinds there.
 import type {
-  ApproveBody, ContractItem, InboxItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseFlag, ReleaseFlagKind,
+  ApproveBody, ContractItem, InboxItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReasonCode, ReleaseFlag, ReleaseFlagKind,
   ReleaseItem, SessionPlan, SessionPlanItem, SessionSummary, TrainState, TrainStop,
 } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
@@ -104,6 +104,7 @@ export type InboxView = {
   readonly plans?: ReadonlyMap<string, Plan>;                  // the plans read so far, by id
   readonly language?: 'en' | 'fr';                             // for the numbers: 0.30 or 0,30
   readonly wide?: boolean;                                     // ROW_ANSWERS_MIN wide or more: a request's row carries its answers
+  readonly narrow?: boolean;                                   // under 1024 px: the detail is a page of its own
 };
 
 // ---------------------------------------------------------------- the model
@@ -444,32 +445,67 @@ export function itemTitle(item: Item, view: InboxView | undefined, t: Translate)
 
 // ------------------------------------------------------------ permissions
 
+// What the intent table cannot read whole (the audit of lane 37): a write to
+// a file, a substitution, a heredoc, a shell or an interpreter given a
+// script, an eval. lib/intent.ts reads the words of each part and would say
+// "Lire des fichiers" for `cat secrets.env > /tmp/x`; on the screen that
+// approves it, such a command is not summarised, and its fold is open.
+const SCRIPTED: Readonly<Record<string, RegExp>> = {
+  sh: /^-[a-z]*c[a-z]*$/, bash: /^-[a-z]*c[a-z]*$/, zsh: /^-[a-z]*c[a-z]*$/, dash: /^-[a-z]*c[a-z]*$/, ksh: /^-[a-z]*c[a-z]*$/,
+  python: /^-c$/, python3: /^-c$/, node: /^-(?:e|p|-eval|-print)$/, perl: /^-[a-z]*e$/i, ruby: /^-e$/,
+};
+export function opaque(command: string): boolean {
+  // Single quotes keep their text literal; double quotes still substitute.
+  const live = command.replace(/'[^']*'/g, "''");
+  if (/\$\(|`|<<|<\(|>\(/.test(live)) return true;
+  const unquoted = live.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  for (const match of unquoted.matchAll(/(?:^|[^<>&\d])\d?(>>?|&>)\s*([^\s;&|]+)/g)) if (!/^&\d$|^\/dev\/null$/.test(match[2] ?? '')) return true;
+  return commandParts(command).some((part) => {
+    const words = part.text.split(/\s+/).filter(Boolean);
+    const program = (words[0] ?? '').split('/').at(-1) ?? '';
+    if (program === 'eval' || program === 'source' || program === '.') return true;
+    const flag = SCRIPTED[program];
+    return flag !== undefined && words.slice(1).some((w) => flag.test(w));
+  });
+}
+
+// The words between two intents: "puis" in a title, "puis à" after
+// "Autoriser … à" (French repeats the preposition), "and" in English.
+const joined = (t: Translate, key: 'request_then' | 'request_then_ask'): Translate => (k, values) => (k === 'intent_and' ? t(key) : t(k, values));
+const capital = (text: string) => text.charAt(0).toLocaleUpperCase() + text.slice(1);
+
+// The command's sentence: lib/intent.ts's, or its first word for a command
+// the table does not know ("Lancer docker", never "docker …").
+function commandSentence(item: PermissionItem, command: string, t: Translate, key: 'request_then' | 'request_then_ask'): string {
+  if (opaque(command)) return t('intent_opaque');
+  const intents = intentsOf(command);
+  const only = intents[0];
+  if (intents.length === 0 || (intents.length === 1 && only?.kind === 'unknown')) {
+    const first = only?.name ?? commandParts(command)[0]?.text.split(/\s+/)[0] ?? item.tool;
+    return capital(t('intent_unknown', { name: first }));
+  }
+  return intentSentence(command, joined(t, key));
+}
+
 // A permission says what it means to do, in the person's language, from the
 // command itself, whatever the harness wrote (docs/v2/ui-overhaul-plan.md,
 // 2.5.1 and U9, lane 37): lib/intent.ts's sentence for a command; for the
 // other tools, what they do to what, the target in the fold.
 export function permissionTitle(item: PermissionItem, t: Translate): string {
   const { input } = item;
-  if (input.kind === 'execute') return intentSentence(input.command, t) || t('intent_tool_other', { tool: item.tool });
+  if (input.kind === 'execute') return commandSentence(item, input.command, t, 'request_then');
   if (input.kind === 'read' || input.kind === 'edit' || input.kind === 'delete' || input.kind === 'move' || input.kind === 'search' || input.kind === 'fetch') return t(`intent_tool_${input.kind}`);
   return t('intent_tool_other', { tool: item.tool });
 }
 
-// The same intent as a verb phrase after "Autoriser … à": an unknown
-// command is said by its first word ("lancer docker"), never "docker …".
+// The same intent as a verb phrase after "Autoriser … à".
 function intentPhrase(item: PermissionItem, t: Translate): string {
-  const { input } = item;
-  if (input.kind === 'execute') {
-    const intents = intentsOf(input.command);
-    const only = intents[0];
-    if (intents.length === 0 || (intents.length === 1 && only?.kind === 'unknown')) {
-      const first = only?.name ?? commandParts(input.command)[0]?.text.split(/\s+/)[0] ?? item.tool;
-      return t('intent_unknown', { name: first });
-    }
-  }
-  const title = permissionTitle(item, t);
-  return title.charAt(0).toLocaleLowerCase() + title.slice(1);
+  const sentence = item.input.kind === 'execute' ? commandSentence(item, item.input.command, t, 'request_then_ask') : permissionTitle(item, t);
+  return sentence.charAt(0).toLocaleLowerCase() + sentence.slice(1);
 }
+
+// The fold opens by itself when the command is what the person must read.
+export const foldOpen = (item: PermissionItem): boolean => item.input.kind === 'execute' && (item.reasonCode === 'compound' || opaque(item.input.command));
 
 // The request as a question to the person (Codex's "Allow … to …?"), naming who asks.
 export function permissionAsk(item: PermissionItem, view: InboxView, t: Translate): string {
@@ -488,6 +524,9 @@ export function foldOf(item: PermissionItem): CommandPart[] {
 // The codes the inbox says in its own words; any other (unknown, or a code
 // a later policy adds) shows the policy's sentence in the fold.
 const SAID: ReadonlySet<string> = new Set(['compound', 'not_allowed', 'network', 'dependency', 'outside_checkout']);
+// Until the policy sends its codes, the rules whose meaning is one of them
+// (session/policy.ts) give it; any other rule shows the policy's sentence.
+const RULE_CODES: Readonly<Record<string, ReasonCode>> = { 'install.package': 'dependency', network: 'network' };
 const SUBCOMMANDS = new Set(['git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'cargo', 'go', 'make', 'pip', 'pip3']);
 
 // The command a "not allowed" names: the part the policy's sentence starts
@@ -506,10 +545,10 @@ function askingName(command: string, reason: string): string {
 // the inbox knows, else the service's own sentence, shown in the fold.
 export function reasonOf(item: PermissionItem, t: Translate): { readonly said?: string; readonly raw?: string } {
   if (item.suggestion.decision !== 'ask') return {};
-  const code = item.reasonCode;
+  const code = item.reasonCode ?? RULE_CODES[item.suggestion.rule];
   if (code && SAID.has(code)) {
-    const name = code === 'not_allowed' && item.input.kind === 'execute' ? askingName(item.input.command, item.suggestion.reason) : '';
-    return { said: t(`reason_${code}`, { name }) };
+    if (code !== 'not_allowed') return { said: t(`reason_${code}`) };
+    return item.input.kind === 'execute' ? { said: t('reason_not_allowed', { name: askingName(item.input.command, item.suggestion.reason) }) } : { said: t('reason_not_allowed_plain') };
   }
   return item.suggestion.reason ? { raw: sentence(item.suggestion.reason) } : {};
 }
@@ -523,8 +562,9 @@ export const ROW_ANSWERS_MIN = 1280;
 export const answerable = (item: Item | undefined, local: Local | undefined): item is PermissionItem =>
   item?.kind === 'permission' && item.state === 'waiting' && local === undefined;
 
+// The request shown has its answers in the detail beside it: its row does not repeat them.
 export function rowAnswers(item: Item, view: InboxView): readonly Answer[] {
-  return view.wide && answerable(item, view.local.get(item.id)) ? ANSWERS : [];
+  return view.wide && item.id !== chosen(view)?.id && answerable(item, view.local.get(item.id)) ? ANSWERS : [];
 }
 
 // The inbox's own keys (lane 35's SCREEN_KEYS.inbox lists them): A, T and R
@@ -536,14 +576,14 @@ const KEY_ANSWERS: Readonly<Record<string, Answer>> = { a: 'allow_once', t: 'all
 export function inboxKey(
   input: {
     readonly key: string; readonly meta: boolean; readonly ctrl: boolean; readonly alt: boolean; readonly focus: Focus; readonly onRow: boolean; readonly overlay: boolean;
-    readonly afterG?: boolean;
+    readonly afterG?: boolean; readonly rowShown?: boolean; readonly beside: boolean;
   },
   shown: { readonly item: Item | undefined; readonly visible: boolean; readonly busy: boolean },
 ): InboxKey | null {
   if (input.meta || input.ctrl || input.alt || input.overlay || input.afterG || input.focus === 'field' || input.focus === 'terminal') return null;
-  if (input.key === ' ') return input.onRow ? { kind: 'peek' } : null;
+  if (input.key === ' ') return input.onRow && input.beside ? { kind: 'peek' } : null;
   const act = KEY_ANSWERS[input.key.toLowerCase()];
-  if (!act || !shown.visible || shown.busy || shown.item?.kind !== 'permission' || shown.item.state !== 'waiting') return null;
+  if (!act || (input.onRow && !input.rowShown) || !shown.visible || shown.busy || shown.item?.kind !== 'permission' || shown.item.state !== 'waiting') return null;
   return { kind: 'answer', act };
 }
 

@@ -104,7 +104,7 @@ test('an approved plan leaves the waiting list; its line says how it runs, and i
   assert.equal(lineOf(html, `plan:${PLAN_ID}`), 'Lead · Running · 0 of 5 landed');
   assert.ok(visibleText(html).includes('LOCAL-301'));
   assert.deepEqual(acts(html), []);
-  assert.ok(visibleText(html).includes('This no longer waits for you.'));
+  assert.ok(visibleText(html).includes('Handled.'));
   const local = new Map<string, Local>([[`plan:${PLAN_ID}`, { kind: 'plan_approved', at: FIXTURE_NOW.toISOString() }]]);
   const done = visibleText(renderInbox({ ...view, local }, en));
   assert.ok(done.includes('Approved by you at 09:41. The tickets start in order, the first ones now.'), done.join('|'));

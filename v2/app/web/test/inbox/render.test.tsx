@@ -118,7 +118,8 @@ test('a permission asks its question, offers its three answers first, then says 
   for (const expected of [
     'Permission', 'LOCAL-161', 'Open the session', 'Allow the author to install date-fns?', 'Upcoming: group entries by week',
     'Session', 'Author · Opus, paused for 3 min', 'Allow once', 'Always in this project', 'Deny',
-    'Command', 'npm install date-fns', 'What for', 'Install date-fns to group dates by week', 'The policy\'s words', 'Network access and a new dependency.',
+    'Why it asks', 'The command adds a dependency to the project.',
+    'Command', 'npm install date-fns', 'What for', 'Install date-fns to group dates by week',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-author">/);
   assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once'], 'the one that lets the work go on first');
@@ -173,7 +174,7 @@ test('Send back asks once before it moves the ticket', () => {
 test('a request settled without the person (issue 145, item 4) says so and offers no button', () => {
   const id = idOf('permission');
   const html = renderInbox(viewOf({ selected: id, local: new Map([[id, { kind: 'settled' }]]) }), en);
-  assert.ok(visibleText(html).includes('This request was settled without you: the session was interrupted or ended, or someone answered it from the session.'));
+  assert.ok(visibleText(html).includes('Settled from the session.'));
   assert.equal(count(html, /data-act=/g), 0);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-author">/, 'the session, where the rules\' refusals are, stays one click away');
   const answered = renderInbox(viewOf({ selected: id, local: new Map([[id, { kind: 'answered', decision: 'allow_once' }]]) }), en);
@@ -183,7 +184,7 @@ test('a request settled without the person (issue 145, item 4) says so and offer
 
 test('an item handled earlier has no button', () => {
   const html = renderInbox(viewOf({ selected: idOf('permission', 'handled'), open: true }), en);
-  assert.ok(visibleText(html).includes('This no longer waits for you.'));
+  assert.ok(visibleText(html).includes('Handled.'));
   assert.equal(count(html, /data-act=/g), 0);
   assert.doesNotMatch(html, /id="deny-reason"/);
 });
@@ -191,7 +192,7 @@ test('an item handled earlier has no button', () => {
 test('an empty inbox says so in one sentence, and an unknown choice falls back to the list', () => {
   const empty = text(viewOf({ items: [] }));
   assert.ok(empty.includes('Nothing waits for you.'));
-  assert.ok(empty.includes('What a session or the lead asks you, every plan and every release to approve, comes here.'));
+  assert.ok(!empty.some((line) => line.includes('comes here')), 'one sentence, and nothing about the interface');
   const gone = renderInbox(viewOf({ selected: 'release:gone', open: true }), en);
   assert.ok(visibleText(gone).includes('This item is no longer in the inbox.'));
 });

@@ -24,6 +24,10 @@
 // ticket at its review), review-editor (its Editor) and review-takeover (its
 // Terminal after Take over, given back once captured).
 //
+// Lane 37's, named only: inbox-permission (the reviewer's compound request
+// selected), inbox-handled (the "Traité" group opened and scrolled to), and
+// sheet-inbox (the inbox's sheet, with its own keys A, T, R and Space).
+//
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
 // the page, which the app answers without a document load (lane 34): the
@@ -53,7 +57,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -109,14 +113,16 @@ export async function capture(options: { readonly out: string; readonly screens?
         const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
         const reviewer = sessions.find((s) => s.role === 'reviewer') ?? sessions[0];
-        const inbox = await (await page.request.get(`${app.base}/api/service/inbox`)).json() as { id: string; kind: string; state: string }[];
-        const permission = inbox.find((item) => item.kind === 'permission' && item.state === 'waiting');
+        // The request to show: the reviewer's compound one (lane 37's fixture), else the first that waits.
+        const inbox = await (await page.request.get(`${app.base}/api/service/inbox`)).json() as { id: string; kind: string; state: string; reasonCode?: string }[];
+        const waits = inbox.filter((item) => item.kind === 'permission' && item.state === 'waiting');
+        const permission = waits.find((item) => item.reasonCode) ?? waits[0];
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
           'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
           review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
-          'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox',
+          'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox',
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -161,7 +167,10 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.evaluate(() => { if (document.location.hash) document.location.hash = ''; });
             await settle(page);
             const toggle = page.locator('#handled-toggle');
-            if (await toggle.count() > 0) await toggle.click();
+            if (await toggle.count() > 0) {
+              await toggle.click();
+              await page.mouse.move(0, 0);
+            }
             const handled = page.locator('#handled, .handled-title').first();
             if (await handled.count() > 0) await handled.scrollIntoViewIfNeeded();
             await settle(page);

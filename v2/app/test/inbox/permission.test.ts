@@ -13,7 +13,7 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../../web/lib/i18n.ts';
 import {
-  ROW_ANSWERS_MIN, closesOnEscape, foldOf, inboxKey, itemTitle, ordered, permissionAsk, permissionTitle, reasonOf, rowAnswers,
+  ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, itemTitle, ordered, permissionAsk, permissionTitle, reasonOf, rowAnswers,
   type InboxView, type Item,
 } from '../../web/screens/inbox/model.ts';
 import { SCREEN_KEYS, keyLabel, sheetRows } from '../../web/shell/keys.ts';
@@ -47,9 +47,19 @@ const SHAPES: readonly (readonly [string, string, string])[] = [
   ['curl -s https://registry.example.invalid/v1/x', 'Appeler registry.example.invalid', 'Call registry.example.invalid'],
   // The live app's LOCAL-14 item (plan, 1.5): reads of several kinds, then the tests and the types.
   ['git show 0cae6b1; cat src/page.ts; grep -rn \'heading\' src | head -20; ls node_modules >/dev/null 2>&1 && (npm test 2>&1 | tail -8; npm run typecheck 2>&1 | tail -5)',
-    'Lire le dépôt et lancer les tests', 'Read the repository and run the tests'],
-  [REVIEW_COMMAND, 'Lire l\'historique et le diff du dépôt et lancer les tests du projet', 'Read the repository\'s history and diff and run the project\'s tests'],
-  ['docker compose up -d', 'docker …', 'docker …'],
+    'Lire le dépôt puis lancer les tests', 'Read the repository and run the tests'],
+  [REVIEW_COMMAND, 'Lire l\'historique et le diff du dépôt puis lancer les tests du projet', 'Read the repository\'s history and diff and run the project\'s tests'],
+  ['git status; npm install date-fns; npm test', 'Lire l\'historique et le diff du dépôt, installer date-fns puis lancer les tests du projet', 'Read the repository\'s history and diff, install date-fns and run the project\'s tests'],
+  // A command the table does not know is said by its first word, never cut short.
+  ['docker compose up -d', 'Lancer docker', 'Run docker'],
+];
+
+// What the intent table cannot read whole (the audit of lane 37): a write to
+// a file, a substitution, a heredoc, a shell given a script. The title does
+// not summarise it, and the fold is open.
+const OPAQUE = [
+  'cat secrets.env > /tmp/x', 'ls `rm -rf build`', 'echo $(rm -rf ~)', 'cat <<EOF > notes.md\nhello\nEOF', 'sh -c "rm -rf build"', 'bash -lc \'npm test\'',
+  'npm test >> log.txt', 'git log; eval "$CMD"', 'python3 -c "import os"', 'node -e "1"',
 ];
 
 test('a request\'s title is its intent, from the command, in the person\'s language, whatever the harness wrote', () => {
@@ -59,6 +69,18 @@ test('a request\'s title is its intent, from the command, in the person\'s langu
     assert.equal(permissionTitle(item, en), english, text);
     assert.equal(itemTitle(item, undefined, en), permissionTitle(item, en), 'the row and the detail say the same');
   }
+});
+
+test('a command the table cannot read whole is not summarised: its title says so and its fold is open', () => {
+  for (const text of OPAQUE) {
+    const item = command(text);
+    assert.equal(permissionTitle(item, fr), 'Lancer une commande composée', text);
+    assert.equal(permissionTitle(item, en), 'Run a compound command', text);
+    assert.equal(foldOpen(item), true, text);
+  }
+  for (const text of ['npm test 2>&1 | tail -8', 'git log 2>/dev/null', REVIEW_COMMAND, 'grep -n \'a > b\' src']) assert.equal(foldOpen(command(text)), false, text);
+  assert.equal(foldOpen({ ...command('npm test'), reasonCode: 'compound' }), true, 'the policy says it is compound');
+  assert.equal(permissionAsk(command('echo $(id)'), viewOf([]), fr), 'Autoriser le relecteur à lancer une commande composée\u202f?');
 });
 
 test('a request that is not a command says what it does to what, and the tool when it is none of them', () => {
@@ -72,13 +94,13 @@ test('a request that is not a command says what it does to what, and the tool wh
 
 test('the request is asked as a question, naming who asks: the reviewer, the author, or the session', () => {
   const view = viewOf([compound]);
-  assert.equal(permissionAsk(compound, view, fr), 'Autoriser le relecteur à lire l\'historique et le diff du dépôt et lancer les tests du projet ?');
+  assert.equal(permissionAsk(compound, view, fr), 'Autoriser le relecteur à lire l\'historique et le diff du dépôt puis à lancer les tests du projet\u202f?');
   assert.equal(permissionAsk(compound, view, en), 'Allow the reviewer to read the repository\'s history and diff and run the project\'s tests?');
   const author = { ...command('npm install date-fns'), sessionId: 'fixture-160' };
-  assert.equal(permissionAsk(author, view, fr), 'Autoriser l\'auteur à installer date-fns ?');
+  assert.equal(permissionAsk(author, view, fr), 'Autoriser l\'auteur à installer date-fns\u202f?');
   const unknown = { ...command('docker compose up -d'), sessionId: 'nobody' };
-  assert.equal(permissionAsk(unknown, view, fr), 'Autoriser la session à lancer docker ?');
-  assert.equal(permissionAsk({ ...unknown, input: { kind: 'read', path: 'a' } }, view, fr), 'Autoriser la session à lire un fichier ?');
+  assert.equal(permissionAsk(unknown, view, fr), 'Autoriser la session à lancer docker\u202f?');
+  assert.equal(permissionAsk({ ...unknown, input: { kind: 'read', path: 'a' } }, view, fr), 'Autoriser la session à lire un fichier\u202f?');
 });
 
 test('the fold holds the command one part per line, cut for display only, a quoted separator kept', () => {
@@ -95,7 +117,7 @@ test('the fold holds the command one part per line, cut for display only, a quot
 });
 
 test('the reason is said by its code, the command it names included; with no code, or an unknown one, the service\'s sentence goes to the fold', () => {
-  assert.deepEqual(reasonOf(compound, fr), { said: '« git merge-base » n\'est pas une commande que la politique autorise seule.' });
+  assert.deepEqual(reasonOf(compound, fr), { said: '«\u00a0git merge-base\u00a0» n\'est pas une commande que la politique autorise seule.' });
   assert.deepEqual(reasonOf(compound, en), { said: '“git merge-base” is not a command the policy allows on its own.' });
   const sentences: Record<Exclude<ReasonCode, 'not_allowed' | 'unknown'>, string> = {
     compound: 'La commande utilise une syntaxe du shell que la politique ne lit pas mot à mot.',
@@ -112,9 +134,16 @@ test('the reason is said by its code, the command it names included; with no cod
   assert.deepEqual(reasonOf({ ...plain, reasonCode: 'sandbox' as ReasonCode }, fr), { raw: policy });
   // not_allowed names the part the reason names, else the command's first word.
   assert.deepEqual(reasonOf({ ...command('ls; make build'), suggestion: { decision: 'ask', rule: 'default', reason: 'Not on the list.' }, reasonCode: 'not_allowed' }, fr),
-    { said: '« ls » n\'est pas une commande que la politique autorise seule.' });
+    { said: '«\u00a0ls\u00a0» n\'est pas une commande que la politique autorise seule.' });
   assert.deepEqual(reasonOf({ ...command('ls; make build'), suggestion: { decision: 'ask', rule: 'default', reason: 'make build is not allowed' }, reasonCode: 'not_allowed' }, fr),
-    { said: '« make build » n\'est pas une commande que la politique autorise seule.' });
+    { said: '«\u00a0make build\u00a0» n\'est pas une commande que la politique autorise seule.' });
+  // Not a shell command: no name to quote.
+  assert.deepEqual(reasonOf({ ...compound, input: { kind: 'read', path: '/etc/hosts' }, reasonCode: 'not_allowed' }, fr), { said: 'La politique n\'autorise pas cette action seule.' });
+  // With no code, the policy's own rules the app knows give one (the policy lane will send it).
+  const rule = (name: string, reason = 'Network access and a new dependency.') => ({ ...compound, reasonCode: undefined, suggestion: { decision: 'ask' as const, rule: name, reason } });
+  assert.deepEqual(reasonOf(rule('install.package'), fr), { said: 'La commande ajoute une dépendance au projet.' });
+  assert.deepEqual(reasonOf(rule('network'), fr), { said: 'La commande appelle le réseau.' });
+  assert.deepEqual(reasonOf(rule('default'), fr), { raw: 'Network access and a new dependency.' });
   assert.deepEqual(reasonOf({ ...compound, suggestion: { decision: 'allow', rule: 'run.safe' } }, fr), {});
 });
 
@@ -125,34 +154,40 @@ test('what waits comes first; what was handled and what expired make one group u
   assert.ok(waiting.some((item) => item.id === compound.id));
   assert.deepEqual(handled.map((item) => item.id), [(fixture.items[3] as Item).id, expired.id], 'the service\'s order, latest first');
   assert.equal(fr('handled_group', { n: handled.length }), 'Traité · 2');
+  assert.equal(fr('allow_always'), 'Toujours pour ce projet');
   assert.equal(en('handled_group', { n: handled.length }), 'Handled · 2');
 });
 
 test('the row carries the three answers from 1280 px, for a request that waits and nothing else', () => {
   assert.equal(ROW_ANSWERS_MIN, 1280);
   const answers = ['allow_once', 'allow_always', 'reject_once'];
-  assert.deepEqual(rowAnswers(compound, viewOf([compound])), answers);
-  assert.deepEqual(rowAnswers(compound, viewOf([compound], { wide: false })), [], 'under 1280 px the detail holds them');
+  const shown = fixture.items[0] as Item;
+  assert.deepEqual(rowAnswers(compound, viewOf([shown, compound])), answers);
+  assert.deepEqual(rowAnswers(compound, viewOf([compound])), [], 'the request shown has its answers in the detail beside it, once');
+  assert.deepEqual(rowAnswers(compound, viewOf([shown, compound], { wide: false })), [], 'under 1280 px the detail holds them');
   assert.deepEqual(rowAnswers(expired, viewOf([expired])), []);
   assert.deepEqual(rowAnswers(fixture.items[0] as Item, viewOf(fixture.items)), [], 'a release is answered in its detail');
-  assert.deepEqual(rowAnswers(compound, viewOf([compound], { local: new Map([[compound.id, { kind: 'busy' }]]) })), [], 'once answered, the row says so instead');
+  assert.deepEqual(rowAnswers(compound, viewOf([shown, compound], { local: new Map([[compound.id, { kind: 'busy' }]]) })), [], 'once answered, the row says so instead');
   assert.equal(fr('allow_always'), 'Toujours pour ce projet', 'the owner\'s words');
 });
 
 test('A, T and R answer the request shown, Space peeks at the row walked to; each is in the inbox\'s sheet and nowhere else', () => {
   const shown = { item: compound as Item, visible: true, busy: false };
-  const key = (k: string, extra: Partial<Parameters<typeof inboxKey>[0]> = {}) => inboxKey({ key: k, meta: false, ctrl: false, alt: false, focus: 'none', onRow: false, overlay: false, ...extra }, shown);
+  const key = (k: string, extra: Partial<Parameters<typeof inboxKey>[0]> = {}) => inboxKey({ key: k, meta: false, ctrl: false, alt: false, focus: 'none', onRow: false, overlay: false, beside: true, ...extra }, shown);
   assert.deepEqual(key('a'), { kind: 'answer', act: 'allow_once' });
   assert.deepEqual(key('T'), { kind: 'answer', act: 'allow_always' });
   assert.deepEqual(key('r'), { kind: 'answer', act: 'reject_once' });
   assert.deepEqual(key(' ', { onRow: true, focus: 'control' }), { kind: 'peek' });
   assert.equal(key(' '), null, 'Space off a row scrolls, as the browser does');
-  assert.deepEqual(key('a', { focus: 'control' }), { kind: 'answer', act: 'allow_once' }, 'from a walked row too');
+  assert.deepEqual(key('a', { focus: 'control', onRow: true, rowShown: true }), { kind: 'answer', act: 'allow_once' }, 'from the row of the request shown too');
+  assert.equal(key('a', { focus: 'control', onRow: true, rowShown: false }), null, 'from another row, A would answer a request the person is not reading');
+  assert.equal(key(' ', { onRow: true, focus: 'control', beside: false }), null, 'under 1024 px a peek would hide the row: Space is the browser\'s');
   for (const blocked of [{ focus: 'field' as const }, { focus: 'terminal' as const }, { overlay: true }, { ctrl: true }, { meta: true }, { alt: true }]) assert.equal(key('a', blocked), null, JSON.stringify(blocked));
-  assert.equal(inboxKey({ key: 'a', meta: false, ctrl: false, alt: false, focus: 'none', onRow: false, overlay: false }, { ...shown, item: expired }), null, 'a handled item has no answer');
-  assert.equal(inboxKey({ key: 'a', meta: false, ctrl: false, alt: false, focus: 'none', onRow: false, overlay: false }, { ...shown, visible: false }), null, 'on a phone, the list alone answers nothing');
-  assert.equal(inboxKey({ key: 'a', meta: false, ctrl: false, alt: false, focus: 'none', onRow: false, overlay: false }, { ...shown, busy: true }), null, 'once is enough');
-  assert.equal(inboxKey({ key: 'a', meta: false, ctrl: false, alt: false, focus: 'none', onRow: false, overlay: false }, { ...shown, item: fixture.items[0] as Item }), null);
+  const plain = { key: 'a', meta: false, ctrl: false, alt: false, focus: 'none' as const, onRow: false, overlay: false, beside: true };
+  assert.equal(inboxKey(plain, { ...shown, item: expired }), null, 'a handled item has no answer');
+  assert.equal(inboxKey(plain, { ...shown, visible: false }), null, 'on a phone, the list alone answers nothing');
+  assert.equal(inboxKey(plain, { ...shown, busy: true }), null, 'once is enough');
+  assert.equal(inboxKey(plain, { ...shown, item: fixture.items[0] as Item }), null);
 
   // The sheet lists exactly the keys the inbox binds, on the inbox only.
   const own = SCREEN_KEYS.inbox ?? [];
@@ -160,13 +195,13 @@ test('A, T and R answer the request shown, Space peeks at the row walked to; eac
   for (const shortcut of own) {
     const token = shortcut.keys[0] as string;
     const typed = token === 'Space' ? ' ' : token.toLowerCase();
-    assert.deepEqual(key(typed, { onRow: token === 'Space', focus: token === 'Space' ? 'control' : 'none' }), shortcut.action, shortcut.id);
+    assert.deepEqual(key(typed, { onRow: token === 'Space', rowShown: token !== 'Space', focus: token === 'Space' ? 'control' : 'none' }), shortcut.action, shortcut.id);
     assert.ok(sheetRows('inbox').includes(shortcut));
     assert.ok(!sheetRows('tower').includes(shortcut));
     for (const language of ['en', 'fr'] as const) assert.ok(loadCatalog('shell', language)[shortcut.label], `${shortcut.label} in shell.${language}`);
   }
   for (const typed of [...'abcdefghijklmnopqrstuvwxyz', ' ']) {
-    const action = key(typed, { onRow: true, focus: 'control' });
+    const action = key(typed, { onRow: true, rowShown: true, focus: 'control' });
     if (action) assert.ok(own.some((s) => JSON.stringify(s.action) === JSON.stringify(action)), `${typed} does something the sheet does not list`);
   }
   assert.equal(keyLabel('Space', false, fr), 'Espace');
@@ -175,7 +210,7 @@ test('A, T and R answer the request shown, Space peeks at the row walked to; eac
 
 test('a key that ends a G chord is the chord\'s: G then T goes to the tower, it never answers', () => {
   const shown = { item: compound as Item, visible: true, busy: false };
-  const input = { key: 't', meta: false, ctrl: false, alt: false, focus: 'none' as const, onRow: false, overlay: false };
+  const input = { key: 't', meta: false, ctrl: false, alt: false, focus: 'none' as const, onRow: false, overlay: false, beside: true };
   assert.equal(inboxKey({ ...input, afterG: true }, shown), null);
   assert.deepEqual(inboxKey({ ...input, afterG: false }, shown), { kind: 'answer', act: 'allow_always' });
   assert.equal(inboxKey({ ...input, key: 'a', afterG: true }, shown), null, 'any key after a G is left to the shell');

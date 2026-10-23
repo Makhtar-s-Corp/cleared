@@ -45,7 +45,7 @@ test('from 1280 px a waiting request\'s row carries its three answers, in French
 
 test('the row says the request\'s intent in French, and the group of what no longer waits is "Traité" with its count', () => {
   const shown = visibleText(renderInbox(viewOf(), fr));
-  for (const expected of ['En attente · 5', 'Lire l\'historique et le diff du dépôt et lancer les tests du projet', 'LOCAL-158 · relecteur en pause', 'Installer date-fns', 'Traité · 3'])
+  for (const expected of ['En attente · 5', 'Lire l\'historique et le diff du dépôt puis lancer les tests du projet', 'LOCAL-158 · relecteur en pause', 'Installer date-fns', 'Traité · 3'])
     assert.ok(shown.includes(expected), `missing: ${expected}`);
   const open = visibleText(renderInbox(viewOf(), fr, { handledOpen: true }));
   for (const expected of ['Lancer le script db:migrate', 'LOCAL-160 · ne vous attend plus']) assert.ok(open.includes(expected), `missing: ${expected}`);
@@ -56,10 +56,10 @@ test('the compound request\'s detail: the question, the ticket, the three answer
   const shown = visibleText(html);
   for (const expected of [
     'Autorisation', 'LOCAL-158', 'Ouvrir la session',
-    'Autoriser le relecteur à lire l\'historique et le diff du dépôt et lancer les tests du projet ?',
+    'Autoriser le relecteur à lire l\'historique et le diff du dépôt puis à lancer les tests du projet\u202f?',
     '“Comings and goings” replaces “Departures and arrivals”',
-    'Autoriser une fois', 'Toujours pour ce projet', 'Refuser', 'Raison d\'un refus, facultative',
-    'Pourquoi la question', '« git merge-base » n\'est pas une commande que la politique autorise seule.',
+    'Autoriser une fois', 'Toujours pour ce projet', 'Refuser', 'Motif du refus (facultatif)',
+    'Pourquoi la question', '«\u00a0git merge-base\u00a0» n\'est pas une commande que la politique autorise seule.',
     'Session', 'Commande',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   const lines = [...html.matchAll(/<span class="fold-line">(?:<span class="op">([^<]*)<\/span>)?([^<\n]*)/g)].map((m) => `${m[1] ?? ''} ${m[2]}`.replace(/\s+/g, ' ').trim());
@@ -72,7 +72,7 @@ test('with no code, the policy\'s English sentence is in the fold under a French
   const plain: PermissionItem = { ...compound, reasonCode: undefined };
   const html = renderInbox(viewOf({ items: [plain], selected: plain.id, open: true }), fr);
   const shown = visibleText(html);
-  assert.ok(shown.includes('Les mots de la politique'));
+  assert.ok(shown.includes('Texte de la règle'));
   assert.ok(shown.includes('Git merge-base main HEAD is not a command the policy allows on its own'));
   assert.ok(!shown.includes('Pourquoi la question'));
 });
@@ -81,7 +81,7 @@ test('an expired request keeps its intent title, says it no longer waits, and of
   const html = renderInbox(viewOf({ selected: expired.id, open: true }), fr);
   const shown = visibleText(html);
   assert.ok(shown.includes('Lancer le script db:migrate'));
-  assert.ok(shown.includes('Ceci ne vous attend plus.'));
+  assert.ok(shown.includes('Traité.'));
   assert.doesNotMatch(html, /data-act=/);
   const local = new Map<string, Local>([[compound.id, { kind: 'answered', decision: 'allow_once' }]]);
   const answered = renderInbox(viewOf({ selected: compound.id, open: true, local }), fr);

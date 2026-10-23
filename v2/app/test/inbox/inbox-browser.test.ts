@@ -24,8 +24,8 @@ declare const document: any;
 declare const window: any;
 
 const WIDTHS = [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 768, height: 1024 }, { width: 390, height: 844 }] as const;
-const QUESTION = 'Autoriser le relecteur à lire l\'historique et le diff du dépôt et lancer les tests du projet ?';
-const REASON = '« git merge-base » n\'est pas une commande que la politique autorise seule.';
+const QUESTION = 'Autoriser le relecteur à lire l\'historique et le diff du dépôt puis à lancer les tests du projet\u202f?';
+const REASON = '«\u00a0git merge-base\u00a0» n\'est pas une commande que la politique autorise seule.';
 
 async function withInbox(run: (page: any, base: string, open: (viewport: { width: number; height: number }) => Promise<string>) => Promise<void>): Promise<void> {
   const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { language: 'fr' } });
@@ -80,13 +80,17 @@ test('the reviewer\'s request in French: its question, its folded command, its r
       assert.equal((await page.locator('#detail .d-ask').innerText()).trim(), QUESTION, at);
       assert.ok(await inView(page, '#detail .d-ask'), `${at}: the question`);
       for (const act of ['allow_once', 'allow_always', 'reject_once']) assert.ok(await inView(page, `#detail [data-act="${act}"]`), `${at}: ${act} above the fold`);
-      assert.deepEqual(await page.locator('#detail [data-act]').allInnerTexts(), ['Autoriser une fois\nA', 'Toujours pour ce projet\nT', 'Refuser\nR'], at);
+      // The key caps beside the words from 768 px; on a phone, the words alone.
+      const labels = ['Autoriser une fois', 'Toujours pour ce projet', 'Refuser'];
+      assert.deepEqual(await page.locator('#detail [data-act]').allInnerTexts(), viewport.width >= 768 ? labels.map((label, n) => `${label}\n${'ATR'[n]}`) : labels, at);
       assert.ok((await page.locator('#detail .facts').first().innerText()).includes(REASON), `${at}: the reason by its code`);
       assert.equal(await page.locator('#fold').evaluate((element: any) => element.open), false, `${at}: the command folded`);
       assert.match(await page.locator('#fold summary').innerText(), /^Commande\s+git log -5 --oneline/);
-      // From 1280 px the row carries the answers; the list is beside the detail from 1024 px.
-      const row = page.locator(`#inbox-list li:has(a.item[data-item="${id}"]) [data-row-act]`);
-      assert.equal(await row.count(), viewport.width >= 1280 ? 3 : 0, `${at}: the row's answers`);
+      // From 1280 px another request's row carries the answers; the shown one's are in the detail beside it.
+      const rowActs = (selector: string) => page.locator(`#inbox-list li:has(${selector}) [data-row-act]`).count();
+      assert.equal(await rowActs(`a.item[data-item="${id}"]`), 0, `${at}: the shown request's row`);
+      assert.equal(await rowActs('a.item:not(.current)[data-item^="permission"]'), viewport.width >= 1280 ? 3 : 0, `${at}: another request's row`);
+      assert.equal(await page.locator('#fold .fold-more').innerText(), '+4', `${at}: the parts the fold hides`);
     }
     // Opened, the fold holds one part per line.
     await page.locator('#fold summary').click();
@@ -146,5 +150,25 @@ test('the "Traité" group is folded under what waits, with its count, and opens 
     assert.ok(await box('#handled-items') > await box(`#inbox-list section:first-of-type li:nth-child(${waiting})`), 'below what waits');
     // The top bar names the screen; the list has no heading of its own.
     assert.equal(await page.locator('#screen h1').count(), 0);
+  });
+});
+
+test('a row\'s answer shows its item, says what it did there, and puts the focus on that line', { skip }, async () => {
+  await withInbox(async (page, base) => {
+    const sent: string[] = [];
+    await page.route(/\/api\/service\/sessions\/[^/]+\/requests\/[^/]+\/answer$/, async (route: any) => {
+      sent.push(route.request().url());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":true}' });
+    });
+    await page.goto(`${base}/inbox`);
+    const row = page.locator('#inbox-list li:has(a.item[data-item*="request-review-1"])');
+    await row.locator('[data-row-act="reject_once"]').click();
+    await page.locator('#detail .d-done').waitFor();
+    assert.match(await page.evaluate(() => document.location.hash), /request-review-1/, 'the answered item is the one shown');
+    assert.equal((await page.locator('#detail .d-done').innerText()).trim(), 'Refusé. Le motif est transmis à la session.');
+    await page.waitForFunction(() => document.activeElement?.id === 'd-done', undefined, { timeout: 2000 });
+    assert.equal((await page.locator('#inbox-live').innerText()).trim(), 'Refusé. Le motif est transmis à la session.');
+    assert.equal(sent.length, 1);
+    assert.match(sent[0] ?? '', /\/requests\/request-review-1\/answer$/);
   });
 });
