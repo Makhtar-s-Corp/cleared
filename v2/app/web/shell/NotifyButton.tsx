@@ -62,7 +62,7 @@ export function NotifyButton({ t, me }: { readonly t: Translate; readonly me: Me
     <div className={view.show && view.on ? 'notify on' : 'notify'} id="notify" hidden={!view.show}>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="ghost" className="icon" id="notify-summary" aria-label={t(view.show && view.on ? 'notify_label_on' : 'notify_label')}>
+          <Button variant="ghost" className="icon" id="notify-summary" aria-label={t(view.show && view.on ? 'notify_label_on' : 'notify_label')} data-tip={t(view.show && view.on ? 'notify_label_on' : 'notify_label')}>
             <BellSimple size={18} weight={view.show && view.on ? 'bold' : 'regular'} aria-hidden="true" />
           </Button>
         </PopoverTrigger>

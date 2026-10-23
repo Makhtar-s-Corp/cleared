@@ -103,18 +103,19 @@ test('each theme is a base, a contrast and an accent; the neutrals are mixed fro
   for (const name of DARK.keys()) assert.ok(/^--(theme-|mix-|awaiting|success|danger|count-ink|e-|halo-|stage-review|harness-)/.test(name) || name === '--select', `dark redefines ${name}`);
 });
 
-test('four spacing steps, three text sizes and two weights, and the sheet\'s new rules use only them', () => {
+test('four spacing steps, three text sizes and two weights, and the app\'s and the tower\'s sheets use only them', () => {
   assert.deepEqual(['--space-1', '--space-2', '--space-3', '--space-4'].map((n) => LIGHT.get(n)), ['4px', '8px', '16px', '24px']);
   assert.deepEqual(['--text-sm', '--text-md', '--text-lg'].map((n) => LIGHT.get(n)), ['12px', '14px', '20px']);
   assert.deepEqual(['--weight-regular', '--weight-strong'].map((n) => LIGHT.get(n)), ['400', '550']);
-  // The shell's and the tower's rows: from "/* shell" to the end of the tower's rules, no size or weight but a token.
-  const from = SHEET.indexOf('/* shell');
-  const to = SHEET.indexOf('/* sign-in');
-  assert.ok(from > 0 && to > from, 'the shell\'s and the tower\'s rules are marked');
-  const rules = SHEET.slice(from, to).replace(/\/\*[^]*?\*\//g, '');
-  for (const [, value] of rules.matchAll(/font-size:\s*([^;}]+)/g)) assert.match(value!, /^var\(--text-(sm|md|lg)\)$/, `font-size: ${value}`);
-  for (const [, value] of rules.matchAll(/font-weight:\s*([^;}]+)/g)) assert.match(value!, /^var\(--weight-(regular|strong)\)$/, `font-weight: ${value}`);
-  for (const [, value] of rules.matchAll(/\bfont:\s*([^;}]+)/g)) assert.match(value!, /var\(--weight-[a-z]+\) var\(--text-[a-z]+\)/, `font: ${value}`);
+  // Every rule of the app's sheet and of the tower's (the sign-in page's included): no size or weight but a
+  // token; --text-input is a phone's fields' size, where iOS zooms on less (art director of lane 35, item 9).
+  const TOWER = readFileSync(join(WEB, 'screens/tower/tower.css'), 'utf8');
+  for (const [name, sheet] of [['app.css', SHEET.slice(SHEET.indexOf('* {'))], ['tower.css', TOWER]] as const) {
+    const rules = sheet.replace(/\/\*[^]*?\*\//g, '');
+    for (const [, value] of rules.matchAll(/font-size:\s*([^;}]+)/g)) assert.match(value!, /^var\(--text-(sm|md|lg|input)\)$/, `${name}: font-size: ${value}`);
+    for (const [, value] of rules.matchAll(/font-weight:\s*([^;}]+)/g)) assert.match(value!, /^var\(--weight-(regular|strong)\)$/, `${name}: font-weight: ${value}`);
+    for (const [, value] of rules.matchAll(/\bfont:\s*([^;}]+)/g)) if (value !== 'inherit') assert.match(value!, /var\(--weight-[a-z]+\) var\(--text-[a-z]+\)/, `${name}: font: ${value}`);
+  }
 });
 
 test('transitions are short and move only opacity and transform, and stop for reduced motion', () => {

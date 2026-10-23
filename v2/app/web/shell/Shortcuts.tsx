@@ -13,7 +13,7 @@ import type { Translate } from '@/lib/i18n.ts';
 import type { ScreenName } from '@/lib/routes.ts';
 import { Keys } from './Kbd.tsx';
 import { resolveKey, sheetRows, type Action, type Chord, type Focus, type Scope } from './keys.ts';
-import { trapTab, useFocusBack } from './dialog.ts';
+import { trapTab } from './dialog.ts';
 
 // The session screen's tabs in the order 1 to 4 press them (TABS in screens/session/tabs.ts).
 export const SESSION_TABS = ['plan', 'terminal', 'editor', 'browser'] as const;
@@ -97,7 +97,6 @@ export function pressTab(n: number): void {
 const SCOPES: readonly Scope[] = ['global', 'list', 'session', 'field'];
 
 export function ShortcutSheet({ t, screen, mac, onClose }: { readonly t: Translate; readonly screen: ScreenName; readonly mac: boolean; readonly onClose: () => void }) {
-  useFocusBack();
   // The dialog itself takes the focus: Tab reaches its button, Esc closes it.
   const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => { box.current?.focus(); }, []);

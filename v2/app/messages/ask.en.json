@@ -15,7 +15,7 @@
   "ask_no_answer": "No answer: the reader stopped before it answered. Ask again below.",
   "ask_cost": "${amount}",
   "ask_usage": "{cost} · {input} tokens in, {output} out",
-  "ask_week": "week used at {n} %",
+  "ask_week": "week used at {n}%",
   "ask_total": "In all: {text}",
   "ask_follow_label": "A follow-up question",
   "ask_follow_placeholder": "Ask a follow-up…",

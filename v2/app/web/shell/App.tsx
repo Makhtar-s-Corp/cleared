@@ -329,10 +329,24 @@ function Shell({ shared }: { readonly shared: Shared }) {
     try { localStorage.setItem(SIDEBAR_KEY, next); }
     catch { /* the choice lasts for this page only */ }
   }, [mode]);
+  // The focus a dialog gives back when it closes: where it was when the
+  // dialog opened (a field's typing goes on), read before the app behind the
+  // dialog is made inert, which takes the focus away (art director, item 5).
+  const back = useRef<HTMLElement | null>(null);
+  const open = useCallback((next: Exclude<Overlay, null>) => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !active.closest('.overlay')) back.current = active;
+    setOverlay(next);
+  }, []);
+  const shut = useRef<Overlay>(null);
+  useEffect(() => {
+    if (overlay === null && shut.current !== null && back.current?.isConnected) back.current.focus({ preventScroll: true });
+    shut.current = overlay;
+  }, [overlay]);
   const openPalette = useCallback(() => {
     setGestures(GESTURES.filter((g) => g.screen === place.screen && shownGesture(g.selector)).map((g) => g.id));
-    setOverlay('palette');
-  }, [place.screen]);
+    open('palette');
+  }, [place.screen, open]);
 
   const runItem = useCallback((item: PaletteItem) => {
     setOverlay(null);
@@ -342,7 +356,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
       switch (run.kind) {
         case 'navigate': navigate(run.href); break;
         case 'theme': flipTheme(); break;
-        case 'sheet': setOverlay('sheet'); break;
+        case 'sheet': open('sheet'); break;
         case 'sidebar': toggleSidebar(); break;
         case 'gesture': {
           const gesture = GESTURES.find((g) => g.id === run.id);
@@ -353,7 +367,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
         }
       }
     });
-  }, [navigate, flipTheme, toggleSidebar]);
+  }, [navigate, flipTheme, toggleSidebar, open]);
 
   // The sidebar draws again only when what it shows changes (Sidebar is memo).
   const groups = useMemo(() => sessionGroups(rows), [rows]);
@@ -364,14 +378,14 @@ function Shell({ shared }: { readonly shared: Shared }) {
   const runKey = useCallback((action: Action) => {
     switch (action.kind) {
       case 'palette': openPalette(); break;
-      case 'sheet': setOverlay('sheet'); break;
+      case 'sheet': open('sheet'); break;
       case 'sidebar': if (mode !== 'bar') toggleSidebar(); break;
       case 'go': navigate(hrefOf(action.to)); break;
       case 'next': case 'previous': case 'open': case 'back': walkRows(action.kind, lastRow); break;
       case 'tab': pressTab(action.n); break;
       case 'send': (document.activeElement?.closest('form') as HTMLFormElement | null)?.requestSubmit(); break;
     }
-  }, [openPalette, toggleSidebar, navigate, mode]);
+  }, [openPalette, toggleSidebar, navigate, mode, open]);
   useShortcuts({ screen: place.screen, overlay: overlay !== null, mac, run: runKey });
 
   const items = useMemo(() => (overlay === 'palette' ? paletteItems({ screen: place.screen, needs, sessions: rows, gestures, theme, t: towerT }) : []),

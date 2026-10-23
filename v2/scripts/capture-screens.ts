@@ -12,11 +12,13 @@
 // The language is the app's default, French, unless --language en asks for
 // English (the owner's decision of 2026-10-23).
 //
-// Four more captures, named only (lane 35): palette and sheet (the tower
-// with the command palette or the shortcut sheet open, by their keys), and
-// tower-empty and lead-empty (the tower and the lead screen with their
-// lists answered empty in the page: no session, nothing waiting, no plan,
-// no message).
+// More captures, named only (lane 35): palette and sheet (the tower with
+// the command palette or the shortcut sheet open, by their keys), the same
+// on the inbox and on a session (palette-inbox, palette-session,
+// sheet-session: each screen's sheet is on under them), rail-tooltip (the
+// sidebar folded, a screen's tooltip shown; from 768 px), and tower-empty
+// and lead-empty (the tower and the lead screen with their lists answered
+// empty in the page: no session, nothing waiting, no plan, no message).
 //
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
@@ -47,7 +49,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'tower-empty', 'lead-empty'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -104,11 +106,13 @@ export async function capture(options: { readonly out: string; readonly screens?
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
-          palette: '/', sheet: '/', 'tower-empty': '/', 'lead-empty': '/lead',
+          palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
+          'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
         for (const screen of screens) {
+          if (screen === 'rail-tooltip' && Number(w) < 768) continue;
           const path = paths[screen as CaptureScreen];
           const empty = screen.endsWith('-empty');
           if (empty) await page.route(EMPTY, answerEmpty);
@@ -125,16 +129,31 @@ export async function capture(options: { readonly out: string; readonly screens?
             if (documents !== before) errors.push(`${w} ${theme}: ${screen} loaded a document`);
           } else await page.goto(`${app.base}${path}`);
           await settle(page);
-          if (screen === 'palette' || screen === 'sheet') {
-            await page.locator('#screen').focus();
-            await page.keyboard.press(screen === 'palette' ? 'Control+k' : 'Shift+Slash');
-            await page.locator(screen === 'palette' ? '#palette' : '#shortcuts').waitFor();
+          const overlay = screen.startsWith('palette') ? 'palette' : screen.startsWith('sheet') ? 'sheet' : null;
+          if (overlay) {
+            await page.evaluate(() => document.getElementById('screen')?.focus({ preventScroll: true }));
+            await page.keyboard.press(overlay === 'palette' ? 'Control+k' : 'Shift+Slash');
+            await page.locator(overlay === 'palette' ? '#palette' : '#shortcuts').waitFor();
             await page.waitForTimeout(250);
+          }
+          let folded = false;
+          if (screen === 'rail-tooltip') {
+            if (await page.locator('.app[data-sidebar="open"]').count() > 0) {
+              await page.evaluate(() => document.getElementById('screen')?.focus({ preventScroll: true }));
+              await page.keyboard.press('BracketLeft');
+              folded = true;
+            }
+            await page.locator('#nav a[href="/inbox"]').hover();
+            await page.waitForTimeout(300);
           }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
           await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
-          if (screen === 'palette' || screen === 'sheet') await page.keyboard.press('Escape');
+          if (overlay) await page.keyboard.press('Escape');
+          if (folded) {
+            await page.mouse.move(0, 0);
+            await page.keyboard.press('BracketLeft');
+          }
           if (empty) {
             await page.unroute(EMPTY);
             await page.goto(`${app.base}/`);

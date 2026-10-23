@@ -9,9 +9,9 @@ import { defaultFilter } from 'cmdk';
 import { Button } from '@/components/ui/button.tsx';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command.tsx';
 import type { Translate } from '@/lib/i18n.ts';
-import { trapTab, useFocusBack } from './dialog.ts';
+import { trapTab } from './dialog.ts';
 import { Keys } from './Kbd.tsx';
-import { GROUP_LABEL, groupOrder, rank, type PaletteItem } from './palette.ts';
+import { GROUP_LABEL, groupOrder, keywordsOf, rank, shownItems, type PaletteGroup, type PaletteItem } from './palette.ts';
 
 const GOTO_ICONS: Readonly<Record<string, Icon>> = { '/': Broadcast, '/inbox': Tray, '/sessions': TerminalWindow, '/lead': ListChecks };
 
@@ -29,10 +29,15 @@ export default function Palette({ t, items, dark, onRun, onClose }: {
   readonly t: Translate; readonly items: readonly PaletteItem[]; readonly dark: boolean;
   readonly onRun: (item: PaletteItem) => void; readonly onClose: () => void;
 }) {
-  useFocusBack();
   const [search, setSearch] = useState('');
-  const order = groupOrder(search);
-  const grouped = useMemo(() => order.map((group) => ({ group, items: items.filter((item) => item.group === group) })).filter((g) => g.items.length > 0), [items, order]);
+  const grouped = useMemo(() => {
+    const shown = shownItems(items, search);
+    const best: Partial<Record<PaletteGroup, number>> = {};
+    if (search.trim()) {
+      for (const item of shown) best[item.group] = Math.max(best[item.group] ?? 0, rank(item.id, search, keywordsOf(item), defaultFilter(item.id, search, keywordsOf(item))));
+    }
+    return groupOrder(search, best).map((group) => ({ group, items: shown.filter((item) => item.group === group) })).filter((g) => g.items.length > 0);
+  }, [items, search]);
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); return; }
     trapTab(event);
@@ -52,11 +57,11 @@ export default function Palette({ t, items, dark, onRun, onClose }: {
                 {rows.map((item) => {
                   const Glyph = iconOf(item, dark);
                   return (
-                    <CommandItem key={item.id} value={item.id} keywords={[item.label, item.detail ?? '', ...item.keywords]} data-item={item.id} onSelect={() => onRun(item)}>
+                    <CommandItem key={item.id} value={item.id} keywords={keywordsOf(item)} data-item={item.id} onSelect={() => onRun(item)}>
                       {item.group === 'waiting' ? <span className="state-dot" data-state="waiting" aria-hidden="true" />
                         : Glyph ? <Glyph size={16} aria-hidden="true" /> : <Circle size={16} aria-hidden="true" />}
-                      <span className="label">{item.label}</span>
-                      {item.detail ? <span className="detail">{item.detail}</span> : null}
+                      <span className="palette-label">{item.label}</span>
+                      {item.detail ? <span className="palette-detail">{item.detail}</span> : null}
                       {item.shortcut ? <Keys keys={item.shortcut} /> : null}
                     </CommandItem>
                   );

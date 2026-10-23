@@ -38,12 +38,11 @@ test('what waits for the person first, then what works, then what reviews', asyn
   assert.deepEqual(order, ['waiting_human', 'working', 'working', 'reviewing']);
 });
 
-test('an empty tower says nothing twice: the heading alone for what waits, one quiet row per part, one action where there is one thing to do', async () => {
+test('an empty tower says nothing twice: the heading and one line, the plans with their one action, what landed', async () => {
   const data = await towerFixture(FIXTURE_NOW);
   const markup = renderTowerBody(towerModel({ ...data, inbox: [], sessions: [], plans: [], tickets: [] }, FIXTURE_NOW), en);
-  assert.match(markup, /<h1>Nothing needs you\.<\/h1><\/div>/, 'no line of zeros under the heading');
-  assert.doesNotMatch(markup, /needs-title/, 'no empty Needs you list under a heading that already says it');
-  assert.match(markup, /<div class="empty-state" id="live-empty"><svg[^]*?<\/svg><p class="empty-text">No session is running\.<\/p><\/div>/, 'the bar above starts one: no second New ticket');
+  assert.match(markup, /<h1 id="tower-heading">Nothing needs you\.<\/h1><p class="muted">No session is running\.<\/p>/, 'one line under the heading, not a list of zeros');
+  assert.doesNotMatch(markup, /live-title|live-empty|Open inbox/, 'no empty Live sessions part, no inbox to open');
   assert.match(markup, /<div class="empty-state" id="plans-empty"><svg[^]*?<\/svg><p class="empty-text">No plan in progress\.<\/p><button type="button" class="chip-button">New goal<\/button><\/div>/);
   assert.match(markup, /<p class="empty-text">Nothing landed yet today\.<\/p>/);
   for (const language of ['en', 'fr'] as const) {

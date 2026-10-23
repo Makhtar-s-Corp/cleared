@@ -113,5 +113,6 @@
   "top_session": "{ticket} · {title}",
   "source_fixtures_short": "Sample",
   "key_cap_enter": "Enter",
-  "key_cap_esc": "Esc"
+  "key_cap_esc": "Esc",
+  "cmd_ask_code": "Ask about the code"
 }

@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
 import { towerModel } from '../../web/screens/tower/model.ts';
-import { GESTURES, GROUPS, groupOrder, paletteItems, rank, type PaletteItem } from '../../web/shell/palette.ts';
+import { GESTURES, GROUPS, groupOrder, paletteItems, rank, shownItems, type PaletteItem } from '../../web/shell/palette.ts';
 import { sessionRows } from '../../web/shell/model.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { loadCatalog } from '../../src/catalog.ts';
@@ -85,8 +85,8 @@ test('a ticket\'s number typed alone puts its sessions first, above what waits o
   assert.equal(rank('session-fixture-161', 'local-161', ['LOCAL-161', '161'], 0.6), 1);
   assert.ok(rank('waiting-request-161', '161', ['LOCAL-161', 'permission'], 0.95) < 1, 'what waits on that ticket comes after its session');
   assert.equal(rank('session-fixture-160', '161', ['LOCAL-160', '160'], 0), 0, 'another ticket stays out');
-  assert.equal(rank('goto-inbox', 'inbox', [], 0.9), 0.9, 'any other query is cmdk\'s own');
-  assert.equal(rank('waiting-x', 'date', ['LOCAL-161'], 0.7), 0.7);
+  assert.equal(rank('goto-inbox', 'inbox', ['Inbox'], 0.9), 0.99, 'a word that holds the query ranks high');
+  assert.equal(rank('waiting-x', 'date', ['LOCAL-161'], 0.7), 0.5, 'a scatter of letters ranks low');
 });
 
 test('the groups keep their order, but a ticket\'s number puts the sessions first', () => {
@@ -94,4 +94,26 @@ test('the groups keep their order, but a ticket\'s number puts the sessions firs
   assert.deepEqual(groupOrder('inbox'), GROUPS);
   assert.deepEqual(groupOrder('161'), ['sessions', 'waiting', 'actions', 'goto', 'general']);
   assert.deepEqual(groupOrder(' LOCAL-161 '), ['sessions', 'waiting', 'actions', 'goto', 'general']);
+});
+
+test('a word the person typed outranks a scatter of its letters, and the groups follow their best match (art director, item 2)', async () => {
+  // "upcoming": the session's title holds it; the long Knowledge title only scatters its letters.
+  const session = rank('session-fixture-1', 'upcoming', ['Upcoming: group entries by week', 'LOCAL-161 · Author', 'LOCAL-161', '161'], 0.4);
+  const scatter = rank('waiting-knowledge', 'upcoming', ['The archive page reuses the list\'s heading: a heading changes in both templates.', 'Knowledge · 50 min · LOCAL-158', 'LOCAL-158'], 0.6);
+  assert.ok(session > scatter, `${session} > ${scatter}`);
+  assert.deepEqual(groupOrder('upcoming', { waiting: scatter, sessions: session, goto: 0 }), ['sessions', 'waiting', 'actions', 'goto', 'general']);
+  assert.deepEqual(groupOrder('', { sessions: 1 }), GROUPS, 'no query: the fixed order');
+});
+
+test('with no query, what needs the person shows three rows, so the screens are on the first screen of the palette (item 4)', async () => {
+  const list = await items('tower');
+  const many = [...list, ...list.filter((i) => i.group === 'waiting').map((i) => ({ ...i, id: `${i.id}-again` }))];
+  assert.equal(shownItems(many, '').filter((i) => i.group === 'waiting').length, 3);
+  assert.equal(shownItems(many, 'a').filter((i) => i.group === 'waiting').length, many.filter((i) => i.group === 'waiting').length, 'a query searches them all');
+});
+
+test('a session offers its permission\'s three answers while it shows them (item 3)', async () => {
+  const actions = (await items('session', ['session_allow_once', 'session_allow_always', 'session_reject_once', 'takeover'])).filter((i) => i.group === 'actions');
+  assert.deepEqual(actions.map((i) => i.label), ['Allow once', 'Always in this project', 'Deny', 'Take over']);
+  assert.ok(GESTURES.some((g) => g.id === 'ask_code' && g.screen === 'tower'), 'the tower\'s Ask about the code too');
 });

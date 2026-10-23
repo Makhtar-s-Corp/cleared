@@ -39,9 +39,9 @@ test('the Plans tab opens /lead, and /lead and /plans/<id> mount the lead screen
   } finally {
     await app.close();
   }
-  assert.match(renderSidebar('lead', shell), /<a class="nav-item" href="\/lead" data-nav="lead" aria-current="page" title="Plans \(G P\)">[^]*?<span class="nav-label">Plans<\/span>/);
+  assert.match(renderSidebar('lead', shell), /<a class="nav-item" href="\/lead" data-nav="lead" aria-current="page" data-tip="Plans · G P">[^]*?<span class="nav-label">Plans<\/span>/);
   const tower = renderSidebar('tower', shell);
-  assert.match(tower, /<a class="nav-item" href="\/lead" data-nav="lead" title="Plans \(G P\)">/);
+  assert.match(tower, /<a class="nav-item" href="\/lead" data-nav="lead" data-tip="Plans · G P">/);
   assert.ok(tower.indexOf('>Plans<') > tower.indexOf('>Sessions<'), 'after Sessions');
   assert.doesNotMatch(tower, /Tickets/, 'no screen that does not exist yet (lane 34\'s audit)');
 });

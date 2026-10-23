@@ -1,6 +1,7 @@
 // What the shell's two dialogs (the palette, the shortcut sheet) share:
-// Tab kept inside, and the focus given back where it was on close.
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+// Tab kept inside. The shell gives the focus back where it was on close
+// (shell/App.tsx).
+import type { KeyboardEvent } from 'react';
 
 // Keeps Tab inside the dialog: its one field and its list are all it holds.
 export function trapTab(event: KeyboardEvent<HTMLElement>): void {
@@ -11,13 +12,4 @@ export function trapTab(event: KeyboardEvent<HTMLElement>): void {
   const last = focusable[focusable.length - 1]!;
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-}
-
-// The element the focus goes back to when a dialog closes.
-export function useFocusBack(): void {
-  const back = useRef<Element | null>(typeof document === 'undefined' ? null : document.activeElement);
-  useEffect(() => () => {
-    const element = back.current;
-    if (element instanceof HTMLElement && element.isConnected) element.focus({ preventScroll: true });
-  }, []);
 }

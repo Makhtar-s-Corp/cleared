@@ -223,8 +223,12 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
   return (
     <div className="tower">
       <div className="tower-main">
-        {/* Nothing running, planned or landed: the heading says it all, no line of zeros under it. */}
-        <div className="hello"><h1>{heading(model.needs.length, t)}</h1>{quiet ? null : <p className="muted">{towerSummary(model, t)}</p>}</div>
+        {/* The heading says what needs the person, once: no section title under it repeats it, and its
+            line says no session runs rather than a list of zeros (art director of lane 35, item 6). */}
+        <div className="hello">
+          <div><h1 id="tower-heading">{heading(model.needs.length, t)}</h1><p className="muted">{quiet ? t('live_empty') : towerSummary(model, t)}</p></div>
+          {model.needs.length === 0 ? null : <a className="more" href="/inbox">{t('open_inbox')}</a>}
+        </div>
         {model.services.length === 0 ? null : (
           <ul className="workspace-line" aria-label={t('services_title')}>
             {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
@@ -232,17 +236,19 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
         )}
         {/* Nothing waiting: the heading above says so; no empty list under it. */}
         {model.needs.length === 0 ? null : (
-          <section className="block" aria-labelledby="needs-title">
-            <div className="block-head"><h2 id="needs-title">{t('needs_title')}</h2><span className="n">{model.needs.length}</span><a className="more" href="/inbox">{t('open_inbox')}</a></div>
+          <section className="block needs-block" aria-labelledby="tower-heading">
             <ul className="rows needs">{model.needs.map((card) => <Need key={card.id} card={card} t={t} />)}</ul>
           </section>
         )}
+        {/* Nothing waiting and nothing running: the heading's line already says no session runs. */}
+        {model.live.length === 0 && model.needs.length === 0 ? null : (
         <section className="block" aria-labelledby="live-title">
           <div className="block-head"><h2 id="live-title">{t('live_title')}</h2><span className="n">{model.live.length || ''}</span><a className="more" href="/sessions">{t('all_sessions')}</a></div>
           {/* The bar above is how a session starts: no second New ticket here. */}
           {model.live.length === 0 ? <Empty icon={TerminalWindow} id="live-empty" text={t('live_empty')} />
             : <ul className="rows sessions">{liveOrder(model.live).map((card) => <LiveSession key={card.id} card={card} t={t} />)}</ul>}
         </section>
+        )}
       </div>
       <aside className="tower-side">
         <LeadSide lead={model.lead} t={t} draft={leadDraft} onDraft={onLeadDraft} />

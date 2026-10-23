@@ -26,19 +26,19 @@ async function view(over: Partial<LeadView> = {}): Promise<LeadView> {
 
 test('the header line says the lead is always on, its context share and when it was refreshed from memory', async () => {
   const { state } = await view();
-  assert.deepEqual(headerLine(state, FIXTURE_NOW, en), { text: 'Always on · context 45 % · refreshed from memory 10 min ago', tone: 'on' });
-  assert.equal(headerLine({ ...state, phase: 'working' }, FIXTURE_NOW, en).text, 'Always on · context 45 % · refreshed from memory 10 min ago');
+  assert.deepEqual(headerLine(state, FIXTURE_NOW, en), { text: 'Always on · context 45% · refreshed from memory 10 min ago', tone: 'on' });
+  assert.equal(headerLine({ ...state, phase: 'working' }, FIXTURE_NOW, en).text, 'Always on · context 45% · refreshed from memory 10 min ago');
   assert.deepEqual(headerLine({ ...state, phase: 'starting', context: null, refreshedAt: null }, FIXTURE_NOW, en), { text: 'Starting', tone: 'quiet' });
   assert.deepEqual(headerLine({ ...state, phase: 'refreshing' }, FIXTURE_NOW, en), { text: 'Refreshing from memory', tone: 'quiet' });
   assert.deepEqual(headerLine({ ...state, phase: 'down' }, FIXTURE_NOW, en), { text: 'The lead is not running', tone: 'down' });
   assert.equal(headerLine({ ...state, context: null }, FIXTURE_NOW, en).text, 'Always on · refreshed from memory 10 min ago', 'no measure yet: no share');
-  assert.equal(headerLine({ ...state, refreshedAt: new Date(FIXTURE_NOW.getTime() - 3 * 3_600_000).toISOString() }, FIXTURE_NOW, en).text, 'Always on · context 45 % · refreshed from memory 3 h ago');
+  assert.equal(headerLine({ ...state, refreshedAt: new Date(FIXTURE_NOW.getTime() - 3 * 3_600_000).toISOString() }, FIXTURE_NOW, en).text, 'Always on · context 45% · refreshed from memory 3 h ago');
   assert.equal(headerLine(state, FIXTURE_NOW, fr).text, 'Toujours actif · contexte 45 % · rechargé depuis la mémoire il y a 10 min');
 });
 
 test('the down state is a danger pill in the lead card, the live states are not', async () => {
   const live = renderLead(await view(), en);
-  assert.match(live, /<p class="lead-line" id="lead-line">Always on · context 45 % · refreshed from memory 10 min ago<\/p>/);
+  assert.match(live, /<p class="lead-line" id="lead-line">Always on · context 45% · refreshed from memory 10 min ago<\/p>/);
   assert.doesNotMatch(live, /lead-down/);
   const v = await view();
   const down = renderLead({ ...v, state: { ...v.state, phase: 'down' } }, en);
@@ -95,8 +95,8 @@ test('the plan panel against the capture: five numbered items, After lines, lane
   assert.deepEqual([...html.matchAll(/<p class="plan-after">([^<]+)<\/p>/g)].map((m) => m[1]), ['After 1', 'After 2']);
   assert.equal(count(html, /<span class="lane full">Full circuit<\/span>/), 3);
   assert.equal(count(html, /<span class="lane fast">Fast lane<\/span>/), 2);
-  assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['40 min · 1.2 %', '50 min · 1.6 %', '30 min · 0.8 %', '10 min · 0.2 %', '5 min · 0.1 %']);
-  assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 2 h of work', '3.9 % of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets']);
+  assert.deepEqual([...html.matchAll(/<span class="plan-estimate">([^<]+)<\/span>/g)].map((m) => m[1]), ['40 min · 1.2%', '50 min · 1.6%', '30 min · 0.8%', '10 min · 0.2%', '5 min · 0.1%']);
+  assert.deepEqual([...html.matchAll(/<li class="plan-fact">([^<]+)<\/li>/g)].map((m) => m[1]), ['About 2 h of work', '3.9% of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets']);
   assert.match(html, /<button type="button" class="plain plan-change" data-plan-action="change">Change the plan<\/button>/);
   assert.match(html, /<button type="button" class="primary plan-go" data-plan-action="approve">Approve the plan and start<\/button>/);
   assert.match(html, /Day headings in the list of entries/);
@@ -173,8 +173,7 @@ test('the side: the plan, the other plans as links, an empty state, a plan the a
   assert.match(all, /<a href="\/plans\/plan-2">Make the guestbook ready for a small team<\/a> <span class="faint">Running · 1 of 5 landed<\/span>/);
   assert.match(all, /<a href="\/plans\/plan-0">Newest entries first<\/a> <span class="faint">Done · 2 of 2 landed<\/span>/);
   const none = renderLead(await view({ plans: [] }), en);
-  assert.match(none, /No plan yet\./);
-  assert.doesNotMatch(none, /Give the lead a goal/, 'the thread offers it; the side does not repeat it');
+  assert.match(none, /<div class="empty-state block" id="plan-empty">[^]*?No plan yet\.<span class="empty-note">The lead proposes one once you give it a goal\.<\/span>[^]*?Give the lead a goal<\/button>/, 'what to do, and the action');
   const missing = renderLead(await view({ planId: 'plan-404' }), en);
   assert.match(missing, /There is no plan plan-404\./);
 });
@@ -187,7 +186,7 @@ test('the memory panel: the last handover, the commitments open then done, the r
   assert.match(open, /<h2 id="memory-title">What the lead remembers<\/h2>/);
   assert.match(renderLead(await view({ memory: 'loading' }), en), /Reading what the lead remembers…/);
   assert.match(renderLead(await view(), en), /aria-expanded="false"/);
-  assert.match(text(html), /Refreshed 2 times · highest context 45 % · claude · opus-5\.5/);
+  assert.match(text(html), /Refreshed 2 times · highest context 45% · claude · opus-5\.5/);
   assert.match(text(html), /Last handover Generation 2 handed over at 09:31, in its own words\. The owner asked for nothing new since the morning\./);
   assert.match(text(html), /Open commitments When the first ticket of the plan lands, tell the owner how long it took from start to live\./);
   assert.match(text(html), /Done Tell the owner when the checks of the example are green again\. Done at 05:41: Told at 15:41: green after the lock file fix\./);

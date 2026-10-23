@@ -12,7 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import type { Translate } from '@/lib/i18n.ts';
 import type { ScreenName } from '@/lib/routes.ts';
 import type { Me } from '@/lib/screen.ts';
-import { Keys } from './Kbd.tsx';
+import { isMac, Keys } from './Kbd.tsx';
+import { keyLabel } from './keys.ts';
 import { Logo } from './Logo.tsx';
 import { inboxBadge, NAV, type LeadDot, type SessionGroup, type SidebarMode, type Theme } from './model.ts';
 import { NotifyButton } from './NotifyButton.tsx';
@@ -44,7 +45,7 @@ export type SidebarProps = {
 
 export function ThemeButton({ t, theme, onFlip }: { readonly t: Translate; readonly theme: Theme; readonly onFlip?: () => void }) {
   return (
-    <Button variant="ghost" className="icon theme" id="theme" aria-label={t(theme === 'dark' ? 'theme_light' : 'theme_dark')} aria-pressed={theme === 'dark'} title={t(theme === 'dark' ? 'theme_light' : 'theme_dark')} onClick={onFlip}>
+    <Button variant="ghost" className="icon theme" id="theme" aria-label={t(theme === 'dark' ? 'theme_light' : 'theme_dark')} aria-pressed={theme === 'dark'} data-tip={t(theme === 'dark' ? 'theme_light' : 'theme_dark')} onClick={onFlip}>
       {theme === 'dark' ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
     </Button>
   );
@@ -60,11 +61,11 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
       <div className="side-head">
         <a className="side-brand" href="/"><Logo size={18} /><span className="project">{props.project || t('app_name')}</span></a>
         <Button variant="ghost" className="icon side-toggle" id="sidebar-toggle" aria-label={t(folded ? 'side_expand' : 'side_collapse')} aria-expanded={!folded} aria-controls="sidebar"
-          aria-keyshortcuts="[" title={`${t(folded ? 'side_expand' : 'side_collapse')} ([)`} onClick={props.onToggle}>
+          aria-keyshortcuts="[" data-tip={`${t(folded ? 'side_expand' : 'side_collapse')} · [`} onClick={props.onToggle}>
           <SidebarSimple size={16} aria-hidden="true" />
         </Button>
       </div>
-      <button type="button" className="search" id="palette-open" aria-label={t('palette_open')} aria-keyshortcuts="Meta+K Control+K" title={t('key_palette')} onClick={props.onSearch}>
+      <button type="button" className="search" id="palette-open" aria-label={t('palette_open')} aria-keyshortcuts="Meta+K Control+K" data-tip={`${t('palette_open')} · ${keyLabel('Mod', isMac())} K`} onClick={props.onSearch}>
         <MagnifyingGlass size={16} aria-hidden="true" /><span className="search-text">{t('palette_open')}</span><Keys keys={['Mod+K']} />
       </button>
       <nav className="side-nav" id="nav" aria-label={t('nav_label')}>
@@ -75,9 +76,10 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
             return (
               <li key={item.screen}>
                 <a className="nav-item" href={item.href} data-nav={item.screen} onClick={() => props.onPick?.(item.href)} aria-current={screen === item.screen ? 'page' : undefined}
-                  title={`${label} (${item.chord.join(' ')})${item.screen === 'lead' && props.lead !== 'unknown' ? ` · ${t(`side_lead_${props.lead}`)}` : ''}`}>
+                  data-tip={`${label} · ${item.chord.join(' ')}${item.screen === 'lead' && props.lead !== 'unknown' ? ` · ${t(`side_lead_${props.lead}`)}` : ''}`}>
                   <Glyph size={16} weight={screen === item.screen ? 'fill' : 'regular'} aria-hidden="true" />
                   <span className="nav-label">{label}</span>
+                  <Keys keys={item.chord} />
                   {item.screen === 'inbox' ? (
                     <>
                       <span className="count" id="inbox-count" hidden={badge === null} aria-hidden="true">{badge ?? ''}</span>
@@ -87,7 +89,6 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
                   {item.screen === 'lead' && props.lead !== 'unknown' ? (
                     <><span className="lead-dot" id="lead-dot" data-lead={props.lead} aria-hidden="true" /><span className="sr-only">{t(`side_lead_${props.lead}`)}</span></>
                   ) : null}
-                  <Keys keys={item.chord} />
                 </a>
               </li>
             );
@@ -115,11 +116,13 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
         </section>
       ) : null}
       <div className="side-foot">
+        {/* The lead's state in words: its dot beside Plans alone read as a plan running (art director, item 14). */}
+        {props.lead === 'unknown' ? null : <p className="lead-status" id="lead-status"><span className="lead-dot" data-lead={props.lead} aria-hidden="true" />{t(`side_lead_${props.lead}`)}</p>}
         {props.source === 'fixtures' ? <p className="source-pill"><span className="long">{t('source_fixtures')}</span><span className="short">{t('source_fixtures_short')}</span></p> : null}
         <div className="side-foot-row">
           <Popover>
             <PopoverTrigger asChild>
-              <button type="button" className="person" id="person" aria-label={signedIn}>
+              <button type="button" className="person" id="person" aria-label={signedIn} data-tip={signedIn}>
                 <span className="avatar" aria-hidden="true">{props.userName.slice(0, 1).toUpperCase()}</span><span className="name">{props.userName}</span>
               </button>
             </PopoverTrigger>

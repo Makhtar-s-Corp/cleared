@@ -41,6 +41,7 @@ export const GESTURES: readonly Gesture[] = [
   { id: 'new_ticket', screen: 'tower', selector: '#ask-input', label: 'cmd_new_ticket', focus: true },
   { id: 'new_goal', screen: 'tower', selector: '[data-lead="goal"]', label: 'cmd_new_goal' },
   { id: 'ask_lead', screen: 'tower', selector: '[data-lead="lead"]', label: 'cmd_ask_lead' },
+  { id: 'ask_code', screen: 'tower', selector: '[data-bar="ask"]', label: 'cmd_ask_code' },
   { id: 'recipe', screen: 'tower', selector: '[data-bar="recipe"]', label: 'cmd_recipe' },
   { id: 'allow_once', screen: 'inbox', selector: '#detail [data-act="allow_once"]', label: 'cmd_allow_once' },
   { id: 'allow_always', screen: 'inbox', selector: '#detail [data-act="allow_always"]', label: 'cmd_allow_always' },
@@ -49,6 +50,9 @@ export const GESTURES: readonly Gesture[] = [
   { id: 'approve', screen: 'inbox', selector: '#detail [data-act="approve"]', label: 'cmd_approve' },
   { id: 'approve_plan', screen: 'inbox', selector: '#detail [data-act="approve_plan"]', label: 'cmd_approve_plan' },
   { id: 'inbox_go', screen: 'inbox', selector: '#detail [data-act="plan_go"]', label: 'cmd_go' },
+  { id: 'session_allow_once', screen: 'session', selector: '[data-answer="allow_once"]', label: 'cmd_allow_once' },
+  { id: 'session_allow_always', screen: 'session', selector: '[data-answer="allow_always"]', label: 'cmd_allow_always' },
+  { id: 'session_reject_once', screen: 'session', selector: '[data-answer="reject_once"]', label: 'cmd_reject_once' },
   { id: 'takeover', screen: 'session', selector: '#takeover', label: 'cmd_takeover' },
   { id: 'giveback', screen: 'session', selector: '#giveback', label: 'cmd_giveback' },
   { id: 'session_go', screen: 'session', selector: '[data-act="plan_go"]', label: 'cmd_go' },
@@ -89,26 +93,46 @@ export function paletteItems({ screen, needs, sessions, gestures, theme, t }: Pa
   return [...waiting, ...actions, ...goto, ...rows, ...general];
 }
 
-// The palette's order for a query: cmdk's own score (`base`), except that a
-// ticket's number typed alone (161, LOCAL-161) puts that ticket's sessions
-// first, then what else matches; the sessions are what a number is typed for.
 const ticketNumber = (search: string): string | undefined => /^(?:[a-z]+-)?(\d+)$/i.exec(search.trim())?.[1];
 
+// The palette's order for a query, from cmdk's own score (`base`): a
+// ticket's number typed alone (161, LOCAL-161) puts that ticket's sessions
+// first, the sessions being what a number is typed for; then an item whose
+// words hold what was typed outranks one that only scatters its letters
+// (cmdk's subsequence match finds "upcoming" in a long unrelated title).
 export function rank(id: string, search: string, keywords: readonly string[], base: number): number {
+  if (base <= 0) return base;
   const number = ticketNumber(search);
-  if (!number || base <= 0) return base;
-  if (id.startsWith('session-') && keywords.includes(number)) return 1;
-  return Math.min(base, 0.9);
+  if (number && id.startsWith('session-') && keywords.includes(number)) return 1;
+  const typed = search.trim().toLowerCase();
+  const holds = typed !== '' && keywords.some((word) => word.toLowerCase().includes(typed));
+  return holds ? Math.min(0.99, 0.9 + base / 10) : Math.min(base, 0.5);
 }
 
-// The groups in the palette's order, the sessions first for a ticket's
-// number. cmdk sorts the items inside a group; it leaves the groups where
-// they are drawn, so the palette draws them in this order.
+// The groups in the palette's order. With no query, a fixed order; with
+// one, the group of the best match first (each group's best score, `best`),
+// and the sessions first for a ticket's number. cmdk sorts the items inside
+// a group but leaves the groups where they are drawn, so the palette draws
+// them in this order, and Enter runs the best match whatever its kind.
 export const GROUPS: readonly PaletteGroup[] = ['waiting', 'actions', 'goto', 'sessions', 'general'];
 
-export function groupOrder(search: string): readonly PaletteGroup[] {
-  return ticketNumber(search) ? ['sessions', ...GROUPS.filter((g) => g !== 'sessions')] : GROUPS;
+export function groupOrder(search: string, best: Partial<Record<PaletteGroup, number>> = {}): readonly PaletteGroup[] {
+  if (!search.trim()) return GROUPS;
+  if (ticketNumber(search)) return ['sessions', ...GROUPS.filter((g) => g !== 'sessions')];
+  return [...GROUPS].sort((a, b) => (best[b] ?? 0) - (best[a] ?? 0));
 }
+
+// With no query, what needs the person shows its first WAITING_MAX rows, so
+// the screens are on the palette's first screen; a query searches them all.
+export const WAITING_MAX = 3;
+
+export function shownItems(items: readonly PaletteItem[], search: string): PaletteItem[] {
+  if (search.trim()) return [...items];
+  let waiting = 0;
+  return items.filter((item) => item.group !== 'waiting' || (waiting += 1) <= WAITING_MAX);
+}
+
+export const keywordsOf = (item: PaletteItem): string[] => [item.label, item.detail ?? '', ...item.keywords];
 
 export const GROUP_LABEL: Readonly<Record<PaletteGroup, string>> = {
   waiting: 'palette_waiting', actions: 'palette_actions', goto: 'palette_goto', sessions: 'palette_sessions', general: 'palette_general',

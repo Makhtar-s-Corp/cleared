@@ -2,7 +2,7 @@
    as rows, with the lead, the plans and what landed in a column beside them. Its width is the main column's, not the
    window's (the sidebar takes its share), so it lays out by container queries: .tower-screen for the columns, the
    main column (rows) for the rows. One left edge for headings and rows; one list language on both sides. Sizes and
-   weights from the tokens of styles/app.css; 16 px only for a phone's fields, where iOS would zoom on less. */
+   weights from the tokens of styles/app.css (--text-input for a phone's fields). */
 .tower-screen { container: tower / inline-size; padding: var(--space-4); }
 
 /* the bar: a ticket, a goal, a question for the lead or the code, a recipe */
@@ -29,7 +29,10 @@
 /* the two columns: what needs the person leads, the column supports it */
 .tower { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-4); align-items: start; margin-top: var(--space-4); }
 .tower-main { container: rows / inline-size; display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-.hello { margin-bottom: calc(-1 * var(--space-2)); }
+.hello { display: flex; align-items: flex-end; gap: var(--space-3); margin-bottom: calc(-1 * var(--space-2)); }
+.hello > div { flex: 1; min-width: 0; }
+.hello .more { flex: none; font-size: var(--text-sm); }
+.needs-block .rows { border-top: 1px solid var(--hairline); }
 .hello h1 { font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -.02em; line-height: 1.25; text-wrap: balance; }
 .hello p { margin-top: var(--space-1); font-size: var(--text-md); }
 .block-head { display: flex; align-items: baseline; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--hairline); }
@@ -136,9 +139,11 @@
 }
 @container tower (max-width: 560px) {
   .tower-side { grid-template-columns: minmax(0, 1fr); }
-  /* One line of actions, New ticket always in view at its end; the others scroll beside it. */
-  .ask-actions { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .ask-actions .primary { position: sticky; right: 0; margin-left: auto; box-shadow: 0 0 0 var(--space-1) var(--surface); }
+  /* The actions wrap under the field, New ticket at the end of their line; Ask about the code and Run a
+     recipe stay in the palette (Ctrl-K or the top bar's search), so the bar is two lines at most. */
+  .ask-actions { flex: 1 1 100%; }
+  .ask-actions .primary { margin-left: auto; }
+  .ask-actions [data-bar="ask"], .ask-actions [data-bar="recipe"] { display: none; }
 }
 /* the rows, by the width of their own column */
 @container rows (max-width: 720px) {
@@ -156,9 +161,9 @@
 }
 @media (max-width: 767px) {
   .tower-screen { padding: var(--space-3); }
-  .ask input { height: 44px; font-size: 16px; }
+  .ask input { height: 44px; font-size: var(--text-input); }
   .svc-toggle, .recipe-toggle { min-height: 44px; padding: 0 var(--space-3); }
-  .recipe-param input, .lead-ask input { min-height: 44px; font-size: 16px; }
+  .recipe-param input, .lead-ask input { min-height: 44px; font-size: var(--text-input); }
   .recipe-bar { flex-direction: column; align-items: stretch; }
   .block-head .more { padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); }
   .row { min-height: 44px; }

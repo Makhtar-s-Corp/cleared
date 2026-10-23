@@ -97,6 +97,13 @@ test('Ctrl-K, a ticket\'s number and Enter open its session in the page; the pal
     await page.keyboard.type('New ticket');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.activeElement?.id === 'ask-input');
+    // Opened from a field and closed with Esc, the palette gives the focus back to the field (art director, item 5).
+    await page.locator('#ask-input').click();
+    await page.keyboard.press('Control+k');
+    await palette.waitFor();
+    await page.keyboard.press('Escape');
+    await palette.waitFor({ state: 'detached' });
+    await page.waitForFunction(() => document.activeElement?.id === 'ask-input');
     // A session's gesture is not offered on the tower.
     await page.keyboard.press('Escape');
     await page.locator('#screen').focus();
@@ -160,7 +167,7 @@ test('[ folds the sidebar to a rail, the choice survives a reload, and [ opens i
     await page.keyboard.press('BracketLeft');
     assert.equal(await mode(), 'rail');
     // In the rail the screens keep their names for a screen reader.
-    assert.equal(await page.locator('#nav a[href="/inbox"]').getAttribute('title'), 'Inbox (G I)');
+    assert.equal(await page.locator('#nav a[href="/inbox"]').getAttribute('data-tip'), 'Inbox · G I', 'its tooltip: the name and the chord');
     assert.match(await page.locator('#nav a[href="/inbox"]').evaluate((a: any) => a.textContent), /Inbox/);
     await page.reload();
     await page.locator('#tower-body .tower').waitFor();

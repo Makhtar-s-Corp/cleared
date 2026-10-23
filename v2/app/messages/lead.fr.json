@@ -80,10 +80,10 @@
   "plan_hours_minutes": "{h} h {m}",
   "plan_estimate": "{time} · {share}",
   "plan_week_share": "{n} %",
-  "plan_cost": "{amount} $",
+  "plan_cost": "{amount}\u00a0$",
   "plan_work": "Environ {time} de travail",
   "plan_week_total": "{n} % de la semaine",
-  "plan_cost_total": "Environ {amount}",
+  "plan_cost_total": "Environ\u00a0{amount}",
   "plan_parallel": "Jusqu'à {n} sessions à la fois",
   "plan_parallel_one": "Une session à la fois",
   "plan_samples": "Estimations tirées de {n} tickets similaires",
@@ -125,5 +125,6 @@
   "plan_step_service": "Service",
   "plan_step_integration": "Intégration",
   "plan_step_after": "attend {list}",
-  "lead_start_goal": "Donner un objectif au lead"
+  "lead_start_goal": "Donner un objectif au lead",
+  "lead_no_plan_note": "Le lead en propose un dès que vous lui donnez un objectif."
 }

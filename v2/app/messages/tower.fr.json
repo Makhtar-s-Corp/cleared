@@ -131,7 +131,7 @@
   "schedule_next_day": "Prochain passage {day} à {time}",
   "schedule_none": "Aucun passage prévu",
   "schedule_off": "Désactivé",
-  "schedule_budget": "{amount} $",
+  "schedule_budget": "{amount}\u00a0$",
   "kind_release": "Mise en ligne",
   "kind_permission": "Permission",
   "kind_question": "Question",
