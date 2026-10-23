@@ -24,10 +24,30 @@ const PLACES: readonly (readonly [RegExp, ScreenName])[] = [
 export function placeOf(pathname: string): Place | undefined {
   for (const [pattern, screen] of PLACES) {
     if (!pattern.test(pathname)) continue;
-    const session = screen === 'session' ? pathname.split('/')[2] : undefined;
-    return { screen, path: pathname, ...(session ? { session } : {}) };
+    const named = screen === 'session' ? pathname.split('/')[2] : undefined;
+    const session = named ? keptWith.get(named) ?? named : undefined;
+    return { screen, path: session ? `/sessions/${session}` : pathname, ...(session ? { session } : {}) };
   }
   return undefined;
+}
+
+// The sessions a kept view draws besides its own (lane 36, U6): the view of
+// a ticket follows the ticket from its author to its reviewer and puts the
+// live session's address in the bar without a navigation. That address is
+// placed on the view, so the shell's stack, scroll and focus see no move.
+// The first view of a ticket keeps its sessions until it is dropped.
+const keptWith = new Map<string, string>();
+
+export function keepWith(session: string, view: string): void {
+  if (session === view || keptWith.has(session) || keptWith.has(view) || [...keptWith.values()].includes(session)) return;
+  keptWith.set(session, view);
+}
+
+// The view that draws a session: another session's, or its own.
+export const viewOf = (session: string): string => keptWith.get(session) ?? session;
+
+export function forgetView(view: string): void {
+  for (const [session, kept] of keptWith) if (kept === view) keptWith.delete(session);
 }
 
 // The title of the tab, as the server wrote it on each page before.

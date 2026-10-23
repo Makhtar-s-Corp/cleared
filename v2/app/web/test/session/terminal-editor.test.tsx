@@ -108,7 +108,7 @@ test('the Terminal tab without the web terminal: why, and no command to run on t
   assert.ok(visibleText(other).some((line) => /teammate/.test(line)));
   const web = html(<TakeoverNotice view={view} t={en} web />);
   assert.doesNotMatch(web, /id="resume-command"|docker exec|on the server|<pre/, 'beside the web terminal, no command either');
-  assert.ok(visibleText(web).some((line) => /harness/.test(line)));
+  assert.deepEqual(visibleText(web), ['Taken over by you at 09:41.', 'Give it back when you are done: it is told what you changed.'], 'one line beside the terminal (lane 36)');
 });
 
 function states(): Record<string, EditorState> {

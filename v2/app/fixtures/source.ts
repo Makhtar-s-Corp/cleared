@@ -16,7 +16,9 @@
 // (GET /api/events) is answered as the service does: open, a comment every
 // KEEPALIVE_MS, and an event for each fixture write (a decision, a take
 // over, a give back, a new ticket, an ask) and for each changed() a test
-// or a lane's fixture calls.
+// or a lane's fixture calls. Lane 36's ticket LOCAL-152 has its author's
+// session, done, before the reviewer the tower shows (envelopeStory of
+// fixtures/session.ts), so its view follows the ticket from one to the other.
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
@@ -24,9 +26,10 @@ import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type Contr
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
+import { applyAll, emptyModel } from '../web/screens/session/model.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
-import { PREVIEW_KEY, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
+import { ENVELOPE_BODY, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
 import { contractItem, knowledgeItem } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
@@ -78,11 +81,16 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   // The lead and the plan it proposes are the lead fixture's, so the tower
   // and the lead's screen agree; the tower fixture adds its plan under way.
   const plans = [...lead.plans, ...fixture.plans.filter((plan) => plan.state !== 'proposed')];
-  const storeOf = (id: string) => (id === lead.session.id ? lead.store : fixture.store);
+  const envelopeReviewer = fixture.sessions.find((s) => s.ticket === ENVELOPE_TICKET && s.role === 'reviewer');
+  const envelope = envelopeReviewer ? envelopeStory(now(), envelopeReviewer) : undefined;
+  const sessions = [...fixture.sessions, ...(envelope ? [envelope.author] : [])];
+  const tickets = fixture.tickets.map((ticket) => (ticket.id === ENVELOPE_TICKET ? { ...ticket, body: ENVELOPE_BODY } : ticket));
+  const storeOf = (id: string) => (id === lead.session.id ? lead.store : envelope && (id === envelope.author.id || id === envelopeReviewer?.id) ? envelope.store : fixture.store);
+  // What a session's stored events add up to, its deltas applied, as the service's detail says.
   const state = (id: string): SessionState | undefined => {
-    let found: SessionState | undefined;
-    for (const { event } of storeOf(id).events.after(id)) if (event.type === 'STATE_SNAPSHOT') found = event.snapshot;
-    return found;
+    const model = emptyModel();
+    applyAll(model, storeOf(id).events.after(id));
+    return model.state;
   };
   // The seq a stream or a thread read starts after: ?after=, else Last-Event-ID.
   const after = (request: IncomingMessage, url: URL): number => {
@@ -117,7 +125,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       else if (collection === 'sessions' && id) changed('session', decodeURIComponent(id));
       else if (collection === 'tickets') changed('ticket', id ? decodeURIComponent(id) : null);
     });
-    if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, fixture.sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
+    if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
     if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...decided, ...lead.inbox]);
     if (method === 'GET' && collection === 'recipes' && parts.length === 1) return sendJson(response, 200, RECIPES);
@@ -187,7 +195,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (parts.length === 2) return plan ? sendJson(response, 200, plan) : sendJson(response, 404, { error: 'no such plan' });
     }
     if (collection === 'sessions' && id) {
-      const session = id === lead.session.id ? lead.session : fixture.sessions.find((s) => s.id === id);
+      const session = id === lead.session.id ? lead.session : sessions.find((s) => s.id === id);
       if (!session) return sendJson(response, 404, { error: 'no such session' });
       const taken = takenOver.get(id);
       const files = () => state(id)?.files ?? [];
@@ -228,7 +236,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       }
     }
     if (collection === 'tickets') {
-      const all = async (): Promise<Ticket[]> => [...fixture.tickets, ...await created.list()];
+      const all = async (): Promise<Ticket[]> => [...tickets, ...await created.list()];
       if (method === 'GET' && parts.length === 1) return sendJson(response, 200, await all());
       if (method === 'POST' && parts.length === 1) {
         const body = ticketBody(await readJson(request), project);

@@ -13,7 +13,7 @@ import { Actions, Detail, InboxScreen, List } from '../screens/inbox/Inbox.tsx';
 import type { InboxView } from '../screens/inbox/model.ts';
 import { LeadScreen, MemoryBody, Side, Thread } from '../screens/lead/Lead.tsx';
 import type { LeadDraft, LeadView, SideOptions } from '../screens/lead/model.ts';
-import { Composer, Crumbs, LeftCards, RightCards, SessionIndex, StatusHead, Timeline } from '../screens/session/Session.tsx';
+import { Composer, Crumbs, LeftCards, RightCards, SessionIndex, StatusHead, ThreadFilter, Timeline } from '../screens/session/Session.tsx';
 import type { SessionView } from '../screens/session/model.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import type { SessionSummary } from '../../../src/api/types.ts';
@@ -66,9 +66,10 @@ export const renderLeft = (view: SessionView, t: Translate) => html(<LeftCards v
 export const renderRight = (view: SessionView, t: Translate) => html(<RightCards view={view} t={t} />);
 export const renderCrumbs = (view: SessionView, t: Translate) => html(<Crumbs view={view} t={t} />);
 export const renderComposer = (view: SessionView, t: Translate) => html(<Composer view={view} t={t} />);
+export const renderFilter = (view: SessionView, t: Translate) => html(<ThreadFilter view={view} t={t} />);
 export const renderSession = (view: SessionView, t: Translate) => `<div class="session-top" id="crumbs">${renderCrumbs(view, t)}</div><div class="session">`
   + `<aside class="s-left" id="s-left">${renderLeft(view, t)}</aside><section class="panel"><div class="panel-head" id="status">${renderStatus(view, t)}</div>`
-  + `<div class="timeline" id="timeline">${renderTimeline(view, t)}</div><div class="panel-foot">${renderComposer(view, t)}</div></section>`
+  + `${renderFilter(view, t)}<div class="timeline" id="timeline">${renderTimeline(view, t)}</div><div class="panel-foot">${renderComposer(view, t)}</div></section>`
   + `<aside class="s-right" id="s-right">${renderRight(view, t)}</aside></div>`;
 export const renderIndex = (data: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date }, t: Translate) =>
   html(<SessionIndex sessions={data.sessions} tickets={data.tickets} now={data.now} t={t} />);

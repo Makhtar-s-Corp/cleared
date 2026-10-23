@@ -1,12 +1,13 @@
-// The session screen's four tabs (decision 30, lane 20): the strip, with
-// Take over or Give back beside it, and what each tab shows. Session.tsx
+// The session screen's four tabs (decision 30, lane 20): the strip, and
+// what each tab shows; Take over or Give back sit in the thread's header
+// (lane 36), on the ticket's live session whatever its role. Session.tsx
 // holds their state and calls the routes; tabs.ts holds the rules. Lane 32
 // adds the web terminal beside the command (components/terminal/) and the
 // editor in the Editor tab (components/editor/).
 import { Browser, Check, Circle, Code, ListChecks, TerminalWindow, type Icon } from '@phosphor-icons/react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { Editing, type EditorHandlers } from '@/components/editor/Editor.tsx';
-import { isDirty, type EditorState, type ReadOnlyWhy } from '@/components/editor/model.ts';
+import { isDirty, type EditorState, type ReadOnlyWhy, type Scope } from '@/components/editor/model.ts';
 import type { SessionFile, SessionFiles, SessionPlan } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
@@ -18,10 +19,8 @@ import {
 
 const ICONS: Readonly<Record<Tab, Icon>> = { plan: ListChecks, terminal: TerminalWindow, editor: Code, browser: Browser };
 
-export function TabStrip({ tab, t, takeover, busy = false, onSelect, onKey, onTakeover, onGiveback }: {
-  readonly tab: Tab; readonly t: Translate; readonly takeover: TakeoverView; readonly busy?: boolean;
-  readonly onSelect?: (tab: Tab) => void; readonly onKey?: (event: KeyboardEvent<HTMLDivElement>) => void;
-  readonly onTakeover?: () => void; readonly onGiveback?: () => void;
+export function TabStrip({ tab, t, onSelect, onKey }: {
+  readonly tab: Tab; readonly t: Translate; readonly onSelect?: (tab: Tab) => void; readonly onKey?: (event: KeyboardEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div className="panel-tabs">
@@ -37,11 +36,18 @@ export function TabStrip({ tab, t, takeover, busy = false, onSelect, onKey, onTa
           );
         })}
       </div>
-      {takeover.kind === 'free' && takeover.can
-        ? <Button className="btn" id="takeover" title={t('takeover_note')} disabled={busy} onClick={onTakeover}>{t('takeover')}</Button> : null}
-      {takeover.kind === 'mine' ? <Button variant="ink" className="btn primary" id="giveback" disabled={busy} onClick={onGiveback}>{t('giveback')}</Button> : null}
     </div>
   );
+}
+
+// Take over stops the session and opens it for the person; Give back hands
+// it back and tells it what the person changed (Devin's contract).
+export function TakeoverButton({ t, takeover, busy = false, onTakeover, onGiveback }: {
+  readonly t: Translate; readonly takeover: TakeoverView; readonly busy?: boolean; readonly onTakeover?: () => void; readonly onGiveback?: () => void;
+}) {
+  if (takeover.kind === 'free' && takeover.can) return <Button className="btn takeover-button" id="takeover" title={t('takeover_note')} disabled={busy} onClick={onTakeover}>{t('takeover')}</Button>;
+  if (takeover.kind === 'mine') return <Button variant="ink" className="btn primary takeover-button" id="giveback" title={t('giveback_note')} disabled={busy} onClick={onGiveback}>{t('giveback')}</Button>;
+  return null;
 }
 
 export function Criteria({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
@@ -148,21 +154,19 @@ export function PlanTab({ view, plan, t, changing = false, change = '', busy = f
   );
 }
 
-// The Terminal tab of a session taken over: what is paused, and what the
-// web terminal below runs (web: the session's harness, Shell beside it);
-// without the web terminal, why (here_only: not the loopback address). No
-// command to run on the server: the terminal is the app's (owner request of
-// 2026-10-22 17:26).
+// The Terminal tab of a session taken over, in one line (lane 36): who
+// stopped it and when, and what Give back does; without the web terminal,
+// why (here_only: not the loopback address). No command to run on the
+// server: the terminal is the app's (owner request of 2026-10-22 17:26).
 export function TakeoverNotice({ view, t, web = false, why }: { readonly view: SessionView; readonly t: Translate; readonly web?: boolean; readonly why?: 'here_only' | 'other' | undefined }) {
   const taken = takenOverOf(view);
   if (!taken || ENDED.has(phaseOf(view))) return null;
   const time = clock(taken.at);
+  const mine = taken.by === view.me;
   return (
     <div className={web ? 'takeover web' : 'takeover'} role="note">
-      <p className="takeover-title">{taken.by === view.me ? t('takeover_title', { time }) : t('takeover_other_title', { time })}</p>
-      <p className="takeover-body">{web ? t('takeover_web_body') : t('takeover_body')}</p>
+      <p className="takeover-line"><strong className="takeover-title">{mine ? t('takeover_title', { time }) : t('takeover_other_title', { time })}</strong>{mine ? <> <span className="takeover-body">{t('takeover_after')}</span></> : null}</p>
       {!web && why === 'here_only' ? <p className="takeover-body">{t('terminal_here_only')}</p> : null}
-      <p className="takeover-body">{t('takeover_after')}</p>
     </div>
   );
 }
@@ -192,9 +196,13 @@ export type EditorEdit = EditorHandlers & {
 // The Editor tab: the changed files, and the one picked, as its changes
 // against the ticket's base or as the whole file; Edit opens it in the
 // editor when it can be (lane 32), else the bar says why it is read only.
-export function EditorTab({ t, files, selected, shown, mode, failed = false, edit, onSelect, onMode }: {
+// The files as all the ticket's changes or as its last turn's (lane 36,
+// Codex's "last turn"), with how many each holds.
+export type EditorScope = { readonly value: Scope; readonly all: number; readonly last: number; readonly onScope?: (scope: Scope) => void };
+
+export function EditorTab({ t, files, selected, shown, mode, failed = false, edit, scope, onSelect, onMode }: {
   readonly t: Translate; readonly files: SessionFiles['files']; readonly selected?: string | undefined; readonly shown?: EditorShown | undefined;
-  readonly mode: 'diff' | 'file'; readonly failed?: boolean; readonly edit?: EditorEdit | undefined;
+  readonly mode: 'diff' | 'file'; readonly failed?: boolean; readonly edit?: EditorEdit | undefined; readonly scope?: EditorScope | undefined;
   readonly onSelect?: (path: string) => void; readonly onMode?: (mode: 'diff' | 'file') => void;
 }) {
   const editing = edit?.state;
@@ -206,6 +214,15 @@ export function EditorTab({ t, files, selected, shown, mode, failed = false, edi
     <div className="editor">
       <nav className="editor-files" aria-label={t('editor_files')}>
         <h3 className="card-label">{t('editor_files')}</h3>
+        {scope && scope.all > 0 ? (
+          <div className="mode scope" role="group" aria-label={t('editor_scope')}>
+            {(['all', 'last'] as const).map((value) => (
+              <button key={value} type="button" data-scope={value} aria-pressed={scope.value === value} disabled={held || (value === 'last' && scope.last === 0)} onClick={() => scope.onScope?.(value)}>
+                {t(`editor_scope_${value}`)} <span className="scope-n">{value === 'all' ? scope.all : scope.last}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {files.length === 0 ? <p className="faint small">{t('changes_none')}</p> : (
           <ul>
             {files.map((file) => (

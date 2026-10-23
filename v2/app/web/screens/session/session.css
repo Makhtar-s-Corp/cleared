@@ -11,11 +11,6 @@
 .crumbs .sep { color: var(--dashed); }
 .crumbs a { color: var(--text-muted); } .crumbs a:hover { color: var(--text); }
 .crumbs .here { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
-.tabs { margin-left: auto; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--tab-fill); }
-.tab { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 6px; color: var(--text-muted); text-decoration: none; white-space: nowrap; }
-a.tab:hover { color: var(--text); text-decoration: none; }
-.tab.current { background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-weight: 500; }
-.tab[aria-disabled="true"] { color: var(--text-faint); }
 
 .session { display: grid; grid-template-columns: 290px minmax(0, 1fr) 330px; gap: 18px; padding: 0 28px 24px; align-items: start; }
 .s-left, .s-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
@@ -31,8 +26,16 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .criteria .crit-open { color: var(--text-faint); }
 .criteria .crit-done .mark { color: var(--ok-text); }
 .checks { display: grid; gap: 6px; font-size: 13px; }
-.checks li { display: flex; align-items: center; flex-wrap: wrap; }
+.checks li, .checks summary { display: flex; align-items: center; flex-wrap: wrap; }
 .checks .state { margin-left: 4px; color: var(--text-secondary); }
+/* A check named by its command: its intent, the command folded under (lane 36). */
+.checks details { width: 100%; }
+.checks summary { list-style: none; cursor: pointer; border-radius: 4px; }
+.checks summary::-webkit-details-marker { display: none; }
+.checks summary:hover .check-name { color: var(--text); text-decoration: underline; text-decoration-color: var(--dashed); text-underline-offset: 3px; }
+.checks summary .caret { margin-left: auto; color: var(--text-faint); transition: transform 120ms var(--ease); }
+.checks details[open] > summary .caret { transform: rotate(90deg); }
+.checks .command { margin: 6px 0 2px 16px; }
 .light { width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; flex: none; background: var(--placeholder); }
 .light.passed { background: var(--success); } .light.failed { background: var(--danger); }
 .steps { display: grid; gap: 4px; font-size: 13px; }
@@ -52,6 +55,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .panel-head .dot.review { background: var(--stage-review); } .panel-head .dot.ended { background: var(--placeholder); }
 .phrase-title { font-size: 14px; font-weight: 600; }
 .panel-head .meta { margin-left: auto; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+.panel-head .takeover-button { min-height: 30px; margin-left: 4px; padding: 0 12px; }
 .timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px; font-size: 13.5px; }
 .timeline .empty { margin: 8px 0; }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: 8px; padding: 6px 0; }
@@ -65,6 +69,35 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .sub .ok, .sub .bad, .sub .add, .sub .del { font-weight: 500; }
 .sub .decided { color: var(--text-secondary); }
 .row.refused .glyph { color: var(--danger-text); }
+/* A step of the thread (lane 36, a worklog's row): the row is its summary,
+   the detail opens under its text column. */
+details.row { display: block; padding: 0; }
+details.row > summary { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr) 14px; gap: 8px; padding: 6px 0; list-style: none; cursor: pointer; border-radius: 6px; }
+details.row > summary::-webkit-details-marker { display: none; }
+details.row > summary:hover { background: var(--tab-fill); box-shadow: 0 0 0 4px var(--tab-fill); }
+details.row > summary .caret { margin-top: 3px; color: var(--text-faint); opacity: 0; transition: opacity 120ms var(--ease), transform 120ms var(--ease); }
+details.row > summary:hover .caret, details.row > summary:focus-visible .caret, details.row[open] > summary .caret { opacity: 1; }
+details.row[open] > summary .caret { transform: rotate(90deg); }
+.step-detail { margin: 2px 0 8px 72px; display: grid; gap: 6px; font-size: 12.5px; }
+.command, .output { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sunken); font: 400 12px/1.55 var(--mono); overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.command .op { color: var(--text-faint); }
+.output { color: var(--text-secondary); }
+.file-detail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.file-detail .counts { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+.read-paths { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.read-paths .link-button { text-align: left; }
+/* Where the ticket passed from one session to the next (lane 36): a quiet
+   divider with who took over and when, never a toast. */
+.handover { display: flex; align-items: center; gap: 12px; margin: 14px 0 10px; font-size: 12.5px; color: var(--text-muted); }
+.handover::before, .handover::after { content: ""; flex: 1 1 24px; height: 1px; background: var(--hairline); }
+.handover span { flex: 0 1 auto; text-align: center; }
+/* Author and Reviewer filter the thread: a segmented control, as the tabs. */
+.thread-filter { display: flex; gap: 2px; align-self: flex-start; margin: 10px 16px 0; padding: 2px; border-radius: 7px; background: var(--tab-fill); flex: none; max-width: calc(100% - 32px); overflow-x: auto; }
+.thread-filter .filter { padding: 3px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.thread-filter .filter:hover:not(:disabled) { color: var(--text); }
+.thread-filter .filter[aria-pressed="true"] { background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-weight: 500; }
+.thread-filter .filter:disabled { color: var(--text-faint); cursor: default; }
+:root[data-theme="dark"] .thread-filter .filter:not([aria-pressed="true"]):not(:disabled) { color: var(--text-secondary); }
 .bubble { margin: 8px 0; padding: 10px 12px; border-radius: 10px; max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bubble.assistant { margin-left: 72px; background: var(--sunken); }
 .bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--ink); color: var(--on-ink); }
@@ -146,8 +179,10 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 /* Terminal, taken over */
 /* Pinned to the timeline's top (its 8px padding) while the rows scroll under it. */
 .takeover { position: sticky; top: -8px; z-index: 1; margin: 0 0 14px; padding: 14px; border-radius: 10px; background: var(--sunken); box-shadow: var(--e-outline), 0 12px 0 var(--surface); }
-.takeover-title { margin-bottom: 4px; font-weight: 600; }
+.takeover-line { font-size: 13px; }
+.takeover-title { font-weight: 600; }
 .takeover-body { font-size: 13px; color: var(--text-secondary); }
+.takeover-line + .takeover-body { margin-top: 4px; }
 
 /* Editor, read only */
 .editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -160,6 +195,10 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .file-pick[aria-current="true"]:disabled { background: var(--tab-fill); opacity: 1; }
 .file-pick .counts { flex-basis: 100%; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .editor-files .card-label { line-height: 24px; }
+.mode.scope { display: flex; margin: 0 0 8px; }
+.mode.scope button { flex: 1 1 auto; white-space: nowrap; }
+.mode.scope button:disabled { color: var(--text-faint); cursor: default; }
+.scope-n { margin-left: 2px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .editor-view { min-width: 0; }
 .editor-bar { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-height: 24px; margin-bottom: 8px; }
 .editor-bar .path { font-weight: 500; }
@@ -185,8 +224,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
    in dark: Terminal.tsx gives xterm the same), then its state and Open
    again. */
 .term-wrap { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; padding: 12px 16px; overflow-y: auto; }
-.takeover.web { position: static; margin: 0; box-shadow: var(--e-outline); }
-.takeover.web .takeover-title { margin-bottom: 2px; }
+.takeover.web { position: static; margin: 0; padding: 10px 14px; box-shadow: var(--e-outline); }
 .term-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .term-mode { min-width: 0; font-size: 13px; font-weight: 600; }
 .term-switch { min-height: 28px; padding: 0 12px; }
@@ -246,10 +284,8 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 @media (max-width: 1100px) {
   .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
   .btn, .composer .btn { min-height: 44px; }
-  .tab { min-height: 44px; }
-  .view-tab, .panel-tabs .btn, .file-pick { min-height: 44px; }
+  .view-tab, .file-pick, .thread-filter .filter { min-height: 44px; }
   .view-tabs { flex: 1; }
-  .panel-tabs .btn { margin-left: 0; }
   .link-button { display: inline-flex; align-items: center; min-height: 44px; }
   .mode button { min-height: 36px; }
   .composer input { height: 44px; flex-basis: 100%; }
@@ -259,22 +295,34 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 @media (max-width: 767px) {
   .session-top { padding: 12px 16px; }
   .crumbs a { padding: 13px 0; margin: -13px 0; }   /* a 44 px target, the look unchanged */
-  .tabs { margin-left: 0; width: 100%; }
-  .tab { flex: 1; justify-content: center; min-height: 44px; }
   .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 0 16px 28px; }
   .panel { max-height: none; min-height: 0; }
   .timeline { overflow: visible; padding: 8px 12px; }
-  .row { grid-template-columns: 40px 16px minmax(0, 1fr); gap: 6px; }
+  .row, details.row > summary { grid-template-columns: 40px 16px minmax(0, 1fr); gap: 6px; }
+  details.row > summary .caret { display: none; }
+  .step-detail { margin-left: 0; }
   .bubble.assistant, .request { margin-left: 0; }
   .bubble.user { max-width: 86%; }
   .btn { min-height: 44px; }
-  .composer .btn { min-height: 44px; }
-  .composer input { height: 44px; flex-basis: 100%; }
+  /* One row each (lane 34's art director): the tabs, the status with Take
+     over, the filter, the composer; the hand over that is not there yet
+     stays off a phone. */
+  .composer { flex-wrap: nowrap; }
+  .composer .btn { min-height: 44px; padding: 0 12px; }
+  .composer input { height: 44px; flex: 1 1 0; }
+  .composer #handover { display: none; }
+  #send { margin-left: 0; }
   .request-actions .btn { flex: 1 1 100%; }
-  .panel-tabs { padding: 10px 12px; }
+  .panel-tabs { padding: 8px 12px; }
   .view-tabs { width: 100%; }
   .view-tab { flex: 1; justify-content: center; padding: 4px 6px; }
-  .panel-tabs .btn { flex: 1 1 100%; margin-left: 0; }
+  .panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; padding: 10px 12px; }
+  .panel-head .meta { grid-column: 2; grid-row: 2; margin-left: 0; white-space: normal; }
+  .panel-head .meta .who { display: none; }
+  .panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; margin-left: 0; }
+  .thread-filter { margin: 8px 12px 0; max-width: none; align-self: stretch; }
+  .thread-filter .filter { flex: 1 1 auto; }
+  .handover { margin: 12px 0 8px; }
   .tab-panel.scroll { overflow: visible; padding: 12px; }
   .mode button { min-height: 44px; }
   .mode { margin-left: 0; }

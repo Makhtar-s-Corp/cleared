@@ -9,7 +9,7 @@ import { applyEvent, emptyModel, follow, threadOf, type SessionModel, type Sessi
 
 export type SessionAgentOptions = {
   readonly sessionId: string;
-  readonly state: SessionState;                           // the session's state as its detail route gave it
+  readonly state?: SessionState | undefined;               // the session's state as its detail route gave it, if read
   readonly open: (url: string) => StreamLike;             // new EventSource(url), or a test's stand-in
   readonly later: (run: () => void, ms: number) => void;
 };
@@ -23,27 +23,56 @@ function messagesOf(model: SessionModel): Message[] {
   return [...model.texts.values()].filter((row) => row.text.trim()).map((row) => ({ id: row.id, role: row.role, content: row.text }));
 }
 
+// The stream can be paused (lane 36): a view kept hidden, or an ended
+// session whose events are all read, holds no connection; resumed, it
+// reads on from the last event it added up.
 export class SessionAgent extends ThreadAgent<SessionThread> {
   readonly options: SessionAgentOptions;
+  #open = true;
+  #connect: (() => void) | undefined;
+  #handle: { stop(): void } | undefined;
 
   constructor(options: SessionAgentOptions) {
     super({ agentId: sessionAgentId(options.sessionId), threadId: options.sessionId, description: 'The session\'s timeline, from the service\'s stream' });
     this.options = options;
   }
 
+  get streaming(): boolean {
+    return this.#handle !== undefined;
+  }
+
+  setOpen(open: boolean): void {
+    if (open === this.#open) return;
+    this.#open = open;
+    if (open) this.#connect?.();
+    else this.#stop();
+  }
+
+  #stop(): void {
+    this.#handle?.stop();
+    this.#handle = undefined;
+  }
+
   protected override follow(publish: Publish<SessionThread>): () => void {
     const model = emptyModel();
-    model.state = structuredClone(this.options.state);
+    if (this.options.state) model.state = structuredClone(this.options.state);
     const send = () => publish(threadOf(model), messagesOf(model));
     const soon = batched(send);
-    const handle = follow({
-      url: (after) => `/api/service/sessions/${encodeURIComponent(this.options.sessionId)}/events?after=${after}`,
-      after: 0,
-      open: this.options.open,
-      later: this.options.later,
-      onEvent: (event) => { if (applyEvent(model, event)) soon(); },
-    });
+    this.#connect = () => {
+      this.#stop();
+      this.#handle = follow({
+        url: (after) => `/api/service/sessions/${encodeURIComponent(this.options.sessionId)}/events?after=${after}`,
+        after: model.lastSeq,
+        open: this.options.open,
+        later: this.options.later,
+        onEvent: (event) => { if (applyEvent(model, event)) soon(); },
+      });
+    };
+    if (this.#open) this.#connect();
     send();
-    return () => handle.stop();
+    return () => {
+      this.#stop();
+      this.#connect = undefined;
+    };
   }
 }
