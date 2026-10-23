@@ -11,6 +11,8 @@ import { translator, type Translate } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, parseCriteria, threadOf, timeline, type SessionModel, type SessionView } from '../../screens/session/model.ts';
 import type { SessionSummary } from '../../../../src/api/types.ts';
 import { modelOf, tool } from '../../../test/session/support.ts';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Composer } from '../../screens/session/Session.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
 // The screen's catalog over the shell's, as the shell gives it (lib/catalogs.ts): the intent's words are the shell's.
@@ -57,6 +59,23 @@ test('the composer has Send and Interrupt, and the hand over is disabled with it
   assert.match(html, /<button[^>]*id="handover"[^>]*aria-disabled="true"/);
   assert.ok(visibleText(html).includes('Handing a session over to another harness comes in milestone 3.'));
   assert.match(html, /placeholder="Message the author…"/);
+});
+
+test('Send waits for a message; Interrupt keeps its name where a phone shows its icon only (lane 38, the critique)', () => {
+  const empty = renderToStaticMarkup(<Composer view={viewOf()} t={en} text="" />);
+  assert.match(empty, /<button[^>]*id="send"[^>]*disabled/);
+  assert.match(renderToStaticMarkup(<Composer view={viewOf()} t={en} text="   " />), /<button[^>]*id="send"[^>]*disabled/);
+  assert.doesNotMatch(renderToStaticMarkup(<Composer view={viewOf()} t={en} text="Look at the week view" />), /<button[^>]*id="send"[^>]*disabled/);
+  assert.match(empty, /<button[^>]*id="interrupt"[^>]*><svg[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/svg><span class="btn-label">Interrupt<\/span><\/button>/);
+});
+
+test('the sessions index puts what waits for the person first, then the most recent', () => {
+  const fixture = sessionFixture(FIXTURE_NOW);
+  const base = fixture.sessions[0] as SessionSummary;
+  const other = (id: string, ticket: string, phase: SessionSummary['phase'], updatedAt: string): SessionSummary => ({ ...base, id, ticket, phase, updatedAt });
+  const sessions = [other('a', 'LOCAL-1', 'working', '2026-10-21T09:50:00Z'), other('b', 'LOCAL-2', 'waiting_human', '2026-10-21T09:00:00Z'), other('c', 'LOCAL-3', 'working', '2026-10-21T09:40:00Z')];
+  const order = [...renderIndex({ sessions, tickets: [], now: FIXTURE_NOW }, en).matchAll(/href="\/sessions\/([a-z])"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['b', 'a', 'c']);
 });
 
 test('an ended session cannot be written to or interrupted', () => {
@@ -174,13 +193,22 @@ test('a ticket that did not load still shows the session, and one with no checkl
   assert.ok(visibleText(none).includes('Only a description.'));
 });
 
-test('the sessions index lists the sessions with their ticket title, and says when there are none', () => {
+test('the sessions index lists one row per session, named by its ticket\'s title, and says when there are none', () => {
   const fixture = sessionFixture(FIXTURE_NOW);
   const html = renderIndex({ sessions: fixture.sessions, tickets: [fixture.ticket], now: FIXTURE_NOW }, en);
   const text = visibleText(html);
-  assert.ok(text.includes(TICKET_TITLE) && text.includes('Paused, waiting for you') && text.includes('Open session'));
-  assert.match(html, /href="\/sessions\/fixture-author"/);
-  assert.ok(visibleText(renderIndex({ sessions: [], tickets: [], now: FIXTURE_NOW }, en)).includes('No session yet. Move a ticket to Todo and one starts.'));
+  assert.ok(text.includes(TICKET_TITLE) && text.includes('Paused, waiting for you'));
+  // A row, as the tower's (lane 38, the art director of lane 36): the row is the link, with no "Open session" beside it.
+  assert.ok(!text.includes('Open session'));
+  const row = /<li class="session-card" data-phase="[a-z_]+"><a class="open index-row" href="\/sessions\/fixture-author" data-row="true" aria-labelledby="([^"]+)"[^>]*>/.exec(html);
+  assert.ok(row, 'the row is the link');
+  assert.match(html, new RegExp(`<span class="session-title" id="${row[1]}">${TICKET_TITLE}</span>`));
+  assert.match(html, /<span class="id">LOCAL-161<\/span>/, 'the ticket\'s number, which the proof scripts read');
+  // The top bar names the screen: its heading is read out, not drawn twice (lane 38's art director, item 6).
+  assert.match(html, /<h1 class="sr-only">Sessions<\/h1>/);
+  const empty = renderIndex({ sessions: [], tickets: [], now: FIXTURE_NOW }, en);
+  assert.deepEqual(visibleText(empty).filter((line) => line !== 'Sessions'), ['No session yet.', 'One starts when a ticket moves to Todo.', 'New ticket']);
+  assert.match(empty, /<div class="empty-state block">/);
   assert.equal(USER.length > 0, true);
 });
 

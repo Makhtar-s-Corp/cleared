@@ -12,6 +12,9 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @font-face { font-family: Geist; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+/* Until Geist arrives, a local face scaled to its width and its ascent and descent (measured in Chromium against
+   Arial, whose metrics Liberation Sans shares), so the text does not move when Geist swaps in. */
+@font-face { font-family: "Geist Fallback"; src: local("Arial"), local("Helvetica"), local("Liberation Sans"); size-adjust: 102.34%; ascent-override: 89.9%; descent-override: 21.5%; line-gap-override: 0%; }
 :root {
   /* the light theme: white, near-black, a deep blue */
   --theme-base: #FFFFFF; --theme-contrast: #171717; --theme-accent: #0B63CE;
@@ -26,17 +29,17 @@
   --e-card: 0 0 0 1px var(--outline), 0 1px 2px rgba(0,0,0,.04);
   --e-bar: 0 0 0 1px var(--outline), 0 4px 14px -8px rgba(0,0,0,.15);
   --e-menu: 0 0 0 1px var(--outline), 0 16px 40px -12px rgba(0,0,0,.22);
-  --e-awaiting: 0 0 0 1.5px #F5A623, 0 8px 22px -12px rgba(245,166,35,.6);
+  --e-awaiting: 0 0 0 1.5px var(--awaiting);
   --halo-progress: rgba(11,99,206,.12); --halo-review: rgba(10,157,176,.14);
   /* the scale: four spacing steps, three text sizes, two weights, one row height, one motion */
   --space-1: 4px; --space-2: 8px; --space-3: 16px; --space-4: 24px;
-  --text-sm: 12px; --text-md: 14px; --text-lg: 20px;
-  --text-input: 16px;   /* a phone's fields only: iOS zooms into a field under 16 px */
+  --text-sm: 0.75rem; --text-md: 0.875rem; --text-lg: 1.25rem;   /* 12, 14 and 20 px at the default size */
+  --text-input: 1rem;   /* a phone's fields only: iOS zooms into a field under 16 px */
   --weight-regular: 400; --weight-strong: 550;
   --row: 34px; --top-bar: 56px; --side-open: 240px; --side-rail: 56px; --bottom-bar: 56px;
   --radius: 8px;
   --motion: 140ms; --ease: cubic-bezier(.2,.8,.2,1);
-  --sans: Geist, -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  --sans: Geist, "Geist Fallback", -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
   color-scheme: light;
 }
 /* The dark theme: the same roles from three other colours and other shares. */
@@ -51,7 +54,7 @@
   --e-card: 0 0 0 1px var(--outline);
   --e-bar: 0 0 0 1px var(--outline);
   --e-menu: 0 0 0 1px var(--outline), 0 16px 40px -12px rgba(0,0,0,.6);
-  --e-awaiting: 0 0 0 1.5px #F5A623, 0 8px 24px -10px rgba(245,166,35,.3);
+  --e-awaiting: 0 0 0 1.5px var(--awaiting);
   --halo-progress: rgba(90,169,255,.18); --halo-review: rgba(61,198,216,.18);
   color-scheme: dark;
 }
@@ -113,6 +116,8 @@ html { -webkit-text-size-adjust: 100%; scroll-padding-top: var(--top-bar); }
 body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--text); font: var(--weight-regular) var(--text-md)/1.45 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
 ::selection { background: var(--select); }
 h1, h2, h3, p { margin: 0; }
+/* No paragraph ends on one word (Impeccable's detector, lane 38); a line cut with an ellipsis does not wrap at all. */
+p, li, dd { text-wrap: pretty; }
 a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
 button, input, textarea { font: inherit; color: inherit; }
 /* One focus ring: an outline, which forced colours keep (a box-shadow ring alone vanishes there). */
@@ -176,8 +181,9 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .lead-status { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
 .app[data-sidebar="rail"] .lead-status { display: none; }
 .side-foot .source-pill { display: none; }
-.source-pill { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--awaiting-pill); color: var(--awaiting-text); font-size: var(--text-sm); font-weight: var(--weight-strong); }
-.source-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--awaiting); flex: none; }
+.source-pill { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--sunken); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+/* Neutral (lane 38's art director): amber says what waits for the person, and nothing else. */
+.source-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex: none; }
 .person { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; min-height: 32px; padding: 0 var(--space-2) 0 var(--space-1); border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font-size: var(--text-md); text-align: left; cursor: pointer; }
 .person:hover, .person[data-state="open"] { background: var(--tab-fill); }
 .person .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -201,7 +207,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
    item of the rail, and the icon-only buttons of the open sidebar. */
 .app[data-sidebar="rail"] .sidebar { overflow: visible; }
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip]) { position: relative; }
-:is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip])::after { content: attr(data-tip); position: absolute; left: calc(100% + var(--space-2)); top: 50%; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font: var(--weight-regular) var(--text-sm)/1.4 var(--sans); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-4px, -50%); transition: opacity var(--motion) var(--ease), transform var(--motion) var(--ease); }
+:is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip])::after { content: attr(data-tip); position: absolute; left: calc(100% + var(--space-3)); top: 50%; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font: var(--weight-regular) var(--text-sm)/1.4 var(--sans); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-4px, -50%); transition: opacity var(--motion) var(--ease), transform var(--motion) var(--ease); }
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip]):is(:hover, :focus-visible)::after { opacity: 1; transform: translate(0, -50%); }
 /* The open sidebar's buttons at its right edge put theirs below. */
 .app[data-sidebar="open"] .side-head .icon[data-tip]::after { left: auto; right: 0; top: calc(100% + var(--space-1)); transform: translateY(-4px); }
@@ -297,21 +303,10 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .lead-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .thread-start { list-style: none; }
 
-/* the sessions index's cards (screens/session), drawn as the tower drew its sessions before lane 35 */
-.index .sessions { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-.index .session-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: 10px; background: var(--surface); box-shadow: var(--e-card); min-width: 0; }
-.index .session-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
-.index .session-head .role { color: var(--text-secondary); font-weight: var(--weight-strong); }
-.index .session-head .id { margin-left: auto; }
-.index .session-title { font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; overflow-wrap: anywhere; }
-.index .phrase { margin-top: auto; padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); font-size: var(--text-md); overflow-wrap: anywhere; }
-.index .session-foot { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
-.index .open { margin-left: auto; white-space: nowrap; }
-.live { width: 7px; height: 7px; border-radius: 50%; background: var(--stage-progress); box-shadow: 0 0 0 3px var(--halo-progress); flex: none; animation: pulse 2.4s ease-in-out infinite; }
+.live { width: 7px; height: 7px; border-radius: 50%; background: var(--stage-progress); box-shadow: 0 0 0 3px var(--halo-progress); flex: none; }
 .live.review { background: var(--stage-review); box-shadow: 0 0 0 3px var(--halo-review); }
-.live.waiting { background: var(--awaiting); box-shadow: 0 0 0 3px rgba(245,166,35,.18); animation: none; }
-.live.taken { background: var(--ink); box-shadow: 0 0 0 3px var(--outline); animation: none; }
-@keyframes pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
+.live.waiting { background: var(--awaiting); box-shadow: 0 0 0 3px rgba(245,166,35,.18); }
+.live.taken { background: var(--ink); box-shadow: 0 0 0 3px var(--outline); }
 .model { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); white-space: nowrap; }
 .sq { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--harness-other); } .sq.claude { background: var(--harness-claude); } .sq.codex { background: var(--harness-codex); }
 .elapsed { color: var(--text-faint); white-space: nowrap; }
@@ -331,9 +326,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .login-error { margin-bottom: var(--space-3); padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); color: var(--danger-text); font-size: var(--text-md); }
 
 /* tablet and phone */
-@media (max-width: 1023px) {
-  .index .sessions { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 767px) {
   /* The sidebar becomes the top bar (the workspace, search, the person) and its screens a bar at the foot. */
   .app, .app[data-sidebar="rail"] { display: block; padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom)); }
@@ -381,4 +373,4 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .app[data-sidebar="rail"] .sidebar { padding-inline: var(--space-1); }
   .keys { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } .live { animation: none; } }
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }

@@ -59,6 +59,7 @@ import {
   type LedgerFacts, type Morning, type Outcome, type ProofResult, type ReleaseCard, type Snapshot, type Step,
 } from './proof-report.ts';
 import { REHEARSAL_GOAL, startRehearsal, type World } from './proof-rehearsal.ts';
+import { said } from './proof-words.ts';
 
 const env = process.env;
 const REHEARSAL = env.PROOF_REHEARSAL === '1';
@@ -292,7 +293,7 @@ if (goalSent) {
       await options.first().waitFor();
       const wanted = ANSWERS[asked - 1] ?? 'recommended';
       if (wanted === 'recommended') {
-        const recommended = options.filter({ hasText: /Recommended|Recommandé/ });
+        const recommended = options.filter({ hasText: said('session', 'choice_recommended') });
         const button = (await recommended.count()) > 0 ? recommended.first() : options.first();
         const label = (await button.getAttribute('data-answer')) ?? '';
         await button.click();
@@ -410,7 +411,8 @@ async function openItem(id: string): Promise<void> {
   const link = page.locator(`a.item[data-item="${id}"]`);
   await link.waitFor();
   await link.click();
-  await page.locator('#d-actions button').first().waitFor();
+  // The item's gestures: a request's three answers at the top of the detail (lane 37), the others' bar at its foot.
+  await page.locator('#detail [data-act]').first().waitFor();
 }
 
 let planDoneAt: string | null = null;

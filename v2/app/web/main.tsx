@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { catalogOf, isLanguage } from '@/lib/catalogs.ts';
 import { translator } from '@/lib/i18n.ts';
 import { placeOf } from '@/lib/routes.ts';
-import { showSheets } from '@/lib/sheets.ts';
+import { sheetsReady } from '@/lib/sheets.ts';
 import { App } from '@/shell/App.tsx';
 import { Login } from '@/shell/Login.tsx';
 import './styles/app.css';
@@ -18,13 +18,13 @@ const lang = document.documentElement.lang;
 const language = isLanguage(lang) ? lang : 'fr';
 const root = createRoot(document.getElementById('root')!);
 const app = data.screen === 'app';
-// The first screen's sheets, on before anything is drawn.
-if (app) showSheets(placeOf(location.pathname)?.screen ?? 'tower');
+// The first screen's sheets, on and loaded before anything is drawn (review of 248, F1).
+const ready = app ? sheetsReady(placeOf(location.pathname)?.screen ?? 'tower') : Promise.resolve();
 
-root.render(
+void ready.then(() => root.render(
   <StrictMode>
     {app
       ? <App start={{ language, project: data.project ?? '', userName: data.user ?? '', source: data.source === 'fixtures' ? 'fixtures' : 'service' }} />
       : <Login t={translator(catalogOf('shell', language))} error={data.error} />}
   </StrictMode>,
-);
+));

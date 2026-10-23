@@ -21,7 +21,7 @@
 // changed file for editing (decision 33). Both packages load by a dynamic
 // import (lane 32).
 import {
-  ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
+  ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { ConfirmableRule, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
@@ -36,7 +36,8 @@ import {
 import { harnessName, terminalChoice } from '@/components/terminal/model.ts';
 import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
-import { useScreen } from '@/lib/context.tsx';
+import { useGo, useScreen } from '@/lib/context.tsx';
+import { Empty } from '@/shell/Empty.tsx';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
 import { useKept, useLive } from '@/lib/query.tsx';
@@ -280,7 +281,7 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile }: {
 }
 
 export function HandoverRow({ handover, t }: { readonly handover: Handover; readonly t: Translate }) {
-  return <p className="handover" data-row="handover" data-session={handover.session}><span>{handoverLine(handover, t)}</span></p>;
+  return <p className="handover" data-row="handover" data-session={handover.session} data-role={handover.role}><span>{handoverLine(handover, t)}</span></p>;
 }
 
 // The thread of the ticket: each session's rows under its own view (its
@@ -292,7 +293,7 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile }: {
   const filter = view.filter ?? 'all';
   const entries = ticketThread(parts, filter);
   const views = new Map(parts.map((part) => [part.summary.id, part.summary.id === view.summary.id ? view : { ...view, summary: part.summary, thread: part.thread ?? emptyThread(part) }]));
-  if (entries.length === 0) return <p className="empty">{t('timeline_empty')}</p>;
+  if (entries.length === 0) return <Empty block icon={ChatText} text={t('timeline_empty')} />;
   const row = (entry: Extract<ThreadEntry, { kind: 'row' }>, index: number) => {
     const key = 'id' in entry.row ? `${entry.session}:${entry.row.kind}:${entry.row.id}` : `${entry.session}:${entry.row.kind}:${entry.row.at}:${index}`;
     return <RowView key={key} row={entry.row} view={views.get(entry.session) ?? view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} />;
@@ -343,6 +344,11 @@ export function ThreadFilter({ view, t, onFilter }: { readonly view: SessionView
   );
 }
 
+// The screen's one heading: the ticket's number and title, read out; the top bar draws them (lane 38).
+export function SessionHeading({ view }: { readonly view: SessionView }) {
+  return <h1 className="sr-only">{view.summary.ticket} · {view.ticket?.title ?? view.summary.ticket}</h1>;
+}
+
 export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void }) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = ticketPlan(partsOf(view)) ?? view.thread.plan;
@@ -377,7 +383,7 @@ export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; rea
 
 // A check, said by its intent when its name is a command, the command folded under.
 function CheckRow({ check, t }: { readonly check: { readonly name: string; readonly state: 'passed' | 'pending' | 'failed' }; readonly t: Translate }) {
-  const head = (name: string) => <><span className={`light ${check.state}`} aria-hidden="true" /><span className="check-name">{name}</span><span className="state">· {t(`check_${check.state}`)}</span></>;
+  const head = (name: string) => <><span className={`light ${check.state}`} aria-hidden="true" /><span className="check-name">{name}</span><span className="state">{t(`check_${check.state}`)}</span></>;
   if (!looksLikeCommand(check.name)) return <li className="check">{head(check.name)}</li>;
   return (
     <li className="check">
@@ -424,7 +430,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
           </>
         )}
       </section>
-      <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="empty-box">{t('screen_empty')}</p></section>
+      <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="faint small">{t('screen_empty')}</p></section>
     </>
   );
 }
@@ -443,8 +449,9 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
       <form className="composer" id="composer" autoComplete="off" onSubmit={onSend}>
         <Input id="message" name="text" ref={input} placeholder={placeholder} aria-label={placeholder} disabled={off} value={text} onChange={(event) => onText?.(event.target.value)} />
         <Button className="btn" id="handover" aria-disabled="true" aria-describedby="handover-note" title={t('handover_note')} onClick={onHandover}>{t('handover')}</Button>
-        <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}>{t('interrupt')}</Button>
-        <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending}>{t('send')}</Button>
+        <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}><Stop size={16} aria-hidden="true" /><span className="btn-label">{t('interrupt')}</span></Button>
+        {/* Send waits for a message (lane 38, the critique): one ink button at a time, the screen's own gesture first. */}
+        <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending || text.trim() === ''}>{t('send')}</Button>
       </form>
       <span className="sr-only" id="handover-note">{t('handover_note')}</span>
       <p className="composer-note" id="composer-note" role="status">{note}</p>
@@ -452,35 +459,44 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
   );
 }
 
-export function SessionIndex({ sessions, tickets, now, t }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate }) {
+export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate; readonly onNew?: () => void }) {
   const titles = new Map(tickets.map((ticket) => [ticket.id, ticket.title]));
   const minutes = (from: string) => Math.max(0, Math.floor((now.getTime() - Date.parse(from)) / 60_000));
-  // One card per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
+  // One row per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
   const tickets_ = new Set(sessions.filter((s) => s.role === 'author' || s.role === 'reviewer').map((s) => s.ticket));
   const shown = [
     ...sessions.filter((s) => s.role !== 'author' && s.role !== 'reviewer'),
     ...[...tickets_].flatMap((ticket) => { const own = ticketSessions(sessions, ticket); const acting = actingSession(own, own.at(-1)?.id ?? ''); return acting ? [acting] : []; }),
   ];
-  const ordered = shown.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  // What waits for the person first, as the tower orders it (lane 38, the critique), then the most recent.
+  const waits = (s: SessionSummary) => (s.phase === 'waiting_human' ? 0 : 1);
+  const ordered = shown.sort((a, b) => waits(a) - waits(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  // Rows as the tower's (lane 38): the row is the link, named by the title and described by the rest.
   return (
     <div className="index">
-      <h1>{t('index_title')}</h1>
-      {ordered.length === 0 ? <p className="empty">{t('index_empty')}</p> : (
+      {/* The top bar names the screen (lane 38's art director): its heading is read out, not drawn twice. */}
+      <h1 className="sr-only">{t('index_title')}</h1>
+      {ordered.length === 0 ? <Empty block icon={Terminal} text={t('index_empty')} note={t('index_empty_note')} action={{ label: t('index_new_ticket'), onClick: () => onNew?.() }} /> : (
         <ul className="sessions">
           {ordered.map((s) => {
             // A reader's session (decision 28) is its question's: the ask
             // screen shows it, and its ticket is the ask's id.
             const reader = s.role === 'reader';
+            const id = `index-${s.id.replace(/[^\w-]/g, '')}`;
             return (
-            <li key={s.id} className="session-card">
-              <span className="session-head"><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span>{reader ? null : <span className="id">{s.ticket}</span>}</span>
-              <span className="session-title">{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
-              <span className="phrase">{s.phase === 'waiting_human' ? t('status_waiting_human') : s.status}</span>
-              <span className="session-foot">
-                <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
-                <span className="elapsed">{t('minutes', { n: minutes(s.startedAt) })}</span>
-                {reader ? <a className="open" href={askHref(s.ticket)}>{t('open_ask')}</a> : <a className="open" href={`/sessions/${s.id}`}>{t('open_session')}</a>}
-              </span>
+            <li key={s.id} className="session-card" data-phase={s.phase}>
+              <a className="open index-row" href={reader ? askHref(s.ticket) : `/sessions/${s.id}`} data-row aria-labelledby={`${id}-title`} aria-describedby={`${id}-kind ${id}-phrase ${id}-meta`}>
+                <span className="index-kind session-head" id={`${id}-kind`}><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span></span>
+                <span className="index-main">
+                  <span className="session-title" id={`${id}-title`}>{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
+                  <span className="phrase" id={`${id}-phrase`}>{s.phase === 'waiting_human' ? t('status_waiting_human') : s.status}</span>
+                </span>
+                <span className="index-meta session-foot" id={`${id}-meta`}>
+                  <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
+                  {reader ? null : <span className="id">{s.ticket}</span>}
+                  <span className="elapsed">{t('minutes', { n: minutes(s.startedAt) })}</span>
+                </span>
+              </a>
             </li>
             );
           })}
@@ -520,6 +536,12 @@ function useShown(ref: { readonly current: Element | null }): boolean {
 
 function Index() {
   const { t, api, now } = useScreen();
+  const go = useGo();
+  // New ticket: the tower's bar, its field focused once the tower is drawn.
+  const newTicket = useCallback(() => {
+    go('/');
+    requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('ask-input')?.focus()));
+  }, [go]);
   const [data, setData] = useKept<{ sessions: SessionSummary[]; tickets: Ticket[] } | 'failed' | null>('sessions', null);
   const refresh = useCallback(async () => {
     try {
@@ -534,7 +556,7 @@ function Index() {
   useLive(() => void refresh());
   if (data === null) return null;
   if (data === 'failed') return <div className="index"><p className="empty error">{t('load_failed')}</p></div>;
-  return <SessionIndex sessions={data.sessions} tickets={data.tickets} now={now()} t={t} />;
+  return <SessionIndex sessions={data.sessions} tickets={data.tickets} now={now()} t={t} onNew={newTicket} />;
 }
 
 type Loaded = {
@@ -964,6 +986,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     <>
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
+        <SessionHeading view={view} />
         <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />

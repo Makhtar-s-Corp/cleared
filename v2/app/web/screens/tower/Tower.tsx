@@ -11,8 +11,8 @@
 // person and the live sessions are rows (a kind, a title, one line), which
 // J and K walk ([data-row]); an empty part says so in one sentence, with
 // the one thing to do about it.
-import { Check, HandGrabbing, ListChecks, TerminalWindow, X } from '@phosphor-icons/react';
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Check, HandGrabbing, ListChecks, Package, TerminalWindow, X } from '@phosphor-icons/react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Recipe } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
@@ -30,6 +30,11 @@ import {
   type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
 import './tower.css';
+
+// A line of facts, each kept whole on a line (lane 38's art director: no fact cut, no line ending on its "·").
+function Facts({ text }: { readonly text: string }) {
+  return <>{text.split(' · ').map((fact, i) => <Fragment key={i}>{i > 0 ? ' · ' : null}<span className="fact">{fact}</span></Fragment>)}</>;
+}
 
 // The services a new ticket names: a chip per service of a workspace of
 // several, shown with the description once a title is typed.
@@ -226,7 +231,7 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
         {/* The heading says what needs the person, once: no section title under it repeats it, and its
             line says no session runs rather than a list of zeros (art director of lane 35, item 6). */}
         <div className="hello">
-          <div><h1 id="tower-heading">{heading(model.needs.length, t)}</h1><p className="muted">{quiet ? t('live_empty') : towerSummary(model, t)}</p></div>
+          <div><h1 id="tower-heading">{heading(model.needs.length, t)}</h1><p className="muted">{quiet ? t('live_empty') : <Facts text={towerSummary(model, t)} />}</p></div>
           {model.needs.length === 0 ? null : <a className="more" href="/inbox">{t('open_inbox')}</a>}
         </div>
         {model.services.length === 0 ? null : (
@@ -260,7 +265,7 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
         </section>
         <section className="side-card" aria-labelledby="landed-title">
           <h2 id="landed-title">{t('landed_title')}</h2>
-          {model.landed.length === 0 ? <Empty icon={Check} text={t('landed_empty')} /> : (
+          {model.landed.length === 0 ? <Empty icon={Package} text={t('landed_empty')} /> : (
             <ul className="landed">
               {model.landed.map((row) => <li key={row.ticket}><span className="time">{row.time}</span><span className="what">{row.title}</span><span className="took">{duration(row.minutes, t)}</span></li>)}
             </ul>

@@ -26,6 +26,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { answerFor, inboxAction } from './proof-inbox.ts';
+import { said } from './proof-words.ts';
 
 const env = process.env;
 const APP = (env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').replace(/\/$/, '');
@@ -302,8 +303,9 @@ if (sent) {
         await item.click();
         // The detail is drawn after the click: wait for this ticket's, then read it.
         await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
-        const chip = page.locator('#detail .d-title code');
-        details.push({ detail: await page.locator('#detail').innerText(), ...(await chip.count() > 0 ? { command: await chip.first().innerText() } : {}) });
+        // The raw command is folded under the request's French title since lane 37, one part a line.
+        const fold = page.locator('#detail .fold-command');
+        details.push({ detail: await page.locator('#detail').innerText(), ...(await fold.count() > 0 ? { command: ((await fold.first().textContent()) ?? '').replace(/\s*\n\s*/g, ' ').trim() } : {}) });
       }
       const action = inboxAction(details, SCRATCH);
       if (action.kind === 'wait') { await page.waitForTimeout(2_000); continue; }
@@ -331,12 +333,12 @@ if (sent) {
       await page.goto(authorUrl);
       // The session may ask for the command alone or fold it into another one.
       const request = page.locator('#timeline [data-row="request"]').filter({ hasText: SCRATCH }).first();
-      const answered = page.locator('#timeline [data-row]:not([data-row="message"])').filter({ hasText: SCRATCH }).filter({ hasText: /Allowed once by|Denied by|Allowed in this project by/ });
+      const answered = page.locator('#timeline [data-row]:not([data-row="message"])').filter({ hasText: SCRATCH }).filter({ hasText: said('session', ['answer_allow_once', 'answer_deny', 'answer_allow_always']) });
       await waitAnswering(async () => await request.count() > 0 || await answered.count() > 0, 60_000);
       if (await request.count() === 0) return `already answered by an earlier run: ${(await answered.first().innerText()).replace(/\s+/g, ' ').slice(-60)}`;
       await request.locator('[data-answer="allow_once"]:not([disabled])').click();
       timeline.permission_answered_at = new Date().toISOString();
-      await page.locator('#timeline').getByText(/Allowed once by/).first().waitFor();
+      await page.locator('#timeline').getByText(said('session', 'answer_allow_once')).first().waitFor();
       return 'answered on the session screen, not the inbox';
     });
   }
@@ -350,26 +352,30 @@ if (answered) {
     // follows: the run waits for a pass, up to the flow's number of rounds.
     const judged = new Set<string>();
     for (;;) {
+      // The author's address shows the ticket's view (lane 36): a reviewer
+      // that starts joins it below a handover row, which names its session.
       await page.goto(authorUrl);
-      const tab = page.locator('a.tab').filter({ hasText: /^Reviewer/ });
-      let href = '';
+      const handovers = page.locator('#timeline [data-row="handover"][data-role="reviewer"]');
+      let reviewer = '';
       await waitAnswering(async () => {
-        if (await tab.count() === 0) return false;
-        href = (await tab.first().getAttribute('href')) ?? '';
-        return !judged.has(href);
+        const ids = await handovers.evaluateAll((nodes: { getAttribute(name: string): string | null }[]) => nodes.map((n) => n.getAttribute('data-session') ?? ''));
+        reviewer = (ids as string[]).find((id) => id !== '' && !judged.has(id)) ?? '';
+        return reviewer !== '';
       }, left());
       Object.assign(appDurations, Object.fromEntries(Object.entries(await readSteps()).map(([k, v]) => [`author: ${k}`, v])));
       await capture(7, `author-before-review-${judged.size + 1}`);
-      await page.goto(`${APP}${href}`);
+      await page.goto(`${APP}/sessions/${reviewer}`);
       reviewerUrl = page.url();
-      const verdict = page.locator('#timeline').getByText(/Review (passed|asked for changes), round/).first();
+      // The view holds every round of the ticket: this round's verdict is the one with its number.
+      const round = judged.size + 1;
+      const verdict = page.locator('#timeline').getByText(said('session', ['verdict_ok', 'verdict_changes'], { round })).first();
       // The reviewer's own requests are answered the same way.
       await waitAnswering(async () => await verdict.count() > 0, left());
       const text = (await verdict.innerText()).trim();
       rounds.push(text);
       save();
-      if (/passed/.test(text)) return text;
-      judged.add(href);
+      if (said('session', 'verdict_ok', { round }).test(text)) return text;
+      judged.add(reviewer);
       await capture(7, `review-round-${judged.size}`);
       if (judged.size >= REVIEW_ROUNDS) throw new Error(`no pass after ${judged.size} rounds: ${rounds.join('; ')}`);
     }
@@ -383,7 +389,7 @@ if (reviewed) {
     await page.goto(`${APP}/inbox`);
     const approve = page.locator('#detail [data-act="approve"]');
     // This ticket's release: another ticket's, with the same title, may wait beside it.
-    const item = page.locator('a.item:not(.handled)').filter({ hasText: 'Release' }).filter({ hasText: `${ticketOf()} · ` }).first();
+    const item = page.locator('a.item:not(.handled)').filter({ hasText: said('inbox', 'kind_release') }).filter({ hasText: `${ticketOf()} · ` }).first();
     try {
       // The release waits until the branch is published and the lock asked.
       await waitAnswering(async () => {
@@ -401,10 +407,10 @@ if (reviewed) {
     await capture(8, 'release-card');
     // As a careful owner: approve once the checks are green. The lock queues
     // a release whose checks still run, and nothing in v2 retries the queue.
-    const green = page.locator('#detail').getByText(/all checks green|checks green/);
+    const green = page.locator('#detail').getByText(said('inbox', 'checks_green'));
     await waitAnswering(async () => {
       if (await green.count() > 0) return true;
-      if (await page.locator('#detail').getByText(/checks failed/).count() > 0) throw new Error('the release card says the checks failed');
+      if (await page.locator('#detail').getByText(said('inbox', 'checks_red')).count() > 0) throw new Error('the release card says the checks failed');
       await page.reload();
       await item.click();
       return false;
@@ -413,10 +419,10 @@ if (reviewed) {
     await capture(8, 'release-checks-green');
     await approve.click();
     timeline.approved_at = new Date().toISOString();
-    await page.getByRole('button', { name: /Undo/ }).first().waitFor({ timeout: 10_000 });
+    await page.getByRole('button', { name: said('inbox', 'undo') }).first().waitFor({ timeout: 10_000 });
     await capture(8, 'approve-grace');
     // The grace: the approval is written after 60 seconds.
-    await page.getByRole('button', { name: /Undo/ }).first().waitFor({ state: 'detached', timeout: 120_000 });
+    await page.getByRole('button', { name: said('inbox', 'undo') }).first().waitFor({ state: 'detached', timeout: 120_000 });
     return 'approved in the inbox; the 60 second Undo passed';
   });
 }

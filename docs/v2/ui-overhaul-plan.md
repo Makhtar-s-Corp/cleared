@@ -244,16 +244,29 @@ The policy lane that fixes the reviewer's permission policy (read-only commands 
 
 ## 8. Before and after measures
 
-Filled by lane 38. The "before" is section 1.2's table; the "after" is the `browser` job's summary on the same fixtures source, same machine class, twenty switches, p95:
+Filled by lane 38 (pull request 256) on 2026-10-23, after lane 37's merge.
+- **Before:** section 1.2's table, the live app through the header's links.
+- **After, CI:** the `browser` job's tab-switch test, `app/test/foundation/budget-browser.test.ts`: three runs of twenty switches among the five screens through two sessions, on the fixtures source, the median of the runs' p95.
+- **After, same session:** the same measure taken locally on 2026-10-23 between 05:26 and 05:29, 1440x900, the load average under 4. Its harness is `app/test/switch-budget.ts`, which also measures a version that loads a document per switch. The versions:
+  - `8a93cd5`, the head of `v2` before lane 34;
+  - `e6446c2`, lanes 33 to 36;
+  - `358f8de`, lane 37 merged;
+  - this lane's head.
 
 | Measure | Before | After | Budget |
 | --- | --- | --- | --- |
-| Tab switch, click to painted screen | 130 to 531 ms for a header tab, a full document each; 54 to 82 ms for the session's in-page tabs | (lane 38) | under 100 ms, median of three runs' p95 |
-| Document navigations for five switches | 5 | (lane 38) | 0 |
-| Requests per switch | 22 to 25 | (lane 38) | at most 1 |
-| Terminal and editor constructions, session, inbox, session | 2 each | (lane 38) | 1 each |
-| Author to reviewer | a full document, the thread restarted | (lane 38) | no navigation |
-| Sessions index on a workspace with a lead session | blank | (lane 38) | drawn |
+| Tab switch, click to painted screen | 130 to 531 ms for a header tab, a full document each (live app); 116.1 ms on the fixtures at `8a93cd5`, the median of three runs' p95 (runs 111.4, 130.3, 116.1) | 28.7 to 35.8 ms on the fixtures, the median of three runs' p95, in three measures beside `358f8de`'s 32.0 and 34.5 ms; in CI, 46.0 to 83.9 ms over this pull request's four runs, against 54.2 to 70.6 ms for `v2` and its lanes on the same runner | under 100 ms, median of three runs' p95 |
+| Document navigations for twenty switches | 20 (`8a93cd5`; section 1.2: one per switch) | 0 | 0 |
+| Requests to the API per switch | 22 to 25 per page (live); at most 13 (`8a93cd5`, fixtures) | at most 1 | at most 1 |
+| Terminal and editor constructions, session, inbox, session | 2 each | 1 each (`app/test/foundation/stack-browser.test.ts`) | 1 each |
+| Author to reviewer | a full document, the thread restarted | no navigation: the handover row 52 to 78 ms after the change event in CI, 0 documents, the same view and diff nodes (`app/test/session/continuity-browser.test.ts`) | no navigation |
+| Sessions index on a workspace with a lead session | blank | drawn (`app/test/catalog.test.ts`, lane 34) | drawn |
+
+What the numbers say:
+- Every switch is now in the page, and costs a fifth to a quarter of what a document cost on the same machine.
+- Lane 38's own changes (the type scale, the sheets, the first-paint wait, which runs once) leave the switch where lanes 34 to 37 put it. On the fixtures, its three measures overlap `358f8de`'s.
+- The CI runner's spread, about 30 ms from run to run on the same code, is wider than any lane's effect, which is why the budget is the median of three runs.
+- The owner's device through the private network's HTTPS front was not measured (section 11): each request a switch made paid a round trip there, and a switch now makes at most one.
 
 ## 9. Questions for the owner
 

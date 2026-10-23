@@ -20,6 +20,9 @@
 // and lead-empty (the tower and the lead screen with their lists answered
 // empty in the page: no session, nothing waiting, no plan, no message).
 //
+// Lane 38's, named only: login (the sign-in page, before the account
+// signs in).
+//
 // Lane 36's, named only: review (a reviewer's session, the view of its
 // ticket at its review), review-editor (its Editor) and review-takeover (its
 // Terminal after Take over, given back once captured).
@@ -58,7 +61,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -107,6 +110,16 @@ export async function capture(options: { readonly out: string; readonly screens?
         page.on('pageerror', (error: Error) => errors.push(`${w} ${theme}: ${error.message}`));
         page.on('request', (request: { url(): string }) => { if (!request.url().startsWith(app.base) && !request.url().startsWith(previewBase) && !request.url().startsWith('data:')) away.push(request.url()); });
         await page.goto(`${app.base}/login`);
+        if (screens.includes('login')) {
+          await page.locator('#name').waitFor();
+          await page.evaluate(async () => {
+            await document.fonts.ready;
+            await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+          });
+          const file = join(options.out, `login-${w}-${theme}.png`);
+          await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+          files.push(file);
+        }
         await page.fill('#name', ACCOUNT);
         await page.fill('#password', PASSWORD);
         await page.click('button[type=submit]');
@@ -122,13 +135,13 @@ export async function capture(options: { readonly out: string; readonly screens?
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
           'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
-          review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
+          login: '/login', review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
           'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
         for (const screen of screens) {
-          if (screen === 'rail-tooltip' && Number(w) < 768) continue;
+          if (screen === 'login' || (screen === 'rail-tooltip' && Number(w) < 768)) continue;
           const path = paths[screen as CaptureScreen];
           const empty = screen.endsWith('-empty');
           if (empty) await page.route(EMPTY, answerEmpty);

@@ -17,7 +17,7 @@
 export const PAINTED: Readonly<Record<string, string>> = {
   tower: '#tower-body .tower',
   inbox: '.inbox .inbox-list',
-  sessions: '.index .sessions, .index .empty',
+  sessions: '.index .sessions, .index .empty, .index .empty-state',
   session: '.session:not([aria-busy]) #status',
   session2: '.session:not([aria-busy]) #status',
   lead: '.lead-screen:not([aria-busy])',

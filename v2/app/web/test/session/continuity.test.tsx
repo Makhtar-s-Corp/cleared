@@ -17,7 +17,7 @@ import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { SessionAgent } from '../../screens/session/agent.ts';
 import { applyAll, emptyModel, threadOf, type SessionView, type StreamLike } from '../../screens/session/model.ts';
-import { LeftCards, RightCards, StatusHead, Timeline } from '../../screens/session/Session.tsx';
+import { LeftCards, RightCards, SessionHeading, StatusHead, Timeline } from '../../screens/session/Session.tsx';
 import { EditorTab, TakeoverButton } from '../../screens/session/Tabs.tsx';
 import { takeoverOf } from '../../screens/session/tabs.ts';
 import { actingSession, type TicketPart } from '../../screens/session/ticket.ts';
@@ -87,12 +87,17 @@ test('the checks: a check named by its command is said by its intent, the comman
   const markup = html(<RightCards view={ticketView()} t={en} />);
   const checks = /<ul class="checks">[\s\S]*?<\/ul>/.exec(markup)?.[0] ?? '';
   const text = visibleText(checks);
-  assert.deepEqual(text.filter((line) => !line.startsWith('·') && !/[|&]|^npm|^git|^tail/.test(line)), ['Run the project\'s tests', 'Commit the changes', 'Review']);
+  // Each check's name, then its state at the end of its line (lane 38).
+  assert.deepEqual(text.filter((line) => !/[|&]|^npm|^git|^tail/.test(line)), ['Run the project\'s tests', 'passed', 'Commit the changes', 'passed', 'Review', 'pending']);
   assert.equal([...checks.matchAll(/<details>/g)].length, 2, 'two checks named by commands, folded');
   assert.ok(text.includes('npm test 2>&1') && text.includes('tail -8'), 'the raw command, one a line');
   const changes = visibleText(/<ul class="changes">[\s\S]*?<\/ul>/.exec(markup)?.[0] ?? '');
   assert.deepEqual(changes, ['src/screens/Envelope.jsx', '+15', '−2', 'test/envelope.test.mjs', '+13'], 'the ticket\'s changes, the author\'s');
   assert.ok(visibleText(markup).includes('Review'), 'the time by step adds up the review');
+});
+
+test('the session view has one heading for the screen: its ticket\'s number and title, read out (lane 38\'s art director, item 5)', () => {
+  assert.match(html(<SessionHeading view={ticketView()} />), /^<h1 class="sr-only">LOCAL-152 · Envelope sheet shows its previous months<\/h1>$/);
 });
 
 test('a card with nothing to say is not drawn: no criteria, no plan, the ticket card alone', () => {
@@ -118,7 +123,7 @@ test('the Editor holds the ticket\'s changes, or its last turn\'s', () => {
   const files = [{ path: 'src/screens/Envelope.jsx', added: 15, removed: 2 }, { path: 'test/envelope.test.mjs', added: 13, removed: 0 }];
   const all = html(<EditorTab t={en} files={files} mode="diff" scope={{ value: 'all', all: 2, last: 1 }} />);
   assert.deepEqual([...all.matchAll(/data-scope="([a-z]+)" aria-pressed="(true|false)"/g)].map((m) => [m[1], m[2]]), [['all', 'true'], ['last', 'false']]);
-  assert.ok(visibleText(all).includes('All changes') && visibleText(all).includes('Last turn'));
+  assert.ok(visibleText(all).includes('All') && visibleText(all).includes('Last turn'));
   const last = html(<EditorTab t={fr} files={files.slice(0, 1)} mode="diff" scope={{ value: 'last', all: 2, last: 1 }} />);
   assert.match(last, /data-scope="last" aria-pressed="true"/);
   assert.ok(visibleText(last).includes('Dernier tour'));
@@ -180,6 +185,8 @@ test('the whole ticket folds an ended session a later one followed into one row,
   assert.equal(fold?.[1], ENVELOPE_AUTHOR_ID);
   assert.match(fold?.[2] ?? '', /^Author · Opus · \d+ steps$/);
   assert.ok(markup.indexOf('class="earlier"') < markup.indexOf('data-row="handover"'), 'folded above the handover row');
+  // The handover row says whose session starts, for a reader of the page (the proof scripts, lane 38).
+  assert.match(markup, /<p class="handover" data-row="handover" data-session="[^"]+" data-role="reviewer">/);
   assert.doesNotMatch(html(<Timeline view={{ ...view, unfolded: new Set([ENVELOPE_AUTHOR_ID]) }} t={en} />), /class="earlier"/, 'seen live: never folded under the person\'s eyes');
   assert.doesNotMatch(html(<Timeline view={{ ...view, filter: 'author' }} t={en} />), /class="earlier"/);
   assert.match(html(<Timeline view={view} t={fr} />), /Auteur · Opus · \d+ étapes/);

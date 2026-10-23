@@ -11,6 +11,7 @@ import { isDirty, type EditorState, type ReadOnlyWhy, type Scope } from '@/compo
 import type { SessionFile, SessionFiles, SessionPlan } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
+import { Empty } from '@/shell/Empty.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ENDED, clock, parseCriteria, phaseOf, takenOverOf, type SessionView } from './model.ts';
 import {
@@ -291,5 +292,5 @@ export function BrowserTab({ view, t }: { readonly view: BrowserView; readonly t
       </figure>
     );
   }
-  return <div className="browser-empty"><p className="empty-box">{t(view.kind === 'here_only' ? 'browser_here_only' : 'screen_empty')}</p></div>;
+  return <div className="browser-empty"><Empty block icon={Browser} text={t(view.kind === 'here_only' ? 'browser_here_only' : 'screen_empty')} /></div>;
 }
