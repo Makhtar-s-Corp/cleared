@@ -6,6 +6,7 @@
 // on a computer, a rail of icons on a tablet or when folded, a top bar and
 // a bottom bar on a phone (styles/app.css).
 import { Broadcast, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
+import { memo } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -49,7 +50,7 @@ export function ThemeButton({ t, theme, onFlip }: { readonly t: Translate; reado
   );
 }
 
-export function Sidebar(props: SidebarProps) {
+export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const { t, mode, screen } = props;
   const badge = inboxBadge(props.waiting);
   const signedIn = t('signed_in_as', { name: props.userName });
@@ -135,4 +136,4 @@ export function Sidebar(props: SidebarProps) {
       </div>
     </aside>
   );
-}
+});

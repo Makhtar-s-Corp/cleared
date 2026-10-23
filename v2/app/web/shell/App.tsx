@@ -355,6 +355,11 @@ function Shell({ shared }: { readonly shared: Shared }) {
     });
   }, [navigate, flipTheme, toggleSidebar]);
 
+  // The sidebar draws again only when what it shows changes (Sidebar is memo).
+  const groups = useMemo(() => sessionGroups(rows), [rows]);
+  const onSignOut = useCallback(() => void signOut(), [signOut]);
+  const onPick = useCallback((href: string) => { fromSidebar.current = href !== location.pathname; }, []);
+
   const lastRow = useRef<HTMLElement | null>(null);
   const runKey = useCallback((action: Action) => {
     switch (action.kind) {
@@ -380,8 +385,8 @@ function Shell({ shared }: { readonly shared: Shared }) {
       <div className="app" data-sidebar={mode} inert={overlay !== null}>
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
-          waiting={waiting} lead={leadDot(lead)} groups={sessionGroups(rows)} theme={theme} onTheme={flipTheme}
-          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={() => void signOut()} onPick={(href) => { fromSidebar.current = href !== location.pathname; }} />
+          waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme}
+          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
         <div className="main">
           <div className="top-bar" id="top-bar">
             <p className="top-title">{shownRow ? <><a className="crumb" href="/sessions">{t('title_session')}</a><span className="crumb" aria-hidden="true">/</span></> : null}<span className="here">{here}</span></p>
