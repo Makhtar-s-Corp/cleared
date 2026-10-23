@@ -68,11 +68,17 @@ export class PlanStore {
   #db: DatabaseSync;
   #project: string;
   #now: () => Date;
+  #configured: readonly string[] | undefined;
 
-  constructor(db: DatabaseSync, project: string, now: () => Date = () => new Date()) {
+  // `configured`: the names of the services the workspace's configuration
+  // has now, in its order. The ledger keeps the row of a service no longer
+  // configured (recordWorkspace), so a workspace that changed under the
+  // same id, from several services to one, still has the old rows.
+  constructor(db: DatabaseSync, project: string, now: () => Date = () => new Date(), configured?: readonly string[]) {
     this.#db = db;
     this.#project = project;
     this.#now = now;
+    this.#configured = configured;
   }
 
   #at(): string {
@@ -92,13 +98,19 @@ export class PlanStore {
   }
 
   // The workspace's services, in the order they were first recorded (the
-  // workspace file's). None when the ledger has no `services` table: a
-  // store opened on the plans' tables alone, as before the workspace.
+  // workspace file's). With the configured names, only those, in the
+  // configuration's order: a service the configuration no longer has is
+  // never planned nor named on a ticket, which the flow would refuse. None
+  // when the ledger has no `services` table: a store opened on the plans'
+  // tables alone, as before the workspace.
   services(): PlanService[] {
     try {
       // The contract is kept as `<format>:<path>` (tickets/local-store.ts).
-      return (this.#db.prepare('SELECT name, sensitivity, contract FROM services WHERE workspace = ? ORDER BY rowid').all(this.#project) as Row[])
+      const recorded = (this.#db.prepare('SELECT name, sensitivity, contract FROM services WHERE workspace = ? ORDER BY rowid').all(this.#project) as Row[])
         .map((row) => ({ name: String(row.name), sensitivity: String(row.sensitivity) as ServiceSensitivity, contract: row.contract ? String(row.contract).replace(/^[^:]*:/, '') : null }));
+      const configured = this.#configured;
+      if (!configured) return recorded;
+      return configured.flatMap((name) => recorded.filter((service) => service.name === name));
     } catch (error) {
       if (/no such table/.test((error as Error).message)) return [];
       throw error;
