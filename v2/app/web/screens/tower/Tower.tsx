@@ -11,7 +11,7 @@
 // person and the live sessions are rows (a kind, a title, one line), which
 // J and K walk ([data-row]); an empty part says so in one sentence, with
 // the one thing to do about it.
-import { Check, HandGrabbing, ListChecks, TerminalWindow, X } from '@phosphor-icons/react';
+import { Check, HandGrabbing, ListChecks, Package, TerminalWindow, X } from '@phosphor-icons/react';
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Recipe } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -260,7 +260,7 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
         </section>
         <section className="side-card" aria-labelledby="landed-title">
           <h2 id="landed-title">{t('landed_title')}</h2>
-          {model.landed.length === 0 ? <Empty icon={Check} text={t('landed_empty')} /> : (
+          {model.landed.length === 0 ? <Empty icon={Package} text={t('landed_empty')} /> : (
             <ul className="landed">
               {model.landed.map((row) => <li key={row.ticket}><span className="time">{row.time}</span><span className="what">{row.title}</span><span className="took">{duration(row.minutes, t)}</span></li>)}
             </ul>

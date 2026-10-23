@@ -115,11 +115,11 @@
 .item-state.held, .item-state.put_back { color: var(--danger-text); }
 .lane { padding: 2px 8px; border-radius: 999px; font-size: var(--text-sm); white-space: nowrap; }
 .lane.full { background: var(--surface-muted); color: var(--text-secondary); }
-.lane.fast { background: var(--ok-surface); color: var(--ok-text); }
-:root[data-theme="dark"] .lane.full { background: var(--sunken); }
+.lane.fast { background: var(--surface-muted); color: var(--text-secondary); }   /* a lane is a fact, not a success (lane 38) */
+:root[data-theme="dark"] .lane.full, :root[data-theme="dark"] .lane.fast { background: var(--sunken); }
 .plan-estimate { min-width: 92px; padding-top: 2px; font-size: var(--text-sm); color: var(--text-faint); text-align: right; white-space: nowrap; }
-.plan-facts { display: flex; gap: 6px 16px; list-style: none; margin: 0; padding: 12px 20px; border-top: 1px solid var(--hairline); font-size: var(--text-md); color: var(--text-secondary); }
-.plan-fact { flex: 0 1 auto; }
+.plan-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; margin: 0; padding: 12px 20px; border-top: 1px solid var(--hairline); font-size: var(--text-md); color: var(--text-secondary); }
+.plan-fact { flex: 0 1 auto; white-space: nowrap; }
 .plan-fact:last-child { margin-left: auto; }
 .plan-actions { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px 18px; }
 .plan-actions button { min-height: 44px; border-radius: 10px; font-size: var(--text-md); cursor: pointer; }
@@ -185,6 +185,7 @@
   .plan-n { grid-area: n; } .plan-what { grid-area: what; } .lane { grid-area: lane; } .plan-estimate { grid-area: estimate; min-width: 0; }
   .plan-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 16px; }
   .plan-fact:last-child { margin-left: 0; }
+  .plan-fact { white-space: normal; }
   .plan-actions { flex-direction: column-reverse; padding: 12px 16px 16px; }
   .plan-actions button { flex: none; width: 100%; }
 }

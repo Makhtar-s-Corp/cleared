@@ -85,6 +85,7 @@
 .lead-state { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lead-state.down { color: var(--danger-text); font-weight: var(--weight-strong); }
 .lead-line { max-width: 70ch; color: var(--text); overflow-wrap: anywhere; }
+:lang(fr) .lead-line q { quotes: "«\202F" "\202F»"; }
 .lead-line q { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .lead-ask { margin-top: var(--space-2); }
 .lead-ask input { width: 100%; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); }

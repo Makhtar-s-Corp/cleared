@@ -430,8 +430,9 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
       <form className="composer" id="composer" autoComplete="off" onSubmit={onSend}>
         <Input id="message" name="text" ref={input} placeholder={placeholder} aria-label={placeholder} disabled={off} value={text} onChange={(event) => onText?.(event.target.value)} />
         <Button className="btn" id="handover" aria-disabled="true" aria-describedby="handover-note" title={t('handover_note')} onClick={onHandover}>{t('handover')}</Button>
-        <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}>{t('interrupt')}</Button>
-        <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending}>{t('send')}</Button>
+        <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}><Stop size={16} aria-hidden="true" /><span className="btn-label">{t('interrupt')}</span></Button>
+        {/* Send waits for a message (lane 38, the critique): one ink button at a time, the screen's own gesture first. */}
+        <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending || text.trim() === ''}>{t('send')}</Button>
       </form>
       <span className="sr-only" id="handover-note">{t('handover_note')}</span>
       <p className="composer-note" id="composer-note" role="status">{note}</p>
@@ -448,7 +449,9 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
     ...sessions.filter((s) => s.role !== 'author' && s.role !== 'reviewer'),
     ...[...tickets_].flatMap((ticket) => { const own = ticketSessions(sessions, ticket); const acting = actingSession(own, own.at(-1)?.id ?? ''); return acting ? [acting] : []; }),
   ];
-  const ordered = shown.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  // What waits for the person first, as the tower orders it (lane 38, the critique), then the most recent.
+  const waits = (s: SessionSummary) => (s.phase === 'waiting_human' ? 0 : 1);
+  const ordered = shown.sort((a, b) => waits(a) - waits(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   // Rows as the tower's (lane 38): the row is the link, named by the title and described by the rest.
   return (
     <div className="index">

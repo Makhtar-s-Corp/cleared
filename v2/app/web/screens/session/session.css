@@ -109,8 +109,8 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* Where the ticket passed from one session to the next (lane 36): a quiet
    divider with who took over and when, never a toast. */
 .handover { display: flex; align-items: center; gap: 12px; margin: 14px 0 10px; font-size: var(--text-sm); color: var(--text-muted); }
-.handover::before, .handover::after { content: ""; flex: 1 1 24px; height: 1px; background: var(--hairline); }
-.handover span { flex: 0 1 auto; text-align: center; }
+.handover::before, .handover::after { content: ""; flex: 1 0 32px; height: 1px; background: var(--hairline); }
+.handover span { flex: 0 1 auto; text-align: center; text-wrap: balance; }
 /* Author and Reviewer filter the thread: quiet chips under a hairline, not a second row of tabs. */
 .thread-filter { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--hairline); flex: none; overflow-x: auto; }
 .thread-filter .filter { min-height: 30px; padding: 3px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
@@ -146,6 +146,9 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .composer input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .composer input:disabled { background: var(--sunken); }
 .composer .btn { min-height: 40px; }
+/* Interrupt is a word on a computer and an icon on a phone, its word read out (lane 38, the critique). */
+.composer #interrupt { gap: 6px; }
+.composer #interrupt svg { display: none; }
 .composer-note { margin-top: 8px; font-size: var(--text-sm); color: var(--text-secondary); }
 .composer-note:empty { display: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -338,9 +341,16 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* Under 760 px of screen (a tablet beside the folded sidebar, a phone): one column, the thread first. */
 @container screen (max-width: 759px) {
   .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; }
+  /* The ticket first, its title and number only, so a phone says which ticket it is in (lane 38, the critique);
+     the thread next, then the rest of the left column and the right one. */
+  .session:has(> .s-left > .card:first-child) { grid-template-areas: "ticket" "panel" "left" "right"; }
+  .s-left { display: contents; }
+  .s-left > .card:first-child { grid-area: ticket; }
+  .s-left > .card:first-child .desc { display: none; }
+  .s-left > .card:not(:first-child) { grid-area: left; }
 }
 @media (max-width: 1100px) {
-  .btn, .composer .btn { min-height: 44px; }
+  .btn, .composer .btn, .panel-head .takeover-button { min-height: 44px; }
   .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
   /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
   .panel { height: auto; max-height: calc(100vh - 132px); }
@@ -366,6 +376,9 @@ details.row .what > .sub { margin: 0 0 0 auto; }
      stays off a phone. */
   .composer { flex-wrap: nowrap; }
   .composer .btn { min-height: 44px; padding: 0 12px; }
+  .composer #interrupt { width: 44px; padding: 0; }
+  .composer #interrupt svg { display: block; }
+  .composer #interrupt .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .composer input { height: 44px; flex: 1 1 0; }
   .composer #handover { display: none; }
   #send { margin-left: 0; }
@@ -374,7 +387,6 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .view-tabs { width: 100%; }
   .view-tab { flex: 1; justify-content: center; padding: 4px 6px; }
   .panel-head { padding: 10px 12px; }
-  .panel-head .meta .who { display: none; }
   .thread-filter { padding: 6px 12px; }
   .thread-filter .filter { flex: 1 1 auto; }
   .earlier > summary { padding-left: 46px; min-height: 44px; }
