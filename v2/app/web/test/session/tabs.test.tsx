@@ -84,7 +84,7 @@ test('a session taken over by you: the status says so, and the Terminal tab give
   const text = visibleText(notice);
   assert.ok(!text.some((line) => /docker exec|on the server|claude --resume/.test(line)));
   // One line (lane 36): who took it over and when, and what Give back does.
-  assert.deepEqual(text, ['Since 09:41.', 'Give back tells the session what you changed.']);
+  assert.deepEqual(text, ['Taken over at 09:41.', 'Give back tells the session what you changed.']);
   assert.equal([...notice.matchAll(/<p /g)].length, 1);
   assert.doesNotMatch(notice, /id="resume-command"/);
   assert.equal(html(<TakeoverNotice view={viewOf()} t={en} />), '', 'nothing when nobody took it over');

@@ -19,7 +19,7 @@ import type { Translate } from './i18n.ts';
 
 export const INTENT_KINDS = [
   'git_read', 'read_files', 'search', 'list', 'tests', 'typecheck', 'lint', 'build', 'install', 'install_all',
-  'network', 'network_any', 'commit', 'push', 'branch', 'delete', 'files', 'start', 'script', 'unknown',
+  'network', 'network_any', 'commit', 'push', 'branch', 'discard', 'delete', 'files', 'start', 'script', 'unknown',
 ] as const;
 export type IntentKind = (typeof INTENT_KINDS)[number];
 
@@ -143,6 +143,8 @@ function intentOfPart(part: string): Intent | undefined {
     if (sub === 'branch') return args.some((a) => /^-[dDmM]$|^--(?:delete|move)$/.test(a)) ? { kind: 'branch' } : { kind: 'git_read' };
     if (sub === 'add' || sub === 'commit') return { kind: 'commit' };
     if (sub === 'push') return { kind: 'push' };
+    // What throws the checkout's changes away says so (review of 251, F2).
+    if (sub === 'restore' || sub === 'clean' || (sub === 'reset' && args.includes('--hard')) || (sub === 'checkout' && (args.includes('--') || args.includes('.')))) return { kind: 'discard' };
     if (sub === 'checkout' || sub === 'switch') return { kind: 'branch' };
     return { kind: 'unknown', name: `git ${sub}` };
   }
@@ -183,6 +185,9 @@ function intentOfPart(part: string): Intent | undefined {
     return { kind: 'unknown', name };
   }
   if (name === 'make') return sub && /test|check/.test(sub) ? { kind: 'tests' } : { kind: 'build' };
+  if (name === 'find' && (args.includes('-delete') || args.some((a, i) => (a === '-exec' || a === '-execdir' || a === '-ok') && /(^|\/)(rm|rmdir|unlink|shred)$/.test(args[i + 1] ?? '')))) return { kind: 'delete' };
+  if (name === 'find' && args.some((a) => a === '-exec' || a === '-execdir' || a === '-ok')) return { kind: 'unknown', name };
+  if (name === 'sort' && args.some((a) => a === '-o' || a.startsWith('--output'))) return { kind: 'files' };
   if (name === 'sed') return args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place')) ? { kind: 'files' } : { kind: 'read_files' };
   if (name === 'playwright' && sub === 'test') return { kind: 'tests' };
   if (TESTS.has(name)) return { kind: 'tests' };
@@ -200,12 +205,27 @@ function intentOfPart(part: string): Intent | undefined {
   return { kind: 'unknown', name };
 }
 
-// The intents of a command, in order, each once; what a pipe reads says nothing.
+// What reads a pipe and runs or writes it: a shell, an interpreter, xargs, tee.
+const RUNS_INPUT = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'python', 'python3', 'node', 'perl', 'ruby', 'php', 'xargs', 'tee', 'sudo', 'env']);
+
+// What a pipe's reader does: nothing of its own (`| tail -8`), unless it
+// runs what it reads (`| sh`), runs a command on it (`| xargs rm`) or writes it (`| tee`).
+function piped(part: string): Intent | undefined {
+  const all = words(part).filter((w) => !REDIRECT.test(w) && !ASSIGN.test(w));
+  const first = all[0]?.split('/').at(-1) ?? '';
+  if (!RUNS_INPUT.has(first)) return undefined;
+  if (first === 'tee') return { kind: 'files' };
+  if (first === 'xargs') return intentOfPart(all.slice(1).filter((a, i, rest) => !a.startsWith('-') || rest.slice(0, i).some((b) => !b.startsWith('-'))).join(' ')) ?? { kind: 'unknown', name: first };
+  if (first === 'sudo' || first === 'env') return intentOfPart(all.slice(1).join(' '));
+  return { kind: 'unknown', name: first };
+}
+
+// The intents of a command, in order, each once; what a pipe reads says
+// nothing, unless it runs or writes what it reads.
 export function intentsOf(command: string): Intent[] {
   const out: Intent[] = [];
   for (const part of commandParts(command)) {
-    if (part.op === '|') continue;
-    const intent = intentOfPart(part.text);
+    const intent = part.op === '|' ? piped(part.text) : intentOfPart(part.text);
     if (intent && !out.some((seen) => seen.kind === intent.kind && seen.name === intent.name)) out.push(intent);
   }
   return out;

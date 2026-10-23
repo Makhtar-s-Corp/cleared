@@ -75,5 +75,6 @@
   "intent_read_any": "read the repository",
   "intent_checks_any": "run the tests",
   "intent_and": "and",
-  "intent_alone": "{name} …"
+  "intent_alone": "{name} …",
+  "intent_discard": "discard changes"
 }

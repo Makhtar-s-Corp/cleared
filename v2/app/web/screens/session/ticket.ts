@@ -27,7 +27,7 @@ export type Handover = {
   readonly model: string;                                 // its model's family: Opus, Sonnet...
   readonly after: ThreadRole;                             // the role of the session before it
 };
-export type ThreadEntry = { readonly kind: 'row'; readonly session: string; readonly role: ThreadRole; readonly row: Row } | Handover;
+export type ThreadEntry = { readonly kind: 'row'; readonly session: string; readonly role: SessionSummary['role']; readonly row: Row } | Handover;
 
 const threadRole = (summary: SessionSummary): summary is SessionSummary & { role: ThreadRole } => summary.role === 'author' || summary.role === 'reviewer';
 const byStart = (a: { readonly startedAt: string }, b: { readonly startedAt: string }) => Date.parse(a.startedAt) - Date.parse(b.startedAt);
@@ -40,6 +40,15 @@ export function ticketSessions(all: readonly SessionSummary[], ticket: string): 
 // A session someone works in: running, waiting, or taken over.
 export const isLive = (summary: SessionSummary): boolean => !ENDED.has(summary.phase) || Boolean(summary.takenOver);
 
+// The sessions a view draws: the ticket's authors and reviewers when the
+// address names one of them; else the session alone (a lead's, a reader's:
+// review of 251, F1), which has a thread of its own and no ticket's.
+export function viewSessions(all: readonly SessionSummary[], named: SessionSummary): SessionSummary[] {
+  if (!threadRole(named)) return [all.find((s) => s.id === named.id) ?? named];
+  const own = ticketSessions(all, named.ticket);
+  return own.some((s) => s.id === named.id) ? own : ticketSessions([...own, named], named.ticket);
+}
+
 // The session the view acts on: the newest live one; else the one the
 // address names, when it is the ticket's; else the newest.
 export function actingSession(sessions: readonly SessionSummary[], asked: string): SessionSummary | undefined {
@@ -51,7 +60,7 @@ export function actingSession(sessions: readonly SessionSummary[], asked: string
 export const partsOf = (view: { readonly parts?: readonly TicketPart[] | undefined; readonly summary: SessionSummary; readonly thread: SessionThread }): readonly TicketPart[] =>
   view.parts ?? [{ summary: view.summary, thread: view.thread }];
 
-const sorted = (parts: readonly TicketPart[]) => [...parts].filter((p) => threadRole(p.summary)).sort((a, b) => byStart(a.summary, b.summary));
+const sorted = (parts: readonly TicketPart[]) => [...parts].sort((a, b) => byStart(a.summary, b.summary));
 
 // One thread of the ticket: each session's rows, a handover row before each
 // session after the first; a filter keeps one role's rows, and no handover.
@@ -59,9 +68,9 @@ export function ticketThread(parts: readonly TicketPart[], filter: Filter): Thre
   const out: ThreadEntry[] = [];
   let before: ThreadRole | undefined;
   for (const { summary, thread } of sorted(parts)) {
-    const role = summary.role as ThreadRole;
-    if (filter === 'all' && before !== undefined) out.push({ kind: 'handover', session: summary.id, at: summary.startedAt, role, model: family(summary.model), after: before });
-    before = role;
+    const role = summary.role;
+    if (filter === 'all' && before !== undefined && threadRole(summary)) out.push({ kind: 'handover', session: summary.id, at: summary.startedAt, role: summary.role, model: family(summary.model), after: before });
+    before = threadRole(summary) ? summary.role : undefined;
     if (filter !== 'all' && filter !== role) continue;
     for (const row of thread?.rows ?? []) out.push({ kind: 'row', session: summary.id, role, row });
   }

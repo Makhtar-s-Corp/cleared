@@ -75,5 +75,6 @@
   "intent_read_any": "lire le dépôt",
   "intent_checks_any": "lancer les tests",
   "intent_and": "et",
-  "intent_alone": "{name} …"
+  "intent_alone": "{name} …",
+  "intent_discard": "annuler des changements"
 }

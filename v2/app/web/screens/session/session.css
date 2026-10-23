@@ -32,6 +32,7 @@
 .checks details { width: 100%; }
 .checks summary { list-style: none; cursor: pointer; border-radius: 4px; }
 .checks summary::-webkit-details-marker { display: none; }
+.checks summary:hover .caret { color: var(--text-muted); }
 .checks summary:hover .check-name { color: var(--text); text-decoration: underline; text-decoration-color: var(--dashed); text-underline-offset: 3px; }
 .checks summary .caret { margin-left: auto; color: var(--text-faint); transition: transform 120ms var(--ease); }
 .checks details[open] > summary .caret { transform: rotate(90deg); }
@@ -78,8 +79,8 @@ details.row > summary { display: grid; grid-template-columns: 44px 20px minmax(0
 details.row > summary::-webkit-details-marker { display: none; }
 details.row > summary:hover { background: var(--tab-fill); box-shadow: 0 0 0 4px var(--tab-fill); }
 /* The caret says a row opens: always there, quiet until the row is pointed at. */
-details.row > summary .caret { margin-top: 3px; color: var(--dashed); transition: color 120ms var(--ease), transform 120ms var(--ease); }
-details.row > summary:hover .caret, details.row > summary:focus-visible .caret, details.row[open] > summary .caret { color: var(--text-faint); }
+details.row > summary .caret { margin-top: 3px; color: var(--text-faint); transition: color 120ms var(--ease), transform 120ms var(--ease); }
+details.row > summary:hover .caret, details.row > summary:focus-visible .caret, details.row[open] > summary .caret { color: var(--text-muted); }
 details.row[open] > summary .caret { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { details.row > summary .caret, .checks summary .caret, .earlier > summary .caret { transition: none; } }
 /* A step on one line: what it did, then its result or its counts as an accessory. */
@@ -107,14 +108,14 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .handover span { flex: 0 1 auto; text-align: center; }
 /* Author and Reviewer filter the thread: quiet chips under a hairline, not a second row of tabs. */
 .thread-filter { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--hairline); flex: none; overflow-x: auto; }
-.thread-filter .filter { min-height: 26px; padding: 3px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.thread-filter .filter { min-height: 30px; padding: 3px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
 .thread-filter .filter:hover:not(:disabled) { color: var(--text); background: var(--tab-fill); }
 .thread-filter .filter[aria-pressed="true"] { background: var(--tab-fill); color: var(--text); font-weight: 500; }
 .thread-filter .filter:disabled { color: var(--text-faint); cursor: default; }
 :root[data-theme="dark"] .thread-filter .filter:not([aria-pressed="true"]):not(:disabled) { color: var(--text-secondary); }
 .bubble { margin: 8px 0; padding: 10px 12px; border-radius: 10px; max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.bubble.assistant { margin-left: 72px; background: var(--sunken); }
-.bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--ink); color: var(--on-ink); }
+.row[data-row="message"] .prose { white-space: pre-wrap; color: var(--text); }
+.bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--tab-fill); color: var(--text); }
 .request { margin: 10px 0 4px 72px; padding: 14px; border-radius: 10px; background: var(--awaiting-pill); box-shadow: 0 0 0 1px rgba(245,166,35,.5); }
 .request.question.waits { background: var(--awaiting-surface); }
 /* amber only while the question waits */
@@ -199,7 +200,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .takeover-line + .takeover-body { margin-top: 4px; }
 
 /* Editor, read only */
-.editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
+.editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; padding-bottom: 8px; }
 .editor-files ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .file-pick { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: none; text-align: left; cursor: pointer; }
 .file-pick:hover { background: var(--tab-fill); }
@@ -209,8 +210,8 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .file-pick[aria-current="true"]:disabled { background: var(--tab-fill); opacity: 1; }
 .file-pick .counts { flex-basis: 100%; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .editor-files .card-label { line-height: 24px; }
-.mode.scope { display: flex; margin: 0 0 8px; }
-.mode.scope button { flex: 1 1 auto; white-space: nowrap; }
+.mode.scope { display: inline-flex; margin: 0 0 8px; }
+.mode.scope button { flex: none; white-space: nowrap; }
 .mode.scope button:disabled { color: var(--text-faint); cursor: default; }
 .scope-n { margin-left: 2px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .editor-view { min-width: 0; }
@@ -285,8 +286,12 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .index h1 { font-size: 26px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; }
 
 @media (max-width: 1439px) {
-  .panel { height: auto; max-height: calc(100vh - 132px); }
   .cm-host .cm-editor { max-height: max(240px, calc(100vh - 540px)); }
+  /* The status's meta under its phrase, so Take over keeps its margin (lane 36's art director). */
+  .panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; }
+  .panel-head .phrase-title { min-width: 0; }
+  .panel-head .meta { grid-column: 2; grid-row: 2; margin-left: 0; white-space: normal; }
+  .panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; margin-left: 0; }
 }
 /* Below the widest screen the diff takes the panel's width; the files become a strip above it. */
 @media (max-width: 1439px) {
@@ -295,14 +300,14 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .editor-files li { flex: none; }
   .file-pick { width: auto; }
   .file-pick .counts { flex-basis: auto; }
+  .file-pick { box-shadow: inset 0 0 0 1px var(--hairline); }
 }
 @media (max-width: 1100px) {
   .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
   .btn, .composer .btn { min-height: 44px; }
   .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
-  .panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; }
-  .panel-head .meta { grid-column: 2; grid-row: 2; margin-left: 0; white-space: normal; }
-  .panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; margin-left: 0; }
+  /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
+  .panel { height: auto; max-height: calc(100vh - 132px); }
   .view-tabs { flex: 1; }
   .link-button { display: inline-flex; align-items: center; min-height: 44px; }
   .mode button { min-height: 36px; }

@@ -15,7 +15,7 @@ import { lastTurnFiles, scopedFiles } from '../../web/components/editor/model.ts
 import { translator } from '../../web/lib/i18n.ts';
 import { applyAll, emptyModel, threadOf, timeline, type SessionThread } from '../../web/screens/session/model.ts';
 import {
-  actingSession, editsOf, filterOptions, handoverLine, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread, type Handover, type TicketPart,
+  actingSession, editsOf, filterOptions, viewSessions, handoverLine, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread, type Handover, type TicketPart,
 } from '../../web/screens/session/ticket.ts';
 import { message, modelOf, stored, tool } from './support.ts';
 
@@ -63,6 +63,15 @@ test('the ticket\'s sessions: its authors and reviewers, oldest first; a reader 
   assert.deepEqual(ticketSessions([REVIEWER, reader, other, AUTHOR], 'LOCAL-152').map((s) => s.id), ['author-1', 'reviewer-1']);
 });
 
+test('a view draws the ticket\'s sessions when the address names an author or a reviewer; a lead\'s or a reader\'s session alone (review of 251, F1)', () => {
+  const lead = { ...summary('lead-1', 'lead', 2, 'working'), ticket: 'lead' };
+  assert.deepEqual(viewSessions([AUTHOR, REVIEWER, lead], lead).map((s) => s.id), ['lead-1']);
+  assert.deepEqual(viewSessions([AUTHOR, REVIEWER, lead], REVIEWER).map((s) => s.id), ['author-1', 'reviewer-1']);
+  assert.deepEqual(viewSessions([AUTHOR], REVIEWER).map((s) => s.id), ['author-1', 'reviewer-1'], 'the session the address names, even before the list has it');
+  const leadThread = threadFrom('lead-1', 2, [...message('l1', 'assistant', 'The plan is ready.')]);
+  assert.deepEqual(ticketThread([{ summary: lead, thread: leadThread }], 'all').map((e) => (e.kind === 'row' ? e.row.kind : e.kind)), ['message'], 'its own rows, no handover');
+});
+
 test('the view acts on the newest live session, else on the one the address names, else on the newest', () => {
   assert.equal(actingSession([AUTHOR, REVIEWER], 'author-1')?.id, 'reviewer-1', 'the reviewer runs: the view is the reviewer\'s');
   const ended = { ...REVIEWER, phase: 'done' as const };
@@ -80,14 +89,14 @@ test('one thread: the author\'s rows, a handover row with who and when, then the
   ]);
   const handover = entries.find((e) => e.kind === 'handover') as Handover;
   assert.deepEqual([handover.session, handover.at, handover.model], ['reviewer-1', at(20), 'Sonnet']);
-  assert.equal(handoverLine(handover, en), 'Reviewer · Sonnet · from 09:20');
-  assert.equal(handoverLine(handover, fr), 'Relecteur · Sonnet · depuis 09:20');
+  assert.equal(handoverLine(handover, en), 'Sonnet started the review at 09:20. The author\'s work is above.');
+  assert.equal(handoverLine(handover, fr), 'Sonnet a commencé la relecture à 09:20. Le travail de l\'auteur est au-dessus.');
   const back: Handover = { ...handover, role: 'author', model: 'Opus', after: 'reviewer' };
-  assert.equal(handoverLine(back, en), 'Author · Opus · again from 09:20');
-  assert.equal(handoverLine(back, fr), 'Auteur · Opus · de nouveau depuis 09:20');
+  assert.equal(handoverLine(back, en), 'Opus started on the review\'s changes at 09:20. The review is above.');
+  assert.equal(handoverLine(back, fr), 'Opus a repris le ticket pour les changements demandés à 09:20. La relecture est au-dessus.');
   const again: Handover = { ...handover, role: 'author', model: 'Opus', after: 'author' };
-  assert.equal(handoverLine(again, en), 'New author session · Opus · from 09:20');
-  assert.equal(handoverLine(again, fr), 'Nouvelle session d\'auteur · Opus · depuis 09:20');
+  assert.equal(handoverLine(again, en), 'A new author session, Opus, started at 09:20. The last one is above.');
+  assert.equal(handoverLine(again, fr), 'Une nouvelle session d\'auteur, Opus, a commencé à 09:20. La précédente est au-dessus.');
 });
 
 test('Author and Reviewer filter the thread: one role\'s rows, no handover row; a session not yet read adds nothing', () => {

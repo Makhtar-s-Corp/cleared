@@ -21,7 +21,7 @@
 // changed file for editing (decision 33). Both packages load by a dynamic
 // import (lane 32).
 import {
-  ArrowRight, ArrowUpRight, CaretRight, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
+  ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { ConfirmableRule, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
@@ -51,7 +51,7 @@ import {
 import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
-  actingSession, editsOf, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
+  actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askHref } from '@/screens/ask/model.ts';
@@ -244,8 +244,12 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile }: {
       return <EditsLine row={row} t={t} onFile={onFile} />;
     case 'tool':
       return <ToolLine row={row} view={view} t={t} onAnswer={onAnswer} onFile={onFile} />;
+    // The session's prose is a row of the worklog, flat (lane 36's art
+    // director); the person's own message keeps a quiet bubble.
     case 'message':
-      return <div className={`bubble ${row.role}`} data-row="message">{row.text}</div>;
+      return row.role === 'assistant'
+        ? <Frame kind="message" at={row.at} icon={ChatText}><div className="prose">{row.text}</div></Frame>
+        : <div className={`bubble ${row.role}`} data-row="message">{row.text}</div>;
     case 'question':
       return <QuestionView row={row} view={view} t={t} onQuestion={onQuestion} />;
     case 'denied':
@@ -564,7 +568,8 @@ function Feed({ summary, detail, open, onThread }: {
     sessionId: id, state: detail?.state,
     open: (url) => new EventSource(url) as unknown as StreamLike,
     later: (run, ms) => { setTimeout(run, ms); },
-  }), [id]);     // made once per session: the state given is only its first
+    streaming: open,
+  }), [id]);     // made once per session: the state and the openness given are only the first
   const agents = useMemo(() => ({ [sessionAgentId(id)]: agent }), [id, agent]);
   useEffect(() => { agent.setOpen(open); }, [agent, open]);
   return <CopilotThreads agents={agents}><FeedReader id={id} onThread={onThread} /></CopilotThreads>;
@@ -582,7 +587,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const root = useRef<HTMLDivElement | null>(null);
   const shown = useShown(root);
   const ticketId = loaded.detail.ticket;
-  const [sessions, setSessions] = useState<readonly SessionSummary[]>(() => ticketSessions(loaded.sessions, ticketId));
+  const [sessions, setSessions] = useState<readonly SessionSummary[]>(() => viewSessions(loaded.sessions, loaded.detail));
   const [details, setDetails] = useState<ReadonlyMap<string, SessionDetail>>(() => new Map([[loaded.detail.id, loaded.detail]]));
   const [threads, setThreads] = useState<ReadonlyMap<string, SessionThread>>(new Map());
   const [now, setNow] = useState(() => context.now());
@@ -637,12 +642,12 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSessions((before) => {
-        const next = ticketSessions(all, ticketId);
+        const next = viewSessions(all, loaded.detail);
         return next.length === before.length && next.every((s, index) => s === before[index]) ? before : next;
       });
       setTaken((local) => (local && !gestureNow.current ? null : local));
     } catch { /* the next change tries again */ }
-  }, [context, ticketId, readSteps]);
+  }, [context, loaded.detail, readSteps]);
   useEffect(() => { void readSteps(); }, [readSteps]);
   useLive(() => {
     if (shown) void refresh();
@@ -704,7 +709,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   }, []);
 
   // The sessions this view saw live stay unfolded once they end: nothing folds under the person's eyes.
-  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set(ticketSessions(loaded.sessions, ticketId).filter(isLive).map((s) => s.id)));
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set(viewSessions(loaded.sessions, loaded.detail).filter(isLive).map((s) => s.id)));
   useEffect(() => {
     const live = sessions.filter((s) => isLive(s) && !unfolded.has(s.id));
     if (live.length > 0) setUnfolded((before) => new Set([...before, ...live.map((s) => s.id)]));

@@ -50,7 +50,7 @@ export function TerminalFrame({ t, status, mode = DEFAULT_MODE, harness = '', ca
       </div>
       <div className="term-host" ref={host} />
       <div className="term-foot">
-        <p className="term-state" role="status">
+        <p className="term-state" role="status" title={status.kind === 'open' ? t('terminal_journaled') : undefined}>
           <span className="dot" data-state={status.kind} aria-hidden="true" />
           <span>{line}</span>
           {closed?.detail && !unsupported ? <span className="term-detail">{closed.detail}</span> : null}

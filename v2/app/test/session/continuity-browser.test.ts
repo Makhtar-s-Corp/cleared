@@ -91,9 +91,9 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     assert.deepEqual({ view: after.view, diff: after.diff, added: after.added, views: after.views, navigations: after.navigations },
       { view: 'view', diff: 'diff', added: 24, views: 1, navigations: 1 }, 'the same view and the same diff, in one document, one view of the ticket');
     assert.equal(documents, loaded, 'no document loaded');
-    assert.match(after.handover ?? '', /^Reviewer · Sonnet · from \d\d:\d\d$/);
+    assert.match(after.handover ?? '', /^Sonnet started the review at \d\d:\d\d\. The author's work is above\.$/);
     assert.deepEqual(after.rows.slice(after.rows.indexOf('handover')), ['handover', 'run', 'read'], 'the reviewer\'s rows below it');
-    assert.match(after.said, /Reviewer · Sonnet · from/, 'said once, politely');
+    assert.match(after.said, /Sonnet started the review at/, 'said once, politely');
 
     // Take over on the reviewer: its terminal, opened once.
     await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
@@ -138,6 +138,39 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     }
     assert.deepEqual(await page.evaluate(() => (window as unknown as { violations?: string[] }).violations ?? []), [], 'no policy violation');
     assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /\u27e6/, 'no missing key drawn');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    await app.close();
+  }
+});
+
+// A session that is neither an author's nor a reviewer's (the lead's, a
+// reader's) has no ticket's thread: its address still draws its own
+// (review of pull request 251, F1).
+test('the lead\'s session address draws its own thread', { skip }, async () => {
+  const { fixtureSource } = await import('../../fixtures/source.ts');
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }) });
+  const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
+  const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
+  const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
+  try {
+    await app.directory.add('owner', PASSWORD);
+    const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (error: Error) => errors.push(error.message));
+    await page.goto(`${app.base}/login`);
+    await page.fill('#name', 'owner');
+    await page.fill('#password', PASSWORD);
+    await page.click('button[type=submit]');
+    await page.waitForURL(`${app.base}/`);
+    const lead = await (await page.request.get(`${app.base}/api/service/lead`)).json() as { sessionId: string };
+    await page.goto(`${app.base}/sessions/${lead.sessionId}`);
+    await page.locator('#timeline [data-row]').first().waitFor();
+    await page.waitForFunction(() => document.querySelector('.session[aria-busy="true"]') === null);
+    assert.equal(await page.locator('[data-filter]').count(), 0, 'no ticket to filter');
+    assert.equal(await page.locator('#timeline [data-row="handover"]').count(), 0);
+    assert.match(page.url(), new RegExp(`/sessions/${lead.sessionId}$`), 'its own address, kept');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

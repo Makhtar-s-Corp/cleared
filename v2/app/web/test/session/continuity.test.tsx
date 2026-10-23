@@ -60,8 +60,8 @@ test('one thread of the ticket: the author\'s steps, the handover row, the revie
   const handover = rows.indexOf('handover');
   assert.ok(handover > 0, 'a handover row, after the author\'s rows');
   assert.deepEqual(rows.slice(handover), ['handover', 'run', 'run', 'read'], 'then the reviewer\'s');
-  assert.ok(visibleText(markup).includes('Reviewer · Sonnet · from 09:37'));
-  assert.ok(visibleText(html(<Timeline view={view} t={fr} />)).includes('Relecteur · Sonnet · depuis 09:37'));
+  assert.ok(visibleText(markup).includes('Sonnet started the review at 09:37. The author\'s work is above.'));
+  assert.ok(visibleText(html(<Timeline view={view} t={fr} />)).includes('Sonnet a commencé la relecture à 09:37. Le travail de l\'auteur est au-dessus.'));
   const status = visibleText(html(<StatusHead view={view} t={en} />));
   assert.deepEqual(status.slice(0, 1), ['Reading the diff of src/screens/Envelope.jsx']);
   assert.deepEqual([status[1], /^4 min/.test(status[2] ?? '')], ['Reviewer · Sonnet ·', true], 'the status says whose it is when the ticket has two');
@@ -131,7 +131,7 @@ test('every word of the ticket view comes from the catalogs, French included', (
   const words = (t: Translate) => [html(<Timeline view={view} t={t} />), html(<RightCards view={view} t={t} />), html(<LeftCards view={view} t={t} />), html(<StatusHead view={view} t={t} />)].flatMap(visibleText);
   assert.ok(words(sentinel).some((line) => line.includes('«handover_reviewer»')));
   const french = words(fr).join('\n');
-  for (const english of ['from 09', 'Read the repository', 'Commit the changes', 'edits', 'Show the changes']) assert.ok(!french.includes(english), english);
+  for (const english of ['started the review', 'Read the repository', 'Commit the changes', 'edits', 'Show the changes']) assert.ok(!french.includes(english), english);
   assert.doesNotMatch(french, /⟦/);
 });
 
@@ -163,6 +163,14 @@ test('a thread\'s stream pauses while its view is hidden, and goes on after the 
   assert.match(stream.opened[1]?.url ?? '', /\/sessions\/s1\/events\?after=3$/, 'shown again: from the last event read');
   stop();
   assert.ok(stream.opened[1]?.closed);
+  // Made closed (a hidden view, an ended session read already): no connection at all until opened.
+  const quiet = streams();
+  const closed = new SessionAgent({ sessionId: 's2', open: quiet.open, later: () => {}, streaming: false });
+  const end = (closed as unknown as { follow(publish: () => void): () => void }).follow(() => {});
+  assert.equal(quiet.opened.length, 0);
+  closed.setOpen(true);
+  assert.equal(quiet.opened.length, 1);
+  end();
 });
 
 test('the whole ticket folds an ended session a later one followed into one row, unless the view saw it live or a filter shows it', () => {

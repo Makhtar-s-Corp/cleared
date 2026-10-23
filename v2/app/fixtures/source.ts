@@ -29,7 +29,7 @@ import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
 import { applyAll, emptyModel } from '../web/screens/session/model.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
-import { ENVELOPE_BODY, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
+import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
 import { contractItem, knowledgeItem } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
@@ -71,7 +71,8 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
   const takenOver = new Map<string, TakenOver>();
-  const human = fixtureHuman();
+  // LOCAL-152's reviewer resumes on its own story (envelopeReviewer, below).
+  const human = fixtureHuman({ resumed: (id) => (id === envelopeReviewer?.id ? ENVELOPE_RESUMED : undefined) });
   const decided: (ContractItem | KnowledgeItem)[] = [contractItem(now()), knowledgeItem(now())];
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
   // The first author's ticket and LOCAL-163 run in four steps, each live

@@ -12,6 +12,7 @@ export type SessionAgentOptions = {
   readonly state?: SessionState | undefined;               // the session's state as its detail route gave it, if read
   readonly open: (url: string) => StreamLike;             // new EventSource(url), or a test's stand-in
   readonly later: (run: () => void, ms: number) => void;
+  readonly streaming?: boolean;                            // whether the stream opens at the start (default true): a feed made closed opens nothing (review of 251, F5)
 };
 
 export const sessionAgentId = (sessionId: string) => `session:${sessionId}`;
@@ -35,6 +36,7 @@ export class SessionAgent extends ThreadAgent<SessionThread> {
   constructor(options: SessionAgentOptions) {
     super({ agentId: sessionAgentId(options.sessionId), threadId: options.sessionId, description: 'The session\'s timeline, from the service\'s stream' });
     this.options = options;
+    this.#open = options.streaming ?? true;
   }
 
   get streaming(): boolean {

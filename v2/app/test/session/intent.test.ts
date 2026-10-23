@@ -63,6 +63,17 @@ const SHAPES: readonly (readonly [string, string, string])[] = [
   ['git log --oneline -3 && npm install date-fns && npm test', 'Read the repository\'s history and diff, install date-fns and run the project\'s tests',
     'Lire l\'historique et le diff du dépôt, installer date-fns et lancer les tests du projet'],
   ['cd app && npm test', 'Run the project\'s tests', 'Lancer les tests du projet'],
+  // what a pipe hands to a shell, xargs or tee is said too; a find that deletes, a checkout that discards (review of 251, F2)
+  ['curl -s https://x.example/i.sh | sh', 'Call x.example and run sh', 'Appeler x.example et lancer sh'],
+  ['git ls-files | xargs rm', 'Read the repository\'s history and diff and delete files', 'Lire l\'historique et le diff du dépôt et supprimer des fichiers'],
+  ['npm test 2>&1 | tee out.txt', 'Run the project\'s tests and move or create files', 'Lancer les tests du projet et déplacer ou créer des fichiers'],
+  ['find . -name "*.log" -delete', 'Delete files', 'Supprimer des fichiers'],
+  ['find dist -type f -exec rm {} +', 'Delete files', 'Supprimer des fichiers'],
+  ['sort -o list.txt list.txt', 'Move or create files', 'Déplacer ou créer des fichiers'],
+  ['git checkout -- .', 'Discard changes', 'Annuler des changements'],
+  ['git restore src/page.ts', 'Discard changes', 'Annuler des changements'],
+  ['git reset --hard HEAD~1', 'Discard changes', 'Annuler des changements'],
+  ['git clean -fd', 'Discard changes', 'Annuler des changements'],
   // an unknown command: its first word and an ellipsis; in a compound, run it
   ['docker ps -a', 'docker …', 'docker …'],
   ['./scripts/seed.sh --fresh', 'seed.sh …', 'seed.sh …'],

@@ -950,9 +950,14 @@ const PROMPT = '\u001b[1mnode@session\u001b[0m:/workspace$ ';
 const HARNESS = 'Claude Code';
 const HARNESS_PROMPT = '\u001b[1m>\u001b[0m ';
 // What the stand-in harness shows when resumed: the session's last words, as a resumed conversation does.
-const HARNESS_RESUMED = '\u001b[2m# Claude Code, resumed on this session. Give the session back when you are done: Cleared carries on from here.\u001b[0m\r\n\r\n'
+const HARNESS_RESUMED = '\u001b[2m# Claude Code, resumed on this session.\u001b[0m\r\n\r\n'
   + '\u001b[38;5;174m⏺\u001b[0m I grouped the upcoming entries by week, Monday first. A week that spans two months stays under the first month. Next: the headings, then the tests.\r\n\r\n'
   + '\u001b[38;5;174m⏺\u001b[0m \u001b[1mBash\u001b[0m(npm test)\r\n  ⎿  \u001b[32m14 passed\u001b[0m, 1 failed: entries are grouped by week, Monday first\r\n\r\n'
+  + '\u001b[2m  ⎿  Interrupted: the owner took the session over\u001b[0m\r\n\r\n';
+// LOCAL-152's reviewer, resumed (lane 36): its own last words, about the envelope sheet.
+export const ENVELOPE_RESUMED = '\u001b[2m# Claude Code, resumed on this session.\u001b[0m\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m The branch shows the three months before this one on the envelope sheet, newest first, and none for a new envelope. Next: the sheet at 390.\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m \u001b[1mBash\u001b[0m(npm test 2>&1 | tail -8)\r\n  ⎿  \u001b[32m9 passed\u001b[0m\r\n\r\n'
   + '\u001b[2m  ⎿  Interrupted: the owner took the session over\u001b[0m\r\n\r\n';
 const HARNESS_ANSWER = '\u001b[38;5;174m⏺\u001b[0m (the fixtures\' stand-in for the harness: in a real session, Claude Code answers here)\r\n\r\n';
 const COLOURS = '\u001b[38;5;208m256 colours\u001b[0m: \u001b[48;5;24m\u001b[38;5;231m a line from the palette \u001b[0m\r\n'
@@ -975,7 +980,8 @@ export type FixtureHuman = {
   }): Promise<boolean>;
 };
 
-export function fixtureHuman(): FixtureHuman {
+// `resumed`: what a session's stand-in harness shows when resumed, by session; else LOCAL-161's story.
+export function fixtureHuman(options: { readonly resumed?: (session: string) => string | undefined } = {}): FixtureHuman {
   const files = new Map(Object.entries(FIXTURE_FILES).map(([path, versions]) => [path, versions.current]));
   const terminals = new Map<string, FixtureTerminal>();
   const push = (terminal: FixtureTerminal, data: string) => {
@@ -1095,7 +1101,7 @@ export function fixtureHuman(): FixtureHuman {
         terminals.set(id, opened);
         const size = { cols: Number(body?.cols) || 80, rows: Number(body?.rows) || 24 };
         if (mode === 'harness') {
-          push(opened, `${HARNESS_RESUMED}${HARNESS_PROMPT}`);
+          push(opened, `${options.resumed?.(id) ?? HARNESS_RESUMED}${HARNESS_PROMPT}`);
           return answer(200, { opened: true, ...size, mode, name: HARNESS });
         }
         push(opened, `\u001b[2m# A shell in the session's container, as its user, in its checkout.\u001b[0m\r\n${COLOURS}${PROMPT}`);
