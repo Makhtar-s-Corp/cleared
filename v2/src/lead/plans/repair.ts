@@ -1,26 +1,28 @@
 // The repair of the tickets that name a service the workspace no longer has
-// (docs/v2/decisions-log.md, 2026-10-23, single-service mode): a workspace that changed under the same id, from several
-// services to one, kept the old services' rows in the ledger, and plans
-// approved before the fix named them on their tickets, which the flow
-// refuses ("guestbook is not a service of workspace ..."). npm run
-// repair-services (src/cli/repair-services.ts) runs it, a dry run unless
-// --apply is given, with the service stopped.
+// (docs/v2/decisions-log.md, 2026-10-23, single-service mode): a workspace
+// that changed under the same id, from several services to one, kept the
+// old services' rows in the ledger, and plans approved before the fix named
+// them on their tickets, which the flow refuses ("guestbook is not a
+// service of workspace ..."). npm run repair-services
+// (src/cli/repair-services.ts) runs it, a dry run unless --apply is given,
+// with the service stopped. It renames and never deletes a row.
 //
-// A ticket is repaired when it is in Todo, in this workspace, and every
-// part naming an unknown service never ran (no branch, no pull request):
+// A ticket is repaired when it is in Todo, in this workspace of one
+// service, and names one service only, an unknown one, whose part never
+// ran (no branch, no pull request):
 //
-//   - its parts on unknown services are replaced: by the workspace's only
-//     service in a workspace of one, the first unknown part renamed;
-//     dropped in a workspace of several when the ticket still names one
-//     of its services. A ticket of several services that names none of
-//     them is left for a person, who knows which ones it touches.
+//   - its part is renamed to the workspace's service;
 //   - its plan item, held or put back, is put back, so the runner starts
-//     it again at its next tick; its count of put backs is kept.
+//     it again at its next tick; its count of put backs is kept;
 //   - a comment on the ticket says what changed.
 //
-// Left alone, and said why: a part that ran, steps of its plan item or of
-// the flow on an unknown service (cancel the item and propose it again).
-// The ledger's `services` rows are never touched.
+// Left alone, and said why: a part that ran; steps of its plan item or of
+// the flow on an unknown service (cancel the item and propose it again); a
+// ticket that names more than that one service, or a ticket of a workspace
+// of several services, which a rename alone cannot repair (removing a part
+// would delete ledger data, and only a person knows which services a
+// ticket of several touches). The ledger's `services` rows are never
+// touched.
 import type { DatabaseSync } from 'node:sqlite';
 
 export type RepairWorkspace = { readonly id: string; readonly services: readonly string[] };
@@ -72,8 +74,6 @@ function survey(db: DatabaseSync, input: Input): { readonly out: TicketRepair[];
     const from = parts.map((part) => String(part.service));
     const stale = parts.filter((part) => !known.has(String(part.service)));
     if (stale.length === 0) continue;
-    const staleNames = stale.map((part) => String(part.service));
-    const kept = from.filter((name) => known.has(name));
     const found = plans
       ? db.prepare(`SELECT i.plan_id, i.position, i.state FROM plan_items i JOIN plans p ON p.id = i.plan_id
           WHERE i.ticket = ? AND p.project = ? ORDER BY p.proposed_at DESC LIMIT 1`).get(ticket, workspace.id) as Row | undefined
@@ -88,20 +88,17 @@ function survey(db: DatabaseSync, input: Input): { readonly out: TicketRepair[];
     if (itemStep) { leave(`item ${Number(found?.position)} of ${String(found?.plan_id)} has steps on ${itemStep}: cancel the item and propose it again`); continue; }
     const flowStep = flowSteps ? stepped(db.prepare('SELECT service FROM ticket_steps WHERE ticket = ?').all(ticket) as Row[]) : undefined;
     if (flowStep) { leave(`its steps run on ${flowStep}: repair it by hand`); continue; }
-    let to: string[];
-    if (kept.length > 0) to = kept;
-    else if (workspace.services.length === 1) to = [workspace.services[0] as string];
-    else { leave(`it names none of the services of ${workspace.id} (${workspace.services.join(', ')}): name them by hand`); continue; }
+    if (workspace.services.length !== 1) { leave(`${workspace.id} has several services (${workspace.services.join(', ')}): name the ticket's by hand`); continue; }
+    if (parts.length > 1) { leave(`it names ${from.join(', ')}: a rename cannot make that one service, and the repair deletes no part: set it aside, or cancel the item and propose it again`); continue; }
+    const to = [workspace.services[0] as string];
     const itemState = found ? String(found.state) : null;
     const item = found && (itemState === 'held' || itemState === 'put_back')
       ? { plan: String(found.plan_id), position: Number(found.position), from: itemState, to: 'put_back' }
       : null;
     out.push({ ticket, from, to, reason: null, item });
     changes.push(() => {
-      const [first, ...rest] = stale;
-      if (kept.length === 0) db.prepare('UPDATE ticket_services SET service = ? WHERE rowid = ?').run(to[0] as string, Number(first?.rowid));
-      for (const part of kept.length === 0 ? rest : stale) db.prepare('DELETE FROM ticket_services WHERE rowid = ?').run(Number(part.rowid));
-      const note = `Cleared: this ticket named ${staleNames.join(', ')}, not ${staleNames.length === 1 ? 'a service' : 'services'} of workspace ${workspace.id}; it now names ${to.join(', ')}.`;
+      db.prepare('UPDATE ticket_services SET service = ? WHERE rowid = ?').run(to[0] as string, Number(stale[0]?.rowid));
+      const note = `Cleared: this ticket named ${from[0]}, not a service of workspace ${workspace.id}; it now names ${to[0]}.`;
       const number = Number(ticket.slice('LOCAL-'.length));
       db.prepare("INSERT INTO tracker_comments(ticket, body, images, actor_kind, actor_id, created_at, proof) VALUES (?, ?, '[]', 'agents', 'cleared-v2', ?, NULL)").run(number, note, input.at);
       db.prepare('UPDATE tracker_tickets SET updated_at = ? WHERE id = ?').run(input.at, number);

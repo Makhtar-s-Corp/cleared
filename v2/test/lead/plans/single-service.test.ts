@@ -117,8 +117,10 @@ test('without the configured names, the store reads every recorded service of th
 });
 
 // The tickets as the 48 h proof's plan created them before the fix: in
-// Todo, naming guestbook, their items held after two failed starts, or put
-// back once, or not started yet. LOCAL-1..32 are earlier tickets.
+// Todo, each naming guestbook (a body about the guestbook names it, or
+// none, and then the first recorded service, guestbook too), their items
+// held after two failed starts, or put back once, or not started yet.
+// LOCAL-1..32 are earlier tickets.
 async function blocked() {
   const t = await setup({ scripts: { author: quickAuthor }, config: { project: PROJECT, workspace: SINGLE, steps: true } });
   applyTables(t.store.db, [...TICKET_TABLES, ...WORKSPACE_TABLES, ...PLAN_TABLES, STEPS_TABLE]);
@@ -134,7 +136,7 @@ async function blocked() {
     items: FIVE.map((i) => ({ ...i, lane: 'full' as const, size: 's' as const, estimate })),
   });
   store.move(stored.id, ['proposed'], 'approved', 'u1');
-  const services: string[][] = [['guestbook'], ['guestbook', 'filter-api'], ['guestbook'], ['guestbook'], ['guestbook']];
+  const services: string[][] = [['guestbook'], ['guestbook'], ['guestbook'], ['guestbook'], ['guestbook']];
   for (const [index, i] of FIVE.entries()) {
     const created = await tickets.create({ title: i.title, body: i.body, labels: ['plan:plan-1', 'size:s'], project: PROJECT, services: services[index] }, agents);
     store.setTicket(stored.id, index + 1, created.id);
@@ -155,7 +157,7 @@ test('the repair is a dry run unless applied, and then names the workspace\'s on
   assert.deepEqual(dump(t.store.db), before, 'a dry run changes nothing');
   assert.deepEqual(dry.map((r) => [r.ticket, r.from, r.to, r.item?.to ?? null]), [
     ['LOCAL-33', ['guestbook'], [PROJECT], 'put_back'],
-    ['LOCAL-34', ['guestbook', 'filter-api'], [PROJECT], 'put_back'],
+    ['LOCAL-34', ['guestbook'], [PROJECT], 'put_back'],
     ['LOCAL-35', ['guestbook'], [PROJECT], 'put_back'],
     ['LOCAL-36', ['guestbook'], [PROJECT], null],
     ['LOCAL-37', ['guestbook'], [PROJECT], null],
@@ -164,7 +166,8 @@ test('the repair is a dry run unless applied, and then names the workspace\'s on
   assert.deepEqual(repairTicketServices(t.store.db, { ...input, apply: true }), dry);
   for (const id of ['LOCAL-33', 'LOCAL-34', 'LOCAL-35', 'LOCAL-36', 'LOCAL-37'])
     assert.deepEqual((await t.tickets.get(id))?.services?.map((s) => s.name), [PROJECT], id);
-  assert.match((await t.tickets.comments('LOCAL-34'))[0]?.body ?? '', new RegExp(`named guestbook, filter-api, not services of workspace ${PROJECT}; it now names ${PROJECT}`));
+  assert.equal((await t.tickets.comments('LOCAL-34'))[0]?.body, `Cleared: this ticket named guestbook, not a service of workspace ${PROJECT}; it now names ${PROJECT}.`);
+  assert.equal((t.store.db.prepare('SELECT COUNT(*) AS n FROM ticket_services').get() as { n: number }).n, 5, 'renamed, none deleted');
   const items = t.planStore.get('plan-1')!.items;
   assert.deepEqual(items.map((i) => [i.state, i.putBacks]), [['put_back', 1], ['put_back', 1], ['put_back', 1], ['waiting', 0], ['waiting', 0]], 'the count of put backs is kept');
   assert.equal((t.store.db.prepare('SELECT COUNT(*) AS n FROM services WHERE workspace = ?').get(PROJECT) as { n: number }).n, 3, 'the services rows are kept');
@@ -186,21 +189,27 @@ test('the repair is a dry run unless applied, and then names the workspace\'s on
   await plans.close();
 });
 
-test('the repair leaves alone a ticket whose part ran, whose item has steps on an old service, or, with several services, that names none of them', async () => {
+test('the repair leaves alone a ticket whose part ran, whose item has steps on an old service, that names two services, or of a workspace of several, and deletes nothing', async () => {
   const t = await blocked();
   t.store.db.prepare("UPDATE ticket_services SET branch = 'cleared/LOCAL-33' WHERE ticket = 'LOCAL-33'").run();
+  t.store.db.prepare("INSERT INTO ticket_services (ticket, service, branch, pr, state) VALUES ('LOCAL-34', 'filter-api', NULL, NULL, 'todo')").run();
   t.store.db.prepare("INSERT INTO plan_steps (plan_id, item, position, kind, service, after, estimate) VALUES ('plan-1', 3, 1, 'service', 'guestbook', '[]', '{}')").run();
+  const left = (await Promise.all(['LOCAL-33', 'LOCAL-34', 'LOCAL-35'].map((id) => t.tickets.get(id)))).map((ticket) => ticket?.services);
   const single = repairTicketServices(t.store.db, { workspace: { id: PROJECT, services: [PROJECT] }, todo: DEFAULT_STATES.todo, apply: true, at: '2026-10-23T18:00:00.000Z' });
   assert.deepEqual(single.filter((r) => r.to === null).map((r) => [r.ticket, r.reason]), [
     ['LOCAL-33', 'its part on guestbook has a branch or a pull request: repair it by hand'],
+    ['LOCAL-34', 'it names guestbook, filter-api: a rename cannot make that one service, and the repair deletes no part: set it aside, or cancel the item and propose it again'],
     ['LOCAL-35', 'item 3 of plan-1 has steps on guestbook: cancel the item and propose it again'],
   ]);
-  assert.deepEqual((await t.tickets.get('LOCAL-33'))?.services?.map((s) => s.name), ['guestbook'], 'left as it was');
-  assert.equal(t.planStore.get('plan-1')!.items[0]?.state, 'held');
+  assert.deepEqual((await Promise.all(['LOCAL-33', 'LOCAL-34', 'LOCAL-35'].map((id) => t.tickets.get(id)))).map((ticket) => ticket?.services), left, 'left as they were');
+  assert.deepEqual(t.planStore.get('plan-1')!.items.slice(0, 3).map((i) => i.state), ['held', 'held', 'put_back']);
+  assert.equal((t.store.db.prepare('SELECT COUNT(*) AS n FROM ticket_services').get() as { n: number }).n, 6, 'no part is deleted');
 
-  // A workspace of several, other than the one the tickets name: a ticket keeps the services it still names, and one that names none is left.
+  // A workspace of several: a ticket naming an old service is left to a person, applied or not.
   const t2 = await blocked();
-  const several = repairTicketServices(t2.store.db, { workspace: { id: PROJECT, services: ['filter-api', 'billing'] }, todo: DEFAULT_STATES.todo, apply: false, at: '2026-10-23T18:00:00.000Z' });
-  assert.deepEqual(several.map((r) => [r.ticket, r.to]), [['LOCAL-33', null], ['LOCAL-34', ['filter-api']], ['LOCAL-35', null], ['LOCAL-36', null], ['LOCAL-37', null]]);
-  assert.match(several[0]?.reason ?? '', /names none of the services of cleared-example-guestbook \(filter-api, billing\): name them by hand/);
+  const before = dump(t2.store.db);
+  const several = repairTicketServices(t2.store.db, { workspace: { id: PROJECT, services: ['guestbook-v2', 'filter-api'] }, todo: DEFAULT_STATES.todo, apply: true, at: '2026-10-23T18:00:00.000Z' });
+  assert.deepEqual(several.map((r) => [r.ticket, r.to]), [['LOCAL-33', null], ['LOCAL-34', null], ['LOCAL-35', null], ['LOCAL-36', null], ['LOCAL-37', null]]);
+  assert.equal(several[0]?.reason, `${PROJECT} has several services (guestbook-v2, filter-api): name the ticket's by hand`);
+  assert.deepEqual(dump(t2.store.db), before);
 });

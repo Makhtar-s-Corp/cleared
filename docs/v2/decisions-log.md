@@ -4068,12 +4068,20 @@ Run 5's reviewer request stays allowed.
 
 **Decision.**
 1. **The plans read the configuration's services, not the ledger's history.** `PlanStore` takes the configured service names and keeps only those rows, in the configuration's order. The runner gets them as `PlanDeps.services`, which `modules/lead.ts` fills from `workspaceOf(flow.config)`. Every reader of the plans' services goes through that one method: the validation of an item's steps, the sensitivity of `applySensitivity` and of the plan panel's chips, the services a new ticket names, and the recipes. A store built without the names reads every recorded row, as before; only the tests build it that way. Scoping by workspace was already in place (`WHERE workspace = ?`) and was not enough, since the id is the same. No ledger row is deleted: a row of an old service still describes the tickets that name it.
-2. **A repair, run by a person, a dry run by default.** `npm run repair-services` (`src/cli/repair-services.ts`, `src/lead/plans/repair.ts`) reads the workspace and the ledger from the service's environment and lists each ticket in Todo of the workspace that names a service the configuration does not have, with what it would do. `-- --apply` does it in one transaction:
-   - in a workspace of one service, the ticket's first part on an old service is renamed to that service, and its other parts on old services are removed. These parts never ran: a part has no branch and no pull request until the flow starts it on a known service. In a workspace of several, the parts on old services are removed when the ticket still names a configured one. A ticket that names none of them is left for a person, since only a person knows which services it touches;
-   - the ticket's plan item, when held or put back, is put back, so the runner starts it again at its next tick, with its count of put backs kept. An item still waiting starts on its own;
-   - a comment on the ticket says which services it named and which it names now.
+2. **A repair, run by a person, a dry run by default, that renames and never deletes.** `npm run repair-services` (`src/cli/repair-services.ts`, `src/lead/plans/repair.ts`) reads the workspace and the ledger from the service's environment and lists each ticket in Todo of the workspace that names a service the configuration does not have, with what it would do. `-- --apply` does it in one transaction, for a ticket of a workspace of one service that names one service only, an old one, whose part never ran:
+   - its part is renamed to the workspace's service (an UPDATE of its `ticket_services` row);
+   - its plan item, when held or put back, is put back, so the runner starts it again at its next tick, with its count of put backs kept. An item still waiting starts on its own;
+   - a comment on the ticket says which service it named and which it names now.
 
-   It leaves alone, and says why, a ticket with a part that has a branch or a pull request, a plan item with steps on an old service (cancel the item and propose it again), and a ticket with flow steps on one. Not chosen: a repair at every start. It would rewrite tickets with no one looking, and the configuration can be wrong as easily as the ticket.
+   It leaves alone, and says why:
+   - a ticket with a part that has a branch or a pull request;
+   - a plan item with steps on an old service (cancel the item and propose it again), and a ticket with flow steps on one;
+   - a ticket that names more than that one service, since making it name the one service would delete a part, and the task forbids deleting ledger data (set it aside, or cancel the item and propose it again);
+   - every ticket of a workspace of several services, since only a person knows which of them it touches.
+
+   The LOCAL-33..37 tickets each name `guestbook` alone. Their bodies are about the guestbook, and a body that names no service falls back to the first recorded one, `guestbook` too. So the rename covers them.
+
+   Not chosen: a repair at every start. It would rewrite tickets with no one looking, and the configuration can be wrong as easily as the ticket.
 
 **To put LOCAL-33..37 back in order** (the owner's or the orchestrator's gesture, not this lane's):
 1. Stop the proof's service.
@@ -4087,6 +4095,6 @@ This lane never ran the repair on the proof's ledger.
 - **LOCAL-33..37 reproduced.** A ledger with the multi-service rows `guestbook` and `filter-api` under the single-service workspace's id, the single-service configuration with the flow's steps on, as `loadFlowConfig` sets them, and a five-item plan proposed and approved. All five tickets name only `cleared-example-guestbook` and start, none is put back, and the three `services` rows are still there. On the old code it fails with each of the five tickets put back: "The flow could not start: guestbook is not a service of workspace cleared-example-guestbook".
 - **Multi-service mode unchanged.** The tickets name the services their bodies name, else the first. A step on the stale single-service row is refused.
 - **The store without the names** reads every row, as before.
-- **The repair.** The dry run changes nothing. Applied, it repairs LOCAL-33..37 (two held, one put back, two waiting; one named both old services), and the runner then starts all five. A second run finds nothing. A part that ran, an item with steps on an old service, and, in a workspace of several, a ticket that names none of its services are each left alone with their reason.
+- **The repair.** The dry run changes nothing. Applied, it renames the part of each of LOCAL-33..37 (two held, one put back, two waiting) and deletes none, and the runner then starts all five. A second run finds nothing. A part that ran, a ticket naming two old services, an item with steps on an old service, and every ticket of a workspace of several are each left alone with their reason, their rows unchanged.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-single-service-fix`.
