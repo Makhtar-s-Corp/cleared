@@ -3456,3 +3456,82 @@ The sidebar costs about 3 to 4 ms per switch on this server. Its props are kept 
 
 - Pull request: 251, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-session-continuity`.
+
+## 2026-10-23: the last pass over the whole app, the proof scripts on the French shell, and the measures (the author's choices, lane 38, `v2-j2-polish-measures`)
+
+**Decision.** On 2026-10-23 from 03:50 (Europe/Paris), lane 38 of the interface overhaul ([ui-overhaul-plan.md](ui-overhaul-plan.md), section 7) makes the last pass over the five screens and the sign-in page, brings the proof scripts to the French shell and the ticket view, and fills the plan's section 8. Lane 37 (the inbox, pull request 255) ran beside it: this lane left the inbox's files alone until 255 merged.
+
+- **Fonts.** Both pages preload Geist and Geist Mono (`<link rel="preload" as="font" crossorigin>`, before the sheets). Until Geist arrives, a local face sized to its metrics stands in: Arial, Helvetica or Liberation Sans, with `size-adjust` 102.34 %, ascent 89.9 %, descent 21.5 % and line gap 0. These were measured in Chromium against Arial, whose metrics Liberation Sans shares. Nothing moves when Geist swaps in. Test: `app/test/polish/fonts.test.ts`.
+- **One type scale, in rem.** `--text-sm`, `--text-md`, `--text-lg` and `--text-input` are 0.75, 0.875, 1.25 and 1 rem, so the person's own font size scales the text. The session, lead, ask and choices sheets held 13 sizes off the scale (10 to 26 px) and weights 500 and 600; each now uses a token:
+  - 12.5 px and under become 12;
+  - 13 to 16 px become 14;
+  - 20 px and over become 20;
+  - 500 and 600 become 550.
+
+  The ink button is at the strong weight. The token test reads every sheet of the app, not only the shell's and the tower's. The same test reads every sheet for transitions on the motion token, opacity and transform only, and for no `outline: none` but the main region and the dialogs: a field's ring keeps a transparent outline, which forced colours draw.
+- **The sessions index** is a list of rows, like the tower's. The row is the link, named by its ticket's title and described by its role, phrase, model, ticket and age. What waits for the person comes first, then the most recent. The top bar names the screen, so the index's heading is read out, not drawn. The empty state says "No session yet.", adds "One starts when a ticket moves to Todo.", and offers New ticket, which opens the tower's bar with its field focused. The rows keep `li.session-card`, `.id` and `a.open`, which the proof scripts and the budget test read.
+- **The session view.**
+  - The empty states are one sentence each ("Nothing yet.", "No picture yet.", "No session plan yet."). Where the terminal or the trial environment cannot open, one sentence says why. A copy test holds every `_empty`, `_none` and `_here_only` sentence of the catalogs to one sentence that never says where things show.
+  - The Editor lays out by its panel's width, not the window's. On a screen of 1160 px or more, the Editor tab gives the diff the ticket column's width, as a review pane would. The scope switch reads "All" and "Last turn", which fit the files' column.
+  - A check is one line, with its state at the end.
+  - A step row's hover fills its own box.
+  - The handover sentence is centred under one hairline, so it can wrap.
+  - Send waits for a message: one ink button at a time.
+  - On a phone the view opens on its ticket's number and title (its description folded), and keeps the role in the status. Interrupt is an icon with its word read out. Take over is 44 px.
+  - The screen's one heading is read out: the ticket's number and title.
+- **The lead, the tower, the shell.**
+  - The lead's own words are flat beside its mark; the person's message keeps a quiet bubble, as in the session's thread. The Plans screen's heading is "Plans", and "Lead" is the chat's.
+  - The status dot no longer pulses: the pulse animated box-shadow. What waits has a ring and no glow.
+  - Paragraphs and list items wrap pretty.
+  - On a phone, the tower's bar is one row (the field and New ticket), and its summary keeps each fact whole.
+  - The sample-data pill is neutral: amber says what waits, and nothing else.
+  - Touch targets: the heads' links and the session's file links are 44 px.
+  - The visually hidden class is defined once, in the app's sheet.
+- **Followups taken.**
+  - Issue 250 F1. A sheet with `media="not all"` never blocks the first paint, so the page now turns the first screen's sheets on and draws once they have loaded or failed, after 3 s at most (`sheetsReady`, `web/lib/sheets.ts`). The server still answers one page for every address. A browser test holds every screen's sheet 800 ms and checks that the first screen drawn has its sheets on and loaded; it fails on the code before (`app/test/polish/first-paint-browser.test.ts`, in the browser job).
+  - Issue 253 item 2: Enter forgets the walked row once the pointer is used.
+  - Issue 254 item 1: `scripts/proof-j1.ts` finds the reviewer by the ticket view's handover row (`data-role` on it) and reads each round's verdict by its number.
+  - Issue 254 item 3: the journaling sentence is read out under the terminal.
+  - Issue 254 item 2 (`intent.ts` gaps) is left to the inbox lane, which uses the sentence as an approval's title. Issue 253 item 1 (a palette gesture whose button disappeared) is left: harmless.
+- **The proof scripts.** `scripts/proof-words.ts` turns a catalog key into a pattern that matches the sentence in English or in French, its placeholders as given or as anything (`test/scripts/proof-words.test.ts`). `proof-j1.ts` reads the answers, the verdicts, the release, the checks and Undo with it; `proof-j2.ts` reads the recommended option with it; `proof-j2-multi.ts` reads the rollback's line with it.
+  - The first multi-service rehearsal on the French shell failed step 9, on "Annulé, 2 sur 2"; with the catalogs' words it passes.
+  - Rehearsals on the fake adapter: `proof-j2` 9 steps ok, 0 failed; `proof-j2-multi` 12 steps ok, 0 failed.
+  - `proof-j1` has no rehearsal. It type-checks, and its real run is the orchestrator's, after the merge.
+
+**Impeccable.** Installed at 4.7.0 in the lane's worktree with the owner's command. Its paths are in the shared exclude file and in no commit. The installer's hooks file was removed before any edit, and `DO_NOT_TRACK=1` was set.
+- `init` wrote PRODUCT.md from the plan, with no interview: section 6 fixes its inputs.
+- `document`, run by an isolated agent, wrote DESIGN.md. Its drift list fed the pass above: off-scale sizes and weights, duplicated `.sr-only`, transitions off the token, focus rings drawn with box-shadow.
+- The detector ran over CDP on the fixtures app at 1280 light and 390 dark. Fixed: the pulsing dot, the dark glow, the lead line's leading, three stragglers. Kept: Geist (the brief), the session's flat hierarchy (Operate mode; the top bar names the ticket), the request card (Devin's approval card).
+- `critique`, Assessment A, ran as an isolated agent: heuristics 25 of 36. Its items 1 to 5, 7, 10b and 11 to 14 are applied. Item 8, the bar's placeholder, came after lane 37's merge. Not applied:
+  - item 6, Hand over to Codex: the owner's decision, B5.10c;
+  - item 9, the lead's two empty actions: lane 35's art director chose them;
+  - item 10a, a sentence about where things will show: against the copy rules;
+  - item 15, the plan's eyebrow and the palette's three rows: lane 35's art director's choices.
+- `typeset`, `layout`, `onboard` and `polish` are the bullets above.
+- The notes are at `/tmp/cleared-captures/j2/overhaul/38/impeccable-38.md`, not committed.
+
+**The art director's look** (`/tmp/cleared-reviews/38-ad.md`, a fresh session). Items 4, 5, 6 (the index), 8, 9 (the bar and the facts), 10, 11 and 12 were applied before lane 37's merge; items 1, 2, 3, 7 and 9's placeholder after it (below).
+
+**The art director's LATER list (none changes this lane).**
+1. French typography: the typographic apostrophe and the narrow no-break space before `?`, `:` and `;` in the catalogs, locked by a test.
+2. "Tour" for the tower collides with "tour" (a turn) in French sentences. "Vue d'ensemble" or "Accueil" would avoid it; renaming a screen is the owner's call.
+3. Hand over to Codex: a dead control that names a product, with milestone jargon in its note. Remove it or build it before the next release; the owner's decision, B5.10c.
+4. The button system: three heights in the app. Pick two, and move the inbox's `.btn` onto the shell's button.
+5. The lead's empty actions: one, in the plan pane, rectangular.
+6. The plan pane's footer: the four facts in a two by two grid, and the share's unit beside each ticket's percentage.
+7. The session's ticket column on a wide screen repeats the top bar's title. For a ticket with no description it is a short card above empty space.
+8. Check rows: a fixed status column with the chevron's slot on every row.
+9. The Editor: "Modifications" names three things. "Lecture seule" should be a muted label with a lock, not a neighbour of the pills.
+10. The diff on a phone: a horizontal scroll with the line numbers pinned, not wrapped code.
+11. The Plans composer at 390: sticky above the bottom bar.
+12. The palette: a count or "Show all" beside "Needs you", and the state, not the role, as a session's accessory.
+13. Contrast: `audit`'s pass again after the neutral pill.
+
+**What lane 38 touched beyond its file list, and why.**
+- `.github/workflows/v2.yml`: the first-paint browser test added to the browser job's list.
+- `v2/scripts/capture-screens.ts`: the `login` screen.
+- `v2/app/test/switch-budget.ts`: the index's empty state as a painted screen.
+- `v2/scripts/proof-words.ts` and its test: new, for the proof scripts.
+
+- Pull request: 256, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-polish-measures`.
