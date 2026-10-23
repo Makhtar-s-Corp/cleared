@@ -250,11 +250,13 @@ test('sed prints lines only: a script that is exactly one range, else refused (r
 
 test('sort, rg: no option that runs another program (review 2 of PR 279, followup 1)', () => {
   for (const command of ['sort README.md', 'sort -rn counts.txt | head', 'sort -t , -k 2 data.csv', 'sort -k2,2n -u data.txt', 'sort --numeric-sort --reverse x.txt',
-    'rg -n findWords src', 'rg --type ts -l "words:" src', 'grep -rn x src | sort | uniq -c']) assert.equal(answerFor(command), 'allow_once', command);
+    'rg -n findWords src', 'rg --type ts -l "words:" src', 'grep -rn x src | sort | uniq -c', 'rg -nw -C2 --glob=*.ts findWords src', 'rg -e a -e b -t ts src']) assert.equal(answerFor(command), 'allow_once', command);
   for (const command of [
     'sort --compress-program=sh -S 1 README.md', 'sort --compress-program sh README.md', 'sort --compress=sh README.md', 'sort -S 1 README.md', 'sort -o out.txt README.md',
     'sort -T tmp README.md', 'sort --output=out.txt README.md', 'sort --files0-from=list README.md',
     'rg --pre sh x README.md', 'rg --pre=sh x README.md', 'rg --pre-glob "*" --pre sh x src', 'rg -z x src', 'rg --search-zip x src', 'rg -nz x src',
+    // ripgrep 14 runs --hostname-bin; and any option not in rg's list.
+    'rg --hostname-bin=sh x src', 'rg --hostname-bin sh x src', 'rg --replace=x y src', 'rg --json x src', 'rg -P x src',
   ]) assert.equal(answerFor(command), 'reject_once', command);
 });
 
@@ -287,4 +289,15 @@ test('rm and mv are never allowed alone; a reporter is a built-in name, never a 
 test('a quoted word holding spaces: each piece is read as a path too (review 2 of PR 279)', () => {
   for (const command of ['grep -rn "a /etc/passwd" src', 'cat "x ../y"', 'echo "see ~/notes"']) assert.equal(answerFor(command), 'reject_once', command);
   for (const command of ['grep -rn "filter API" src', 'echo "typecheck ok"']) assert.equal(answerFor(command), 'allow_once', command);
+});
+
+test('nothing under .git: git reads its config there and runs what it names (review 2 of PR 279)', () => {
+  for (const command of [
+    // A plain git diff runs diff.external; git status runs core.fsmonitor.
+    "echo '[diff]' >> .git/config; echo '  external = id' >> .git/config; git diff",
+    "printf '[core]\\n\\tfsmonitor = id\\n' >> .git/config && git status",
+    'cp x .git/config', 'mkdir .git/hooks', 'cd .git && ls', 'cp --target-directory=.git x', 'cat .git/config', 'touch ./.git/hooks/pre-commit',
+    'cp x /workspace/.git/config', 'echo x > services/api/.git/config',
+  ]) assert.equal(answerFor(command), 'reject_once', command);
+  for (const command of ['cat .gitignore', 'ls .github/workflows', 'git show HEAD:.gitignore', 'cat .github/workflows/checks.yml | head']) assert.equal(answerFor(command), 'allow_once', command);
 });

@@ -56,8 +56,14 @@ const GIT_SUBCOMMANDS: ReadonlyMap<string, { readonly flags: ReadonlySet<string>
   // branch lists only: a name would create a branch.
   ['branch', { flags: new Set(['--show-current', '-a', '--all', '-r', '--remotes', '--list', '-v', '-vv']), values: null, operands: false }],
 ]);
-// rg: no --pre or --pre-glob (a program run on each file), no -z (decompressors).
-const RG_REFUSED = /^(--pre(-glob)?(=.*)?|--search-zip|-[A-Za-z]*z[A-Za-z]*)$/;
+// rg: its search and output options only, a list as sort's and git's: no
+// --pre or --pre-glob (a program run on each file), no -z (decompressors), no
+// --hostname-bin (ripgrep 14 runs it).
+const RG_FLAGS = new Set(['--no-heading', '--heading', '--line-number', '--files-with-matches', '--files-without-match', '--ignore-case', '--smart-case',
+  '--case-sensitive', '--word-regexp', '--fixed-strings', '--count', '--invert-match', '--only-matching', '--hidden', '--no-ignore', '--files',
+  '--color=never', '--no-filename', '--with-filename', '--vimgrep', '--']);
+const RG_VALUES = new Set(['-A', '-B', '-C', '-m', '-g', '-t', '-T', '-e', '--after-context', '--before-context', '--context', '--max-count', '--glob',
+  '--iglob', '--type', '--type-not', '--regexp']);
 // sort: its ordering options; no --compress-program, no --output, no temporary folder.
 const SORT_FLAGS = new Set(['--numeric-sort', '--reverse', '--unique', '--human-numeric-sort', '--version-sort', '--ignore-case', '--general-numeric-sort',
   '--month-sort', '--stable', '--dictionary-order', '--ignore-leading-blanks', '--zero-terminated']);
@@ -87,11 +93,15 @@ const NETWORK = /\b(apt-get|apt|apk|brew|sudo|su|pip3?|pipx|curl|wget|ssh|scp|sf
 function pathInside(word: string): boolean {
   return word.split(/\s+/).every(pieceInside);
 }
+// Nothing under .git either: git reads its config there, and runs the
+// drivers and hooks it names (diff.external, core.fsmonitor), so a write to
+// it would turn a read-only git diff or git status into any program (review
+// 2 of PR 279). .github and .gitignore are other names.
 function pieceInside(word: string): boolean {
   return [word, ...(word.includes('=') ? [word.slice(word.indexOf('=') + 1)] : [])].every((path) => {
     if (path === '' || /^\d+$/.test(path) || path === '/dev/null') return true;
     if (path.startsWith('~')) return false;
-    if (path.split('/').includes('..')) return false;
+    if (path.split('/').includes('..') || path.split('/').includes('.git')) return false;
     if (path.startsWith('/')) return path === CHECKOUT || path.startsWith(`${CHECKOUT}/`);
     return true;
   });
@@ -147,6 +157,17 @@ function sedInside(words: readonly string[]): boolean {
   return options.length > 0 && options.every((w) => w === '-n') && operands.length >= 1 && /^\d+(,\d+)?p$/.test(operands[0] as string);
 }
 
+function rgInside(words: readonly string[]): boolean {
+  for (let at = 0; at < words.length; at++) {
+    const word = words[at] as string;
+    if (!word.startsWith('-') || RG_FLAGS.has(word) || /^-[nliwFcSsHvoIx]+$/.test(word)) continue;
+    if (/^-[ABCm]\d+$/.test(word) || /^--(after-context|before-context|context|max-count)=\d+$/.test(word) || /^--(glob|iglob|type|type-not|regexp)=.+$/.test(word)) continue;
+    if (RG_VALUES.has(word) && words[at + 1] !== undefined) { at++; continue; }
+    return false;
+  }
+  return true;
+}
+
 function sortInside(words: readonly string[]): boolean {
   for (let at = 0; at < words.length; at++) {
     const word = words[at] as string;
@@ -169,7 +190,7 @@ function npxInside(words: readonly string[]): boolean {
 // Each program's words beyond its name: what is safe to pass.
 function argumentsInside(program: string, words: readonly string[]): boolean {
   if (LOCAL.has(program)) return true;
-  if (program === 'rg') return !words.some((w) => RG_REFUSED.test(w));
+  if (program === 'rg') return rgInside(words);
   if (program === 'sort') return sortInside(words);
   // cd into a folder of the checkout: one folder named; no cd alone (home) nor cd - (the folder before).
   if (program === 'cd') return words.length === 1 && words[0] !== '-';

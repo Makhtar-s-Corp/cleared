@@ -4040,18 +4040,21 @@ The rehearsal skips the workflows and the watchers: its forge and its brokers ar
 - **sed**: `-n`, then a script that is exactly one word `^\d+(,\d+)?p$`, then files. Any other script or option is refused.
 - **Each piece of a word**: a quoted word holding spaces is also read piece by piece as a path, so `'w /tmp/pwn'` names `/tmp/pwn` and is refused, whatever the program.
 - **sort**: its ordering options only (`-k`, `-t`, `-n`, `-r`, `-u` and their long names). `--compress-program` (or any prefix of it), `-S`, `-T`, `-o` and `--files0-from` are refused.
-- **rg**: `--pre`, `--pre-glob`, `-z` and `--search-zip` are refused.
+- **rg**: its search and output options only, from a list. `--pre`, `--pre-glob`, `-z`, `--search-zip` and ripgrep 14's `--hostname-bin`, which runs a program, are refused, and so is every option not listed.
 - **git**: only `status`, `diff`, `log`, `show`, `ls-files` and a listing `branch`, each with its options from a list. Every other subcommand (`add`, `commit`, `restore`, `rm`, `mv`, `push`, `stash`, `checkout`, `reset`) is refused, and so is every option not listed (`--output`, `--ext-diff`, `--textconv`, `--no-index`, `-D`, `-m`, `-c`, `-C`). A branch name would create a branch, so `branch` takes none. The policy still allows a session's plain `git add` and `git commit` on its own. Only the proof's own answer to a request that reached the inbox no longer allows them.
 - **rm and mv**: no longer allowed by the proof alone. The policy asks the owner for them, and the proof never deletes nor moves a file on its own (followup 4: `rm -rf *` had become possible once globs were read).
 - **A reporter**: `--test-reporter` and `--reporter` take a built-in name only (`spec`, `tap`, `dot`, `junit`, `lcov`, vitest's), never a path. `node --test` still takes no option at all (followup 3).
 
-**Limit.** `git diff`, `log` and `show` use the diff and textconv drivers the checkout's `.git/config` sets. A session cannot write that file without asking: an edit under `.git` asks, and the proof refuses a request that is not a command. The rule does not read that configuration.
+- **Nothing under `.git`**: a path with a `.git` segment is refused, whether a word, a value after `=` or a redirection target. Git reads its configuration there and runs the programs it names: with `diff.external` set, a plain `git diff` runs it (checked with git in a scratch repository), and `core.fsmonitor` does the same for `git status`. An `echo … >> .git/config` was allowed before this change, in the base too. `.github` and `.gitignore` are other names and stay allowed.
+
+**Limit.** A session can still change what `npm test` runs, through its `package.json` or a `.npmrc` in the checkout. That is the checkout's own code, which `npm test` runs anyway (the limit of the first rule).
 
 **Tests.** `test/scripts/proof-inbox.test.ts`:
 - the review's two sed commands and other scripts, refused;
 - sort's and rg's program options, refused;
 - the git allow list both ways, the review's cases among them;
 - rm, mv and a reporter given by its path, refused;
+- every write or read under `.git` refused, the two commands that turn `git diff` and `git status` into a program among them;
 - the pieces of a quoted word;
 - the first rule's allowed list, now without `rm -r test/tmp` and `git add … && git commit …`, which moved to the refused list.
 
