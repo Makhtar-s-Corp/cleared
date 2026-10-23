@@ -42,7 +42,7 @@ test('a headless browser registers the worker, subscribes through the button, an
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
     await context.grantPermissions(['notifications'], { origin: app.origin });
     await context.addInitScript((shape: { p256dh: string; auth: string }) => {
       let current: unknown = null;

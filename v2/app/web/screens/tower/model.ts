@@ -17,6 +17,7 @@ import type {
 import type { Harness, Role } from '../../../../src/session/contract.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
+import { ago, clock, decimal, duration, estimate, fixed } from '../../lib/time.ts';
 import { requestReason, requestTitle, type Request } from '../../lib/request.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
@@ -105,7 +106,7 @@ export type LandedRow = { readonly ticket: string; readonly title: string; reado
 export type LeadCard = {
   readonly phase: LeadPhase;
   readonly percent: number | null;
-  readonly refreshedMinutes: number | null;
+  readonly refreshed: { readonly at: string; readonly now: Date } | null;
   readonly line: string | null;
 };
 
@@ -155,7 +156,6 @@ function family(model: string): string {
   return match ? (match[1] as string).charAt(0).toUpperCase() + (match[1] as string).slice(1).toLowerCase() : model;
 }
 
-const pad = (n: number) => String(n).padStart(2, '0');
 
 // The catalog names a release's checks by colour.
 const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
@@ -273,11 +273,11 @@ export function towerModel(data: TowerData, now: Date, viewer?: string): TowerMo
     return `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}` === today;
   }).sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt)).map((ticket): LandedRow => {
     const at = new Date(ticket.updatedAt);
-    return { ticket: ticket.id, title: ticket.title, time: `${pad(at.getHours())}:${pad(at.getMinutes())}`, minutes: minutesSince(ticket.createdAt, at) };
+    return { ticket: ticket.id, title: ticket.title, time: clock(ticket.updatedAt), minutes: minutesSince(ticket.createdAt, at) };
   });
   const lead: LeadCard | null = data.lead && {
     phase: data.lead.phase, percent: data.lead.context ? Math.round(data.lead.context.percent) : null,
-    refreshedMinutes: data.lead.refreshedAt && data.lead.refreshCount > 0 ? minutesSince(data.lead.refreshedAt, now) : null, line: data.leadLine,
+    refreshed: data.lead.refreshedAt && data.lead.refreshCount > 0 ? { at: data.lead.refreshedAt, now } : null, line: data.leadLine,
   };
   return {
     needs, live, landed, lead, plans: data.plans.filter((p) => UNDER_WAY.has(p.state)).map(planRow), weekLeft: data.weekLeft,
@@ -322,10 +322,10 @@ const dayOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date
 // browser shows times; "Off" for one switched off.
 export function scheduleLine(row: ScheduleRow, now: Date, language: 'en' | 'fr', t: Translate): string {
   if (!row.enabled) return t('schedule_off');
-  const budget = t('schedule_budget', { amount: new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }).format(row.budgetUsd) });
+  const budget = t('schedule_budget', { amount: fixed(row.budgetUsd, 2, language) });
   if (!row.nextRunAt) return `${t('schedule_none')} · ${budget}`;
   const next = new Date(row.nextRunAt);
-  const time = `${pad(next.getHours())}:${pad(next.getMinutes())}`;
+  const time = clock(row.nextRunAt);
   const days = Math.round((dayOf(next) - dayOf(now)) / 86_400_000);
   const when = days <= 0 ? t('schedule_next_today', { time }) : days === 1 ? t('schedule_next_tomorrow', { time })
     : t('schedule_next_day', { time, day: next.toLocaleDateString(language, { weekday: 'short' }) });
@@ -392,11 +392,8 @@ export function takenOverText(taken: TakenOverCard, t: Translate): string {
   return t(taken.you ? 'taken_over_you' : 'taken_over_other', { age: duration(taken.minutes, t) });
 }
 
-// "18 min", "1 h 24".
-export function duration(minutes: number, t: Translate): string {
-  if (minutes < 60) return t('minutes', { n: minutes });
-  return t('hours_minutes', { h: Math.floor(minutes / 60), m: pad(minutes % 60) });
-}
+// "18 min", "1 h 24", "2 j 4 h": the app's one formatter (lib/time.ts).
+export { duration };
 
 export function heading(count: number, t: Translate): string {
   return count <= 5 ? t(`needs_${count}`) : t('needs_many', { n: count });
@@ -404,20 +401,11 @@ export function heading(count: number, t: Translate): string {
 
 export const plural = (n: number, key: string, t: Translate) => t(n === 1 ? `${key}_one` : `${key}_other`, { n });
 
-// "40 min", "2 h", "2 h 15": a plan's estimate, already rounded by the service.
-function about(minutes: number, t: Translate): string {
-  if (minutes < 60) return t('minutes', { n: minutes });
-  return minutes % 60 === 0 ? t('hours', { h: minutes / 60 }) : duration(minutes, t);
-}
-
-// A number with the catalog's decimal mark.
-const decimal = (value: string, t: Translate) => value.replace('.', t('decimal_mark'));
-
 export function planDetail(values: Readonly<Record<string, string>>, t: Translate): string {
   const n = Number(values.n);
-  const time = about(Number(values.minutes), t);
+  const time = estimate(Number(values.minutes), t);
   const key = `plan_proposes_${values.week === undefined ? 'cost' : 'week'}_${n === 1 ? 'one' : 'other'}`;
-  return t(key, { n, time, week: decimal(values.week ?? '', t), cost: decimal(values.cost ?? '', t) });
+  return t(key, { n, time, week: values.week === undefined ? '' : decimal(Number(values.week), t, 0, 1), cost: decimal(Number(values.cost), t, 2, 2) });
 }
 
 // Where New goal and Ask the lead go: the lead's screen, with what was
@@ -470,7 +458,7 @@ export function leadState(lead: LeadCard | null, t: Translate): { readonly text:
   if (lead.phase === 'refreshing') return { text: t('lead_refreshing'), kind: 'refreshing' };
   const parts = [t('lead_on')];
   if (lead.percent !== null) parts.push(t('lead_context', { n: lead.percent }));
-  if (lead.refreshedMinutes !== null) parts.push(t('lead_refreshed', { age: duration(lead.refreshedMinutes, t) }));
+  if (lead.refreshed !== null) parts.push(t('lead_refreshed', { ago: ago(lead.refreshed.at, lead.refreshed.now, t) }));
   return { text: parts.join(' · '), kind: 'on' };
 }
 

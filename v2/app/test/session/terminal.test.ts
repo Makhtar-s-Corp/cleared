@@ -13,8 +13,8 @@ import {
   BATCH_MS, DEFAULT_MODE, InputBatcher, closedLine, freshChunk, otherMode, pageNonce, splitBytes, styleShims, terminalApi, terminalChoice,
 } from '../../web/components/terminal/model.ts';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
 
 // A clock the test moves: what the batcher schedules runs when the test says.

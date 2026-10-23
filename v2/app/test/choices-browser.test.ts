@@ -40,7 +40,7 @@ async function browse(source: DataSource, path: string, run: (page: any, base: s
   const errors: string[] = [];
   const away: string[] = [];
   try {
-    const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+    const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'en-US' })).newPage();
     page.on('pageerror', (error: Error) => errors.push(error.message));
     page.on('request', (request: { url(): string }) => { if (!request.url().startsWith(app.base)) away.push(request.url()); });
     await page.goto(`${app.base}/login`);

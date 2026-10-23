@@ -66,10 +66,10 @@ test('the English tower reads as the capture', async () => {
   // The summary's facts are each kept whole (lane 38): read them back as the line they make.
   const text = visibleText(html).join('\n').replace(/\n·\n/g, ' · ');
   for (const expected of [
-    'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12 min', 'Permission', '3 min', 'Plan', '25 min', 'Goal',
-    'The lead proposes 5 tickets, about 2 h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
+    'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12\u00a0min', 'Permission', '3\u00a0min', 'Plan', '25\u00a0min', 'Goal',
+    'The Lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10\u00a0min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Install date-fns', 'The command calls the network. The author is paused until you answer.',
-    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
+    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18\u00a0min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the Lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /\sstyle=/, 'no inline style: the page runs under default-src \'self\'');
 });
@@ -89,14 +89,14 @@ test('what the data says is escaped, never markup', async () => {
   const data = await towerFixture(FIXTURE_NOW);
   const evil = '<img src=x onerror=alert(1)>"&';
   const changed: TowerData = { ...data, tickets: data.tickets.map((ticket) => ({ ...ticket, title: evil })), sessions: data.sessions.map((s) => ({ ...s, status: evil })) };
-  const html = renderTower(towerModel(changed, FIXTURE_NOW), translator(loadCatalog('tower', 'en')));
+  const html = renderTower(towerModel(changed, FIXTURE_NOW), translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') }));
   assert.ok(!html.includes('<img'));
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;&quot;&amp;'));
 });
 
 test('nothing waiting says so, and a waiting question is a card of its own', async () => {
   const data = await towerFixture(FIXTURE_NOW);
-  const t = translator(loadCatalog('tower', 'en'));
+  const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
   const calm = renderTower(towerModel({ ...data, inbox: [] }, FIXTURE_NOW), t);
   assert.ok(visibleText(calm).includes('Nothing needs you.'));
   const question = towerModel({
@@ -105,7 +105,7 @@ test('nothing waiting says so, and a waiting question is a card of its own', asy
   }, FIXTURE_NOW);
   assert.deepEqual(question.needs.map((n) => [n.kind, n.title, n.minutes]), [['question', 'Which date format should the list use?', 5]]);
   const row = visibleText(renderTower(question, t));
-  assert.ok(row.includes('Question') && row.includes('5 min'), 'its kind and how long it waited, in the row');
+  assert.ok(row.includes('Question') && row.includes('5\u00a0min'), 'its kind and how long it waited, in the row');
 });
 
 test('a model name reads as the capture writes it', () => {

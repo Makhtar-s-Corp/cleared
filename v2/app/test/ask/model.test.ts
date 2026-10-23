@@ -14,8 +14,8 @@ import {
   POLL_MS, QUESTION_MAX, askBody, askFailure, askHref, askIdOf, followAsk, pollDelay, questionProblem, readAsk, startAsk, stateLine, targetLine, totalLine, turnsOf, usageLine,
 } from '../../web/screens/ask/model.ts';
 
-const t = translator(loadCatalog('ask', 'en'));
-const fr = translator(loadCatalog('ask', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('ask', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('ask', 'fr') });
 const group = (n: number, language: 'en' | 'fr') => new Intl.NumberFormat(language).format(n);
 
 type Call = { readonly path: string; readonly method: string; readonly body: unknown };
@@ -74,7 +74,7 @@ test('each turn says its question, its answer or that it waits, and its cost', (
 test('the ask\'s total adds the week share only once it is measured', () => {
   assert.equal(totalLine(askFixture(), 'en', t), `$0.0027 · ${group(58_414, 'en')} tokens in, ${group(1_065, 'en')} out · week used at 29%`);
   assert.equal(totalLine({ ...askFixture(), weekPercent: null }, 'en', t), `$0.0027 · ${group(58_414, 'en')} tokens in, ${group(1_065, 'en')} out`);
-  assert.equal(totalLine(askFixture(), 'fr', fr), `0,0027\u00a0$ · ${group(58_414, 'fr')} jetons en entrée, ${group(1_065, 'fr')} en sortie · semaine utilisée à 29 %`);
+  assert.equal(totalLine(askFixture(), 'fr', fr), `0,0027\u00a0$ · ${group(58_414, 'fr')} jetons en entrée, ${group(1_065, 'fr')} en sortie · semaine utilisée à 29\u202f%`);
   assert.equal(totalLine(platformAsk(), 'en', t), undefined, 'nothing spent yet');
 });
 

@@ -60,7 +60,7 @@ import { sameProof } from '../../src/modules/users.ts';
 import { requestPath } from '../../src/server.ts';
 import type { UserId } from '../../src/session/contract.ts';
 import { translator, type Translate } from '../web/lib/i18n.ts';
-import { isScreen, loadCatalog, type Language, type Screen } from './catalog.ts';
+import { isScreen, languageOf, loadCatalog, type Language, type Screen } from './catalog.ts';
 import { deviceName, notificationsFrom, NotifyError, type Notifications } from './notifications.ts';
 import { sendJson, type DataSource } from './proxy.ts';
 import { clearedCookie, readCookie, sessionCookie, type CookieSession, type CookieSessions } from './session-cookie.ts';
@@ -71,7 +71,7 @@ export type AppOptions = {
   readonly sessions: CookieSessions;
   readonly throttle: LoginThrottle;
   readonly source: DataSource;
-  readonly language: Language;
+  readonly language: Language;                      // the fallback when neither the choice nor the browser names one (languageOf)
   readonly project: string;
   readonly publicOrigin?: string | undefined;
   readonly distDir?: string;                         // default: app/dist, Vite's build
@@ -244,7 +244,9 @@ function readBody(request: IncomingMessage, limit: number): Promise<string | und
 
 export function createAppHandler(options: AppOptions): (request: IncomingMessage, response: ServerResponse) => void {
   const distDir = options.distDir ?? DIST_DIR;
-  const shellT = translator(loadCatalog('shell', options.language));
+  // Each request's language (catalog.ts, languageOf), and the shell's words in it.
+  const languageFor = (request: IncomingMessage): Language => languageOf(request.headers, options.language);
+  const shellFor = (language: Language) => translator(loadCatalog('shell', language));
   // Read once, at the first page: a server started before the build says so on every page.
   let bundle: Bundle | undefined;
   const built = (): Bundle => (bundle ??= readBundle(distDir));
@@ -349,7 +351,9 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   }
 
   async function signIn(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!sameOrigin(request)) return sendPage(response, 403, (nonce) => loginPage(shellT, options.language, built(), nonce, shellT('login_refused')));
+    const language = languageFor(request);
+    const shellT = shellFor(language);
+    if (!sameOrigin(request)) return sendPage(response, 403, (nonce) => loginPage(shellT, language, built(), nonce, shellT('login_refused')));
     const body = await readBody(request, 4096);
     const form = new URLSearchParams(body ?? '');
     const name = (form.get('name') ?? '').trim();
@@ -359,10 +363,10 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     const attempt = options.throttle.start(peer, name);
     if (attempt.succeeded === undefined) {
       const minutes = Math.max(1, Math.ceil(attempt.wait / 60));
-      return sendPage(response, 429, (nonce) => loginPage(shellT, options.language, built(), nonce, shellT('login_throttled', { minutes })), { 'retry-after': String(attempt.wait) });
+      return sendPage(response, 429, (nonce) => loginPage(shellT, language, built(), nonce, shellT('login_throttled', { minutes })), { 'retry-after': String(attempt.wait) });
     }
     const user = body === undefined ? undefined : await options.users.verify(name, password);
-    if (!user) return sendPage(response, 401, (nonce) => loginPage(shellT, options.language, built(), nonce, shellT('login_wrong')));
+    if (!user) return sendPage(response, 401, (nonce) => loginPage(shellT, language, built(), nonce, shellT('login_wrong')));
     attempt.succeeded();
     const made = options.sessions.create(user.id);
     redirect(response, '/', { 'set-cookie': sessionCookie(made.id) });
@@ -398,7 +402,8 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
       if (method === 'POST') return signIn(request, response);
       if (!read) return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'GET, HEAD, POST' });
       if (await session(request)) return redirect(response, '/');
-      return sendPage(response, 200, (nonce) => loginPage(shellT, options.language, built(), nonce));
+      const language = languageFor(request);
+      return sendPage(response, 200, (nonce) => loginPage(shellFor(language), language, built(), nonce));
     }
 
     if (path.startsWith('/api/')) {
@@ -406,7 +411,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
       if (!mine) return sendJson(response, 401, { error: 'sign in first' });
       if (path === '/api/me') {
         if (!read) return sendJson(response, 405, { error: 'method not allowed' });
-        return sendJson(response, 200, { user: mine.user, csrf: mine.cookie.csrf, language: options.language, project: options.project, source: options.source.kind, terminal: loopback(request) });
+        return sendJson(response, 200, { user: mine.user, csrf: mine.cookie.csrf, language: languageFor(request), project: options.project, source: options.source.kind, terminal: loopback(request) });
       }
       if (path === '/api/notifications' || path.startsWith('/api/notifications/')) return notify(request, response, path, mine);
       if (path.startsWith('/api/service/')) {
@@ -438,14 +443,15 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     if (messages) {
       const screen = messages[1] ?? '';
       if (!isScreen(screen)) return sendJson(response, 404, { error: 'not found' });
-      return sendJson(response, 200, loadCatalog(screen, options.language));
+      return sendJson(response, 200, loadCatalog(screen, languageFor(request)));
     }
 
     const page = PAGES.find((p) => p.path.test(path));
     if (page) {
       const mine = await session(request);
       if (!mine) return redirect(response, '/login');
-      return sendPage(response, 200, (nonce) => shellPage(shellT, options.language, built(), nonce, { project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
+      const language = languageFor(request);
+      return sendPage(response, 200, (nonce) => shellPage(shellFor(language), language, built(), nonce, { project: options.project, user: mine.user, source: options.source.kind, preview: options.previewOrigin }));
     }
 
     if (await serveFile(request, response, path)) return;

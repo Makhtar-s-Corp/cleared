@@ -12,6 +12,7 @@
 import type { Ask, AskAnswer, AskBody } from '../../../../src/api/types.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
+import { count, fixed } from '../../lib/time.ts';
 
 // The longest question the reader takes (MAX_QUESTION of
 // src/reader/service.ts, which the browser cannot import; a test keeps the two equal).
@@ -56,9 +57,7 @@ export function turnsOf(ask: Pick<Ask, 'turns' | 'state'>): TurnView[] {
   return ask.turns.map((turn) => ({ turn, kind: turn.answer !== null ? 'answered' : running(ask) ? 'waiting' : 'lost' }));
 }
 
-const decimals = (value: number, digits: number, language: Language) =>
-  new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
-const count = (value: number, language: Language) => new Intl.NumberFormat(language).format(value);
+const decimals = fixed;
 
 // A reader's turn costs a fraction of a cent: under a cent it reads to the
 // hundredth of a cent, else in cents.

@@ -23,6 +23,7 @@ import { Empty } from '@/shell/Empty.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
+import { sessionStatus, ticketState } from '@/lib/status.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
   DRAFT_MAX, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, liveOrder, loadTower, needId, needSentence, needTitle, pickedFor, planProgress, recipeKey,
@@ -33,7 +34,7 @@ import './tower.css';
 
 // A line of facts, each kept whole on a line (lane 38's art director: no fact cut, no line ending on its "·").
 function Facts({ text }: { readonly text: string }) {
-  return <>{text.split(' · ').map((fact, i) => <Fragment key={i}>{i > 0 ? ' · ' : null}<span className="fact">{fact}</span></Fragment>)}</>;
+  return <>{text.split(' · ').map((fact, i) => <Fragment key={i}>{i > 0 ? <span className="fact-sep">{' · '}</span> : null}<span className="fact">{fact}</span></Fragment>)}</>;
 }
 
 // The services a new ticket names: a chip per service of a workspace of
@@ -151,7 +152,7 @@ export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: 
         <span className="row-kind session-head" id={`${id}-kind`}><span className={liveDot(card.phase, card.role, card.takenOver)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span></span>
         <span className="row-main">
           <span className="session-title" id={`${id}-title`}>{card.title}</span>
-          {card.takenOver ? <span className="phrase taken-line" id={`${id}-phrase`}><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase" id={`${id}-phrase`}>{card.status}</span>}
+          {card.takenOver ? <span className="phrase taken-line" id={`${id}-phrase`}><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase" id={`${id}-phrase`}>{sessionStatus(card, t)}</span>}
         </span>
         <span className="row-meta session-foot" id={`${id}-meta`}>
           {card.step ? <span className="svc-tag" data-step={card.step.position}>{stepTag(card.step, t)}</span>
@@ -330,7 +331,7 @@ export default function Tower() {
       setTitle('');
       setBody('');
       setPicked([]);
-      setNote({ text: t('ticket_created', { id: ticket.id, status: ticket.status }), kind: 'ok' });
+      setNote({ text: t('ticket_created', { id: ticket.id, status: ticketState(ticket.status, t) }), kind: 'ok' });
       void refresh();
     } catch {
       setNote({ text: t('ticket_failed'), kind: 'error' });

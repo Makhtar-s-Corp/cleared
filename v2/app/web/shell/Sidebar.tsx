@@ -9,6 +9,8 @@ import { Broadcast, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, Termi
 import { memo } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
+import { Toggle } from '@/components/ui/toggle.tsx';
+import type { Language } from '@/lib/catalogs.ts';
 import type { Translate } from '@/lib/i18n.ts';
 import type { ScreenName } from '@/lib/routes.ts';
 import type { Me } from '@/lib/screen.ts';
@@ -17,6 +19,8 @@ import { keyLabel } from './keys.ts';
 import { Logo } from './Logo.tsx';
 import { inboxBadge, NAV, type LeadDot, type SessionGroup, type SidebarMode, type Theme } from './model.ts';
 import { NotifyButton } from './NotifyButton.tsx';
+
+const LANGUAGES: readonly Language[] = ['fr', 'en'];
 
 const ICONS: Readonly<Record<string, Icon>> = { tower: Broadcast, inbox: Tray, session: TerminalWindow, lead: ListChecks };
 
@@ -37,6 +41,8 @@ export type SidebarProps = {
   readonly groups: readonly SessionGroup[];
   readonly theme: Theme;
   readonly onTheme?: () => void;
+  readonly language?: Language;
+  readonly onLanguage?: (language: Language) => void;
   readonly onSearch?: () => void;
   readonly onToggle?: () => void;
   readonly onSignOut?: () => void;
@@ -65,8 +71,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           <SidebarSimple size={16} aria-hidden="true" />
         </Button>
       </div>
-      <button type="button" className="search" id="palette-open" aria-label={t('palette_open')} aria-keyshortcuts="Meta+K Control+K" data-tip={`${t('palette_open')} · ${keyLabel('Mod', isMac())} K`} onClick={props.onSearch}>
-        <MagnifyingGlass size={16} aria-hidden="true" /><span className="search-text">{t('palette_open')}</span><Keys keys={['Mod+K']} />
+      <button type="button" className="search" id="palette-open" aria-label={t('palette_open')} aria-keyshortcuts="Meta+K Control+K" data-tip={`${t('palette_open')} · ${keyLabel('Mod', isMac(), t)} K`} onClick={props.onSearch}>
+        <MagnifyingGlass size={16} aria-hidden="true" /><span className="search-text">{t('palette_open')}</span><Keys keys={['Mod+K']} t={t} />
       </button>
       <nav className="side-nav" id="nav" aria-label={t('nav_label')}>
         <ul>
@@ -79,7 +85,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
                   data-tip={`${label} · ${item.chord.join(' ')}${item.screen === 'lead' && props.lead !== 'unknown' ? ` · ${t(`side_lead_${props.lead}`)}` : ''}`}>
                   <Glyph size={16} weight={screen === item.screen ? 'fill' : 'regular'} aria-hidden="true" />
                   <span className="nav-label">{label}</span>
-                  <Keys keys={item.chord} />
+                  <Keys keys={item.chord} t={t} />
                   {item.screen === 'inbox' ? (
                     <>
                       <span className="count" id="inbox-count" hidden={badge === null} aria-hidden="true">{badge ?? ''}</span>
@@ -130,6 +136,12 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               <p className="menu-note">{signedIn}</p>
               {/* On a phone the theme's button is here, the top bar has no room for it. */}
               <Button className="plain menu-theme" onClick={props.onTheme}>{t(props.theme === 'dark' ? 'theme_light' : 'theme_dark')}</Button>
+              {/* Each language named in itself (lane i18n): the person finds theirs whatever the page's. */}
+              <div className="menu-language" id="language" role="group" aria-label={t('language_label')}>
+                {LANGUAGES.map((language) => (
+                  <Toggle key={language} lang={language} data-language={language} pressed={props.language === language} onPressedChange={() => props.onLanguage?.(language)}>{t(`language_${language}`)}</Toggle>
+                ))}
+              </div>
               <Button className="plain" id="sign-out" onClick={props.onSignOut}>{t('sign_out')}</Button>
             </PopoverContent>
           </Popover>

@@ -11,7 +11,8 @@
 // gesture ("Write a message") focuses the field.
 import type { ScreenName } from '../lib/routes.ts';
 import type { Translate } from '../lib/i18n.ts';
-import { needId, needTitle, duration, type NeedCard } from '../screens/tower/model.ts';
+import { needId, needTitle, type NeedCard } from '../screens/tower/model.ts';
+import { duration } from '../lib/time.ts';
 import { NAV, type SessionRow, type Theme } from './model.ts';
 
 export type PaletteGroup = 'waiting' | 'actions' | 'goto' | 'sessions' | 'general';

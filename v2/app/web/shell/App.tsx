@@ -22,6 +22,7 @@ import { json, serviceApi } from '@/lib/api.ts';
 import { ScreenBoundary } from '@/lib/boundary.tsx';
 import { Cache } from '@/lib/cache.ts';
 import { screenCatalog, type Language } from '@/lib/catalogs.ts';
+import { browserStore, rememberLanguage } from '@/lib/language.ts';
 import { Screen } from '@/lib/context.tsx';
 import { ChangeStream, type SourceLike } from '@/lib/events.ts';
 import { translator } from '@/lib/i18n.ts';
@@ -220,9 +221,15 @@ function Shell({ shared }: { readonly shared: Shared }) {
   const { start, cache, router } = shared;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const place: Place = placeOf(pathname) ?? { screen: 'tower', path: '/' };
-  const t = useMemo(() => translator(screenCatalog(place.screen, start.language)), [place.screen, start.language]);
+  // The person's language, picked again in the account menu: every screen redraws in it, with no reload.
+  const [language, setLanguage] = useState<Language>(start.language);
+  const pickLanguage = useCallback((next: Language) => {
+    rememberLanguage(next, browserStore(), document, location.protocol === 'https:');
+    setLanguage(next);
+  }, []);
+  const t = useMemo(() => translator(screenCatalog(place.screen, language)), [place.screen, language]);
   // The palette names what waits as the tower does: the shell's words over the tower's.
-  const towerT = useMemo(() => translator(screenCatalog('tower', start.language)), [start.language]);
+  const towerT = useMemo(() => translator(screenCatalog('tower', language)), [language]);
   const [me, setMe] = useState<Me | null>(null);
   const [waiting, setWaiting] = useState<number | null>(null);
   const [lead, setLead] = useState<LeadState | null | undefined>(undefined);
@@ -398,14 +405,14 @@ function Shell({ shared }: { readonly shared: Shared }) {
     [overlay, place.screen, needs, rows, gestures, theme, towerT]);
 
   const host = (screen: ScreenName, path: string) => (me && raw
-    ? <ScreenHost screen={screen} path={path} me={me} language={start.language} cache={cache} raw={raw} navigate={navigate} inboxChanged={inboxChanged} />
+    ? <ScreenHost screen={screen} path={path} me={me} language={language} cache={cache} raw={raw} navigate={navigate} inboxChanged={inboxChanged} />
     : null);
   return (
     <>
       <div className="app" data-sidebar={mode} inert={overlay !== null}>
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
-          waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme}
+          waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
           onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
         <div className="main">
           <div className="top-bar" id="top-bar">

@@ -34,9 +34,9 @@ test('the list reads as the capture: what waits, with its time, then what was ha
   const shown = text(viewOf());
   for (const expected of [
     'Waiting · 4',
-    'Release', '12 min', RELEASE_TITLE, `${RELEASE_TICKET} · Reviewed by Sonnet, checks green`,
-    'Permission', '3 min', 'Install date-fns', 'LOCAL-161 · author paused',
-    'Question', '1 h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
+    'Release', '12\u00a0min', RELEASE_TITLE, `${RELEASE_TICKET} · Reviewed by Sonnet, checks green`,
+    'Permission', '3\u00a0min', 'Install date-fns', 'LOCAL-161 · author paused',
+    'Question', '1h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
     'Handled · 1',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(renderInbox(viewOf(), en), /<h1/, 'no heading repeats the top bar\'s');
@@ -84,7 +84,7 @@ test('a release shows its announcement, the before and after, the sessions line,
     'Release to approve', RELEASE_TICKET, 'Open the sessions', RELEASE_TITLE,
     'Two testers out of two found it clearer. The heading changes on the list and on the archive, nothing else.',
     'What changes on screen', 'Desktop', 'Phone', 'Before', 'After',
-    'Sessions', 'Opus wrote it in 2 min · Sonnet reviewed it in 6 min, one round', 'Change', 'PR #42', 'all checks green',
+    'Sessions', 'Opus wrote it in 2\u00a0min · Sonnet reviewed it in 6\u00a0min, one round', 'Change', 'PR #42', 'all checks green',
     'Signed in as demo', 'Send back', 'Approve the release', '3f9c2a1',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-158-author">/);
@@ -108,7 +108,7 @@ test('a release with no capture says so instead of an empty frame, and a capture
   assert.ok(visibleText(html).includes('No picture of this screen yet.'));
   const unreviewed: ReleaseItem = { ...release, sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 75 }], pr: { ...release.pr, checks: 'pending' } };
   const shown = text(viewOf({ items: [unreviewed], selected: unreviewed.id }));
-  assert.ok(shown.includes('Opus wrote it in 1 h 15'));
+  assert.ok(shown.includes('Opus wrote it in 1h\u00a015m'));
   assert.ok(shown.includes('checks running'));
 });
 
@@ -117,7 +117,7 @@ test('a permission asks its question, offers its three answers first, then says 
   const shown = visibleText(html);
   for (const expected of [
     'Permission', 'LOCAL-161', 'Open the session', 'Allow the author to install date-fns?', 'Upcoming: group entries by week',
-    'Session', 'Author · Opus, paused for 3 min', 'Allow once', 'Always in this project', 'Deny',
+    'Session', 'Author · Opus, paused for 3\u00a0min', 'Allow once', 'Always in this project', 'Deny',
     'Why it asks', 'The command adds a dependency to the project.',
     'Command', 'npm install date-fns', 'What for', 'Install date-fns to group dates by week',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
@@ -263,6 +263,6 @@ test('a session the list does not know still shows its request', () => {
   const shown = text(viewOf({ sessions: [], selected: idOf('permission'), open: true }));
   assert.ok(shown.includes('npm install date-fns'));
   assert.ok(shown.includes('Allow once'));
-  assert.ok(!shown.includes('Author · Opus, paused for 3 min'));
+  assert.ok(!shown.includes('Author · Opus, paused for 3\u00a0min'));
   assert.equal(AUTHOR_ID.length > 0, true);
 });

@@ -63,7 +63,7 @@ test('a note and a draft are kept; a busy follow-up waits', () => {
 test('in French, and every word from the catalog or the data', () => {
   const markup = render(fr, askFixture(), { language: 'fr' });
   assert.match(markup, /guestbook · src\/page\.ts, ligne 12/);
-  assert.match(markup, /semaine utilisée à 29 %/);
+  assert.match(markup, /semaine utilisée à 29\u202f%/);
   assert.match(markup, />Demander<\/button>/);
   // With a translator that names its keys, no word of the screen is left but the data's.
   const sentinel: Translate = (key) => `«${key}»`;

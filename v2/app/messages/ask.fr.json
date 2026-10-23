@@ -15,7 +15,7 @@
   "ask_no_answer": "Pas de réponse\u00a0: le lecteur s'est arrêté avant de répondre. Reposez la question ci-dessous.",
   "ask_cost": "{amount}\u00a0$",
   "ask_usage": "{cost} · {input} jetons en entrée, {output} en sortie",
-  "ask_week": "semaine utilisée à {n} %",
+  "ask_week": "semaine utilisée à {n}\u202f%",
   "ask_total": "Au total\u00a0: {text}",
   "ask_follow_label": "Une question de relance",
   "ask_follow_placeholder": "Posez une question de relance…",

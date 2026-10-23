@@ -40,8 +40,8 @@ test('the screen\'s lead ticket is the service\'s', () => {
 test('the plan card reads as the capture\'s: Plan, its age, its title, its tickets, its time and its share of the week', () => {
   const html = renderInbox(viewOf(), en);
   const shown = visibleText(html);
-  for (const expected of ['Waiting · 4', 'Plan', '25 min', PLAN_TITLE]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  assert.equal(lineOf(html, `plan:${PLAN_ID}`), '5 tickets · 2 h 15 · 3.9% of the week');
+  for (const expected of ['Waiting · 4', 'Plan', '25\u00a0min', PLAN_TITLE]) assert.ok(shown.includes(expected), `missing: ${expected}`);
+  assert.equal(lineOf(html, `plan:${PLAN_ID}`), '5 tickets · 2h\u00a015m · 3.9% of the week');
   const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]?.split(':')[0]);
   assert.deepEqual(order, ['release', 'permission', 'plan', 'question'], 'the capture\'s order: release, permission, plan, question; the handled group folded');
 });
@@ -49,27 +49,27 @@ test('the plan card reads as the capture\'s: Plan, its age, its title, its ticke
 test('without a measured week the card says the cost, and one ticket is in the singular', () => {
   const item = planItem();
   const cost: PlanItemInbox = { ...item, totals: { ...item.totals, weekPercent: null } };
-  assert.equal(lineOf(renderInbox(viewOf({ items: [cost] }), en), cost.id), '5 tickets · 2 h 15 · about $3.05');
-  assert.equal(lineOf(renderInbox(viewOf({ items: [cost], language: 'fr' }), fr), cost.id), '5 tickets · 2 h 15 · environ 3,05\u00a0$');
+  assert.equal(lineOf(renderInbox(viewOf({ items: [cost] }), en), cost.id), '5 tickets · 2h\u00a015m · about $3.05');
+  assert.equal(lineOf(renderInbox(viewOf({ items: [cost], language: 'fr' }), fr), cost.id), '5 tickets · 2\u00a0h\u00a015 · environ 3,05\u00a0$');
   const one: PlanItemInbox = { ...cost, itemCount: 1, totals: { ...cost.totals, minutes: 40 } };
-  assert.equal(lineOf(renderInbox(viewOf({ items: [one] }), en), one.id), '1 ticket · 40 min · about $3.05');
+  assert.equal(lineOf(renderInbox(viewOf({ items: [one] }), en), one.id), '1 ticket · 40\u00a0min · about $3.05');
 });
 
 test('the plan\'s detail is lane 8\'s plan panel under the inbox\'s eyebrow, with Change and Approve in the inbox\'s bar', () => {
   const html = renderInbox(viewOf({ selected: `plan:${PLAN_ID}`, open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Plan to approve', 'Lead', 'Open on the lead\'s screen', PLAN_TITLE,
+    'Plan to approve', 'Lead', 'Open on the Lead\'s screen', PLAN_TITLE,
     'A GET /entries.json route that lists the entries', 'The time each entry was written, on the page', 'After 1, 2, 3 and 4',
-    'Full circuit', 'Fast lane', '45 min · 1.0%', '1 h 15 · 1.4%',
-    'About 2 h 15 of work', '3.9% of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets',
+    'Full circuit', 'Fast lane', '45\u00a0min · 1.0%', '1h\u00a015m · 1.4%',
+    'About 2h\u00a015m of work', '3.9% of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets',
     'Signed in as demo', 'Change the plan', 'Approve the plan and start',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<section class="plan-panel awaiting" data-plan="plan-3"/);
   assert.match(html, /<a class="d-link" href="\/plans\/plan-3">/);
   assert.doesNotMatch(html, /data-plan-action=/, 'the panel\'s own buttons are left out: the inbox\'s bar holds the gestures');
   assert.deepEqual(acts(html), ['approve_plan']);
-  assert.match(html, /<a href="\/plans\/plan-3" class="btn">Change the plan<\/a>/, 'Change goes to the lead\'s screen, where the reply field is');
+  assert.match(html, /<a href="\/plans\/plan-3" class="btn">Change the plan<\/a>/, 'Change goes to the Lead\'s screen, where the reply field is');
   assert.equal([...html.matchAll(/class="item-state /g)].length, 0, 'a proposed plan shows no item state');
 });
 
@@ -77,7 +77,7 @@ test('a plan not read yet, or not readable, still shows what the inbox item says
   const html = renderInbox(viewOf({ selected: `plan:${PLAN_ID}`, plans: new Map() }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Plan to approve', PLAN_TITLE, proposedPlan(FIXTURE_NOW).summary, '5 tickets', 'About 2 h 15 of work', '3.9% of the week', 'Approve the plan and start',
+    'Plan to approve', PLAN_TITLE, proposedPlan(FIXTURE_NOW).summary, '5 tickets', 'About 2h\u00a015m of work', '3.9% of the week', 'Approve the plan and start',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /class="plan-panel/);
   assert.deepEqual(acts(html), ['approve_plan']);
@@ -120,13 +120,13 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   const html = renderInbox(viewOf({ items, selected: question.id, open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Question from the lead', 'Lead', 'Answer on the lead\'s screen', LEAD_QUESTION_TEXT, 'Only the visible ones', 'Recommended',
-    'All of them, with a hidden flag', 'The lead waits for your answer on its screen.',
+    'Question from the Lead', 'Lead', 'Answer on the Lead\'s screen', LEAD_QUESTION_TEXT, 'Only the visible ones', 'Recommended',
+    'All of them, with a hidden flag', 'The Lead waits for your answer on its screen.',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the lead\'s session');
-  assert.deepEqual(acts(html), [], 'no Send: the answer is given on the lead\'s screen');
-  assert.match(html, /<a href="\/lead" class="btn">Answer on the lead&#39;s screen<\/a>/);
-  assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the lead\'s screen, in the bar');
+  assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the Lead\'s session');
+  assert.deepEqual(acts(html), [], 'no Send: the answer is given on the Lead\'s screen');
+  assert.match(html, /<a href="\/lead" class="btn">Answer on the Lead&#39;s screen<\/a>/);
+  assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the Lead\'s screen, in the bar');
   assert.match(html, /class="questions waits read"/);
   assert.doesNotMatch(html, /<button[^>]*data-answer=/, 'its choices are lines, not buttons');
   assert.match(html, /data-choices-state="read"/);
@@ -210,7 +210,7 @@ test('the plan and the lead\'s question in French have no English sentence left'
   }
   const shown = visibleText(renderInbox(viewOf({ selected: `plan:${PLAN_ID}`, language: 'fr' }), fr));
   assert.ok(shown.includes('Approuver le plan et démarrer'));
-  assert.ok(shown.includes('3,9 % de la semaine'));
+  assert.ok(shown.includes('3,9\u202f% de la semaine'));
 });
 
 test('what the plan and the lead\'s question say is escaped, never markup', () => {

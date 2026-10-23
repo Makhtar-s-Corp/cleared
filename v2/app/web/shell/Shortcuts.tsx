@@ -119,7 +119,7 @@ export function ShortcutSheet({ t, screen, mac, onClose }: { readonly t: Transla
             return (
               <section key={scope} aria-labelledby={`keys-${scope}`}>
                 <h3 id={`keys-${scope}`}>{t(`keys_group_${scope}`)}</h3>
-                <ul>{here.map((row) => <li key={row.id} data-shortcut={row.id}><span>{t(row.label)}</span><Keys keys={row.keys} t={t} mac={mac} /></li>)}</ul>
+                <ul>{here.map((row) => <li key={row.id} data-shortcut={row.id}><span>{t(row.label)}</span><Keys keys={row.keys} t={t} mac={mac} then /></li>)}</ul>
               </section>
             );
           })}

@@ -18,8 +18,8 @@ import {
 } from '../../web/screens/session/tabs.ts';
 import * as tabs from '../../web/screens/session/tabs.ts';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 
 test('the four tabs, Terminal first opened; the address\'s hash names the others, and the arrows move between them', () => {
   assert.deepEqual([...TABS], ['plan', 'terminal', 'editor', 'browser']);
@@ -69,7 +69,7 @@ test('the Plan tab: the plan, its confidence and reason; Go and Change while it 
   assert.equal(goLine(SESSION_PLAN, USER, en), `Go given by you at ${time}`);
   assert.equal(goLine(SESSION_PLAN, 'someone-else', en), `Go given by a teammate at ${time}`);
   assert.equal(goLine({ ...SESSION_PLAN, go: { by: 'delay', at } }, USER, en), `Started by itself at ${time}: no answer in time, and its confidence is high`);
-  assert.equal(goLine({ ...SESSION_PLAN, go: { by: 'lead', at } }, USER, en), `Go given by the lead at ${time}, for a plan you approved`);
+  assert.equal(goLine({ ...SESSION_PLAN, go: { by: 'lead', at } }, USER, en), `Go given by the Lead at ${time}, for a plan you approved`);
   assert.equal(goLine(waiting, USER, en), undefined);
   for (const confidence of ['low', 'medium', 'high'] as const) for (const t of [en, fr]) assert.ok(t(`confidence_${confidence}`));
 

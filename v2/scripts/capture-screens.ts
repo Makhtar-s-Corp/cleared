@@ -23,6 +23,10 @@
 // Lane 38's, named only: login (the sign-in page, before the account
 // signs in).
 //
+// Lane i18n's, named only: account (the tower with the account menu open,
+// its language choice shown). The browser asks for the --language too
+// (its locale), since the page's language now follows the browser's.
+//
 // Lane 36's, named only: review (a reviewer's session, the view of its
 // ticket at its review), review-editor (its Editor) and review-takeover (its
 // Terminal after Take over, given back once captured).
@@ -61,7 +65,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -103,7 +107,7 @@ export async function capture(options: { readonly out: string; readonly screens?
     await app.directory.add(ACCOUNT, PASSWORD);
     for (const theme of themes) {
       for (const w of widths) {
-        const context = await browser.newContext({ viewport: WIDTHS[w], deviceScaleFactor: 1, colorScheme: theme === 'dark' ? 'dark' : 'light' });
+        const context = await browser.newContext({ viewport: WIDTHS[w], deviceScaleFactor: 1, colorScheme: theme === 'dark' ? 'dark' : 'light', locale: options.language ?? 'fr' });
         await context.addInitScript((value: string) => { try { (globalThis as any).localStorage.setItem('cleared-v2-theme', value); } catch { /* no storage */ } }, theme);
         const page = await context.newPage();
         await page.clock.setFixedTime(FIXTURE_NOW);
@@ -134,7 +138,7 @@ export async function capture(options: { readonly out: string; readonly screens?
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
-          'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
+          'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead', account: '/',
           login: '/login', review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
           'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
         };
@@ -189,6 +193,13 @@ export async function capture(options: { readonly out: string; readonly screens?
             if (await handled.count() > 0) await handled.scrollIntoViewIfNeeded();
             await settle(page);
           }
+          let menu = false;
+          if (screen === 'account' && await page.locator('#person').isVisible()) {
+            await page.locator('#person').click();
+            await page.locator('#language').waitFor();
+            await settle(page);
+            menu = true;
+          }
           let folded = false;
           if (screen === 'rail-tooltip') {
             if (await page.locator('.app[data-sidebar="open"]').count() > 0) {
@@ -207,7 +218,7 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.locator('#giveback').click();
             await page.locator('#takeover').waitFor({ timeout: 10_000 });
           }
-          if (overlay) await page.keyboard.press('Escape');
+          if (overlay || menu) await page.keyboard.press('Escape');
           if (folded) {
             await page.mouse.move(0, 0);
             await page.keyboard.press('BracketLeft');

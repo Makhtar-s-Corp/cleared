@@ -13,7 +13,7 @@ import { liveOrder, recipeKey, towerModel, type NeedCard } from '../../screens/t
 import { RecipeForm } from '../../screens/tower/Tower.tsx';
 import { html, renderTowerBody, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('tower', 'en'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
 
 test('what needs the person and the live sessions are rows, each a link J and K walk', async () => {
   const markup = renderTowerBody(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), en);

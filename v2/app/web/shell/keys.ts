@@ -113,13 +113,13 @@ export function resolveKey(input: KeyInput, context: KeyContext, chord: Chord): 
   }
 }
 
-// How a key is written in the sheet and the palette: Enter and Esc in the
-// person's language (Entrée, Échap) when a translator is given.
-export function keyLabel(token: string, mac: boolean, t?: (key: string) => string): string {
-  if (token === 'Mod') return mac ? '⌘' : 'Ctrl';
-  if (token === 'Enter') return mac ? '↵' : t ? t('key_cap_enter') : 'Enter';
-  if (token === 'Esc') return t ? t('key_cap_esc') : 'Esc';
-  if (token === 'Space') return t ? t('key_cap_space') : 'Space';
+// How a key is written in the sheet, the palette and the tooltips: Ctrl,
+// Enter, Esc and Space in the person's language (Entrée, Échap, Espace).
+export function keyLabel(token: string, mac: boolean, t: (key: string) => string): string {
+  if (token === 'Mod') return mac ? '⌘' : t('key_cap_ctrl');
+  if (token === 'Enter') return mac ? '↵' : t('key_cap_enter');
+  if (token === 'Esc') return t('key_cap_esc');
+  if (token === 'Space') return t('key_cap_space');
   return token.length === 1 ? token.toUpperCase() : token;
 }
 

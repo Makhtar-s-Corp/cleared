@@ -101,7 +101,7 @@ test('the blocked card has no Approve: it says why, proposes the way out, and po
   const buttons = acts(html);
   assert.ok(!buttons.includes('approve'), 'no Approve');
   assert.deepEqual(buttons, ['send_back'], 'it can still be sent back');
-  assert.match(html, /<a[^>]*href="\/lead"[^>]*>Ask the lead to add the step<\/a>/);
+  assert.match(html, /<a[^>]*href="\/lead"[^>]*>Ask the Lead to add the step<\/a>/);
   // The list says it too, without opening it.
   assert.ok(shown(renderInbox(viewOf([item], { selected: undefined, open: false }), en)).includes(`${BLOCKED_TICKET} · Blocked: a consumer is not changed`));
 });

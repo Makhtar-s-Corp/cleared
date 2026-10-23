@@ -9,13 +9,14 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { ApiError } from '../../web/lib/screen.ts';
+import { since } from '../../web/lib/time.ts';
 import { DEFAULT_STATES } from '../../../src/tickets/contract.ts';
 import {
-  TODO_STATE, answerRequest, answersFor, approve, approveBody, decisionFor, detailKey, elapsed, failure, itemFromHash, ordered, sameOrigin, sendBack, undoApproval,
+  TODO_STATE, answerRequest, answersFor, approve, approveBody, decisionFor, detailKey, failure, itemFromHash, ordered, sameOrigin, sendBack, undoApproval,
   type InboxView,
 } from '../../web/screens/inbox/model.ts';
 
-const en = translator(loadCatalog('inbox', 'en'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
 const fixture = inboxFixture(FIXTURE_NOW);
 const release = fixture.items[0] as ReleaseItem;
 const permission = fixture.items[1] as Extract<InboxItem, { kind: 'permission' }>;
@@ -40,14 +41,14 @@ test('what waits comes first, releases then permissions then questions, each old
   assert.deepEqual(handled.map((i) => i.id), [(fixture.items[3] as InboxItem).id]);
 });
 
-test('elapsed time reads as the capture does', () => {
+test('elapsed time reads as the capture does, through the app\'s one formatter', () => {
   const at = (ms: number) => new Date(FIXTURE_NOW.getTime() - ms).toISOString();
-  assert.equal(elapsed(at(20_000), FIXTURE_NOW, en), 'now');
-  assert.equal(elapsed(at(12 * 60_000), FIXTURE_NOW, en), '12 min');
-  assert.equal(elapsed(at(60 * 60_000), FIXTURE_NOW, en), '1 h');
-  assert.equal(elapsed(at(195 * 60_000), FIXTURE_NOW, en), '3 h');
-  assert.equal(elapsed(at(50 * 3600_000), FIXTURE_NOW, en), '2 d');
-  assert.equal(elapsed(at(-60_000), FIXTURE_NOW, en), 'now', 'a clock a little ahead of ours is not negative');
+  assert.equal(since(at(20_000), FIXTURE_NOW, en), 'just now');
+  assert.equal(since(at(12 * 60_000), FIXTURE_NOW, en), '12\u00a0min');
+  assert.equal(since(at(60 * 60_000), FIXTURE_NOW, en), '1h');
+  assert.equal(since(at(195 * 60_000), FIXTURE_NOW, en), '3h\u00a015m');
+  assert.equal(since(at(50 * 3600_000), FIXTURE_NOW, en), '2d\u00a02h');
+  assert.equal(since(at(-60_000), FIXTURE_NOW, en), 'just now', 'a clock a little ahead of ours is not negative');
 });
 
 test('the address names the item shown, and a capture is shown only from this site', () => {

@@ -17,6 +17,7 @@
 import type { SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Role } from '../../../../src/session/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
+import { fixed } from '../../lib/time.ts';
 import { clock, who } from './model.ts';
 
 export const TABS = ['plan', 'terminal', 'editor', 'browser'] as const;
@@ -196,6 +197,6 @@ export function stepLine(row: StepRow, t: Translate): string {
 // What a step's sessions spent, once one ran.
 export function stepCost(row: StepRow, language: 'en' | 'fr', t: Translate): string | undefined {
   if (row.costUsd === null) return undefined;
-  const amount = new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }).format(row.costUsd);
+  const amount = fixed(row.costUsd, 2, language);
   return t('ticket_step_cost', { amount });
 }

@@ -34,7 +34,7 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-US' });
     await context.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event) => {
         const seen = ((window as unknown as { violations?: string[] }).violations ??= []);
@@ -156,7 +156,7 @@ test('the lead\'s session address draws its own thread', { skip }, async () => {
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
+    const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-US' })).newPage();
     const errors: string[] = [];
     page.on('pageerror', (error: Error) => errors.push(error.message));
     await page.goto(`${app.base}/login`);

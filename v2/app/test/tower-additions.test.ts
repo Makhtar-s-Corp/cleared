@@ -16,8 +16,8 @@ import {
 } from '../web/screens/tower/model.ts';
 import { signedIn, startApp } from './support.ts';
 
-const t = translator(loadCatalog('tower', 'en'));
-const fr = translator(loadCatalog('tower', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const [update, review] = RECIPES as [Recipe, Recipe];
 
 async function workspaceData(): Promise<TowerData> {
@@ -90,8 +90,8 @@ test('a contract and a knowledge item need the owner, with what each waits for, 
   assert.deepEqual(knowledge.map((card) => needTitle(card, t)), [knowledgeItem(FIXTURE_NOW).text, knowledgeItem(FIXTURE_NOW).text]);
   assert.deepEqual(knowledge.map((card) => needSentence(card, t)), ['Proposed for guestbook: approve it to keep it.', 'Proposed for the whole workspace: approve it to keep it.']);
   assert.equal(needSentence(knowledge[0]!, fr), 'Proposé pour guestbook\u00a0: approuvez-le pour le garder.');
-  assert.equal(t('need_contract', { age: '3 min' }), 'Contract · 3 min');
-  assert.equal(t('need_knowledge', { age: '3 min' }), 'Knowledge · 3 min');
+  assert.equal(t('need_contract', { age: '3\u00a0min' }), 'Contract · 3\u00a0min');
+  assert.equal(t('need_knowledge', { age: '3\u00a0min' }), 'Knowledge · 3\u00a0min');
   // A handled one needs nobody.
   assert.equal(towerModel({ ...base, inbox: [{ ...contractItem(FIXTURE_NOW), state: 'handled' }] }, FIXTURE_NOW).needs.length, 0);
 });
@@ -135,7 +135,7 @@ test('a recipe\'s form refuses a missing parameter before anything is posted, an
 
 test('what a run says, and where it leads: the plan of a ticket recipe, the lead for a goal', () => {
   assert.deepEqual(recipeDone({ accepted: true, plan: 'plan-9' }, update, t), { text: 'dependency-update runs as a one-ticket plan.', href: '/plans/plan-9' });
-  assert.deepEqual(recipeDone({ accepted: true, message: 4 }, review, t), { text: 'weekly-review was sent to the lead as a goal.', href: '/lead' });
+  assert.deepEqual(recipeDone({ accepted: true, message: 4 }, review, t), { text: 'weekly-review was sent to the Lead as a goal.', href: '/lead' });
   assert.deepEqual(recipeDone({ accepted: true }, update, t), { text: 'dependency-update runs as a one-ticket plan.', href: null });
 });
 

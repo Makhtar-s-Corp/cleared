@@ -40,7 +40,7 @@ async function withShell(run: (page: any, base: string) => Promise<void>, langua
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: language === 'fr' ? 'fr-FR' : 'en-US' });
     await context.addInitScript(() => {
       document.addEventListener('securitypolicyviolation', (event: any) => {
         (window.violations ??= []).push(`${event.violatedDirective} ${event.blockedURI}`);
@@ -191,7 +191,8 @@ function englishOf(text: string): string | undefined {
   const en = all('en');
   const fr = all('fr');
   for (const [key, value] of Object.entries(en)) {
-    if (fr[key] === value) continue;
+    // A template with under two letters of its own ("{n}s") says nothing of a language.
+    if (fr[key] === value || (value.replace(/\{[a-z_]+\}/g, '').match(/\p{L}/gu) ?? []).length < 2) continue;
     const literal = value.split(/\{[a-z_]+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+?');
     if (new RegExp(`^${literal}$`).test(text)) return key;
   }

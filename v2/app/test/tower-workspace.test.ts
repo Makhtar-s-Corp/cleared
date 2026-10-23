@@ -14,8 +14,8 @@ import { ApiError, type ScreenContext } from '../web/lib/screen.ts';
 import { createTicket, DRAFT_MAX, liveDot, loadTower, needSentence, newTicket, serviceState, takenOverText, towerModel, type TowerData } from '../web/screens/tower/model.ts';
 import { signedIn, startApp } from './support.ts';
 
-const t = translator(loadCatalog('tower', 'en'));
-const fr = translator(loadCatalog('tower', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const minutesBefore = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
 
 test('the workspace line names each service with its live sessions and its train: landing, or rolled back', async () => {
@@ -51,9 +51,9 @@ test('a session taken over stays among the live ones, says by whom and since whe
   assert.ok(taken, 'the taken-over session is live');
   assert.deepEqual(taken.takenOver, { you: true, minutes: 6 });
   assert.equal(taken.service, 'filter-api');
-  assert.equal(takenOverText(taken.takenOver!, t), 'Taken over by you · 6 min');
-  assert.equal(takenOverText({ you: false, minutes: 6 }, t), 'Taken over by another account · 6 min');
-  assert.equal(takenOverText(taken.takenOver!, fr), 'Repris en main par vous · 6 min');
+  assert.equal(takenOverText(taken.takenOver!, t), 'Taken over by you · 6\u00a0min');
+  assert.equal(takenOverText({ you: false, minutes: 6 }, t), 'Taken over by another account · 6\u00a0min');
+  assert.equal(takenOverText(taken.takenOver!, fr), 'Repris en main par vous · 6\u00a0min');
   assert.equal(liveDot(taken.phase, taken.role, taken.takenOver), 'live taken');
   assert.equal(liveDot('working', 'author', null), 'live');
   // Seen by another account, it does not say "you".

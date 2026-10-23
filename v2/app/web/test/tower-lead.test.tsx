@@ -14,8 +14,8 @@ import { ApiError } from '../lib/screen.ts';
 import { lastLeadLine, loadTower, towerModel, type TowerData } from '../screens/tower/model.ts';
 import { signedIn, startApp } from '../../test/support.ts';
 
-const en: Translate = translator(loadCatalog('tower', 'en'));
-const fr: Translate = translator(loadCatalog('tower', 'fr'));
+const en: Translate = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr: Translate = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const minutesAgo = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
 
 function text(html: string): string {
@@ -44,14 +44,14 @@ test('the lead card is live: its state line, then the last thing the lead said t
   const data = await towerFixture(FIXTURE_NOW);
   const model = towerModel(data, FIXTURE_NOW);
   assert.deepEqual(model.lead, {
-    phase: 'idle', percent: 31, refreshedMinutes: 10,
+    phase: 'idle', percent: 31, refreshed: { at: new Date(FIXTURE_NOW.getTime() - 10 * 60_000).toISOString(), now: FIXTURE_NOW },
     line: 'LOCAL-161 is paused on a permission. I moved LOCAL-163 ahead so the machine stays busy.',
   });
   const html = renderTower(model, en);
   const words = text(html);
-  assert.ok(words.includes('Always on · context 31% · refreshed 10 min ago'));
+  assert.ok(words.includes('Always on · context 31% · refreshed 10\u00a0min ago'));
   assert.match(html, /<q>LOCAL-161 is paused on a permission\. I moved LOCAL-163 ahead so the machine stays busy\.<\/q>/, 'quoted in the reader\'s language by the browser');
-  assert.match(html, /<form class="lead-ask" id="lead-ask"[^>]*>\s*<input id="lead-ask-input"[^>]*placeholder="Message the lead…"/);
+  assert.match(html, /<form class="lead-ask" id="lead-ask"[^>]*>\s*<input id="lead-ask-input"[^>]*placeholder="Message the Lead…"/);
   assert.doesNotMatch(words, /Comes in milestone 2|milestone 2/, 'the milestone 1 sentences are gone');
 });
 
@@ -59,13 +59,13 @@ test('each state of the lead reads as such, and a lead the tower cannot read is 
   const line = (lead: LeadState | null) => text(renderTowerBody(towerModel({ sessions: [], inbox: [], tickets: [], lead, leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), en));
   assert.match(line(leadState('idle')), /Always on · context 12%/);
   assert.doesNotMatch(line(leadState('idle')), /refreshed/, 'a first generation was never refreshed');
-  assert.match(line(leadState('working', { refreshedAt: minutesAgo(90), refreshCount: 1 })), /Always on · context 12% · refreshed 1 h 30 ago/);
+  assert.match(line(leadState('working', { refreshedAt: minutesAgo(90), refreshCount: 1 })), /Always on · context 12% · refreshed 1h ago/);
   assert.match(line(leadState('idle', { context: null })), /^Always on$/m, 'no share before the first measure');
   assert.match(line(leadState('starting')), /^Starting$/m);
   assert.match(line(leadState('refreshing')), /^Refreshing from memory$/m);
   assert.match(line(leadState('down')), /^Not running$/m);
   assert.match(line(null), /^Not running$/m);
-  assert.match(line(null), /No message from the lead yet\./);
+  assert.match(line(null), /No message from the Lead yet\./);
   assert.match(renderTowerBody(towerModel({ sessions: [], inbox: [], tickets: [], lead: leadState('down'), leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), en), /class="lead-state down"/, 'down is the danger state');
 });
 
@@ -159,7 +159,7 @@ test('a proposed plan is a card under Needs you, after what the teams wait for, 
   assert.equal(card?.href, '/plans/plan-readable');
   const html = renderTower(model, en);
   assert.match(html, /<a class="need row" href="\/plans\/plan-readable"/);
-  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe lead proposes 5 tickets, about 2 h of work and 4% of the week.\nGoal\n25 min'), 'its kind, its title, its line, then whose and how long');
+  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe Lead proposes 5 tickets, about 2h of work and 4% of the week.\nGoal\n25\u00a0min'), 'its kind, its title, its line, then whose and how long');
 });
 
 test('a plan without the week share says its cost, one ticket reads in the singular, and French says it in French', () => {
@@ -168,10 +168,10 @@ test('a plan without the week share says its cost, one ticket reads in the singu
     title: 'A goal', summary: 'A summary.', itemCount: count, totals: { minutes, costUsd: 3.9, weekPercent, samples: 2 },
   });
   const render = (inbox: InboxItem[], t: Translate) => text(renderTowerBody(towerModel({ sessions: [], inbox, tickets: [], lead: null, leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), t));
-  assert.match(render([proposal(5, 135, null)], en), /The lead proposes 5 tickets, about 2 h 15 of work, about \$3\.90\./);
-  assert.match(render([proposal(1, 40, null)], en), /The lead proposes 1 ticket, about 40 min of work, about \$3\.90\./);
-  assert.match(render([proposal(3, 60, 1.25)], en), /The lead proposes 3 tickets, about 1 h of work and 1\.3% of the week\./);
-  assert.match(render([proposal(3, 60, 1.25)], fr), /Le lead propose 3 tickets, environ 1 h de travail et 1,3 % de la semaine\./);
+  assert.match(render([proposal(5, 135, null)], en), /The Lead proposes 5 tickets, about 2h\u00a015m of work, about \$3\.90\./);
+  assert.match(render([proposal(1, 40, null)], en), /The Lead proposes 1 ticket, about 40\u00a0min of work, about \$3\.90\./);
+  assert.match(render([proposal(3, 60, 1.25)], en), /The Lead proposes 3 tickets, about 1h of work and 1\.3% of the week\./);
+  assert.match(render([proposal(3, 60, 1.25)], fr), /Le Lead propose 3 tickets, environ 1\u00a0h de travail et 1,3\u202f% de la semaine\./);
   assert.match(render([proposal(5, 135, null)], fr), /environ 3,90 \$/);
 });
 
@@ -187,12 +187,12 @@ test('the lead\'s own question shows no ticket id and opens the lead, and its se
   };
   const changed: TowerData = { ...data, inbox: [...data.inbox, question], sessions: [...data.sessions, leadSession] };
   const model = towerModel(changed, FIXTURE_NOW);
-  assert.equal(model.live.length, 4, 'the lead is on its card, not in Live sessions');
+  assert.equal(model.live.length, 4, 'the Lead is on its card, not in Live sessions');
   assert.ok(!model.live.some((s) => s.role === 'lead'));
   const card = model.needs.find((n) => n.id === 'lead-question');
   assert.equal(card?.href, '/lead');
   const html = renderTower(model, en);
-  assert.match(html, /<a class="need row" href="\/lead"[^>]*>[\s\S]*?Pages of 20, or one long list\?[\s\S]*?The lead waits for your answer on its screen\.[\s\S]*?<span class="owner">Lead<\/span>/);
+  assert.match(html, /<a class="need row" href="\/lead"[^>]*>[\s\S]*?Pages of 20, or one long list\?[\s\S]*?The Lead waits for your answer on its screen\.[\s\S]*?<span class="owner">Lead<\/span>/);
   assert.doesNotMatch(html, /<span class="id">lead<\/span>/, 'the sentinel ticket never shows');
   assert.ok(text(html).startsWith('Four things need you.') || text(html).includes('Four things need you.'));
   assert.match(text(html), /^4 sessions running/m);
@@ -204,7 +204,7 @@ test('the grey line gives the week left when the harness measures it', async () 
   const words = text(renderTower(towerModel({ ...data, weekLeft: 76 }, FIXTURE_NOW), en));
   assert.ok(words.includes('4 sessions running · 1 plan in progress · 2 landed today · Claude 76% left'));
   const french = text(renderTower(towerModel({ ...data, weekLeft: 76 }, FIXTURE_NOW), fr));
-  assert.match(french, /Claude\u00a0: 76 % restants/);
+  assert.match(french, /Claude\u00a0: 76\u202f% restants/);
 });
 
 test('the pill shows only while a generation of the lead is live, or refreshing between two', () => {
@@ -230,6 +230,6 @@ test('the shell draws the lead\'s dot beside Plans, none before the first read, 
   const shell = translator(loadCatalog('shell', 'en'));
   for (const screen of ['tower', 'inbox', 'lead'] as const) assert.doesNotMatch(renderSidebar(screen, shell), /lead-dot/, `${screen}: not known yet, no dot`);
   const on = renderSidebar('tower', shell, { lead: 'on' });
-  assert.match(on, /<a class="nav-item" href="\/lead"[^>]*>[^]*?<span class="lead-dot" id="lead-dot" data-lead="on" aria-hidden="true"><\/span><span class="sr-only">The lead is on<\/span>/);
-  assert.match(renderSidebar('tower', shell, { lead: 'down' }), /data-lead="down"[^]*?The lead is not running/);
+  assert.match(on, /<a class="nav-item" href="\/lead"[^>]*>[^]*?<span class="lead-dot" id="lead-dot" data-lead="on" aria-hidden="true"><\/span><span class="sr-only">The Lead is on<\/span>/);
+  assert.match(renderSidebar('tower', shell, { lead: 'down' }), /data-lead="down"[^]*?The Lead is not running/);
 });
