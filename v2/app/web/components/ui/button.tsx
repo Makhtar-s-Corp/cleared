@@ -15,7 +15,7 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        ink: 'rounded-md bg-primary text-primary-foreground font-medium hover:opacity-88 disabled:opacity-50',
+        ink: 'rounded-md bg-primary text-primary-foreground font-[var(--weight-strong)] hover:opacity-88 disabled:opacity-50',
         outline: 'rounded-md bg-card shadow-control hover:bg-accent disabled:opacity-45',
         chip: 'rounded-full bg-transparent shadow-control text-xs hover:bg-accent',
         ghost: 'rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',

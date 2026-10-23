@@ -12,6 +12,8 @@ import { join } from 'node:path';
 const WEB = new URL('../../web/', import.meta.url).pathname;
 const MESSAGES = new URL('../../messages/', import.meta.url).pathname;
 const SHEET = readFileSync(join(WEB, 'styles/app.css'), 'utf8');
+// The inbox's sheet is lane 37's, which runs beside lane 38: it joins the scale once lane 37 has merged.
+const PENDING: ReadonlySet<string> = new Set(['screens/inbox/inbox.css']);
 
 // The declarations of the first rule whose selector is exactly `selector`.
 function block(selector: string): Map<string, string> {
@@ -103,17 +105,21 @@ test('each theme is a base, a contrast and an accent; the neutrals are mixed fro
   for (const name of DARK.keys()) assert.ok(/^--(theme-|mix-|awaiting|success|danger|count-ink|e-|halo-|stage-review|harness-)/.test(name) || name === '--select', `dark redefines ${name}`);
 });
 
-test('four spacing steps, three text sizes and two weights, and the app\'s and the tower\'s sheets use only them', () => {
+test('four spacing steps, three text sizes and two weights, and every sheet of the app uses only them', () => {
   assert.deepEqual(['--space-1', '--space-2', '--space-3', '--space-4'].map((n) => LIGHT.get(n)), ['4px', '8px', '16px', '24px']);
-  assert.deepEqual(['--text-sm', '--text-md', '--text-lg'].map((n) => LIGHT.get(n)), ['12px', '14px', '20px']);
+  // In rem, so the person's own font size scales the text (lane 38): 12, 14 and 20 px at the browser's default.
+  assert.deepEqual(['--text-sm', '--text-md', '--text-lg', '--text-input'].map((n) => LIGHT.get(n)), ['0.75rem', '0.875rem', '1.25rem', '1rem']);
   assert.deepEqual(['--weight-regular', '--weight-strong'].map((n) => LIGHT.get(n)), ['400', '550']);
-  // Every rule of the app's sheet and of the tower's (the sign-in page's included): no size or weight but a
-  // token; --text-input is a phone's fields' size, where iOS zooms on less (art director of lane 35, item 9).
-  const TOWER = readFileSync(join(WEB, 'screens/tower/tower.css'), 'utf8');
-  for (const [name, sheet] of [['app.css', SHEET.slice(SHEET.indexOf('* {'))], ['tower.css', TOWER]] as const) {
+  // Every rule of every sheet (the sign-in page's included): no size or weight but a token; --text-input is a
+  // phone's fields' size, where iOS zooms on less (art director of lane 35, item 9). Lane 35 held the app's and
+  // the tower's sheets to it, lane 38 the others.
+  for (const file of files(WEB, /\.css$/)) {
+    const name = file.slice(WEB.length);
+    if (PENDING.has(name)) continue;
+    const sheet = name === 'styles/app.css' ? SHEET.slice(SHEET.indexOf('* {')) : readFileSync(file, 'utf8');
     const rules = sheet.replace(/\/\*[^]*?\*\//g, '');
-    for (const [, value] of rules.matchAll(/font-size:\s*([^;}]+)/g)) assert.match(value!, /^var\(--text-(sm|md|lg|input)\)$/, `${name}: font-size: ${value}`);
-    for (const [, value] of rules.matchAll(/font-weight:\s*([^;}]+)/g)) assert.match(value!, /^var\(--weight-(regular|strong)\)$/, `${name}: font-weight: ${value}`);
+    for (const [, value] of rules.matchAll(/font-size:\s*([^;}]+)/g)) assert.match(value!, /^(var\(--text-(sm|md|lg|input)\)|inherit)$/, `${name}: font-size: ${value}`);
+    for (const [, value] of rules.matchAll(/font-weight:\s*([^;}]+)/g)) assert.match(value!, /^(var\(--weight-(regular|strong)\)|inherit)$/, `${name}: font-weight: ${value}`);
     for (const [, value] of rules.matchAll(/\bfont:\s*([^;}]+)/g)) if (value !== 'inherit') assert.match(value!, /var\(--weight-[a-z]+\) var\(--text-[a-z]+\)/, `${name}: font: ${value}`);
   }
 });
