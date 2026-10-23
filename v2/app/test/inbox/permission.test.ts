@@ -173,6 +173,14 @@ test('A, T and R answer the request shown, Space peeks at the row walked to; eac
   assert.equal(keyLabel('Space', false, en), 'Space');
 });
 
+test('a key that ends a G chord is the chord\'s: G then T goes to the tower, it never answers', () => {
+  const shown = { item: compound as Item, visible: true, busy: false };
+  const input = { key: 't', meta: false, ctrl: false, alt: false, focus: 'none' as const, onRow: false, overlay: false };
+  assert.equal(inboxKey({ ...input, afterG: true }, shown), null);
+  assert.deepEqual(inboxKey({ ...input, afterG: false }, shown), { kind: 'answer', act: 'allow_always' });
+  assert.equal(inboxKey({ ...input, key: 'a', afterG: true }, shown), null, 'any key after a G is left to the shell');
+});
+
 test('Esc closes the item shown, but never from a field: the text typed there stays (lane 34\'s audit, P1)', () => {
   assert.equal(closesOnEscape('none'), true);
   assert.equal(closesOnEscape('control'), true);

@@ -534,10 +534,13 @@ export type InboxKey = { readonly kind: 'answer'; readonly act: Answer } | { rea
 const KEY_ANSWERS: Readonly<Record<string, Answer>> = { a: 'allow_once', t: 'allow_always', r: 'reject_once' };
 
 export function inboxKey(
-  input: { readonly key: string; readonly meta: boolean; readonly ctrl: boolean; readonly alt: boolean; readonly focus: Focus; readonly onRow: boolean; readonly overlay: boolean },
+  input: {
+    readonly key: string; readonly meta: boolean; readonly ctrl: boolean; readonly alt: boolean; readonly focus: Focus; readonly onRow: boolean; readonly overlay: boolean;
+    readonly afterG?: boolean;
+  },
   shown: { readonly item: Item | undefined; readonly visible: boolean; readonly busy: boolean },
 ): InboxKey | null {
-  if (input.meta || input.ctrl || input.alt || input.overlay || input.focus === 'field' || input.focus === 'terminal') return null;
+  if (input.meta || input.ctrl || input.alt || input.overlay || input.afterG || input.focus === 'field' || input.focus === 'terminal') return null;
   if (input.key === ' ') return input.onRow ? { kind: 'peek' } : null;
   const act = KEY_ANSWERS[input.key.toLowerCase()];
   if (!act || !shown.visible || shown.busy || shown.item?.kind !== 'permission' || shown.item.state !== 'waiting') return null;
@@ -697,8 +700,6 @@ export function shareLine(totals: PlanItemInbox['totals'], language: 'en' | 'fr'
     ? t('plan_cost_total', { amount: t('plan_cost', { amount: decimals(totals.costUsd, 2, language) }) })
     : t('plan_week_total', { n: decimals(totals.weekPercent, 1, language) });
 }
-
-export const verbOf = (input: ToolInput) => (input.kind === 'think' || input.kind === 'switch_mode' || input.kind === 'other' ? 'other' : input.kind);
 
 export function graceLeft(dueAt: string, now: Date): number {
   return Math.max(0, Math.ceil((Date.parse(dueAt) - now.getTime()) / 1000));

@@ -1,9 +1,6 @@
 {
-  "inbox_title": "Inbox",
-  "waiting_count": "{n} waiting",
   "list_label": "What waits for you",
   "detail_label": "The item chosen",
-  "handled_title": "Handled",
   "empty_title": "Nothing waits for you.",
   "empty_note": "What a session or the lead asks you, every plan and every release to approve, comes here.",
   "inbox_load_failed": "The inbox could not be loaded. It tries again in a few seconds.",
@@ -70,14 +67,6 @@
   "undo": "Undo",
   "approved": "Approved by you at {time}, landing.",
   "sent_back": "Sent back at {time}. The ticket is in Todo and the author starts again.",
-  "wants_execute": "Wants to run",
-  "wants_edit": "Wants to edit",
-  "wants_delete": "Wants to delete",
-  "wants_move": "Wants to move",
-  "wants_read": "Wants to read",
-  "wants_search": "Wants to search for",
-  "wants_fetch": "Wants to fetch",
-  "wants_other": "Wants to use {tool}",
   "facts_what_for": "What for",
   "facts_why": "Why it asks",
   "facts_session": "Session",
@@ -337,5 +326,6 @@
   "fold_target": "Target",
   "fold_policy": "The policy's words",
   "handled_group": "Handled · {n}",
-  "waiting_group": "Waiting · {n}"
+  "waiting_group": "Waiting · {n}",
+  "answers_label": "Answers to “{title}”"
 }

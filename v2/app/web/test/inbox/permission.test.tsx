@@ -62,7 +62,7 @@ test('the compound request\'s detail: the question, the ticket, the three answer
     'Pourquoi la question', '« git merge-base » n\'est pas une commande que la politique autorise seule.',
     'Session', 'Commande',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  const lines = [...html.matchAll(/<span class="fold-line">(?:<span class="op">([^<]*)<\/span>)?([^<\n]*)/g)].map((m) => `${m[1] ?? ''} ${m[2]}`.trim());
+  const lines = [...html.matchAll(/<span class="fold-line">(?:<span class="op">([^<]*)<\/span>)?([^<\n]*)/g)].map((m) => `${m[1] ?? ''} ${m[2]}`.replace(/\s+/g, ' ').trim());
   assert.deepEqual(lines, ['git log -5 --oneline', '; git merge-base main HEAD', '; git show 3f9c2a1 --stat', '; npm test 2&gt;&amp;1', '| tail -8']);
   assert.ok(!shown.some((text) => text.includes('is not a command the policy allows')), 'the code is said in French; the English sentence is not shown');
   assert.ok(html.indexOf('data-act="allow_once"') < html.indexOf('Pourquoi la question'), 'the answers come first');
@@ -86,5 +86,6 @@ test('an expired request keeps its intent title, says it no longer waits, and of
   const local = new Map<string, Local>([[compound.id, { kind: 'answered', decision: 'allow_once' }]]);
   const answered = renderInbox(viewOf({ selected: compound.id, open: true, local }), fr);
   assert.ok(visibleText(answered).includes('Autorisé une fois. La session continue.'));
-  assert.doesNotMatch(answered, /data-act=|data-row-act=/);
+  assert.doesNotMatch(answered, /data-act=/);
+  assert.deepEqual(rowActs(answered, compound.id), [], 'nor on its row');
 });

@@ -21,6 +21,7 @@ import type { Translate } from '@/lib/i18n.ts';
 import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
+import { CHORD_MS } from '@/shell/keys.ts';
 import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
@@ -28,7 +29,7 @@ import {
   changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   sessionLink, sessionOf, sessionsLine, shareLine, short,
-  ticketTitle, trainLine, stopState, undoApproval, verbOf, type Gesture, type InboxView, type Item, type Local,
+  ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
 
@@ -288,7 +289,7 @@ function PermissionBody({ item, view, t, note, reason, onReason, onAct }: {
       {fold.length > 0 || why.raw || description ? (
         <details className="fold" id="fold">
           <summary><CaretRight size={12} aria-hidden="true" className="caret" /><span className="fold-label">{t(item.input.kind === 'execute' ? 'fold_command' : 'fold_target')}</span><code className="fold-peek">{fold[0]?.text ?? ''}</code></summary>
-          {fold.length > 0 ? <pre className="fold-command"><code>{fold.map((part, index) => <span key={index} className="fold-line">{part.op ? <span className="op">{part.op}</span> : null}{part.text}{'\n'}</span>)}</code></pre> : null}
+          {fold.length > 0 ? <pre className="fold-command"><code>{fold.map((part, index) => <span key={index} className="fold-line">{part.op ? <><span className="op">{part.op}</span>{' '}</> : null}{part.text}{'\n'}</span>)}</code></pre> : null}
           {description || why.raw ? (
             <dl className="facts fold-facts">
               {description ? <Fact label={t('facts_what_for')}>{description}</Fact> : null}
@@ -724,8 +725,11 @@ export default function Inbox() {
   // leaves them alone (preventDefault).
   const keyState = useRef({ shown: undefined as Item | undefined, visible: false, busy: false });
   useEffect(() => {
+    let lastG = -Infinity;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      const afterG = performance.now() - lastG <= CHORD_MS;
+      lastG = event.key.toLowerCase() === 'g' && !event.metaKey && !event.ctrlKey && !event.altKey ? performance.now() : -Infinity;
       const focus = focusOf(event.target);
       if (event.key === 'Escape') {
         if (location.hash && closesOnEscape(focus) && !document.querySelector('.overlay')) location.hash = '';
@@ -733,7 +737,7 @@ export default function Inbox() {
       }
       const row = (event.target as Element | null)?.closest?.('#inbox-list a.item');
       const read = inboxKey(
-        { key: event.key, meta: event.metaKey, ctrl: event.ctrlKey, alt: event.altKey, focus, onRow: row instanceof HTMLAnchorElement, overlay: document.querySelector('.overlay') !== null },
+        { key: event.key, meta: event.metaKey, ctrl: event.ctrlKey, alt: event.altKey, focus, onRow: row instanceof HTMLAnchorElement, overlay: document.querySelector('.overlay') !== null, afterG },
         { item: keyState.current.shown, visible: keyState.current.visible, busy: keyState.current.busy },
       );
       if (!read) return;
