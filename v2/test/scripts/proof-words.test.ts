@@ -24,3 +24,9 @@ test('several keys make one alternative, and the words are taken as written, not
   assert.ok(!said('session', 'verdict_ok').test('Review passedX round 2'.replace('X', '')), 'the comma is a comma');
   assert.throws(() => said('session', 'no_such_key'), /no_such_key/);
 });
+
+test('a space matches a space, a no-break space or a narrow one, either way round (French spacing, lane 37; review of 256)', () => {
+  const verdict = said('session', 'verdict_changes', { round: 3 });
+  for (const space of [' ', '\u00a0', '\u202f']) assert.ok(verdict.test(`Relecture${space}: des changements demandés, tour 3`), JSON.stringify(space));
+  assert.ok(said('session', 'answer_allow_once').test('Allowed\u00a0once by owner'));
+});

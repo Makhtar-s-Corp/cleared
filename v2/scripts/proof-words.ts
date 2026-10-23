@@ -19,7 +19,8 @@ function catalog(name: string, language: string): Record<string, string> {
   return read;
 }
 
-const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// A space of the catalog matches a plain, a no-break or a narrow no-break space (French spacing, lane 37).
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[ \u00a0\u202f]/g, '[ \\u00a0\\u202f]');
 
 export function said(name: string, keys: string | readonly string[], values: Readonly<Record<string, string | number>> = {}): RegExp {
   const sentences = (typeof keys === 'string' ? [keys] : keys).flatMap((key) => LANGUAGES.map((language) => {
