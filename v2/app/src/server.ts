@@ -174,12 +174,16 @@ export function screenSheets(bundle: Bundle): { readonly href: string; readonly 
   return [...sheets].map(([href, screens]) => ({ href, screens }));
 }
 
+const FONTS = ['/fonts/Geist-Variable.woff2', '/fonts/GeistMono-Variable.woff2'];
+
 function head(language: Language, title: string, bundle: Bundle, nonce: string, app = false): string {
   const sheets = [
     ...bundle.styles.map((href) => `<link rel="stylesheet" href="${escape(href)}">`),
     ...(app ? screenSheets(bundle).map(({ href, screens }) => `<link rel="stylesheet" href="${escape(href)}" media="not all" data-screens="${escape(screens.join(' '))}">`) : []),
   ].join('\n');
   const chunks = app ? Object.values(bundle.screens).map((own) => `\n<link rel="modulepreload" href="${escape(own.script)}">`).join('') : '';
+  // The two faces every page sets, asked for before the sheet names them.
+  const fonts = FONTS.map((href) => `<link rel="preload" href="${href}" as="font" type="font/woff2" crossorigin>`).join('\n');
   return `<!doctype html>
 <html lang="${language}">
 <head>
@@ -190,6 +194,7 @@ function head(language: Language, title: string, bundle: Bundle, nonce: string, 
 <meta name="theme-color" content="#FAFAFA">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+${fonts}
 ${sheets}
 <script src="/theme.js"></script>
 <script type="module" src="${escape(bundle.script)}"></script>${chunks}

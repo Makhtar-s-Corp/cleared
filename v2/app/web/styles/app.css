@@ -12,6 +12,9 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @font-face { font-family: Geist; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+/* Until Geist arrives, a local face scaled to its width and its ascent and descent (measured in Chromium against
+   Arial, whose metrics Liberation Sans shares), so the text does not move when Geist swaps in. */
+@font-face { font-family: "Geist Fallback"; src: local("Arial"), local("Helvetica"), local("Liberation Sans"); size-adjust: 102.34%; ascent-override: 89.9%; descent-override: 21.5%; line-gap-override: 0%; }
 :root {
   /* the light theme: white, near-black, a deep blue */
   --theme-base: #FFFFFF; --theme-contrast: #171717; --theme-accent: #0B63CE;
@@ -36,7 +39,7 @@
   --row: 34px; --top-bar: 56px; --side-open: 240px; --side-rail: 56px; --bottom-bar: 56px;
   --radius: 8px;
   --motion: 140ms; --ease: cubic-bezier(.2,.8,.2,1);
-  --sans: Geist, -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  --sans: Geist, "Geist Fallback", -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
   color-scheme: light;
 }
 /* The dark theme: the same roles from three other colours and other shares. */
