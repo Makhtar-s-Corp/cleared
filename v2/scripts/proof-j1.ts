@@ -303,8 +303,9 @@ if (sent) {
         await item.click();
         // The detail is drawn after the click: wait for this ticket's, then read it.
         await page.locator('#detail').getByText(ticketOf()).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
-        const chip = page.locator('#detail .d-title code');
-        details.push({ detail: await page.locator('#detail').innerText(), ...(await chip.count() > 0 ? { command: await chip.first().innerText() } : {}) });
+        // The raw command is folded under the request's French title since lane 37, one part a line.
+        const fold = page.locator('#detail .fold-command');
+        details.push({ detail: await page.locator('#detail').innerText(), ...(await fold.count() > 0 ? { command: ((await fold.first().textContent()) ?? '').replace(/\s*\n\s*/g, ' ').trim() } : {}) });
       }
       const action = inboxAction(details, SCRATCH);
       if (action.kind === 'wait') { await page.waitForTimeout(2_000); continue; }
