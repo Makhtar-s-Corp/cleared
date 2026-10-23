@@ -3739,3 +3739,16 @@ The browser job on GitHub's runner read 46.0, 75.7, 58.9 and 83.9 ms over this p
 
 - Pull request: 256, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-polish-measures`.
+
+## 2026-10-23: Owner decision: the filter API proof repository's main goes back before LOCAL-11's contract, by a revert commit
+
+**Decision.** On 2026-10-23 at 07:22 (Europe/Paris) the owner approved, in writing, reverting LOCAL-11's contract commit (`35c0376`, "contract: POST /check answers a severity, none or review") on the main branch of the filter API's proof repository (the one the proof instance's `workspace.conf` names) by a revert commit, and the guestbook's side of LOCAL-10 and LOCAL-11 the same way only if the guestbook's `/health` needed it. No history is rewritten: no reset, no force push.
+
+**Why.** The multi-service proof's first ticket asks for that same contract change. With LOCAL-11's contract already on the filter API's main, the ticket's contract step has an empty diff, and an empty contract diff never creates the inbox item that the proof's step 03 waits for.
+
+**What was done.**
+- The filter API's main: `752e7c7` (`git revert 35c0376`, on top of `f5c7ddf`), pushed without force. Its deploy watcher deployed `752e7c7` at 05:26:18Z; `/health` answers 200 on both services. LOCAL-11's app commit (`3529630`) stays, so the app still answers `severity` and the repository's contract test fails on two cases until the proof's ticket puts the contract back. The watcher builds `src/` and runs no tests, so the deploy is not affected.
+- The guestbook: not reverted. A contract-only revert does not change what the filter API answers, and the guestbook's client falls back to `ok` when `severity` is missing, so its `/health` stayed green. The guestbook has no commit of LOCAL-10.
+- LOCAL-17, which a stopped run had started, is in the state LOCAL-13, LOCAL-15 and LOCAL-16 were put back to (the entry above): Todo since 04:14Z, no live session or container, no waiting release, plan, session plan or permission item. Nothing of it is approved or deployed.
+
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-final`.
