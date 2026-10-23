@@ -39,6 +39,7 @@ import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useGo, useScreen } from '@/lib/context.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
+import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { forgetView, keepWith, viewOf } from '@/lib/routes.ts';
@@ -46,7 +47,7 @@ import { ApiError } from '@/lib/screen.ts';
 import { formatModel, harnessSquare, liveDot } from '../tower/model.ts';
 import { isSessionThread, SessionAgent, sessionAgentId } from './agent.ts';
 import {
-  ENDED, answerBody, answerLine, clock, decisionOf, duration, family, known, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, statusMeta, statusTone, takenOverOf, target, verb,
+  ENDED, answerBody, answerLine, clock, decisionOf, duration, family, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, statusMeta, statusTone, takenOverOf, target, verb,
   type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
@@ -118,23 +119,36 @@ export function StatusHead({ view, t }: { readonly view: SessionView; readonly t
   return <><span className={`dot ${statusTone(view)}`} aria-hidden="true" /><h2 className="phrase-title">{phrase(view, t)}</h2><span className="meta">{who ? <span className="who">{who}</span> : null}{statusMeta(view, t)}</span></>;
 }
 
+// A request waiting in the thread, as the inbox says it (lib/request.ts, lane
+// 37): the question naming who asks, why in the person's words, the three
+// answers, then the command folded, open by itself when it must be read.
 function RequestCard({ row, request, view, t, onAnswer }: { readonly row: ToolRow; readonly request: RequestState; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer }) {
   const input = row.input;
-  const lead = known(t, `wants_${verb(input)}`, { tool: row.name }) ?? t('wants_other', { tool: row.name });
+  const asked = input ? { input, tool: row.name } : undefined;
+  const title = asked ? requestAsk(asked, view.summary.role, t) : t('wants_other', { tool: row.name });
+  const why = asked ? requestReason(asked, request.suggestion, t) : {};
   const description = input?.kind === 'execute' && input.description ? input.description : '';
-  const reason = request.suggestion.decision === 'ask' ? request.suggestion.reason : '';
+  const fold = input ? requestFold(input) : [];
   const off = view.busy?.has(request.requestId) ?? false;
-  const why = [description, reason].filter(Boolean);
   const answer = (kind: string) => onAnswer?.(request.requestId, kind, view.summary.id);
   return (
-    <div className="request" data-row="request" data-request-id={request.requestId} role="group" aria-label={t('request_group')}>
-      <p className="request-title">{lead} <Code text={target(input)} /></p>
-      {why.length ? <p className="request-why">{why.map((part) => <span key={part}>{part}</span>)}</p> : null}
+    <div className="request" data-row="request" data-request-id={request.requestId} data-command={input ? target(input) : undefined} role="group" aria-label={t('request_group')}>
+      <p className="request-title">{title}</p>
+      {why.said ? <p className="request-why"><span>{why.said}</span></p> : null}
       <div className="request-actions">
         <Button variant="ink" className="btn primary" data-answer="allow_once" disabled={off} onClick={() => answer('allow_once')}>{t('allow_once')}</Button>
         <Button className="btn" data-answer="allow_always" disabled={off} onClick={() => answer('allow_always')}>{t('allow_always')}</Button>
         <Button className="btn" data-answer="reject_once" disabled={off} onClick={() => answer('reject_once')}>{t('deny')}</Button>
       </div>
+      {fold.length > 0 ? (
+        <details className="request-fold" open={asked ? requestFoldOpen(asked) : false}>
+          <summary><span className="fold-label">{t(input?.kind === 'execute' ? 'fold_command' : 'fold_target')}</span> <Code text={fold[0]?.text ?? ''} />{fold.length > 1 ? <span className="fold-more"> {t(fold.length === 2 ? 'fold_more_one' : 'fold_more_other', { n: fold.length - 1 })}</span> : null}</summary>
+          {input?.kind === 'execute' ? <CommandLines command={input.command} /> : null}
+          {description || why.raw ? (
+            <p className="request-why">{description ? <span>{description}</span> : null}{why.raw ? <span>{why.raw}</span> : null}</p>
+          ) : null}
+        </details>
+      ) : null}
     </div>
   );
 }

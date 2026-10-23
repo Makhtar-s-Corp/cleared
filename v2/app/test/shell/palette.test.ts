@@ -26,9 +26,10 @@ test('what waits for you first, then the screen\'s gestures, the screens, the se
   const list = await items('tower', ['new_ticket']);
   assert.deepEqual(groups(list), ['waiting', 'actions', 'goto', 'sessions', 'general']);
   const waiting = list.filter((item) => item.group === 'waiting');
-  assert.deepEqual(waiting.map((item) => item.detail), ['Release · 12 min · LOCAL-158', 'Permission · 3 min · LOCAL-161', 'Plan · 25 min · Goal'], 'what the tower shows, in its order');
-  assert.equal(waiting[0]!.label, '“Comings and goings” replaces “Departures and arrivals”');
-  assert.match((waiting[1]!.run as { href: string }).href, /^\/inbox#/);
+  assert.deepEqual(waiting.map((item) => item.detail), ['Permission · 3 min · LOCAL-161', 'Release · 12 min · LOCAL-158', 'Plan · 25 min · Goal'], 'what blocks a session first (lane 37)');
+  assert.equal(waiting[1]!.label, '“Comings and goings” replaces “Departures and arrivals”');
+  assert.equal(waiting[0]!.label, 'Install date-fns', 'a request by its intent, as the inbox says it');
+  assert.match((waiting[0]!.run as { href: string }).href, /^\/inbox#/);
   assert.match((waiting[2]!.run as { href: string }).href, /^\/plans\//);
   const empty = paletteItems({ screen: 'tower', needs: [], sessions: [], gestures: [], theme: 'light', t: en });
   assert.deepEqual(groups(empty), ['goto', 'general'], 'no empty group');
@@ -110,6 +111,19 @@ test('with no query, what needs the person shows three rows, so the screens are 
   const many = [...list, ...list.filter((i) => i.group === 'waiting').map((i) => ({ ...i, id: `${i.id}-again` }))];
   assert.equal(shownItems(many, '').filter((i) => i.group === 'waiting').length, 3);
   assert.equal(shownItems(many, 'a').filter((i) => i.group === 'waiting').length, many.filter((i) => i.group === 'waiting').length, 'a query searches them all');
+});
+
+test('the three rows kept with no query are what blocks a session first: requests and questions, then releases, then the rest (art director of lane 37)', async () => {
+  const data = await towerFixture(FIXTURE_NOW);
+  const needs = towerModel(data, FIXTURE_NOW).needs;
+  const permission = needs.find((n) => n.kind === 'permission')!;
+  const release = needs.find((n) => n.kind === 'release')!;
+  const plan = needs.find((n) => n.kind === 'plan')!;
+  // The fixtures source's order on the tower: oldest first, the requests last.
+  const aged = [{ ...plan, kind: 'knowledge' as const, id: 'k' }, { ...plan, kind: 'contract' as const, id: 'c' }, release, plan, permission, { ...permission, id: 'p2' }];
+  const list = paletteItems({ screen: 'inbox', needs: aged, sessions: [], gestures: [], theme: 'light', t: en });
+  const shown = shownItems(list, '').filter((i) => i.group === 'waiting').map((i) => i.id);
+  assert.deepEqual(shown, [`waiting-${permission.id}`, 'waiting-p2', `waiting-${release.id}`]);
 });
 
 test('a session offers its permission\'s three answers while it shows them (item 3)', async () => {

@@ -204,7 +204,7 @@ test('the grey line gives the week left when the harness measures it', async () 
   const words = text(renderTower(towerModel({ ...data, weekLeft: 76 }, FIXTURE_NOW), en));
   assert.ok(words.includes('4 sessions running · 1 plan in progress · 2 landed today · Claude 76% left'));
   const french = text(renderTower(towerModel({ ...data, weekLeft: 76 }, FIXTURE_NOW), fr));
-  assert.match(french, /Claude : 76 % restants/);
+  assert.match(french, /Claude\u00a0: 76 % restants/);
 });
 
 test('the pill shows only while a generation of the lead is live, or refreshing between two', () => {

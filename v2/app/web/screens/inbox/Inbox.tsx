@@ -5,7 +5,7 @@
 // contract to validate or send back, and knowledge to approve or reject
 // (model.ts says what each gesture calls). A release of several services is
 // a train (TrainBody).
-import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CheckCircle, Circle, CircleNotch, LockSimple, WarningCircle } from '@phosphor-icons/react';
+import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CaretRight, CheckCircle, Circle, CircleNotch, LockSimple, Tray, WarningCircle } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TrainState, TrainStop } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
@@ -21,46 +21,77 @@ import type { Translate } from '@/lib/i18n.ts';
 import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
+import { CHORD_MS } from '@/shell/keys.ts';
+import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
+  ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
   changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
-  sentence, sessionLink, sessionOf, sessionsLine, shareLine, short, target,
-  ticketTitle, trainLine, stopState, undoApproval, verbOf, type Gesture, type InboxView, type Item, type Local,
+  sessionLink, sessionOf, sessionsLine, shareLine, short,
+  ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
 
-function Card({ item, current, view, t }: { readonly item: Item; readonly current: boolean; readonly view: InboxView; readonly t: Translate }) {
+// One row: the kind, the age, the title and one line. A request that waits
+// carries its three answers beside the link from ROW_ANSWERS_MIN (lane 37).
+function Card({ item, current, view, t, onAnswer }: {
+  readonly item: Item; readonly current: boolean; readonly view: InboxView; readonly t: Translate; readonly onAnswer?: (item: Item, act: Answer) => void;
+}) {
+  const answers = rowAnswers(item, view);
   return (
-    <li>
+    <li className={[answers.length > 0 ? 'with-answers' : '', current ? 'current' : ''].filter(Boolean).join(' ') || undefined}>
       <a className={`item${current ? ' current' : ''}${item.state === 'handled' ? ' handled' : ''}`} href={`#${encodeURIComponent(item.id)}`} aria-current={current ? 'true' : undefined} data-item={item.id}>
         <span className="item-head">
           <span className="chip">{t(`kind_${item.kind}`)}</span>
           {item.kind === 'release' && item.train && item.train.state !== 'waiting' ? <span className={`chip train-chip train-chip-${item.train.state}`} data-train-chip={item.train.state}>{t(`train_chip_${item.train.state}`)}</span> : null}
           <span className="since">{elapsed(item.since, view.now, t)}</span>
         </span>
-        <span className="item-title">{itemTitle(item, view)}</span>
+        <span className="item-title">{itemTitle(item, view, t)}</span>
         <span className="item-line">{itemLine(item, view, t)}</span>
       </a>
+      {answers.length > 0 ? (
+        <div className="row-answers" role="group" aria-label={t('answers_label', { title: itemTitle(item, view, t) })}>
+          {answers.map((act) => (
+            <button key={act} type="button" className="row-answer" data-row-act={act} onClick={() => onAnswer?.(item, act)}>{t(act === 'reject_once' ? 'deny' : act)}</button>
+          ))}
+        </div>
+      ) : null}
     </li>
   );
 }
 
 function Empty({ t }: { readonly t: Translate }) {
-  return <p className="empty"><strong>{t('empty_title')}</strong> {t('empty_note')}</p>;
+  return <p className="empty-state inbox-empty"><Tray size={16} aria-hidden="true" /><span className="empty-text">{t('empty_title')}</span></p>;
 }
 
-export function List({ view, t }: { readonly view: InboxView; readonly t: Translate }) {
+// What waits, then the handled and the expired items in one folded group,
+// "Traité", with its count (plan, 2.5.5). The top bar names the screen: the
+// list has no heading of its own (lane 35's art director).
+export function List({ view, t, handledOpen = false, onHandled, onAnswer }: {
+  readonly view: InboxView; readonly t: Translate; readonly handledOpen?: boolean; readonly onHandled?: () => void; readonly onAnswer?: (item: Item, act: Answer) => void;
+}) {
   const { waiting, handled } = ordered(view.items);
   const shown = chosen(view);
-  const head = <div className="inbox-head"><h1 id="inbox-title">{t('inbox_title')}</h1>{waiting.length > 0 ? <span className="faint">{t('waiting_count', { n: waiting.length })}</span> : null}</div>;
-  if (view.items.length === 0) return <>{head}<Empty t={t} /></>;
-  const list = (items: Item[]) => <ul className="items">{items.map((item) => <Card key={item.id} item={item} current={item.id === shown?.id} view={view} t={t} />)}</ul>;
+  if (view.items.length === 0) return <Empty t={t} />;
+  // Under 1024 px the detail is a page of its own: no row is marked shown until one is open.
+  const marked = view.narrow && !view.open ? undefined : shown?.id;
+  const list = (items: Item[], id?: string) => <ul className="items" id={id}>{items.map((item) => <Card key={item.id} item={item} current={item.id === marked} view={view} t={t} onAnswer={onAnswer} />)}</ul>;
+  // An address that names a handled item opens the group, so the item it shows is in view.
+  const open = handledOpen || (shown?.state === 'handled' && view.selected === shown.id);
   return (
     <>
-      {head}
-      {waiting.length > 0 ? list(waiting) : <Empty t={t} />}
-      {handled.length > 0 ? <><h2 className="handled-title">{t('handled_title')}</h2>{list(handled)}</> : null}
+      {waiting.length > 0 ? <section aria-labelledby="waiting-title"><h2 className="group-title" id="waiting-title">{t('waiting_group', { n: waiting.length })}</h2>{list(waiting)}</section> : <Empty t={t} />}
+      {handled.length > 0 ? (
+        <section className="handled-group" id="handled" data-open={String(open)}>
+          <h2 className="group-title">
+            <button type="button" className="group-toggle" id="handled-toggle" aria-expanded={open} aria-controls="handled-items" onClick={onHandled}>
+              <CaretRight size={12} aria-hidden="true" className="caret" />{t('handled_group', { n: handled.length })}
+            </button>
+          </h2>
+          {open ? list(handled, 'handled-items') : null}
+        </section>
+      ) : null}
     </>
   );
 }
@@ -233,25 +264,80 @@ function Shots({ item, view, t, onFrame }: { readonly item: ReleaseItem; readonl
   );
 }
 
-function PermissionBody({ item, view, t }: { readonly item: PermissionItem; readonly view: InboxView; readonly t: Translate }) {
-  const input = item.input;
-  const shown = target(input);
+// A permission (plan, 2.5.1 to 2.5.4): the question, the ticket, the three
+// answers before anything else, at every width; then why it asks, who asks,
+// and the command folded, one part per line, with the harness's and the
+// policy's own words when the app has none of its own.
+function PermissionBody({ item, view, t, note, reason, onReason, onAct }: {
+  readonly item: PermissionItem; readonly view: InboxView; readonly t: Translate; readonly note: string; readonly reason: string;
+  readonly onReason?: (value: string) => void; readonly onAct?: Act;
+}) {
   const session = sessionOf(view, item.sessionId);
   const title = ticketTitle(view, item.ticket);
+  const why = reasonOf(item, t);
+  const fold = foldOf(item);
+  const description = item.input.kind === 'execute' ? item.input.description : undefined;
   const facts = [
-    input.kind === 'execute' && input.description ? <Fact key="for" label={t('facts_what_for')}>{input.description}</Fact> : null,
-    item.suggestion.decision === 'ask' && item.suggestion.reason ? <Fact key="why" label={t('facts_why')}>{sentence(item.suggestion.reason)}</Fact> : null,
+    why.said ? <Fact key="why" label={t('facts_why')}>{why.said}</Fact> : null,
     session ? <Fact key="session" label={t('facts_session')}>{pausedLine(item, session, view.now, t)}</Fact> : null,
   ].filter(Boolean);
   return (
     <>
       <Eyebrow item={item} kind={t('eyebrow_permission')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
-      <h2 className="d-title">{t(`wants_${verbOf(input)}`, { tool: item.tool })}{shown ? <>{' '}<code>{shown}</code></> : null}</h2>
+      <h2 className="d-title d-ask">{item.state === 'waiting' ? permissionAsk(item, view, t) : permissionTitle(item, t)}</h2>
       {title ? <p className="d-ticket">{title}</p> : null}
+      <div className="d-answers" id="d-answers"><PermissionAnswers item={item} view={view} t={t} note={note} reason={reason} onReason={onReason} onAct={onAct} /></div>
       {facts.length ? <dl className="facts">{facts}</dl> : null}
+      {fold.length > 0 || why.raw || description ? (
+        <details className="fold" id="fold" open={foldOpen(item)}>
+          <summary>
+            <CaretRight size={12} aria-hidden="true" className="caret" /><span className="fold-label">{t(item.input.kind === 'execute' ? 'fold_command' : 'fold_target')}</span>
+            <code className="fold-peek">{fold[0]?.text ?? ''}</code>{fold.length > 1 ? <span className="fold-more">{t(fold.length === 2 ? 'fold_more_one' : 'fold_more_other', { n: fold.length - 1 })}</span> : null}
+          </summary>
+          {fold.length > 0 ? <pre className="fold-command"><code>{fold.map((part, index) => <span key={index} className="fold-line">{part.op ? <><span className="op">{part.op}</span>{' '}</> : null}{part.text}{'\n'}</span>)}</code></pre> : null}
+          {description || why.raw ? (
+            <dl className="facts fold-facts">
+              {description ? <Fact label={t('facts_what_for')}>{description}</Fact> : null}
+              {why.raw ? <Fact label={t('fold_policy')}>{why.raw}</Fact> : null}
+            </dl>
+          ) : null}
+        </details>
+      ) : null}
     </>
   );
 }
+
+// The three answers of a request, or what became of it.
+function PermissionAnswers({ item, view, t, note, reason, onReason, onAct }: {
+  readonly item: PermissionItem; readonly view: InboxView; readonly t: Translate; readonly note: string; readonly reason: string;
+  readonly onReason?: (value: string) => void; readonly onAct?: Act;
+}) {
+  const local = view.local.get(item.id);
+  const busy = local?.kind === 'busy';
+  const status = <p className="d-note" id="d-note" role="status">{note}</p>;
+  if (local?.kind === 'settled') return <><p className="d-done">{t('settled')}</p>{status}</>;
+  if (local?.kind === 'answered') return <><p className="d-done" id="d-done">{t(`answered_${local.decision}`)}</p>{status}</>;
+  // While an answer is on its way the cache already shows the item handled: the answers stay, disabled, until it lands.
+  if (item.state === 'handled' && !busy) return <><p className="d-done">{t('handled_note')}</p>{status}</>;
+  const act = (name: Answer, primary: boolean) => (
+    <Button variant={primary ? 'ink' : 'outline'} className={primary ? 'btn primary' : 'btn'} data-act={name} disabled={busy} onClick={() => onAct?.(name)}
+      aria-keyshortcuts={ANSWER_KEY[name]}>
+      <span>{t(name === 'reject_once' ? 'deny' : name)}</span><kbd aria-hidden="true">{ANSWER_KEY[name]}</kbd>
+    </Button>
+  );
+  return (
+    <>
+      <div className="d-buttons answers">{act('allow_once', true)}{act('allow_always', false)}{act('reject_once', false)}</div>
+      <label className="deny-reason" htmlFor="deny-reason"><span className="sr-only">{t('deny_reason')}</span>
+        <Input id="deny-reason" type="text" maxLength={2000} autoComplete="off" placeholder={t('deny_reason')} disabled={busy} value={reason} onChange={(event) => onReason?.(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); onAct?.('reject_once'); } }} />
+      </label>
+      {status}
+    </>
+  );
+}
+
+const ANSWER_KEY: Readonly<Record<Answer, string>> = { allow_once: 'A', allow_always: 'T', reject_once: 'R' };
 
 // What the person picked and typed: the clickable answers' draft, kept by
 // the detail with its other fields and sent from the bar.
@@ -311,7 +397,7 @@ function SessionPlanBody({ item, view, t }: { readonly item: SessionPlanItem; re
   return (
     <>
       <Eyebrow item={item} kind={t(waiting ? 'eyebrow_session_plan' : 'kind_session_plan')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
-      <h2 className="d-title">{itemTitle(item, view)}</h2>
+      <h2 className="d-title">{itemTitle(item, view, t)}</h2>
       {item.service ? <p className="d-ticket">{t('on_service', { service: item.service })}</p> : null}
       <div className="confidence" data-confidence={plan.confidence}>
         <span className="confidence-chip">{t(`confidence_${plan.confidence}`)}</span>
@@ -369,6 +455,8 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
   readonly item: Item; readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly reason?: string; readonly ready?: boolean;
   readonly message?: string; readonly onAct?: Act; readonly onReason?: (value: string) => void; readonly onMessage?: (value: string) => void;
 }) {
+  // A permission's answers and what became of it are at the top of its detail (PermissionAnswers).
+  if (item.kind === 'permission') return null;
   const local = view.local.get(item.id);
   const busy = local?.kind === 'busy';
   const status = <p className="d-note" id="d-note" role="status">{note}</p>;
@@ -422,14 +510,6 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
         : <><span>{t('approve')}</span>{first ? <span className="commit">{short(first.head)}</span> : null}</>;
       return <>{signed}<div className="d-buttons">{act('send_back', t('send_back'), false, busy)}{act('approve', label, true, busy, { 'aria-label': t('approve_label', { versions }), title: versions })}</div>{status}</>;
     }
-    case 'permission':
-      return (
-        <>
-          <label className="deny-reason" htmlFor="deny-reason"><span className="sr-only">{t('deny_reason')}</span><Input id="deny-reason" type="text" maxLength={2000} autoComplete="off" placeholder={t('deny_reason')} disabled={busy} value={reason} onChange={(event) => onReason?.(event.target.value)} /></label>
-          <div className="d-buttons">{act('reject_once', t('deny'), false, busy)}{act('allow_always', t('allow_always'), false, busy)}{act('allow_once', t('allow_once'), true, busy)}</div>
-          {status}
-        </>
-      );
     case 'question':
       // Disabled until every question has a choice or a free answer.
       return <>{signed}<div className="d-buttons">{act('answer', t('send_answer'), true, busy || !ready)}</div>{status}</>;
@@ -495,7 +575,7 @@ export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMes
       {back}
       <div className="d-body" data-kind={item.kind}>
         {item.kind === 'release' ? <ReleaseBody item={item} view={view} t={t} onFrame={onFrame} />
-          : item.kind === 'permission' ? <PermissionBody item={item} view={view} t={t} />
+          : item.kind === 'permission' ? <PermissionBody item={item} view={view} t={t} note={note} reason={reason} onReason={setReason} onAct={(act) => onAct?.(act, { reason, answers, message })} />
           : item.kind === 'plan' ? <PlanBody item={item} view={view} t={t} />
           : item.kind === 'session_plan' ? <SessionPlanBody item={item} view={view} t={t} />
           : item.kind === 'contract' ? <ContractBody item={item} view={view} t={t} />
@@ -512,15 +592,19 @@ export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMes
 
 type Given = { readonly reason: string; readonly answers: Answers; readonly message: string };
 
-export function InboxScreen({ view, t, note = '', message = '', onAct, onFrame, onMessage, detailRef }: {
-  readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly message?: string;
+export function InboxScreen({ view, t, note = '', message = '', onAct, onFrame, onMessage, detailRef, handledOpen, onHandled, onAnswer, said = '' }: {
+  readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly message?: string; readonly said?: string;
   readonly onAct?: (act: string, given: Given) => void; readonly onFrame?: (frame: InboxView['frame']) => void; readonly onMessage?: (value: string) => void;
-  readonly detailRef?: Ref<HTMLElement>;
+  readonly detailRef?: Ref<HTMLElement>; readonly handledOpen?: boolean; readonly onHandled?: () => void; readonly onAnswer?: (item: Item, act: Answer) => void;
 }) {
-  if (view.items.length === 0) return <div className="inbox empty-inbox" data-open="false"><aside className="inbox-list" id="inbox-list" aria-labelledby="inbox-title"><List view={view} t={t} /></aside></div>;
+  const list = <List view={view} t={t} handledOpen={handledOpen} onHandled={onHandled} onAnswer={onAnswer} />;
+  // What an answer did, said once, from outside the detail (which is drawn again with it).
+  const live = <p className="sr-only" role="status" id="inbox-live">{said}</p>;
+  if (view.items.length === 0) return <div className="inbox empty-inbox" data-open="false"><aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}>{list}</aside>{live}</div>;
   return (
     <div className="inbox" data-open={String(view.open)}>
-      <aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}><List view={view} t={t} /></aside>
+      {live}
+      <aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}>{list}</aside>
       <section className="detail" id="detail" tabIndex={-1} aria-label={t('detail_label')} ref={detailRef}>
         <Detail key={detailKey(view)} view={view} t={t} note={note} message={message} onAct={onAct} onFrame={onFrame} onMessage={onMessage} />
       </section>
@@ -555,6 +639,12 @@ export default function Inbox() {
   // On a phone the captures start in their phone frame; the switch changes the frame only.
   const [frame, setFrame] = useState<InboxView['frame']>(() => (window.matchMedia('(max-width: 767px)').matches ? 'phone' : 'desktop'));
   const [hash, setHash] = useState(() => location.hash);
+  // From ROW_ANSWERS_MIN a request's row carries its answers; the group of what was handled opens on a click.
+  const [wide, setWide] = useState(() => window.matchMedia(`(min-width: ${ROW_ANSWERS_MIN}px)`).matches);
+  const [handledOpen, setHandledOpen] = useState(false);
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1023px)').matches);
+  const [said, setSaid] = useState('');
+  const peeking = useRef(false);
   const [now, setNow] = useState(() => context.now());
   const [note, setNote] = useState('');
   const [message, setMessage] = useState('');
@@ -604,7 +694,7 @@ export default function Inbox() {
 
   const selected = itemFromHash(hash);
   const view: InboxView | undefined = data && {
-    ...data, selected, open: selected !== undefined, me: context.me.user, now, local, frame, plans, language: context.me.language,
+    ...data, selected, open: selected !== undefined, me: context.me.user, now, local, frame, plans, language: context.me.language, wide, narrow,
   };
 
   // The grace counts down each second; at its end the approval is written.
@@ -621,24 +711,75 @@ export default function Inbox() {
   }, [shown, shownLocal, now, change, context]);
 
   useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${ROW_ANSWERS_MIN}px)`);
+    const small = window.matchMedia('(max-width: 1023px)');
+    const onWidth = () => { setWide(media.matches); setNarrow(small.matches); };
+    media.addEventListener('change', onWidth);
+    small.addEventListener('change', onWidth);
+    return () => { media.removeEventListener('change', onWidth); small.removeEventListener('change', onWidth); };
+  }, []);
+
+  useEffect(() => {
     const onHash = () => {
       setHash(location.hash);
       setNote('');
       setMessage('');
+      // A peek (Space on a row) shows the item and leaves the focus on the row;
+      // a row's answer gives it to the answer's line.
+      if (peeking.current) { peeking.current = false; return; }
       if (itemFromHash(location.hash) !== undefined) {
         queueMicrotask(() => detail.current?.focus({ preventScroll: true }));
         if (window.matchMedia('(max-width: 1023px)').matches) window.scrollTo(0, 0);
       }
     };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && location.hash && !(event.target as Element | null)?.closest?.('input')) location.hash = '';
-    };
     window.addEventListener('hashchange', onHash);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('hashchange', onHash);
-      document.removeEventListener('keydown', onKey);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  // The inbox's own keys (SCREEN_KEYS.inbox): A, T and R press the answer of
+  // the request shown, Space peeks at the row walked to; Esc leaves the item,
+  // never from a field (the text typed there stays). Handled here, the shell
+  // leaves them alone (preventDefault).
+  // Once the answer is drawn, the detail takes the focus (the pressed button
+  // is gone with the answers); the detail's inside is drawn again when the
+  // cache moves the item to what was handled, the detail itself stays.
+  const focusDone = useRef(false);
+  useLayoutEffect(() => {
+    if (!focusDone.current || !document.getElementById('d-done')) return;
+    focusDone.current = false;
+    detail.current?.focus({ preventScroll: true });
+  });
+
+  const keyState = useRef({ shown: undefined as Item | undefined, visible: false, busy: false });
+  useEffect(() => {
+    let lastG = -Infinity;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const afterG = performance.now() - lastG <= CHORD_MS;
+      lastG = event.key.toLowerCase() === 'g' && !event.metaKey && !event.ctrlKey && !event.altKey ? performance.now() : -Infinity;
+      const focus = focusOf(event.target);
+      if (event.key === 'Escape') {
+        if (location.hash && closesOnEscape(focus) && !document.querySelector('.overlay')) location.hash = '';
+        return;
+      }
+      const row = (event.target as Element | null)?.closest?.('#inbox-list a.item');
+      const onRow = row instanceof HTMLAnchorElement;
+      const read = inboxKey(
+        {
+          key: event.key, meta: event.metaKey, ctrl: event.ctrlKey, alt: event.altKey, focus, onRow, overlay: document.querySelector('.overlay') !== null, afterG,
+          rowShown: onRow && row.getAttribute('data-item') === keyState.current.shown?.id, beside: window.matchMedia('(min-width: 1024px)').matches,
+        },
+        { item: keyState.current.shown, visible: keyState.current.visible, busy: keyState.current.busy },
+      );
+      if (!read) return;
+      event.preventDefault();
+      if (read.kind === 'peek' && row instanceof HTMLAnchorElement) {
+        peeking.current = location.hash !== row.hash;
+        location.hash = row.hash;
+      } else if (read.kind === 'answer') document.querySelector<HTMLButtonElement>(`#detail [data-act="${read.act}"]`)?.click();
     };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, []);
 
   const act = async (item: Item, gesture: Gesture, run: () => Promise<Local | undefined>) => {
@@ -648,6 +789,11 @@ export default function Inbox() {
       const after = await run();
       change((next) => { if (after) next.set(item.id, after); else next.delete(item.id); });
       setNote('');
+      // The answer is said once, and the detail that shows it takes the focus.
+      if (after?.kind === 'answered') {
+        setSaid(t(`answered_${after.decision}`));
+        focusDone.current = true;
+      }
       if (gesture === 'plan_change' || gesture === 'contract_send_back') setMessage('');
       context.inboxChanged();
       void load();                                   // the list shows the item handled at once
@@ -662,7 +808,10 @@ export default function Inbox() {
         else if (before) next.set(item.id, before);
         else next.delete(item.id);
       });
-      setNote(t(key));
+      // A request settled without the person says so once, on the detail's line ("Réglé depuis la session.").
+      const quiet = settled && gesture === 'answer';
+      setNote(quiet ? '' : t(key));
+      if (gesture === 'answer') setSaid(t(quiet ? 'settled' : key));
       // A Change whose plan no longer waits has nowhere to go: its text is dropped.
       if (settled && (gesture === 'plan_change' || gesture === 'contract_send_back')) setMessage('');
       if (settled) context.inboxChanged();
@@ -670,14 +819,13 @@ export default function Inbox() {
         await load();
         const plan = item.kind === 'plan' ? plansRef.current.get(item.planId) : undefined;
         const after = afterPlanRefusal(key, plan);
-        setNote(t(after));
+        setNote(quiet ? '' : t(after));
         if (after !== key) context.inboxChanged();
       }
     }
   };
 
-  const onAct = (name: string, given: Given) => {
-    const item = shown;
+  const onAct = (name: string, given: Given, item: Item | undefined = shown) => {
     if (!item) return;
     const at = context.now();
     switch (name) {
@@ -761,8 +909,26 @@ export default function Inbox() {
     }
   };
 
-  if (!view) return failed ? <div className="inbox-error"><p className="empty error">{t('inbox_load_failed')}</p></div> : <div className="inbox-loading" aria-busy="true" />;
-  return <InboxScreen view={view} t={t} note={note} message={message} onAct={onAct} onFrame={setFrame} onMessage={setMessage} detailRef={detail} />;
+  // The detail is in view beside the list from 1024 px, or as its own page once an item is open.
+  keyState.current = { shown, visible: view !== undefined && (view.open || window.matchMedia('(min-width: 1024px)').matches), busy: shownLocal !== undefined };
+  if (!view) {
+    return failed
+      ? <div className="inbox-error"><p className="empty error inbox-failed"><span>{t('inbox_load_failed')}</span><button type="button" className="chip-button" onClick={() => { setFailed(false); void load(); }}>{t('inbox_retry')}</button></p></div>
+      : <div className="inbox-loading" aria-busy="true" />;
+  }
+  // A row's answer is the detail's, given with no reason (a deny's reason is
+  // typed in the detail); the item is shown at once, so what it did, or why it
+  // failed, is said on that item.
+  const onAnswer = (item: Item, act: Answer) => {
+    if (location.hash !== `#${encodeURIComponent(item.id)}`) {
+      peeking.current = true;                        // the answer's line takes the focus, not the detail
+      location.hash = encodeURIComponent(item.id);
+      setHash(location.hash);                        // the detail shows it now, not at the hashchange (which would draw it again)
+    }
+    onAct(act, { reason: '', answers: noAnswers(undefined), message: '' }, item);
+  };
+  return <InboxScreen view={view} t={t} note={note} message={message} onAct={onAct} onFrame={setFrame} onMessage={setMessage} detailRef={detail}
+    handledOpen={handledOpen} onHandled={() => setHandledOpen((open) => !open)} onAnswer={onAnswer} said={said} />;
 }
 
 export type { Answers };

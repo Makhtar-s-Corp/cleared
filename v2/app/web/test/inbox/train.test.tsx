@@ -15,8 +15,9 @@ import type { InboxView, Local } from '../../screens/inbox/model.ts';
 import { renderActions, renderDetail, renderInbox, visibleText } from '../render.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+// The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 
 function viewOf(items: readonly NextInboxItem[], overrides: Partial<InboxView> = {}): InboxView {
   const fixture = inboxFixture(FIXTURE_NOW, { train: 'waiting', sessionPlan: 'medium' });
@@ -145,8 +146,8 @@ test('the session plan waiting for its Go: the steps, the files, the confidence 
   assert.match(html, new RegExp(`href="/sessions/${PLAN_SESSION}"`));
   assert.deepEqual(acts(html), ['plan_change', 'plan_go']);
   // A medium or low confidence says it waits for the owner; a high one that the delay will start it.
-  assert.ok(text.includes('A medium or low confidence waits for your Go.'));
-  assert.ok(shown(detailOf(sessionPlanItem(FIXTURE_NOW, 'high'))).includes('With a high confidence, it starts by itself when the delay passes.'));
+  assert.ok(text.includes('Waits for your Go.'));
+  assert.ok(shown(detailOf(sessionPlanItem(FIXTURE_NOW, 'high'))).includes('Starts by itself when the delay passes.'));
 });
 
 test('Change opens a field for what to change, with Keep the plan and Send the change', () => {
@@ -183,11 +184,11 @@ test('the list with every new kind: each has its chip, in the order of the kinds
   const fixture = inboxFixture(FIXTURE_NOW, { train: 'waiting', sessionPlan: 'high', reading: true });
   const html = renderInbox(viewOf(fixture.items, { selected: undefined, open: false }), en);
   const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]?.split(':')[0]);
-  assert.deepEqual(order, ['release', 'release', 'permission', 'session_plan', 'plan', 'question', 'contract', 'knowledge', 'permission']);
+  assert.deepEqual(order, ['release', 'release', 'permission', 'session_plan', 'plan', 'question', 'contract', 'knowledge'], 'the handled group folded');
   const text = shown(html);
   for (const chip of ['Release', 'Session plan', 'Contract', 'Knowledge']) assert.ok(text.includes(chip), chip);
   assert.ok(text.includes(`${TRAIN_TICKET} · 2 services · Reviewed by Sonnet, checks green`));
-  assert.ok(text.includes('8 waiting'));
+  assert.ok(text.includes('Waiting · 8'));
 });
 
 test('every text of the new parts comes from the catalog, in both languages', () => {
@@ -225,7 +226,7 @@ test('a line shaped like a secret is a chip with its words, as every flag', () =
 test('in the list, a train that is not waiting carries its state beside its kind; a waiting one does not', () => {
   const states = ['blocked', 'landing', 'landed', 'rolled_back', 'halted'] as const;
   const items = states.map((state) => ({ ...trainRelease(FIXTURE_NOW, state), id: `release:${state}` }));
-  const html = renderInbox(viewOf([...items, trainRelease(FIXTURE_NOW, 'waiting')], { selected: undefined, open: false }), en);
+  const html = renderInbox(viewOf([...items, trainRelease(FIXTURE_NOW, 'waiting')], { selected: undefined, open: false }), en, { handledOpen: true });
   assert.deepEqual([...html.matchAll(/data-train-chip="([a-z_]+)">([^<]*)</g)].map((m) => `${m[1]}:${m[2]}`),
     ['blocked:Blocked', 'landing:Landing', 'landed:Landed', 'rolled_back:Rolled back', 'halted:Halted']);
   // The chip's class is train-chip-<state>, never the bare state: `.blocked`

@@ -18,7 +18,9 @@ export type Action =
   | { readonly kind: 'open' }
   | { readonly kind: 'back' }
   | { readonly kind: 'tab'; readonly n: number }
-  | { readonly kind: 'send' };
+  | { readonly kind: 'send' }
+  | { readonly kind: 'answer'; readonly act: 'allow_once' | 'allow_always' | 'reject_once' }   // the inbox's own (lane 37)
+  | { readonly kind: 'peek' };
 
 // global: anywhere but a field; list: the rows of the screen shown;
 // session: a session's screen; field: while typing in a form's field.
@@ -49,8 +51,17 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'send', keys: ['Mod+Enter'], scope: 'field', label: 'key_send', action: { kind: 'send' } },
 ];
 
-// The keys a screen binds itself, listed in the sheet on that screen.
-export const SCREEN_KEYS: Readonly<Partial<Record<ScreenName, readonly Shortcut[]>>> = {};
+// The keys a screen binds itself, listed in the sheet on that screen. The
+// inbox's (lane 37): A, T and R answer the request shown, Space peeks at the
+// row walked to (inboxKey, screens/inbox/model.ts, reads the same keys).
+export const SCREEN_KEYS: Readonly<Partial<Record<ScreenName, readonly Shortcut[]>>> = {
+  inbox: [
+    { id: 'inbox_allow_once', keys: ['A'], scope: 'list', label: 'key_allow_once', action: { kind: 'answer', act: 'allow_once' }, screens: ['inbox'] },
+    { id: 'inbox_allow_always', keys: ['T'], scope: 'list', label: 'key_allow_always', action: { kind: 'answer', act: 'allow_always' }, screens: ['inbox'] },
+    { id: 'inbox_reject_once', keys: ['R'], scope: 'list', label: 'key_reject_once', action: { kind: 'answer', act: 'reject_once' }, screens: ['inbox'] },
+    { id: 'inbox_peek', keys: ['Space'], scope: 'list', label: 'key_peek', action: { kind: 'peek' }, screens: ['inbox'] },
+  ],
+};
 
 export const sheetRows = (screen: ScreenName): readonly Shortcut[] =>
   [...SHORTCUTS.filter((s) => !s.screens || s.screens.includes(screen)), ...(SCREEN_KEYS[screen] ?? [])];
@@ -108,6 +119,7 @@ export function keyLabel(token: string, mac: boolean, t?: (key: string) => strin
   if (token === 'Mod') return mac ? '⌘' : 'Ctrl';
   if (token === 'Enter') return mac ? '↵' : t ? t('key_cap_enter') : 'Enter';
   if (token === 'Esc') return t ? t('key_cap_esc') : 'Esc';
+  if (token === 'Space') return t ? t('key_cap_space') : 'Space';
   return token.length === 1 ? token.toUpperCase() : token;
 }
 

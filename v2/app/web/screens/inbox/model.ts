@@ -44,7 +44,10 @@ import type { Question, ToolInput } from '../../../../src/session/events.ts';
 import { answersFor as choiceAnswers } from '../../components/choices/model.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
+import type { CommandPart } from '../../lib/intent.ts';
+import { requestAsk, requestFold, requestFoldOpen, requestReason, requestTitle, targetOf } from '../../lib/request.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
+import type { Focus } from '../../shell/keys.ts';
 import { formatDuration, planStateLine } from '../../plan-panel/model.ts';
 
 // The local tracker's default name of the state a ticket is sent back to
@@ -101,6 +104,8 @@ export type InboxView = {
   readonly frame: 'desktop' | 'phone';
   readonly plans?: ReadonlyMap<string, Plan>;                  // the plans read so far, by id
   readonly language?: 'en' | 'fr';                             // for the numbers: 0.30 or 0,30
+  readonly wide?: boolean;                                     // ROW_ANSWERS_MIN wide or more: a request's row carries its answers
+  readonly narrow?: boolean;                                   // under 1024 px: the detail is a page of its own
 };
 
 // ---------------------------------------------------------------- the model
@@ -415,21 +420,14 @@ export function releaseSession(view: InboxView, ticket: string): SessionSummary 
   return mine.find((s) => s.role === 'author') ?? mine[0];
 }
 
-export function target(input: ToolInput): string {
-  switch (input.kind) {
-    case 'read': case 'edit': case 'delete': case 'move': return input.path;
-    case 'execute': return input.command;
-    case 'search': return input.pattern;
-    case 'fetch': return input.target;
-    default: return '';
-  }
-}
+export const target = (input: ToolInput): string => targetOf(input);
 
-// A session plan is named by its ticket's title, else by its first step.
-export function itemTitle(item: Item, view?: InboxView): string {
+// A session plan is named by its ticket's title, else by its first step; a
+// permission by its intent (permissionTitle).
+export function itemTitle(item: Item, view: InboxView | undefined, t: Translate): string {
   switch (item.kind) {
     case 'release': return item.title;
-    case 'permission': return item.input.kind === 'execute' && item.input.description ? item.input.description : target(item.input) || item.tool;
+    case 'permission': return permissionTitle(item, t);
     case 'question': return item.questions[0]?.question ?? '';
     case 'plan': return item.title;
     case 'session_plan': return (view && ticketTitle(view, item.ticket)) ?? item.plan.steps[0] ?? item.ticket;
@@ -437,6 +435,65 @@ export function itemTitle(item: Item, view?: InboxView): string {
     case 'knowledge': return item.text;
   }
 }
+
+// ------------------------------------------------------------ permissions
+
+// A permission says what it means to do, in the person's language, from the
+// command itself, whatever the harness wrote (docs/v2/ui-overhaul-plan.md,
+// 2.5.1 and U9, lane 37). The words are lib/request.ts's, which the session
+// thread and the tower say too.
+export const permissionTitle = (item: PermissionItem, t: Translate): string => requestTitle(item, t);
+
+// The fold opens by itself when the command is what the person must read.
+export const foldOpen = (item: PermissionItem): boolean => requestFoldOpen(item);
+
+// The request as a question to the person, naming who asks.
+export const permissionAsk = (item: PermissionItem, view: InboxView, t: Translate): string => requestAsk(item, sessionOf(view, item.sessionId)?.role, t);
+
+// The fold: the command one part per line, or the tool's target.
+export const foldOf = (item: PermissionItem): CommandPart[] => requestFold(item.input);
+
+// Why it asks: by the service's code, else the policy's sentence as written.
+export const reasonOf = (item: PermissionItem, t: Translate): { readonly said?: string; readonly raw?: string } => requestReason(item, item.suggestion, t);
+
+export type Answer = 'allow_once' | 'allow_always' | 'reject_once';
+export const ANSWERS: readonly Answer[] = ['allow_once', 'allow_always', 'reject_once'];
+// From this width the list is wide enough for a request's row to carry its answers (plan, 2.5.4).
+export const ROW_ANSWERS_MIN = 1280;
+
+// A request that waits, with nothing under way on it, can be answered.
+export const answerable = (item: Item | undefined, local: Local | undefined): item is PermissionItem =>
+  item?.kind === 'permission' && item.state === 'waiting' && local === undefined;
+
+// The request shown has its answers in the detail beside it: its row does not repeat them.
+export function rowAnswers(item: Item, view: InboxView): readonly Answer[] {
+  return view.wide && item.id !== chosen(view)?.id && answerable(item, view.local.get(item.id)) ? ANSWERS : [];
+}
+
+// The inbox's own keys (lane 35's SCREEN_KEYS.inbox lists them): A, T and R
+// answer the request shown, when its detail is in view; Space on a row the
+// person walked to shows that row's item without leaving the row (a peek).
+export type InboxKey = { readonly kind: 'answer'; readonly act: Answer } | { readonly kind: 'peek' };
+const KEY_ANSWERS: Readonly<Record<string, Answer>> = { a: 'allow_once', t: 'allow_always', r: 'reject_once' };
+
+export function inboxKey(
+  input: {
+    readonly key: string; readonly meta: boolean; readonly ctrl: boolean; readonly alt: boolean; readonly focus: Focus; readonly onRow: boolean; readonly overlay: boolean;
+    readonly afterG?: boolean; readonly rowShown?: boolean; readonly beside: boolean;
+  },
+  shown: { readonly item: Item | undefined; readonly visible: boolean; readonly busy: boolean },
+): InboxKey | null {
+  if (input.meta || input.ctrl || input.alt || input.overlay || input.afterG || input.focus === 'field' || input.focus === 'terminal') return null;
+  if (input.key === ' ') return input.onRow && input.beside ? { kind: 'peek' } : null;
+  const act = KEY_ANSWERS[input.key.toLowerCase()];
+  // On another row than the one shown, the key shows that row first; the next press answers it.
+  if (act && input.onRow && !input.rowShown) return input.beside ? { kind: 'peek' } : null;
+  if (!act || !shown.visible || shown.busy || shown.item?.kind !== 'permission' || shown.item.state !== 'waiting') return null;
+  return { kind: 'answer', act };
+}
+
+// Esc leaves the item shown, but not from a field: a reason or a message being typed stays.
+export const closesOnEscape = (focus: Focus): boolean => focus === 'none' || focus === 'control';
 
 export function recommendation(item: QuestionItem): string | undefined {
   for (const question of item.questions) for (const option of question.options ?? []) if (RECOMMENDED.test(option.label)) return option.label.replace(RECOMMENDED, '');
@@ -588,8 +645,6 @@ export function shareLine(totals: PlanItemInbox['totals'], language: 'en' | 'fr'
     ? t('plan_cost_total', { amount: t('plan_cost', { amount: decimals(totals.costUsd, 2, language) }) })
     : t('plan_week_total', { n: decimals(totals.weekPercent, 1, language) });
 }
-
-export const verbOf = (input: ToolInput) => (input.kind === 'think' || input.kind === 'switch_mode' || input.kind === 'other' ? 'other' : input.kind);
 
 export function graceLeft(dueAt: string, now: Date): number {
   return Math.max(0, Math.ceil((Date.parse(dueAt) - now.getTime()) / 1000));

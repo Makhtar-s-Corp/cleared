@@ -13,8 +13,9 @@ import { translator, type Translate } from '../../lib/i18n.ts';
 import type { InboxView, Local } from '../../screens/inbox/model.ts';
 import { renderDetail, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+// The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 const sentinel: Translate = (key) => `«${key}»`;
 const ME = 'user-demo';
 
@@ -54,7 +55,7 @@ test('a knowledge item waiting: its text, its level, then Reject and Approve', (
   assert.ok(shown(html).includes(knowledgeItem(FIXTURE_NOW).text));
   assert.match(shown(html), /The service guestbook/);
   assert.deepEqual(acts(html), ['knowledge_reject', 'knowledge_approve']);
-  assert.match(shown(html), /Approve writes it into the memory at once, and queues it for the service's skill\./);
+  assert.match(shown(html), /Approve writes it into the memory and queues it for the service's skill\./);
 });
 
 test('what the owner did shows on the item, from the page at once, then from the service', () => {
