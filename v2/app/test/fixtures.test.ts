@@ -14,7 +14,7 @@ test('the fixture source answers the service\'s routes from lane 1\'s fake sessi
   try {
     const { cookie } = await signedIn(app);
     const sessions = await (await fetch(`${app.base}/api/service/sessions`, { headers: { cookie } })).json() as SessionSummary[];
-    assert.equal(sessions.length, 4);
+    assert.equal(sessions.length, 5, 'the four live sessions of the tower, and LOCAL-152\'s author before its reviewer (lane 36)');
     assert.ok(sessions.every((s) => s.lastSeq > 0), 'each session has stored events');
     const inbox = await (await fetch(`${app.base}/api/service/inbox`, { headers: { cookie } })).json() as InboxItem[];
     assert.deepEqual(inbox.map((i) => i.kind), ['release', 'permission', 'contract', 'knowledge', 'plan'], 'the contract and knowledge items of lane 27 among them');

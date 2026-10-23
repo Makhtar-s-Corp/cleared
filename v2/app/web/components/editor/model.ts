@@ -164,3 +164,31 @@ export async function putFile(options: {
   });
   return { status: response.status, body: await response.json().catch(() => null) };
 }
+
+// ------------------------------------------------------------------- scope
+
+// The Editor's files as all the ticket's changes, or as its last turn's
+// (lane 36, Codex's "last turn"): the files the last turn that changed a
+// file changed, with that turn's own counts. A turn starts at its run's
+// start; with no turn known, every edit is the last turn's.
+export type Scope = 'all' | 'last';
+export type ChangedFile = { readonly path: string; readonly added: number; readonly removed: number };
+export type TimedEdit = ChangedFile & { readonly at: string };
+
+export function lastTurnFiles(edits: readonly TimedEdit[], turns: readonly string[]): ChangedFile[] {
+  const latest = edits.reduce<TimedEdit | undefined>((found, edit) => (!found || Date.parse(edit.at) >= Date.parse(found.at) ? edit : found), undefined);
+  if (!latest) return [];
+  const end = Date.parse(latest.at);
+  const start = turns.map(Date.parse).filter((at) => at <= end).reduce((a, b) => Math.max(a, b), -Infinity);
+  const out = new Map<string, { path: string; added: number; removed: number }>();
+  for (const edit of edits) {
+    if (Date.parse(edit.at) < start) continue;
+    const file = out.get(edit.path) ?? { path: edit.path, added: 0, removed: 0 };
+    file.added += edit.added;
+    file.removed += edit.removed;
+    out.set(edit.path, file);
+  }
+  return [...out.values()];
+}
+
+export const scopedFiles = (all: readonly ChangedFile[], last: readonly ChangedFile[], scope: Scope): readonly ChangedFile[] => (scope === 'last' ? last : all);

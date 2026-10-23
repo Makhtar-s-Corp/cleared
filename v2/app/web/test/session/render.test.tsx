@@ -13,7 +13,8 @@ import type { SessionSummary } from '../../../../src/api/types.ts';
 import { modelOf, tool } from '../../../test/session/support.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
-const en = translator(loadCatalog('session', 'en'));
+// The screen's catalog over the shell's, as the shell gives it (lib/catalogs.ts): the intent's words are the shell's.
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
 
 function viewOf(overrides: Partial<SessionView> = {}): SessionView {
   const fixture = sessionFixture(FIXTURE_NOW);
@@ -34,9 +35,9 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
   for (const expected of [
     TICKET_TITLE, 'LOCAL-161', 'Done when', 'Entries grouped by week, Monday first', 'Same totals as today, a test proves it', 'Plan of the session',
     'Paused, waiting for you', '18 min · 35,500 tokens',
-    'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
+    'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run the project\'s tests', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
     'Wants to run', 'npm install date-fns', 'Network access and a new dependency.', 'Allow once', 'Always in this project', 'Deny, use what we have',
-    'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Screen so far', 'Hand over to Codex', 'Interrupt', 'Send', 'Author · Opus', 'Reviewer, waiting',
+    'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Screen so far', 'Hand over to Codex', 'Interrupt', 'Send',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
 });
 
@@ -75,6 +76,8 @@ test('every word on the screen comes from the catalog or from the data', () => {
   const parsed = parseCriteria(TICKET_BODY);
   for (const text of [...parsed.description, ...parsed.criteria.map((c) => c.text)]) allowed.add(text);
   for (const row of rows) allowed.add(`${String(new Date(row.at).getHours()).padStart(2, '0')}:${String(new Date(row.at).getMinutes()).padStart(2, '0')}`);
+  // A command's last lines, one a line, in its step's detail.
+  for (const row of rows) if (row.kind === 'tool' && row.output?.kind === 'execute') for (const line of row.output.output.split('\n')) allowed.add(line.trim());
   allowed.add('LOCAL-161');
   const html = renderSession(view, sentinel);
   for (const text of visibleText(html)) {
@@ -87,12 +90,13 @@ test('every word on the screen comes from the catalog or from the data', () => {
 });
 
 test('the French screen has no English sentence left', () => {
-  const enCatalog = loadCatalog('session', 'en');
-  const frCatalog = loadCatalog('session', 'fr');
+  const enCatalog = { ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') };
+  const frCatalog = { ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') };
   const html = renderSession(viewOf(), translator(frCatalog));
   for (const [key, value] of Object.entries(enCatalog)) {
     if (frCatalog[key] === value || value.length < 12 || !/\s/.test(value)) continue;
     const plain = value.replace(/\{[a-z_]+\}/g, '').trim();
+    if (plain.length < 12) continue;      // "install {name}": a word of the data, not a sentence
     assert.ok(!html.includes(plain), `English left in French: ${plain}`);
   }
   assert.ok(visibleText(html).includes('En pause, attend votre réponse'));
@@ -144,17 +148,19 @@ test('the policy refusal and the answered requests read as sentences', () => {
   assert.ok(visibleText(unknown).includes('Blocked by the rules (future.rule).'), 'a rule the catalog does not know is named as it is');
 });
 
-test('the tabs switch between the author and the reviewer of the ticket', () => {
+test('Author and Reviewer filter the ticket\'s thread, never links to another page (lane 36)', () => {
   const view = viewOf();
   const reviewer: SessionSummary = { ...view.summary, id: 'fixture-reviewer', role: 'reviewer', model: 'claude-sonnet-5-5', phase: 'reviewing', status: 'Reading the diff' };
   const both = renderSession({ ...view, siblings: [view.summary, reviewer] }, en);
-  assert.match(both, /<a[^>]*href="\/sessions\/fixture-author"[^>]*aria-current="page"[^>]*>/);
-  assert.match(both, /<a[^>]*href="\/sessions\/fixture-reviewer"[^>]*>/);
-  assert.ok(visibleText(both).includes('Reviewer · Sonnet'));
+  assert.doesNotMatch(both, /<a[^>]*href="\/sessions\//, 'no link to a session');
+  const pressed = [...both.matchAll(/<button[^>]*data-filter="([a-z]+)"[^>]*aria-pressed="(true|false)"[^>]*>([^<]*)</g)].map((m) => [m[1], m[2], m[3]]);
+  assert.deepEqual(pressed, [['all', 'true', 'Whole ticket'], ['author', 'false', 'Author · Opus'], ['reviewer', 'false', 'Reviewer · Sonnet']]);
+  const filtered = renderSession({ ...view, siblings: [view.summary, reviewer], filter: 'reviewer' }, en);
+  assert.match(filtered, /data-filter="reviewer" aria-pressed="true"/);
+  assert.equal(count(filtered, /data-row="/g), 0, 'the reviewer has no row yet: the author\'s are filtered out');
   const asReviewer = renderSession({ ...view, summary: reviewer, siblings: [view.summary, reviewer] }, en);
-  assert.match(asReviewer, /<a[^>]*href="\/sessions\/fixture-reviewer"[^>]*aria-current="page"/);
   assert.match(asReviewer, /placeholder="Message the reviewer…"/);
-  assert.doesNotMatch(renderSession(view, en), /href="\/sessions\/[^"]*"[^>]*>Reviewer/, 'no reviewer yet: not a link');
+  assert.doesNotMatch(renderSession(view, en), /data-filter=/, 'one session: nothing to filter yet');
 });
 
 test('a ticket that did not load still shows the session, and one with no checklist says so', () => {
@@ -162,7 +168,9 @@ test('a ticket that did not load still shows the session, and one with no checkl
   assert.ok(visibleText(bare).includes('LOCAL-161'));
   const fixture = sessionFixture(FIXTURE_NOW);
   const none = renderSession(viewOf({ ticket: { ...fixture.ticket, body: 'Only a description.' } }), en);
-  assert.ok(visibleText(none).includes('The ticket lists no criteria.'));
+  // A card with nothing to say is not drawn (lane 34's art director): no "Done when" without criteria.
+  assert.ok(!visibleText(none).includes('Done when'));
+  assert.ok(!visibleText(none).includes('The ticket lists no criteria.'));
   assert.ok(visibleText(none).includes('Only a description.'));
 });
 

@@ -51,6 +51,9 @@ test('the terminal\'s frame: opening, open with its size, and the host the termi
   const open = html(<TerminalFrame t={en} status={{ kind: 'open', cols: 100, rows: 30 }} />);
   assert.match(open, /data-terminal-state="open"/);
   assert.ok(visibleText(open).some((line) => line.includes('100 × 30')), 'the size the shell has');
+  // One line under the terminal; what is journaled is its title (lane 36's art director).
+  assert.match(open, /title="Each line you type is journaled; what it prints is not kept\."/);
+  assert.doesNotMatch(open.replace(/<[^>]*>/g, ' '), /journaled/, 'not a line of its own');
   assert.doesNotMatch(open, /data-act="terminal_open"/, 'no Open again while open');
   for (const markup of [opening, open]) noInlineStyle(markup);
 });
@@ -108,7 +111,7 @@ test('the Terminal tab without the web terminal: why, and no command to run on t
   assert.ok(visibleText(other).some((line) => /teammate/.test(line)));
   const web = html(<TakeoverNotice view={view} t={en} web />);
   assert.doesNotMatch(web, /id="resume-command"|docker exec|on the server|<pre/, 'beside the web terminal, no command either');
-  assert.ok(visibleText(web).some((line) => /harness/.test(line)));
+  assert.deepEqual(visibleText(web), ['Taken over at 09:41.', 'Give back tells the session what you changed.'], 'one line beside the terminal (lane 36)');
 });
 
 function states(): Record<string, EditorState> {

@@ -10,7 +10,7 @@ import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, parseCriteria, threadOf, type SessionView } from '../../screens/session/model.ts';
-import { BrowserTab, EditorTab, PlanTab, TabStrip, TakeoverNotice } from '../../screens/session/Tabs.tsx';
+import { BrowserTab, EditorTab, PlanTab, TabStrip, TakeoverButton, TakeoverNotice } from '../../screens/session/Tabs.tsx';
 import { LeftCards, StatusHead } from '../../screens/session/Session.tsx';
 import { browserView } from '../../screens/session/tabs.ts';
 import { html, strings, visibleText } from '../render.tsx';
@@ -28,8 +28,8 @@ function viewOf(overrides: Partial<SessionView> = {}): SessionView {
 
 const file = (path: string, text: string): SessionFile => ({ path, text, lines: text.split('\n').length - 1, cut: false, hash: 'h' });
 
-test('the tab strip: four tabs, one selected, each naming its panel; Take over on a free author session', () => {
-  const markup = html(<TabStrip tab="terminal" t={en} takeover={{ kind: 'free', can: true }} />);
+test('the tab strip: four tabs, one selected, each naming its panel; Take over, in the thread\'s header, on a free session', () => {
+  const markup = html(<><TabStrip tab="terminal" t={en} /><TakeoverButton t={en} takeover={{ kind: 'free', can: true }} /></>);
   const tabs = [...markup.matchAll(/<button[^>]*role="tab"[^>]*>/g)].map((m) => m[0]);
   assert.equal(tabs.length, 4);
   assert.deepEqual(tabs.map((tab) => /aria-selected="(true|false)"/.exec(tab)?.[1]), ['false', 'true', 'false', 'false']);
@@ -38,9 +38,11 @@ test('the tab strip: four tabs, one selected, each naming its panel; Take over o
   assert.match(markup, /role="tablist"/);
   assert.match(markup, /<button[^>]*id="takeover"/);
   for (const word of ['Plan', 'Terminal', 'Editor', 'Browser', 'Take over']) assert.ok(visibleText(markup).includes(word), word);
-  assert.doesNotMatch(html(<TabStrip tab="plan" t={en} takeover={{ kind: 'free', can: false }} />), /id="takeover"/, 'no Take over for a lead\'s or an ended session');
-  const mine = html(<TabStrip tab="terminal" t={en} takeover={{ kind: 'mine', at: FIXTURE_NOW.toISOString() }} />);
+  assert.equal(html(<TakeoverButton t={en} takeover={{ kind: 'free', can: false }} />), '', 'no Take over for a lead\'s or an ended session');
+  assert.equal(html(<TakeoverButton t={en} takeover={{ kind: 'other', at: FIXTURE_NOW.toISOString() }} />), '', 'nothing to give back of a teammate\'s');
+  const mine = html(<TakeoverButton t={en} takeover={{ kind: 'mine', at: FIXTURE_NOW.toISOString() }} />);
   assert.match(mine, /<button[^>]*id="giveback"/);
+  assert.match(mine, /title="Hands the session back and tells it what you changed\."/, 'Give back says it tells the session what changed');
   assert.doesNotMatch(mine, /id="takeover"/);
 });
 
@@ -81,7 +83,9 @@ test('a session taken over by you: the status says so, and the Terminal tab give
   const notice = html(<TakeoverNotice view={view} t={en} />);
   const text = visibleText(notice);
   assert.ok(!text.some((line) => /docker exec|on the server|claude --resume/.test(line)));
-  assert.ok(text.some((line) => line.includes('paused')));
+  // One line (lane 36): who took it over and when, and what Give back does.
+  assert.deepEqual(text, ['Taken over at 09:41.', 'Give back tells the session what you changed.']);
+  assert.equal([...notice.matchAll(/<p /g)].length, 1);
   assert.doesNotMatch(notice, /id="resume-command"/);
   assert.equal(html(<TakeoverNotice view={viewOf()} t={en} />), '', 'nothing when nobody took it over');
 });
@@ -126,7 +130,8 @@ test('the tabs\' words come from the catalog, French included, and nothing is st
   const view = viewOf();
   const waiting: SessionPlan = { ...SESSION_PLAN, go: null };
   const parts = (t: Translate) => [
-    html(<TabStrip tab="plan" t={t} takeover={{ kind: 'free', can: true }} />),
+    html(<TabStrip tab="plan" t={t} />),
+    html(<TakeoverButton t={t} takeover={{ kind: 'free', can: true }} />),
     html(<PlanTab view={view} plan={waiting} t={t} />),
     html(<TakeoverNotice view={viewOf({ summary: { ...view.summary, takenOver: { by: USER, at: FIXTURE_NOW.toISOString() } } })} t={t} />),
     html(<EditorTab t={t} files={view.thread.state?.files ?? []} mode="diff" />),

@@ -13,6 +13,7 @@ import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhas
 import type { Verdict } from '../../../../src/session/policy.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { ChoiceStatus } from '../../components/choices/model.ts';
+import type { Filter, TicketPart } from './ticket.ts';
 import { hasMark, type Translate } from '../../lib/i18n.ts';
 
 export const EVENT_NAMES = [
@@ -59,9 +60,16 @@ export type QuestionRow = {
   cancelled?: boolean;                              // the turn was interrupted while it waited
 };
 export type ReadRow = { readonly kind: 'read'; readonly at: string; readonly paths: readonly string[] };
+// Consecutive edits of one file nobody was asked about, as one row (lane 36, Devin's merged edits).
+export type EditsRow = {
+  readonly kind: 'edits'; readonly at: string; readonly path: string; readonly added: number; readonly removed: number;
+  readonly count: number; readonly ids: readonly string[];
+  readonly each: readonly { readonly at: string; readonly added: number; readonly removed: number }[];   // every edit, for the Editor's last turn
+};
 export type Row =
   | ToolRow
   | ReadRow
+  | EditsRow
   | MessageRow
   | QuestionRow
   | { readonly kind: 'denied'; readonly at: string; readonly requestId: string; readonly rule: string }
@@ -81,7 +89,8 @@ export type SessionModel = {
   lastSeq: number;
   lastAt: string | undefined;                       // the time of the last event seen
   state: SessionState | undefined;
-  readonly rows: Exclude<Row, ReadRow>[];
+  readonly rows: Exclude<Row, ReadRow | EditsRow>[];
+  readonly turns: string[];                         // when each turn started (RUN_STARTED), for the Editor's last turn
   pending: string[];                                // request ids (permissions and questions) that wait for the human
   readonly steps: Step[];                           // from STEP_STARTED and STEP_FINISHED, each span
   readonly tools: Map<string, ToolRow>;
@@ -92,7 +101,7 @@ export type SessionModel = {
 };
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -188,6 +197,9 @@ export function applyEvent(model: SessionModel, stored: SessionEvent): boolean {
       else model.steps.push({ name: event.stepName, startedAt: at, finishedAt: at });
       break;
     }
+    case 'RUN_STARTED':
+      model.turns.push(at);
+      break;
     case 'RUN_FINISHED':
       if (event.outcome.type === 'cancelled') model.rows.push({ kind: 'interrupted', at });
       break;
@@ -271,8 +283,19 @@ export function applyAll(model: SessionModel, events: readonly SessionEvent[]): 
   return added;
 }
 
+// An edit nobody was asked about, which did not fail: one that merges.
+const quietEdit = (row: Row): row is ToolRow & { input: Extract<ToolInput, { kind: 'edit' }> } =>
+  row.kind === 'tool' && row.input?.kind === 'edit' && !row.request && !(row.output && 'ok' in row.output && !row.output.ok);
+
+const asEdits = (row: Row): EditsRow | undefined => (row.kind === 'edits' ? row
+  : quietEdit(row) ? {
+    kind: 'edits', at: row.at, path: row.input.path, added: row.input.added, removed: row.input.removed, count: 1, ids: [row.id],
+    each: [{ at: row.at, added: row.input.added, removed: row.input.removed }],
+  } : undefined);
+
 // The rows as the screen shows them: the ticket's prompt and empty messages
-// left out, and consecutive reads that nobody was asked about as one row.
+// left out, consecutive reads that nobody was asked about as one row, and
+// consecutive edits of one file as one row with their sum (lane 36).
 export function timeline(model: SessionModel): Row[] {
   const out: Row[] = [];
   for (const row of model.rows) {
@@ -283,6 +306,16 @@ export function timeline(model: SessionModel): Row[] {
       if (previous?.kind === 'read') out[out.length - 1] = { kind: 'read', at: previous.at, paths: [...previous.paths, row.input.path] };
       else out.push({ kind: 'read', at: row.at, paths: [row.input.path] });
       continue;
+    }
+    if (quietEdit(row)) {
+      const before = previous && asEdits(previous);
+      if (before?.path === row.input.path) {
+        out[out.length - 1] = {
+          ...before, added: before.added + row.input.added, removed: before.removed + row.input.removed, count: before.count + 1, ids: [...before.ids, row.id],
+          each: [...before.each, { at: row.at, added: row.input.added, removed: row.input.removed }],
+        };
+        continue;
+      }
     }
     out.push(row);
   }
@@ -358,6 +391,7 @@ export type SessionThread = {
   readonly lastAt: string | undefined;
   readonly state: SessionState | undefined;
   readonly rows: readonly Row[];
+  readonly turns: readonly string[];
   readonly pending: readonly string[];
   readonly interrupts: readonly QuestionInterrupt[];
   readonly steps: readonly Step[];
@@ -373,7 +407,7 @@ export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
 
 export function threadOf(model: SessionModel): SessionThread {
   return {
-    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan,
+    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan,
   };
 }
 
@@ -391,6 +425,12 @@ export type SessionView = {
   readonly answers?: ReadonlyMap<string, LocalAnswer>;     // what this tab knows of its questions' answers
   readonly takenOver?: TakenOver | null;                  // what this tab knows of the take over, newer than the summary's
   readonly steps?: readonly TicketStep[] | null;          // the ticket's steps across services (lane 27); absent until read
+  // The view of the ticket (lane 36, ticket.ts): its sessions with their
+  // threads, this one among them, and the thread's filter. Absent: this
+  // session alone, the whole thread.
+  readonly parts?: readonly TicketPart[];
+  readonly filter?: Filter;
+  readonly unfolded?: ReadonlySet<string>;               // the ticket's sessions this view saw live: never folded
 };
 
 // Who took the session over (decision 30, lane 20): what this tab knows,

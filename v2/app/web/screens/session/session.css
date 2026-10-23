@@ -1,23 +1,16 @@
 /* The session screen (session.png). Loaded with the screen's chunk, on top of
    styles/app.css: same tokens, flat colours, nothing inline. */
-.session { --ok-text: #15803D; --add-fill: rgba(22,163,74,.09); --del-fill: rgba(196,0,0,.07); }
+.session { --ok-text: #166534; --add-fill: rgba(22,163,74,.09); --del-fill: rgba(196,0,0,.07); }
 :root[data-theme="dark"] .session { --ok-text: var(--success); --add-fill: rgba(61,208,104,.13); --del-fill: rgba(255,107,107,.12); }
 /* The editor's code colours (lane 32), each at 4.5:1 or more on its surface. */
 .session { --code-keyword: #7928CA; --code-string: #15803D; --code-comment: #707070; --code-number: #AB570A; --code-function: #0060DF; --code-definition: #171717; --code-property: #4D4D4D; }
 :root[data-theme="dark"] .session { --code-keyword: #C9A2FF; --code-string: #7EE2A0; --code-comment: #8F8F8F; --code-number: #F7B955; --code-function: #79B8FF; --code-definition: #EDEDED; --code-property: #B8B8B8; }
 
-.session-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 28px; font-size: 13px; color: var(--text-muted); }
-.crumbs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.crumbs .sep { color: var(--dashed); }
-.crumbs a { color: var(--text-muted); } .crumbs a:hover { color: var(--text); }
-.crumbs .here { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
-.tabs { margin-left: auto; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--tab-fill); }
-.tab { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 6px; color: var(--text-muted); text-decoration: none; white-space: nowrap; }
-a.tab:hover { color: var(--text); text-decoration: none; }
-.tab.current { background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-weight: 500; }
-.tab[aria-disabled="true"] { color: var(--text-faint); }
 
-.session { display: grid; grid-template-columns: 290px minmax(0, 1fr) 330px; gap: 18px; padding: 0 28px 24px; align-items: start; }
+.session { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 18px; padding: 16px 28px 24px; align-items: start; }
+/* The screen's own width decides the columns, since the sidebar (lane 35) takes
+   its share of the window, open or folded: three from 1160 px, then two. */
+#screen:has(> [data-session-view] .session, > .session) { container: screen / inline-size; }
 .s-left, .s-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
 .eyebrow { margin-bottom: 4px; font-size: 12px; color: var(--text-faint); }
@@ -31,8 +24,17 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .criteria .crit-open { color: var(--text-faint); }
 .criteria .crit-done .mark { color: var(--ok-text); }
 .checks { display: grid; gap: 6px; font-size: 13px; }
-.checks li { display: flex; align-items: center; flex-wrap: wrap; }
+.checks li, .checks summary { display: flex; align-items: center; flex-wrap: wrap; }
 .checks .state { margin-left: 4px; color: var(--text-secondary); }
+/* A check named by its command: its intent, the command folded under (lane 36). */
+.checks details { width: 100%; }
+.checks summary { list-style: none; cursor: pointer; border-radius: 4px; }
+.checks summary::-webkit-details-marker { display: none; }
+.checks summary:hover .caret { color: var(--text-muted); }
+.checks summary:hover .check-name { color: var(--text); text-decoration: underline; text-decoration-color: var(--dashed); text-underline-offset: 3px; }
+.checks summary .caret { margin-left: auto; color: var(--text-faint); transition: transform 120ms var(--ease); }
+.checks details[open] > summary .caret { transform: rotate(90deg); }
+.checks .command { margin: 6px 0 2px 16px; }
 .light { width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; flex: none; background: var(--placeholder); }
 .light.passed { background: var(--success); } .light.failed { background: var(--danger); }
 .steps { display: grid; gap: 4px; font-size: 13px; }
@@ -43,15 +45,24 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .path { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; min-width: 0; }
 .add { color: var(--ok-text); } .del { color: var(--danger-text); } .ok { color: var(--ok-text); } .bad { color: var(--danger-text); }
 .changes .add, .changes .del { font-family: var(--mono); }
+.changes .link-button { min-height: 24px; text-align: left; color: var(--text); }
+.changes .link-button:hover { color: var(--link); }
 .empty-box { padding: 12px; border: 1px dashed var(--dashed); border-radius: 8px; color: var(--text-faint); font-size: 13px; line-height: 1.5; }
 
 /* the conversation */
-.panel { display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 132px); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; }
-.panel-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); flex: none; }
+.panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 96px); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; }
+.panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); flex: none; }
+/* The status's phrase, its meta under it, Take over beside both (lane 36's art director). */
+.panel-head .phrase-title { min-width: 0; }
+.panel-head .meta { grid-column: 2; grid-row: 2; white-space: normal; }
+.panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; }
+/* The hand over that is not there yet leaves a narrow thread its composer's row. */
+@container panel (max-width: 640px) { .composer #handover { display: none; } .composer { flex-wrap: nowrap; } .composer input { flex: 1 1 0; } }
 .panel-head .dot.waiting { background: var(--awaiting); } .panel-head .dot.progress { background: var(--stage-progress); }
 .panel-head .dot.review { background: var(--stage-review); } .panel-head .dot.ended { background: var(--placeholder); }
 .phrase-title { font-size: 14px; font-weight: 600; }
-.panel-head .meta { margin-left: auto; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+.panel-head .meta { font-size: 12px; color: var(--text-faint); }
+.panel-head .takeover-button { min-height: 30px; padding: 0 12px; }
 .timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px; font-size: 13.5px; }
 .timeline .empty { margin: 8px 0; }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: 8px; padding: 6px 0; }
@@ -65,9 +76,50 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .sub .ok, .sub .bad, .sub .add, .sub .del { font-weight: 500; }
 .sub .decided { color: var(--text-secondary); }
 .row.refused .glyph { color: var(--danger-text); }
+/* A step of the thread (lane 36, a worklog's row): the row is its summary,
+   the detail opens under its text column. */
+details.row { display: block; padding: 0; }
+details.row > summary { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr) 14px; gap: 8px; padding: 6px 0; list-style: none; cursor: pointer; border-radius: 6px; }
+details.row > summary::-webkit-details-marker { display: none; }
+details.row > summary:hover { background: var(--tab-fill); box-shadow: 0 0 0 4px var(--tab-fill); }
+/* The caret says a row opens: always there, quiet until the row is pointed at. */
+details.row > summary .caret { margin-top: 3px; color: var(--text-faint); transition: color 120ms var(--ease), transform 120ms var(--ease); }
+details.row > summary:hover .caret, details.row > summary:focus-visible .caret, details.row[open] > summary .caret { color: var(--text-muted); }
+details.row[open] > summary .caret { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { details.row > summary .caret, .checks summary .caret, .earlier > summary .caret { transition: none; } }
+/* A step on one line: what it did, then its result or its counts as an accessory. */
+details.row .what { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+details.row .what > .sub { margin: 0 0 0 auto; }
+/* An ended session a later one followed: one row until it is opened. */
+.earlier { margin: 4px 0; }
+.earlier > summary { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 52px; list-style: none; cursor: pointer; border-radius: 6px; color: var(--text-secondary); font-size: 13px; }
+.earlier > summary::-webkit-details-marker { display: none; }
+.earlier > summary:hover { background: var(--tab-fill); box-shadow: 0 0 0 4px var(--tab-fill); }
+.earlier > summary .caret { color: var(--text-faint); transition: transform 120ms var(--ease); }
+.earlier[open] > summary .caret { transform: rotate(90deg); }
+.step-detail { margin: 2px 0 8px 72px; display: grid; gap: 6px; font-size: 12.5px; }
+.command, .output { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sunken); font: 400 12px/1.55 var(--mono); overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.command .op { color: var(--text-faint); }
+.output { color: var(--text-secondary); }
+.file-detail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.file-detail .counts { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+.read-paths { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.read-paths .link-button, .file-detail .link-button { min-height: 24px; text-align: left; }
+/* Where the ticket passed from one session to the next (lane 36): a quiet
+   divider with who took over and when, never a toast. */
+.handover { display: flex; align-items: center; gap: 12px; margin: 14px 0 10px; font-size: 12.5px; color: var(--text-muted); }
+.handover::before, .handover::after { content: ""; flex: 1 1 24px; height: 1px; background: var(--hairline); }
+.handover span { flex: 0 1 auto; text-align: center; }
+/* Author and Reviewer filter the thread: quiet chips under a hairline, not a second row of tabs. */
+.thread-filter { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--hairline); flex: none; overflow-x: auto; }
+.thread-filter .filter { min-height: 30px; padding: 3px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.thread-filter .filter:hover:not(:disabled) { color: var(--text); background: var(--tab-fill); }
+.thread-filter .filter[aria-pressed="true"] { background: var(--tab-fill); color: var(--text); font-weight: 500; }
+.thread-filter .filter:disabled { color: var(--text-faint); cursor: default; }
+:root[data-theme="dark"] .thread-filter .filter:not([aria-pressed="true"]):not(:disabled) { color: var(--text-secondary); }
 .bubble { margin: 8px 0; padding: 10px 12px; border-radius: 10px; max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.bubble.assistant { margin-left: 72px; background: var(--sunken); }
-.bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--ink); color: var(--on-ink); }
+.row[data-row="message"] .prose { white-space: pre-wrap; color: var(--text); }
+.bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--tab-fill); color: var(--text); }
 .request { margin: 10px 0 4px 72px; padding: 14px; border-radius: 10px; background: var(--awaiting-pill); box-shadow: 0 0 0 1px rgba(245,166,35,.5); }
 .request.question.waits { background: var(--awaiting-surface); }
 /* amber only while the question waits */
@@ -89,7 +141,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .panel-foot { padding: 12px 16px; border-top: 1px solid var(--hairline); flex: none; }
 .composer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .composer input { flex: 1 1 200px; min-width: 0; height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); }
-.composer input::placeholder { color: var(--placeholder); }
+.composer input::placeholder { color: var(--text-faint); }   /* 4.5:1 at least in both themes (lane 36's audit) */
 .composer input:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
 .composer input:disabled { background: var(--sunken); }
 .composer .btn { min-height: 40px; }
@@ -146,11 +198,13 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 /* Terminal, taken over */
 /* Pinned to the timeline's top (its 8px padding) while the rows scroll under it. */
 .takeover { position: sticky; top: -8px; z-index: 1; margin: 0 0 14px; padding: 14px; border-radius: 10px; background: var(--sunken); box-shadow: var(--e-outline), 0 12px 0 var(--surface); }
-.takeover-title { margin-bottom: 4px; font-weight: 600; }
+.takeover-line { font-size: 13px; }
+.takeover-title { font-weight: 600; }
 .takeover-body { font-size: 13px; color: var(--text-secondary); }
+.takeover-line + .takeover-body { margin-top: 4px; }
 
 /* Editor, read only */
-.editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
+.editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; padding-bottom: 8px; }
 .editor-files ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .file-pick { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: none; text-align: left; cursor: pointer; }
 .file-pick:hover { background: var(--tab-fill); }
@@ -160,6 +214,10 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .file-pick[aria-current="true"]:disabled { background: var(--tab-fill); opacity: 1; }
 .file-pick .counts { flex-basis: 100%; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .editor-files .card-label { line-height: 24px; }
+.mode.scope { display: inline-flex; margin: 0 0 8px; }
+.mode.scope button { flex: none; white-space: nowrap; }
+.mode.scope button:disabled { color: var(--text-faint); cursor: default; }
+.scope-n { margin-left: 2px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .editor-view { min-width: 0; }
 .editor-bar { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-height: 24px; margin-bottom: 8px; }
 .editor-bar .path { font-weight: 500; }
@@ -175,7 +233,8 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .code .sign { width: 1%; padding: 0 2px; color: var(--text-faint); user-select: none; }
 .code .text code { font-family: inherit; white-space: pre; }
 .line.add, .line.del { color: var(--text); }
-.line.add { background: var(--add-fill); } .line.add .sign { color: var(--ok-text); }
+.line.add { background: var(--add-fill); } .line.add .num, .line.del .num { color: var(--text-muted); }   /* 4.5:1 on the fills (lane 36's audit) */
+.line.add .sign { color: var(--ok-text); }
 .line.del { background: var(--del-fill); } .line.del .sign { color: var(--danger-text); }
 .editor-note { margin-top: 8px; font-size: 12.5px; }
 
@@ -185,8 +244,7 @@ a.tab:hover { color: var(--text); text-decoration: none; }
    in dark: Terminal.tsx gives xterm the same), then its state and Open
    again. */
 .term-wrap { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; padding: 12px 16px; overflow-y: auto; }
-.takeover.web { position: static; margin: 0; box-shadow: var(--e-outline); }
-.takeover.web .takeover-title { margin-bottom: 2px; }
+.takeover.web { position: static; margin: 0; padding: 10px 14px; box-shadow: var(--e-outline); }
 .term-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .term-mode { min-width: 0; font-size: 13px; font-weight: 600; }
 .term-switch { min-height: 28px; padding: 0 12px; }
@@ -232,7 +290,6 @@ a.tab:hover { color: var(--text); text-decoration: none; }
 .index h1 { font-size: 26px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; }
 
 @media (max-width: 1439px) {
-  .panel { height: auto; max-height: calc(100vh - 132px); }
   .cm-host .cm-editor { max-height: max(240px, calc(100vh - 540px)); }
 }
 /* Below the widest screen the diff takes the panel's width; the files become a strip above it. */
@@ -242,39 +299,56 @@ a.tab:hover { color: var(--text); text-decoration: none; }
   .editor-files li { flex: none; }
   .file-pick { width: auto; }
   .file-pick .counts { flex-basis: auto; }
+  .file-pick { box-shadow: inset 0 0 0 1px var(--hairline); }
+}
+@container screen (max-width: 1159px) {
+  .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
+  .s-left { grid-area: left; } .s-right { grid-area: right; } .panel { grid-area: panel; }
+}
+/* Under 760 px of screen (a tablet beside the folded sidebar, a phone): one column, the thread first. */
+@container screen (max-width: 759px) {
+  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; }
 }
 @media (max-width: 1100px) {
-  .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
   .btn, .composer .btn { min-height: 44px; }
-  .tab { min-height: 44px; }
-  .view-tab, .panel-tabs .btn, .file-pick { min-height: 44px; }
+  .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
+  /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
+  .panel { height: auto; max-height: calc(100vh - 132px); }
   .view-tabs { flex: 1; }
-  .panel-tabs .btn { margin-left: 0; }
   .link-button { display: inline-flex; align-items: center; min-height: 44px; }
   .mode button { min-height: 36px; }
   .composer input { height: 44px; flex-basis: 100%; }
   #send { margin-left: auto; }
-  .s-left { grid-area: left; } .s-right { grid-area: right; } .panel { grid-area: panel; }
 }
 @media (max-width: 767px) {
-  .session-top { padding: 12px 16px; }
-  .crumbs a { padding: 13px 0; margin: -13px 0; }   /* a 44 px target, the look unchanged */
-  .tabs { margin-left: 0; width: 100%; }
-  .tab { flex: 1; justify-content: center; min-height: 44px; }
-  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 0 16px 28px; }
+  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 12px 16px 28px; }
   .panel { max-height: none; min-height: 0; }
   .timeline { overflow: visible; padding: 8px 12px; }
   .row { grid-template-columns: 40px 16px minmax(0, 1fr); gap: 6px; }
+  details.row > summary { grid-template-columns: 40px 16px minmax(0, 1fr) 12px; gap: 6px; }
+  details.row > summary { min-height: 44px; align-items: start; }
+  .step-detail { margin-left: 0; }
   .bubble.assistant, .request { margin-left: 0; }
   .bubble.user { max-width: 86%; }
   .btn { min-height: 44px; }
-  .composer .btn { min-height: 44px; }
-  .composer input { height: 44px; flex-basis: 100%; }
+  /* One row each (lane 34's art director): the tabs, the status with Take
+     over, the filter, the composer; the hand over that is not there yet
+     stays off a phone. */
+  .composer { flex-wrap: nowrap; }
+  .composer .btn { min-height: 44px; padding: 0 12px; }
+  .composer input { height: 44px; flex: 1 1 0; }
+  .composer #handover { display: none; }
+  #send { margin-left: 0; }
   .request-actions .btn { flex: 1 1 100%; }
-  .panel-tabs { padding: 10px 12px; }
+  .panel-tabs { padding: 8px 12px; }
   .view-tabs { width: 100%; }
   .view-tab { flex: 1; justify-content: center; padding: 4px 6px; }
-  .panel-tabs .btn { flex: 1 1 100%; margin-left: 0; }
+  .panel-head { padding: 10px 12px; }
+  .panel-head .meta .who { display: none; }
+  .thread-filter { padding: 6px 12px; }
+  .thread-filter .filter { flex: 1 1 auto; }
+  .earlier > summary { padding-left: 46px; min-height: 44px; }
+  .handover { margin: 12px 0 8px; }
   .tab-panel.scroll { overflow: visible; padding: 12px; }
   .mode button { min-height: 44px; }
   .mode { margin-left: 0; }

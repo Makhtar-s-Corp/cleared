@@ -24,7 +24,7 @@
 // 32 adds the web terminal's routes and the editor's save (fixtureHuman).
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sseFrame, TERMINAL_INPUT_MAX_BYTES, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type TerminalMode, type Workspace } from '../../src/api/types.ts';
+import { changeFrame, sseFrame, TERMINAL_INPUT_MAX_BYTES, type ChangeKind, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type TerminalMode, type Workspace } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import { GIVEN_BACK } from '../../src/flow/takeover.ts';
 import { createCleaner } from '../../src/session/clean.ts';
@@ -278,11 +278,82 @@ const TEST_NOW = [
   "});",
 ];
 
+// The envelope sheet of LOCAL-152 (lane 36's ticket with an author, then a
+// reviewer): the month alone before; the three months before it after.
+const ENVELOPE_BASE = [
+  "import { envelopes } from '../engine/envelopes.mjs';",
+  "import { Money } from './Money.jsx';",
+  "",
+  "// The envelope sheet: what an envelope holds this month.",
+  "export function Envelope({ id }) {",
+  "  const envelope = envelopes().find((e) => e.id === id);",
+  "  const month = envelope.months.at(-1);",
+  "  return (",
+  "    <section className=\"envelope\">",
+  "      <h1>{envelope.name}</h1>",
+  "      <p className=\"left\"><Money value={month.left} /> left this month</p>",
+  "      <ul className=\"moves\">",
+  "        {month.moves.map((move) => <li key={move.id}>{move.label} <Money value={move.amount} /></li>)}",
+  "      </ul>",
+  "    </section>",
+  "  );",
+  "}",
+];
+const ENVELOPE_NOW = [
+  "import { envelopes } from '../engine/envelopes.mjs';",
+  "import { Money } from './Money.jsx';",
+  "",
+  "// The envelope sheet: what an envelope holds this month, and what it",
+  "// held the months before, newest first.",
+  "export const PREVIOUS = 3;",
+  "",
+  "export function Envelope({ id }) {",
+  "  const envelope = envelopes().find((e) => e.id === id);",
+  "  const [month, ...before] = [...envelope.months].reverse();",
+  "  return (",
+  "    <section className=\"envelope\">",
+  "      <h1>{envelope.name}</h1>",
+  "      <p className=\"left\"><Money value={month.left} /> left this month</p>",
+  "      <ul className=\"moves\">",
+  "        {month.moves.map((move) => <li key={move.id}>{move.label} <Money value={move.amount} /></li>)}",
+  "      </ul>",
+  "      {before.length > 0 ? (",
+  "        <>",
+  "          <h2>Previous months</h2>",
+  "          <ol className=\"previous\">",
+  "            {before.slice(0, PREVIOUS).map((m) => (",
+  "              <li key={m.key}><span className=\"month\">{m.label}</span> <Money value={m.left} /></li>",
+  "            ))}",
+  "          </ol>",
+  "        </>",
+  "      ) : null}",
+  "    </section>",
+  "  );",
+  "}",
+];
+const ENVELOPE_TEST = [
+  "import test from 'node:test';",
+  "import assert from 'node:assert/strict';",
+  "import { render } from './render.mjs';",
+  "",
+  "test('the sheet shows the three months before this one, newest first', () => {",
+  "  const html = render('Envelope', { id: 'groceries' });",
+  "  assert.match(html, /Previous months/);",
+  "  assert.deepEqual([...html.matchAll(/class=\"month\">([^<]+)</g)].map((m) => m[1]), ['September 2026', 'August 2026', 'July 2026']);",
+  "});",
+  "",
+  "test('a new envelope shows no previous month', () => {",
+  "  assert.doesNotMatch(render('Envelope', { id: 'new-bike' }), /Previous months/);",
+  "});",
+];
+
 const text_ = (lines: readonly string[]) => `${lines.join('\n')}\n`;
 export const FIXTURE_FILES: Readonly<Record<string, { readonly base: string | null; readonly current: string }>> = {
   'src/engine/upcoming.mjs': { base: text_(ENGINE_BASE), current: text_(ENGINE_NOW) },
   'src/screens/Upcoming.jsx': { base: text_(SCREEN_BASE), current: text_(SCREEN_NOW) },
   'test/upcoming.test.mjs': { base: null, current: text_(TEST_NOW) },
+  'src/screens/Envelope.jsx': { base: text_(ENVELOPE_BASE), current: text_(ENVELOPE_NOW) },
+  'test/envelope.test.mjs': { base: null, current: text_(ENVELOPE_TEST) },
 };
 
 // The workspace of the fixtures: the guestbook alone, as the milestone 1
@@ -350,7 +421,14 @@ export class Player {
   }
 }
 
-export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly question?: boolean; readonly plan?: 'go' | 'waiting' } = {}): SessionFixture {
+// The reviewer of the story's ticket (lane 36): it starts once the author
+// is done, in the same view of the ticket.
+export const REVIEWER_ID = 'fixture-reviewer';
+
+// `review`: the author's turn goes on past the request (allowed, the full
+// suite, the commit) and the author is done; 'started' adds the reviewer
+// (startReview), 'later' leaves it for a test to start.
+export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly question?: boolean; readonly plan?: 'go' | 'waiting'; readonly review?: 'later' | 'started' } = {}): SessionFixture {
   const project = FIXTURE_PROJECT;
   const store = openStore(':memory:');
   const start = new Date(now.getTime() - 18 * MINUTE);
@@ -416,11 +494,24 @@ export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly ques
     delta({ phase: 'waiting_human', status: 'Waiting for you', steps: steps(at(15)) }),
   );
 
+  if (options.review) player.play(at(15.5),
+    { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: REQUEST_ID, decision: 'allow_once', by: USER } },
+    { type: 'TOOL_CALL_RESULT', messageId: 'run-2-result', toolCallId: 'run-2', content: JSON.stringify({ kind: 'execute', output: 'added 1 package in 2s\n', cut: 0, isError: false }), role: 'tool' },
+    delta({ phase: 'working', status: 'Running the full suite', steps: steps(null) }),
+    call('run-3', 'Bash', { kind: 'execute', command: 'npm test 2>&1 | tail -8', description: 'Run the full suite' }, { kind: 'execute', output: '# tests 22\n# pass 22\n# fail 0\n', cut: 0, isError: false }),
+    delta({ checks: [{ name: 'Targeted tests', state: 'passed' }, { name: 'Full suite', state: 'passed' }] }),
+    call('run-4', 'Bash', { kind: 'execute', command: 'git add -A && git commit -q -m "Upcoming: group entries by week"', description: 'Commit the change' }, { kind: 'execute', output: '', cut: 0, isError: false }),
+    text('assistant-2', 'assistant', 'The upcoming list is grouped by week, Monday first, under its month. The totals are the same, and the full suite passes.'),
+    { type: 'RUN_FINISHED', threadId: AUTHOR_ID, runId: 'turn-1', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.62 } },
+    { type: 'STEP_FINISHED', stepName: 'author' },
+    delta({ phase: 'done', status: 'Done', steps: steps(null).map((step) => (step.finishedAt === null ? { ...step, finishedAt: at(15.5).toISOString() } : step)) }),
+  );
+
   const events = store.events.after(AUTHOR_ID);
   const last = events[events.length - 1] as SessionEvent;
   const author: SessionSummary = {
-    id: AUTHOR_ID, project, ticket: TICKET_ID, role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: 'waiting_human',
-    status: 'Waiting for you', startedAt: start.toISOString(), updatedAt: last.at, lastSeq: last.seq,
+    id: AUTHOR_ID, project, ticket: TICKET_ID, role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: options.review ? 'done' : 'waiting_human',
+    status: options.review ? 'Done' : 'Waiting for you', startedAt: start.toISOString(), updatedAt: last.at, lastSeq: last.seq,
   };
   const ticket: Ticket = {
     id: TICKET_ID, title: TICKET_TITLE, body: TICKET_BODY, labels: [], project, status: 'In Progress',
@@ -433,7 +524,36 @@ export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly ques
     input: { kind: 'execute', command: 'npm install date-fns', description: 'Install date-fns to group dates by week' },
     suggestion: { decision: 'ask', rule: 'install.package', reason: 'Network access and a new dependency.' },
   }];
-  return { store, project, now, ticket, sessions: [author], inbox, takenOver: new Map() };
+  if (options.review) inbox.forEach((item, index) => { inbox[index] = { ...item, state: 'handled' }; });
+  const fixture: SessionFixture = { store, project, now, ticket, sessions: [author], inbox, takenOver: new Map() };
+  if (options.review === 'started') startReview(fixture, at(16));
+  return fixture;
+}
+
+// The reviewer of the story starts (lane 36): its session is listed, and
+// its first events are stored, as the flow's review start stores them.
+export function startReview(fixture: SessionFixture, at: Date = new Date(fixture.now.getTime() - 2 * MINUTE)): SessionSummary {
+  const player = new Player(fixture.store, REVIEWER_ID, TICKET_ID, fixture.project);
+  const later = (seconds: number) => new Date(at.getTime() + seconds * 1000);
+  const review = (finishedAt: string | null) => [{ name: 'review' as const, startedAt: at.toISOString(), finishedAt }];
+  player.play(at,
+    { type: 'STEP_STARTED', stepName: 'review' },
+    { type: 'RUN_STARTED', threadId: REVIEWER_ID, runId: 'review-1' },
+    { type: 'STATE_SNAPSHOT', snapshot: { status: 'Reading the diff', phase: 'reviewing', steps: review(null), files: [], checks: [{ name: 'Full suite', state: 'passed' }, { name: 'Review', state: 'pending' }], usage: { model: 'claude-sonnet-5-5', inputTokens: 8_400, outputTokens: 600 } } },
+  );
+  player.play(later(20), call('review-run-1', 'Bash', { kind: 'execute', command: 'git log --oneline main..HEAD; git diff --stat main...HEAD', description: 'Read the branch' }, { kind: 'execute', output: '3 files changed, 103 insertions(+), 18 deletions(-)\n', cut: 0, isError: false }));
+  player.play(later(40),
+    call('review-read-1', 'Read', { kind: 'read', path: 'src/engine/upcoming.mjs' }, { kind: 'read', path: 'src/engine/upcoming.mjs', bytes: 1904 }),
+    delta({ status: 'Reading the diff of src/engine/upcoming.mjs' }),
+  );
+  const events = fixture.store.events.after(REVIEWER_ID);
+  const last = events[events.length - 1] as SessionEvent;
+  const reviewer: SessionSummary = {
+    id: REVIEWER_ID, project: fixture.project, ticket: TICKET_ID, role: 'reviewer', harness: 'claude-code', model: 'claude-sonnet-5-5', phase: 'reviewing',
+    status: 'Reading the diff of src/engine/upcoming.mjs', startedAt: at.toISOString(), updatedAt: last.at, lastSeq: last.seq,
+  };
+  fixture.sessions.push(reviewer);
+  return reviewer;
 }
 
 // The story of a plan that waits for its Go: the author read, proposed, and
@@ -461,6 +581,93 @@ function waitingForGo(store: Store, project: string, now: Date, start: Date, pro
     createdAt: new Date(now.getTime() - 20 * MINUTE).toISOString(), updatedAt: start.toISOString(),
   };
   return { store, project, now, ticket, sessions: [author], inbox: [], takenOver: new Map() };
+}
+
+// LOCAL-152 in the fixtures source (lane 36): the author's session, done,
+// then the reviewer's, which the tower shows reading the diff; both in one
+// store, the reviewer's events under the tower's id for it. The author
+// edits the envelope sheet twice in a row (one row in the thread), writes
+// its test, commits, and on the owner's word renames a heading in a second
+// turn (the Editor's last turn); its checks are named by their commands.
+export const ENVELOPE_TICKET = 'LOCAL-152';
+export const ENVELOPE_AUTHOR_ID = 'fixture-envelope-author';
+export const ENVELOPE_BODY = `Each envelope's sheet shows the months before this one, so a person sees where the money went.
+
+- [x] The three months before this one, newest first
+- [x] A new envelope shows none
+- [ ] The sheet at 390 keeps one column`;
+
+export function envelopeStory(now: Date, reviewer: SessionSummary): { readonly store: Store; readonly author: SessionSummary } {
+  const store = openStore(':memory:');
+  const project = reviewer.project;
+  const start = new Date(now.getTime() - 40 * MINUTE);
+  const at = (minutes: number) => new Date(start.getTime() + minutes * MINUTE);
+  const author = new Player(store, ENVELOPE_AUTHOR_ID, ENVELOPE_TICKET, project);
+  const TESTS = 'npm test 2>&1 | tail -8';
+  const COMMIT = 'git add -A && git commit -q -m "Envelope: the months before"';
+  const steps = (end: Date | null): SessionState['steps'] => [{ name: 'author', startedAt: start.toISOString(), finishedAt: end?.toISOString() ?? null }];
+  const checks = (tests: 'pending' | 'passed', commit: 'pending' | 'passed') => [{ name: TESTS, state: tests }, { name: COMMIT, state: commit }];
+  const passed = { kind: 'execute', output: '# tests 9\n# pass 9\n# fail 0\n', cut: 0, isError: false };
+  author.play(start,
+    { type: 'STEP_STARTED', stepName: 'author' },
+    { type: 'RUN_STARTED', threadId: ENVELOPE_AUTHOR_ID, runId: 'turn-1' },
+    { type: 'STATE_SNAPSHOT', snapshot: { status: 'Reading src/screens/Envelope.jsx', phase: 'working', steps: steps(null), files: [], checks: checks('pending', 'pending'), usage: { model: 'claude-opus-5-5', inputTokens: 21_800, outputTokens: 2_900 } } },
+    text('envelope-prompt', 'user', ENVELOPE_BODY, 'cleared'),
+    call('envelope-read-1', 'Read', { kind: 'read', path: 'src/screens/Envelope.jsx' }, { kind: 'read', path: 'src/screens/Envelope.jsx', bytes: 610 }),
+    call('envelope-read-2', 'Read', { kind: 'read', path: 'src/engine/envelopes.mjs' }, { kind: 'read', path: 'src/engine/envelopes.mjs', bytes: 1320 }),
+    call('envelope-read-3', 'Read', { kind: 'read', path: 'test/render.mjs' }, { kind: 'read', path: 'test/render.mjs', bytes: 480 }),
+  );
+  author.play(at(6),
+    call('envelope-edit-1', 'Edit', { kind: 'edit', path: 'src/screens/Envelope.jsx', added: 9, removed: 2 }, { kind: 'edit', ok: true }),
+    call('envelope-edit-2', 'Edit', { kind: 'edit', path: 'src/screens/Envelope.jsx', added: 5, removed: 0 }, { kind: 'edit', ok: true }),
+    call('envelope-edit-3', 'Write', { kind: 'edit', path: 'test/envelope.test.mjs', added: 13, removed: 0 }, { kind: 'edit', ok: true }),
+    delta({ status: 'Running the tests', files: [{ path: 'src/screens/Envelope.jsx', added: 14, removed: 2 }, { path: 'test/envelope.test.mjs', added: 13, removed: 0 }] }),
+  );
+  author.play(at(12),
+    call('envelope-run-1', 'Bash', { kind: 'execute', command: TESTS, description: 'Run the tests' }, passed),
+    call('envelope-run-2', 'Bash', { kind: 'execute', command: COMMIT, description: 'Commit the change' }, { kind: 'execute', output: '', cut: 0, isError: false }),
+    delta({ checks: checks('passed', 'passed') }),
+    text('envelope-said-1', 'assistant', 'The sheet lists the three months before this one, newest first, under a History heading. A new envelope shows none.'),
+    { type: 'RUN_FINISHED', threadId: ENVELOPE_AUTHOR_ID, runId: 'turn-1', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.41 } },
+  );
+  author.play(at(20), text('envelope-owner-1', 'user', 'Call the section Previous months, as the ticket says.', USER));
+  author.play(at(21),
+    { type: 'RUN_STARTED', threadId: ENVELOPE_AUTHOR_ID, runId: 'turn-2' },
+    call('envelope-edit-4', 'Edit', { kind: 'edit', path: 'src/screens/Envelope.jsx', added: 1, removed: 1 }, { kind: 'edit', ok: true }),
+    call('envelope-run-3', 'Bash', { kind: 'execute', command: TESTS, description: 'Run the tests' }, passed),
+    call('envelope-run-4', 'Bash', { kind: 'execute', command: 'git commit -qam "Envelope: Previous months"', description: 'Commit the change' }, { kind: 'execute', output: '', cut: 0, isError: false }),
+    delta({ files: [{ path: 'src/screens/Envelope.jsx', added: 15, removed: 2 }, { path: 'test/envelope.test.mjs', added: 13, removed: 0 }] }),
+    { type: 'RUN_FINISHED', threadId: ENVELOPE_AUTHOR_ID, runId: 'turn-2', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.12 } },
+    { type: 'STEP_FINISHED', stepName: 'author' },
+    delta({ phase: 'done', status: 'Done', steps: steps(at(34)) }),
+  );
+
+  // The reviewer, from its start four minutes ago: what the tower says it does.
+  const reviewing = new Player(store, reviewer.id, ENVELOPE_TICKET, project);
+  const begun = new Date(reviewer.startedAt);
+  const after = (minutes: number) => new Date(begun.getTime() + minutes * MINUTE);
+  const review = [{ name: 'review' as const, startedAt: begun.toISOString(), finishedAt: null }];
+  reviewing.play(begun,
+    { type: 'STEP_STARTED', stepName: 'review' },
+    { type: 'RUN_STARTED', threadId: reviewer.id, runId: 'review-1' },
+    { type: 'STATE_SNAPSHOT', snapshot: { status: 'Reading the branch', phase: 'reviewing', steps: review, files: [], checks: [...checks('passed', 'passed'), { name: 'Review', state: 'pending' }], usage: { model: 'claude-sonnet-5-5', inputTokens: 9_600, outputTokens: 700 } } },
+    text('envelope-review-prompt', 'user', ENVELOPE_BODY, 'cleared'),
+  );
+  reviewing.play(after(1), call('envelope-review-run-1', 'Bash', { kind: 'execute', command: 'git log --oneline main..HEAD; git diff --stat main...HEAD', description: 'Read the branch' }, { kind: 'execute', output: '2 files changed, 28 insertions(+), 2 deletions(-)\n', cut: 0, isError: false }));
+  reviewing.play(after(2), call('envelope-review-run-2', 'Bash', { kind: 'execute', command: 'ls node_modules >/dev/null 2>&1 && (npm test 2>&1 | tail -8; npm run typecheck 2>&1 | tail -5)', description: 'Run the tests and the type check' }, passed));
+  reviewing.play(after(3),
+    call('envelope-review-read-1', 'Read', { kind: 'read', path: 'src/screens/Envelope.jsx' }, { kind: 'read', path: 'src/screens/Envelope.jsx', bytes: 1010 }),
+    delta({ status: reviewer.status }),
+  );
+  const events = store.events.after(ENVELOPE_AUTHOR_ID);
+  const last = events[events.length - 1] as SessionEvent;
+  return {
+    store,
+    author: {
+      id: ENVELOPE_AUTHOR_ID, project, ticket: ENVELOPE_TICKET, role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: 'done', status: 'Done',
+      startedAt: start.toISOString(), updatedAt: last.at, lastSeq: last.seq,
+    },
+  };
 }
 
 // The session as the service answers GET /api/sessions/:id: the summary and
@@ -549,7 +756,7 @@ const UPCOMING_PAGE = `<!doctype html>
 `;
 
 export type Call = { readonly method: string; readonly path: string; readonly user: string; readonly body: unknown };
-export type SessionSource = DataSource & { readonly calls: Call[] };
+export type SessionSource = DataSource & { readonly calls: Call[]; changed(kind: ChangeKind, id: string | null): void };
 
 function readJson(request: IncomingMessage): Promise<unknown> {
   return new Promise((resolve) => {
@@ -565,7 +772,9 @@ function readJson(request: IncomingMessage): Promise<unknown> {
 // reload shows it: an answer to a question as `cleared.answered`, to a
 // permission as `cleared.permission_answered`, and an interrupt cancels
 // what waits as the adapters do. The stream answers the events after
-// `?after=` and ends.
+// `?after=` and ends. The change stream (lane 34's GET /api/events) is
+// answered too: an event for each write, and for each changed() a test
+// calls (lane 36: the reviewer's start).
 export function sessionSource(fixture: SessionFixture, options: { readonly now?: () => Date } = {}): SessionSource {
   const calls: Call[] = [];
   const human = fixtureHuman();
@@ -580,9 +789,24 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
     return found;
   };
 
+  const listeners = new Set<ServerResponse>();
+  let seq = 0;
+  const changed = (kind: ChangeKind, id: string | null) => {
+    seq += 1;
+    for (const listener of listeners) listener.write(changeFrame(seq, { kind, id, at: now().toISOString() }));
+  };
+
   async function handle(request: IncomingMessage, response: ServerResponse, method: string, url: URL, user: string): Promise<void> {
     const parts = url.pathname.split('/').slice(2);
     const [collection, id, sub, requestId, action] = parts;
+    if (method === 'GET' && collection === 'events' && parts.length === 1) {
+      response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' });
+      response.write(': stream open\n\n');
+      listeners.add(response);
+      response.on('close', () => listeners.delete(response));
+      return;
+    }
+    if (method !== 'GET' && collection === 'sessions' && id) response.once('finish', () => { if (response.statusCode < 300) changed('session', decodeURIComponent(id)); });
     if (method === 'GET' && collection === 'inbox') return sendJson(response, 200, fixture.inbox);
     if (method === 'GET' && collection === 'tickets') {
       if (parts.length === 1) return sendJson(response, 200, [fixture.ticket]);
@@ -696,6 +920,7 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
   return {
     kind: 'fixtures',
     calls,
+    changed,
     forward(request, response, forward) {
       handle(request, response, forward.method, new URL(forward.path, 'http://fixtures'), forward.user.id).catch(() => {
         if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });
@@ -725,9 +950,14 @@ const PROMPT = '\u001b[1mnode@session\u001b[0m:/workspace$ ';
 const HARNESS = 'Claude Code';
 const HARNESS_PROMPT = '\u001b[1m>\u001b[0m ';
 // What the stand-in harness shows when resumed: the session's last words, as a resumed conversation does.
-const HARNESS_RESUMED = '\u001b[2m# Claude Code, resumed on this session. Give the session back when you are done: Cleared carries on from here.\u001b[0m\r\n\r\n'
+const HARNESS_RESUMED = '\u001b[2m# Claude Code, resumed on this session.\u001b[0m\r\n\r\n'
   + '\u001b[38;5;174m⏺\u001b[0m I grouped the upcoming entries by week, Monday first. A week that spans two months stays under the first month. Next: the headings, then the tests.\r\n\r\n'
   + '\u001b[38;5;174m⏺\u001b[0m \u001b[1mBash\u001b[0m(npm test)\r\n  ⎿  \u001b[32m14 passed\u001b[0m, 1 failed: entries are grouped by week, Monday first\r\n\r\n'
+  + '\u001b[2m  ⎿  Interrupted: the owner took the session over\u001b[0m\r\n\r\n';
+// LOCAL-152's reviewer, resumed (lane 36): its own last words, about the envelope sheet.
+export const ENVELOPE_RESUMED = '\u001b[2m# Claude Code, resumed on this session.\u001b[0m\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m The branch shows the three months before this one on the envelope sheet, newest first, and none for a new envelope. Next: the sheet at 390.\r\n\r\n'
+  + '\u001b[38;5;174m⏺\u001b[0m \u001b[1mBash\u001b[0m(npm test 2>&1 | tail -8)\r\n  ⎿  \u001b[32m9 passed\u001b[0m\r\n\r\n'
   + '\u001b[2m  ⎿  Interrupted: the owner took the session over\u001b[0m\r\n\r\n';
 const HARNESS_ANSWER = '\u001b[38;5;174m⏺\u001b[0m (the fixtures\' stand-in for the harness: in a real session, Claude Code answers here)\r\n\r\n';
 const COLOURS = '\u001b[38;5;208m256 colours\u001b[0m: \u001b[48;5;24m\u001b[38;5;231m a line from the palette \u001b[0m\r\n'
@@ -750,7 +980,8 @@ export type FixtureHuman = {
   }): Promise<boolean>;
 };
 
-export function fixtureHuman(): FixtureHuman {
+// `resumed`: what a session's stand-in harness shows when resumed, by session; else LOCAL-161's story.
+export function fixtureHuman(options: { readonly resumed?: (session: string) => string | undefined } = {}): FixtureHuman {
   const files = new Map(Object.entries(FIXTURE_FILES).map(([path, versions]) => [path, versions.current]));
   const terminals = new Map<string, FixtureTerminal>();
   const push = (terminal: FixtureTerminal, data: string) => {
@@ -870,7 +1101,7 @@ export function fixtureHuman(): FixtureHuman {
         terminals.set(id, opened);
         const size = { cols: Number(body?.cols) || 80, rows: Number(body?.rows) || 24 };
         if (mode === 'harness') {
-          push(opened, `${HARNESS_RESUMED}${HARNESS_PROMPT}`);
+          push(opened, `${options.resumed?.(id) ?? HARNESS_RESUMED}${HARNESS_PROMPT}`);
           return answer(200, { opened: true, ...size, mode, name: HARNESS });
         }
         push(opened, `\u001b[2m# A shell in the session's container, as its user, in its checkout.\u001b[0m\r\n${COLOURS}${PROMPT}`);

@@ -98,7 +98,8 @@ jobs:
           export CLEARED_V2_CHROME="$(node -p "require('$CLEARED_V2_PLAYWRIGHT').chromium.executablePath()")"
           files="app/test/choices-browser.test.ts app/test/notify/browser.test.ts app/test/session/tabs-browser.test.ts
             app/test/session/terminal-browser.test.ts app/test/foundation/budget-browser.test.ts
-            app/test/foundation/stack-browser.test.ts app/test/shell/shell-browser.test.ts"
+            app/test/foundation/stack-browser.test.ts app/test/shell/shell-browser.test.ts
+            app/test/session/continuity-browser.test.ts"
           node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap"
           count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{print $3}'; }
           test "$(count skipped)" = 0 || { echo "::error::$(count skipped) browser test(s) skipped"; exit 1; }

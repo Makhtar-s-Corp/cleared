@@ -6,7 +6,7 @@
 // captured at each width in each theme, then everything is stopped.
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
-//     [--screens tower,inbox,sessions,session,lead] [--widths 1440,390] [--themes light,dark]
+//     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light,dark]
 //     [--via load|click] [--language fr|en]
 //
 // The language is the app's default, French, unless --language en asks for
@@ -19,6 +19,10 @@
 // sidebar folded, a screen's tooltip shown; from 768 px), and tower-empty
 // and lead-empty (the tower and the lead screen with their lists answered
 // empty in the page: no session, nothing waiting, no plan, no message).
+//
+// Lane 36's, named only: review (a reviewer's session, the view of its
+// ticket at its review), review-editor (its Editor) and review-takeover (its
+// Terminal after Take over, given back once captured).
 //
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
@@ -49,7 +53,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -104,10 +108,12 @@ export async function capture(options: { readonly out: string; readonly screens?
         await page.waitForURL(`${app.base}/`);
         const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
+        const reviewer = sessions.find((s) => s.role === 'reviewer') ?? sessions[0];
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
           'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
+          review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -129,6 +135,17 @@ export async function capture(options: { readonly out: string; readonly screens?
             if (documents !== before) errors.push(`${w} ${theme}: ${screen} loaded a document`);
           } else await page.goto(`${app.base}${path}`);
           await settle(page);
+          if (screen === 'review-editor') {
+            await page.locator('[role="tab"][aria-controls="tab-editor"]').click();
+            await page.locator('#tab-editor table.code').waitFor({ timeout: 10_000 });
+            await settle(page);
+          }
+          if (screen === 'review-takeover') {
+            await page.locator('#takeover').click();
+            await page.locator('#tab-terminal [data-terminal-state="open"]').waitFor({ timeout: 10_000 });
+            await page.locator('#tab-terminal .xterm-rows').getByText('resumed on this session').waitFor({ timeout: 10_000 });
+            await settle(page);
+          }
           const overlay = screen.startsWith('palette') ? 'palette' : screen.startsWith('sheet') ? 'sheet' : null;
           if (overlay) {
             await page.evaluate(() => document.getElementById('screen')?.focus({ preventScroll: true }));
@@ -149,6 +166,11 @@ export async function capture(options: { readonly out: string; readonly screens?
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
           await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
+          if (screen === 'review-editor') await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
+          if (screen === 'review-takeover') {
+            await page.locator('#giveback').click();
+            await page.locator('#takeover').waitFor({ timeout: 10_000 });
+          }
           if (overlay) await page.keyboard.press('Escape');
           if (folded) {
             await page.mouse.move(0, 0);
