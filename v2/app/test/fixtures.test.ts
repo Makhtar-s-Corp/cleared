@@ -12,7 +12,7 @@ import { signedIn, startApp } from './support.ts';
 test('the fixture source answers the service\'s routes from lane 1\'s fake sessions', async () => {
   const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }) });
   try {
-    const { cookie } = await signedIn(app);
+    const { cookie, csrf } = await signedIn(app);
     const sessions = await (await fetch(`${app.base}/api/service/sessions`, { headers: { cookie } })).json() as SessionSummary[];
     assert.equal(sessions.length, 5, 'the four live sessions of the tower, and LOCAL-152\'s author before its reviewer (lane 36)');
     assert.ok(sessions.every((s) => s.lastSeq > 0), 'each session has stored events');
@@ -23,6 +23,14 @@ test('the fixture source answers the service\'s routes from lane 1\'s fake sessi
     const review = inbox[2] as Extract<InboxItem, { kind: 'permission' }>;
     assert.equal(sessions.find((s) => s.id === review.sessionId)?.role, 'reviewer', 'the compound request is the reviewer\'s');
     assert.equal(review.reasonCode, 'not_allowed');
+    // Its answer is kept: the item is handled, and a second answer is refused as the service refuses it.
+    const answer = () => fetch(`${app.base}/api/service/sessions/${review.sessionId}/requests/${review.requestId}/answer`, {
+      method: 'POST', headers: { cookie, origin: app.origin, 'x-csrf-token': csrf, 'content-type': 'application/json' }, body: JSON.stringify({ decision: { kind: 'allow_once' } }),
+    });
+    assert.equal((await answer()).status, 200);
+    const after = await (await fetch(`${app.base}/api/service/inbox`, { headers: { cookie } })).json() as InboxItem[];
+    assert.equal(after.find((i) => i.id === review.id)?.state, 'handled');
+    assert.equal((await answer()).status, 409);
     const first = sessions[0]!;
     const detail = await fetch(`${app.base}/api/service/sessions/${first.id}`, { headers: { cookie } });
     assert.equal(detail.status, 200);

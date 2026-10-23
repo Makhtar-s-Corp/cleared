@@ -146,8 +146,8 @@ test('the session plan waiting for its Go: the steps, the files, the confidence 
   assert.match(html, new RegExp(`href="/sessions/${PLAN_SESSION}"`));
   assert.deepEqual(acts(html), ['plan_change', 'plan_go']);
   // A medium or low confidence says it waits for the owner; a high one that the delay will start it.
-  assert.ok(text.includes('A medium or low confidence waits for your Go.'));
-  assert.ok(shown(detailOf(sessionPlanItem(FIXTURE_NOW, 'high'))).includes('With a high confidence, it starts by itself when the delay passes.'));
+  assert.ok(text.includes('Waits for your Go.'));
+  assert.ok(shown(detailOf(sessionPlanItem(FIXTURE_NOW, 'high'))).includes('Starts by itself when the delay passes.'));
 });
 
 test('Change opens a field for what to change, with Keep the plan and Send the change', () => {

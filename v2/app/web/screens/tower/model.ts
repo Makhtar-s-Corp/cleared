@@ -17,6 +17,8 @@ import type {
 import type { Harness, Role } from '../../../../src/session/contract.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
+import { requestReason, requestTitle, type Request } from '../../lib/request.ts';
+import type { Verdict } from '../../../../src/session/policy.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
 
 export type TowerData = {
@@ -66,6 +68,7 @@ export type NeedCard = {
   readonly detail: string;                      // from the data; may be empty
   readonly detailKey: string | undefined;       // a catalog sentence after it
   readonly detailValues: Readonly<Record<string, string>>;
+  readonly request?: Request & { readonly suggestion: Verdict };   // a permission: titled and explained as the inbox does (lane 37)
 };
 
 // Who took a session over (decision 30): the signed-in person, or another
@@ -172,13 +175,9 @@ function need(item: NeedItem, now: Date, titles: ReadonlyMap<string, string>): N
       const key = reviewer ? `release_reviewed_${checks}` : `release_unreviewed_${checks}`;
       return { ...base, title: item.title, detail: '', detailKey: key, detailValues: reviewer ? { model: family(reviewer.model) } : {} };
     }
-    case 'permission': {
-      const input = item.input;
-      let title = item.tool;
-      if (input.kind === 'execute') title = input.description || input.command;
-      else if ('path' in input && input.path) title = input.path;
-      return { ...base, title, detail: 'reason' in item.suggestion ? item.suggestion.reason : '', detailKey: 'permission_paused', detailValues: {} };
-    }
+    // Its title and its reason are the inbox's (lib/request.ts), in the person's language.
+    case 'permission':
+      return { ...base, title: '', detail: '', detailKey: 'permission_paused', detailValues: {}, request: { input: item.input, tool: item.tool, reasonCode: item.reasonCode, suggestion: item.suggestion } };
     case 'question': {
       const [first, ...others] = item.questions;
       return { ...base, title: first?.question ?? '', detail: others.map((q) => q.question).join(' '), detailKey: lead ? 'question_lead' : 'question_paused', detailValues: {} };
@@ -198,7 +197,7 @@ function need(item: NeedItem, now: Date, titles: ReadonlyMap<string, string>): N
   }
 }
 
-export const needTitle = (card: NeedCard, t: Translate): string => (card.titleKey ? t(card.titleKey, card.detailValues) : card.title);
+export const needTitle = (card: NeedCard, t: Translate): string => (card.request ? requestTitle(card.request, t) : card.titleKey ? t(card.titleKey, card.detailValues) : card.title);
 
 // What a plan card says of the plan; renderTowerBody words it.
 function proposal(item: PlanItemInbox): Record<string, string> {
@@ -449,7 +448,8 @@ export function createTicket(api: ScreenContext['api'], input: { readonly title:
 // What a need's card says under its title: the item's own words, then the catalog's sentence.
 export function needSentence(card: NeedCard, t: Translate): string {
   const sentence = card.kind === 'plan' ? planDetail(card.detailValues, t) : card.detailKey ? t(card.detailKey, card.detailValues) : '';
-  return [card.detail, sentence].filter(Boolean).join(' ');
+  const why = card.request ? requestReason(card.request, card.request.suggestion, t) : {};
+  return [card.detail || why.said || why.raw, sentence].filter(Boolean).join(' ');
 }
 
 export function needId(card: NeedCard, t: Translate): string {

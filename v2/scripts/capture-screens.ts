@@ -25,8 +25,9 @@
 // Terminal after Take over, given back once captured).
 //
 // Lane 37's, named only: inbox-permission (the reviewer's compound request
-// selected), inbox-handled (the "Traité" group opened and scrolled to), and
-// sheet-inbox (the inbox's sheet, with its own keys A, T, R and Space).
+// selected), inbox-handled (the "Traité" group opened and scrolled to),
+// sheet-inbox (the inbox's sheet, with its own keys A, T, R and Space), and
+// palette-inbox-permission (the palette over that request: its three answers).
 //
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
@@ -57,7 +58,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -122,7 +123,7 @@ export async function capture(options: { readonly out: string; readonly screens?
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
           'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
           review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
-          'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox',
+          'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });

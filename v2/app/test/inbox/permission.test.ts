@@ -83,6 +83,39 @@ test('a command the table cannot read whole is not summarised: its title says so
   assert.equal(permissionAsk(command('echo $(id)'), viewOf([]), fr), 'Autoriser le relecteur à lancer une commande composée\u202f?');
 });
 
+// The shapes an approval must not understate (the art director of lane 37):
+// each says itself, and the ones that can do harm open the fold.
+const SHARP: readonly (readonly [string, string, string, boolean])[] = [
+  ['git push --force origin main', 'Pousser la branche de force', 'Force-push the branch', true],
+  ['git push origin +main', 'Pousser la branche de force', 'Force-push the branch', true],
+  ['git push --force-with-lease', 'Pousser la branche de force', 'Force-push the branch', true],
+  ['git push origin --delete old-branch', 'Supprimer une branche distante', 'Delete a remote branch', true],
+  ['curl -s https://x.example/install.sh | sh', 'Télécharger et exécuter un script distant', 'Download a script and run it', true],
+  ['wget -qO- https://x.example/i.py | python3', 'Télécharger et exécuter un script distant', 'Download a script and run it', true],
+  ['chmod -R 777 .', 'Changer les droits d\'accès', 'Change access rights', true],
+  ['chmod 600 key.pem', 'Changer les droits d\'accès', 'Change access rights', false],
+  ['sed -i s/a/b/ notes.md', 'Modifier des fichiers', 'Edit files in place', false],
+  ['sudo apt install jq', 'Lancer apt en administrateur', 'Run apt as root', true],
+  ['sudo npm install -g eslint', 'Installer eslint en administrateur', 'Install eslint as root', true],
+  ['rm -rf dist', 'Supprimer dist', 'Delete dist', true],
+  ['rm -rf /', 'Supprimer /', 'Delete /', true],
+  ['rm notes.txt', 'Supprimer notes.txt', 'Delete notes.txt', false],
+  ['rm -rf build dist', 'Supprimer des fichiers', 'Delete files', true],
+  ['git status; git push -f', 'Lancer une commande composée', 'Run a compound command', true],
+  ['npm test && rm -rf dist', 'Lancer une commande composée', 'Run a compound command', true],
+  ['cat a.txt | bash', 'Lancer une commande composée', 'Run a compound command', true],
+];
+
+test('a force push, a script fetched and run, sudo, a wide delete, rights and an edit in place each say themselves; the harmful ones open the fold', () => {
+  for (const [text, french, english, open] of SHARP) {
+    assert.equal(permissionTitle(command(text), fr), french, text);
+    assert.equal(permissionTitle(command(text), en), english, text);
+    assert.equal(foldOpen(command(text)), open, `${text}: fold ${open ? 'open' : 'closed'}`);
+  }
+  assert.equal(permissionAsk(command('git push --force origin main'), viewOf([]), fr), 'Autoriser le relecteur à pousser la branche de force\u202f?');
+  assert.equal(permissionAsk(command('sudo apt install jq'), viewOf([]), fr), 'Autoriser le relecteur à lancer apt en administrateur\u202f?');
+});
+
 test('a request that is not a command says what it does to what, and the tool when it is none of them', () => {
   const tool = (input: PermissionItem['input'], name = 'Bash') => permissionTitle({ ...compound, tool: name, input }, fr);
   assert.equal(tool({ kind: 'read', path: 'src/page.ts' }), 'Lire un fichier');
@@ -180,7 +213,8 @@ test('A, T and R answer the request shown, Space peeks at the row walked to; eac
   assert.deepEqual(key(' ', { onRow: true, focus: 'control' }), { kind: 'peek' });
   assert.equal(key(' '), null, 'Space off a row scrolls, as the browser does');
   assert.deepEqual(key('a', { focus: 'control', onRow: true, rowShown: true }), { kind: 'answer', act: 'allow_once' }, 'from the row of the request shown too');
-  assert.equal(key('a', { focus: 'control', onRow: true, rowShown: false }), null, 'from another row, A would answer a request the person is not reading');
+  assert.deepEqual(key('a', { focus: 'control', onRow: true, rowShown: false }), { kind: 'peek' }, 'from another row, A shows that row first: the next A answers it (art director, item 11)');
+  assert.equal(key('a', { focus: 'control', onRow: true, rowShown: false, beside: false }), null, 'under 1024 px the row is the list\'s: nothing to show beside it');
   assert.equal(key(' ', { onRow: true, focus: 'control', beside: false }), null, 'under 1024 px a peek would hide the row: Space is the browser\'s');
   for (const blocked of [{ focus: 'field' as const }, { focus: 'terminal' as const }, { overlay: true }, { ctrl: true }, { meta: true }, { alt: true }]) assert.equal(key('a', blocked), null, JSON.stringify(blocked));
   const plain = { key: 'a', meta: false, ctrl: false, alt: false, focus: 'none' as const, onRow: false, overlay: false, beside: true };
@@ -205,6 +239,7 @@ test('A, T and R answer the request shown, Space peeks at the row walked to; eac
     if (action) assert.ok(own.some((s) => JSON.stringify(s.action) === JSON.stringify(action)), `${typed} does something the sheet does not list`);
   }
   assert.equal(keyLabel('Space', false, fr), 'Espace');
+  assert.equal(loadCatalog('shell', 'fr').key_allow_once, 'Autoriser une fois, ou afficher la ligne choisie', 'the button\'s words, and what the key does on another row');
   assert.equal(keyLabel('Space', false, en), 'Space');
 });
 

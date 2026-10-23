@@ -130,6 +130,15 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .request-why { margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); }
 .request-why span { display: block; }
 .request-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* the command folded under the answers (lane 37), as the inbox folds it */
+.request-fold { margin-top: var(--space-2); font-size: var(--text-sm); }
+.request-fold > summary { display: flex; align-items: baseline; gap: var(--space-1); min-height: 28px; color: var(--text-muted); cursor: pointer; }
+.request-fold > summary code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-fold[open] > summary code, .request-fold[open] .fold-more { display: none; }
+.request-fold .fold-label { flex: none; font-weight: var(--weight-strong); }
+.request-fold .fold-more { flex: none; color: var(--text-faint); }
+.request-fold .request-why { margin: var(--space-2) 0 0; }
+@media (max-width: 767px) { .request-fold > summary { min-height: 44px; align-items: center; } }
 .request-actions .btn { flex: 1 1 auto; }
 .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); font-size: 13px; cursor: pointer; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--tab-fill); }

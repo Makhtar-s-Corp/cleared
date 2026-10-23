@@ -29,6 +29,8 @@
 .item { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2); border-radius: var(--radius); color: var(--text); text-decoration: none; transition: background-color var(--motion) var(--ease); }
 .item:hover { text-decoration: none; background: var(--tab-fill); }
 .items > li.current .item:hover { background: transparent; }
+/* the keyboard's ring inside the row, so it never crosses the row's answers under it */
+.items a.item:focus-visible { outline-offset: -2px; }
 .item-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 .chip { color: var(--awaiting-text); font-weight: var(--weight-strong); white-space: nowrap; }   /* one amber signal: the kind of what waits */
 .since { margin-left: auto; color: var(--text-faint); white-space: nowrap; }

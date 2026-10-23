@@ -292,7 +292,7 @@ function PermissionBody({ item, view, t, note, reason, onReason, onAct }: {
         <details className="fold" id="fold" open={foldOpen(item)}>
           <summary>
             <CaretRight size={12} aria-hidden="true" className="caret" /><span className="fold-label">{t(item.input.kind === 'execute' ? 'fold_command' : 'fold_target')}</span>
-            <code className="fold-peek">{fold[0]?.text ?? ''}</code>{fold.length > 1 ? <span className="fold-more">{t('fold_more', { n: fold.length - 1 })}</span> : null}
+            <code className="fold-peek">{fold[0]?.text ?? ''}</code>{fold.length > 1 ? <span className="fold-more">{t(fold.length === 2 ? 'fold_more_one' : 'fold_more_other', { n: fold.length - 1 })}</span> : null}
           </summary>
           {fold.length > 0 ? <pre className="fold-command"><code>{fold.map((part, index) => <span key={index} className="fold-line">{part.op ? <><span className="op">{part.op}</span>{' '}</> : null}{part.text}{'\n'}</span>)}</code></pre> : null}
           {description || why.raw ? (
@@ -317,7 +317,8 @@ function PermissionAnswers({ item, view, t, note, reason, onReason, onAct }: {
   const status = <p className="d-note" id="d-note" role="status">{note}</p>;
   if (local?.kind === 'settled') return <><p className="d-done">{t('settled')}</p>{status}</>;
   if (local?.kind === 'answered') return <><p className="d-done" id="d-done">{t(`answered_${local.decision}`)}</p>{status}</>;
-  if (item.state === 'handled') return <><p className="d-done">{t('handled_note')}</p>{status}</>;
+  // While an answer is on its way the cache already shows the item handled: the answers stay, disabled, until it lands.
+  if (item.state === 'handled' && !busy) return <><p className="d-done">{t('handled_note')}</p>{status}</>;
   const act = (name: Answer, primary: boolean) => (
     <Button variant={primary ? 'ink' : 'outline'} className={primary ? 'btn primary' : 'btn'} data-act={name} disabled={busy} onClick={() => onAct?.(name)}
       aria-keyshortcuts={ANSWER_KEY[name]}>
@@ -807,8 +808,10 @@ export default function Inbox() {
         else if (before) next.set(item.id, before);
         else next.delete(item.id);
       });
-      setNote(t(key));
-      if (gesture === 'answer') setSaid(t(key));
+      // A request settled without the person says so once, on the detail's line ("Réglé depuis la session.").
+      const quiet = settled && gesture === 'answer';
+      setNote(quiet ? '' : t(key));
+      if (gesture === 'answer') setSaid(t(quiet ? 'settled' : key));
       // A Change whose plan no longer waits has nowhere to go: its text is dropped.
       if (settled && (gesture === 'plan_change' || gesture === 'contract_send_back')) setMessage('');
       if (settled) context.inboxChanged();
@@ -816,7 +819,7 @@ export default function Inbox() {
         await load();
         const plan = item.kind === 'plan' ? plansRef.current.get(item.planId) : undefined;
         const after = afterPlanRefusal(key, plan);
-        setNote(t(after));
+        setNote(quiet ? '' : t(after));
         if (after !== key) context.inboxChanged();
       }
     }

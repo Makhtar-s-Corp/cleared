@@ -69,8 +69,14 @@ export type PaletteInput = {
   readonly t: Translate;                                 // the shell's catalog over the tower's
 };
 
+// What blocks a running session comes first, then what ships, then the
+// rest, so the three rows kept with no query hold the requests (lane 37's
+// art director); the tower's order within a kind is kept.
+const BLOCKS: Readonly<Record<string, number>> = { permission: 0, question: 1, session_plan: 2, release: 3, plan: 4, contract: 5, knowledge: 6 };
+const blocking = (needs: readonly NeedCard[]): NeedCard[] => [...needs].sort((a, b) => (BLOCKS[a.kind] ?? 9) - (BLOCKS[b.kind] ?? 9));
+
 export function paletteItems({ screen, needs, sessions, gestures, theme, t }: PaletteInput): PaletteItem[] {
-  const waiting = needs.map((card): PaletteItem => ({
+  const waiting = blocking(needs).map((card): PaletteItem => ({
     id: `waiting-${card.id}`, group: 'waiting', label: needTitle(card, t),
     detail: [t(`need_${card.kind}`, { age: duration(card.minutes, t) }), needId(card, t)].filter(Boolean).join(' · '),
     keywords: [card.ticket, card.kind].filter(Boolean), run: { kind: 'navigate', href: card.href },

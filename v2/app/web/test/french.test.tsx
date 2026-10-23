@@ -76,7 +76,11 @@ test('the tower, the sessions index and the sidebar in French', async () => {
   const data = await dataWords();
   const fixture = await towerFixture(FIXTURE_NOW);
   const t = tOf('tower', 'fr');
-  assertFrench('tower', html(<TowerBody model={towerModel(fixture, FIXTURE_NOW)} t={t} language="fr" />), data);
+  const tower = html(<TowerBody model={towerModel(fixture, FIXTURE_NOW)} t={t} language="fr" />);
+  assertFrench('tower', tower, data);
+  // A request reads as the inbox reads it (lane 37's art director), not by the harness's words.
+  assert.ok(visibleText(tower).includes('Installer date-fns'));
+  assert.ok(!visibleText(tower).includes('Install date-fns to group dates by week'));
   assertFrench('sidebar', renderSidebar('tower', t, { waiting: 5, lead: 'on', groups: sessionGroups(sessionRows(fixture.sessions, fixture.tickets)), source: 'fixtures' }), data);
   assertFrench('sessions index', renderIndex({ sessions: fixture.sessions, tickets: fixture.tickets, now: FIXTURE_NOW }, tOf('session', 'fr')), data);
 });
@@ -137,7 +141,7 @@ test('the palette and the shortcut sheet in French, on every screen, the inbox\'
     assertFrench(`sheet ${screen}`, html(<ShortcutSheet t={t} screen={screen} mac={false} onClose={() => {}} />), data);
   }
   const inboxSheet = visibleText(html(<ShortcutSheet t={t} screen="inbox" mac={false} onClose={() => {}} />));
-  for (const expected of ['Autoriser une fois la demande affichée', 'Refuser la demande affichée', 'Espace']) assert.ok(inboxSheet.includes(expected), `missing: ${expected}`);
+  for (const expected of ['Autoriser une fois, ou afficher la ligne choisie', 'Refuser, ou afficher la ligne choisie', 'Espace']) assert.ok(inboxSheet.includes(expected), `missing: ${expected}`);
 });
 
 test('times, durations, numbers and plurals in French', () => {

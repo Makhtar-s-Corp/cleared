@@ -36,7 +36,7 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
     TICKET_TITLE, 'LOCAL-161', 'Done when', 'Entries grouped by week, Monday first', 'Same totals as today, a test proves it', 'Plan of the session',
     'Paused, waiting for you', '18 min · 35,500 tokens',
     'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run the project\'s tests', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
-    'Wants to run', 'npm install date-fns', 'Network access and a new dependency.', 'Allow once', 'Always in this project', 'Deny',
+    'Allow the author to install date-fns?', 'The command adds a dependency to the project.', 'Command', 'npm install date-fns', 'Allow once', 'Always in this project', 'Deny',
     'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Screen so far', 'Hand over to Codex', 'Interrupt', 'Send',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
 });
@@ -201,4 +201,14 @@ test('an ended session shows its duration up to its last event, not the stale su
   const model = modelOf([{ type: 'STATE_SNAPSHOT', snapshot: { status: 'Done', phase: 'done', steps: [], files: [], checks: [], usage: {} } }]);
   const text = visibleText(renderSession(on(model, { summary }), en));
   assert.ok(text.includes('10 min'), 'from 08:50 to the last event, 10 min');
+});
+
+// Lane 37: the thread's request says what the inbox says, from lib/request.ts.
+test('a waiting request asks its question with who asks, says why in the person\'s words, and folds its command, kept whole in data-command', () => {
+  const html = renderSession(viewOf(), en);
+  assert.match(html, /<p class="request-title">Allow the author to install date-fns\?<\/p>/);
+  assert.match(html, /data-command="npm install date-fns"/);
+  assert.match(html, /<details class="request-fold"><summary>/, 'a plain install stays folded');
+  const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
+  assert.ok(visibleText(renderSession(viewOf(), fr)).includes('Autoriser l\'auteur à installer date-fns ?'));
 });

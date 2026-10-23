@@ -90,7 +90,7 @@ test('the reviewer\'s request in French: its question, its folded command, its r
       const rowActs = (selector: string) => page.locator(`#inbox-list li:has(${selector}) [data-row-act]`).count();
       assert.equal(await rowActs(`a.item[data-item="${id}"]`), 0, `${at}: the shown request's row`);
       assert.equal(await rowActs('a.item:not(.current)[data-item^="permission"]'), viewport.width >= 1280 ? 3 : 0, `${at}: another request's row`);
-      assert.equal(await page.locator('#fold .fold-more').innerText(), '+4', `${at}: the parts the fold hides`);
+      assert.equal(await page.locator('#fold .fold-more').innerText(), '+ 4 autres', `${at}: the parts the fold hides, with their unit`);
     }
     // Opened, the fold holds one part per line.
     await page.locator('#fold summary').click();
@@ -172,5 +172,49 @@ test('a row\'s answer shows its item, says what it did there, and puts the focus
     assert.equal((await page.locator('#inbox-live').innerText()).trim(), 'Refusé. Le motif est transmis à la session.');
     assert.equal(sent.length, 1);
     assert.match(sent[0] ?? '', /\/requests\/request-review-1\/answer$/);
+  });
+});
+
+test('an answer the service finds settled says so once, and the item leaves what waits; the fixtures source answers a request for real', { skip }, async () => {
+  await withInbox(async (page, _base, open) => {
+    // The fixtures source keeps the answer: the request is handled, and a second answer is a 409.
+    await open(WIDTHS[0]);
+    await page.evaluate(() => document.getElementById('screen')?.focus());
+    await page.keyboard.press('t');
+    await page.locator('#detail .d-done').waitFor();
+    assert.equal((await page.locator('#detail .d-done').innerText()).trim(), 'Autorisé pour ce projet. La session continue.');
+    await page.locator('#handled-toggle[aria-expanded="true"]').waitFor({ timeout: 5000 });
+    assert.equal(await page.locator('#handled-items a.item[data-item*="request-review-1"]').count(), 1, 'in "Traité", opened since it is the item shown');
+    assert.equal(await page.locator('#inbox-list section:first-of-type a.item[data-item*="request-review-1"]').count(), 0, 'no longer under what waits');
+    // A request settled elsewhere: one line, no note repeating it.
+    await page.route(/\/requests\/[^/]+\/answer$/, (route: any) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"answered"}' }));
+    const items = await (await page.request.get(`${_base}/api/service/inbox`)).json() as { id: string; kind: string; state: string; reasonCode?: string }[];
+    const other = items.find((item) => item.kind === 'permission' && item.state === 'waiting');
+    await page.goto(`${_base}/inbox#${encodeURIComponent(other?.id ?? '')}`);
+    await page.locator('#detail [data-act="reject_once"]').click();
+    await page.locator('#detail .d-done').waitFor();
+    assert.equal((await page.locator('#detail .d-done').innerText()).trim(), 'Réglé depuis la session.');
+    assert.equal((await page.locator('#d-note').innerText()).trim(), '', 'said once');
+  });
+});
+
+test('A on a walked row that is not the one shown shows it first; A again answers it', { skip }, async () => {
+  await withInbox(async (page, base) => {
+    const sent: string[] = [];
+    await page.route(/\/requests\/[^/]+\/answer$/, async (route: any) => {
+      sent.push(route.request().url());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":true}' });
+    });
+    await page.goto(`${base}/inbox`);
+    const row = page.locator('#inbox-list a.item[data-item*="request-review-1"]');
+    await row.focus();
+    await page.keyboard.press('a');
+    await page.waitForFunction(() => document.location.hash.includes('request-review-1'));
+    assert.equal(sent.length, 0, 'the first A shows the row');
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-item') ?? ''), await row.getAttribute('data-item'), 'the focus stays on the row');
+    await page.keyboard.press('a');
+    await page.locator('#detail .d-done').waitFor();
+    assert.equal(sent.length, 1, 'the second answers it');
+    assert.match(sent[0] ?? '', /request-review-1\/answer$/);
   });
 });

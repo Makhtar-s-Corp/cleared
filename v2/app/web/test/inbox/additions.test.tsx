@@ -55,7 +55,7 @@ test('a knowledge item waiting: its text, its level, then Reject and Approve', (
   assert.ok(shown(html).includes(knowledgeItem(FIXTURE_NOW).text));
   assert.match(shown(html), /The service guestbook/);
   assert.deepEqual(acts(html), ['knowledge_reject', 'knowledge_approve']);
-  assert.match(shown(html), /Approve writes it into the memory at once, and queues it for the service's skill\./);
+  assert.match(shown(html), /Approve writes it into the memory and queues it for the service's skill\./);
 });
 
 test('what the owner did shows on the item, from the page at once, then from the service', () => {
