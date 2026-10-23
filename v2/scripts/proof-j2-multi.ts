@@ -331,15 +331,16 @@ const signedIn = await step(0, 'sign-in', async () => {
 });
 
 // ---- the clean base (scripts/proof-base.ts) ------------------------------------------
-// The earlier runs' tickets: the proof's titles, not Done. One that has a
-// live session or anything waiting, or is not in Todo, is set aside; then
-// none of them may have either.
+// The earlier runs' tickets, by the proof's titles. One that has a live
+// session or anything waiting, or is in neither Todo nor Done, is set aside
+// (a Done one only has what waits of it settled); then none of them may
+// have either.
 const TITLES: ReadonlySet<string> = new Set(MULTI_TICKETS.map((t) => t.title));
 const LIVE: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
 async function openEarlier(): Promise<string[]> {
   const [all, waiting, sessions] = await Promise.all([api<Ticket[]>('/tickets'), inbox(), api<SessionSummary[]>('/sessions')]);
-  return all.filter((t) => TITLES.has(t.title) && t.status !== 'Done'
-    && (t.status !== 'Todo' || waiting.some((i) => i.ticket === t.id && i.state === 'waiting') || sessions.some((x) => x.ticket === t.id && LIVE.has(x.phase)))).map((t) => t.id);
+  return all.filter((t) => TITLES.has(t.title)
+    && ((t.status !== 'Todo' && t.status !== 'Done') || waiting.some((i) => i.ticket === t.id && i.state === 'waiting') || sessions.some((x) => x.ticket === t.id && LIVE.has(x.phase)))).map((t) => t.id);
 }
 
 async function prepareBase(settings: BaseSettings): Promise<string> {

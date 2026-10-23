@@ -15,9 +15,11 @@ const main = new URL('../src/main.ts', import.meta.url).pathname;
 // directory of its own, never the machine's.
 const state = mkdtempSync(join(tmpdir(), 'cleared-v2-main-'));
 after(() => rmSync(state, { recursive: true, force: true }));
+// The service builds its flow and its lead at start: a workspace the shell
+// names would start real sessions, so these runs name none.
 function isolated(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state };
-  delete out.ORCH_LEDGER;
+  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state, CLEARED_V2_LEAD_ENABLED: 'off' };
+  for (const key of ['ORCH_LEDGER', 'CLEARED_V2_PROJECT', 'CLEARED_V2_WORKSPACE', 'CLEARED_V2_STATE_DIR', 'CLEARED_V2_ADAPTER']) delete out[key];
   return out;
 }
 
@@ -158,7 +160,7 @@ test('the restart recovery runs once the service listens, before any request: a 
   const own = mkdtempSync(join(tmpdir(), 'cleared-v2-main-recover-'));
   try {
     const env: NodeJS.ProcessEnv = {
-      ...process.env, CLEARED_STATE_DIR: own, CLEARED_V2_STATE_DIR: own, CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: join(own, 'checkout'),
+      ...isolated(process.env), CLEARED_STATE_DIR: own, CLEARED_V2_STATE_DIR: own, CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: join(own, 'checkout'),
       CLEARED_V2_REPO_URL: 'https://example.invalid/guestbook.git', CLEARED_V2_REPO: 'example-org/guestbook', CLEARED_V2_LEAD_ENABLED: 'off',
     };
     delete env.CLEARED_V2_HOST;

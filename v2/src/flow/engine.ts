@@ -1025,16 +1025,19 @@ export class FlowEngine {
   // out of the flow without starting it again, which a move to Todo would.
   // Its live sessions stop, everything of it that waits in the inbox is
   // settled, a train not yet approved is halted, its running steps wait,
-  // and it is back in Todo with a comment. Nothing is merged or reverted:
-  // an approved ticket, a done one and a train that lands are refused. The
-  // multi-service proof sets its earlier runs' tickets aside, so that each
-  // run starts with nothing of theirs open (scripts/proof-base.ts).
+  // and it is back in Todo with a comment. A done ticket keeps its state:
+  // only what of it still waits (a knowledge item its handover proposed) is
+  // settled. Nothing is merged or reverted: an approved ticket and a train
+  // that lands are refused. The multi-service proof sets its earlier runs'
+  // tickets aside, so that each run starts with nothing of theirs open
+  // (scripts/proof-base.ts).
   async setAside(id: TicketId, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
     if (!ticket || ticket.project !== this.config.project) throw new FlowError('not_found', `unknown ticket ${id}`);
-    if (ticket.status === tickets.states.go || ticket.status === tickets.states.done) throw new FlowError('conflict', `${id} is in “${ticket.status}”: it is not set aside`);
+    if (ticket.status === tickets.states.go) throw new FlowError('conflict', `${id} is in “${ticket.status}”: it is not set aside`);
     if (this.#trains.latest(id)?.state === 'landing') throw new FlowError('conflict', `the train of ${id} is landing: it is not set aside`);
+    const done = ticket.status === tickets.states.done;
     const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
     // No step of it starts while its sessions stop.
     this.#active.delete(id);
@@ -1050,6 +1053,7 @@ export class FlowEngine {
       if (item.kind === 'release' ? this.#settleRelease(item.id, id, ticket.project, by) : this.inbox.handle(item.id, by)) items++;
     }
     this.#trains.haltActive(id);
+    if (done) return { sessions, items };
     if (ticket.status !== tickets.states.todo) await this.#putBack(id, note, 'set_aside');
     else {
       this.#origins.delete(id);

@@ -1125,12 +1125,33 @@ async function poolSection(): Promise<void> {
   let daemon: string | undefined;
   try { daemon = readFileSync('/etc/docker/daemon.json', 'utf8'); } catch { daemon = undefined; }
   const pools = (daemon === undefined ? undefined : poolsOfDaemon(daemon)) ?? [...DOCKER_DEFAULT_POOLS];
-  const labelled = await new Docker().networkSubnets();
-  const taken = [...interfaceSubnets(networkInterfaces()), ...labelled.flatMap((n) => n.subnets)];
-  const usage = poolUsage(pools, taken);
+  const print = (args: readonly string[]) => say(`$ docker ${args.map((arg) => (/[\s'"{}]/.test(arg) ? `'${arg}'` : arg)).join(' ')}`);
+  const docker = new Docker(async (args, options) => { print(args); return cliRunner(args, options); });
+  const read = async () => {
+    const labelled = await docker.networkSubnets();
+    return { labelled, usage: poolUsage(pools, [...interfaceSubnets(networkInterfaces()), ...labelled.flatMap((n) => n.subnets)]) };
+  };
+  const before = await read();
   say(`pools: ${pools.map((p) => `${p.base} by /${p.size}`).join(', ')} (${daemon === undefined || !poolsOfDaemon(daemon) ? 'Docker\'s defaults' : 'daemon.json'})`);
-  say(`subnets: ${usage.total} in all, ${usage.taken} taken (${labelled.length} labelled networks, the rest seen on the host's interfaces), ${usage.free} free at most`);
-  check('at least two subnets are free: one session takes two networks', usage.free >= 2, `${usage.free} free`);
+  say(`subnets: ${before.usage.total} in all, ${before.usage.taken} taken (${before.labelled.length} labelled networks, the rest seen on the host's interfaces), ${before.usage.free} free at most`);
+  check('at least two subnets are free: one session takes two networks', before.usage.free >= 2, `${before.usage.free} free`);
+  if (before.usage.free < 2) return;
+  // A stopped session's two networks, made for the run and labelled, then
+  // released by name as a restart or the flow's tick releases them (issue 265).
+  const session = randomUUID();
+  const names = sessionNames(session);
+  try {
+    await docker.createNetwork({ name: names.network, session, internal: true });
+    await docker.createNetwork({ name: names.outNetwork, session, internal: false });
+    const made = await read();
+    say(`with the two networks of a session made for the run: ${made.usage.taken} taken, ${made.usage.free} free`);
+    check('the session\'s two networks take two subnets', made.usage.taken === before.usage.taken + 2, `${before.usage.taken} → ${made.usage.taken}`);
+  } finally {
+    const released = await docker.releaseStopped([session]);
+    say(`released by name: ${released.networks.length} networks, ${released.containers.length} containers`);
+  }
+  const after = await read();
+  check('after the release, nothing has the session label and the free subnets are back', (await docker.networks(session)).length === 0 && after.usage.free === before.usage.free && after.labelled.length === before.labelled.length, `${after.usage.free} free, ${after.labelled.length} labelled networks`);
 }
 
 const args = process.argv.slice(2);

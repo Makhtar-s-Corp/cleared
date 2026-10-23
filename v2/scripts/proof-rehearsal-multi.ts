@@ -23,7 +23,7 @@
 // listener's and the trial stand-in's, on 127.0.0.1, checked free with
 // `ss -ltn` and never a reserved one. HOME is the temporary folder.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type net from 'node:net';
@@ -33,6 +33,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { createFake, readContract, type Fake } from '../images/fake/fake.ts';
+import { InboxStore } from '../src/inbox/store.ts';
 import { RELAY } from '../src/container/preview.ts';
 import type { FakeStep } from '../src/session/adapters/fake.ts';
 import type { RehearsalScript } from '../src/session/adapters/index.ts';
@@ -73,6 +74,39 @@ export const MULTI_TICKETS = [
     services: ['guestbook'],
   },
 ] as const;
+
+// ---- an earlier run ---------------------------------------------------------------
+
+// What an earlier run leaves in the ledger, which the clean base puts
+// straight before ticket 1 (proof-base.ts): ticket 1 Done with a lesson
+// its handover proposed still waiting, and ticket 2 waiting for its
+// approval with its release card. Written as the service writes them, in
+// the ledger the service and the stand-in brokers share; their ids.
+export function seedEarlierRun(ledger: string, at = new Date()): string[] {
+  const db = new DatabaseSync(ledger);
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const when = at.toISOString();
+    const ticket = (title: string, status: string): string => {
+      const row = db.prepare("INSERT INTO tracker_tickets (title, body, labels, project, status, created_at, updated_at) VALUES (?, '', '[]', 'guestbook', ?, ?, ?) RETURNING id").get(title, status, when, when) as { id: number };
+      db.prepare("INSERT INTO tracker_history (ticket, status, actor_kind, actor_id, at) VALUES (?, ?, 'agents', 'cleared-v2', ?)").run(row.id, status, when);
+      return `LOCAL-${row.id}`;
+    };
+    const [first, second] = [MULTI_TICKETS[0], MULTI_TICKETS[1]] as const;
+    const done = ticket(first.title, 'Done');
+    const waiting = ticket(second.title, 'Needs Approval');
+    const inbox = new InboxStore(db, () => at);
+    inbox.addKnowledge({ ticket: done, project: 'guestbook', sessionId: randomUUID(), text: 'An earlier run\'s lesson: the filter answers ok and words.', level: 'service', service: 'filter-api' });
+    inbox.addRelease({
+      ticket: waiting, project: 'guestbook', title: second.title, announcement: 'An earlier run\'s release, never approved.', requestedAt: when,
+      pr: { number: 900, url: 'https://forge.invalid/rehearsal/guestbook/pull/900', checks: 'pending' }, heads: [{ pr: 900, head: 'e'.repeat(40) }],
+      captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } }, sessions: [],
+    });
+    return [done, waiting];
+  } finally {
+    db.close();
+  }
+}
 
 // ---- the workspace file -----------------------------------------------------------
 
@@ -486,9 +520,10 @@ coalesce_minutes = 1
   };
   const service = start('service', 'src/main.ts', {});
   await waitFor('the service', async () => (await fetch(`http://127.0.0.1:${servicePort}/health`)).ok, 30_000, service);
+  const earlier = seedEarlierRun(ledger);
   const app = start('app', 'app/main.ts', { CLEARED_V2_APP_PORT: String(appPort), CLEARED_V2_APP_HOST: '127.0.0.1', CLEARED_V2_APP_PROJECT: 'guestbook', CLEARED_V2_PREVIEW_PORT: String(previewPort) });
   await waitFor('the app', async () => (await fetch(`http://127.0.0.1:${appPort}/`, { redirect: 'manual' })).status < 500, 30_000, app);
-  options.log(`rehearsal: ${root}, service on ${servicePort}, app on ${appPort}, preview on ${previewPort}, trial stand-in on ${trialPort}`);
+  options.log(`rehearsal: ${root}, service on ${servicePort}, app on ${appPort}, preview on ${previewPort}, trial stand-in on ${trialPort}; an earlier run's ${earlier.join(' and ')} left open`);
 
   return {
     root, appUrl: `http://127.0.0.1:${appPort}`, serviceUrl: `http://127.0.0.1:${servicePort}`, owner: OWNER, passwordFile, ledger, docker,
@@ -497,6 +532,7 @@ coalesce_minutes = 1
       'the forge: a bare copy of each example as its remote, and a gh stand-in that opens, lists and passes pull requests per repository in a file',
       'the locks: two stand-in brokers, one socket and one state folder each on the one ledger, that merge an approved branch into the bare copy and write the release watch\'s rows themselves; the guestbook\'s watch fails twice and reverts its merge when the merged src/config.ts turns PROOF_BREAK_HEALTH on, instead of probing a deployed /health',
       'the deployments: nothing is deployed and no /health is probed; the clean base recreates the run branch on the bare copies, closes no pull request (the forge stand-in has none of an earlier run) and waits for no watcher',
+      'the earlier run: two tickets written into the ledger before the run (ticket 1 Done with a knowledge item waiting, ticket 2 in Needs Approval with its release card), which the clean base sets aside through the app',
       'the containers: a docker stand-in answers the labelled lists and inspections of a session\'s containers, runs the service\'s own programs (the editor\'s read and save, the checkout at Take over and Give back) on the session\'s checkout on this machine, and relays the preview; no container, no network and no image exist',
       'the trial environment: a loopback stand-in for the session\'s siblings, the guestbook\'s page and the filter API\'s fake; the fake is images/fake/fake.ts built from the contract the owner validated, and the page checks one sample entry with it at each load',
       'the harness in the terminal: the fake adapter\'s scripted sessions have no interactive harness, so Take over shows the harness as unsupported and step 11 goes to the Shell; Take over attached to a live Claude Code harness, then the Shell beside it, is shown by the real run only',

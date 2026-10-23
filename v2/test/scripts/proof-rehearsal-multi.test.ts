@@ -13,7 +13,11 @@ import { authorPrompt, stepPrompt } from '../../src/flow/prompts.ts';
 import { parseRehearsalScript, type AuthorRule } from '../../src/session/adapters/index.ts';
 import { END_TERMINAL, SHELL_COMMAND, giveCommand, readCommand, takeCommand, terminalCommand, writeCommand } from '../../src/terminal/container.ts';
 import { loadWorkspace } from '../../src/workspace/config.ts';
-import { MULTI_TICKETS, breaksHealth, dockerStub, multiScript, rehearsalWorkspace, shellAnswer, type StubContext } from '../../scripts/proof-rehearsal-multi.ts';
+import { MULTI_TICKETS, T3_QUESTION, breaksHealth, dockerStub, multiScript, rehearsalWorkspace, seedEarlierRun, shellAnswer, type StubContext } from '../../scripts/proof-rehearsal-multi.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { INBOX_TABLE, InboxStore } from '../../src/inbox/store.ts';
+import { TICKET_TABLES } from '../../src/tickets/local-store.ts';
+import { chooseAnswers } from '../../scripts/proof-inbox.ts';
 
 const SESSION = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
@@ -154,4 +158,34 @@ test('the human\'s stand-in shell answers the lines the proof types, runs git st
   assert.deepEqual(shellAnswer('exit'), { kind: 'exit' });
   assert.deepEqual(shellAnswer(''), { kind: 'text', text: '' });
   assert.match((shellAnswer('curl http://x') as { text: string }).text, /not part of/);
+});
+
+test('the earlier run the rehearsal leaves open: ticket 1 Done with a knowledge item waiting, ticket 2 in Needs Approval with its release card', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cleared-earlier-'));
+  try {
+    const ledger = join(dir, 'ledger.db');
+    const db = new DatabaseSync(ledger);
+    for (const sql of [...TICKET_TABLES, INBOX_TABLE]) db.exec(sql);
+    db.close();
+    const ids = seedEarlierRun(ledger, new Date('2026-10-23T09:00:00.000Z'));
+    assert.equal(ids.length, 2);
+    const read = new DatabaseSync(ledger, { readOnly: true });
+    try {
+      const rows = read.prepare('SELECT id, title, status FROM tracker_tickets ORDER BY id').all() as { id: number; title: string; status: string }[];
+      assert.deepEqual(rows.map((r) => [`LOCAL-${r.id}`, r.title, r.status]), [[ids[0], MULTI_TICKETS[0].title, 'Done'], [ids[1], MULTI_TICKETS[1].title, 'Needs Approval']]);
+      const waiting = new InboxStore(read).items().filter((i) => i.state === 'waiting').map((i) => [i.kind, i.ticket]);
+      assert.deepEqual(waiting, [['knowledge', ids[0]], ['release', ids[1]]]);
+    } finally {
+      read.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ticket 3\'s author asks a question whose recommended option is not the first: the proof chooses it', () => {
+  const asked = 'question' in T3_QUESTION ? T3_QUESTION.question.questions : [];
+  assert.deepEqual(chooseAnswers(asked).map((c) => [c.answer, c.how]), [['From 0 (Recommended)', 'recommended']]);
+  const rule = multiScript().authorRules?.find((r) => r.steps.some((step) => step === T3_QUESTION));
+  assert.ok(rule, 'a rule of ticket 3 asks it');
 });

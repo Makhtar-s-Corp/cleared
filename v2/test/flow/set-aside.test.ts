@@ -64,7 +64,7 @@ test('a ticket already in Todo with something left waiting: settled, still in To
   assert.equal(t.flowEvents.filter((e) => e.type === 'ticket_put_back').length, 0, 'no move: it was in Todo');
 });
 
-test('an approved ticket, a done one, another project\'s and an unknown one are refused, and nothing is changed', async () => {
+test('an approved ticket, another project\'s and an unknown one are refused, and nothing is changed', async () => {
   const t = await setup();
   const done = await t.tickets.create({ title: 'Done', project: 'guestbook' }, { kind: 'human', id: 'u1' });
   await t.tickets.move(done.id, 'Done', agents);
@@ -75,10 +75,19 @@ test('an approved ticket, a done one, another project\'s and an unknown one are 
   const refused = async (id: string, kind: FlowError['kind']) => {
     await assert.rejects(t.engine.setAside(id, 'u1'), (error: unknown) => error instanceof FlowError && error.kind === kind);
   };
-  await refused(done.id, 'conflict');
   await refused(elsewhere.id, 'not_found');
   await refused('LOCAL-999', 'not_found');
   await refused(approved.id, 'conflict');
-  assert.equal((await t.tickets.get(done.id))?.status, 'Done');
   assert.equal((await t.tickets.get(approved.id))?.status, 'Ready to Ship');
+});
+
+test('a done ticket with a knowledge item still waiting: the item settled, the ticket left Done and not moved', async () => {
+  const t = await setup();
+  await t.tickets.move(t.ticket.id, 'Done', agents);
+  t.inbox.addKnowledge({ ticket: t.ticket.id, project: 'guestbook', sessionId: 's-author', text: 'A lesson the handover proposed.', level: 'service', service: 'guestbook' });
+  assert.deepEqual(await t.engine.setAside(t.ticket.id, 'u1'), { sessions: 0, items: 1 });
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Done');
+  assert.equal(t.inbox.items().filter((i) => i.state === 'waiting').length, 0);
+  assert.equal(t.flowEvents.filter((e) => e.type === 'ticket_put_back').length, 0);
+  assert.equal(t.startedSessions.length, 0);
 });
