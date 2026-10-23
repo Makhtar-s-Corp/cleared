@@ -213,6 +213,9 @@ async function until<T>(what: string, check: () => Promise<T | undefined | false
 async function openItem(id: string): Promise<void> {
   await page.goto(`${APP}/inbox`);
   const link = page.locator(`a.item[data-item="${id}"]`);
+  // A handled item (a train rolled back) sits in the "Traité" group, folded until it is opened (lane 37).
+  await page.locator(`a.item[data-item="${id}"], #handled-toggle`).first().waitFor({ state: 'attached' });
+  if (await link.count() === 0 && await page.locator('#handled-toggle[aria-expanded="false"]').count() > 0) await page.locator('#handled-toggle').click();
   await link.waitFor();
   await link.click();
   // The item shown: a waiting one with its buttons, a handled one (a train
