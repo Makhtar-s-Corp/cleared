@@ -3972,3 +3972,15 @@ The LATER items are in the pull request's body as follow-ups.
 Followups 3 to 7 of the review stay open for the next round.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`.
+
+## 2026-10-23: Orchestrator decision: the proof repositories' checks also run on the run branch
+
+**Decision.** On 2026-10-23 at 14:19 (Europe/Paris) the orchestrator, not the owner, decided to add `proof-run` to the `push` and `pull_request` branches of `.github/workflows/checks.yml` in both proof repositories, by one commit on `proof-base` each (filter API `ffa50a7`, guestbook `8727d60`), then to recreate `proof-run` from `proof-base`. Main is not touched (still `2127dd2` and `0d7fbb5`). The commits are reversible and stay on proof branches.
+
+**Why.** On the first run on the clean base, step 06 waited for a release card that could not come: the pull requests into `proof-run` had no checks, because the workflows only triggered on `main`.
+
+**Consequences.**
+- The running proof was stopped and relaunched. Checks now run on `proof-run` (filter API run 39952852338, guestbook run 39952857168).
+- An audit found one more `main` on the host side: the proof's `CLEARED_V2_BASE`, read only in one-service mode, now `proof-run`. Watchers, brokers and workspace services were already on `proof-run`.
+- The run's start check must refuse a base whose checks do not trigger on the run branch: issue #277.
+- Recorded by: the orchestrator, ops lane, branch `v2-j2-ops-proofci`.
