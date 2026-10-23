@@ -18,6 +18,8 @@
 // (SERVICE_PROOF_HEADER) and, when a person acts, their user id
 // (SERVICE_USER_HEADER). A request without the proof is refused before
 // anything else; an approval also needs the user id.
+import type { LeversChange } from '../consumption/levers.ts';
+import type { Consumption, LeverChoices } from '../consumption/usage.ts';
 import type { Decision, Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
@@ -618,6 +620,9 @@ export type ApiRoutes = {
   // changed, as a stream of changeFrame() frames; the app refetches the
   // resource an event names. Last-Event-ID resumes it.
   'GET /api/events': { readonly body: null; readonly response: 'text/event-stream' };
+  // Milestone 3, the Consumption screen (O15): `?tz=<IANA zone>` gives the days.
+  'GET /api/consumption': { readonly body: null; readonly response: Consumption };
+  'POST /api/consumption/levers': { readonly body: LeversChange; readonly response: LeverChoices };
 };
 
 export type ApiRoute = keyof ApiRoutes;
@@ -677,7 +682,10 @@ const routes = {
   'POST /api/plans/:id/pause': true,
   'POST /api/plans/:id/resume': true,
   'GET /api/events': true,
+  'GET /api/consumption': true,
+  'POST /api/consumption/levers': true,
 } satisfies Record<ApiRoute, true>;
+export type { Consumption, LeverChoices, LeversChange };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
 // The preview route: lane 15 serves it (container/preview.ts), not the flow's API.
@@ -699,6 +707,9 @@ export const TERMINAL_ROUTES: readonly ApiRoute[] = [   // lane 31, terminal/ an
   'POST /api/sessions/:id/terminal/open', 'POST /api/sessions/:id/terminal/input', 'POST /api/sessions/:id/terminal/resize', 'POST /api/sessions/:id/terminal/close',
   'GET /api/sessions/:id/terminal/stream', 'PUT /api/sessions/:id/files/*',
 ];
+
+// The routes of the Consumption screen (milestone 3, O15): the lead module's, with the schedules'.
+export const CONSUMPTION_ROUTES: readonly ApiRoute[] = ['GET /api/consumption', 'POST /api/consumption/levers'];
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));

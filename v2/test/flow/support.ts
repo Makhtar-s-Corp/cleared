@@ -2,6 +2,7 @@
 // and recorders of the registry, a fake adapter that plays one script per
 // role, and effects that record their calls instead of running git, gh,
 // Docker or the broker.
+import type { LeverReader } from '../../src/consumption/levers.ts';
 import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import type { FlowConfig } from '../../src/flow/config.ts';
 import { parseServices } from '../../src/container/services.ts';
@@ -109,6 +110,7 @@ export type SetupOptions = {
   ledger?: boolean;                       // the v1 events table the lock and the release watch write; true by default
   locks?: (service: ServiceConfig) => ServiceLock;   // the lock of each service of a workspace of several
   clean?: (text: string) => string;                  // the service's cleaner; the identity by default
+  levers?: LeverReader;                              // the Consumption screen's levers; none by default
 };
 
 export async function setup(options: SetupOptions = {}) {
@@ -130,7 +132,7 @@ export async function setup(options: SetupOptions = {}) {
   };
   const deps = {
     store, inbox, registry, config: { ...CONFIG, ...options.config }, effects: fakeEffects(calls, options.effects),
-    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}), ...(options.clean ? { clean: options.clean } : {}),
+    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}), ...(options.clean ? { clean: options.clean } : {}), ...(options.levers ? { levers: options.levers } : {}),
   };
   const engine = new FlowEngine(deps);
   const flowEvents: FlowEvent[] = [];
