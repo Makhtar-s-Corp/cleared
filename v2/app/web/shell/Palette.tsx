@@ -3,9 +3,10 @@
 // with the items palette.ts makes from the cache. The shell's own dialog,
 // not cmdk's (components/ui/command.tsx says why): focus stays in it, Esc
 // or a click outside closes it, and the focus goes back where it was.
-import { ArrowRight, Broadcast, Circle, Keyboard, ListChecks, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
+import { ArrowRight, Broadcast, Circle, Keyboard, ListChecks, Moon, SidebarSimple, Sun, TerminalWindow, Tray, X, type Icon } from '@phosphor-icons/react';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import { defaultFilter } from 'cmdk';
+import { Button } from '@/components/ui/button.tsx';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { trapTab, useFocusBack } from './dialog.ts';
@@ -40,7 +41,10 @@ export default function Palette({ t, items, dark, onRun, onClose }: {
     <div className="overlay" data-overlay="palette" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={t('palette_label')} id="palette" onKeyDown={keyDown}>
         <Command label={t('palette_label')} loop filter={(value, search, keywords) => rank(value, search, keywords ?? [], defaultFilter(value, search, keywords))}>
-          <CommandInput placeholder={t('palette_placeholder')} autoFocus value={search} onValueChange={setSearch} />
+          <CommandInput placeholder={t('palette_placeholder')} autoFocus value={search} onValueChange={setSearch}>
+            {/* A phone has no Esc: the palette closes from here too. */}
+            <Button variant="ghost" className="icon" id="palette-close" aria-label={t('keys_close')} onClick={onClose}><X size={16} aria-hidden="true" /></Button>
+          </CommandInput>
           <CommandList>
             <CommandEmpty>{t('palette_empty')}</CommandEmpty>
             {grouped.map(({ group, items: rows }) => (

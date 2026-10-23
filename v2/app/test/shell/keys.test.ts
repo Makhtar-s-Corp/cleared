@@ -47,7 +47,8 @@ test('every shortcut the sheet lists is bound, on a Mac and elsewhere', () => {
 });
 
 test('every key that does something is in the sheet of the screen it does it on', () => {
-  const keys = [...'abcdefghijklmnopqrstuvwxyz0123456789[]?/.,;', 'Enter', 'Escape', 'ArrowDown', 'Tab', ' '];
+  const digits = Array.from({ length: 10 }, (_, n) => String(n));
+  const keys = [...'abcdefghijklmnopqrstuvwxyz', ...digits, ...'[]?/.,;', 'Enter', 'Escape', 'ArrowDown', 'Tab', ' '];
   const listed = (screen: ScreenName) => sheetRows(screen).map((row) => JSON.stringify(row.action));
   for (const mac of [true, false]) {
     for (const screen of SCREENS) {
@@ -130,4 +131,12 @@ test('a screen\'s own keys join the sheet of that screen only, and every label i
   assert.equal(keyLabel('Mod', false), 'Ctrl');
   assert.equal(keyLabel('Esc', true), 'Esc');
   assert.equal(keyLabel('g', true), 'G');
+});
+
+test('[ and ? typed with AltGr (Ctrl and Alt on Windows, as on a French keyboard) still fold the sidebar and open the sheet', () => {
+  const context = { screen: 'tower' as const, focus: 'none' as const, overlay: false, mac: false, now: 1 };
+  assert.deepEqual(resolveKey({ key: '[', meta: false, ctrl: true, alt: true, shift: false }, context, null).action, { kind: 'sidebar' });
+  assert.deepEqual(resolveKey({ key: '?', meta: false, ctrl: true, alt: true, shift: false }, context, null).action, { kind: 'sheet' });
+  assert.equal(resolveKey({ key: 'j', meta: false, ctrl: true, alt: true, shift: false }, context, null).action, null, 'a letter with Ctrl and Alt stays the browser\'s');
+  assert.equal(resolveKey({ key: '[', meta: false, ctrl: true, alt: true, shift: false }, { ...context, focus: 'field' }, null).action, null, 'typed in a field, it is the field\'s');
 });

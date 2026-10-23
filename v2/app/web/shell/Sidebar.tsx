@@ -73,7 +73,8 @@ export function Sidebar(props: SidebarProps) {
             const label = t(item.label);
             return (
               <li key={item.screen}>
-                <a className="nav-item" href={item.href} data-nav={item.screen} onClick={() => props.onPick?.(item.href)} aria-current={screen === item.screen ? 'page' : undefined} title={`${label} (${item.chord.join(' ')})`}>
+                <a className="nav-item" href={item.href} data-nav={item.screen} onClick={() => props.onPick?.(item.href)} aria-current={screen === item.screen ? 'page' : undefined}
+                  title={`${label} (${item.chord.join(' ')})${item.screen === 'lead' && props.lead !== 'unknown' ? ` · ${t(`side_lead_${props.lead}`)}` : ''}`}>
                   <Glyph size={16} weight={screen === item.screen ? 'fill' : 'regular'} aria-hidden="true" />
                   <span className="nav-label">{label}</span>
                   {item.screen === 'inbox' ? (

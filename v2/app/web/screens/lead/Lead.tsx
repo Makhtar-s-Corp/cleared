@@ -172,13 +172,13 @@ function MemoryPanel({ view, t, onClose }: { readonly view: LeadView; readonly t
   );
 }
 
-export function Side({ view, t, busy = false, note = null, onAction, onStart }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly note?: string | null; readonly onAction?: (plan: Plan, action: PlanAction) => void; readonly onStart?: () => void }) {
+export function Side({ view, t, busy = false, note = null, onAction }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly note?: string | null; readonly onAction?: (plan: Plan, action: PlanAction) => void }) {
   const shown = choosePlan(view.plans, view.planId);
   const others = otherPlans(view.plans, shown);
   return (
     <>
       {shown ? <PlanPanel plan={shown} t={t} options={{ language: view.language, busy, note, services: true }} onAction={(action) => onAction?.(shown, action)} />
-        : view.planId === null ? <Empty icon={ListChecks} id="plan-empty" text={t('lead_no_plan')} action={{ label: t('lead_start_goal'), onClick: () => onStart?.() }} />
+        : view.planId === null ? <Empty icon={ListChecks} id="plan-empty" text={t('lead_no_plan')} />
         : <p className="empty plan-empty">{t('lead_plan_missing', { id: view.planId })}</p>}
       {others.length === 0 ? null : (
         <section className="other-plans" aria-labelledby="other-plans-title">
@@ -382,7 +382,7 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
         <ReplyForm mode={mode} changing={changing} text={text} sending={sending} note={note} t={t} fieldRef={field} onText={setText}
           onGoal={() => { setGoal((current) => !current); setChanging(false); field.current?.focus(); }} onSubmit={submit} onKeyDown={keyDown} />
       </section>
-      <div className="plan-side" id="plan-side" ref={side}><Side view={view} t={t} busy={planBusy} note={planNote} onAction={(plan, action) => void act(plan, action)} onStart={startGoal} /></div>
+      <div className="plan-side" id="plan-side" ref={side}><Side view={view} t={t} busy={planBusy} note={planNote} onAction={(plan, action) => void act(plan, action)} /></div>
     </div>
   );
 }

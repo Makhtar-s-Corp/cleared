@@ -190,7 +190,7 @@ test('the lead\'s own question shows no ticket id and opens the lead, and its se
   const card = model.needs.find((n) => n.id === 'lead-question');
   assert.equal(card?.href, '/lead');
   const html = renderTower(model, en);
-  assert.match(html, /<a class="need row" href="\/lead"[^>]*>[\s\S]*?Pages of 20, or one long list\?[\s\S]*?The lead waits for your answer on its screen\.[\s\S]*?<span class="id">Lead<\/span>/);
+  assert.match(html, /<a class="need row" href="\/lead"[^>]*>[\s\S]*?Pages of 20, or one long list\?[\s\S]*?The lead waits for your answer on its screen\.[\s\S]*?<span class="owner">Lead<\/span>/);
   assert.doesNotMatch(html, /<span class="id">lead<\/span>/, 'the sentinel ticket never shows');
   assert.ok(text(html).startsWith('Four things need you.') || text(html).includes('Four things need you.'));
   assert.match(text(html), /^4 sessions running/m);

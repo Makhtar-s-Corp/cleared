@@ -385,6 +385,8 @@ function Shell({ shared }: { readonly shared: Shared }) {
         <div className="main">
           <div className="top-bar" id="top-bar">
             <p className="top-title">{shownRow ? <><a className="crumb" href="/sessions">{t('title_session')}</a><span className="crumb" aria-hidden="true">/</span></> : null}<span className="here">{here}</span></p>
+            {/* The sample data says so on every screen of a computer; a phone's top bar says it (Sidebar.tsx). */}
+            {start.source === 'fixtures' ? <div className="top-actions"><p className="source-pill" id="source-pill">{t('source_fixtures')}</p></div> : null}
           </div>
           <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
           <main id="screen" className="screen" tabIndex={-1}>

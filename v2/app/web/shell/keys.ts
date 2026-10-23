@@ -78,7 +78,9 @@ export function resolveKey(input: KeyInput, context: KeyContext, chord: Chord): 
     if (key === 'Enter' && context.focus === 'field') return { action: { kind: 'send' }, chord: null };
     return none;
   }
-  if (input.meta || input.ctrl || input.alt || context.focus === 'field') return none;
+  // AltGr arrives as Ctrl and Alt on Windows: [ and ? typed with it (a French keyboard) are themselves.
+  const altGraph = input.ctrl && input.alt && !input.meta && (key === '[' || key === '?');
+  if ((!altGraph && (input.meta || input.ctrl || input.alt)) || context.focus === 'field') return none;
   const pending = chord && context.now - chord.at <= CHORD_MS ? chord : null;
   if (pending) {
     const to = CHORDS[key];

@@ -5,18 +5,20 @@
 // its own dialog around Command (shell/Palette.tsx).
 import { MagnifyingGlass } from '@phosphor-icons/react';
 import { Command as CommandPrimitive } from 'cmdk';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '@/lib/utils.ts';
 
 export function Command({ className, ...props }: ComponentProps<typeof CommandPrimitive>) {
   return <CommandPrimitive data-slot="command" className={cn('palette', className)} {...props} />;
 }
 
-export function CommandInput({ className, ...props }: ComponentProps<typeof CommandPrimitive.Input>) {
+// Its children (a close button) follow the field in the same row.
+export function CommandInput({ className, children, ...props }: ComponentProps<typeof CommandPrimitive.Input> & { readonly children?: ReactNode }) {
   return (
     <div className="palette-input" data-slot="command-input-wrapper">
       <MagnifyingGlass size={16} aria-hidden="true" />
       <CommandPrimitive.Input data-slot="command-input" className={className} {...props} />
+      {children}
     </div>
   );
 }

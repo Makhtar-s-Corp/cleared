@@ -22,7 +22,7 @@ test('what needs the person and the live sessions are rows, each a link J and K 
   assert.match(markup, /<ul class="rows needs">/);
   assert.match(markup, /<ul class="rows sessions">/);
   // The proof scripts find a live session by its ticket and click its link.
-  assert.match(markup, /<li class="session-card" data-phase="waiting_human"><a class="open row" href="\/sessions\/[^"]+" data-row="true">[^]*?<span class="id">LOCAL-161<\/span>/);
+  assert.match(markup, /<li class="session-card" data-phase="waiting_human"><a class="open row" href="\/sessions\/[^"]+" data-row="true"[^>]*>[^]*?<span class="id">LOCAL-161<\/span>/);
 });
 
 test('one amber signal per waiting row: its kind, no ring, no stripe, no dot', async () => {
@@ -38,17 +38,26 @@ test('what waits for the person first, then what works, then what reviews', asyn
   assert.deepEqual(order, ['waiting_human', 'working', 'working', 'reviewing']);
 });
 
-test('an empty part says so in one sentence, with one action where there is one thing to do', async () => {
+test('an empty tower says nothing twice: the heading alone for what waits, one quiet row per part, one action where there is one thing to do', async () => {
   const data = await towerFixture(FIXTURE_NOW);
   const markup = renderTowerBody(towerModel({ ...data, inbox: [], sessions: [], plans: [], tickets: [] }, FIXTURE_NOW), en);
-  assert.match(markup, /<p class="quiet-line" id="needs-empty">Nothing waits for you\.<\/p>/);
-  assert.match(markup, /<div class="empty-state" id="live-empty"><svg[^]*?<\/svg><p class="empty-text">No session is running\.<\/p><button type="button" class="chip-button">New ticket<\/button><\/div>/);
+  assert.match(markup, /<h1>Nothing needs you\.<\/h1><\/div>/, 'no line of zeros under the heading');
+  assert.doesNotMatch(markup, /needs-title/, 'no empty Needs you list under a heading that already says it');
+  assert.match(markup, /<div class="empty-state" id="live-empty"><svg[^]*?<\/svg><p class="empty-text">No session is running\.<\/p><\/div>/, 'the bar above starts one: no second New ticket');
   assert.match(markup, /<div class="empty-state" id="plans-empty"><svg[^]*?<\/svg><p class="empty-text">No plan in progress\.<\/p><button type="button" class="chip-button">New goal<\/button><\/div>/);
-  assert.ok(visibleText(markup).includes('Nothing landed yet today.'));
+  assert.match(markup, /<p class="empty-text">Nothing landed yet today\.<\/p>/);
   for (const language of ['en', 'fr'] as const) {
     const catalog = loadCatalog('tower', language);
-    for (const key of ['needs_empty', 'live_empty', 'plans_empty']) assert.equal(catalog[key]!.split(/[.?]\s/).length, 1, `${language} ${key}: one sentence`);
+    for (const key of ['live_empty', 'plans_empty', 'landed_empty']) assert.equal(catalog[key]!.split(/[.?]\s/).length, 1, `${language} ${key}: one sentence`);
   }
+});
+
+test('a row is named by its title and described by its kind, its line and its meta', async () => {
+  const markup = renderTowerBody(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), en);
+  const row = /<a class="need row"[^>]*aria-labelledby="([^"]+)" aria-describedby="([^"]+)"/.exec(markup);
+  assert.ok(row);
+  assert.match(markup, new RegExp(`<span class="need-title" id="${row[1]!.replace(/[^\w-]/g, '.')}">`));
+  assert.equal(row[2]!.split(' ').length, 3);
 });
 
 test('every kind a waiting row can have is named in both languages', () => {

@@ -28,10 +28,10 @@ test('a live session of a ticket in steps names its step and service', async () 
 test('a contract and a knowledge item in Needs you, each linked to its inbox item', async () => {
   const base = await towerFixture(FIXTURE_NOW);
   const markup = renderTowerBody(towerModel({ ...base, inbox: [...base.inbox, contractItem(FIXTURE_NOW), knowledgeItem(FIXTURE_NOW)] }, FIXTURE_NOW), en);
-  assert.match(markup, new RegExp(`<a class="need row" href="/inbox#${encodeURIComponent(contractItem(FIXTURE_NOW).id)}" data-row="true" data-kind="contract">`));
-  assert.match(markup, /<span class="row-kind wait-line">Contract<\/span>[^]*?<span class="age">40 min<\/span>/);
+  assert.match(markup, new RegExp(`<a class="need row" href="/inbox#${encodeURIComponent(contractItem(FIXTURE_NOW).id)}" data-row="true" data-kind="contract"[^>]*>`));
+  assert.match(markup, /<span class="row-kind wait-line"[^>]*>Contract<\/span>[^]*?<span class="age">40 min<\/span>/);
   assert.match(markup, /Contract of filter-api/);
-  assert.match(markup, /<span class="row-kind wait-line">Knowledge<\/span>[^]*?<span class="age">50 min<\/span>/);
+  assert.match(markup, /<span class="row-kind wait-line"[^>]*>Knowledge<\/span>[^]*?<span class="age">50 min<\/span>/);
   assert.ok(visibleText(markup).includes(knowledgeItem(FIXTURE_NOW).text));
 });
 

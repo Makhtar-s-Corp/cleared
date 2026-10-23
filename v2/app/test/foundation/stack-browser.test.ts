@@ -209,7 +209,8 @@ test('two sessions visited A, B, A, B: neither moves, the frame is not loaded ag
         }, path);
         await page.waitForURL((url: URL) => url.pathname === path);
       };
-      await page.setViewportSize({ width: 1280, height: 600 });
+      // Short enough for the tower (rows since lane 35) to scroll 240 px.
+      await page.setViewportSize({ width: 1280, height: 400 });
       await page.locator('#tower-body .tower').waitFor();
       await page.evaluate(() => window.scrollTo(0, 240));
       await page.waitForFunction(() => window.scrollY === 240);
