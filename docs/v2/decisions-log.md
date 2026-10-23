@@ -3873,7 +3873,7 @@ The LATER items are in the pull request's body as follow-ups.
 
 ## 2026-10-23: Owner decision: the LOCAL-20 merges reverted on both proof repositories' main, the last push to main
 
-**Decision.** On 2026-10-23 at 11:24 (Europe/Paris) the owner approved, in writing, reverting the LOCAL-20 merges on the main branch of both proof repositories with `git revert -m 1`: the filter API's merge `2127dd2` and the guestbook's merge `0d7fbb5`. The owner declared this the last push to main of the proof repositories. From then on, the proof runs from a frozen base branch and a disposable run branch in each repository (the entry below, [proof-clean-base.md](proof-clean-base.md)).
+**Decision.** On 2026-10-23 at 11:24 (Europe/Paris) the owner approved, in writing, reverting the LOCAL-20 merges on the main branch of both proof repositories with `git revert -m 1`: the filter API's merge `8c3f87a` (revert commit `2127dd2`) and the guestbook's merge `b9f65ce` (revert commit `0d7fbb5`). The owner declared this the last push to main of the proof repositories. From then on, the proof runs from a frozen base branch and a disposable run branch in each repository (the entry below, [proof-clean-base.md](proof-clean-base.md)).
 
 **What was done**, as relayed by the ops session:
 - Both merges were reverted with a revert commit each, pushed to main without force. No history was rewritten.
@@ -3972,3 +3972,17 @@ The LATER items are in the pull request's body as follow-ups.
 Followups 3 to 7 of the review stay open for the next round.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`.
+
+## 2026-10-23: Orchestrator decision: the proof repositories' checks also run on the run branch
+
+**Decision.** On 2026-10-23 at 14:19 (Europe/Paris) the orchestrator, not the owner, decided to add `proof-run` to the `push` and `pull_request` branches of `.github/workflows/checks.yml` in both proof repositories, by one commit on `proof-base` each (filter API `ffa50a7`, guestbook `8727d60`), then to recreate `proof-run` from `proof-base`. Main is not touched: its heads are still the revert commits `2127dd2` (filter API) and `0d7fbb5` (guestbook) of the entry above. The commits are reversible and stay on proof branches.
+
+**Why.** On the first run on the clean base, step 06 waited for a release card that could not come: the pull requests into `proof-run` had no checks, because the workflows only triggered on `main`.
+
+**Consequences.**
+- The running proof was stopped and relaunched. Checks now run on `proof-run` (filter API run 39952852338, guestbook run 39952857168).
+- `proof-run` was recreated from the new `proof-base` head in each repository. The frozen-base rule still holds: `proof-base` moves only on a written decision, as here.
+- An audit found one more `main` on the host side: the variable `CLEARED_V2_BASE` in the proof host's environment file, read only in one-service mode, was changed from `main` to `proof-run`. Watchers, brokers and workspace services were already on `proof-run`.
+- The run's start check must refuse a base whose checks do not trigger on the run branch: issue #277 (the start check verifies that checks trigger on the run branch).
+- No change to the milestone 2 plan is expected: its unknowns table has no item on the checks trigger.
+- Recorded by: the orchestrator, ops lane, branch `v2-j2-ops-proofci`; this entry also corrects the commit ids of the entry above (the ids it named are the revert commits, not the merges).
