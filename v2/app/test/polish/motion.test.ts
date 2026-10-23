@@ -27,7 +27,6 @@ test('the shared visually hidden class is the app sheet\'s only, not redefined b
   const { readdirSync } = await import('node:fs');
   const screens = new URL('../../web/screens/', import.meta.url);
   for (const screen of readdirSync(screens)) {
-    if (screen === 'inbox') continue;   // lane 37's sheet, beside lane 38
     for (const name of readdirSync(new URL(`${screen}/`, screens)).filter((n) => n.endsWith('.css'))) {
       assert.doesNotMatch(readFileSync(new URL(`${screen}/${name}`, screens), 'utf8'), /\.sr-only\s*\{/, `${screen}/${name}`);
     }

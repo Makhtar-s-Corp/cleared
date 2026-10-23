@@ -12,8 +12,8 @@ import { join } from 'node:path';
 const WEB = new URL('../../web/', import.meta.url).pathname;
 const MESSAGES = new URL('../../messages/', import.meta.url).pathname;
 const SHEET = readFileSync(join(WEB, 'styles/app.css'), 'utf8');
-// The inbox's sheet is lane 37's, which runs beside lane 38: it joins the scale once lane 37 has merged.
-const PENDING: ReadonlySet<string> = new Set(['screens/inbox/inbox.css']);
+// Sheets left off the scale: none since lane 38 brought the inbox's on, after lane 37's merge.
+const PENDING: ReadonlySet<string> = new Set();
 
 // The declarations of the first rule whose selector is exactly `selector`.
 function block(selector: string): Map<string, string> {
@@ -125,9 +125,11 @@ test('four spacing steps, three text sizes and two weights, and every sheet of t
 });
 
 test('transitions are short and move only opacity and transform, and stop for reduced motion', () => {
-  // Every sheet of the app (lane 38), the inbox's once lane 37 has merged.
+  // Every sheet of the app (lane 38).
   const sheets = files(WEB, /\.css$/).filter((file) => !PENDING.has(file.slice(WEB.length))).map((file) => readFileSync(file, 'utf8'));
-  const durations = sheets.flatMap((sheet) => [...sheet.matchAll(/transition:\s*([^;}]+)/g)].map((m) => m[1]!)).filter((value) => value !== 'none');
+  // The grace bar's fill is the one exception, as for the gradient: a 60-second timer that moves each second.
+  const durations = sheets.map((sheet) => sheet.replace(/\.grace-fill \{[^}]*\}/g, ''))
+    .flatMap((sheet) => [...sheet.matchAll(/transition:\s*([^;}]+)/g)].map((m) => m[1]!)).filter((value) => value !== 'none');
   for (const value of durations) {
     for (const part of value.split(',')) {
       assert.match(part.trim(), /^(opacity|transform) var\(--motion\)/, `transition: ${value}`);
