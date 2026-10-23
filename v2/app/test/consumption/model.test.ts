@@ -74,7 +74,10 @@ test('the headline names the first agent to reach 100 % before its reset, else s
   const hit = headline(data, 'en', en);
   assert.equal(hit.kind, 'hit');
   assert.equal(hit.harness, 'codex');
-  assert.match(hit.text, /^At the average pace of this cycle, Codex would reach 100% on Fri, Oct 23, 12:37 PM, before its reset on Sat, Oct 24, 09:41 PM\.$/);
+  // FIXTURE_NOW is a local time: the hours come from the data, not from a constant.
+  const codexQuota = quotaOf(harness(data, 'codex'))!;
+  const hitsAt = (codexQuota.projection as { hitsAt: string }).hitsAt;
+  assert.equal(flat(hit.text), flat(`At the average pace of this cycle, Codex would reach 100% on ${moment(hitsAt, ZONE, 'en')}, before its reset on ${moment(codexQuota.resetsAt, ZONE, 'en')}.`));
   assert.match(headline(data, 'fr', fr).text, new RegExp(`^Au rythme moyen de ce cycle, Codex atteindrait 100${NBSP}% le `));
   const calm = { ...data, harnesses: data.harnesses.map((h) => (h.harness === 'codex' ? { ...h, quotas: [] } : h)) };
   assert.deepEqual(headline(calm, 'en', en), { kind: 'ok', text: 'At the average pace of this cycle, no agent reaches 100% before its reset.' });
@@ -87,7 +90,7 @@ test('each projection is said before and after the reset', () => {
   const claude = harness(data, 'claude-code');
   const codex = harness(data, 'codex');
   const holds = projectionLines(quotaOf(claude)!, claude, ZONE, 'en', en);
-  assert.equal(holds.before, 'Claude Code holds until the reset on Sat, Oct 24, 09:41 PM, at about 82.3% used.');
+  assert.equal(flat(holds.before), flat(`Claude Code holds until the reset on ${moment(quotaOf(claude)!.resetsAt, ZONE, 'en')}, at about 82.3% used.`));
   assert.equal(holds.after, 'After the reset, the same pace would end the next cycle at about 82.3%.');
   const hits = projectionLines(quotaOf(codex)!, codex, ZONE, 'fr', fr);
   assert.match(hits.before, new RegExp(`^Codex atteint 100${NBSP}% le .*, avant le reset du `));
@@ -108,7 +111,7 @@ test('the reset is said as a human duration, never in milliseconds or as an ISO 
   assert.equal(flat(resetIn(quota, FIXTURE_NOW, fr)), 'Reset dans 3 j 12 h');
   assert.equal(flat(resetIn({ resetsAt: new Date(FIXTURE_NOW.getTime() + 42 * 60_000).toISOString() }, FIXTURE_NOW, fr)), 'Reset dans 42 min');
   assert.equal(flat(resetIn({ resetsAt: new Date(FIXTURE_NOW.getTime() - 5_000).toISOString() }, FIXTURE_NOW, en)), 'Resets in 0 min', 'a reset that has passed is never negative');
-  assert.equal(flat(measuredAt(read(), 'en', en)), 'Measured Wed, Oct 21, 09:41 AM');
+  assert.equal(flat(measuredAt(read(), 'en', en)), flat(`Measured ${moment(FIXTURE_NOW.toISOString(), ZONE, 'en')}`));
 });
 
 test('the cost is shown only for an agent that reported one, and says when it is partial', () => {
