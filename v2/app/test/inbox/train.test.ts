@@ -135,7 +135,7 @@ test('who gave a session plan its Go, and when', () => {
   assert.equal(goLine({ by: 'user-demo', at }, view, en), `Go given by you at ${hhmm}.`);
   assert.equal(goLine({ by: 'user-other', at }, view, en), `Go given by user-other at ${hhmm}.`);
   assert.equal(goLine({ by: 'delay', at }, view, en), `Started by itself at ${hhmm}: the delay passed with a high confidence.`);
-  assert.equal(goLine({ by: 'lead', at }, view, en), `Started by the lead at ${hhmm}, as part of the plan you approved.`);
+  assert.equal(goLine({ by: 'lead', at }, view, en), `Started by the Lead at ${hhmm}, as part of the plan you approved.`);
 });
 
 test('Go posts the session\'s Go route with no body; Change posts the message, trimmed', async () => {

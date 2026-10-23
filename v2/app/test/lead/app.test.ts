@@ -22,7 +22,7 @@ test('the app serves the lead\'s pages, catalog, stylesheet and scripts, and its
     }
     const catalog = await (await get('/messages/lead.json')).json() as Record<string, string>;
     assert.equal(catalog.plan_approve, 'Approve the plan and start');
-    assert.equal(catalog.lead_remember, 'What does the lead remember?');
+    assert.equal(catalog.lead_remember, 'What does the Lead remember?');
     const files = await pageFiles(app, '/lead', cookie);
     assert.ok(files.styles.length >= 2, 'the shell\'s sheet, then the lead\'s');
     assert.doesNotMatch(files.css, /gradient|prefers-color-scheme/i, 'flat colours, and the theme is the person\'s choice');

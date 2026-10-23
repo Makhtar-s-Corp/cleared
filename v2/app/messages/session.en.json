@@ -171,7 +171,7 @@
   "plan_change_failed": "The change was not sent. Try again.",
   "plan_go_by": "Go given by {who} at {time}",
   "plan_go_delay": "Started by itself at {time}: no answer in time, and its confidence is high",
-  "plan_go_lead": "Go given by the lead at {time}, for a plan you approved",
+  "plan_go_lead": "Go given by the Lead at {time}, for a plan you approved",
   "row_plan_low": "Proposed its session plan, low confidence",
   "row_plan_medium": "Proposed its session plan, medium confidence",
   "row_plan_high": "Proposed its session plan, high confidence",

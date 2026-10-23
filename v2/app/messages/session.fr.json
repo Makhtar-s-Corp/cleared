@@ -171,7 +171,7 @@
   "plan_change_failed": "La demande n'a pas été envoyée. Réessayez.",
   "plan_go_by": "Go donné par {who} à {time}",
   "plan_go_delay": "Lancé de lui-même à {time}\u00a0: pas de réponse à temps, et sa confiance est élevée",
-  "plan_go_lead": "Go donné par le chef de projet à {time}, pour un plan que vous avez approuvé",
+  "plan_go_lead": "Go donné par le Lead à {time}, pour un plan que vous avez approuvé",
   "row_plan_low": "A proposé son plan de session, confiance faible",
   "row_plan_medium": "A proposé son plan de session, confiance moyenne",
   "row_plan_high": "A proposé son plan de session, confiance élevée",

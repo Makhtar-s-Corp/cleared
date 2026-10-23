@@ -135,7 +135,7 @@ test('a recipe\'s form refuses a missing parameter before anything is posted, an
 
 test('what a run says, and where it leads: the plan of a ticket recipe, the lead for a goal', () => {
   assert.deepEqual(recipeDone({ accepted: true, plan: 'plan-9' }, update, t), { text: 'dependency-update runs as a one-ticket plan.', href: '/plans/plan-9' });
-  assert.deepEqual(recipeDone({ accepted: true, message: 4 }, review, t), { text: 'weekly-review was sent to the lead as a goal.', href: '/lead' });
+  assert.deepEqual(recipeDone({ accepted: true, message: 4 }, review, t), { text: 'weekly-review was sent to the Lead as a goal.', href: '/lead' });
   assert.deepEqual(recipeDone({ accepted: true }, update, t), { text: 'dependency-update runs as a one-ticket plan.', href: null });
 });
 

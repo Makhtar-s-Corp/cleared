@@ -71,7 +71,7 @@ test('the recipe form: a choice per recipe, the picked one\'s parameters, the re
   assert.doesNotMatch(/<button[^>]*data-act="recipe_run"[^>]*>/.exec(markup)?.[0] ?? '', /primary/);
   assert.match(html(<RecipeForm t={en} recipes={RECIPES} picked={recipeKey(update)} values={{ package: 'pg' }} note="" />), /<button[^>]*class="chip-button primary"[^>]*data-act="recipe_run"/);
   const goal = html(<RecipeForm t={en} recipes={RECIPES} picked="guestbook/weekly-review" values={{}} note="" />);
-  assert.match(goal, /A goal, sent to the lead/);
+  assert.match(goal, /A goal, sent to the Lead/);
   assert.match(goal, /This recipe takes no parameter\./);
   const none = html(<RecipeForm t={en} recipes={RECIPES} picked={null} values={{}} note="" />);
   assert.doesNotMatch(none, /data-param|data-act="recipe_run"/);

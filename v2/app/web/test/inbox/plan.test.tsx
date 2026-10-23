@@ -59,7 +59,7 @@ test('the plan\'s detail is lane 8\'s plan panel under the inbox\'s eyebrow, wit
   const html = renderInbox(viewOf({ selected: `plan:${PLAN_ID}`, open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Plan to approve', 'Lead', 'Open on the lead\'s screen', PLAN_TITLE,
+    'Plan to approve', 'Lead', 'Open on the Lead\'s screen', PLAN_TITLE,
     'A GET /entries.json route that lists the entries', 'The time each entry was written, on the page', 'After 1, 2, 3 and 4',
     'Full circuit', 'Fast lane', '45 min · 1.0%', '1h 15m · 1.4%',
     'About 2h 15m of work', '3.9% of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets',
@@ -69,7 +69,7 @@ test('the plan\'s detail is lane 8\'s plan panel under the inbox\'s eyebrow, wit
   assert.match(html, /<a class="d-link" href="\/plans\/plan-3">/);
   assert.doesNotMatch(html, /data-plan-action=/, 'the panel\'s own buttons are left out: the inbox\'s bar holds the gestures');
   assert.deepEqual(acts(html), ['approve_plan']);
-  assert.match(html, /<a href="\/plans\/plan-3" class="btn">Change the plan<\/a>/, 'Change goes to the lead\'s screen, where the reply field is');
+  assert.match(html, /<a href="\/plans\/plan-3" class="btn">Change the plan<\/a>/, 'Change goes to the Lead\'s screen, where the reply field is');
   assert.equal([...html.matchAll(/class="item-state /g)].length, 0, 'a proposed plan shows no item state');
 });
 
@@ -120,13 +120,13 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   const html = renderInbox(viewOf({ items, selected: question.id, open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Question from the lead', 'Lead', 'Answer on the lead\'s screen', LEAD_QUESTION_TEXT, 'Only the visible ones', 'Recommended',
-    'All of them, with a hidden flag', 'The lead waits for your answer on its screen.',
+    'Question from the Lead', 'Lead', 'Answer on the Lead\'s screen', LEAD_QUESTION_TEXT, 'Only the visible ones', 'Recommended',
+    'All of them, with a hidden flag', 'The Lead waits for your answer on its screen.',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the lead\'s session');
-  assert.deepEqual(acts(html), [], 'no Send: the answer is given on the lead\'s screen');
-  assert.match(html, /<a href="\/lead" class="btn">Answer on the lead&#39;s screen<\/a>/);
-  assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the lead\'s screen, in the bar');
+  assert.doesNotMatch(html, /data-free=/, 'no free answer here: the session answer route refuses the Lead\'s session');
+  assert.deepEqual(acts(html), [], 'no Send: the answer is given on the Lead\'s screen');
+  assert.match(html, /<a href="\/lead" class="btn">Answer on the Lead&#39;s screen<\/a>/);
+  assert.equal([...html.matchAll(/href="\/lead"/g)].length, 1, 'one way to the Lead\'s screen, in the bar');
   assert.match(html, /class="questions waits read"/);
   assert.doesNotMatch(html, /<button[^>]*data-answer=/, 'its choices are lines, not buttons');
   assert.match(html, /data-choices-state="read"/);

@@ -67,9 +67,9 @@ test('the English tower reads as the capture', async () => {
   const text = visibleText(html).join('\n').replace(/\n·\n/g, ' · ');
   for (const expected of [
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12 min', 'Permission', '3 min', 'Plan', '25 min', 'Goal',
-    'The lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
+    'The Lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Install date-fns', 'The command calls the network. The author is paused until you answer.',
-    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
+    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the Lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /\sstyle=/, 'no inline style: the page runs under default-src \'self\'');
 });

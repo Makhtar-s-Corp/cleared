@@ -127,10 +127,11 @@ test('a screen\'s own keys join the sheet of that screen only, and every label i
     for (const shortcut of SHORTCUTS) assert.ok(catalog[shortcut.label], `${language}: ${shortcut.label}`);
     for (const group of new Set(SHORTCUTS.map((s) => `keys_group_${s.scope}`))) assert.ok(catalog[group], `${language}: ${group}`);
   }
-  assert.equal(keyLabel('Mod', true), '⌘');
-  assert.equal(keyLabel('Mod', false), 'Ctrl');
-  assert.equal(keyLabel('Esc', true), 'Esc');
-  assert.equal(keyLabel('g', true), 'G');
+  const en = (key: string) => loadCatalog('shell', 'en')[key] ?? key;
+  assert.equal(keyLabel('Mod', true, en), '⌘');
+  assert.equal(keyLabel('Mod', false, en), 'Ctrl');
+  assert.equal(keyLabel('Esc', true, en), 'Esc');
+  assert.equal(keyLabel('g', true, en), 'G');
 });
 
 test('[ and ? typed with AltGr (Ctrl and Alt on Windows, as on a French keyboard) still fold the sidebar and open the sheet', () => {

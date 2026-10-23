@@ -50,7 +50,7 @@ export default function Palette({ t, items, dark, onRun, onClose }: {
             {/* A phone has no Esc: the palette closes from here too. */}
             <Button variant="ghost" className="icon" id="palette-close" aria-label={t('keys_close')} onClick={onClose}><X size={16} aria-hidden="true" /></Button>
           </CommandInput>
-          <CommandList>
+          <CommandList label={t('palette_results')}>
             <CommandEmpty>{t('palette_empty')}</CommandEmpty>
             {grouped.map(({ group, items: rows }) => (
               <CommandGroup key={group} value={group} heading={t(GROUP_LABEL[group])} data-group={group}>
@@ -62,7 +62,7 @@ export default function Palette({ t, items, dark, onRun, onClose }: {
                         : Glyph ? <Glyph size={16} aria-hidden="true" /> : <Circle size={16} aria-hidden="true" />}
                       <span className="palette-label">{item.label}</span>
                       {item.detail ? <span className="palette-detail">{item.detail}</span> : null}
-                      {item.shortcut ? <Keys keys={item.shortcut} /> : null}
+                      {item.shortcut ? <Keys keys={item.shortcut} t={t} /> : null}
                     </CommandItem>
                   );
                 })}

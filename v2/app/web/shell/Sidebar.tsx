@@ -65,8 +65,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           <SidebarSimple size={16} aria-hidden="true" />
         </Button>
       </div>
-      <button type="button" className="search" id="palette-open" aria-label={t('palette_open')} aria-keyshortcuts="Meta+K Control+K" data-tip={`${t('palette_open')} · ${keyLabel('Mod', isMac())} K`} onClick={props.onSearch}>
-        <MagnifyingGlass size={16} aria-hidden="true" /><span className="search-text">{t('palette_open')}</span><Keys keys={['Mod+K']} />
+      <button type="button" className="search" id="palette-open" aria-label={t('palette_open')} aria-keyshortcuts="Meta+K Control+K" data-tip={`${t('palette_open')} · ${keyLabel('Mod', isMac(), t)} K`} onClick={props.onSearch}>
+        <MagnifyingGlass size={16} aria-hidden="true" /><span className="search-text">{t('palette_open')}</span><Keys keys={['Mod+K']} t={t} />
       </button>
       <nav className="side-nav" id="nav" aria-label={t('nav_label')}>
         <ul>
@@ -79,7 +79,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
                   data-tip={`${label} · ${item.chord.join(' ')}${item.screen === 'lead' && props.lead !== 'unknown' ? ` · ${t(`side_lead_${props.lead}`)}` : ''}`}>
                   <Glyph size={16} weight={screen === item.screen ? 'fill' : 'regular'} aria-hidden="true" />
                   <span className="nav-label">{label}</span>
-                  <Keys keys={item.chord} />
+                  <Keys keys={item.chord} t={t} />
                   {item.screen === 'inbox' ? (
                     <>
                       <span className="count" id="inbox-count" hidden={badge === null} aria-hidden="true">{badge ?? ''}</span>
