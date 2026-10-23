@@ -53,7 +53,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -109,11 +109,14 @@ export async function capture(options: { readonly out: string; readonly screens?
         const sessions = await (await page.request.get(`${app.base}/api/service/sessions`)).json() as { id: string; role: string }[];
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
         const reviewer = sessions.find((s) => s.role === 'reviewer') ?? sessions[0];
+        const inbox = await (await page.request.get(`${app.base}/api/service/inbox`)).json() as { id: string; kind: string; state: string }[];
+        const permission = inbox.find((item) => item.kind === 'permission' && item.state === 'waiting');
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
           'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
           review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
+          'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox',
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -152,6 +155,16 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.keyboard.press(overlay === 'palette' ? 'Control+k' : 'Shift+Slash');
             await page.locator(overlay === 'palette' ? '#palette' : '#shortcuts').waitFor();
             await page.waitForTimeout(250);
+          }
+          if (screen === 'inbox-handled') {
+            // From an item's address, a goto to /inbox moves only the hash: the list comes back.
+            await page.evaluate(() => { if (document.location.hash) document.location.hash = ''; });
+            await settle(page);
+            const toggle = page.locator('#handled-toggle');
+            if (await toggle.count() > 0) await toggle.click();
+            const handled = page.locator('#handled, .handled-title').first();
+            if (await handled.count() > 0) await handled.scrollIntoViewIfNeeded();
+            await settle(page);
           }
           let folded = false;
           if (screen === 'rail-tooltip') {

@@ -31,7 +31,7 @@ import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
 import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
-import { contractItem, knowledgeItem } from './inbox.ts';
+import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -74,6 +74,12 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   // LOCAL-152's reviewer resumes on its own story (envelopeReviewer, below).
   const human = fixtureHuman({ resumed: (id) => (id === envelopeReviewer?.id ? ENVELOPE_RESUMED : undefined) });
   const decided: (ContractItem | KnowledgeItem)[] = [contractItem(now()), knowledgeItem(now())];
+  // Lane 37: the reviewer's compound request, and two that no longer wait (one answered, one expired).
+  const asker = (find: (s: { readonly role: string; readonly ticket: string }) => boolean) => {
+    const session = fixture.sessions.find(find) ?? fixture.sessions[0];
+    return { id: session?.id ?? '', ticket: session?.ticket ?? '' };
+  };
+  const requests = requestItems(now(), { reviewer: asker((s) => s.role === 'reviewer'), author: asker((s) => s.ticket === 'LOCAL-160') });
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
   // The first author's ticket and LOCAL-163 run in four steps, each live
   // author on the service step of the filter API (lane 23's shape).
@@ -128,7 +134,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     });
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
-    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...decided, ...lead.inbox]);
+    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...requests.filter((item) => item.state === 'waiting'), ...decided, ...lead.inbox, ...requests.filter((item) => item.state === 'handled')]);
     if (method === 'GET' && collection === 'recipes' && parts.length === 1) return sendJson(response, 200, RECIPES);
     if (method === 'GET' && collection === 'schedules' && parts.length === 1) return sendJson(response, 200, schedulesFixture(now()));
     if (method === 'POST' && collection === 'recipes' && id && sub === 'run' && parts.length === 3) {

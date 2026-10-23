@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { API_ROUTES, ASK_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, TERMINAL_INPUT_MAX_BYTES, TERMINAL_ROUTES, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace, type Ask, type ContractItem, type FileWrite, type FileWriteRefusal, type HumanEdit, type KnowledgeItem, type NextInboxItem, type Recipe, type Schedule, type SessionPlanItem, type TerminalChunk, type TicketStep } from '../../src/api/types.ts';
+import { API_ROUTES, ASK_ROUTES, REASON_CODES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, TERMINAL_INPUT_MAX_BYTES, TERMINAL_ROUTES, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type PermissionItem, type ReasonCode, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace, type Ask, type ContractItem, type FileWrite, type FileWriteRefusal, type HumanEdit, type KnowledgeItem, type NextInboxItem, type Recipe, type Schedule, type SessionPlanItem, type TerminalChunk, type TicketStep } from '../../src/api/types.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import type { SessionEvent } from '../../src/session/events.ts';
 
@@ -187,4 +187,20 @@ test('the shapes of waves 9 to 11 (lane 17) type check with real values', () => 
   assert.equal(write.confirm, 'install.package');
   assert.equal(refusal.confirmable, false);
   assert.equal(edit.via, 'editor');
+});
+
+// Lane 37 (docs/v2/ui-overhaul-plan.md, 2.5.3): why a request asks, as a code
+// the app translates, beside the policy's own sentence. The policy lane fills
+// it; until then the field is absent and the app shows the sentence.
+test('a permission request may carry the code of its reason, from a closed list', () => {
+  assert.deepEqual([...REASON_CODES], ['compound', 'not_allowed', 'network', 'dependency', 'outside_checkout', 'unknown']);
+  const base = { id: 'permission:s1:r1', kind: 'permission' as const, ticket: 'LOCAL-14', project: 'guestbook', since: '2026-10-23T08:00:00.000Z', state: 'waiting' as const, sessionId: 's1', requestId: 'r1', tool: 'Bash' };
+  const coded: PermissionItem = {
+    ...base, input: { kind: 'execute', command: 'git merge-base main HEAD' },
+    suggestion: { decision: 'ask', rule: 'default', reason: 'git merge-base main HEAD is not a command the policy allows on its own' }, reasonCode: 'not_allowed',
+  };
+  const before: PermissionItem = { ...base, input: { kind: 'execute', command: 'npm test' }, suggestion: { decision: 'ask', rule: 'default', reason: 'Not on the list.' } };
+  const code: ReasonCode | undefined = before.reasonCode;
+  assert.equal(coded.reasonCode, 'not_allowed');
+  assert.equal(code, undefined);
 });

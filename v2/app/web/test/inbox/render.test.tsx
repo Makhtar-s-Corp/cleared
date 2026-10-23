@@ -14,8 +14,9 @@ import { type InboxView, type Local } from '../../screens/inbox/model.ts';
 import { strings, visibleText } from '../render.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+// The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 
 function viewOf(overrides: Partial<InboxView> = {}): InboxView {
   const fixture = inboxFixture(FIXTURE_NOW);
@@ -29,18 +30,29 @@ const idOf = (kind: InboxItem['kind'], state: InboxItem['state'] = 'waiting') =>
 const count = (html: string, pattern: RegExp) => [...html.matchAll(pattern)].length;
 const text = (view: InboxView, t: Translate = en) => visibleText(renderInbox(view, t));
 
-test('the list reads as the capture: what waits, with its time, then what was handled today', () => {
+test('the list reads as the capture: what waits, with its time, then what was handled, folded with its count (lane 37)', () => {
   const shown = text(viewOf());
   for (const expected of [
-    'Inbox', '4 waiting',
+    'Waiting · 4',
     'Release', '12 min', RELEASE_TITLE, `${RELEASE_TICKET} · Reviewed by Sonnet, checks green`,
-    'Permission', '3 min', 'Install date-fns to group dates by week', 'LOCAL-161 · author paused',
+    'Permission', '3 min', 'Install date-fns', 'LOCAL-161 · author paused',
     'Question', '1 h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
-    'Handled today', 'Apply the new migration to the test database', 'LOCAL-160 · no longer waits for you',
+    'Handled · 1',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
+  assert.doesNotMatch(renderInbox(viewOf(), en), /<h1/, 'no heading repeats the top bar\'s');
+  assert.ok(!shown.includes('Install date-fns to group dates by week'), 'the title is the app\'s sentence, not the harness\'s');
   const html = renderInbox(viewOf(), en);
-  const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(order.map((id) => id?.split(':')[0]), ['release', 'permission', 'plan', 'question', 'permission'], 'release first, then by kind; handled last');
+  const order = (markup: string) => [...markup.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]?.split(':')[0]);
+  assert.deepEqual(order(html), ['release', 'permission', 'plan', 'question'], 'release first, then by kind; the handled group folded');
+  assert.match(html, /<button[^>]*id="handled-toggle"[^>]*aria-expanded="false"/);
+  const open = renderInbox(viewOf(), en, { handledOpen: true });
+  assert.match(open, /<button[^>]*id="handled-toggle"[^>]*aria-expanded="true"/);
+  assert.deepEqual(order(open), ['release', 'permission', 'plan', 'question', 'permission'], 'opened, the handled items come last');
+  for (const expected of ['Run the db:migrate script', 'LOCAL-160 · no longer waits for you']) assert.ok(visibleText(open).includes(expected), `missing: ${expected}`);
+  assert.match(open, /<a class="item handled"/);
+  // An address that names a handled item opens its group.
+  const named = renderInbox(viewOf({ selected: idOf('permission', 'handled') }), en);
+  assert.match(named, /aria-expanded="true"/);
 });
 
 test('two releases with the same title, from two tickets, are told apart in the list by their ticket', () => {
@@ -100,18 +112,24 @@ test('a release with no capture says so instead of an empty frame, and a capture
   assert.ok(shown.includes('checks running'));
 });
 
-test('a permission shows the command, what for, why it asks, and its three answers with a reason field for a deny', () => {
+test('a permission asks its question, offers its three answers first, then says who asks, and folds the command with the harness\'s and the policy\'s words', () => {
   const html = renderInbox(viewOf({ selected: idOf('permission'), open: true }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Permission', 'LOCAL-161', 'Open the session', 'Wants to run', 'npm install date-fns', 'Upcoming: group entries by week',
-    'What for', 'Install date-fns to group dates by week', 'Why it asks', 'Network access and a new dependency.',
+    'Permission', 'LOCAL-161', 'Open the session', 'Allow the author to install date-fns?', 'Upcoming: group entries by week',
     'Session', 'Author · Opus, paused for 3 min', 'Allow once', 'Always in this project', 'Deny',
+    'Command', 'npm install date-fns', 'What for', 'Install date-fns to group dates by week', 'The policy\'s words', 'Network access and a new dependency.',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-author">/);
-  assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['reject_once', 'allow_always', 'allow_once']);
+  assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once'], 'the one that lets the work go on first');
+  // The answers come before what the detail explains, and the command is folded.
+  assert.ok(html.indexOf('data-act="allow_once"') < html.indexOf('<dl class="facts">'));
+  assert.match(html, /<details class="fold" id="fold"><summary>/);
+  assert.doesNotMatch(html, /<details class="fold" id="fold" open/);
+  assert.match(html, /aria-keyshortcuts="A"/);
   assert.match(html, /<input[^>]*id="deny-reason"/);
   assert.match(html, /<label[^>]*for="deny-reason"/);
+  assert.match(html, /<div class="d-actions" id="d-actions"><\/div>/, 'the bar at the foot holds nothing for a request');
 });
 
 test('a question shows each question, its choices and a free answer, through the clickable answers, sent from the bar', () => {
@@ -182,6 +200,7 @@ test('every word on the screen comes from the catalog or from the data', () => {
   const fixture = inboxFixture(FIXTURE_NOW);
   const allowed = strings([fixture.items, fixture.tickets, fixture.sessions]);
   allowed.add('3f9c2a1').add('demo').add('Show “Anonymous”');      // the short head, the user, a label without "(Recommended)"
+  for (const cap of ['A', 'T', 'R']) allowed.add(cap);               // the answers' key caps (SCREEN_KEYS.inbox)
   for (const item of fixture.items) {
     for (const local of [undefined, { kind: 'grace', dueAt: new Date(FIXTURE_NOW.getTime() + 30_000).toISOString() }, { kind: 'confirm' }, { kind: 'settled' }] as (Local | undefined)[]) {
       const html = renderInbox(viewOf({ selected: item.id, open: true, local: new Map(local ? [[item.id, local]] : []) }), sentinel);

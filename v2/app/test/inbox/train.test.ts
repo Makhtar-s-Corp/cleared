@@ -113,15 +113,15 @@ test('the detail redraws when the train moves, and when a session plan gets its 
 test('a session plan in the list: its ticket\'s title, then its confidence and its steps', () => {
   const plan = sessionPlanItem(FIXTURE_NOW, 'high');
   const view = viewOf([plan]);
-  assert.equal(itemTitle(plan, view), 'Moderation: a held entry waits for a moderator');
+  assert.equal(itemTitle(plan, view, en), 'Moderation: a held entry waits for a moderator');
   assert.equal(itemLine(plan, view, en), 'LOCAL-165 · High confidence · 4 steps');
-  assert.equal(itemTitle(plan, viewOf([plan], { tickets: [] })), plan.plan.steps[0], 'with no ticket read, its first step');
+  assert.equal(itemTitle(plan, viewOf([plan], { tickets: [] }), en), plan.plan.steps[0], 'with no ticket read, its first step');
   assert.equal(itemLine({ ...plan, plan: { ...plan.plan, steps: ['One step'] } }, view, fr), 'LOCAL-165 · Confiance haute · 1 étape');
 });
 
 test('the contract and knowledge items are named in the list, for reading', () => {
   const view = viewOf([]);
-  assert.equal(itemTitle(contractItem(FIXTURE_NOW), view), 'openapi.yaml');
+  assert.equal(itemTitle(contractItem(FIXTURE_NOW), view, en), 'openapi.yaml');
   assert.equal(itemLine(contractItem(FIXTURE_NOW), view, en), 'LOCAL-170 · contract of filter-api');
   assert.equal(itemLine(knowledgeItem(FIXTURE_NOW), view, en), 'LOCAL-158 · for guestbook');
   assert.equal(itemLine({ ...knowledgeItem(FIXTURE_NOW), level: 'workspace', service: null }, view, en), 'LOCAL-158 · for the workspace');

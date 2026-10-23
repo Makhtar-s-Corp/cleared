@@ -11,22 +11,33 @@
 .inbox .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .inbox-error { padding: 20px 28px; max-width: 560px; }
 
-/* the list */
-.inbox-list { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.inbox-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-.inbox-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -.02em; line-height: 1.25; }
-.items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.item { display: flex; flex-direction: column; padding: 12px 14px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); color: var(--text); text-decoration: none; transition: box-shadow 200ms var(--ease); }
-.item:hover { text-decoration: none; box-shadow: var(--e-control); }
-.item.current { box-shadow: 0 0 0 1.5px var(--ink); }
-.item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 12px; }
-.chip { padding: 1px 8px; border-radius: 999px; background: var(--awaiting-pill); color: var(--awaiting-text); font-weight: 500; white-space: nowrap; }
-.item.handled .chip { background: var(--sunken); color: var(--text-muted); }
+/* the list (lane 37): what waits, then the folded "Traité" group, as rows on hairlines like the tower's. The top
+   bar names the screen, so the list has no heading of its own. The row shown is filled; the keyboard's focus is
+   the app's outline ring, a different look (lane 34's art director). */
+.inbox-list { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.group-title { display: flex; align-items: center; min-height: 28px; margin-bottom: var(--space-1); color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.items { list-style: none; margin: 0 calc(-1 * var(--space-2)); padding: 0; display: flex; flex-direction: column; }
+.items > li + li { border-top: 1px solid var(--hairline); }
+.items > li:has(.item.current) + li, .items > li:has(.item.current) { border-top-color: transparent; }
+.item { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2); border-radius: var(--radius); color: var(--text); text-decoration: none; transition: background-color var(--motion) var(--ease); }
+.item:hover { text-decoration: none; background: var(--tab-fill); }
+.item.current { background: var(--selected); }
+.item-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.chip { padding: 0 var(--space-2); border-radius: 999px; background: var(--awaiting-pill); color: var(--awaiting-text); font-weight: var(--weight-strong); white-space: nowrap; }
 .since { margin-left: auto; color: var(--text-faint); white-space: nowrap; }
-.item-title { font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
-.item-line { margin-top: 2px; font-size: 12.5px; color: var(--text-faint); overflow-wrap: anywhere; }
-.handled-title { margin-top: 8px; font-size: 12px; font-weight: 400; color: var(--text-faint); }
-.inbox-list .empty strong { font-weight: 500; color: var(--text-secondary); }
+.item-title { font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; overflow-wrap: anywhere; }
+.item-line { font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+/* a request that waits, from 1280 px: its three answers under its line, on the row's left edge */
+.items > li.with-answers { padding-bottom: var(--space-2); }
+.row-answers { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: 0 var(--space-2); }
+/* what no longer waits: folded under what does, lighter once opened */
+.group-toggle { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 28px; margin-left: calc(-1 * var(--space-1)); padding: 0 var(--space-1); border: 0; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.group-toggle:hover { background: var(--tab-fill); color: var(--text); }
+.caret { flex: none; transition: transform var(--motion) var(--ease); }
+.group-toggle[aria-expanded="true"] .caret, .fold[open] > summary .caret { transform: rotate(90deg); }
+.item.handled .chip { background: transparent; padding: 0; color: var(--text-faint); font-weight: var(--weight-regular); }
+.item.handled .item-title { font-weight: var(--weight-regular); color: var(--text-secondary); }
+.inbox-list .inbox-empty { padding: var(--space-2) 0; }
 
 /* the detail */
 .detail:focus { outline: none; }
@@ -70,6 +81,29 @@
 .facts dt { color: var(--text-faint); }
 .facts dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
 .facts .sep { margin: 0 6px; color: var(--text-faint); }
+
+/* a permission (lane 37): the question, then its answers at the top of the detail, at every width; the command
+   folded under, one part per line after its operator */
+.d-ask { text-wrap: balance; }
+.d-answers { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-1) 0 var(--space-2); }
+.d-answers .d-buttons { margin-left: 0; justify-content: flex-start; }
+.d-answers .btn { flex-direction: row; gap: var(--space-2); min-width: 0; }
+.d-answers .btn kbd { background: transparent; box-shadow: inset 0 0 0 1px currentColor; color: inherit; opacity: .6; }
+.d-answers .deny-reason { flex: 1 1 100%; }
+.d-answers .d-done { flex: 1 1 100%; padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--sunken); }
+.d-actions:empty { display: none; }
+.fold { margin-top: var(--space-3); border-top: 1px solid var(--hairline); padding-top: var(--space-2); }
+.fold > summary { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; color: var(--text-muted); font-size: var(--text-sm); cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary:hover { color: var(--text); }
+.fold-label { flex: none; font-weight: var(--weight-strong); }
+.d-body .fold-peek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; background: none; color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.fold[open] .fold-peek { display: none; }
+.fold-command { margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--sunken); overflow-x: auto; }
+.d-body .fold-command code { display: block; padding: 0; background: none; font: var(--weight-regular) var(--text-sm)/1.6 var(--mono); color: var(--text); white-space: pre; }
+.fold-line { display: block; }
+.fold-line .op { display: inline-block; min-width: 3ch; margin-right: var(--space-1); color: var(--text-faint); }
+.fold-facts { margin-top: var(--space-2); }
 
 /* a question */
 .questions { display: flex; flex-direction: column; gap: 22px; margin-top: 10px; }
@@ -255,4 +289,4 @@ a.btn, a.btn:hover { text-decoration: none; }
 @media (max-width: 399px) { .d-buttons:has(.ask-lead) { flex-direction: column; } .d-buttons:has(.ask-lead) .btn { flex: none; width: 100%; } }
 .btn.ask-lead { text-align: center; }
 @media (max-width: 359px) { .shots { flex-direction: column; } .shots.frame-phone .shot { flex-basis: auto; width: 70%; } }
-@media (prefers-reduced-motion: reduce) { .item { transition: none; } .grace-fill { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .item, .caret { transition: none; } .grace-fill { transition: none; } }

@@ -13,8 +13,9 @@ import { translator, type Translate } from '../../lib/i18n.ts';
 import type { InboxView, Local } from '../../screens/inbox/model.ts';
 import { renderDetail, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+// The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 const sentinel: Translate = (key) => `«${key}»`;
 const ME = 'user-demo';
 

@@ -139,5 +139,10 @@
   "intent_checks_any": "lancer les tests",
   "intent_and": "et",
   "intent_alone": "{name} …",
-  "intent_discard": "annuler des changements"
+  "intent_discard": "annuler des changements",
+  "key_allow_once": "Autoriser une fois la demande affichée",
+  "key_allow_always": "L'autoriser toujours pour ce projet",
+  "key_reject_once": "Refuser la demande affichée",
+  "key_peek": "Afficher l'élément de la ligne, sans la quitter",
+  "key_cap_space": "Espace"
 }

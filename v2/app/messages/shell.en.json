@@ -139,5 +139,10 @@
   "intent_checks_any": "run the tests",
   "intent_and": "and",
   "intent_alone": "{name} …",
-  "intent_discard": "discard changes"
+  "intent_discard": "discard changes",
+  "key_allow_once": "Allow the request shown once",
+  "key_allow_always": "Always allow it in this project",
+  "key_reject_once": "Deny the request shown",
+  "key_peek": "Show the row's item, staying on the row",
+  "key_cap_space": "Space"
 }

@@ -87,6 +87,14 @@ type InboxBase = {
   readonly state: 'waiting' | 'handled';
 };
 
+// Why a request asks, as a code the app translates (docs/v2/ui-overhaul-plan.md,
+// 2.5.3, lane 37): a compound the policy does not read word for word, a
+// command it does not allow on its own, the network, a new dependency, a path
+// outside the session's checkout, or none of these. The policy lane sets it
+// beside the verdict's `reason`; absent, or `unknown`, the app shows the reason.
+export const REASON_CODES = ['compound', 'not_allowed', 'network', 'dependency', 'outside_checkout', 'unknown'] as const;
+export type ReasonCode = (typeof REASON_CODES)[number];
+
 export type PermissionItem = InboxBase & {
   readonly kind: 'permission';
   readonly sessionId: SessionId;
@@ -94,6 +102,7 @@ export type PermissionItem = InboxBase & {
   readonly tool: string;
   readonly input: ToolInput;
   readonly suggestion: Verdict;
+  readonly reasonCode?: ReasonCode;
 };
 
 export type QuestionItem = InboxBase & {
