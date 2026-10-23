@@ -679,6 +679,60 @@ Usage: codex queue [OPTIONS] --thread <THREAD> --message <TEXT>
 
 Also run without pasting: `claude mcp --help`, `claude mcp serve --help`, `claude auth --help`, `codex resume --help`, `codex mcp --help`, `codex login --help`, `codex features list`, `codex debug --help`. `codex mcp-server --help` and `codex proto --help` print the top-level help: neither is a subcommand in 0.163.0.
 
+## Cursor harness (milestone 3, lane j3-cursor-harness)
+
+Written on 2026-10-23 with **no Cursor account and no Cursor program on this server**. Everything below is split in two: what the official pages say (read that day, not run) and what the tests prove against fakes. Nothing here was observed from a real Cursor run. The owner's trial list is at the end.
+
+### From the documentation (not verified by a run)
+
+Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference/output-format, /cli/reference/permissions, /agent/hooks.
+
+- The program is `agent` in the current pages (`cursor-agent` earlier). The adapter looks for both.
+- `agent -p "<prompt>" --output-format stream-json --model <m>` runs one turn and prints one JSON object per line: `system/init` (with `session_id`, the chat's id), `user`, `assistant`, `tool_call` (`started` then `completed`, correlated by `call_id`), then `result/success`. The page documents **no token counts and no cost** in these lines. A failed turn has no `result` line; the error goes to stderr.
+- `agent --resume <chatId>` resumes a chat, `agent create-chat` makes an empty one, `agent status` shows the authentication state, `agent login` signs in. `CURSOR_API_KEY` (or `--api-key`) authenticates. `--force` allows commands unless explicitly denied.
+- Permissions are a JSON file, `<project>/.cursor/cli.json` or `~/.cursor/cli-config.json`, with `allow` and `deny` lists of `Shell(cmd)`, `Shell(cmd:args)`, `Read(glob)`, `Write(glob)`, `WebFetch(domain)`, `Mcp(server:tool)`. Deny wins over allow. Print mode has no prompt.
+- Hooks (`beforeShellExecution`, `beforeReadFile`, `preToolUse`, with allow / deny / ask answers) are documented for the desktop app. The pages do not say the CLI runs them. The adapter therefore does not depend on them.
+
+### How the adapter drives it
+
+| Need | Claude Code | Cursor (this adapter) |
+| --- | --- | --- |
+| Process | one runner per session, stdin and stdout kept | one `docker exec` per message, the prompt on its standard input, resumed on the chat id kept in `<state>/cursor-chats/<session>.chat` |
+| Login | the mounted file, read in the container into the harness's environment | the mounted Cursor API key file (`CLEARED_CURSOR_API_KEY_FILE`, else `<state>/cursor.key`), read in the container into `CURSOR_API_KEY`; never `--api-key` |
+| Guard | policy asked before every call, an ask waits in the inbox | **two layers, failing closed** (below) |
+| Usage | tokens, cost, context share, rate windows | the model only, `total_cost_usd: null`; nothing estimated |
+| Take over | the runner releases its harness, `claude --resume <id>` in the web terminal | the running turn ends, `agent --resume <chat> --model <m>` in the web terminal, messages refused until Give back |
+| Give back | the runner reloads the transcript | the next turn resumes the chat the human left |
+
+**Guard.** Print mode gives no way to hold a call until a person answers, so an inbox "ask" cannot work mid-turn. The adapter:
+
+1. Compiles the session's policy into `.cursor/cli.json` before each turn (`cursor/permissions.ts`): deny first (the credential file, `.env*`, `*.pem`, `/proc/*/environ`, writes to `.git`, `.claude`, `.cursor` and `CLAUDE.md`, `printenv`, `env`, `sudo`, `curl`, `ssh`, `docker`), then a narrow allow (reads in the checkout; writes there for an author whose plan is approved; the policy's safe commands and package scripts word by word). `--force` is never passed. The file is kept out of git (`.cursor/` is in the checkout's exclude list) and the policy denies the session's own writes to `.cursor`.
+2. Evaluates every `tool_call` Cursor reports with the unchanged policy (`policy.ts`). Only an allow lets the turn go on. A deny, **and an ask**, end the turn: the program is killed in the container, the thread shows the refusal (`cleared.permission_answered`, rule from the policy) and an error with the code `policy_stop`, and the session waits for the next message. This layer sees a call when it starts, so it is a tripwire, not a prevention; layer 1 is what refuses.
+
+**Failures** are classified by exit code and a stderr pattern into fixed sentences (`cursor_login`, `cursor_not_installed`, `cursor_exit`, `cursor_launch`). The program's own words are never journaled.
+
+**Image.** The session image does not contain Cursor. No pinned, verifiable install source was found (the documented install is `curl https://cursor.com/install | bash`, unpinned), so nothing was added to `images/session/Dockerfile`. A turn in an image without it ends with `cursor_not_installed`. `CursorRuntime.image` names an image that has it.
+
+**Probe.** `node scripts/doctor.ts cursor` runs `--version` and `status` only, never `login`, and prints `not_installed`, `not_signed_in` or `ready`. On this server (2026-10-23, no Cursor): `cursor: not_installed`, exit 0.
+
+### Proven with fakes (`test/session/cursor/`)
+
+- The mapper on lines written from the documented format (`fixtures.ts`, labelled as not recorded): text, read, write, shell, result, errors, no tokens and no cost, the model as usage.
+- The adapter on a fake launcher, no Docker: prompt on stdin and never in a command word, chat id kept and resumed, a denied read stops the turn, an ask stops the turn and leaves nothing in the inbox, allowed calls pass, failures by code without the program's words, interrupt, stop, handover rejected, Take over ends the turn and refuses messages, Give back resumes the chat, a malformed chat id is not kept.
+- The launcher programs run by this machine's `sh` with a stand-in `agent`: the key reaches the environment only, the permissions file is written, the former program name is found, exit 127 and 3.
+- The permissions compiled from the policy; the probe with stand-in programs; `docker exec` built on the labelled container only.
+
+### Needs a real Cursor trial by the owner
+
+1. Record one real `stream-json` turn and replace `fixtures.ts` with it (tool names other than `read` and `write` are guessed: `shell`, `grep`, `glob`, `edit`, `delete`; any unknown tool is sent to the policy under its own name, which asks, so it stops the turn).
+2. Confirm that `.cursor/cli.json` is honoured in print mode, that deny lists refuse without `--force`, and that the `Shell(cmd:args)` form matches `npm test` and `git commit -m x`. A syntax that does not match only makes the agent unable to run the command (it fails closed).
+3. Confirm `CURSOR_CONFIG_DIR` is honoured so chats persist on the session volume, and that `--resume` finds the chat after a stopped and restarted container.
+4. Confirm the sign-in the session can use: an API key file is supported; the host's existing browser login (owner note of 2026-10-22) is not, since where it lives is unverified.
+5. Confirm the egress hosts (`CURSOR_HOSTS` in `cursor.ts`) and install Cursor in a session image.
+6. Confirm Cursor reads the generated `CLAUDE.md` or an `AGENTS.md` for the briefing.
+7. Whether the CLI runs hooks: if it does, a `beforeShellExecution` hook would give a true ask and make layer 2 a real gate.
+8. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
+
 ## v1 adapter contract
 
 This is the contract implemented today by `adapters/claude.sh` and `adapters/codex.sh`, which run one `run` per prompt.

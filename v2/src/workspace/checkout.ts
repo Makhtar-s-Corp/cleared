@@ -30,7 +30,7 @@ export class CheckoutError extends Error {
 export const BASE_REF = 'refs/cleared/base';
 
 // Generated or captured by Cleared, never part of the project's history.
-export const EXCLUDED = ['/CLAUDE.md', '/HANDOVER.md'] as const;
+export const EXCLUDED = ['/CLAUDE.md', '/HANDOVER.md', '/.cursor/'] as const;
 
 // Settings that would run a program, written into the command line so they
 // win over any configuration file of the repository.

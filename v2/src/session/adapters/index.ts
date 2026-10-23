@@ -1,5 +1,6 @@
 // The harness adapters the service can start sessions with: 'claude-code'
-// (claude-code.ts, with the default runtime of the service's state folder).
+// (claude-code.ts, with the default runtime of the service's state folder),
+// and 'cursor' (cursor.ts, milestone 3).
 // The fake adapter (fake.ts) is registered only for the rehearsal of the
 // milestone 2 proof (scripts/proof-j2.ts, docs/v2/milestone-2-plan.md,
 // lane 11): CLEARED_V2_ADAPTER=fake plays the scripts of the JSON file
@@ -21,6 +22,7 @@ import type { Policy } from '../policy.ts';
 import { ledgerPath, LedgerPathError } from '../../store/db.ts';
 import { parseConf } from '../../workspace/config.ts';
 import { createClaudeCodeAdapter } from './claude-code.ts';
+import { createCursorAdapter } from './cursor.ts';
 import { createFakeAdapter, type FakeStep } from './fake.ts';
 
 // What an adapter needs from the service.
@@ -426,7 +428,11 @@ export function factoriesFor(env: NodeJS.ProcessEnv): Readonly<Partial<Record<Ha
     }
     return { 'claude-code': (deps) => createRehearsalAdapter({ log: deps.log, script, cleaner: deps.cleaner }) };
   }
-  return { 'claude-code': (deps) => createClaudeCodeAdapter({ log: deps.log, cleaner: deps.cleaner, ...(deps.policy ? { policy: deps.policy } : {}) }) };
+  // 'cursor' (milestone 3) is built only for a session that names it; claude-code stays the default.
+  return {
+    'claude-code': (deps) => createClaudeCodeAdapter({ log: deps.log, cleaner: deps.cleaner, ...(deps.policy ? { policy: deps.policy } : {}) }),
+    cursor: (deps) => createCursorAdapter({ log: deps.log, cleaner: deps.cleaner, ...(deps.policy ? { policy: deps.policy } : {}) }),
+  };
 }
 
 // A setting that is set but wrong stops the service with exit code 64, as

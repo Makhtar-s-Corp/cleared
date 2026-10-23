@@ -34,7 +34,7 @@ import { FlowEngine, type FlowDeps, type FlowEffects } from './engine.ts';
 export type Runtime = {
   // Called by the sessions module with the store; reads and checks the configuration.
   attach(deps: { readonly store: Store }): void;
-  adapters(): Partial<Record<'claude-code' | 'codex', SessionAdapter>>;
+  adapters(): Partial<Record<Harness, SessionAdapter>>;
   engine(registry: Registry): FlowEngine | undefined;
   proof(): string;
   routes(match: (path: string) => boolean): Route[];

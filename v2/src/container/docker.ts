@@ -433,6 +433,20 @@ export class Docker {
     return this.spawner(args);
   }
 
+  // A command in a running container whose standard streams the caller keeps
+  // (the Cursor harness's turns: one process per turn, its prompt on the
+  // standard input so that no word of it is a docker argument): `docker exec
+  // --interactive` as the given user in the given folder.
+  async execStream(session: string, name: string, options: { readonly user: string; readonly workdir: string; readonly command: readonly string[] }): Promise<ChildProcessWithoutNullStreams> {
+    check(USER.test(options.user), 'user', options.user);
+    check(absolute(options.workdir) && /^[A-Za-z0-9/_.-]+$/.test(options.workdir), 'workdir', options.workdir);
+    check(options.command.length > 0 && options.command.every((word) => !word.includes('\0')), 'command', options.command);
+    const { id, owned } = await this.owned(session, name);
+    const args = ['exec', '--interactive', '--user', options.user, '--workdir', options.workdir, '--', id, ...options.command];
+    assertLabelRule(args, owned);
+    return this.spawner(args);
+  }
+
   // A shell for a human in a running container (the web terminal of a
   // session taken over, milestone 2 decision 32): `docker exec --interactive
   // --tty` as the given user in the given folder, under the host's `script`,
