@@ -3395,5 +3395,5 @@ The sidebar costs about 3 to 4 ms per switch on this server. Its props are kept 
 
 **Beyond the file list in this round.** `app/src/config.ts`, `web/main.tsx` and `v2/README.md` for the French default. `app/messages/inbox.en.json`, `app/messages/ask.en.json` and their tests (`web/test/inbox/plan.test.tsx`, `web/test/ask/render.test.tsx`, `app/test/ask/model.test.ts`) for "45%": the inbox's plan-panel keys must equal the lead's, a test holds them alike. `app/test/main.test.ts`, for the default.
 
-- Pull request: (to fill), against `v2`.
+- Pull request: 252, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-shell`.
