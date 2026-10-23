@@ -4126,3 +4126,29 @@ This lane never ran the repair on the proof's ledger.
 - **The repair.** The dry run changes nothing. Applied, it renames the part of each of LOCAL-33..37 (two held, one put back, two waiting) and deletes none, and the runner then starts all five. A second run finds nothing. A part that ran, a ticket naming two old services, an item with steps on an old service, and every ticket of a workspace of several are each left alone with their reason, their rows unchanged.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-single-service-fix`.
+
+## 2026-10-23: Orchestrator decision: plan-1 paused and the 48-hour proof relaunched from the beginning
+
+**Decision.** On 2026-10-23 at 19:50 (Europe/Paris), the orchestrator, not the owner, chose in writing option (b): pause plan-1 and relaunch the 48-hour proof from the beginning. The owner's approval of 18:49 (the step C entry above) covers this relaunch. At 19:19 the owner had decided that the demo stays stopped.
+
+**Why.** The 48-hour proof's driver (`v2/scripts/proof-j2.ts`) always sends a new goal and approves the new plan (steps 01 to 04). It cannot take over a plan that is already approved. After the repair of pull request 282, plan-1 was still approved, with its five items (LOCAL-33 to LOCAL-37) put back. The runner would have started them at its first tick, 30 s after the service starts. Starting from the beginning would then have run two plans on the same goal:
+- duplicate tickets merging into `proof-run`;
+- the morning rule approving the cards of both plans;
+- the run's measures mixed;
+- 10 free Docker subnets shared between the two plans.
+
+The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver doit savoir reprendre un plan approuvé »).
+
+**What was done**, by the ops session (times in Europe/Paris):
+- At 19:45, the proof service was stopped. The proof's checkout was moved to Cleared `a731856`, the head of v2.
+- `npm run repair-services` ran as a dry run first. Only LOCAL-33 to LOCAL-37 had a change listed: each would be renamed to `cleared-example-guestbook`, and its item of plan-1 put back. The other 18 tickets were left alone, LOCAL-13, LOCAL-15 and LOCAL-16 among them.
+- At 19:48, the same command ran with `--apply`, with the service still stopped. A second dry run lists none of the five any more.
+- At 19:51, the service was started in one-service mode. `POST /api/plans/plan-1/pause` answered 200 half a second after the service answered, before the runner's first tick. Two ticks later, plan-1 is still `paused`, its five items are `put_back`, LOCAL-33 to LOCAL-37 are in Todo, and none has a session. The guard was clean.
+- At 19:52:47, the 48-hour proof's driver was launched (`launch-proofs.sh 48`). The goal was sent at 19:52:56, and plan-2 was approved at 19:53. Its first two tickets (LOCAL-38 and LOCAL-39) started at once, on the service `cleared-example-guestbook`. Steps 00 to 04 are ok, and the night watch runs until 2026-10-24 at 08:00 (CEST).
+
+**Consequences.**
+- The morning rule starts on 2026-10-24 at 08:00 (CEST). The lead's memory is read on 2026-10-25 at 18:52 (CET), 48 hours after the goal; summer time ends during the run.
+- At the first night reading (19:59), the driver was alive with no failed step, and every `/health` answered 200. LOCAL-38 and LOCAL-39 were waiting for the owner on a permission each, which the morning rule answers. Items 3 to 5 were ready, behind the limit of 2. 6 of Docker's 31 address-pool subnets were free, with two sessions live.
+- plan-1 stays paused, and its tickets stay inactive. Resuming it, or cancelling its items, is a later decision.
+- The demo stays stopped. Nothing is pushed to the main branch of either proof repository (`2127dd2`, `0d7fbb5`). The run merges into `proof-run` only.
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
