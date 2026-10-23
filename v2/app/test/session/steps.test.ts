@@ -10,8 +10,8 @@ import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { serviceLine, stepCost, stepLine, stepsView } from '../../web/screens/session/tabs.ts';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 
 async function steps(): Promise<{ readonly steps: TicketStep[]; readonly session: string }> {
   const { sessions } = await towerFixture(FIXTURE_NOW);

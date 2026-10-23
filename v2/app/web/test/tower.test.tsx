@@ -67,7 +67,7 @@ test('the English tower reads as the capture', async () => {
   const text = visibleText(html).join('\n').replace(/\n·\n/g, ' · ');
   for (const expected of [
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12 min', 'Permission', '3 min', 'Plan', '25 min', 'Goal',
-    'The lead proposes 5 tickets, about 2 h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
+    'The lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Install date-fns', 'The command calls the network. The author is paused until you answer.',
     'Live sessions', 'All sessions', 'Author', 'Reviewer', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
@@ -89,14 +89,14 @@ test('what the data says is escaped, never markup', async () => {
   const data = await towerFixture(FIXTURE_NOW);
   const evil = '<img src=x onerror=alert(1)>"&';
   const changed: TowerData = { ...data, tickets: data.tickets.map((ticket) => ({ ...ticket, title: evil })), sessions: data.sessions.map((s) => ({ ...s, status: evil })) };
-  const html = renderTower(towerModel(changed, FIXTURE_NOW), translator(loadCatalog('tower', 'en')));
+  const html = renderTower(towerModel(changed, FIXTURE_NOW), translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') }));
   assert.ok(!html.includes('<img'));
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;&quot;&amp;'));
 });
 
 test('nothing waiting says so, and a waiting question is a card of its own', async () => {
   const data = await towerFixture(FIXTURE_NOW);
-  const t = translator(loadCatalog('tower', 'en'));
+  const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
   const calm = renderTower(towerModel({ ...data, inbox: [] }, FIXTURE_NOW), t);
   assert.ok(visibleText(calm).includes('Nothing needs you.'));
   const question = towerModel({

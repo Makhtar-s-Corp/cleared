@@ -48,7 +48,8 @@ import type { CommandPart } from '../../lib/intent.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason, requestTitle, targetOf } from '../../lib/request.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
 import type { Focus } from '../../shell/keys.ts';
-import { formatDuration, planStateLine } from '../../plan-panel/model.ts';
+import { planStateLine } from '../../plan-panel/model.ts';
+import { clock, duration, estimate, since } from '../../lib/time.ts';
 
 // The local tracker's default name of the state a ticket is sent back to
 // (DEFAULT_STATES.todo of src/tickets/contract.ts, which the browser cannot
@@ -191,29 +192,13 @@ export function sameOrigin(url: string | null): string | undefined {
   return url && url.startsWith('/') && !url.startsWith('//') && !url.includes('\\') ? url : undefined;
 }
 
-export function elapsed(iso: string, now: Date, t: Translate): string {
-  const minutes = Math.floor(Math.max(0, now.getTime() - Date.parse(iso)) / 60_000);
-  if (minutes < 1) return t('now');
-  if (minutes < 60) return t('minutes', { n: minutes });
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? t('hours', { n: hours }) : t('days', { n: Math.floor(hours / 24) });
-}
-
-export function took(minutes: number, t: Translate): string {
-  if (minutes < 60) return t('took_minutes', { n: Math.max(0, Math.round(minutes)) });
-  const m = Math.round(minutes) % 60;
-  const h = Math.floor(Math.round(minutes) / 60);
-  return m === 0 ? t('took_hours_flat', { h }) : t('took_hours', { h, m: String(m).padStart(2, '0') });
-}
-
 // 'claude-sonnet-5-5' reads 'Sonnet', as the capture names a model.
 export function family(model: string): string {
   const match = /(opus|sonnet|haiku|fable)/i.exec(model);
   return match ? (match[1] as string).charAt(0).toUpperCase() + (match[1] as string).slice(1).toLowerCase() : model;
 }
 
-const pad = (n: number) => String(n).padStart(2, '0');
-export const clock = (iso: string) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+export { clock };
 export const short = (head: string) => head.slice(0, 7);
 export const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
@@ -511,7 +496,7 @@ export function planLine(item: PlanItemInbox, view: InboxView, t: Translate): st
   const share = totals.weekPercent === null
     ? t('list_plan_cost', { amount: t('plan_cost', { amount: decimals(totals.costUsd, 2, language) }) })
     : t('plan_week_total', { n: decimals(totals.weekPercent, 1, language) });
-  return t(item.itemCount === 1 ? 'list_plan_one' : 'list_plan_other', { n: item.itemCount, time: formatDuration(totals.minutes, t), share });
+  return t(item.itemCount === 1 ? 'list_plan_one' : 'list_plan_other', { n: item.itemCount, time: estimate(totals.minutes, t), share });
 }
 
 export function itemLine(item: Item, view: InboxView, t: Translate): string {
@@ -624,7 +609,7 @@ export const isWebLink = (url: string) => /^https?:\/\//i.test(url);
 
 export function sessionsLine(item: ReleaseItem, t: Translate): string {
   return item.sessions.map((s) => {
-    const values = { model: family(s.model), time: took(s.minutes, t) };
+    const values = { model: family(s.model), time: duration(s.minutes, t) };
     if (s.role !== 'reviewer') return t('wrote', values);
     if (s.rounds === undefined) return t('reviewed', values);
     return s.rounds === 1 ? t('reviewed_rounds_one', values) : t('reviewed_rounds_other', { ...values, n: s.rounds });
@@ -636,7 +621,7 @@ export function pausedLine(item: Item, session: SessionSummary, now: Date, t: Tr
   const model = family(session.model);
   if (item.state === 'handled') return t(`session_${session.role}_plain`, { model });
   const minutes = (now.getTime() - Date.parse(item.since)) / 60_000;
-  return minutes < 1 ? t(`session_${session.role}_now`, { model }) : t(`session_${session.role}`, { model, time: elapsed(item.since, now, t) });
+  return minutes < 1 ? t(`session_${session.role}_now`, { model }) : t(`session_${session.role}`, { model, time: since(item.since, now, t) });
 }
 
 // What a share of the week says, or the cost until the week is measured.

@@ -19,8 +19,8 @@ import {
 } from '../../web/screens/session/ticket.ts';
 import { message, modelOf, stored, tool } from './support.ts';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 
 const at = (minute: number) => new Date(2026, 9, 21, 9, minute).toISOString();
 const summary = (id: string, role: SessionSummary['role'], minute: number, phase: SessionSummary['phase'], model = role === 'reviewer' ? 'claude-sonnet-5-5' : 'claude-opus-5-5'): SessionSummary => ({

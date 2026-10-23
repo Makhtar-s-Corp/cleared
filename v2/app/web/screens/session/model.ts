@@ -15,6 +15,8 @@ import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { ChoiceStatus } from '../../components/choices/model.ts';
 import type { Filter, TicketPart } from './ticket.ts';
 import { hasMark, type Translate } from '../../lib/i18n.ts';
+import { sessionStatus } from '../../lib/status.ts';
+import { clock, lasted } from '../../lib/time.ts';
 
 export const EVENT_NAMES = [
   'RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR',
@@ -446,20 +448,15 @@ export type LocalAnswer =
   | { readonly kind: 'settled' };
 
 export const ENDED: ReadonlySet<SessionPhase> = new Set(['done', 'stopped', 'failed']);
-const pad = (n: number) => String(n).padStart(2, '0');
-export const clock = (iso: string) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+export { clock };
 
 export function family(model: string): string {
   const match = /(opus|sonnet|haiku|fable)/i.exec(model);
   return match ? (match[1] as string).charAt(0).toUpperCase() + (match[1] as string).slice(1).toLowerCase() : model;
 }
 
-export function duration(ms: number, t: Translate): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return t('seconds', { n: seconds });
-  const minutes = Math.floor(seconds / 60);
-  return minutes < 60 ? t('minutes', { n: minutes }) : t('hours_minutes', { h: Math.floor(minutes / 60), m: pad(minutes % 60) });
-}
+// "42 s", "18 min", "1 h 30", "2 j 4 h": the app's one formatter (lib/time.ts).
+export const duration = lasted;
 
 // A catalog sentence for a key that may not exist (a rule the catalog has not met).
 // The translator marks a missing key rather than throwing (lane 34, U10).
@@ -482,18 +479,10 @@ export function statusTone(view: SessionView): 'waiting' | 'progress' | 'review'
 
 export function phrase(view: SessionView, t: Translate): string {
   const phase = phaseOf(view);
-  const data = view.thread.state?.status || view.summary.status;
   const taken = ENDED.has(phase) ? null : takenOverOf(view);
   if (taken) return t(taken.by === view.me ? 'status_taken_over_you' : 'status_taken_over_other');
-  switch (phase) {
-    case 'waiting_human': return t(view.thread.pending.length > 0 ? 'status_waiting_human' : view.thread.plan?.go === null ? 'status_waiting_go' : 'status_idle');
-    case 'starting': return t('status_starting');
-    case 'done': return t('status_done');
-    case 'stopped': return t('status_stopped');
-    case 'failed': return t('status_failed');
-    case 'reviewing': return data || t('status_reviewing');
-    default: return data || t('status_working');
-  }
+  if (phase === 'waiting_human') return t(view.thread.pending.length > 0 ? 'status_waiting_human' : view.thread.plan?.go === null ? 'status_waiting_go' : 'status_idle');
+  return sessionStatus({ phase, status: view.thread.state?.status || view.summary.status }, t);
 }
 
 // "18 min · 35,500 tokens": how long the session ran, and what it used.

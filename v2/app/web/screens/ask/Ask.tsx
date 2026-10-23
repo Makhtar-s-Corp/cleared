@@ -10,11 +10,10 @@ import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
+import { clock } from '@/lib/time.ts';
 import { QUESTION_MAX, askFailure, askIdOf, followAsk, pollDelay, questionProblem, readAsk, running, stateLine, targetLine, totalLine, turnsOf, usageLine } from './model.ts';
 import './ask.css';
 
-const pad = (n: number) => String(n).padStart(2, '0');
-const clock = (iso: string) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
 export function AskScreen({ ask, t, language, draft = '', note = '', busy = false, onDraft, onFollow }: {
   readonly ask: Ask; readonly t: Translate; readonly language: 'en' | 'fr';

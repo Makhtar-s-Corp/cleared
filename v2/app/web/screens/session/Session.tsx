@@ -39,6 +39,8 @@ import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useGo, useScreen } from '@/lib/context.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
+import { sessionStatus } from '@/lib/status.ts';
+import { since } from '@/lib/time.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -461,7 +463,6 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
 
 export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate; readonly onNew?: () => void }) {
   const titles = new Map(tickets.map((ticket) => [ticket.id, ticket.title]));
-  const minutes = (from: string) => Math.max(0, Math.floor((now.getTime() - Date.parse(from)) / 60_000));
   // One row per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
   const tickets_ = new Set(sessions.filter((s) => s.role === 'author' || s.role === 'reviewer').map((s) => s.ticket));
   const shown = [
@@ -489,12 +490,12 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
                 <span className="index-kind session-head" id={`${id}-kind`}><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span></span>
                 <span className="index-main">
                   <span className="session-title" id={`${id}-title`}>{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
-                  <span className="phrase" id={`${id}-phrase`}>{s.phase === 'waiting_human' ? t('status_waiting_human') : s.status}</span>
+                  <span className="phrase" id={`${id}-phrase`}>{sessionStatus(s, t)}</span>
                 </span>
                 <span className="index-meta session-foot" id={`${id}-meta`}>
                   <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
                   {reader ? null : <span className="id">{s.ticket}</span>}
-                  <span className="elapsed">{t('minutes', { n: minutes(s.startedAt) })}</span>
+                  <span className="elapsed">{since(s.startedAt, now, t)}</span>
                 </span>
               </a>
             </li>

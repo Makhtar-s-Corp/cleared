@@ -21,8 +21,8 @@ import { applyAll, emptyModel, threadOf, type SessionView } from '../../screens/
 import { EditorTab, TakeoverNotice } from '../../screens/session/Tabs.tsx';
 import { html, strings, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const sentinel: Translate = (key) => `«${key}»`;
 const hex = (text: string) => createHash('sha256').update(text).digest('hex');
 const AT = FIXTURE_NOW.toISOString();

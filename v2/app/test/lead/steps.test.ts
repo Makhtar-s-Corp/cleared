@@ -10,8 +10,8 @@ import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { PLAN_PANEL_KEYS, planSteps, stepText } from '../../web/plan-panel/model.ts';
 
-const en = translator(loadCatalog('lead', 'en'));
-const fr = translator(loadCatalog('lead', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('lead', 'fr') });
 
 test('an item\'s steps in order, each with its kind, its service, what it waits for and its estimate', () => {
   const plan = stepsPlan(FIXTURE_NOW);

@@ -9,8 +9,8 @@ import { loadCatalog } from '../../../src/catalog.ts';
 import { translator } from '../../lib/i18n.ts';
 import { renderPlanPanel, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('lead', 'en'));
-const fr = translator(loadCatalog('lead', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('lead', 'fr') });
 
 test('an item in steps lists them under its title, in order', () => {
   const markup = renderPlanPanel(stepsPlan(FIXTURE_NOW), en, { services: true });

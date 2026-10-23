@@ -12,8 +12,8 @@ import { translator } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, questionStatus, threadOf, type QuestionRow, type SessionModel, type SessionView } from '../../screens/session/model.ts';
 import { renderTimeline, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const ME = 'user-demo';
 
 function modelWith(): SessionModel {

@@ -7,13 +7,14 @@
 // out whole, so a test can read the list from this file.
 import type { Plan, PlanItem, PlanState, PlanStep, ServiceSensitivity } from '../../../src/api/types.ts';
 import type { Translate } from '../lib/i18n.ts';
+import { estimate } from '../lib/time.ts';
 
 export const PLAN_PANEL_KEYS = [
   'plan_state_proposed', 'plan_state_approved', 'plan_state_paused', 'plan_state_done', 'plan_state_superseded', 'plan_state_rejected',
   'plan_progress', 'plan_items_label', 'plan_after', 'plan_and',
   'plan_lane_full', 'plan_lane_fast',
   'plan_item_waiting', 'plan_item_ready', 'plan_item_running', 'plan_item_needs_approval', 'plan_item_landed', 'plan_item_put_back', 'plan_item_held', 'plan_item_cancelled',
-  'plan_minutes', 'plan_hours', 'plan_hours_minutes', 'plan_estimate', 'plan_week_share', 'plan_cost',
+  'plan_estimate', 'plan_week_share', 'plan_cost',
   'plan_work', 'plan_week_total', 'plan_cost_total', 'plan_parallel', 'plan_parallel_one', 'plan_samples', 'plan_defaults',
   'plan_change', 'plan_approve', 'plan_pause', 'plan_resume',
   'plan_steps_label', 'plan_step_contract', 'plan_step_service', 'plan_step_integration', 'plan_step_after',
@@ -98,14 +99,6 @@ export function chipText(c: ServiceChip, t: Translate): string {
   }
 }
 
-// 40 min, 1 h, 2 h 15: the critical path or an estimate, never zero.
-export function formatDuration(minutes: number, t: Translate): string {
-  const whole = Math.max(1, Math.round(minutes));
-  if (whole < 60) return t('plan_minutes', { n: whole });
-  const h = Math.floor(whole / 60);
-  const m = whole % 60;
-  return m === 0 ? t('plan_hours', { h }) : t('plan_hours_minutes', { h, m: String(m).padStart(2, '0') });
-}
 
 export const decimals = (value: number, digits: number, language: 'en' | 'fr') =>
   new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
@@ -135,7 +128,7 @@ export function planStateLine(plan: Plan, t: Translate): string {
 export function facts(plan: Plan, t: Translate, language: 'en' | 'fr'): string[] {
   const { totals } = plan;
   return [
-    t('plan_work', { time: formatDuration(totals.minutes, t) }),
+    t('plan_work', { time: estimate(totals.minutes, t) }),
     totals.weekPercent === null
       ? t('plan_cost_total', { amount: t('plan_cost', { amount: decimals(totals.costUsd, 2, language) }) })
       : t('plan_week_total', { n: decimals(totals.weekPercent, 1, language) }),
@@ -158,5 +151,5 @@ const STEP_KEYS: Readonly<Record<PlanStep['kind'], string>> = { contract: 'plan_
 export function stepText(step: PlanStep, t: Translate, language: 'en' | 'fr'): string {
   const kind = Object.hasOwn(STEP_KEYS, step.kind) ? t(STEP_KEYS[step.kind]) : step.kind;
   const after = step.after.length > 0 ? [t('plan_step_after', { list: positions(step.after, t) })] : [];
-  return [kind, step.service, ...after, formatDuration(step.estimate.minutes, t), share(step.estimate, t, language)].join(' · ');
+  return [kind, step.service, ...after, estimate(step.estimate.minutes, t), share(step.estimate, t, language)].join(' · ');
 }

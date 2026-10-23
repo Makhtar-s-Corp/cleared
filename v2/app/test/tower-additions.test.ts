@@ -16,8 +16,8 @@ import {
 } from '../web/screens/tower/model.ts';
 import { signedIn, startApp } from './support.ts';
 
-const t = translator(loadCatalog('tower', 'en'));
-const fr = translator(loadCatalog('tower', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const [update, review] = RECIPES as [Recipe, Recipe];
 
 async function workspaceData(): Promise<TowerData> {

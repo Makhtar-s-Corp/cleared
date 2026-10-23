@@ -14,8 +14,8 @@ import {
   editorReducer, editorStart, editorSentence, isDirty, languageOf, lineSeparator, putFile, readOnlyWhy, saveOutcome, sha256Hex, type EditorState,
 } from '../../web/components/editor/model.ts';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const hex = (text: string) => createHash('sha256').update(text).digest('hex');
 const fileOf = (path: string, text: string, extra: Partial<SessionFile> = {}): SessionFile => ({ path, text, lines: text.split('\n').length - 1, cut: false, hash: hex(text), ...extra });
 

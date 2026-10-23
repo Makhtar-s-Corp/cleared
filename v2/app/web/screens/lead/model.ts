@@ -20,6 +20,7 @@ import type { Question } from '../../../../src/session/events.ts';
 import type { Answers } from '../../components/choices/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
+import { ago, clock } from '../../lib/time.ts';
 import type { PlanAction } from '../../plan-panel/model.ts';
 
 export type LeadDraft = { readonly text: string; readonly goal: boolean };
@@ -50,21 +51,12 @@ export type LeadView = {
   readonly trains?: readonly TrainLine[];                  // the release trains, from the inbox (lane 22)
 };
 
-const pad = (n: number) => String(n).padStart(2, '0');
 
 // 09:31 today; with the day before that.
 export function clockOf(iso: string, now: Date, language: 'en' | 'fr'): string {
   const at = new Date(iso);
-  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const time = clock(iso);
   return at.toDateString() === now.toDateString() ? time : `${at.toLocaleDateString(language, { day: 'numeric', month: 'short' })} ${time}`;
-}
-
-function ago(iso: string, now: Date, t: Translate): string {
-  const minutes = Math.max(0, Math.floor((now.getTime() - Date.parse(iso)) / 60_000));
-  if (minutes < 1) return t('lead_ago_now');
-  if (minutes < 60) return t('lead_ago_minutes', { n: minutes });
-  if (minutes < 48 * 60) return t('lead_ago_hours', { h: Math.floor(minutes / 60) });
-  return t('lead_ago_days', { n: Math.floor(minutes / (24 * 60)) });
 }
 
 // ------------------------------------------------------------------ header

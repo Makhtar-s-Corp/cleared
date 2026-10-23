@@ -17,8 +17,8 @@ import {
 } from '../../web/screens/inbox/model.ts';
 import { signedIn, startApp } from '../support.ts';
 
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 const ME = 'user-demo';
 
 function viewOf(items: readonly NextInboxItem[]): InboxView {

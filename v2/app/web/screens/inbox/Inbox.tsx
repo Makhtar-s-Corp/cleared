@@ -18,7 +18,8 @@ import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
-import { formatDuration, planStateLine } from '@/plan-panel/model.ts';
+import { planStateLine } from '@/plan-panel/model.ts';
+import { estimate, since } from '@/lib/time.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
 import '@/screens/lead/lead.css';
 import { CHORD_MS } from '@/shell/keys.ts';
@@ -26,7 +27,7 @@ import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
-  changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, elapsed, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
+  changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   sessionLink, sessionOf, sessionsLine, shareLine, short,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
@@ -45,7 +46,7 @@ function Card({ item, current, view, t, onAnswer }: {
         <span className="item-head">
           <span className="chip">{t(`kind_${item.kind}`)}</span>
           {item.kind === 'release' && item.train && item.train.state !== 'waiting' ? <span className={`chip train-chip train-chip-${item.train.state}`} data-train-chip={item.train.state}>{t(`train_chip_${item.train.state}`)}</span> : null}
-          <span className="since">{elapsed(item.since, view.now, t)}</span>
+          <span className="since">{since(item.since, view.now, t)}</span>
         </span>
         <span className="item-title">{itemTitle(item, view, t)}</span>
         <span className="item-line">{itemLine(item, view, t)}</span>
@@ -381,7 +382,7 @@ function PlanBody({ item, view, t }: { readonly item: PlanItemInbox; readonly vi
       <p className="announce">{item.summary}</p>
       <dl className="facts">
         <Fact label={t('facts_tickets')}>{t(item.itemCount === 1 ? 'tickets_one' : 'tickets_other', { n: item.itemCount })}</Fact>
-        <Fact label={t('facts_work')}>{t('plan_work', { time: formatDuration(item.totals.minutes, t) })}</Fact>
+        <Fact label={t('facts_work')}>{t('plan_work', { time: estimate(item.totals.minutes, t) })}</Fact>
         <Fact label={t('facts_share')}>{shareLine(item.totals, language, t)}</Fact>
       </dl>
     </>

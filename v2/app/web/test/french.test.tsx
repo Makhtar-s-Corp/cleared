@@ -16,9 +16,11 @@ import { AUTHOR_ID, sessionFixture } from '../../fixtures/session.ts';
 import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
 import { loadCatalog, SCREENS, type Screen } from '../../src/catalog.ts';
 import { hasMark, translator, type Translate } from '../lib/i18n.ts';
+import { looksLikeCommand } from '../lib/intent.ts';
+import { DEFAULT_STATES } from '../../../src/tickets/contract.ts';
 import { AskScreen } from '../screens/ask/Ask.tsx';
-import { elapsed, planLine, took, type InboxView, type Local } from '../screens/inbox/model.ts';
-import { formatDuration } from '../plan-panel/model.ts';
+import { planLine, type InboxView, type Local } from '../screens/inbox/model.ts';
+import { duration, estimate, since } from '../lib/time.ts';
 import type { LeadView } from '../screens/lead/model.ts';
 import { applyAll, emptyModel, threadOf, type SessionView } from '../screens/session/model.ts';
 import { towerModel } from '../screens/tower/model.ts';
@@ -55,9 +57,19 @@ async function dataWords(): Promise<Set<string>> {
   return strings([tower.sessions, tower.tickets, tower.inbox, tower.plans, lead.messages, lead.plans, lead.state, session.sessions, session.ticket, inbox.items, inbox.tickets, inbox.sessions, askFixture(), platformAsk()]);
 }
 
+// The service's English for a session's status and a ticket's state
+// (src/flow/state.ts, PHRASES and toolPhrase; src/tickets/contract.ts,
+// DEFAULT_STATES): they arrive as data, and the app says them in French
+// (the owner's request of 2026-10-23, lane durations), so the fixtures'
+// words do not excuse them.
+const SERVICE_WORDS = new Set(['Starting', 'Working', 'Paused, waiting for you', 'Reviewing', 'Done', 'Stopped', 'Failed', 'Paused', ...Object.values(DEFAULT_STATES)]);
+const servicePhrase = (text: string) => SERVICE_WORDS.has(text) || /^(?:Reading|Editing) \S+$/.test(text) || /^Searching for ./.test(text)
+  || (text.startsWith('Running ') && looksLikeCommand(text.slice('Running '.length)));
+
 function assertFrench(where: string, markup: string, data: ReadonlySet<string>): void {
   assert.ok(!hasMark(markup), `${where}: a key is missing from the catalog: ${/⟦[^⟧]*⟧/.exec(markup)?.[0]}`);
   for (const text of visibleText(markup)) {
+    assert.ok(!servicePhrase(text), `${where}: "${text}" is the service's English for a status`);
     if (data.has(text)) continue;
     const hit = english.find(({ pattern }) => pattern.test(text));
     assert.ok(!hit, `${where}: "${text}" is the English of ${hit?.key}`);
@@ -103,7 +115,8 @@ test('the lead and a question to the code in French', async () => {
   for (const ask of [askFixture(), platformAsk()]) assertFrench(`ask ${ask.state}`, html(<AskScreen ask={ask} t={t} language="fr" draft="" note="" busy={false} />), data);
 });
 
-test('the inbox in French: every kind, waiting and handled, each detail, and what a gesture leaves', async () => {
+// Issue 257, item 1: 13 local states for every item, slow under a loaded run.
+test('the inbox in French: every kind, waiting and handled, each detail, and what a gesture leaves', { timeout: 30_000 }, async () => {
   const data = await dataWords();
   const fixture = inboxFixture(FIXTURE_NOW, { sessionPlan: 'medium', reading: true });
   const requests = requestItems(FIXTURE_NOW, { reviewer: { id: 'fixture-158-review', ticket: 'LOCAL-158' }, author: { id: 'fixture-160', ticket: 'LOCAL-160' } });
@@ -144,12 +157,42 @@ test('the palette and the shortcut sheet in French, on every screen, the inbox\'
   for (const expected of ['Autoriser une fois, ou afficher la ligne choisie', 'Refuser, ou afficher la ligne choisie', 'Espace']) assert.ok(inboxSheet.includes(expected), `missing: ${expected}`);
 });
 
+// Every phase a session can be in, with the service's own phrase for it,
+// and the phrases it builds for a tool: the sessions index, the tower, the
+// sidebar and the session's own status say them in French. "Stopped" and
+// "Done" were drawn as the service wrote them.
+test('every session status in French, on the sessions index, the tower and the session', async () => {
+  const data = await dataWords();
+  const fixture = await towerFixture(FIXTURE_NOW);
+  const base = fixture.sessions[0] as SessionSummary;
+  const phrases: readonly (readonly [SessionSummary['phase'], string])[] = [
+    ['starting', 'Starting'], ['working', 'Working'], ['waiting_human', 'Paused, waiting for you'], ['reviewing', 'Reviewing'], ['done', 'Done'], ['stopped', 'Stopped'], ['failed', 'Failed'],
+    ['working', 'Reading src/page.ts'], ['working', 'Editing src/page.ts'], ['reviewing', 'Searching for week'], ['working', 'Running npm test'],
+  ];
+  const sessions = phrases.map(([phase, status], n): SessionSummary => ({ ...base, id: `phase-${n}`, ticket: `LOCAL-${300 + n}`, phase, status }));
+  const index = renderIndex({ sessions, tickets: fixture.tickets, now: FIXTURE_NOW }, tOf('session', 'fr'));
+  assertFrench('sessions index, every phase', index, data);
+  for (const word of ['Démarrage', 'Au travail', 'En pause, attend votre réponse', 'En relecture', 'Terminée', 'Arrêtée', 'Arrêtée sur une erreur', 'Lit src/page.ts', 'Modifie src/page.ts', 'Cherche week', 'Lance npm test']) {
+    assert.ok(visibleText(index).includes(word), `the index says ${word}`);
+  }
+  const tower = html(<TowerBody model={towerModel({ ...fixture, sessions }, FIXTURE_NOW)} t={tOf('tower', 'fr')} language="fr" />);
+  assertFrench('tower, every phase', tower, data);
+  const session = sessionFixture(FIXTURE_NOW);
+  for (const [phase, status] of phrases) {
+    const summary = { ...(session.sessions[0] as SessionSummary), phase, status };
+    const view: SessionView = { summary, thread: threadOf(emptyModel()), ticket: session.ticket, siblings: [summary], me: 'demo-id', language: 'fr', now: FIXTURE_NOW };
+    assertFrench(`session ${phase} ${status}`, renderSession(view, tOf('session', 'fr')), data);
+  }
+  // The test reads the service's English as English.
+  assert.throws(() => assertFrench('planted', html(<p><span>Stopped</span></p>), new Set(['Stopped'])), /service's English/);
+});
+
 test('times, durations, numbers and plurals in French', () => {
   const t = tOf('inbox', 'fr');
   const at = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
-  assert.deepEqual([0, 12, 60, 195, 3000].map((m) => elapsed(at(m), FIXTURE_NOW, t)), ['à l\'instant', '12 min', '1 h', '3 h', '2 j']);
-  assert.deepEqual([34, 60, 135].map((m) => took(m, t)), ['34 min', '1 h', '2 h 15']);
-  assert.equal(formatDuration(135, t), '2 h 15');
+  assert.deepEqual([0, 12, 60, 195, 3000].map((m) => since(at(m), FIXTURE_NOW, t)), ['à l\'instant', '12 min', '1 h', '3 h 15', '2 j 2 h']);
+  assert.deepEqual([34, 60, 135].map((m) => duration(m, t)), ['34 min', '1 h', '2 h 15']);
+  assert.equal(estimate(135, t), '2 h 15');
   const plan = inboxFixture(FIXTURE_NOW).items.find((item) => item.kind === 'plan');
   assert.ok(plan?.kind === 'plan');
   const base = { items: [], tickets: [], sessions: [], selected: undefined, open: false, me: { id: 'u', name: 'demo' }, now: FIXTURE_NOW, local: new Map(), frame: 'desktop', language: 'fr' } as const;

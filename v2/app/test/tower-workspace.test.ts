@@ -14,8 +14,8 @@ import { ApiError, type ScreenContext } from '../web/lib/screen.ts';
 import { createTicket, DRAFT_MAX, liveDot, loadTower, needSentence, newTicket, serviceState, takenOverText, towerModel, type TowerData } from '../web/screens/tower/model.ts';
 import { signedIn, startApp } from './support.ts';
 
-const t = translator(loadCatalog('tower', 'en'));
-const fr = translator(loadCatalog('tower', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const minutesBefore = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
 
 test('the workspace line names each service with its live sessions and its train: landing, or rolled back', async () => {

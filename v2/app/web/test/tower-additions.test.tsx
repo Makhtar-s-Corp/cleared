@@ -13,8 +13,8 @@ import { Bar, RecipeForm } from '../screens/tower/Tower.tsx';
 import { recipeKey, towerModel } from '../screens/tower/model.ts';
 import { html, renderTowerBody, visibleText } from './render.tsx';
 
-const en = translator(loadCatalog('tower', 'en'));
-const fr = translator(loadCatalog('tower', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const [update] = RECIPES as [Recipe, Recipe];
 
 test('a live session of a ticket in steps names its step and service', async () => {

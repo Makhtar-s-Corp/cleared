@@ -18,8 +18,8 @@ import {
   type InboxView,
 } from '../../web/screens/inbox/model.ts';
 
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 
 function viewOf(items: readonly NextInboxItem[], overrides: Partial<InboxView> = {}): InboxView {
   const fixture = inboxFixture(FIXTURE_NOW, { train: 'waiting', sessionPlan: 'medium' });

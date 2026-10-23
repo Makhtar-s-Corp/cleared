@@ -14,8 +14,8 @@ import { ApiError } from '../lib/screen.ts';
 import { lastLeadLine, loadTower, towerModel, type TowerData } from '../screens/tower/model.ts';
 import { signedIn, startApp } from '../../test/support.ts';
 
-const en: Translate = translator(loadCatalog('tower', 'en'));
-const fr: Translate = translator(loadCatalog('tower', 'fr'));
+const en: Translate = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr: Translate = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const minutesAgo = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
 
 function text(html: string): string {
@@ -44,7 +44,7 @@ test('the lead card is live: its state line, then the last thing the lead said t
   const data = await towerFixture(FIXTURE_NOW);
   const model = towerModel(data, FIXTURE_NOW);
   assert.deepEqual(model.lead, {
-    phase: 'idle', percent: 31, refreshedMinutes: 10,
+    phase: 'idle', percent: 31, refreshed: { at: new Date(FIXTURE_NOW.getTime() - 10 * 60_000).toISOString(), now: FIXTURE_NOW },
     line: 'LOCAL-161 is paused on a permission. I moved LOCAL-163 ahead so the machine stays busy.',
   });
   const html = renderTower(model, en);
@@ -59,7 +59,7 @@ test('each state of the lead reads as such, and a lead the tower cannot read is 
   const line = (lead: LeadState | null) => text(renderTowerBody(towerModel({ sessions: [], inbox: [], tickets: [], lead, leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), en));
   assert.match(line(leadState('idle')), /Always on · context 12%/);
   assert.doesNotMatch(line(leadState('idle')), /refreshed/, 'a first generation was never refreshed');
-  assert.match(line(leadState('working', { refreshedAt: minutesAgo(90), refreshCount: 1 })), /Always on · context 12% · refreshed 1 h 30 ago/);
+  assert.match(line(leadState('working', { refreshedAt: minutesAgo(90), refreshCount: 1 })), /Always on · context 12% · refreshed 1h ago/);
   assert.match(line(leadState('idle', { context: null })), /^Always on$/m, 'no share before the first measure');
   assert.match(line(leadState('starting')), /^Starting$/m);
   assert.match(line(leadState('refreshing')), /^Refreshing from memory$/m);
@@ -159,7 +159,7 @@ test('a proposed plan is a card under Needs you, after what the teams wait for, 
   assert.equal(card?.href, '/plans/plan-readable');
   const html = renderTower(model, en);
   assert.match(html, /<a class="need row" href="\/plans\/plan-readable"/);
-  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe lead proposes 5 tickets, about 2 h of work and 4% of the week.\nGoal\n25 min'), 'its kind, its title, its line, then whose and how long');
+  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe lead proposes 5 tickets, about 2h of work and 4% of the week.\nGoal\n25 min'), 'its kind, its title, its line, then whose and how long');
 });
 
 test('a plan without the week share says its cost, one ticket reads in the singular, and French says it in French', () => {
@@ -168,9 +168,9 @@ test('a plan without the week share says its cost, one ticket reads in the singu
     title: 'A goal', summary: 'A summary.', itemCount: count, totals: { minutes, costUsd: 3.9, weekPercent, samples: 2 },
   });
   const render = (inbox: InboxItem[], t: Translate) => text(renderTowerBody(towerModel({ sessions: [], inbox, tickets: [], lead: null, leadLine: null, plans: [], weekLeft: null }, FIXTURE_NOW), t));
-  assert.match(render([proposal(5, 135, null)], en), /The lead proposes 5 tickets, about 2 h 15 of work, about \$3\.90\./);
+  assert.match(render([proposal(5, 135, null)], en), /The lead proposes 5 tickets, about 2h 15m of work, about \$3\.90\./);
   assert.match(render([proposal(1, 40, null)], en), /The lead proposes 1 ticket, about 40 min of work, about \$3\.90\./);
-  assert.match(render([proposal(3, 60, 1.25)], en), /The lead proposes 3 tickets, about 1 h of work and 1\.3% of the week\./);
+  assert.match(render([proposal(3, 60, 1.25)], en), /The lead proposes 3 tickets, about 1h of work and 1\.3% of the week\./);
   assert.match(render([proposal(3, 60, 1.25)], fr), /Le lead propose 3 tickets, environ 1 h de travail et 1,3 % de la semaine\./);
   assert.match(render([proposal(5, 135, null)], fr), /environ 3,90 \$/);
 });

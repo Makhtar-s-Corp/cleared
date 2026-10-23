@@ -10,8 +10,8 @@ import { Bar } from '../screens/tower/Tower.tsx';
 import { towerModel } from '../screens/tower/model.ts';
 import { html, renderTower, renderTowerBody, strings, visibleText } from './render.tsx';
 
-const en = translator(loadCatalog('tower', 'en'));
-const fr = translator(loadCatalog('tower', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 
 test('the workspace line names each service, its live sessions and its train', async () => {
   const markup = renderTowerBody(towerModel(await workspaceFixture(FIXTURE_NOW), FIXTURE_NOW, OWNER_ID), en);

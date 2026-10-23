@@ -14,8 +14,8 @@ import {
   POLL_MS, QUESTION_MAX, askBody, askFailure, askHref, askIdOf, followAsk, pollDelay, questionProblem, readAsk, startAsk, stateLine, targetLine, totalLine, turnsOf, usageLine,
 } from '../../web/screens/ask/model.ts';
 
-const t = translator(loadCatalog('ask', 'en'));
-const fr = translator(loadCatalog('ask', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('ask', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('ask', 'fr') });
 const group = (n: number, language: 'en' | 'fr') => new Intl.NumberFormat(language).format(n);
 
 type Call = { readonly path: string; readonly method: string; readonly body: unknown };

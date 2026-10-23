@@ -12,8 +12,8 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { chipText, ITEM_KEYS, PLAN_PANEL_KEYS, PLAN_SERVICE_KEYS, planStateLine, serviceChips, itemStateText } from '../../web/plan-panel/model.ts';
 
-const t = translator(loadCatalog('lead', 'en'));
-const fr = translator(loadCatalog('lead', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('lead', 'fr') });
 const plan = servicePlan(FIXTURE_NOW);
 const only = (sensitivity: PlanItem['sensitivity'], items: readonly PlanItem[] = plan.items): Plan => ({ ...plan, items: items.map((item) => ({ ...item, ...(sensitivity ? { sensitivity } : {}) })) });
 

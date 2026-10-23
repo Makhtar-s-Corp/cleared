@@ -12,8 +12,8 @@ import { FIXTURE_NOW, towerFixture, trainItems } from '../../fixtures/tower.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { stopText, threadRows, trainHeadline, trainLines } from '../../web/screens/lead/model.ts';
 
-const t = translator(loadCatalog('lead', 'en'));
-const fr = translator(loadCatalog('lead', 'fr'));
+const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('lead', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('lead', 'fr') });
 const minutesBefore = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes * 60_000).toISOString();
 
 test('only release items with a train make a line, oldest move first, each at the time its train last moved', async () => {

@@ -36,7 +36,7 @@ test('the list reads as the capture: what waits, with its time, then what was ha
     'Waiting · 4',
     'Release', '12 min', RELEASE_TITLE, `${RELEASE_TICKET} · Reviewed by Sonnet, checks green`,
     'Permission', '3 min', 'Install date-fns', 'LOCAL-161 · author paused',
-    'Question', '1 h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
+    'Question', '1h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
     'Handled · 1',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(renderInbox(viewOf(), en), /<h1/, 'no heading repeats the top bar\'s');
@@ -108,7 +108,7 @@ test('a release with no capture says so instead of an empty frame, and a capture
   assert.ok(visibleText(html).includes('No picture of this screen yet.'));
   const unreviewed: ReleaseItem = { ...release, sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 75 }], pr: { ...release.pr, checks: 'pending' } };
   const shown = text(viewOf({ items: [unreviewed], selected: unreviewed.id }));
-  assert.ok(shown.includes('Opus wrote it in 1 h 15'));
+  assert.ok(shown.includes('Opus wrote it in 1h 15m'));
   assert.ok(shown.includes('checks running'));
 });
 

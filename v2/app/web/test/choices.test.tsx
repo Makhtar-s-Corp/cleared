@@ -11,8 +11,8 @@ import { emptyDraft, pick, typeFree, type ChoiceStatus } from '../components/cho
 import { translator, type Translate } from '../lib/i18n.ts';
 import { html, visibleText } from './render.tsx';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const count = (markup: string, pattern: RegExp) => [...markup.matchAll(pattern)].length;
 
 const week: Question = {

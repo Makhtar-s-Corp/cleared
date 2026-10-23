@@ -18,8 +18,8 @@ import {
 } from '../../web/screens/session/tabs.ts';
 import * as tabs from '../../web/screens/session/tabs.ts';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 
 test('the four tabs, Terminal first opened; the address\'s hash names the others, and the arrows move between them', () => {
   assert.deepEqual([...TABS], ['plan', 'terminal', 'editor', 'browser']);

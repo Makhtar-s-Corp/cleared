@@ -13,8 +13,8 @@ import { LeftCards } from '../../screens/session/Session.tsx';
 import { PlanTab } from '../../screens/session/Tabs.tsx';
 import { html, visibleText } from '../render.tsx';
 
-const en = translator(loadCatalog('session', 'en'));
-const fr = translator(loadCatalog('session', 'fr'));
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const sentinel: Translate = (key) => `«${key}»`;
 
 function viewOf(overrides: Partial<SessionView> = {}): SessionView {
