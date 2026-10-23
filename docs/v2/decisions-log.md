@@ -3461,7 +3461,7 @@ The sidebar costs about 3 to 4 ms per switch on this server. Its props are kept 
 
 **Decision.** On 2026-10-23 between 02:30 and 04:30 (Europe/Paris), lane 37 of the interface overhaul ([ui-overhaul-plan.md](ui-overhaul-plan.md), section 7) delivers requirements 2.5.1 to 2.5.6 and decision U9 on the inbox, on lane 36's `lib/intent.ts` (pull request 251, merged into the lane through `origin/v2`).
 
-- **The title is the intent (2.5.1, U9).** A request's row and its detail are named by the app's sentence, computed from the command by lane 36's function, whatever the harness wrote ("Installer date-fns", "Lire l'historique et le diff du dépôt puis lancer les tests du projet"). The inbox reads `intent.ts` unchanged and adds three things in its own model (`permissionTitle`, `screens/inbox/model.ts`):
+- **The title is the intent (2.5.1, U9).** A request's row and its detail are named by the app's sentence, computed from the command by lane 36's function, whatever the harness wrote ("Installer date-fns", "Lire l'historique et le diff du dépôt puis lancer les tests du projet"). The inbox reads `intent.ts` unchanged and adds three things on top of it (`permissionTitle`, first in `screens/inbox/model.ts`, then in `web/lib/request.ts` for every screen after the art director's round):
   - French joins two intents with "puis" in a title and "puis à" after "Autoriser … à", so the preposition is repeated and the double "et" is gone (the critique). English keeps "and". The session screen's checks keep lane 36's "et".
   - A command the table does not know is said by its first word ("Lancer docker"), not "docker …", which read as cut off.
   - **A command the table cannot read whole is not summarised.** A write to a file (`>`, `>>` to anything but `/dev/null`), a substitution (`$( )`, a backtick), a heredoc, a process substitution, `eval` or `source`, a shell given `-c` or an interpreter given `-c` or `-e`: its title is "Lancer une commande composée" and its fold opens by itself (`opaque`, `foldOpen`). The audit showed `intent.ts` saying "Lire des fichiers" for `cat secrets.env > /tmp/x`; on the screen that approves the command, that would misstate it.
@@ -3566,18 +3566,62 @@ No catalog key was missing: lanes 34 and 35's catalog test already held both cat
 
 **Checks.** On this server:
 - `npm run typecheck`.
-- `npm test`: 1359 node tests, 1334 pass, 25 skipped (the browser tests), 0 fail; 218 Vitest tests pass.
-- The `browser` job's nine files by hand with the full Chromium build the CI installs, twice: 23 tests, 23 pass. With the headless shell, the notification test fails for want of a push service, the same on `origin/v2`.
+- `npm test`: 1364 node tests, 1337 pass, 27 skipped (the browser tests), 0 fail; 219 Vitest tests pass.
+- The `browser` job's nine files by hand with the full Chromium build the CI installs: 25 tests, 25 pass. With the headless shell, the notification test fails for want of a push service, the same on `origin/v2`.
 - `npm run guard -- --base origin/v2`: nothing refused.
 - The capture script on the fixtures source: no page error, no request off the origin.
 - Before captures: `docs/v2/ui-overhaul/before/37/` (24 files: the inbox, a request selected, the palette over the inbox; the source had no handled item before this lane, so there is no "before" of the group).
-- After captures: `docs/v2/ui-overhaul/after/37/` (72 files, in French: the five screens, the reviewer's request selected, the "Traité" group opened, the palette and the sheet over the inbox, at 1440, 1280, 768 and 390, light and dark). Each was looked at for secrets and names.
+- After captures: `docs/v2/ui-overhaul/after/37/` (80 files, in French: the five screens, the reviewer's request selected, the "Traité" group opened, the palette over the inbox and over the request, and the inbox's sheet, at 1440, 1280, 768 and 390, light and dark), taken again after the art director's round. Each was looked at for secrets and names.
+
+**The art director's look** (`/tmp/cleared-reviews/37-ad.md`, a fresh session; not committed). All eleven items before the merge are taken:
+1. **A title that understated what is approved.** The request's sentences moved to `web/lib/request.ts`, words in the shell's catalog, and say themselves:
+   - a force push or a `+refspec` ("Pousser la branche de force"), a remote branch deleted;
+   - a script fetched and piped to a shell or an interpreter ("Télécharger et exécuter un script distant");
+   - `sudo` or `doas` ("Lancer apt en administrateur");
+   - a delete of one path named ("Supprimer dist");
+   - `chmod`, `chown` ("Changer les droits d'accès"), `sed -i` ("Modifier des fichiers").
+
+   A recursive, forced or absolute delete, sudo, a force push and a fetched script open the fold. Two such parts, or one beside other work, read "Lancer une commande composée", fold open. Each shape is in `app/test/inbox/permission.test.ts`, which fails on the code before (a force push read "Pousser la branche"). `lib/intent.ts` is unchanged.
+2. **The session thread's request** (`screens/session/Session.tsx`, `RequestCard`) says what the inbox says: the question naming who asks, the reason by code, the three answers, the command folded (open when it must be read). The command stays whole in `data-command`, which `scripts/proof-j1.ts` now reads in place of the title's code chip (one line; lane 38 owns the proof scripts).
+3. **The tower and the palette** title a request by its intent and say its reason in French (`NeedCard.request`, `needTitle`, `needSentence` in `screens/tower/model.ts`). The French test asserts the tower's request row.
+4. **The palette's "Pour vous"** keeps what blocks a session before its cut of three: requests, questions, session plans, then releases, plans, contracts, knowledge (`shell/palette.ts`). The tower's own order is unchanged. A new capture, `palette-inbox-permission`, shows the three answers under "Sur cet écran".
+5. **"+4"** reads "+ 4 autres" / "+ 1 autre" (and "+ n more").
+6. **French spacing in every French catalog** (ask 6, inbox 2, lead 9, session 19, shell 4, tower 15 sentences), with `app/test/french-typography.test.ts`, which fails on a plain space before ? ! ; : » or after «.
+7. **Sentences about the interface**: "La liste a été actualisée." is gone from five keys. `knowledge_rule` is grammatical. `confidence_waits`, `confidence_starts` and `train_order_note` say only what changes the decision ("Attend votre Go.", "Démarre seul à la fin du délai.", "Livré dans l'ordre, chaque service vérifié en bonne santé avant le suivant."). `contract_rule` stays: it says the consequence.
+8. **"Settled" twice after T.** The fixtures source answered every request with a 404. It now answers a session's request, keeps it in memory (the item handled, a second answer a 409) and tells the stream; `app/test/fixtures.test.ts` holds it. A settled answer says so once: the detail's line, no note. While an answer is under way, the answers stay, disabled, though lane 34's optimistic cache already shows the item handled. A browser test answers T through the source and checks the item moves to "Traité".
+9. **The ring through the row's answers**: the row's focus ring is drawn inside it (`outline-offset: -2px`).
+10. **Contrast**: `--awaiting-text` (light) is `#9A4D08`, 4.9:1 on the selected row where `#AB570A` gave 4.34:1. Lane 35's contrast test now reads the selected fill as one of its grounds and failed on the old value (`styles/app.css`, `app/test/shell/tokens.test.ts`).
+11. **J, K then A on another row**: A, T or R on a walked row that is not the one shown shows it first (a peek), and the next press answers it; under 1024 px they do nothing on a row. The sheet says so in the buttons' words ("Autoriser une fois, ou afficher la ligne choisie"). A browser test walks a row, presses A twice and finds one answer.
+
+**The art director's LATER list, for lane 38 and the owner.**
+1. Rows of 74 px (110 with answers) against the plan's 32 to 36 px: the kind as an icon before the title, the age on the title's line, the ticket and state on the second line; with lane 38's density pass, the tower's rows too.
+2. On a row, "Toujours pour ce projet" for a compound, unknown or code-less command, without the reason or the command in sight: consider "Autoriser une fois" and "Refuser" alone on such a row.
+3. Amber on the kind of 5 of 6 rows: keep amber for what blocks a session (a request, a question), neutral for a review; and order both the inbox and the tower by what blocks a running session first.
+4. The deny reason field is the detail's second heaviest object for a rare gesture: a quiet "Ajouter un motif" that opens it, or a hairline border; Enter in it refuses at once, unlike every other field.
+5. Nested cards in the release's detail (`.announce` and the frames inside the outlined detail): a hairline instead.
+6. A handled row says only "ne vous attend plus": needs the item's outcome from the service (below).
+7. "Tour" as the French name of the tower reads as "turn"; "Vue d'ensemble" or "Pilotage" (lane 35's name, the owner's call).
+8. "Todo" in `confirm_send_back`, `sent_back`, `send_back_conflict`: "À faire" if the board says it so.
+9. The sheet's answers in the buttons' words: done here with item 11.
+10. The 390 inbox has no heading or count in its top bar ("Exemple", search and avatar instead): lane 38's mobile pass.
+11. Ticket, release and lead titles in English are the data's words, shown as written under French labels (plan 2.5.6): the French test passes on them by design.
+12. Row answers are 28 px from 1280 px; from 768 to 1279 px on a touch tablet the row has none: check the tablet path is one tap.
+
+**What lane 37 touched beyond its file list in the art director's round, and why.**
+- `v2/app/web/lib/request.ts` (new): the request's sentences, shared by the inbox, the session thread, the tower and the palette.
+- `v2/app/web/screens/session/{Session.tsx,session.css}`, `v2/app/web/test/session/render.test.tsx`: item 2.
+- `v2/app/web/screens/tower/model.ts`, `v2/app/web/test/{tower.test.tsx,tower-lead.test.tsx}`, `v2/app/test/tower-additions.test.ts`: item 3, and the French spacing's tests.
+- `v2/app/web/shell/palette.ts`, `v2/app/test/shell/palette.test.ts`: item 4.
+- `v2/app/messages/*.fr.json`, `shell.en.json`: items 1, 5, 6, 11; the request's words moved from the inbox's catalog to the shell's.
+- `v2/app/web/styles/app.css`, `v2/app/test/shell/tokens.test.ts`: item 10.
+- `v2/scripts/proof-j1.ts`: item 2, one line.
+
+**Measures after the round** (the same harness, full Chromium, CI mode, three runs; lane 38 ran on the server meanwhile, load average 6, so `origin/v2` was measured again interleaved): `origin/v2` 29.9 then 26.4 ms, this branch 33.5 then 27.1 ms, median of the runs' p95; 0 documents, at most 1 request. The two are within the server's noise.
 
 **Followups.**
-1. **The tower and the palette still title a request by the harness's words or the raw command, with the policy's English sentence as its line** (`screens/tower/model.ts`, `need()`, case `permission`; the palette reads the same needs). With the new fixture request, the tower shows "git log -5 --oneline; git merge-base main HEAD; …". `permissionTitle` and `reasonOf` are exported from `screens/inbox/model.ts` for it. Lane 38 is working on the tower in the same wave, so this lane did not edit it.
-2. `lib/intent.ts` itself misreads what the inbox now refuses to summarise (a write redirect, a substitution, a heredoc, `sh -c`), and strips `sudo` and `--force` silently. The session screen's checks and commands use it as is. Lane 36's file.
-3. The outcome of a handled request (answered once, always, denied, expired) and when: `PermissionItem` needs `outcome` from the store's `handled_at` and `handled_by`, then the "Traité" rows can say it.
-4. The policy's `reasonCode`: the policy lane fills it (`compound`, `not_allowed` with the asking part, `network`, `dependency`, `outside_checkout`); `RULE_CODES` in the inbox's model can then go.
-5. The session screen's request card keeps the raw command as its title and the harness's English: lane 36 left the question-shaped title to this lane, but it is the session screen's file. `permissionAsk` is exported for it.
+1. `lib/intent.ts` itself still misreads what `lib/request.ts` now takes first (a write redirect, a substitution, a heredoc, `sh -c`, sudo, a force push): the session screen's step rows and checks use it as is. Lane 36's file.
+2. The outcome of a handled request (answered once, always, denied, expired) and when: `PermissionItem` needs `outcome` from the store's `handled_at` and `handled_by`, then the "Traité" rows can say it (LATER 6).
+3. The policy's `reasonCode`: the policy lane fills it (`compound`, `not_allowed` with the asking part, `network`, `dependency`, `outside_checkout`); `RULE_CODES` in `lib/request.ts` can then go.
+4. The art director's LATER list above.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-inbox-fr`.
