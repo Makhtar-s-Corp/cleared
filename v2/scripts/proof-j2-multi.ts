@@ -11,7 +11,7 @@
 //    6 approve the one release card: two pull requests in landing order;
 //    7 see the train land in order, each service healthy, the ticket Done;
 //    8 create the second ticket, whose guestbook change breaks /health, and approve it;
-//    9 see the rollback in reverse order: "Rolled back, 2 of 2", the ticket in Todo;
+//    9 see the rollback in reverse order: "Rolled back, 2 of 2" ("Annulé, 2 sur 2" in French), the ticket in Todo;
 //   10 create the third ticket, a contract change without the guestbook: the
 //      card is blocked before approval with the proposal, and has no Approve;
 //   11 create the fourth ticket, on the guestbook alone; Take over its working
@@ -61,6 +61,7 @@ import { answerFor } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
 import { humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type MultiResult, type Step } from './proof-report.ts';
 import { MULTI_TICKETS, startMultiRehearsal, type MultiWorld } from './proof-rehearsal-multi.ts';
+import { said } from './proof-words.ts';
 
 const env = process.env;
 const REHEARSAL = env.PROOF_REHEARSAL === '1';
@@ -409,7 +410,7 @@ if (approvedSecond) {
     if (first) times.first_failing_at = first.at;
     await openItem(rolled.id);
     const line = (await page.locator('#detail [data-train-line]').first().innerText().catch(() => '')).trim();
-    if (!/Rolled back, 2 of 2/.test(line)) throw new Error(`the card says: ${line || 'nothing'}`);
+    if (!said('inbox', 'train_rolled_back', { n: 2, total: 2 }).test(line)) throw new Error(`the card says: ${line || 'nothing'}`);
     const order = [...(rolled.train?.services ?? [])].filter((s) => s.state === 'reverted').sort((a, b) => Date.parse(a.at ?? '') - Date.parse(b.at ?? '')).map((s) => s.service);
     if (order.join(',') !== 'guestbook,filter-api') throw new Error(`reverted in this order: ${order.join(', ')}`);
     return `"${line}"; reverted ${order.join(' then ')}; ${ticket.id} in ${ticket.status}`;

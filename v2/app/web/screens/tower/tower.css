@@ -142,6 +142,8 @@
   /* The actions wrap under the field, New ticket at the end of their line; Ask about the code and Run a
      recipe stay in the palette (Ctrl-K or the top bar's search), so the bar is two lines at most. */
   .ask-actions [data-bar="ask"], .ask-actions [data-bar="recipe"] { display: none; }
+  /* Ask the lead too (lane 38): the lead's own field is the next block down, so the bar keeps one row. */
+  .ask-actions [data-lead="lead"] { display: none; }
 }
 /* the rows, by the width of their own column */
 @container rows (max-width: 720px) {
