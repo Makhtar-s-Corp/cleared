@@ -3858,3 +3858,15 @@ The LATER items are in the pull request's body as follow-ups.
 **The browser job was red on pull request 263.** Seven tests failed: the boundary's French sentence, the inbox's French requests and the shell's French sheet. They started the app with French as its setting, but GitHub's Chromium asks for `en-US`, which the app now honours. On this server the headless shell does not send that header, so they passed here. Every browser test's context now names its locale: `fr-FR` where the test reads French, `en-US` elsewhere.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-durations` (i18n).
+
+## 2026-10-23: Owner decision: the stopped leads' containers and networks on the proof host are removed by name
+
+**Decision.** On 2026-10-23 at 10:19 (Europe/Paris) the owner approved, in writing, removing by name the containers and networks labelled `cleared.dev=v2` of the five stopped leads (`a75e176e`, `8b1ddedc`, `e86e2f32`, `bdd33971`, `c354868f`), once the running proof had finished. Nothing else: not the demo's, not the live leads', not `cleared-guestbook`, no unlabelled network, no volume, no prune.
+
+**Why.** Step 08 of the multi-service proof timed out waiting for its release card. Docker's default address pool on the host holds 31 subnets, and 29 were taken: 15 labelled `cleared.dev=v2`, ten of them the `cleared-v2-<id>` and `-out` networks of the five stopped leads, never released, and 14 unlabelled ones that are not ours. A session needs two networks, so the next session could not start.
+
+**Consequences.**
+- Each container and network is checked for the `cleared.dev=v2` label and its `cleared.session` before removal, and removed by its name. Volumes are kept.
+- The proof is rerun from a clean state after the removal.
+- The service must release a session's networks when the session stops: issue #265.
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops lane, branch `v2-j2-ops-networks`.
