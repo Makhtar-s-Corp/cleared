@@ -218,7 +218,8 @@ async function openItem(id: string): Promise<void> {
   // The item shown: a waiting one with its buttons, a handled one (a train
   // rolled back) with its line only.
   await page.locator(`a.item[data-item="${id}"][aria-current="true"]`).waitFor();
-  await page.locator('#d-actions').waitFor({ state: 'attached' });
+  // The item's gestures: a request's three answers at the top of the detail (lane 37), the others' bar at its foot.
+  await page.locator('#d-actions, #detail [data-act]').first().waitFor({ state: 'attached' });
 }
 
 // Creates ticket `n` of the proof from the tower bar, naming its services.

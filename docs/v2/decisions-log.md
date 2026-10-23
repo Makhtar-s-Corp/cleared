@@ -3680,7 +3680,30 @@ No catalog key was missing: lanes 34 and 35's catalog test already held both cat
 - `typeset`, `layout`, `onboard` and `polish` are the bullets above.
 - The notes are at `/tmp/cleared-captures/j2/overhaul/38/impeccable-38.md`, not committed.
 
-**The art director's look** (`/tmp/cleared-reviews/38-ad.md`, a fresh session). Items 4, 5, 6 (the index), 8, 9 (the bar and the facts), 10, 11 and 12 were applied before lane 37's merge; items 1, 2, 3, 7 and 9's placeholder after it (below).
+**The art director's look** (`/tmp/cleared-reviews/38-ad.md`, a fresh session). Its BEFORE MERGE list is empty.
+- Applied before lane 37's merge: items 4, 5, 6 (the index), 8, 9 (the bar and the facts), 10 and 11.
+- Applied after the merge:
+  - Item 1: the inbox's sheet is on the type scale. Its 13 off-scale sizes and weights 500 and 600 now use the tokens, mapped as above. The token test reads every sheet, the inbox's included: the `PENDING` set is empty.
+  - Item 2: the row's background transition is gone. The grace bar's fill, a 60-second timer that moves each second, is the one exception the motion test names, as the gradient test names it.
+  - Item 3: under 1024 px, where the list is alone, no row is filled as the shown one.
+  - Item 7: lane 37 had already given the inbox one name, "Réception", everywhere.
+  - Item 9: the bar's placeholder is "Un objectif, une question ou un ticket…" ("A goal, a question or a ticket…"), held under 40 characters by a test.
+  - Item 11's contrast pass: the neutral pill's text (`--text-muted` on `--sunken`) is among the contrast test's pairs, AA in both themes.
+  - Item 12: the plan's section 8 and the matrix's O20 and O21, below.
+
+**After lane 37's merge (pull request 255).** `origin/v2` was merged into the branch, with no rebase. The conflicts were resolved as follows:
+- the capture script keeps both lanes' screens;
+- the browser job keeps both new tests;
+- the log keeps lane 37's entry, then this one;
+- the session's French browser sentence is this lane's one-sentence copy.
+
+Lane 37 titles a request by its intent and folds its command:
+- `proof-j1.ts` reads the inbox's command from `#detail .fold-command`;
+- lane 37 had already moved its session half to the card's `data-command`.
+
+Lane 37 also put a no-break space before French colons, so `said()` matches a plain, a no-break or a narrow no-break space alike, with a test. `npm test` runs `test/**/*.test.ts`, so the verify job runs that test. Review round 1 of 256 found the test's literal stale before the merge.
+
+The after captures were taken again on the merged head: 166 files, with lane 37's inbox screens.
 
 **The art director's LATER list (none changes this lane).**
 1. French typography: the typographic apostrophe and the narrow no-break space before `?`, `:` and `;` in the catalogs, locked by a test.

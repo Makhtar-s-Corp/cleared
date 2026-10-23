@@ -411,7 +411,8 @@ async function openItem(id: string): Promise<void> {
   const link = page.locator(`a.item[data-item="${id}"]`);
   await link.waitFor();
   await link.click();
-  await page.locator('#d-actions button').first().waitFor();
+  // The item's gestures: a request's three answers at the top of the detail (lane 37), the others' bar at its foot.
+  await page.locator('#detail [data-act]').first().waitFor();
 }
 
 let planDoneAt: string | null = null;
