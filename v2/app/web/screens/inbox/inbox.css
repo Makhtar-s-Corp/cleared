@@ -86,7 +86,7 @@
 .shot figcaption { margin-top: 6px; font-size: 12px; color: var(--text-faint); }
 .shot.after figcaption { color: var(--ok-text); font-weight: 500; }
 
-.facts { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: var(--space-1) var(--space-2); margin: var(--space-3) 0 0; font-size: var(--text-md); }
+.facts { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: var(--space-1) var(--space-2); margin: var(--space-3) 0 0; font-size: var(--text-md); }
 .facts dt { color: var(--text-faint); }
 .facts dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
 .facts .sep { margin: 0 6px; color: var(--text-faint); }
