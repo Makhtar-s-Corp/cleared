@@ -3986,3 +3986,23 @@ Followups 3 to 7 of the review stay open for the next round.
 - The run's start check must refuse a base whose checks do not trigger on the run branch: issue #277 (the start check verifies that checks trigger on the run branch).
 - No change to the milestone 2 plan is expected: its unknowns table has no item on the checks trigger.
 - Recorded by: the orchestrator, ops lane, branch `v2-j2-ops-proofci`; this entry also corrects the commit ids of the entry above (the ids it named are the revert commits, not the merges).
+
+## 2026-10-23: the proof's driver lets an author or a reviewer run its service's declared checks (P52, partial)
+
+**Decision.** In run 5 of the multi-service proof, step 10 failed. The driver's `tend()` answers each permission a session of the proof's tickets asks with the checkout rule (`answerFor`, `scripts/proof-inbox.ts`), and it denied the reviewer's requests to run the service's tests. The reviewer judged on the diff alone, asked for changes twice, and the ticket went back to Todo. The driver now allows once a request from an author or a reviewer to run exactly one of its service's declared read-only checks. Every other request keeps the answer it had.
+- The declared checks are `test`, `typecheck` and `lint` among the scripts of the service's `package.json`, as `npm test`, `npm run typecheck` and `npm run lint`. They are read from the frozen base of each proof repository when the run prepares its clean base, the same file the service's policy reads its scripts from. Without a clean base (the rehearsal with `PROOF_REPOS=none`) no check is declared, and the old rule answers.
+- The session's role and service come from `GET /api/sessions`, read once per pass of `tend()`. A lead, a reader, or a role the driver cannot read gets the old rule's answer.
+- `answerFor` is unchanged: the milestone 1 proof and the 48-hour proof's morning share it.
+- Each answer is traced in `result.json` and in the report's "Session permissions" section: the ticket, the session, its role and service, the command (cut to 160 characters), the answer, and the rule that gave it (`check`, `checkout`, `outside`, `not_a_command`).
+
+**What it does not fix.** The ledger of run 5 shows that the reviewer's two requests on the third ticket were compound commands, not a bare check:
+- `npm test | tail; npm run typecheck | tail; git ls-files; grep "a\|b" ... | head`. It is read-only, but the checkout rule refuses it: `git ls-files` is not in its list of git commands, and its split does not read quotes, so it cuts the grep pattern at `\|`.
+- A check followed by a file written to `/tmp` through a heredoc. It is refused, and rightly.
+
+A bare `npm test` or `npm run typecheck` was already allowed by the checkout rule, and the service's policy allows it without asking (`run.safe`), so it never reaches the inbox. The exact rule makes the reviewer's checks explicit and traced, but alone it would not have changed step 10 of run 5. Widening the driver to compounds of checks and reads (a split that reads quotes, `git ls-files`) changes the answer to other requests, so it is left to the owner as a follow-up lane. The rest of P52 (the service's policy allowing only the declared test command, the verdict carrying the result) stays for milestone 3.
+
+**Tests.**
+- `test/scripts/proof-inbox.test.ts`: the declared checks read from a `package.json`; an author's or a reviewer's exact check, allowed once; a write outside the checkout, a network command or an install, refused whatever the role, run 5's first reviewer request among them; a lead, a reader, an empty or unknown role, answered by the checkout rule.
+- `test/scripts/proof-report.test.ts`: the report's permissions section.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.

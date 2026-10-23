@@ -153,6 +153,41 @@ export function leftForOwner(entries: readonly InboxEntry[]): { readonly knowled
   return { knowledge: entries.filter((e) => e.kind === 'knowledge').length, contract: entries.filter((e) => e.kind === 'contract').length };
 }
 
+// ---- the multi-service proof, a session's permission -----------------------------
+
+// Run 5 of the multi-service proof (step 10): the proof denied a reviewer's
+// requests to run the service's tests, so the reviewer judged on the diff
+// alone, asked for changes twice, and the ticket went back to Todo. An author
+// or a reviewer that asks to run exactly one of the read-only checks its
+// service declares (test, typecheck or lint among the scripts of its
+// package.json, which the service's policy reads too) is allowed once;
+// everything else keeps the rule above. A lead, a reader or a role the proof
+// cannot read is not an author's or a reviewer's checkout: the rule above too.
+export const CHECK_SCRIPTS: readonly string[] = ['test', 'typecheck', 'lint'];
+const CHECKING_ROLES: ReadonlySet<string> = new Set(['author', 'reviewer']);
+
+// The check commands of a package.json's text: none when it is absent or unreadable.
+export function declaredChecks(packageJson: string | undefined): string[] {
+  let scripts: unknown;
+  try { scripts = (JSON.parse(packageJson ?? '') as { scripts?: unknown }).scripts; } catch { return []; }
+  if (typeof scripts !== 'object' || scripts === null) return [];
+  return CHECK_SCRIPTS.filter((name) => typeof (scripts as Record<string, unknown>)[name] === 'string')
+    .map((name) => (name === 'test' ? 'npm test' : `npm run ${name}`));
+}
+
+export type PermissionRule = 'check' | 'checkout' | 'outside' | 'not_a_command';
+export type PermissionAnswer = { readonly decision: 'allow_once' | 'reject_once'; readonly rule: PermissionRule };
+
+// `command` is absent for a request that is not a command (an edit, a fetch),
+// `role` when the proof could not read the session's.
+export function permissionAnswer(request: { readonly role: string | undefined; readonly command: string | undefined; readonly checks: readonly string[] }): PermissionAnswer {
+  const { role, command, checks } = request;
+  if (command === undefined) return { decision: 'reject_once', rule: 'not_a_command' };
+  const exact = command.trim().replace(/[ \t]+/g, ' ');
+  if (role !== undefined && CHECKING_ROLES.has(role) && checks.includes(exact)) return { decision: 'allow_once', rule: 'check' };
+  return answerFor(command) === 'allow_once' ? { decision: 'allow_once', rule: 'checkout' } : { decision: 'reject_once', rule: 'outside' };
+}
+
 // ---- the multi-service proof, a session's question -------------------------------
 
 // A question a session of one of the proof's tickets asks (AskUserQuestion's

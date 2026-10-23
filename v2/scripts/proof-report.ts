@@ -385,6 +385,8 @@ export type MultiResult = {
   readonly proposal: string | null;                         // the blocked card's proposal (step 10)
   // The questions the sessions of the proof's tickets asked, and what the proof chose (proof-inbox.ts, chooseAnswers).
   readonly questions: readonly AnsweredQuestion[];
+  // The permissions the sessions of the proof's tickets asked, and how the proof answered (proof-inbox.ts, permissionAnswer).
+  readonly permissions: readonly AnsweredPermission[];
   // The clean base the run started from (proof-base.ts), when it reset one.
   readonly base: BaseReport | null;
 };
@@ -398,6 +400,21 @@ export type AnsweredQuestion = {
   readonly answer: string;
   readonly how: 'recommended' | 'first' | 'free';
 };
+
+// `role` and `service` are null when the proof could not read the session;
+// `command` is cut to PERMISSION_COMMAND_LIMIT, and null for a request that
+// is not a command.
+export type AnsweredPermission = {
+  readonly at: string;
+  readonly ticket: string;
+  readonly session: string;
+  readonly role: string | null;
+  readonly service: string | null;
+  readonly command: string | null;
+  readonly answer: 'allow_once' | 'reject_once';
+  readonly rule: 'check' | 'checkout' | 'outside' | 'not_a_command';
+};
+export const PERMISSION_COMMAND_LIMIT = 160;
 
 export type BaseReport = {
   readonly frozen: string;                                  // the frozen base branch, only ever read
@@ -414,6 +431,15 @@ function questionLines(questions: readonly AnsweredQuestion[]): string[] {
   out.push(row('At', 'Ticket', 'Session', 'Question', 'Options', 'Answer', 'Chosen as'), row('---', '---', '---', '---', '---', '---', '---'));
   for (const q of questions) out.push(row(q.at, q.ticket, q.session.slice(0, 8), q.question, q.options.join(' / ') || 'none', q.answer, q.how));
   return [...out, ''];
+}
+
+function permissionLines(permissions: readonly AnsweredPermission[]): string[] {
+  const out = ['## Session permissions', ''];
+  if (permissions.length === 0) return [...out, 'No session of the proof\'s tickets asked a permission.', ''];
+  out.push(row('At', 'Ticket', 'Session', 'Role', 'Service', 'Command', 'Answer', 'Rule'), row('---', '---', '---', '---', '---', '---', '---', '---'));
+  for (const p of permissions) out.push(row(p.at, p.ticket, p.session.slice(0, 8), p.role ?? 'unknown', p.service ?? 'unknown', p.command ?? 'not a command', p.answer, p.rule));
+  const checks = permissions.filter((p) => p.rule === 'check').length;
+  return [...out, '', `${plural(checks, 'declared check')} allowed once; ${plural(permissions.length - checks, 'other request')} answered by the checkout rule.`, ''];
 }
 
 function baseLines(base: BaseReport | null): string[] {
@@ -505,6 +531,7 @@ export function renderMultiDurations(r: MultiResult): string {
     '',
     ...sessionPlanLines(r.sessionPlans),
     ...questionLines(r.questions),
+    ...permissionLines(r.permissions),
     ...baseLines(r.base),
     '## The owner',
     '',
