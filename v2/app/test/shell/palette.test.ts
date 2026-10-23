@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
 import { towerModel } from '../../web/screens/tower/model.ts';
-import { GESTURES, paletteItems, type PaletteItem } from '../../web/shell/palette.ts';
+import { GESTURES, GROUPS, groupOrder, paletteItems, rank, type PaletteItem } from '../../web/shell/palette.ts';
 import { sessionRows } from '../../web/shell/model.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { loadCatalog } from '../../src/catalog.ts';
@@ -77,4 +77,21 @@ test('every label the palette draws is in both catalogs', () => {
     for (const gesture of GESTURES) assert.ok(all[gesture.label], `${language}: ${gesture.label}`);
     for (const key of ['palette_placeholder', 'palette_label', 'palette_empty', 'palette_waiting', 'palette_actions', 'palette_goto', 'palette_sessions', 'palette_general', 'palette_open', 'cmd_sheet', 'cmd_sidebar']) assert.ok(all[key], `${language}: ${key}`);
   }
+});
+
+test('a ticket\'s number typed alone puts its sessions first, above what waits on the same ticket', () => {
+  // base: what cmdk's own filter gave each item for the query.
+  assert.equal(rank('session-fixture-161', '161', ['LOCAL-161', '161'], 0.6), 1);
+  assert.equal(rank('session-fixture-161', 'local-161', ['LOCAL-161', '161'], 0.6), 1);
+  assert.ok(rank('waiting-request-161', '161', ['LOCAL-161', 'permission'], 0.95) < 1, 'what waits on that ticket comes after its session');
+  assert.equal(rank('session-fixture-160', '161', ['LOCAL-160', '160'], 0), 0, 'another ticket stays out');
+  assert.equal(rank('goto-inbox', 'inbox', [], 0.9), 0.9, 'any other query is cmdk\'s own');
+  assert.equal(rank('waiting-x', 'date', ['LOCAL-161'], 0.7), 0.7);
+});
+
+test('the groups keep their order, but a ticket\'s number puts the sessions first', () => {
+  assert.deepEqual(groupOrder(''), GROUPS);
+  assert.deepEqual(groupOrder('inbox'), GROUPS);
+  assert.deepEqual(groupOrder('161'), ['sessions', 'waiting', 'actions', 'goto', 'general']);
+  assert.deepEqual(groupOrder(' LOCAL-161 '), ['sessions', 'waiting', 'actions', 'goto', 'general']);
 });

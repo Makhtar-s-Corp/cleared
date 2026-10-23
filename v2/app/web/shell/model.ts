@@ -94,10 +94,11 @@ export function sessionGroups(rows: readonly SessionRow[]): SessionGroup[] {
 }
 
 // open: the full sidebar; rail: its icons only; bar: four icons at the
-// foot of a phone. A computer opens it from 1200 px, a tablet has the rail;
-// what `[` stored wins on both.
+// foot of a phone. A wide screen opens it from 1400 px; below, a laptop or
+// a tablet has the rail, which leaves the session screen's three columns
+// their room; what `[` stored wins on both.
 export type SidebarMode = 'open' | 'rail' | 'bar';
-export const OPEN_FROM = 1200;
+export const OPEN_FROM = 1400;
 export const RAIL_FROM = 768;
 
 export function sidebarMode(stored: string | null, width: number): SidebarMode {

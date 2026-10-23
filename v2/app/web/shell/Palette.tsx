@@ -4,13 +4,13 @@
 // not cmdk's (components/ui/command.tsx says why): focus stays in it, Esc
 // or a click outside closes it, and the focus goes back where it was.
 import { ArrowRight, Broadcast, Circle, Keyboard, ListChecks, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
-import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { defaultFilter } from 'cmdk';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { Keys } from './Kbd.tsx';
-import { GROUP_LABEL, type PaletteGroup, type PaletteItem } from './palette.ts';
+import { GROUP_LABEL, groupOrder, rank, type PaletteItem } from './palette.ts';
 
-const GROUPS: readonly PaletteGroup[] = ['waiting', 'actions', 'goto', 'sessions', 'general'];
 const GOTO_ICONS: Readonly<Record<string, Icon>> = { '/': Broadcast, '/inbox': Tray, '/sessions': TerminalWindow, '/lead': ListChecks };
 
 function iconOf(item: PaletteItem, dark: boolean): Icon | null {
@@ -48,7 +48,9 @@ export function Palette({ t, items, dark, onRun, onClose }: {
   readonly onRun: (item: PaletteItem) => void; readonly onClose: () => void;
 }) {
   useFocusBack();
-  const grouped = useMemo(() => GROUPS.map((group) => ({ group, items: items.filter((item) => item.group === group) })).filter((g) => g.items.length > 0), [items]);
+  const [search, setSearch] = useState('');
+  const order = groupOrder(search);
+  const grouped = useMemo(() => order.map((group) => ({ group, items: items.filter((item) => item.group === group) })).filter((g) => g.items.length > 0), [items, order]);
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); return; }
     trapTab(event);
@@ -56,12 +58,12 @@ export function Palette({ t, items, dark, onRun, onClose }: {
   return (
     <div className="overlay" data-overlay="palette" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={t('palette_label')} id="palette" onKeyDown={keyDown}>
-        <Command label={t('palette_label')} loop>
-          <CommandInput id="palette-input" placeholder={t('palette_placeholder')} autoFocus />
+        <Command label={t('palette_label')} loop filter={(value, search, keywords) => rank(value, search, keywords ?? [], defaultFilter(value, search, keywords))}>
+          <CommandInput placeholder={t('palette_placeholder')} autoFocus value={search} onValueChange={setSearch} />
           <CommandList>
             <CommandEmpty>{t('palette_empty')}</CommandEmpty>
             {grouped.map(({ group, items: rows }) => (
-              <CommandGroup key={group} heading={t(GROUP_LABEL[group])} data-group={group}>
+              <CommandGroup key={group} value={group} heading={t(GROUP_LABEL[group])} data-group={group}>
                 {rows.map((item) => {
                   const Glyph = iconOf(item, dark);
                   return (

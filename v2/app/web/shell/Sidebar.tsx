@@ -38,6 +38,7 @@ export type SidebarProps = {
   readonly onSearch?: () => void;
   readonly onToggle?: () => void;
   readonly onSignOut?: () => void;
+  readonly onPick?: (href: string) => void;               // a screen or a session picked here: the focus stays on it
 };
 
 export function ThemeButton({ t, theme, onFlip }: { readonly t: Translate; readonly theme: Theme; readonly onFlip?: () => void }) {
@@ -57,7 +58,7 @@ export function Sidebar(props: SidebarProps) {
     <aside className="sidebar" id="sidebar" aria-label={t('side_label')}>
       <div className="side-head">
         <a className="side-brand" href="/"><Logo size={18} /><span className="project">{props.project || t('app_name')}</span></a>
-        <Button variant="ghost" className="icon collapse" id="sidebar-toggle" aria-label={t(folded ? 'side_expand' : 'side_collapse')} aria-expanded={!folded} aria-controls="sidebar"
+        <Button variant="ghost" className="icon side-toggle" id="sidebar-toggle" aria-label={t(folded ? 'side_expand' : 'side_collapse')} aria-expanded={!folded} aria-controls="sidebar"
           aria-keyshortcuts="[" title={`${t(folded ? 'side_expand' : 'side_collapse')} ([)`} onClick={props.onToggle}>
           <SidebarSimple size={16} aria-hidden="true" />
         </Button>
@@ -72,7 +73,7 @@ export function Sidebar(props: SidebarProps) {
             const label = t(item.label);
             return (
               <li key={item.screen}>
-                <a className="nav-item" href={item.href} data-nav={item.screen} aria-current={screen === item.screen ? 'page' : undefined} title={`${label} (${item.chord.join(' ')})`}>
+                <a className="nav-item" href={item.href} data-nav={item.screen} onClick={() => props.onPick?.(item.href)} aria-current={screen === item.screen ? 'page' : undefined} title={`${label} (${item.chord.join(' ')})`}>
                   <Glyph size={16} weight={screen === item.screen ? 'fill' : 'regular'} aria-hidden="true" />
                   <span className="nav-label">{label}</span>
                   {item.screen === 'inbox' ? (
@@ -100,7 +101,7 @@ export function Sidebar(props: SidebarProps) {
               <ul>
                 {group.rows.slice(0, GROUP_MAX).map((row) => (
                   <li key={row.id}>
-                    <a className="side-session" href={`/sessions/${encodeURIComponent(row.id)}`} aria-current={props.session === row.id ? 'page' : undefined} title={`${row.ticket} · ${row.title}`}>
+                    <a className="side-session" href={`/sessions/${encodeURIComponent(row.id)}`} onClick={() => props.onPick?.(`/sessions/${encodeURIComponent(row.id)}`)} aria-current={props.session === row.id ? 'page' : undefined} title={`${row.ticket} · ${row.title}`}>
                       <span className="sr-only">{row.ticket} </span><span className="title">{row.title}</span>
                     </a>
                   </li>

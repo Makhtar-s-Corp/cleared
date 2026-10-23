@@ -57,10 +57,11 @@ test('the live sessions of the teams, grouped: what waits for you, what works, w
   assert.deepEqual(sessionGroups(rows.filter((row) => row.state === 'ended')), [], 'no group without a row');
 });
 
-test('open from 1200 px, a rail from 768, a bottom bar below; `[` stores the other of open and rail', () => {
+test('open from 1400 px, a rail from 768, a bottom bar below; `[` stores the other of open and rail', () => {
   assert.equal(sidebarMode(null, 1440), 'open');
-  assert.equal(sidebarMode(null, 1200), 'open');
-  assert.equal(sidebarMode(null, 1199), 'rail');
+  assert.equal(sidebarMode(null, 1400), 'open');
+  assert.equal(sidebarMode(null, 1399), 'rail');
+  assert.equal(sidebarMode(null, 1280), 'rail', 'a laptop leaves its width to the screen');
   assert.equal(sidebarMode(null, 768), 'rail');
   assert.equal(sidebarMode(null, 767), 'bar');
   assert.equal(sidebarMode('rail', 1440), 'rail');

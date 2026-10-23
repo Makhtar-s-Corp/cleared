@@ -309,7 +309,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .app, .app[data-sidebar="rail"] { display: block; padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom)); }
   .sidebar { position: sticky; top: 0; flex-direction: row; align-items: center; gap: var(--space-1); height: var(--top-bar); padding: 0 var(--space-2) 0 var(--space-3); border-right: 0; box-shadow: var(--e-header); overflow: visible; }
   .side-head { flex: 1; min-width: 0; min-height: 0; padding: 0; }
-  .side-head .collapse, .side-sessions, .search-text, .search .keys, .person .name, .nav-item .keys { display: none; }
+  .side-head .side-toggle, .side-sessions, .search-text, .search .keys, .person .name, .nav-item .keys { display: none; }
   .app[data-sidebar="rail"] .nav-label { position: static; width: auto; height: auto; clip: auto; }
   .app[data-sidebar="rail"] .side-head { justify-content: flex-start; }
   .app[data-sidebar="rail"] .side-brand { display: inline-flex; }

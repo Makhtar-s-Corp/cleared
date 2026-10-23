@@ -89,6 +89,27 @@ export function paletteItems({ screen, needs, sessions, gestures, theme, t }: Pa
   return [...waiting, ...actions, ...goto, ...rows, ...general];
 }
 
+// The palette's order for a query: cmdk's own score (`base`), except that a
+// ticket's number typed alone (161, LOCAL-161) puts that ticket's sessions
+// first, then what else matches; the sessions are what a number is typed for.
+const ticketNumber = (search: string): string | undefined => /^(?:[a-z]+-)?(\d+)$/i.exec(search.trim())?.[1];
+
+export function rank(id: string, search: string, keywords: readonly string[], base: number): number {
+  const number = ticketNumber(search);
+  if (!number || base <= 0) return base;
+  if (id.startsWith('session-') && keywords.includes(number)) return 1;
+  return Math.min(base, 0.9);
+}
+
+// The groups in the palette's order, the sessions first for a ticket's
+// number. cmdk sorts the items inside a group; it leaves the groups where
+// they are drawn, so the palette draws them in this order.
+export const GROUPS: readonly PaletteGroup[] = ['waiting', 'actions', 'goto', 'sessions', 'general'];
+
+export function groupOrder(search: string): readonly PaletteGroup[] {
+  return ticketNumber(search) ? ['sessions', ...GROUPS.filter((g) => g !== 'sessions')] : GROUPS;
+}
+
 export const GROUP_LABEL: Readonly<Record<PaletteGroup, string>> = {
   waiting: 'palette_waiting', actions: 'palette_actions', goto: 'palette_goto', sessions: 'palette_sessions', general: 'palette_general',
 };

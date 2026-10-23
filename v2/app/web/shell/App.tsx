@@ -303,9 +303,11 @@ function Shell({ shared }: { readonly shared: Shared }) {
   // of places does (lane 34's art director). Not on the first draw.
   const [said, say] = useState('');
   const moved = useRef(false);
+  const fromSidebar = useRef(false);
   useLayoutEffect(() => {
     if (!moved.current) { moved.current = true; return; }
-    if (!document.activeElement?.closest('#sidebar')) document.getElementById('screen')?.focus({ preventScroll: true });
+    if (!fromSidebar.current) document.getElementById('screen')?.focus({ preventScroll: true });
+    fromSidebar.current = false;
     say(document.title);
   }, [place.path]);
 
@@ -372,7 +374,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
           waiting={waiting} lead={leadDot(lead)} groups={sessionGroups(rows)} theme={theme} onTheme={flipTheme}
-          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={() => void signOut()} />
+          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={() => void signOut()} onPick={(href) => { fromSidebar.current = href !== location.pathname; }} />
         <div className="main">
           <div className="top-bar" id="top-bar">
             <p className="top-title">{shownRow ? <><a className="crumb" href="/sessions">{t('title_session')}</a><span className="crumb" aria-hidden="true">/</span></> : null}<span className="here">{here}</span></p>

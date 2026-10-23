@@ -23,14 +23,15 @@ export const PAINTED: Readonly<Record<string, string>> = {
   lead: '.lead-screen:not([aria-busy])',
 };
 
-// The link a person clicks to reach each screen from the one before it.
+// The link a person clicks to reach each screen from the one before it:
+// the sidebar's since lane 35, the header's before it (a "before" measure).
 export const LINKS: Readonly<Record<string, string>> = {
-  tower: 'header nav a[href="/"]',
-  inbox: 'header nav a[href="/inbox"]',
-  sessions: 'header nav a[href="/sessions"]',
+  tower: '#nav a[href="/"], header nav a[href="/"]',
+  inbox: '#nav a[href="/inbox"], header nav a[href="/inbox"]',
+  sessions: '#nav a[href="/sessions"], header nav a[href="/sessions"]',
   session: '.index a.open[href^="/sessions/"]',
   session2: '.index .sessions > li:nth-child(2) a.open[href^="/sessions/"]',
-  lead: 'header nav a[href="/lead"]',
+  lead: '#nav a[href="/lead"], header nav a[href="/lead"]',
 };
 
 // The order of a lap: each step is reachable from the one before it.

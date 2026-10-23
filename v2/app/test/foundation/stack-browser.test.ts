@@ -12,7 +12,7 @@
 //     shown one holds the only copy of its ids, and the tower's scroll is
 //     given back on return;
 //   - a screen that throws while it draws shows which screen failed and a
-//     way to draw it again; the header stays, and the other screens draw.
+//     way to draw it again; the sidebar stays, and the other screens draw.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/foundation/stack-browser.test.ts
 import test from 'node:test';
@@ -108,15 +108,17 @@ test('a message comes back when refused; a session\'s terminal and editor live t
         (document.querySelector('#tab-editor .cm-editor') as unknown as { kept: string }).kept = 'editor';
       });
 
-      await page.locator('header nav a[href="/inbox"]').click();
+      await page.locator('#nav a[href="/inbox"]').click();
       await page.waitForURL(`${app.base}/inbox`);
       await page.locator('#screen > [data-session-view]').first().waitFor({ state: 'hidden' });
-      // What a page load did for a keyboard and a screen reader: focus at the new screen, its title said.
+      // What a page load did for a screen reader: the new screen's title said. A move started in the
+      // sidebar keeps the focus on the item pressed (lane 35); Back moves it to the screen, as a load did.
       await page.waitForFunction(() => document.querySelector('#screen-said')?.textContent === 'Cleared · Inbox');
-      assert.equal(await page.evaluate(() => document.activeElement?.id), 'screen');
+      assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.nav), 'inbox');
       assert.equal(await page.title(), 'Cleared · Inbox');
       await page.goBack();
       await page.waitForURL(new RegExp(`/sessions/${AUTHOR_ID}`));
+      await page.waitForFunction(() => document.activeElement?.id === 'screen');
       await page.locator('#tab-editor .cm-editor').waitFor();
 
       const kept = await page.evaluate(() => ({
@@ -154,7 +156,7 @@ async function broken(): Promise<DataSource> {
   return source;
 }
 
-test('a screen that throws says so, in its language, and offers to try again; the header stays and the other screens draw', { skip }, async () => {
+test('a screen that throws says so, in its language, and offers to try again; the sidebar stays and the other screens draw', { skip }, async () => {
   const fr = await startApp({ source: await broken(), extra: { language: 'fr' } });
   try {
     await signedInPage(fr, async (page) => {
@@ -173,10 +175,10 @@ test('a screen that throws says so, in its language, and offers to try again; th
       await failed.waitFor();
       assert.match(await failed.innerText(), /Sessions did not load\./, 'the screen\'s name, translated');
       assert.equal(await page.locator('#boundary-retry').innerText(), 'Try again');
-      assert.equal(await page.locator('header nav a[href="/lead"]').count(), 1, 'the header stays');
+      assert.equal(await page.locator('#nav a[href="/lead"]').count(), 1, 'the sidebar stays');
       await page.locator('#boundary-retry').click();
       await failed.waitFor();
-      await page.locator('header nav a[href="/lead"]').click();
+      await page.locator('#nav a[href="/lead"]').click();
       await page.locator('.lead-screen:not([aria-busy])').waitFor();
       assert.equal(await failed.count(), 0);
     }, '/sessions');
@@ -248,7 +250,7 @@ test('two sessions visited A, B, A, B: neither moves, the frame is not loaded ag
       }));
       assert.deepEqual(ids, { message: 1, terminal: 1, owner: b }, 'the shown session holds its ids alone');
 
-      await page.locator('header nav a[href="/"]').click();
+      await page.locator('#nav a[href="/"]').click();
       await page.locator('#tower-body .tower').waitFor();
       await page.waitForFunction(() => window.scrollY === 240, undefined, { timeout: 3000 });
     });
