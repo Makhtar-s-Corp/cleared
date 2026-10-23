@@ -3720,6 +3720,17 @@ The after captures were taken again on the merged head: 166 files, with lane 37'
 12. The palette: a count or "Show all" beside "Needs you", and the state, not the role, as a session's accessory.
 13. Contrast: `audit`'s pass again after the neutral pill.
 
+**Measures** (the plan's section 8 holds the table; the fixtures source, 1440x900, the median of three runs' p95 of twenty switches through two sessions, taken in one session on 2026-10-23 between 05:26 and 05:29):
+
+| Version | Median p95 | Documents in twenty switches | Requests per switch, at most |
+| --- | --- | --- | --- |
+| `8a93cd5`, before the overhaul | 116.1 ms (the lap through two sessions: 128.7 ms) | 20 | 13 |
+| `e6446c2`, this lane's start | 27.0 ms (29.5 ms) | 0 | 1 |
+| `358f8de`, lane 37 merged | 34.5 and 32.0 ms (27.7 and 30.8 ms) | 0 | 1 |
+| this lane's head | 33.1, 28.7 and 35.8 ms (29.6, 37.4 and 32.6 ms) | 0 | 1 |
+
+The browser job on GitHub's runner read 46.0, 75.7, 58.9 and 83.9 ms over this pull request's runs, against 54.2 to 70.6 ms for `v2` and its lanes. The handover row arrived 52 to 78 ms after the change event. The terminal and the editor were made once each.
+
 **What lane 38 touched beyond its file list, and why.**
 - `.github/workflows/v2.yml`: the first-paint browser test added to the browser job's list.
 - `v2/scripts/capture-screens.ts`: the `login` screen.
