@@ -173,7 +173,7 @@ test('the side: the plan, the other plans as links, an empty state, a plan the a
   assert.match(all, /<a href="\/plans\/plan-2">Make the guestbook ready for a small team<\/a> <span class="faint">Running · 1 of 5 landed<\/span>/);
   assert.match(all, /<a href="\/plans\/plan-0">Newest entries first<\/a> <span class="faint">Done · 2 of 2 landed<\/span>/);
   const none = renderLead(await view({ plans: [] }), en);
-  assert.match(none, /No plan yet\. Give the lead a goal and it proposes one here\./);
+  assert.match(none, /No plan yet\.[^]*?Give the lead a goal/);
   const missing = renderLead(await view({ planId: 'plan-404' }), en);
   assert.match(missing, /There is no plan plan-404\./);
 });

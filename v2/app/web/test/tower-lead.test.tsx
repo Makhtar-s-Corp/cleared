@@ -3,7 +3,7 @@
 // week share, the lead's own sessions and questions, and the "Lead · always
 // on" pill of the shell's header.
 import { test } from 'vitest';
-import { renderHeader, renderTower, renderTowerBody } from './render.tsx';
+import { renderSidebar, renderTower, renderTowerBody } from './render.tsx';
 import assert from 'node:assert/strict';
 import type { InboxItem, LeadMessage, LeadState, Plan, PlanItem, SessionSummary } from '../../../src/api/types.ts';
 import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
@@ -113,7 +113,8 @@ test('without the lead or the plans routes, the milestone 1 tower still loads', 
   assert.equal(model.landed.length, 2);
   const words = text(renderTowerBody(model, en));
   assert.match(words, /Not running/);
-  assert.match(words, /No plan in progress\. Give the lead a goal from the bar above\./);
+  assert.match(words, /No plan in progress\./);
+  assert.match(words, /New goal/, 'and the one thing to do about it');
   const failing = async <T,>(path: string): Promise<T> => { throw new ApiError(path === '/inbox' ? 502 : 404, path); };
   await assert.rejects(loadTower(failing, { after: 0, line: null }), 'the tower\'s own data is still required');
 });
@@ -155,8 +156,8 @@ test('a proposed plan is a card under Needs you, after what the teams wait for, 
   assert.equal(card?.kind, 'plan');
   assert.equal(card?.href, '/plans/plan-readable');
   const html = renderTower(model, en);
-  assert.match(html, /<a class="need" href="\/plans\/plan-readable">/);
-  assert.ok(text(html).includes('Plan · 25 min\nGoal\nMake the guestbook readable on desktop\nThe lead proposes 5 tickets, about 2 h of work and 4 % of the week.'));
+  assert.match(html, /<a class="need row" href="\/plans\/plan-readable"/);
+  assert.ok(text(html).includes('Plan\nMake the guestbook readable on desktop\nThe lead proposes 5 tickets, about 2 h of work and 4 % of the week.\nGoal\n25 min'), 'its kind, its title, its line, then whose and how long');
 });
 
 test('a plan without the week share says its cost, one ticket reads in the singular, and French says it in French', () => {
@@ -189,7 +190,7 @@ test('the lead\'s own question shows no ticket id and opens the lead, and its se
   const card = model.needs.find((n) => n.id === 'lead-question');
   assert.equal(card?.href, '/lead');
   const html = renderTower(model, en);
-  assert.match(html, /<a class="need" href="\/lead">[\s\S]*?<span class="id">Lead<\/span>[\s\S]*?Pages of 20, or one long list\?[\s\S]*?The lead waits for your answer on its screen\./);
+  assert.match(html, /<a class="need row" href="\/lead"[^>]*>[\s\S]*?Pages of 20, or one long list\?[\s\S]*?The lead waits for your answer on its screen\.[\s\S]*?<span class="id">Lead<\/span>/);
   assert.doesNotMatch(html, /<span class="id">lead<\/span>/, 'the sentinel ticket never shows');
   assert.ok(text(html).startsWith('Four things need you.') || text(html).includes('Four things need you.'));
   assert.match(text(html), /^4 sessions running/m);
@@ -213,22 +214,20 @@ test('the pill shows only while a generation of the lead is live, or refreshing 
   assert.equal(leadPillShown(null), false);
 });
 
-test('the shell draws the pill hidden in the header, so no page render calls the service', async () => {
+test('the shell draws the lead\'s dot beside Plans, none before the first read, so no page render calls the service', async () => {
   const app = await startApp();
   try {
     const { cookie } = await signedIn(app);
     for (const path of ['/', '/inbox', '/lead']) {
       const html = await (await fetch(`${app.base}${path}`, { headers: { cookie } })).text();
-      assert.doesNotMatch(html, /lead-pill/, `${path}: the server writes no header; the shell draws it`);
+      assert.doesNotMatch(html, /lead-dot|sidebar/, `${path}: the server writes no sidebar; the shell draws it`);
     }
   } finally {
     await app.close();
   }
   const shell = translator(loadCatalog('shell', 'en'));
-  for (const screen of ['tower', 'inbox', 'lead'] as const) {
-    const html = renderHeader(screen, shell);
-    assert.match(html, /<a class="lead-pill" id="lead-pill" href="\/lead" hidden="">Lead · always on<\/a>/, screen);
-    assert.ok(html.indexOf('id="lead-pill"') < html.indexOf('id="notify"'), 'first in the header\'s right group, as the capture');
-  }
-  assert.match(renderHeader('tower', shell, { leadOn: true }), /<a class="lead-pill" id="lead-pill" href="\/lead">Lead · always on<\/a>/);
+  for (const screen of ['tower', 'inbox', 'lead'] as const) assert.doesNotMatch(renderSidebar(screen, shell), /lead-dot/, `${screen}: not known yet, no dot`);
+  const on = renderSidebar('tower', shell, { lead: 'on' });
+  assert.match(on, /<a class="nav-item" href="\/lead"[^>]*>[^]*?<span class="lead-dot" id="lead-dot" data-lead="on" aria-hidden="true"><\/span><span class="sr-only">The lead is on<\/span>/);
+  assert.match(renderSidebar('tower', shell, { lead: 'down' }), /data-lead="down"[^]*?The lead is not running/);
 });

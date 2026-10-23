@@ -7,7 +7,11 @@
 // The milestone 2 additions (lane 27): a live session's step, the contract
 // and knowledge items in Needs you, the schedules in the plans card, "Ask
 // about the code" and "Run a recipe" in the bar, with the recipe's form.
-import { Check, HandGrabbing, X } from '@phosphor-icons/react';
+// Lane 35 (docs/v2/ui-overhaul-plan.md, 2.2.4 and 2.2.7): what needs the
+// person and the live sessions are rows (a kind, a title, one line), which
+// J and K walk ([data-row]); an empty part says so in one sentence, with
+// the one thing to do about it.
+import { Check, HandGrabbing, ListChecks, TerminalWindow, X } from '@phosphor-icons/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Recipe } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -15,12 +19,13 @@ import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { useGo, useScreen } from '@/lib/context.tsx';
+import { Empty } from '@/shell/Empty.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
-  DRAFT_MAX, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, loadTower, needId, needSentence, needTitle, pickedFor, planProgress,
+  DRAFT_MAX, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, liveOrder, loadTower, needId, needSentence, needTitle, pickedFor, planProgress, recipeKey,
   recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, towerModel, towerSummary,
   type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
@@ -71,7 +76,8 @@ export function RecipeForm({ t, recipes, picked, values, note, link = null, busy
   readonly onPick?: (name: string) => void; readonly onValue?: (name: string, value: string) => void;
   readonly onRun?: (event: FormEvent<HTMLFormElement>) => void; readonly onClose?: () => void;
 }) {
-  const recipe = recipes.find((r) => r.name === picked);
+  // A recipe is its service's and its name's: two services may name one alike (issue 227, item 1).
+  const recipe = recipes.find((r) => recipeKey(r) === picked);
   return (
     <form className="recipe-form" id="recipe-form" autoComplete="off" noValidate aria-labelledby="recipe-title" onSubmit={onRun}>
       <div className="recipe-head">
@@ -80,8 +86,8 @@ export function RecipeForm({ t, recipes, picked, values, note, link = null, busy
       </div>
       <div className="recipe-list" role="group" aria-label={t('recipe_list_label')}>
         {recipes.map((r) => (
-          <Toggle key={`${r.service}/${r.name}`} className="recipe-toggle" pressed={r.name === picked} onPressedChange={() => onPick?.(r.name)} data-recipe={r.name}>
-            {r.name === picked ? <Check size={12} aria-hidden="true" /> : null}{r.name}<span className="recipe-service">{r.service}</span>
+          <Toggle key={recipeKey(r)} className="recipe-toggle" pressed={recipeKey(r) === picked} onPressedChange={() => onPick?.(recipeKey(r))} data-recipe={r.name} data-service={r.service}>
+            {recipeKey(r) === picked ? <Check size={12} aria-hidden="true" /> : null}{r.name}<span className="recipe-service">{r.service}</span>
           </Toggle>
         ))}
       </div>
@@ -113,13 +119,15 @@ export function RecipeForm({ t, recipes, picked, values, note, link = null, busy
   );
 }
 
+// A row of what needs the person: its kind, its title and one line of why,
+// its ticket and how long it has waited. Amber says it waits, once: the kind.
 function Need({ card, t }: { readonly card: NeedCard; readonly t: Translate }) {
   return (
     <li>
-      <a className="need" href={card.href}>
-        <span className="need-head"><span className="wait-line">{t(`need_${card.kind}`, { age: duration(card.minutes, t) })}</span><span className="id">{needId(card, t)}</span></span>
-        <span className="need-title">{needTitle(card, t)}</span>
-        <span className="need-detail">{needSentence(card, t)}</span>
+      <a className="need row" href={card.href} data-row data-kind={card.kind}>
+        <span className="row-kind wait-line">{t(`kind_${card.kind}`)}</span>
+        <span className="row-main"><span className="need-title">{needTitle(card, t)}</span><span className="need-detail">{needSentence(card, t)}</span></span>
+        <span className="row-meta"><span className="id">{needId(card, t)}</span><span className="age">{duration(card.minutes, t)}</span></span>
       </a>
     </li>
   );
@@ -129,19 +137,21 @@ function Need({ card, t }: { readonly card: NeedCard; readonly t: Translate }) {
 // which stopped when it was paused (decision 30).
 export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: Translate }) {
   return (
-    <li className={card.takenOver ? 'session-card taken' : 'session-card'}>
-      <span className="session-head">
-        <span className={liveDot(card.phase, card.role, card.takenOver)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span>
-        {card.step ? <span className="svc-tag" data-step={card.step.position}>{stepTag(card.step, t)}</span>
-          : card.service ? <span className="svc-tag">{card.service}</span> : null}<span className="id">{card.ticket}</span>
-      </span>
-      <span className="session-title">{card.title}</span>
-      {card.takenOver ? <span className="phrase taken-line"><HandGrabbing size={16} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase">{card.status}</span>}
-      <span className="session-foot">
-        <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" />{formatModel(card.harness, card.model)}</span>
-        <span className="elapsed">{duration(card.minutes, t)}</span>
-        <a className="open" href={`/sessions/${card.id}`}>{t('open_session')}</a>
-      </span>
+    <li className={card.takenOver ? 'session-card taken' : 'session-card'} data-phase={card.phase}>
+      <a className="open row" href={`/sessions/${card.id}`} data-row>
+        <span className="row-kind session-head"><span className={liveDot(card.phase, card.role, card.takenOver)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span></span>
+        <span className="row-main">
+          <span className="session-title">{card.title}</span>
+          {card.takenOver ? <span className="phrase taken-line"><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase">{card.status}</span>}
+        </span>
+        <span className="row-meta session-foot">
+          {card.step ? <span className="svc-tag" data-step={card.step.position}>{stepTag(card.step, t)}</span>
+            : card.service ? <span className="svc-tag">{card.service}</span> : null}
+          <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" />{formatModel(card.harness, card.model)}</span>
+          <span className="id">{card.ticket}</span>
+          <span className="elapsed">{duration(card.minutes, t)}</span>
+        </span>
+      </a>
     </li>
   );
 }
@@ -200,9 +210,14 @@ function Schedules({ rows, now, language, t }: { readonly rows: readonly Schedul
   );
 }
 
+// The one thing an empty part asks for: a ticket, written in the bar; a
+// goal, given to the lead on its screen.
+const focusBar = () => document.getElementById('ask-input')?.focus();
+
 export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDraft }: {
   readonly model: TowerModel; readonly t: Translate; readonly language?: 'en' | 'fr'; readonly leadDraft?: string; readonly onLeadDraft?: (value: string) => void;
 }) {
+  const go = useGo();
   return (
     <div className="tower">
       <div className="tower-main">
@@ -213,27 +228,27 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
           </ul>
         )}
         <section className="block" aria-labelledby="needs-title">
-          <div className="block-head"><span className="dot awaiting" aria-hidden="true" /><h2 id="needs-title">{t('needs_title')}</h2><a className="more" href="/inbox">{t('open_inbox')}</a></div>
-          {model.needs.length === 0 ? <p className="empty">{t('needs_empty')}</p>
-            : <ul className="needs">{model.needs.map((card) => <Need key={card.id} card={card} t={t} />)}</ul>}
+          <div className="block-head"><h2 id="needs-title">{t('needs_title')}</h2><span className="n">{model.needs.length || ''}</span><a className="more" href="/inbox">{t('open_inbox')}</a></div>
+          {model.needs.length === 0 ? <p className="quiet-line" id="needs-empty">{t('needs_empty')}</p>
+            : <ul className="rows needs">{model.needs.map((card) => <Need key={card.id} card={card} t={t} />)}</ul>}
         </section>
         <section className="block" aria-labelledby="live-title">
-          <div className="block-head"><span className="dot progress" aria-hidden="true" /><h2 id="live-title">{t('live_title')}</h2><span className="n">{model.live.length}</span></div>
-          {model.live.length === 0 ? <p className="empty">{t('live_empty')}</p>
-            : <ul className="sessions">{model.live.map((card) => <LiveSession key={card.id} card={card} t={t} />)}</ul>}
+          <div className="block-head"><h2 id="live-title">{t('live_title')}</h2><span className="n">{model.live.length || ''}</span><a className="more" href="/sessions">{t('all_sessions')}</a></div>
+          {model.live.length === 0 ? <Empty icon={TerminalWindow} id="live-empty" text={t('live_empty')} action={{ label: t('bar_new_ticket'), onClick: focusBar }} />
+            : <ul className="rows sessions">{liveOrder(model.live).map((card) => <LiveSession key={card.id} card={card} t={t} />)}</ul>}
         </section>
       </div>
       <aside className="tower-side">
         <LeadSide lead={model.lead} t={t} draft={leadDraft} onDraft={onLeadDraft} />
         <section className="side-card" aria-labelledby="plans-title">
           <h2 id="plans-title">{t('plans_title')}</h2>
-          {model.plans.length === 0 ? <p className="faint small">{t('plans_empty')}</p>
+          {model.plans.length === 0 ? <Empty icon={ListChecks} id="plans-empty" text={t('plans_empty')} action={{ label: t('bar_new_goal'), onClick: () => go(leadHref('goal', '')) }} />
             : <ul className="plans">{model.plans.map((row) => <PlanLine key={row.id} row={row} t={t} />)}</ul>}
           {model.schedules.length > 0 ? <Schedules rows={model.schedules} now={model.now} language={language} t={t} /> : null}
         </section>
         <section className="side-card" aria-labelledby="landed-title">
           <h2 id="landed-title">{t('landed_title')}</h2>
-          {model.landed.length === 0 ? <p className="faint">{t('landed_empty')}</p> : (
+          {model.landed.length === 0 ? <p className="quiet-line">{t('landed_empty')}</p> : (
             <ul className="landed">
               {model.landed.map((row) => <li key={row.ticket}><span className="time">{row.time}</span><span className="what">{row.title}</span><span className="took">{duration(row.minutes, t)}</span></li>)}
             </ul>
@@ -327,7 +342,7 @@ export default function Tower() {
 
   const run = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const chosen = model?.recipes.find((r) => r.name === recipe);
+    const chosen = model?.recipes.find((r) => recipeKey(r) === recipe);
     if (!chosen) return;
     const missing = recipeProblem(chosen, values);
     if (missing !== undefined) {
@@ -349,7 +364,7 @@ export default function Tower() {
   };
 
   return (
-    <>
+    <div className="tower-screen">
       <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} recipes={model?.recipes ?? []} recipeOpen={recipeOpen} busy={asking}
         onTitle={(value) => { setTitle(value); if (!value.trim()) setPicked([]); }} onBody={setBody} onSubmit={(event) => void submit(event)}
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
@@ -357,13 +372,13 @@ export default function Tower() {
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       {recipeOpen && model && model.recipes.length > 0 ? (
         <RecipeForm t={t} recipes={model.recipes} picked={recipe} values={values} note={recipeNote.text} link={recipeNote.link} busy={running}
-          onPick={(name) => { setRecipe((current) => (current === name ? null : name)); setValues({}); setRecipeNote({ text: '', link: null }); }}
+          onPick={(key) => { setRecipe((current) => (current === key ? null : key)); setValues({}); setRecipeNote({ text: '', link: null }); }}
           onValue={(name, value) => setValues((current) => ({ ...current, [name]: value }))} onRun={(event) => void run(event)} onClose={() => setRecipeOpen(false)} />
       ) : null}
       <div id="tower-body" aria-busy={model === null && failed === null ? 'true' : undefined}>
         {failed !== null ? <p className="empty error">{failed}</p>
           : model ? <TowerBody model={model} t={t} language={context.me.language} leadDraft={leadDraft} onLeadDraft={setLeadDraft} /> : null}
       </div>
-    </>
+    </div>
   );
 }

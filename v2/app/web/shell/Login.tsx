@@ -6,7 +6,7 @@
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import type { Translate } from '@/lib/i18n.ts';
-import { Logo } from './Header.tsx';
+import { Logo } from './Logo.tsx';
 
 export function Login({ t, error }: { readonly t: Translate; readonly error?: string | undefined }) {
   return (

@@ -32,7 +32,7 @@
   "lead_memory_fulfilled": "Done at {time}",
   "lead_memory_fulfilled_note": "Done at {time}: {note}",
   "lead_thread_label": "Your conversation with the lead",
-  "lead_thread_empty": "Nothing yet. Give the lead a goal, or ask it what ran.",
+  "lead_thread_empty": "No message yet.",
   "lead_refresh_line": "Refreshed from memory · generation {generation} · {time}",
   "lead_system_line": "{text} · {time}",
   "lead_see_plan": "See the plan",
@@ -48,7 +48,7 @@
   "lead_send_goal": "Send the goal",
   "lead_send_answer": "Answer",
   "lead_send_failed": "Not sent. Try again.",
-  "lead_no_plan": "No plan yet. Give the lead a goal and it proposes one here.",
+  "lead_no_plan": "No plan yet.",
   "lead_plan_missing": "There is no plan {id}.",
   "lead_other_plans": "Other plans",
   "lead_plan_conflict": "The plan changed in the meantime. Here it is as it is now.",
@@ -83,7 +83,7 @@
   "plan_cost": "${amount}",
   "plan_work": "About {time} of work",
   "plan_week_total": "{n} % of the week",
-  "plan_cost_total": "About\u00a0{amount}",
+  "plan_cost_total": "About {amount}",
   "plan_parallel": "Up to {n} sessions at a time",
   "plan_parallel_one": "One session at a time",
   "plan_samples": "Estimates from {n} similar tickets",
@@ -124,5 +124,6 @@
   "plan_step_contract": "Contract",
   "plan_step_service": "Service",
   "plan_step_integration": "Integration",
-  "plan_step_after": "waits for {list}"
+  "plan_step_after": "waits for {list}",
+  "lead_start_goal": "Give the lead a goal"
 }

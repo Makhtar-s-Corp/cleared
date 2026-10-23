@@ -297,6 +297,15 @@ function liveStep(steps: readonly TicketStep[] | undefined, session: string): Li
   return step ? { position: step.position, total: steps.length, service: step.service } : null;
 }
 
+// The live sessions in the tower's order: what waits for the person first,
+// then what works (a session taken over among them), then what reviews.
+const LIVE_RANK: Readonly<Record<string, number>> = { waiting_human: 0, starting: 1, working: 1, paused: 1, reviewing: 2 };
+export const liveOrder = (cards: readonly LiveCard[]): LiveCard[] =>
+  [...cards].sort((a, b) => (LIVE_RANK[a.phase] ?? 1) - (LIVE_RANK[b.phase] ?? 1));
+
+// A recipe is named by its service and its name: two services may have a recipe of one name.
+export const recipeKey = (recipe: Pick<Recipe, 'service' | 'name'>): string => `${recipe.service}/${recipe.name}`;
+
 export const stepTag = (step: LiveStep, t: Translate): string => t('live_step', { n: step.position, total: step.total, service: step.service });
 
 // ------------------------------------------------------------- schedules
