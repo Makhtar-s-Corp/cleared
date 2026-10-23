@@ -32,6 +32,7 @@ import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
 import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
+import { consumptionFixture } from './consumption.ts';
 import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
@@ -84,6 +85,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   // The requests answered from the screens, kept in memory: each is handled once (lane 37's art director).
   const answered = new Set<string>();
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
+  const consumption = consumptionFixture(project, now);
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
   // The first author's ticket and LOCAL-163 run in four steps, each live
   // author on the service step of the filter API (lane 23's shape).
@@ -148,6 +150,16 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       answered.add(key);
       response.once('finish', () => changed('inbox', null));
       return sendJson(response, 200, { accepted: true });
+    }
+    // The consumption screen (O15): the service's own read and levers over a week of invented turns.
+    if (collection === 'consumption') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, consumption.read(url.searchParams.get('tz') ?? undefined));
+      if (method === 'POST' && id === 'levers' && parts.length === 2) {
+        const body = await readJson(request);
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendJson(response, 400, { error: 'the body is an object: { model?, maxLanes?, paused? }' });
+        const done = consumption.write(body as Record<string, never>, user);
+        return sendJson(response, done.status, done.body);
+      }
     }
     if (method === 'GET' && collection === 'recipes' && parts.length === 1) return sendJson(response, 200, RECIPES);
     if (method === 'GET' && collection === 'schedules' && parts.length === 1) return sendJson(response, 200, schedulesFixture(now()));

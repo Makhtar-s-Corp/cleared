@@ -5,7 +5,7 @@
 // the sample-data line, the person, the notifications and the theme. Open
 // on a computer, a rail of icons on a tablet or when folded, a top bar and
 // a bottom bar on a phone (styles/app.css).
-import { Broadcast, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
+import { Broadcast, Gauge, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
 import { memo } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
@@ -22,7 +22,7 @@ import { NotifyButton } from './NotifyButton.tsx';
 
 const LANGUAGES: readonly Language[] = ['fr', 'en'];
 
-const ICONS: Readonly<Record<string, Icon>> = { tower: Broadcast, inbox: Tray, session: TerminalWindow, lead: ListChecks };
+const ICONS: Readonly<Record<string, Icon>> = { tower: Broadcast, inbox: Tray, session: TerminalWindow, lead: ListChecks, consumption: Gauge };
 
 // A group shows this many sessions; the rest are on the sessions screen.
 export const GROUP_MAX = 8;

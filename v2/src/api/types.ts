@@ -19,7 +19,7 @@
 // (SERVICE_USER_HEADER). A request without the proof is refused before
 // anything else; an approval also needs the user id.
 import type { LeversChange } from '../consumption/levers.ts';
-import type { Consumption, LeverChoices } from '../consumption/usage.ts';
+import type { Consumption, HarnessConsumption, LeverChoices, Projection, Quota } from '../consumption/usage.ts';
 import type { Decision, Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
@@ -685,7 +685,7 @@ const routes = {
   'GET /api/consumption': true,
   'POST /api/consumption/levers': true,
 } satisfies Record<ApiRoute, true>;
-export type { Consumption, LeverChoices, LeversChange };
+export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
 // The preview route: lane 15 serves it (container/preview.ts), not the flow's API.

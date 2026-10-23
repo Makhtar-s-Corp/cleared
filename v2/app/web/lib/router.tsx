@@ -21,6 +21,7 @@ const LOADERS: Readonly<Record<ScreenName, () => Promise<{ default: ComponentTyp
   lead: () => import('@/screens/lead/Lead.tsx'),
   inbox: () => import('@/screens/inbox/Inbox.tsx'),
   ask: () => import('@/screens/ask/Ask.tsx'),
+  consumption: () => import('@/screens/consumption/Consumption.tsx'),
 };
 export const SCREEN_NAMES = Object.keys(LOADERS) as ScreenName[];
 
@@ -51,6 +52,7 @@ export function firstReads(place: Place): string[] {
     case 'inbox': return ['/inbox', '/tickets', '/sessions', '/plans'];
     case 'session': return place.session ? [`/sessions/${encodeURIComponent(place.session)}`, '/sessions', '/tickets'] : ['/sessions', '/tickets'];
     case 'lead': return ['/lead', '/lead/messages', '/plans', '/inbox'];
+    case 'consumption': return ['/sessions'];
     case 'ask': return [];
   }
 }
@@ -64,7 +66,7 @@ export function prefetch(cache: Cache, href: string): void {
 
 export function createAppRouter(Shell: () => ReactNode): AnyRouter {
   const root = createRootRoute({ component: Shell });
-  const routes = ['/', '/inbox', '/sessions', '/sessions/$id', '/lead', '/plans/$id', '/ask/$id'].map((path) => createRoute({ getParentRoute: () => root, path }));
+  const routes = ['/', '/inbox', '/sessions', '/sessions/$id', '/lead', '/plans/$id', '/consumption', '/ask/$id'].map((path) => createRoute({ getParentRoute: () => root, path }));
   return createRouter({
     routeTree: root.addChildren(routes),
     history: createBrowserHistory(),
