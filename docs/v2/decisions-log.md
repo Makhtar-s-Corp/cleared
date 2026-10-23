@@ -4165,6 +4165,6 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The 48-hour run's networks were not touched: its two sessions' pairs, its lead's pair and `cleared-guestbook`.
 
 **Consequences.**
-- The 48-hour run has room for three more sessions at a time, beyond the two that are live.
+- The 48-hour run has room for five more sessions at a time (each takes two subnets), beyond the two that are live.
 - When the service cannot release a stopped session's networks (« the stopped sessions' containers and networks could not be released »), they are still removed by hand on a written decision, as here.
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
