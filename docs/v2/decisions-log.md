@@ -3624,4 +3624,5 @@ No catalog key was missing: lanes 34 and 35's catalog test already held both cat
 3. The policy's `reasonCode`: the policy lane fills it (`compound`, `not_allowed` with the asking part, `network`, `dependency`, `outside_checkout`); `RULE_CODES` in `lib/request.ts` can then go.
 4. The art director's LATER list above.
 
+- Pull request: 255, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-inbox-fr`.
