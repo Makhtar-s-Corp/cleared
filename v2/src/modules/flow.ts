@@ -48,6 +48,10 @@ const flow: Module = {
     store = deps.store;
     return {};
   },
+  // The engine is built at start, not at the first request: its restart
+  // recovery stops what the last process left, puts its tickets back, and
+  // releases the stopped sessions' containers and networks.
+  start: (registry) => { runtime.engine(registry); },
 };
 
 export default flow;

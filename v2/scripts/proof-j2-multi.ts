@@ -21,7 +21,15 @@
 //      Editor tab and save it, Give back; see the session's next turn begin
 //      with the notice, and the change in the ticket's diff.
 // Every session proposes its session plan first (decision 22): the proof
-// gives each one of its tickets its Go from the inbox, as the owner would.
+// gives each one of its tickets its Go from the inbox, as the owner would,
+// and answers a question one of their sessions asks with the option marked
+// recommended, else the first one, recorded in the report.
+// Before step 1 the run starts from a clean base (scripts/proof-base.ts):
+// the earlier runs' tickets set aside, each run branch recreated from its
+// frozen branch, and the watchers' deploys of it awaited. Nothing is ever
+// pushed to main. A real run without PROOF_REPOS, or whose workspace merges
+// into main or master, stops before it starts; PROOF_REPOS=none skips the
+// reset in the rehearsal only.
 // The times come from the app's routes, as the screens read them, and from
 // the ledger, read only, when it is given.
 //
@@ -43,6 +51,8 @@
 //   PROOF_CHROME           the Chromium executable
 //   PROOF_STEP_MINUTES     the longest wait of one step (default 60; the rehearsal: 6)
 //   PROOF_TIMEOUT_MINUTES  the rehearsal's whole run at most (default 40)
+//   PROOF_REPOS, PROOF_REMOTE, PROOF_BASE_BRANCH, PROOF_RUN_BRANCH, PROOF_DEPLOY_MINUTES
+//                          the clean base: scripts/proof-base.ts, docs/v2/proof-clean-base.md
 // The fake's calls are read through the docker wrapper of src/container/docker.ts,
 // under its label rule: the session's egress container asks the fake, as the
 // preview route asks the guestbook. No trace and no video are recorded.
@@ -50,16 +60,17 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { NextInboxItem, ReleaseItem, SessionDetail, SessionSummary, TicketStep, Workspace } from '../src/api/types.ts';
+import type { NextInboxItem, QuestionItem, ReleaseItem, SessionDetail, SessionSummary, TicketStep, Workspace } from '../src/api/types.ts';
 import { Docker, commandRunner } from '../src/container/docker.ts';
 import { RELAY } from '../src/container/preview.ts';
 import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
 import { sessionNames, siblingAddress } from '../src/container/session-runtime.ts';
 import type { Ticket } from '../src/tickets/contract.ts';
+import { BaseError, baseModeOf, closeStale, frozenCommits, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, type BaseMode, type BaseSettings } from './proof-base.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
-import { answerFor } from './proof-inbox.ts';
+import { answerFor, chooseAnswers } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
-import { humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type MultiResult, type Step } from './proof-report.ts';
+import { humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type AnsweredQuestion, type BaseReport, type MultiResult, type Step } from './proof-report.ts';
 import { MULTI_TICKETS, startMultiRehearsal, type MultiWorld } from './proof-rehearsal-multi.ts';
 import { said } from './proof-words.ts';
 
@@ -77,6 +88,10 @@ const minutes = (name: string, fallback: number): number => {
 const startedAt = new Date();
 const STEP_MS = minutes('PROOF_STEP_MINUTES', REHEARSAL ? 6 : 60) * 60_000;
 const DEADLINE = REHEARSAL ? startedAt.getTime() + minutes('PROOF_TIMEOUT_MINUTES', 40) * 60_000 : Number.POSITIVE_INFINITY;
+// A real run always starts from its clean base: without PROOF_REPOS it stops here.
+let baseMode: BaseMode;
+try { baseMode = baseModeOf(env, REHEARSAL); } catch (error) { console.error(`proof: ${(error as Error).message}`); process.exit(64); }
+let baseSettings: BaseSettings | undefined = baseMode.kind === 'reset' ? baseMode.settings : undefined;
 const OUT = env.PROOF_OUT ?? `/tmp/cleared-captures/j2/multi-${REHEARSAL ? 'rehearsal' : 'proof'}`;
 const log = (line: string) => console.log(`proof: ${line}`);
 mkdirSync(OUT, { recursive: true });
@@ -87,6 +102,7 @@ if (REHEARSAL) {
   const started = world;
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void started.stop().finally(() => process.exit(130)); });
 }
+if (world && baseMode.kind === 'reset') baseSettings = world.base;
 const APP = (world?.appUrl ?? env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').replace(/\/$/, '');
 const OWNER = world?.owner ?? env.PROOF_OWNER ?? 'owner';
 const PASSWORD_FILE = (world?.passwordFile ?? env.PROOF_PASSWORD_FILE) as string;
@@ -110,6 +126,9 @@ const tickets: Record<number, string> = {};
 const saves: { at: string; status: number; kept: boolean | null }[] = [];
 let fake: MultiResult['fake'] = null;
 let proposal: string | null = null;
+const questions: AnsweredQuestion[] = [];
+let base: BaseReport | null = null;
+let baseError: string | null = null;
 let human: { session: string; givenBackAt: string | null } | null = null;
 let harnessShown = '';
 let captures = 0;
@@ -129,7 +148,7 @@ async function capture(name: string): Promise<string> {
 
 function save(): void {
   const file = join(OUT, 'result.json');
-  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', tickets, steps, times, gestures, saves, fake, proposal }, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', tickets, steps, times, gestures, saves, fake, proposal, questions, base, baseError }, null, 2)}\n`);
   chmodSync(file, 0o644);
 }
 
@@ -179,8 +198,9 @@ const minutesOf = (ticket: string): Map<number, number> => new Map((ledger((db) 
   .map((row) => [Number(row.position), Math.round(Number(row.minutes) * 10) / 10]));
 
 // What the owner tends while the proof waits: the Go of a session plan of
-// one of the proof's tickets, and a permission of one of them, answered by
-// the rule of the 48-hour proof's morning (proof-inbox.ts).
+// one of the proof's tickets, a permission of one of them, answered by the
+// rule of the 48-hour proof's morning, and a question one of their sessions
+// asks, answered with its recommended option, else its first (proof-inbox.ts).
 async function tend(): Promise<void> {
   const ours = new Set(Object.values(tickets));
   for (const item of await inbox()) {
@@ -195,8 +215,34 @@ async function tend(): Promise<void> {
       await openItem(item.id);
       await page.locator(`#detail [data-act="${decision}"]`).click();
       gesture(`${decision} for ${item.id}`);
+    } else if (item.kind === 'question') {
+      await answerQuestion(item);
     }
   }
+}
+
+// The inbox shows a session's question with a toggle per option and a free
+// field per question; the bar's Send answers them all. Each option is found
+// by its data-answer read back, never by its label written into a selector.
+async function answerQuestion(item: QuestionItem): Promise<void> {
+  const chosen = chooseAnswers(item.questions);
+  await openItem(item.id);
+  for (const [index, choice] of chosen.entries()) {
+    if (choice.how === 'free') {
+      await page.locator(`#detail [data-free="${index}"]`).fill(choice.answer);
+      continue;
+    }
+    const options = page.locator(`#detail [data-q="${index}"][data-answer]`);
+    const labels = await options.evaluateAll((nodes: { getAttribute(name: string): string | null }[]) => nodes.map((n) => n.getAttribute('data-answer')));
+    const at = labels.indexOf(choice.answer);
+    if (at < 0) throw new Error(`the question "${choice.question}" shows no option "${choice.answer}"`);
+    await options.nth(at).click();
+  }
+  await page.locator('#detail [data-act="answer"]').click();
+  const at = now();
+  for (const choice of chosen) questions.push({ at, ticket: item.ticket, session: item.sessionId, ...choice });
+  gesture(`answered the question of ${item.ticket} (${chosen.map((c) => `${c.how}: ${c.answer}`).join('; ')})`);
+  await until('the answer to be taken', async () => !(await inbox()).some((i) => i.id === item.id && i.state === 'waiting'), 60_000, 1_000, false);
 }
 
 async function until<T>(what: string, check: () => Promise<T | undefined | false>, ms = STEP_MS, every = 2_000, tending = true): Promise<T> {
@@ -247,6 +293,16 @@ async function createTicket(n: number): Promise<string> {
 const releaseOf = async (ticket: string, state: 'waiting' | 'handled' | 'any' = 'waiting'): Promise<ReleaseItem | undefined> =>
   (await inbox()).filter((i): i is ReleaseItem => i.kind === 'release' && i.ticket === ticket && (state === 'any' || i.state === state)).at(-1);
 
+// A write as the page makes it: the session's anti-forgery token, its origin.
+async function post<T>(path: string): Promise<T> {
+  return await reader.evaluate(async (url: string) => {
+    const me = await (await fetch('/api/me', { headers: { accept: 'application/json' } })).json() as { csrf: string };
+    const response = await fetch(url, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': me.csrf }, body: 'null' });
+    if (!response.ok) throw new Error(`${url} answered ${response.status}: ${((await response.json().catch(() => ({}))) as { error?: string }).error ?? ''}`);
+    return await response.json();
+  }, `/api/service${path}`) as T;
+}
+
 const stepLine = (list: readonly TicketStep[]) => list.map((s) => `${s.position}:${s.kind}/${s.service}${s.after.length ? ` after ${s.after.join(',')}` : ''}`).join('; ');
 
 // The fake's own count (images/fake/fake.ts), asked from the session's
@@ -277,6 +333,78 @@ const signedIn = await step(0, 'sign-in', async () => {
   if (!names.includes('guestbook') || !names.includes('filter-api')) throw new Error(`the workspace has ${names.join(', ')}, not the guestbook and the filter API`);
   return `signed in as ${OWNER}; workspace ${workspace.id}: ${names.join(', ')}`;
 });
+
+// ---- the clean base (scripts/proof-base.ts) ------------------------------------------
+// The earlier runs' tickets, by the proof's titles. One that has a live
+// session or anything waiting, or is in neither Todo nor Done, is set aside
+// (a Done one only has what waits of it settled); then none of them may
+// have either.
+const TITLES: ReadonlySet<string> = new Set(MULTI_TICKETS.map((t) => t.title));
+const LIVE: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
+async function openEarlier(): Promise<string[]> {
+  const [all, waiting, sessions] = await Promise.all([api<Ticket[]>('/tickets'), inbox(), api<SessionSummary[]>('/sessions')]);
+  return all.filter((t) => TITLES.has(t.title)
+    && ((t.status !== 'Todo' && t.status !== 'Done') || waiting.some((i) => i.ticket === t.id && i.state === 'waiting') || sessions.some((x) => x.ticket === t.id && LIVE.has(x.phase)))).map((t) => t.id);
+}
+
+async function prepareBase(settings: BaseSettings): Promise<string> {
+  const workspace = await api<Workspace>('/workspace');
+  const { commits, defaults } = await frozenCommits(runCommand, settings);
+  const refused = refusal(settings, Object.fromEntries(workspace.services.map((s) => [s.name, s.base])), defaults);
+  if (refused) throw new BaseError(refused);
+  for (const repo of settings.repos) {
+    const found = await ticketChangesIn(repo.service, fileAt(runCommand, repo.clone, commits[repo.service] as string));
+    if (found.length > 0) throw new BaseError(`the frozen base of ${repo.service} already holds a change of the proof's tickets: ${found.join('; ')}`);
+  }
+  const setAside: string[] = [];
+  for (const id of await openEarlier()) {
+    await post(`/tickets/${encodeURIComponent(id)}/set-aside`);
+    setAside.push(id);
+    log(`base: set ${id} aside`);
+  }
+  const left = await until('the earlier tickets to be clean', async () => { const open = await openEarlier(); return open.length === 0 ? [] : undefined; }, 120_000, 2_000, false)
+    .catch(async () => await openEarlier());
+  if (left.length > 0) throw new BaseError(`earlier tickets still open after being set aside: ${left.join(', ')}`);
+  const repos: BaseReport['repos'][number][] = [];
+  for (const repo of settings.repos) {
+    const commit = commits[repo.service] as string;
+    // The rehearsal's forge is a stand-in that the service alone calls: nothing to close there.
+    const closed = REHEARSAL ? [] : await closeStale(runCommand, repo, settings.run);
+    await recreate(runCommand, repo, settings, commit, defaults[repo.service] ?? null);
+    repos.push({ service: repo.service, commit, closed });
+    log(`base: ${repo.service}'s ${settings.run} recreated at ${commit.slice(0, 12)} from ${settings.frozen}${closed.length ? `; closed ${closed.map((n) => `#${n}`).join(', ')}` : ''}`);
+  }
+  base = { frozen: settings.frozen, run: settings.run, repos, setAside };
+  // Each watcher deploys the frozen commit (its app container carries it as
+  // cleared.commit), and each service's health answers. The rehearsal has
+  // no watcher: its stand-in brokers read the branch at each merge.
+  if (!REHEARSAL) {
+    await until('the watchers to deploy the frozen base', async () => {
+      const apps = await docker.containers();
+      return settings.repos.every((repo) => apps.some((c) => c.state === 'running' && c.labels['cleared.example'] === repo.service && c.labels['cleared.role'] === 'app' && c.labels['cleared.commit'] === commits[repo.service])) || undefined;
+    }, settings.deployMs, 5_000, false);
+    for (const service of workspace.services) {
+      if (!service.healthUrl) continue;
+      const url = service.healthUrl;
+      await until(`the health of ${service.name}`, async () => (await fetch(url).then((r) => r.ok).catch(() => false)) || undefined, settings.deployMs, 5_000, false);
+    }
+  }
+  times.base_ready_at = now();
+  return `${repos.map((r) => `${r.service} at ${r.commit.slice(0, 12)}`).join(', ')}; ${setAside.length} earlier ticket(s) set aside`;
+}
+
+if (signedIn && baseSettings) {
+  try {
+    log(`base: ready (${await prepareBase(baseSettings)})`);
+  } catch (error) {
+    baseError = (error as Error).message.split('\n')[0] ?? '';
+    log(`base: failed (${baseError}); the run stops before its first ticket`);
+    save();
+    await browser.close();
+    if (world) await world.stop();
+    process.exit(1);
+  }
+}
 
 // ---- 1 to 7. The first ticket, across both services --------------------------------
 let first = '';
@@ -575,7 +703,7 @@ for (const id of Object.values(tickets)) {
 const result: MultiResult = {
   mode: REHEARSAL ? 'rehearsal' : 'real', app: APP, startedAt: since, steps, times, tickets, ticketSteps,
   trains: ledger((db) => trainFacts(db)) ?? [], fake, human: human ? ledger((db) => humanFacts(db, (human as { session: string }).session, (human as { givenBackAt: string | null }).givenBackAt)) ?? null : null,
-  saves, sessionPlans: ledger((db) => sessionPlanFacts(db, since)) ?? [], gestures, stand_ins: world?.standIns ?? [], proposal,
+  saves, sessionPlans: ledger((db) => sessionPlanFacts(db, since)) ?? [], gestures, stand_ins: world?.standIns ?? [], proposal, questions, base,
 };
 const durations = join(OUT, 'durations.md');
 writeFileSync(durations, renderMultiDurations(result));

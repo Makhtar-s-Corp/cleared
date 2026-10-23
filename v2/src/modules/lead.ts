@@ -113,6 +113,13 @@ const lead: Module = {
     }
     return {};
   },
+  // The lead and its plans are built at start, as a lead route builds them:
+  // a restart's live generation is ended, and the stopped leads' containers
+  // and networks are released, without waiting for the tower to poll.
+  start: (registry) => {
+    plansOf(registry);
+    leadRuntime.lead(registry);
+  },
 };
 
 export default lead;

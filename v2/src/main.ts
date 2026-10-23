@@ -3,7 +3,9 @@
 // modules (src/modules/) and serves their routes, with /health from
 // server.ts. A lane fills its module; it does not edit this file (lead and
 // notify were added once, by milestone 2's first lane: decision 14;
-// knowledge once, by the replan's lane 24: decision 27).
+// knowledge once, by the replan's lane 24: decision 27; the modules' start,
+// once, by lane j2-proof-clean-base, so that the restart recovery runs
+// without waiting for a request).
 import { createServer } from 'node:http';
 import { ConfigError, readConfig, type Config } from './config.ts';
 import approval from './modules/approval.ts';
@@ -44,6 +46,7 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 });
 server.listen(port, host, () => {
   console.log(`cleared-v2: listening on http://${address} (health: /health)`);
+  app.start?.();
 });
 
 // server.close waits for every open connection to end, and the event

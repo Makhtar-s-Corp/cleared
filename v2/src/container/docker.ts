@@ -130,6 +130,7 @@ export function assertLabelRule(args: readonly string[], owned: ReadonlySet<stri
 // A session id is what Cleared chose (a UUID): lowercase, so it can never be
 // read as an option, a filter pattern or a path.
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const isSessionId = (session: string): boolean => SESSION_ID.test(session);
 export function assertSessionId(session: string): void {
   if (!SESSION_ID.test(session)) throw new DockerError(`not a session id: ${JSON.stringify(session)}`);
 }
@@ -480,6 +481,37 @@ export class Docker {
     const images = (await this.images(session)).filter((row) => only === undefined || (only.images ?? []).includes(row.name)).map((row) => row.id);
     if (images.length > 0) await this.must(['image', 'rm', '--force', '--', ...images], new Set(images));
     return { containers: containers.length, networks: networks.length, images: images.length };
+  }
+
+  // The subnets of every labelled network (the doctor's pool section, issue
+  // 265): one labelled list, then an inspection of the ids it returned.
+  async networkSubnets(): Promise<{ name: string; subnets: string[] }[]> {
+    const rows = await this.networks();
+    if (rows.length === 0) return [];
+    const ids = rows.map((row) => row.id);
+    const inspected = JSON.parse(await this.must(['network', 'inspect', '--', ...ids], new Set(ids))) as { Name?: string; IPAM?: { Config?: { Subnet?: string }[] | null } }[];
+    return inspected.map((n) => ({ name: String(n.Name ?? ''), subnets: (n.IPAM?.Config ?? []).flatMap((c) => (typeof c.Subnet === 'string' ? [c.Subnet] : [])) }));
+  }
+
+  // Releases the containers and networks of sessions that are stopped (issue
+  // 265): one labelled list of each, then, by name, the rows whose
+  // `cleared.session` is one of `sessions` and whose name is that
+  // session's (`cleared-v2-<id>` or under it). The containers go first, so
+  // that no network is still in use; never a volume, an image or a prune.
+  async releaseStopped(sessions: readonly string[]): Promise<{ containers: string[]; networks: string[] }> {
+    for (const session of sessions) assertSessionId(session);
+    const wanted = new Set(sessions);
+    const ours = (row: { readonly name: string; readonly labels: Readonly<Record<string, string>> }): boolean => {
+      const session = row.labels[SESSION_LABEL];
+      if (session === undefined || !wanted.has(session) || row.labels[LABEL_KEY] !== LABEL_VALUE) return false;
+      const name = row.name.replace(/^\//, '');
+      return name === `cleared-v2-${session}` || name.startsWith(`cleared-v2-${session}-`);
+    };
+    const containers = wanted.size === 0 ? [] : (await this.containers()).filter(ours).map((row) => row.name.replace(/^\//, ''));
+    if (containers.length > 0) await this.must(['rm', '--force', '--', ...containers], new Set(containers));
+    const networks = wanted.size === 0 ? [] : (await this.networks()).filter(ours).map((row) => row.name);
+    if (networks.length > 0) await this.must(['network', 'rm', '--', ...networks], new Set(networks));
+    return { containers, networks };
   }
 
   async removeVolumes(session: string): Promise<number> {

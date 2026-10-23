@@ -3870,3 +3870,105 @@ The LATER items are in the pull request's body as follow-ups.
 - The proof is rerun from a clean state after the removal.
 - The service must release a session's networks when the session stops: issue #265.
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops lane, branch `v2-j2-ops-networks`.
+
+## 2026-10-23: Owner decision: the LOCAL-20 merges reverted on both proof repositories' main, the last push to main
+
+**Decision.** On 2026-10-23 at 11:24 (Europe/Paris) the owner approved, in writing, reverting the LOCAL-20 merges on the main branch of both proof repositories with `git revert -m 1`: the filter API's merge `2127dd2` and the guestbook's merge `0d7fbb5`. The owner declared this the last push to main of the proof repositories. From then on, the proof runs from a frozen base branch and a disposable run branch in each repository (the entry below, [proof-clean-base.md](proof-clean-base.md)).
+
+**What was done**, as relayed by the ops session:
+- Both merges were reverted with a revert commit each, pushed to main without force. No history was rewritten.
+- LOCAL-22 was moved to In Review through the API, and the service was then restarted. The restart recovery, which puts a ticket left In Review back in Todo, runs only once a request builds the flow's engine. The entry below makes it run at start.
+
+**Consequences.**
+- No later run pushes to main: requirement O24 in [requirements-matrix.md](requirements-matrix.md).
+- The frozen base is created once from main as it stands after these reverts, following the setup in [proof-clean-base.md](proof-clean-base.md).
+- Recorded by: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`, at the ops session's request. This lane pushed nothing to any main.
+
+## 2026-10-23: the proof's clean base, the questions answered, set aside, the stopped sessions released, the modules started at start (the author's choices, lane `v2-j2-proof-clean-base`)
+
+**Goal.** The multi-service proof (`v2/scripts/proof-j2-multi.ts`) reaches 12 of 12 steps reliably. Three things made runs fail or need a person:
+- a session's question that nobody answered;
+- a base that earlier runs had changed;
+- Docker's address pool filled by the networks of stopped sessions (issue 265).
+
+**Choices.**
+- **The questions** (P60). The driver now tends a session's question on one of its tickets, as it tends permissions and session plans: from the inbox detail, the option whose label ends with "(Recommended)", else the first option. A multiple choice gets one option too. A question with no option gets a fixed free answer. The labels come from the API (`chooseAnswers` in `scripts/proof-inbox.ts`), so the choice does not depend on the page's language. Each option is found by reading its `data-answer` back, never by writing the label into a selector, because labels hold parentheses and quotes. Each question, its options, the answer and how it was chosen go into `result.json` and a "Session questions" table in `durations.md`. Ticket 3's author in the rehearsal asks one, with the recommended option second.
+- **A frozen base and a run branch** (O24, P51, `scripts/proof-base.ts`, [proof-clean-base.md](proof-clean-base.md)). These are mostly settings: the workspace's `base`, the brokers' `[lanes] base` and the watchers' `--branch` name the run branch. The code is the reset and its guards.
+  - The reset is one push with an explicit refspec, `<frozen commit>:refs/heads/proof-run`.
+  - It refuses main, master, the repository's default branch, the frozen branch, and a run branch that is not every service's base in `GET /api/workspace`.
+  - It refuses a frozen commit that already holds a change of the proof's tickets, the cause of step 3's empty contract diff in the runs before.
+  - Before the reset, every clone the service uses was checked: they all fetch with a forced refspec, or clone afresh, so a forced move of the base breaks none of them.
+  - The open pull requests into the run branch are closed; pull requests into any other branch are left alone.
+  - After the reset, the run waits for each watcher's container labelled with the frozen commit, then for each health address.
+  - A failure stops the run before ticket 1, with the reason in `result.json` (`baseError`). It is not a numbered step, so the count stays 12.
+- **Set aside** (P61, `POST /api/tickets/:id/set-aside`). Nothing in the service put a ticket in "Todo, nothing waiting":
+  - a move to Todo starts the ticket again;
+  - a release card's Send back is that move;
+  - the restart recovery runs only at a restart.
+
+  The new owner action stops the ticket's live sessions through the engine's own close path. It settles everything of the ticket that waits, of every kind, halts a train not yet approved and holds its steps. The ticket goes to Todo without `begin`, with a comment. An approved ticket, a done one and a train that lands are refused: nothing is merged or reverted. The proof sets aside its earlier runs' tickets, found by its four titles, then reads the API again and stops if one is still open. Issue 249's Reject or Close action in the interface stays open.
+- **The stopped sessions released** (P50, issue 265). `Docker.releaseStopped` makes one labelled `ps` and one labelled `network ls`. It keeps the rows whose `cleared.session` is one of the given ids and whose name is `cleared-v2-<id>` or under it. It removes them by name: the containers with `rm --force` (without `--volumes`, which would delete anonymous volumes), then the networks. It runs no volume, image or prune command. The ids are taken positively from this service's own ledger, never as "every labelled object not in use": the demo shares the host and the label. They come from two places:
+  - the flow's sessions that are not live, after the restart recovery. This covers the stopped session that kept its five containers running;
+  - the lead's ended generations, after the lead ends the one a dead process left. This covers the lead whose session container had exited while the ledger still said working: its egress container and its two networks.
+
+  - while the service runs, every tick of the flow (30 s) takes the sessions its ledger says stopped in the last ten minutes, so a session whose own stop did not remove its objects, or whose container exited, is released within 60 s of its stop and retried for ten minutes. A tick with no such session asks Docker nothing. A session that a resume is starting under its own names (a step reopened, an author reopened after review, a Give back) is never released, though its row may still say done.
+
+  A failure is logged and never stops the service or the lead. The doctor's new `pool` section counts the subnets of Docker's address pools: daemon.json's `default-address-pools`, else Docker's defaults (31 subnets). The subnets taken are read from the host's interfaces and from an inspection of the labelled networks, never from a list of unlabelled ones, so the free count is an upper bound. A session takes two networks, so the check fails under two free. It then makes the two labelled networks of a session id of its own, releases them with `releaseStopped`, and checks that nothing keeps the label and the free count is back. On this host on 2026-10-23 it read 31 in all, 19 taken (7 of them labelled networks), 12 free at most; 21 taken with the two networks; 12 free again after the release.
+- **The modules start at start** (P62). The flow's engine, and with it the restart recovery and the release above, was built on the first request, so nothing ran until the app called the API. `Module` gets an optional `start(registry)`. `assemble` gives `App.start`, which `main.ts` calls once the service listens: one line, written down at the top of `main.ts` as the earlier exceptions are. The flow module builds its engine. The lead module builds the lead and its plans, as a lead route does, so the scheduler no longer waits for the app either (P33's followup). A test starts the real service over a ledger with a ticket left In Progress and sees it in Todo with no request made; with the start call removed, that test fails.
+- **The rehearsal** follows the real setup. Its bare copies have `proof-base` and a `proof-run` that an earlier run moved on. Its workspace and its two stand-in brokers (`startBroker`'s new `base` option, `main` when absent) name `proof-run`, and the proof recreates the run branch before ticket 1. Its ports stay 9700 to 9799.
+
+**Runs.** The multi rehearsal (`PROOF_REHEARSAL=1`, bare copies in a temporary folder, ports 9700 to 9799, the demo untouched) passed 12 of 12 twice in a row on 2026-10-23.
+- In the first run, each run branch was recreated at its `proof-base`, which `result.json` records, and the bare copies' main did not move. Ticket 3's question was answered "From 0 (Recommended)", the second option, and recorded.
+- In the second run, an earlier run had left ticket 1 Done with a knowledge item waiting and ticket 2 waiting for its approval. Both were set aside through the app before ticket 1: the first stayed Done, the second went back to Todo, and both items were settled by the owner account.
+
+**Not done here.**
+- The real proof was not run: no disposable run branch exists yet on the proof repositories, and the demo stays as it is.
+- The message when Docker's pool is full (issue 265's third item) is a followup; the doctor's `pool` section says how much is left.
+- Two real runs in a row with the same score (P51) wait for the one-time setup.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`.
+
+## 2026-10-23: the owner approved ten proposals on 2026-10-23 at 11:51, tracked as issues
+
+**Decision.** On 2026-10-23 at 11:51 (Europe/Paris) the owner approved ten proposals, each tracked as an issue. At 11:55 they were added to [requirements-matrix.md](requirements-matrix.md) as lines P50 to P59, with their effort, milestone and acceptance criteria:
+
+| Line | Issue | Proposal | Effort | Milestone |
+| --- | --- | --- | --- | --- |
+| P50 | #265 | Release the networks of stopped sessions | S | 2, delivered by lane `v2-j2-proof-clean-base` |
+| P51 | #267 | A proof run never pushes to main | S | 2, delivered by lane `v2-j2-proof-clean-base` |
+| P52 | #268 | The reviewer runs the service's tests | M | 3 |
+| P53 | #249 | Reject or Close a card | S | 3 |
+| P54 | #269 | An agent's multiple-choice questions in the inbox | M | 3 |
+| P55 | #270 | A reliable, stored quota reading | M | 3 |
+| P56 | #271 | Parallel variants of one ticket | L | 3 |
+| P57 | #272 | Replay and resume a session from a step | M | 3 |
+| P58 | #273 | Automatic CI repair | M | 3 |
+| P59 | #274 | A project page kept up to date per service | L | 4 |
+
+**Consequences.**
+- P50 and P51 are delivered by lane `v2-j2-proof-clean-base`. Their acceptance criteria are covered by its tests, named in the matrix, and by `doctor pool`. One criterion stays open: two real runs in a row with the same score, which waits for the one-time setup of [proof-clean-base.md](proof-clean-base.md).
+- The lane had first numbered its own lines P50 to P53. Before its merge they became P60 to P62, and its release line was folded into P50: an id is never reused, and none of the lane's ids had been merged.
+- P53 and P54 build on this lane. Set aside (P61) is the service side of a Close, without its reason or its screen. The proof script's answer to a question (P60) is one of P54's criteria.
+- Recorded by: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`, at the owner's request relayed by the ops session.
+
+## 2026-10-23: the clean base's guards fail closed, and a real run needs PROOF_REPOS (review 1 of pull request 275, followups 1 and 2)
+
+**Decision.** Review 1 of pull request 275 passed with two followups on the no-push-to-main guarantee, fixed before review 2 at the orchestrator's request (P51):
+- **Followup 1.** When `git ls-remote --symref` gave no default branch, the guard went on. A default branch named neither main nor master (`v2`, `develop`) could then be force-pushed if `PROOF_RUN_BRANCH` named it.
+  - `refusal` and `recreate` now refuse when a repository's default branch cannot be read.
+  - Both also refuse a run branch that does not start with `proof-`, so no ordinary branch name can be the target.
+- **Followup 2.** Without `PROOF_REPOS`, a real run reset nothing and ran on the branches as it found them. A workspace still on main would then merge the proof's tickets into main.
+  - A real run without `PROOF_REPOS` now stops before it signs in (`baseModeOf`, exit 64).
+  - `PROOF_REPOS=none` is accepted by the rehearsal only, where it skips the reset of its own bare copies.
+  - `refusal` also refuses any workspace whose base is main or master, naming each such service, even one with no clone named.
+
+**Tests.** `test/scripts/proof-base.test.ts`:
+- an unread default branch, refused by `refusal` and by `recreate` before any push;
+- run branches `v2`, `develop`, `proof`, `proof-`, `run-proof` and `Proof-run`, refused;
+- a workspace base of main or master, refused;
+- `baseModeOf` in both modes;
+- the driver itself, started without `PROOF_REPOS` and with `PROOF_REPOS=none`, exiting 64 with the reason before it opens a browser.
+
+Followups 3 to 7 of the review stay open for the next round.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`.

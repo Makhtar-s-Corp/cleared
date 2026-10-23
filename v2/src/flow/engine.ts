@@ -62,6 +62,7 @@
 // message; a restart stops it as any live session.
 import { posix } from 'node:path';
 import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver, TicketStep } from '../api/types.ts';
+import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
@@ -150,6 +151,9 @@ export type FlowDeps = {
   // its broker, its validations, its review reports. Built from the
   // environment when absent (approval/service.ts serviceLocks).
   readonly locks?: (service: ServiceConfig) => ServiceLock;
+  // Releases the containers and networks of stopped sessions, by name
+  // (Docker.releaseStopped): after the restart recovery (issue 265).
+  readonly release?: (sessions: readonly SessionId[]) => Promise<{ readonly containers: readonly string[]; readonly networks: readonly string[] }>;
 };
 
 export type FlowErrorKind = 'not_found' | 'conflict' | 'invalid' | 'unavailable';
@@ -195,6 +199,8 @@ type Candidate = {
 // A ticket's steps at once when no plan says otherwise: the plans' default (lead/plans/runner.ts).
 const STEP_PARALLEL = 2;
 const LIVE_PHASES: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
+// How long after its stop a session's containers and networks are still looked for at each tick.
+const RELEASE_WINDOW_MS = 10 * 60_000;
 const CHECKS_MS = 60_000;                                           // the forge is asked for a release's checks at most this often
 const LANDING_HORIZON_MS = 2 * 24 * 3600_000;                       // a Done ticket's release is followed for so long after its approval
 
@@ -250,6 +256,8 @@ export class FlowEngine {
   #trains: TrainStore;
   #runner: TrainRunner;
   #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
+  #release: FlowDeps['release'];
+  #resuming = new Set<SessionId>();                                 // sessions whose container a resume is starting: never released
   #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
   #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
   #origins = new Map<TicketId, Origin>();                           // the plan item a ticket's current flow runs for
@@ -269,6 +277,7 @@ export class FlowEngine {
     this.#clean = deps.clean ?? ((text) => text);
     this.#workspace = workspaceOf(deps.config);
     this.#locks = deps.locks;
+    this.#release = deps.release;
     this.#trains = new TrainStore(deps.store.db, this.#now);
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
@@ -341,10 +350,10 @@ export class FlowEngine {
     for (const set of this.#watchers.values()) for (const watcher of set) watcher.wake();
   }
 
-  // The idle stop, the notice that a release was approved, and the
-  // landing of what was approved. A session that waits for the human is
-  // not idle: the request in the inbox would be lost with it, and the wait
-  // is the human's.
+  // The idle stop, the notice that a release was approved, the landing of
+  // what was approved, and the release of the sessions that stopped. A
+  // session that waits for the human is not idle: the request in the inbox
+  // would be lost with it, and the wait is the human's.
   async tick(): Promise<void> {
     const now = this.#now().getTime();
     // A session held by its plan, or its want of one, is not idle: its delay decides (#gateTick).
@@ -386,6 +395,10 @@ export class FlowEngine {
     }
     for (const candidate of await this.#landings()) this.#follow(candidate);
     this.#runner.tick();
+    // The sessions that stopped lately leave no container nor network behind
+    // (issue 265). Chosen synchronously: a tick with none to release does not yield.
+    const stopped = this.#stopped(new Date(now - RELEASE_WINDOW_MS).toISOString());
+    if (stopped.length > 0) await this.#releaseStopped(stopped);
   }
 
   // A release's checks; a train's are failed when one service's are, else
@@ -1008,6 +1021,48 @@ export class FlowEngine {
     void this.#track(work.catch((error: unknown) => console.error(`cleared-v2: the steps of ${ticket} could not go on (${error instanceof Error ? error.name : typeof error})`)));
   }
 
+  // Set aside (POST /api/tickets/:id/set-aside): the owner takes a ticket
+  // out of the flow without starting it again, which a move to Todo would.
+  // Its live sessions stop, everything of it that waits in the inbox is
+  // settled, a train not yet approved is halted, its running steps wait,
+  // and it is back in Todo with a comment. A done ticket keeps its state:
+  // only what of it still waits (a knowledge item its handover proposed) is
+  // settled. Nothing is merged or reverted: an approved ticket and a train
+  // that lands are refused. The multi-service proof sets its earlier runs'
+  // tickets aside, so that each run starts with nothing of theirs open
+  // (scripts/proof-base.ts).
+  async setAside(id: TicketId, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
+    const tickets = this.registry.ticketStore;
+    const ticket = await tickets.get(id);
+    if (!ticket || ticket.project !== this.config.project) throw new FlowError('not_found', `unknown ticket ${id}`);
+    if (ticket.status === tickets.states.go) throw new FlowError('conflict', `${id} is in “${ticket.status}”: it is not set aside`);
+    if (this.#trains.latest(id)?.state === 'landing') throw new FlowError('conflict', `the train of ${id} is landing: it is not set aside`);
+    const done = ticket.status === tickets.states.done;
+    const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
+    // No step of it starts while its sessions stop.
+    this.#active.delete(id);
+    let sessions = 0;
+    for (const live of [...this.#live.values()].filter((l) => l.input.ticket === id && !l.closed)) {
+      this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'RUN_ERROR', message: 'The owner set the ticket aside: this session was stopped.', code: 'set_aside' });
+      await this.#close(live, 'stopped', note);
+      sessions++;
+    }
+    let items = 0;
+    for (const item of this.inbox.items()) {
+      if (item.ticket !== id || item.state !== 'waiting') continue;
+      if (item.kind === 'release' ? this.#settleRelease(item.id, id, ticket.project, by) : this.inbox.handle(item.id, by)) items++;
+    }
+    this.#trains.haltActive(id);
+    if (done) return { sessions, items };
+    if (ticket.status !== tickets.states.todo) await this.#putBack(id, note, 'set_aside');
+    else {
+      this.#origins.delete(id);
+      this.#steps.hold(id);
+      await tickets.comment(id, note, SERVICE).catch(() => undefined);
+    }
+    return { sessions, items };
+  }
+
   // Send back (POST /api/contracts/:id/sendback): the contract step's
   // session is resumed with the message, or, when it cannot be, a new one
   // runs the step with it, in the background; a ticket put back runs it
@@ -1034,7 +1089,7 @@ export class FlowEngine {
     const kept = step.session ? this.#inputs.get(step.session) : undefined;
     if (!adapter || !kept || !step.session) return false;
     let handle: SessionHandle;
-    try { handle = await adapter.resume(step.session); } catch { return false; }
+    try { handle = await this.#resume(adapter, step.session); } catch { return false; }
     const lastSeq = this.#store.events.after(step.session).at(-1)?.seq ?? 0;
     const live: Live = { id: step.session, input: kept.input, settings: kept.settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
     this.#live.set(live.id, live);
@@ -1113,6 +1168,42 @@ export class FlowEngine {
       const ticket = await tickets.get(id);
       if (!ticket || ticket.project !== project || (ticket.status !== tickets.states.progress && ticket.status !== tickets.states.review)) continue;
       await this.#putBack(id, note, 'restart');
+    }
+    const stopped = this.#stopped();
+    if (stopped.length > 0) await this.#releaseStopped(stopped);
+  }
+
+  // A resume starts a container under the session's own names while its
+  // row may still say done or stopped: the release leaves it alone.
+  async #resume(adapter: SessionAdapter, id: SessionId): Promise<SessionHandle> {
+    this.#resuming.add(id);
+    try { return await adapter.resume(id); } finally { this.#resuming.delete(id); }
+  }
+
+  // The containers and networks of the sessions this ledger says are not
+  // live (stopped, done, failed, or just stopped by the recovery): a stop
+  // whose removal failed, a session whose container exited, or what the last
+  // process left, all of which fill Docker's address pool (issue 265). After
+  // the recovery, every such session; at each tick, the ones that stopped in
+  // the last RELEASE_WINDOW_MS, so a stop is released within a tick (30 s)
+  // and retried for ten minutes. Only the ids of this ledger's own rows are
+  // named, so another instance's sessions on the same host are never
+  // touched, nor one this engine runs or resumes; the volumes stay. A
+  // failure is said and the service goes on.
+  #stopped(since?: string): SessionId[] {
+    if (!this.#release) return [];
+    return this.#store.sessions.list().filter((row) => row.project === this.config.project && !LIVE_PHASES.has(row.status) && !this.#live.has(row.id) && !this.#resuming.has(row.id)
+      && (since === undefined || row.updatedAt >= since) && isSessionId(row.id)).map((row) => row.id);
+  }
+
+  async #releaseStopped(stopped: readonly SessionId[]): Promise<void> {
+    const release = this.#release;
+    if (!release) return;
+    try {
+      const { containers, networks } = await release(stopped);
+      if (containers.length + networks.length > 0) console.error(`cleared-v2: released ${containers.length} container(s) and ${networks.length} network(s) of stopped sessions`);
+    } catch (error) {
+      console.error(`cleared-v2: the stopped sessions' containers and networks could not be released (${error instanceof Error ? error.name : typeof error})`);
     }
   }
 
@@ -1652,7 +1743,7 @@ export class FlowEngine {
     let reopened = false;
     if (authorRow && kept) {
       let handle: SessionHandle | undefined;
-      try { handle = await adapter.resume(authorRow.id); } catch { handle = undefined; }
+      try { handle = await this.#resume(adapter, authorRow.id); } catch { handle = undefined; }
       if (handle) {
         const live: Live = { id: authorRow.id, input: kept.input, settings: kept.settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
         this.#live.set(live.id, live);
@@ -1987,7 +2078,7 @@ export class FlowEngine {
     if (!adapter) throw new FlowError('unavailable', 'no session adapter is configured');
     let handle: SessionHandle;
     try {
-      handle = await adapter.resume(id);
+      handle = await this.#resume(adapter, id);
     } catch (error) {
       throw new FlowError('unavailable', `session ${id} could not be resumed: ${name(error)}`);
     }

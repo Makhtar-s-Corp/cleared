@@ -87,6 +87,7 @@ const cases = (): Case[] => {
     { route: 'POST /api/tickets', path: () => '/api/tickets', body: () => ({ title: 'Second', project: 'guestbook' }), ok: 200 },
     { route: 'GET /api/tickets/:id', path: () => `/api/tickets/${t.ticket.id}`, ok: 200 },
     { route: 'POST /api/tickets/:id/move', path: () => `/api/tickets/${parked.id}/move`, body: () => ({ status: 'In Review' }), ok: 200 },
+    { route: 'POST /api/tickets/:id/set-aside', path: () => `/api/tickets/${parked.id}/set-aside`, ok: 200 },
     { route: 'GET /api/inbox', path: () => '/api/inbox', ok: 200 },
   ];
 };
@@ -132,6 +133,7 @@ test('a write needs a user the service knows; a read does not', async () => {
     ['POST', `/api/sessions/${id}/requests/r/answer`, { decision: { kind: 'allow_once' } }],
     ['POST', '/api/tickets', { title: 'x', project: 'guestbook' }],
     ['POST', `/api/tickets/${parked.id}/move`, { status: 'In Review' }],
+    ['POST', `/api/tickets/${parked.id}/set-aside`, undefined],
   ] as const;
   for (const [method, path, body] of writes) {
     assert.equal((await call(method, path, { ...signed, 'content-type': 'application/json' }, body)).status, 403, `${path} without a user`);

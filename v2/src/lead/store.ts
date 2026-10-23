@@ -107,6 +107,13 @@ export class LeadStore {
     return last && last.endedAt === null ? last : undefined;
   }
 
+  // The sessions of the generations that ended: the stopped leads, whose
+  // containers and networks a restart releases (issue 265).
+  endedSessions(): SessionId[] {
+    return (this.#db.prepare('SELECT session_id FROM lead_generations WHERE project = ? AND ended_at IS NOT NULL ORDER BY number').all(this.#project) as Row[])
+      .map((row) => String(row.session_id));
+  }
+
   startGeneration(input: { readonly number: number; readonly sessionId: SessionId; readonly briefingBytes: number }): GenerationRow {
     this.#db.prepare('INSERT INTO lead_generations (project, number, session_id, started_at, briefing_bytes) VALUES (?, ?, ?, ?, ?)')
       .run(this.#project, input.number, input.sessionId, this.#at(), input.briefingBytes);

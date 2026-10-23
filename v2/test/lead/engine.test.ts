@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
-import { LeadError } from '../../src/lead/engine.ts';
+import { LeadEngine, LeadError } from '../../src/lead/engine.ts';
 import { exampleLeadScript } from '../../src/session/adapters/fake.ts';
 import type { SessionEvent } from '../../src/session/events.ts';
 import {
@@ -228,6 +228,26 @@ test('a new engine over a store with a live generation ends it, writes the machi
   assert.equal(refreshed?.type === 'CUSTOM' && refreshed.name === 'cleared.lead_refreshed' ? refreshed.value.reason : undefined, 'restart');
   assert.deepEqual(second.messages().map((m) => `${m.kind}:${m.generation}`), ['refresh:2']);
   await second.close();
+});
+
+test('a restart releases the stopped leads\' containers and networks: the generation it ends, the ones before, never the new one (issue 265)', async () => {
+  const t = await leadSetup({ lead: [[...opening(12)], [...opening(9)], [...opening(7)]] });
+  await t.lead.settled();
+  await t.lead.close();
+  const asked: string[][] = [];
+  const second = new LeadEngine({ ...t.deps, release: async (sessions) => { asked.push([...sessions]); return { containers: [`cleared-v2-${sessions[0]}-egress`], networks: [] }; } });
+  await second.start();
+  await second.settled();
+  // Generation 1 was live when the process stopped (its ledger said working): ended, then released.
+  assert.deepEqual(asked, [[t.generations[0]?.id]]);
+  await second.close();
+  // A release that fails is said, and the lead starts all the same.
+  const third = new LeadEngine({ ...t.deps, release: async () => { throw new Error('docker is not there'); } });
+  await third.start();
+  await third.settled();
+  assert.equal(third.state().generation, 3);
+  assert.equal(third.state().sessionId, t.generations[2]?.id);
+  await third.close();
 });
 
 test('a commitment due in the past wakes the lead with an event turn', async () => {

@@ -11,6 +11,7 @@ export type FakeObject = {
   readonly labels: Record<string, string>;
   state?: string;
   readonly args?: readonly string[];
+  readonly subnet?: string;                 // a network's IPAM subnet, when the test gives one
 };
 
 export type Call = { readonly args: readonly string[]; readonly options: RunOptions; readonly result: DockerResult };
@@ -104,9 +105,10 @@ export class FakeDocker {
     return ok(kept.map((object) => JSON.stringify(row(object)) + '\n').join(''));
   }
 
-  private remove(objects: FakeObject[], ids: readonly string[], key: 'id' | 'name'): DockerResult {
+  // A container or a network is named by its id or its name, as the CLI takes either.
+  private remove(objects: FakeObject[], ids: readonly string[], key: 'id' | 'name', byName = false): DockerResult {
     for (const ref of ids) {
-      const at = objects.findIndex((object) => object[key] === ref);
+      const at = objects.findIndex((object) => object[key] === ref || (byName && object.name === ref));
       if (at < 0) return fail(`Error: No such object: ${ref}`);
       objects.splice(at, 1);
     }
@@ -184,9 +186,9 @@ export class FakeDocker {
         }
         return ok(targets(args).join('\n') + '\n');
       case 'rm':
-        return this.remove(this.containers, targets(args), 'id');
+        return this.remove(this.containers, targets(args), 'id', true);
       case 'network rm':
-        return this.remove(this.networks, targets(args), 'id');
+        return this.remove(this.networks, targets(args), 'id', true);
       case 'volume rm':
         return this.remove(this.volumes, targets(args), 'name');
       case 'exec':
@@ -203,8 +205,9 @@ export class FakeDocker {
         }]));
       }
       case 'network inspect': {
-        const network = this.networks.find((n) => n.id === targets(args)[0]);
-        return network ? ok(JSON.stringify([{ Id: network.id, Name: network.name, IPAM: { Config: [{ Gateway: '172.30.0.1' }] } }])) : fail('Error: No such network');
+        const found = targets(args).map((id) => this.networks.find((n) => n.id === id));
+        if (found.length === 0 || found.some((n) => !n)) return fail('Error: No such network');
+        return ok(JSON.stringify(found.map((n) => ({ Id: n?.id, Name: n?.name, IPAM: { Config: [{ Gateway: '172.30.0.1', ...(n?.subnet ? { Subnet: n.subnet } : {}) }] } }))));
       }
       case 'logs':
         return ok('{"at":"2026-10-21T00:00:00.000Z","listening":"172.30.0.2:3128"}\n');

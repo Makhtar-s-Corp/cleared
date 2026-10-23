@@ -86,3 +86,18 @@ test('the dispatcher serves module routes and leaves /health and unknown paths t
     assert.deepEqual(await failed.json(), { error: 'internal error' });
   });
 });
+
+test('start runs each module\'s start once, in module order, with the assembled registry; one that throws is said and the others still start', () => {
+  const seen: string[] = [];
+  const starting = (name: string, fail = false): Module => ({ ...emptyModule, start: (registry) => { seen.push(`${name}:${registry.ticketStore instanceof MemoryTicketStore}`); if (fail) throw new Error('no'); } });
+  const app = assemble({ ...stubs, flow: starting('flow', true), lead: starting('lead') }, deps);
+  assert.deepEqual(seen, [], 'assembling starts nothing');
+  app.start?.();
+  assert.deepEqual(seen, ['flow:true', 'lead:true']);
+});
+
+test('the flow and the lead modules start at once, without waiting for a request (the restart recovery, issue 265)', async () => {
+  const flow = (await import('../../src/modules/flow.ts')).default;
+  assert.equal(typeof flow.start, 'function');
+  assert.equal(typeof lead.start, 'function');
+});

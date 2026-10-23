@@ -1,7 +1,7 @@
 // Checks this server can run v2 sessions, with real objects, labelled
 // cleared.dev=v2 only. One section per lane that needs a real run
 // (milestone 1 plan, section 10); `cleared doctor` will run it in milestone 5.
-//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [--no-build] [--model <id>]
+//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [pool] [--no-build] [--model <id>]
 //
 // docker (lane 2): builds the two images, starts a session with a postgres:16
 // service, proves from inside the session container what it can and cannot
@@ -32,6 +32,9 @@
 // stop leaves nothing with the session label. The two examples are seeded
 // into temporary repositories from examples/; no model is called, so no
 // session runs on either example. Run only when named.
+//
+// pool (issue 265): the free subnets of Docker's address pools, from the
+// host's interfaces and the labelled networks; run by default and by name.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -42,6 +45,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { Docker, cliRunner, cliSpawner, type DockerResult } from '../src/container/docker.ts';
 import { PREVIEW_POLICY, RELAY, previewRoutes } from '../src/container/preview.ts';
+import { DOCKER_DEFAULT_POOLS, interfaceSubnets, poolUsage, poolsOfDaemon } from '../src/container/pool.ts';
 import { parseServices, planSiblings } from '../src/container/services.ts';
 import {
   CONFIG_MOUNT, LOGIN_FILE_MOUNT, SESSION_IMAGE, SKILLS_MOUNT, WORKDIR_MOUNT, buildBaseImages, removeSessionVolume, sessionNames, siblingAddress, startSession, stopSession,
@@ -1111,11 +1115,50 @@ async function workspaceSection(build: boolean): Promise<void> {
   check('no new listening socket on the host from this run', ours.length === 0, ours.length ? ours.join(', ') : `none (${added.length} new from other processes)`);
 }
 
+// pool (issue 265): how many subnets Docker's address pools have left. A
+// session takes two networks, so fewer than two free stops the next one.
+// The pools are daemon.json's default-address-pools when it is readable,
+// else Docker's defaults; what is taken is read from the host's interfaces
+// and from the labelled networks, never from a list of unlabelled ones.
+async function poolSection(): Promise<void> {
+  say('\n== pool: the free subnets of Docker\'s address pools ==');
+  let daemon: string | undefined;
+  try { daemon = readFileSync('/etc/docker/daemon.json', 'utf8'); } catch { daemon = undefined; }
+  const pools = (daemon === undefined ? undefined : poolsOfDaemon(daemon)) ?? [...DOCKER_DEFAULT_POOLS];
+  const print = (args: readonly string[]) => say(`$ docker ${args.map((arg) => (/[\s'"{}]/.test(arg) ? `'${arg}'` : arg)).join(' ')}`);
+  const docker = new Docker(async (args, options) => { print(args); return cliRunner(args, options); });
+  const read = async () => {
+    const labelled = await docker.networkSubnets();
+    return { labelled, usage: poolUsage(pools, [...interfaceSubnets(networkInterfaces()), ...labelled.flatMap((n) => n.subnets)]) };
+  };
+  const before = await read();
+  say(`pools: ${pools.map((p) => `${p.base} by /${p.size}`).join(', ')} (${daemon === undefined || !poolsOfDaemon(daemon) ? 'Docker\'s defaults' : 'daemon.json'})`);
+  say(`subnets: ${before.usage.total} in all, ${before.usage.taken} taken (${before.labelled.length} labelled networks, the rest seen on the host's interfaces), ${before.usage.free} free at most`);
+  check('at least two subnets are free: one session takes two networks', before.usage.free >= 2, `${before.usage.free} free`);
+  if (before.usage.free < 2) return;
+  // A stopped session's two networks, made for the run and labelled, then
+  // released by name as a restart or the flow's tick releases them (issue 265).
+  const session = randomUUID();
+  const names = sessionNames(session);
+  try {
+    await docker.createNetwork({ name: names.network, session, internal: true });
+    await docker.createNetwork({ name: names.outNetwork, session, internal: false });
+    const made = await read();
+    say(`with the two networks of a session made for the run: ${made.usage.taken} taken, ${made.usage.free} free`);
+    check('the session\'s two networks take two subnets', made.usage.taken === before.usage.taken + 2, `${before.usage.taken} → ${made.usage.taken}`);
+  } finally {
+    const released = await docker.releaseStopped([session]);
+    say(`released by name: ${released.networks.length} networks, ${released.containers.length} containers`);
+  }
+  const after = await read();
+  check('after the release, nothing has the session label and the free subnets are back', (await docker.networks(session)).length === 0 && after.usage.free === before.usage.free && after.labelled.length === before.labelled.length, `${after.usage.free} free, ${after.labelled.length} labelled networks`);
+}
+
 const args = process.argv.slice(2);
 const modelAt = args.indexOf('--model');
 const model = modelAt >= 0 ? args[modelAt + 1] ?? '' : 'claude-haiku-5-5';
 const sections = args.filter((arg, index) => !arg.startsWith('--') && (modelAt < 0 || index !== modelAt + 1));
-const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace'];
+const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace', 'pool'];
 const unknown = sections.filter((section) => !known.includes(section));
 if (unknown.length > 0) {
   console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build] [--model <id>]; unknown: ${unknown.join(', ')}`);
@@ -1126,5 +1169,6 @@ if (sections.includes('claude-code')) await claudeCodeSection(!args.includes('--
 if (sections.includes('host-tools')) await hostToolsSection(!args.includes('--no-build'), model);
 if (sections.includes('lead')) await leadSection(!args.includes('--no-build'), model);
 if (sections.includes('workspace')) await workspaceSection(!args.includes('--no-build'));
+if (sections.length === 0 || sections.includes('pool')) await poolSection();
 say(failures === 0 ? 'doctor: all checks passed' : `doctor: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

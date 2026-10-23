@@ -284,6 +284,7 @@ type BrokerOptions = {
   readonly repo?: string;                                   // its service's repository on the forge stand-in; any when absent
   readonly name?: string;                                   // how its log lines name it
   readonly watch?: Watch;
+  readonly base?: string;                                   // the branch it merges into and reverts on (main when absent)
 };
 
 // Answers on the socket as serve/release-broker.mjs does ({ ok, code,
@@ -306,14 +307,15 @@ export function startBroker(options: BrokerOptions): Promise<net.Server> {
   };
   const event = (db: DatabaseSync, kind: string, ticket: string, pr: number, detail: string) =>
     db.prepare("INSERT INTO events (at, kind, ticket, detail, value, source) VALUES (?, ?, ?, ?, ?, 'rehearsal-lock')").run(new Date().toISOString(), kind, ticket, detail, pr);
+  const base = options.base ?? 'main';
   const own = (forge: Forge, pr: number) => forge.prs.find((p) => p.number === pr && (options.repo === undefined || p.repo === options.repo));
 
   // Reverts a merge in the bare copy, as a rollback pushes its revert.
   async function revert(sha: string, pr: number, ticket: string): Promise<string> {
     await git('fetch', '--quiet', 'origin');
-    await git('checkout', '--quiet', '-B', 'main', 'origin/main');
+    await git('checkout', '--quiet', '-B', base, `origin/${base}`);
     await git('revert', '--no-edit', '-m', '1', sha);
-    await git('push', '--quiet', 'origin', 'main');
+    await git('push', '--quiet', 'origin', base);
     const at = (await git('rev-parse', 'HEAD')).stdout.trim();
     options.log(`${who}: reverted #${pr} (${ticket}) as ${at.slice(0, 12)}`);
     return at;
@@ -326,9 +328,9 @@ export function startBroker(options: BrokerOptions): Promise<net.Server> {
     if (!request) return { ok: false, code: 1, output: `no pull request #${pr}` };
     try {
       await git('fetch', '--quiet', 'origin');
-      await git('checkout', '--quiet', '-B', 'main', 'origin/main');
+      await git('checkout', '--quiet', '-B', base, `origin/${base}`);
       await git('merge', '--quiet', '--no-ff', '-m', `Merge pull request #${pr} (${ticket})`, `origin/${request.branch}`);
-      await git('push', '--quiet', 'origin', 'main');
+      await git('push', '--quiet', 'origin', base);
     } catch (error) {
       await git('merge', '--abort').catch(() => undefined);
       return { ok: false, code: 1, output: `the merge of #${pr} failed: ${(error as Error).message.split('\n')[0]}` };

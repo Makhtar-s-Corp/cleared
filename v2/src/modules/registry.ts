@@ -79,6 +79,10 @@ export type Module = {
   readonly tables: readonly string[];                  // CREATE TABLE IF NOT EXISTS statements
   readonly routes: readonly Route[];
   readonly provide: (deps: ModuleDeps) => Partial<Registry>;
+  // Called once the service listens, with the assembled registry: what must
+  // not wait for the first request (the flow's restart recovery, the lead's
+  // stopped sessions released). Never throws.
+  readonly start?: (registry: Registry) => void;
 };
 
 // lead and notify: milestone 2 (docs/v2/milestone-2-plan.md, decision 14);
@@ -118,6 +122,7 @@ export type App = {
   readonly registry: Registry;
   readonly tables: readonly string[];
   readonly routes: readonly Route[];
+  readonly start?: () => void;                         // each module's start, in module order (assemble sets it)
 };
 
 // The modules' tables and routes in module order, and the registry with
@@ -147,7 +152,13 @@ export function assemble(modules: Readonly<Record<ModuleName, Module>>, deps: Mo
       slots[slot] = value;
     }
   }
-  return { registry: slots as Registry, tables, routes };
+  const registry = slots as Registry;
+  const start = () => {
+    for (const name of MODULE_NAMES) {
+      try { modules[name].start?.(registry); } catch (error) { console.error(`cleared-v2: the ${name} module could not start (${error instanceof Error ? error.name : typeof error})`); }
+    }
+  };
+  return { registry, tables, routes, start };
 }
 
 export type Match =

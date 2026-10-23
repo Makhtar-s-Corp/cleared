@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { LeadMemory, LeadMessage, LeadPhase, LeadState, LeadStreamFrame, Plan, SessionDetail, SessionSummary } from '../api/types.ts';
+import { Docker, isSessionId } from '../container/docker.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { FlowEngine } from '../flow/engine.ts';
 import type { FlowListener } from '../flow/events.ts';
@@ -96,6 +97,9 @@ export type LeadDeps = {
   readonly settleMs?: number;             // how long the end of a turn waits for its measure (the runner sends it after the result)
   readonly retryMs?: number;              // a generation that could not start is tried again after this long
   readonly extensions?: LeadExtensions;
+  // Releases the containers and networks of stopped leads' sessions, by
+  // name (Docker.releaseStopped); at start only, after a restart (issue 265).
+  readonly release?: (sessions: readonly SessionId[]) => Promise<{ readonly containers: readonly string[]; readonly networks: readonly string[] }>;
 };
 
 type RefreshReason = CustomValue['cleared.lead_refreshed']['reason'];
@@ -156,8 +160,9 @@ export class LeadEngine {
   // ---- lifecycle -----------------------------------------------------------
 
   // Listens to the flow, puts straight what a stopped process left (a live
-  // generation's row), and starts a generation. Never throws: a generation
-  // that cannot start leaves the lead down until a tick starts it.
+  // generation's row, the containers and networks of the stopped leads),
+  // and starts a generation. Never throws: a generation that cannot start
+  // leaves the lead down until a tick starts it.
   async start(): Promise<void> {
     if (this.#started) return;
     this.#started = true;
@@ -175,7 +180,23 @@ export class LeadEngine {
       this.store.endGeneration(live.number, 'restart', handover.id);
       this.#nextReason = 'restart';
     }
+    await this.#releaseStopped();
     await this.#startGeneration();
+  }
+
+  // A lead's session stopped by a restart of the service was never stopped
+  // through its adapter: its containers and its two networks stayed, and
+  // Docker's address pool filled up (issue 265). A failure is said and the
+  // lead starts all the same.
+  async #releaseStopped(): Promise<void> {
+    const stopped = this.store.endedSessions().filter(isSessionId);
+    if (!this.#deps.release || stopped.length === 0) return;
+    try {
+      const { containers, networks } = await this.#deps.release(stopped);
+      if (containers.length + networks.length > 0) console.error(`cleared-v2: released ${containers.length} container(s) and ${networks.length} network(s) of stopped leads`);
+    } catch (error) {
+      console.error(`cleared-v2: the stopped leads' containers and networks could not be released (${errorName(error)})`);
+    }
   }
 
   // Ticks every `ms` until close(); the timer never keeps the process alive.
@@ -771,6 +792,7 @@ export type LeadRuntimeOptions = {
   readonly flow: Pick<Runtime, 'engine'>;
   readonly effects?: (config: LeadEffectsConfig) => LeadEffects;
   readonly extensions?: LeadExtensions;
+  readonly release?: LeadDeps['release'];   // a real Docker's releaseStopped otherwise
 };
 
 export type LeadRuntime = {
@@ -804,6 +826,7 @@ export function createLeadRuntime(options: LeadRuntimeOptions): LeadRuntime {
         effects: (options.effects ?? realLeadEffects)({ projectDir: fc.projectDir, repoUrl: fc.repoUrl, base: fc.base, workdir, env }),
         clean: (text) => cleanText(text, { secrets: secretValues(env), servicePaths }),
         ...(options.extensions ? { extensions: options.extensions } : {}),
+        release: options.release ?? ((sessions) => new Docker().releaseStopped(sessions)),
       });
       engine.startTimer();
       const started = engine;
