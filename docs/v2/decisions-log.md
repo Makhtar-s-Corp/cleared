@@ -4084,9 +4084,9 @@ Run 5's reviewer request stays allowed.
 - **Result.** The run stopped at step 04 (approve), at 19:04: 4 steps ok, 5 skipped, 1 failed. The plan was approved and its five tickets were created (LOCAL-33 to LOCAL-37), but none started. Each is held with the note « The flow could not start: guestbook is not a service of workspace cleared-example-guestbook » (`v2/src/flow/engine.ts:302`). The 48-hour proof is not running. Nothing was pushed to any main.
 - **Cause.** The ledger's `services` table still lists the services of the multi-service workspace (`guestbook`, `filter-api`), written while the service ran on the workspace file. The lead's plan store reads that table (`v2/src/lead/plans/store.ts:97`, `services()`). An item that names no service gets the first one, so each ticket is given the service `guestbook` (`v2/src/lead/plans/store.ts:58`, `itemServices`). In one-service mode, though, the workspace's only service is named after the project, `cleared-example-guestbook` (`v2/src/workspace/config.ts:103`, `serviceNameOf`, used by `v2/src/flow/config.ts:159`). The flow therefore refuses every ticket.
 - **Next.**
-  - The owner decided at 19:19 that the fix is made in the lane `j2-single-service-fix`.
+  - At 19:19, the owner decided in writing that the fix is made in the lane `j2-single-service-fix`, and that the demo stays stopped.
   - Before the relaunch, the ops session puts LOCAL-33 to LOCAL-37 back in a clean state. Left as they are, the relaunch would find an approved plan holding those tickets, and the morning rule would answer whatever of theirs is waiting.
-  - The demo stays stopped.
+  - The demo stays stopped, by the owner's decision of 19:19.
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h`. Nothing was pushed to any main.
 
@@ -4126,3 +4126,45 @@ This lane never ran the repair on the proof's ledger.
 - **The repair.** The dry run changes nothing. Applied, it renames the part of each of LOCAL-33..37 (two held, one put back, two waiting) and deletes none, and the runner then starts all five. A second run finds nothing. A part that ran, a ticket naming two old services, an item with steps on an old service, and every ticket of a workspace of several are each left alone with their reason, their rows unchanged.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-single-service-fix`.
+
+## 2026-10-23: Orchestrator decision: plan-1 paused and the 48-hour proof relaunched from the beginning
+
+**Decision.** On 2026-10-23 at 19:50 (Europe/Paris), the orchestrator, not the owner, chose in writing option (b): pause plan-1 and relaunch the 48-hour proof from the beginning. The owner's approval of 18:49 (the step C entry above) covers this relaunch. At 19:19, the owner had decided in writing that the fix is made in the lane `j2-single-service-fix`, and that the demo stays stopped (the Outcome of the step C entry).
+
+**Why.** The 48-hour proof's driver (`v2/scripts/proof-j2.ts`) always sends a new goal and approves the new plan (steps 01 to 04). It cannot take over a plan that is already approved. After the repair of pull request 282, plan-1 was still approved, with its five items (LOCAL-33 to LOCAL-37) put back. The runner would have started them at its first tick, 30 s after the service starts. Starting from the beginning would then have run two plans on the same goal:
+- duplicate tickets merging into `proof-run`;
+- the morning rule approving the cards of both plans;
+- the run's measures mixed;
+- 10 free Docker subnets shared between the two plans.
+
+The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver doit savoir reprendre un plan approuvé »).
+
+**What was done**, by the ops session (times in Europe/Paris):
+- At 19:45, the proof service was stopped. The proof's checkout was moved to Cleared `a731856`, the head of v2.
+- `npm run repair-services` ran as a dry run first. Only LOCAL-33 to LOCAL-37 had a change listed: each would be renamed to `cleared-example-guestbook`, and its item of plan-1 put back. The other 18 tickets were left alone, LOCAL-13, LOCAL-15 and LOCAL-16 among them.
+- At 19:48, the same command ran with `--apply`, with the service still stopped. A second dry run lists none of the five any more.
+- At 19:51, the service was started in one-service mode. `POST /api/plans/plan-1/pause` answered 200 half a second after the service answered, before the runner's first tick. Two ticks later, plan-1 is still `paused`, its five items are `put_back`, LOCAL-33 to LOCAL-37 are in Todo, and none has a session. The guard was clean.
+- At 19:52:47, the 48-hour proof's driver was launched (`launch-proofs.sh 48`). The goal was sent at 19:52:56, and plan-2 was approved at 19:53. Its first two tickets (LOCAL-38 and LOCAL-39) started at once, on the service `cleared-example-guestbook`. Steps 00 to 04 are ok, and the night watch runs until 2026-10-24 at 08:00 (CEST).
+
+**Consequences.**
+- The morning rule starts on 2026-10-24 at 08:00 (CEST). The lead's memory is read on 2026-10-25 at 18:52 (CET), 48 hours after the goal; summer time ends during the run.
+- At the first night reading (19:59), the driver was alive with no failed step, and every `/health` answered 200. LOCAL-38 and LOCAL-39 were waiting for the owner on a permission each, which the morning rule answers. Items 3 to 5 were ready, behind the limit of 2. 6 of Docker's 31 address-pool subnets were free, with two sessions live.
+- plan-1 stays paused, and its tickets stay inactive. Resuming it, or cancelling its items, is a later decision.
+- The demo stays stopped, by the owner's decision of 19:19. Nothing is pushed to the main branch of either proof repository (`2127dd2`, `0d7fbb5`). The run merges into `proof-run` only.
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
+
+## 2026-10-23: Orchestrator decision: the two orphan pairs of networks removed by name
+
+**Decision.** On 2026-10-23 at 20:05 (Europe/Paris), the orchestrator, not the owner, decided in writing to remove the two orphan pairs of Docker networks kept at the launch of step C (the step C entry of 18:49, its Consequences): `cleared-v2-abccbe43-f1f7-4d2f-ae47-749c0ea4c615`, `cleared-v2-abccbe43-f1f7-4d2f-ae47-749c0ea4c615-out`, `cleared-v2-90cd8204-69a3-4ab3-a614-99a45343dff3` and `cleared-v2-90cd8204-69a3-4ab3-a614-99a45343dff3-out`. The principle is the one applied that morning to the five stopped leads' resources: by name, only a network labelled `cleared.dev=v2` with no container attached, with `docker network rm <name>`. No prune, no volume, nothing else, and nothing of the 48-hour run in progress.
+
+**What was done**, by the ops session:
+- Each network was read with `docker network inspect` (name, `cleared.dev` label, attached containers), then again just before its removal:
+  - `cleared-v2-abccbe43-f1f7-4d2f-ae47-749c0ea4c615` and its `-out`: label `v2`, no container. The ledger's `sessions` table gives `abccbe43` as an author session of LOCAL-23, stopped. Its containers were gone, and at each start the service logged « the stopped sessions' containers and networks could not be released (DockerError) ».
+  - `cleared-v2-90cd8204-69a3-4ab3-a614-99a45343dff3` and its `-out`: label `v2`, no container. They belong to the demo's lead, stopped with the demo at 18:53.
+- All four were removed. Docker's address pool went from 6 to 10 free subnets out of 31.
+- The 48-hour run's networks were not touched: its two sessions' pairs, its lead's pair and `cleared-guestbook`.
+
+**Consequences.**
+- The 48-hour run has room for five more sessions at a time (each takes two subnets), beyond the two that are live.
+- When the service cannot release a stopped session's networks (« the stopped sessions' containers and networks could not be released »), they are still removed by hand on a written decision, as here.
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
