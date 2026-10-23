@@ -52,12 +52,13 @@ export function plansOf(registry: Registry): PlanRunner | undefined {
   const fc = flow.config;
   const servicePaths = [...new Set([env.CLEARED_V2_STATE_DIR, env.HOME ?? homedir(), fc.projectDir, fc.workdirRoot].filter((p): p is string => !!p && p !== '/'))];
   const clean = (text: string) => cleanText(text, { secrets: secretValues(env), servicePaths });
+  const services = workspaceOf(fc).services;
   plans = new PlanRunner({
-    store, inbox: flow.inbox, tickets: registry.ticketStore, flow: budgetedFlow(flow, (plan) => schedules?.budgetOf(plan)), lead, project: fc.project, config: planConfig, clean,
+    store, inbox: flow.inbox, tickets: registry.ticketStore, flow: budgetedFlow(flow, (plan) => schedules?.budgetOf(plan)), lead, project: fc.project,
+    services: services.map((service) => service.name), config: planConfig, clean,
   });
   plans.listen();
   plans.startTimer();
-  const services = workspaceOf(fc).services;
   recipes = new Recipes({
     source: gitRecipeSource({
       services: services.map((service) => ({ name: service.name, base: service.base, dir: service.dir, path: service.path })),

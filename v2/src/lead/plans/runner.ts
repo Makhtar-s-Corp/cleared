@@ -108,6 +108,9 @@ export type PlanDeps = {
   readonly flow: PlanFlow;
   readonly lead: PlanLead;
   readonly project: string;
+  // The names of the services the workspace's configuration has, in its
+  // order: the plans read only these of the ledger's rows (PlanStore).
+  readonly services?: readonly string[];
   readonly config: PlanConfig;
   readonly now?: () => Date;
   // Applied to every text of the model before it becomes a plan or a ticket.
@@ -140,7 +143,7 @@ export class PlanRunner {
     this.#deps = deps;
     this.#now = deps.now ?? (() => new Date());
     this.#clean = deps.clean ?? ((text) => text);
-    this.store = new PlanStore(deps.store.db, deps.project, this.#now);
+    this.store = new PlanStore(deps.store.db, deps.project, this.#now, deps.services);
   }
 
   // ---- lifecycle -------------------------------------------------------------

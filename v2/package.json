@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p app && tsc --noEmit -p app/web",
     "guard": "node scripts/guard.ts",
     "doctor": "node scripts/doctor.ts",
-    "notify": "node src/cli/notify.ts"
+    "notify": "node src/cli/notify.ts",
+    "repair-services": "node src/cli/repair-services.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.1",
