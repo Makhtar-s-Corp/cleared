@@ -3753,6 +3753,21 @@ The browser job on GitHub's runner read 46.0, 75.7, 58.9 and 83.9 ms over this p
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-final`.
 
+## 2026-10-23: Owner decision: the rest of LOCAL-11 reverted on both proof repositories' main, by revert commits
+
+**Decision.** On 2026-10-23 at 08:23 (Europe/Paris) the owner approved, in writing, reverting LOCAL-11's app commit on the filter API proof repository's main (`3529630`, "filter-api: POST /check answers severity, none or review") and LOCAL-11's guestbook commit on the guestbook proof repository's main (`7d46cd0`, "Hold an entry the filter flags for review instead of refusing it"), each by a revert commit pushed to main. No history is rewritten.
+
+**Why.** The first revert (the entry above) took back only LOCAL-11's contract, and left its app half on the filter API and its guestbook half on the guestbook. The proof's ticket, LOCAL-19, then had nothing to change but the contract. Its contract step was validated (step 03), but the reviewer saw a contract-only change to the filter API and the guestbook's fallback for a missing `severity`, and asked for changes in both review rounds. LOCAL-19 went back to Todo after the second round, with no pull request opened, so step 06 never got a release card and the run could not pass. With both halves reverted, the proof base is the one the ticket starts from: no `severity` in the contract, in the filter API or in the guestbook.
+
+**What was done.**
+- The proof driver of that run was stopped, with its children only (steps 00 to 05 had passed).
+- The filter API's main: `f20fd6d` (`git revert 3529630`, on top of `752e7c7`). Its watcher deployed it; `POST /check` answers `ok` and `words` again. Its tests pass, 37 of 37, locally and on the push's checks.
+- The guestbook's main: `d88cb3a` (`git revert 7d46cd0`, on top of `9637c4a`). Its watcher deployed it. Its checks on the push pass, 48 of 48, against Postgres. The `held` and `held_words` columns stay in the proof database, with their defaults; the reverted code does not read them.
+- `/health` answers 200 on both services after the deploys.
+- LOCAL-19 is in the state LOCAL-17 was left in: Todo, no live session, no waiting release, plan, session plan or permission item, no release train, no branch. Nothing of it is approved or deployed.
+
+- Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-final-2`.
+
 ## 2026-10-23: the interface in French and in English from catalogs, the language from the browser, one formatter for durations and dates (the author's choices, lane i18n, `v2-j2-ui-durations`)
 
 **Decision.** On 2026-10-23 at 08:30 (Europe/Paris) the owner approved a small lane: durations in a human format through one formatter, the session statuses still in English on Sessions translated, "Lead" capitalised everywhere and "Relecteur" kept as it is. At 08:40 the owner widened it into the i18n lane (requirement O23): every visible word from a French or an English catalog, the page's language from the browser with French as the fallback, a language choice in the account menu, durations, relative dates and numbers through Intl, and a test that fails on any visible text from no catalog and on any key missing in one language. The branch keeps its name.
