@@ -25,6 +25,10 @@
 // (an empty contract diff never makes the inbox item step 3 waits for).
 // A real run without PROOF_REPOS is refused: it would merge into whatever
 // the workspace names. PROOF_REPOS=none skips the reset, in the rehearsal only.
+// Before step 1 a real run's start check (issue 277) also refuses, with code
+// 64, a frozen base none of whose workflows runs on both a push and a pull
+// request to the run branch, and a deploy watcher of one of its services
+// that deploys another branch, or is missing, or cannot be read.
 //
 //   PROOF_REPOS          service=<absolute path of a clone>[,...]: a clone of each
 //                        proof repository that may push its run branch; required by
@@ -34,6 +38,8 @@
 //   PROOF_RUN_BRANCH     the run branch (default proof-run; always proof-<something>)
 //   PROOF_DEPLOY_MINUTES how long the watchers have to deploy the base (default 10)
 import { spawn } from 'node:child_process';
+import { readFile, readdir, readlink } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 
 export const FROZEN_BRANCH = 'proof-base';
 export const RUN_BRANCH = 'proof-run';
@@ -48,6 +54,12 @@ export type BaseSettings = { readonly frozen: string; readonly run: string; read
 
 export class BaseError extends Error {
   override name = 'BaseError';
+}
+
+// What the start check of a real run refuses, before anything is set aside
+// or recreated: the run stops with code 64, as for a setting it lacks.
+export class StartRefusal extends BaseError {
+  override name = 'StartRefusal';
 }
 
 // What the run does with the base, from the environment: a real run needs
@@ -133,6 +145,170 @@ export async function ticketChangesIn(service: string, read: (path: string) => P
     if (/\bseverity\b/.test(await read('src/filter.ts') ?? '')) found.push('src/filter.ts already reads severity');
   }
   return found;
+}
+
+// ---- the start check: checks and watchers on the run branch (issue 277) ----------
+
+// Step 06 of the first run on the clean base waited for a release card that
+// could not come: the proof repositories' checks ran on main only, so the
+// pull requests into the run branch had none (decisions log of 2026-10-23).
+// A real run now reads the workflows of each frozen base before it starts,
+// and refuses unless one of them runs on both a push and a pull request to
+// the run branch. The workflows are read without a YAML library: only the
+// top-level `on:`, and an event filtered on anything the reader does not
+// know (paths, tags, types, a flow mapping) does not count, so an unsure
+// reading refuses.
+
+// A filter of GitHub's: * any characters but /, ** any, ? one, ! negates; the last match wins.
+function branchMatches(patterns: readonly string[], branch: string): boolean {
+  let matched = false;
+  for (const raw of patterns) {
+    const negated = raw.startsWith('!');
+    const pattern = negated ? raw.slice(1) : raw;
+    const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '.').replace(/\u0000/g, '.*');
+    if (new RegExp(`^${source}$`).test(branch)) matched = !negated;
+  }
+  return matched;
+}
+
+const unquote = (value: string): string => value.trim().replace(/^(['"])(.*)\1$/, '$2');
+const uncomment = (line: string): string => line.replace(/(^|\s)#.*$/, '').replace(/\s+$/, '');
+const flowList = (value: string): string[] | undefined => {
+  const match = /^\[(.*)\]$/.exec(value.trim());
+  return match ? (match[1] as string).split(',').map(unquote).filter((item) => item !== '') : undefined;
+};
+
+// Each event of a workflow's `on:` with its branch filters (absent: every
+// branch), or undefined when the reader cannot tell. `null` for an event
+// marks one filtered on something else: it does not count.
+export type Trigger = { readonly branches?: readonly string[]; readonly ignore?: readonly string[] } | null;
+export function workflowTriggers(text: string): Map<string, Trigger> | undefined {
+  const lines = text.split(/\r?\n/).map(uncomment);
+  const at = lines.findIndex((line) => /^(on|"on"|'on'):(\s|$)/.test(line));
+  if (at < 0) return undefined;
+  const inline = (lines[at] as string).slice((lines[at] as string).indexOf(':') + 1).trim();
+  const events = new Map<string, Trigger>();
+  if (inline !== '') {
+    const list = flowList(inline) ?? (/^[a-z_]+$/.test(inline) ? [inline] : undefined);
+    if (!list) return undefined;
+    for (const event of list) events.set(event, {});
+    return events;
+  }
+  // The block under `on:`, down to the next line at column 0.
+  const block: { indent: number; text: string }[] = [];
+  for (const line of lines.slice(at + 1)) {
+    if (line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) break;
+    block.push({ indent, text: line.trim() });
+  }
+  const top = block[0]?.indent;
+  if (top === undefined) return undefined;
+  for (let i = 0; i < block.length; i++) {
+    const { indent, text: entry } = block[i] as { indent: number; text: string };
+    if (indent !== top) continue;
+    const key = /^([A-Za-z_]+):\s*(.*)$/.exec(entry);
+    if (!key) return undefined;
+    const [, event, value] = key as unknown as [string, string, string];
+    let children = block.slice(i + 1);
+    const next = children.findIndex((child) => child.indent <= top);
+    if (next >= 0) children = children.slice(0, next);
+    if (value !== '' && value !== 'null' && value !== '{}' && value !== '~') { events.set(event, null); continue; }
+    if (children.length === 0) { events.set(event, {}); continue; }
+    const second = (children[0] as { indent: number }).indent;
+    const filters: Record<string, string[]> = {};
+    let known = true;
+    for (let j = 0; j < children.length; j++) {
+      const child = children[j] as { indent: number; text: string };
+      if (child.indent !== second) continue;
+      const filter = /^([A-Za-z_-]+):\s*(.*)$/.exec(child.text);
+      if (!filter || !['branches', 'branches-ignore'].includes(filter[1] as string)) { known = false; break; }
+      let items = filter[2] === '' ? [] : flowList(filter[2] as string);
+      if (filter[2] === '') {
+        for (const item of children.slice(j + 1)) {
+          if (item.indent <= second) break;
+          if (!item.text.startsWith('- ')) { items = undefined; break; }
+          items?.push(unquote(item.text.slice(2)));
+        }
+      }
+      if (!items) { known = false; break; }
+      filters[filter[1] as string] = items;
+    }
+    events.set(event, known ? { ...(filters.branches ? { branches: filters.branches } : {}), ...(filters['branches-ignore'] ? { ignore: filters['branches-ignore'] } : {}) } : null);
+  }
+  return events;
+}
+
+function runsOn(trigger: Trigger | undefined, branch: string): boolean {
+  if (trigger === undefined || trigger === null) return false;
+  if (trigger.branches && !branchMatches(trigger.branches, branch)) return false;
+  if (trigger.ignore && branchMatches(trigger.ignore, branch)) return false;
+  return true;
+}
+
+// Whether one of a frozen base's workflows runs on both a push and a pull request to the run branch.
+export function checksRunOn(workflows: readonly { readonly path: string; readonly text: string }[], branch: string): boolean {
+  return workflows.some((workflow) => {
+    const events = workflowTriggers(workflow.text);
+    return events !== undefined && runsOn(events.get('push'), branch) && runsOn(events.get('pull_request'), branch);
+  });
+}
+
+// The workflows of a commit of a clone: .github/workflows/*.yml and *.yaml.
+export async function workflowsAt(run: Run, clone: string, commit: string): Promise<{ path: string; text: string }[]> {
+  const listed = await run('git', ['ls-tree', '--name-only', `${commit}:.github/workflows`], clone).catch(() => '');
+  const read = reader(run, clone, commit);
+  const out: { path: string; text: string }[] = [];
+  for (const name of listed.split('\n').map((line) => line.trim()).filter((line) => /\.ya?ml$/.test(line))) {
+    const text = await read(`.github/workflows/${name}`);
+    if (text !== undefined) out.push({ path: `.github/workflows/${name}`, text });
+  }
+  return out;
+}
+
+// A deploy watcher running on this machine (examples/*/deploy/watch.ts):
+// the service its script labels (`cleared.example=<service>`), null when it
+// cannot be read, and the branch it deploys (its --branch, main by default).
+export type Watcher = { readonly pid: number; readonly service: string | null; readonly branch: string };
+export const WATCH_SCRIPT = /(^|\/)deploy\/watch\.ts$/;
+export function watcherOf(pid: number, args: readonly string[], script: string | undefined): Watcher | undefined {
+  const at = args.findIndex((arg) => WATCH_SCRIPT.test(arg));
+  if (at < 0) return undefined;
+  const rest = args.slice(at + 1);
+  const flag = rest.indexOf('--branch');
+  const branch = flag >= 0 ? rest[flag + 1] ?? '' : 'main';
+  const service = script === undefined ? null : /['"]cleared\.example=([a-z0-9][a-z0-9-]*)['"]/.exec(script)?.[1] ?? null;
+  return { pid, service, branch };
+}
+
+// The watchers of this machine, read from /proc: each process's arguments,
+// and its script's text, read from where the process runs.
+export async function readWatchers(proc = '/proc'): Promise<Watcher[]> {
+  const watchers: Watcher[] = [];
+  for (const entry of await readdir(proc).catch(() => [] as string[])) {
+    if (!/^\d+$/.test(entry)) continue;
+    const args = (await readFile(join(proc, entry, 'cmdline'), 'utf8').catch(() => '')).split('\0').filter(Boolean);
+    const scriptArg = args.find((arg) => WATCH_SCRIPT.test(arg));
+    if (scriptArg === undefined) continue;
+    const cwd = isAbsolute(scriptArg) ? '' : await readlink(join(proc, entry, 'cwd')).catch(() => undefined);
+    const script = cwd === undefined ? undefined : await readFile(isAbsolute(scriptArg) ? scriptArg : join(cwd, scriptArg), 'utf8').catch(() => undefined);
+    const watcher = watcherOf(Number(entry), args, script);
+    if (watcher) watchers.push(watcher);
+  }
+  return watchers;
+}
+
+// Why the watchers may not serve the run, or undefined when they may: each
+// service has a watcher, and every watcher whose service the run names, or
+// cannot be read, deploys the run branch.
+export function watcherRefusal(watchers: readonly Watcher[], services: readonly string[], run: string): string | undefined {
+  const unread = watchers.filter((w) => w.service === null);
+  if (unread.length > 0) return `the service of the deploy watcher${unread.length === 1 ? '' : 's'} ${unread.map((w) => `pid ${w.pid}`).join(', ')} could not be read: a run starts only when every watcher is known to deploy ${run}`;
+  const wrong = watchers.filter((w) => w.service !== null && services.includes(w.service) && w.branch !== run);
+  if (wrong.length > 0) return `${wrong.map((w) => `the watcher of ${w.service} (pid ${w.pid}) deploys ${w.branch || 'no branch'}`).join(', ')}, not ${run}: restart it with --branch ${run} (docs/v2/proof-clean-base.md)`;
+  const missing = services.filter((s) => !watchers.some((w) => w.service === s));
+  if (missing.length > 0) return `no deploy watcher runs for ${missing.join(', ')}: the run would wait for a deploy that never comes; start node deploy/watch.ts --branch ${run} in its clone (docs/v2/proof-clean-base.md)`;
+  return undefined;
 }
 
 // ---- git and gh, without a shell ---------------------------------------------

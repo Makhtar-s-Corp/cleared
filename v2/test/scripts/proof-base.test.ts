@@ -5,12 +5,13 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BaseError, FROZEN_BRANCH, baseModeOf, RUN_BRANCH, closeStale, defaultBranchOf, frozenCommits, readBaseSettings, reader, recreate, refusal, runCommand, ticketChangesIn, type BaseSettings, type Run,
+  BaseError, FROZEN_BRANCH, baseModeOf, RUN_BRANCH, StartRefusal, checksRunOn, closeStale, defaultBranchOf, frozenCommits, readBaseSettings, readWatchers, reader, recreate, refusal, runCommand,
+  ticketChangesIn, watcherOf, watcherRefusal, workflowTriggers, workflowsAt, type BaseSettings, type Run, type Watcher,
 } from '../../scripts/proof-base.ts';
 import { rehearsalWorkspace } from '../../scripts/proof-rehearsal-multi.ts';
 
@@ -210,8 +211,12 @@ test('two runs in a row start from the same commit: what the first run merged in
 // The only pushes the proof's scripts make, each line as written: a test
 // fails as soon as one of them pushes anything else, or names main.
 const ALLOWED_PUSHES: Readonly<Record<string, readonly string[]>> = {
-  // The run branch, recreated at the frozen commit (guarded by recreate).
-  'proof-base.ts': ["await run('git', ['push', '--quiet', '--force', settings.remote, `${commit}:refs/heads/${settings.run}`], repo.clone);"],
+  // The workflow event `push` the start check reads (checksRunOn, issue 277), not a git push;
+  // then the run branch, recreated at the frozen commit (guarded by recreate).
+  'proof-base.ts': [
+    "return events !== undefined && runsOn(events.get('push'), branch) && runsOn(events.get('pull_request'), branch);",
+    "await run('git', ['push', '--quiet', '--force', settings.remote, `${commit}:refs/heads/${settings.run}`], repo.clone);",
+  ],
   // The rehearsal's seeding of its temporary bare copy: the run branch an earlier run moved on.
   'proof-rehearsal-multi.ts': ["git(seed, 'push', '--quiet', p.origin, `HEAD:refs/heads/${RUN_BRANCH}`);"],
   // The rehearsals' stand-in brokers, into their temporary bare copies' base (the run branch for the multi-service proof).
@@ -232,4 +237,156 @@ test('no proof script pushes to main: every push of scripts/proof-*.ts is one of
 test('the multi-service rehearsal\'s workspace names the run branch as every service\'s base, never main', () => {
   const text = rehearsalWorkspace({ root: '/tmp/rehearsal', ports: { guestbook: 3000, 'filter-api': 3001 } });
   assert.deepEqual([...text.matchAll(/^base = (.+)$/gm)].map((m) => m[1]), [RUN_BRANCH, RUN_BRANCH]);
+});
+
+// ---- the start check: checks and watchers on the run branch (issue 277) ----------
+
+// The proof repositories' checks workflow as recorded: the guestbook's before
+// the orchestrator's decision of 2026-10-23 (main only, step 06 waited for
+// nothing), and both after it (main and proof-run).
+const GUESTBOOK_MAIN_ONLY = `name: checks
+
+# The guestbook's tests against a Postgres service container, on every pull
+# request to main and every push to it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: checks-\${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+`;
+const GUESTBOOK_RUN = `name: checks
+
+# The guestbook's tests against a Postgres service container, on every pull
+# request to main or to proof-run (the multi-service proof's run branch) and
+# every push to either.
+on:
+  push:
+    branches: [main, proof-run]
+  pull_request:
+    branches: [main, proof-run]
+
+concurrency:
+  group: checks-\${{ github.ref }}
+  cancel-in-progress: true
+`;
+const FILTER_API_RUN = `name: checks
+
+# The filter API's tests and types, on every pull request to main or to
+# proof-run (the multi-service proof's run branch) and every push to either. No
+# service container: the filter API has no database.
+on:
+  push:
+    branches: [main, proof-run]
+  pull_request:
+    branches: [main, proof-run]
+
+concurrency:
+  group: checks-\${{ github.ref }}
+  cancel-in-progress: true
+`;
+const checks = (text: string) => [{ path: '.github/workflows/checks.yml', text }];
+
+test('the recorded workflows: branches [main] refused, [main, proof-run] accepted (issue 277)', () => {
+  assert.equal(checksRunOn(checks(GUESTBOOK_MAIN_ONLY), RUN_BRANCH), false);
+  assert.equal(checksRunOn(checks(GUESTBOOK_RUN), RUN_BRANCH), true);
+  assert.equal(checksRunOn(checks(FILTER_API_RUN), RUN_BRANCH), true);
+  // This repository's example still runs on main only: a proof repository copied from it is refused.
+  assert.equal(checksRunOn(checks(readFileSync(fileURLToPath(new URL('../../../examples/guestbook/.github/workflows/checks.yml', import.meta.url)), 'utf8')), RUN_BRANCH), false);
+  assert.equal(checksRunOn([], RUN_BRANCH), false);
+  assert.deepEqual(workflowTriggers(GUESTBOOK_RUN), new Map([['push', { branches: ['main', 'proof-run'] }], ['pull_request', { branches: ['main', 'proof-run'] }]]));
+});
+
+test('a workflow counts only when it surely runs on both a push and a pull request to the run branch; an unsure reading refuses', () => {
+  const on = (block: string) => checksRunOn(checks(`name: checks\n${block}\njobs:\n  test:\n    runs-on: ubuntu-latest\n`), 'proof-run');
+  for (const block of [
+    'on: [push, pull_request]', "'on': [push, pull_request, workflow_dispatch]",
+    'on:\n  push:\n  pull_request:',
+    'on:\n  push:\n    branches:\n      - main\n      - "proof-run"   # the run branch\n  pull_request:\n    branches: [\'proof-run\']',
+    'on:\n  push:\n    branches: [main, "proof-*"]\n  pull_request:\n    branches: ["**"]',
+    'on:\n  push:\n    branches-ignore: [gh-pages]\n  pull_request:\n  workflow_dispatch:',
+  ]) assert.equal(on(block), true, block);
+  for (const block of [
+    'on: push', 'on: [pull_request]', 'on:\n  push:\n    branches: [main, proof-run]',
+    'on:\n  push:\n    branches: [main, proof-run]\n  pull_request:\n    branches: [main]',
+    'on:\n  push:\n    branches: ["proof-*", "!proof-run"]\n  pull_request:',
+    'on:\n  push:\n    branches-ignore: [proof-run]\n  pull_request:',
+    'on:\n  push:\n    branches: [proof-run]\n    paths: [src/**]\n  pull_request:\n    branches: [proof-run]',
+    'on:\n  push:\n    tags: [v*]\n  pull_request:',
+    'on:\n  push: {branches: [proof-run]}\n  pull_request:',
+    'on: {push: {}, pull_request: {}}', 'on:', '# on: [push, pull_request]', 'true: [push, pull_request]',
+    'on:\n  push:\n    branches: []\n  pull_request:',
+  ]) assert.equal(on(block), false, block);
+  // One workflow that runs on both is enough.
+  assert.equal(checksRunOn([...checks(GUESTBOOK_MAIN_ONLY), { path: '.github/workflows/run.yml', text: 'on: [push, pull_request]\n' }], 'proof-run'), true);
+});
+
+test('the workflows of a frozen commit are read from the clone, .yml and .yaml', async () => {
+  const repo = join(root, 'workflows');
+  mkdirSync(join(repo, '.github', 'workflows'), { recursive: true });
+  git(repo, 'init', '--quiet');
+  writeFileSync(join(repo, '.github', 'workflows', 'checks.yml'), GUESTBOOK_RUN);
+  writeFileSync(join(repo, '.github', 'workflows', 'pages.yaml'), 'on: push\n');
+  writeFileSync(join(repo, '.github', 'workflows', 'notes.md'), 'not a workflow\n');
+  git(repo, 'add', '--all');
+  git(repo, 'commit', '--quiet', '-m', 'workflows');
+  const commit = git(repo, 'rev-parse', 'HEAD');
+  const read = await workflowsAt(runCommand, repo, commit);
+  assert.deepEqual(read.map((w) => w.path), ['.github/workflows/checks.yml', '.github/workflows/pages.yaml']);
+  assert.equal(checksRunOn(read, RUN_BRANCH), true);
+  // A commit without workflows has none.
+  git(repo, 'rm', '-r', '--quiet', '.github');
+  git(repo, 'commit', '--quiet', '-m', 'none');
+  assert.deepEqual(await workflowsAt(runCommand, repo, git(repo, 'rev-parse', 'HEAD')), []);
+});
+
+const WATCH = "export const LABELS = ['cleared.dev=v2', 'cleared.example=guestbook'] as const;\n";
+
+test('a deploy watcher: its service from its script\'s label, its branch from --branch, main by default', async () => {
+  assert.deepEqual(watcherOf(7, ['node', 'deploy/watch.ts', '--repo', '/srv/clone', '--branch', 'proof-run', '--interval', '30'], WATCH), { pid: 7, service: 'guestbook', branch: 'proof-run' });
+  assert.deepEqual(watcherOf(8, ['node', '/srv/clone/deploy/watch.ts', '--repo', '/srv/clone'], WATCH.replace('guestbook', 'filter-api')), { pid: 8, service: 'filter-api', branch: 'main' });
+  assert.deepEqual(watcherOf(9, ['node', 'deploy/watch.ts', '--branch', 'proof-run'], undefined), { pid: 9, service: null, branch: 'proof-run' });
+  assert.equal(watcherOf(10, ['node', 'src/server.ts', '--branch', 'proof-run'], WATCH), undefined);
+
+  // Read from a /proc of processes: arguments, working folder and script.
+  const proc = join(root, 'proc');
+  const clone = (name: string, label: string) => { const dir = join(root, `watch-${name}`); mkdirSync(join(dir, 'deploy'), { recursive: true }); writeFileSync(join(dir, 'deploy', 'watch.ts'), WATCH.replace('guestbook', label)); return dir; };
+  const process = (pid: number, args: string[], cwd: string) => { mkdirSync(join(proc, String(pid)), { recursive: true }); writeFileSync(join(proc, String(pid), 'cmdline'), `${args.join('\0')}\0`); symlinkSync(cwd, join(proc, String(pid), 'cwd')); };
+  process(101, ['node', 'deploy/watch.ts', '--repo', '.', '--branch', 'proof-run', '--interval', '30'], clone('guestbook', 'guestbook'));
+  process(102, ['node', 'deploy/watch.ts', '--repo', '.'], clone('filter-api', 'filter-api'));
+  process(103, ['node', 'src/server.ts'], root);
+  mkdirSync(join(proc, 'self'), { recursive: true });
+  const read = (await readWatchers(proc)).sort((a, b) => a.pid - b.pid);
+  assert.deepEqual(read, [{ pid: 101, service: 'guestbook', branch: 'proof-run' }, { pid: 102, service: 'filter-api', branch: 'main' }]);
+});
+
+test('the watchers: each service of the run has one, and every one deploys the run branch (issue 277)', () => {
+  const services = ['filter-api', 'guestbook'];
+  const both: Watcher[] = [{ pid: 1, service: 'filter-api', branch: 'proof-run' }, { pid: 2, service: 'guestbook', branch: 'proof-run' }];
+  assert.equal(watcherRefusal(both, services, 'proof-run'), undefined);
+  // A watcher of another example, on its own branch, is not the run's.
+  assert.equal(watcherRefusal([...both, { pid: 3, service: 'notes', branch: 'main' }], services, 'proof-run'), undefined);
+  assert.match(watcherRefusal([both[0] as Watcher, { pid: 2, service: 'guestbook', branch: 'main' }], services, 'proof-run') ?? '', /the watcher of guestbook \(pid 2\) deploys main, not proof-run: restart it with --branch proof-run/);
+  assert.match(watcherRefusal([both[0] as Watcher], services, 'proof-run') ?? '', /no deploy watcher runs for guestbook/);
+  assert.match(watcherRefusal([], services, 'proof-run') ?? '', /no deploy watcher runs for filter-api, guestbook/);
+  assert.match(watcherRefusal([...both, { pid: 4, service: null, branch: 'proof-run' }], services, 'proof-run') ?? '', /the service of the deploy watcher pid 4 could not be read/);
+  // A refusal of the start check stops the run with code 64 (proof-j2-multi.ts), a BaseError still.
+  assert.ok(new StartRefusal('x') instanceof BaseError);
+});
+
+test('the start check refuses a workspace whose service is not on the run branch, with code 64 (issue 277)', () => {
+  const driver = readFileSync(fileURLToPath(new URL('../../scripts/proof-j2-multi.ts', import.meta.url)), 'utf8');
+  assert.match(driver, /if \(refused\) throw new StartRefusal\(refused\);/);
+  assert.match(driver, /process\.exit\(error instanceof StartRefusal \? 64 : 1\);/);
+  assert.match(refusal({ frozen: FROZEN_BRANCH, run: RUN_BRANCH, repos: [{ service: 'guestbook', clone: '/c' }] }, { guestbook: 'proof-base' }, { guestbook: 'main' }) ?? '', /the workspace's base of guestbook is proof-base, not proof-run/);
 });

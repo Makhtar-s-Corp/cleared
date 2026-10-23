@@ -3986,3 +3986,78 @@ Followups 3 to 7 of the review stay open for the next round.
 - The run's start check must refuse a base whose checks do not trigger on the run branch: issue #277 (the start check verifies that checks trigger on the run branch).
 - No change to the milestone 2 plan is expected: its unknowns table has no item on the checks trigger.
 - Recorded by: the orchestrator, ops lane, branch `v2-j2-ops-proofci`; this entry also corrects the commit ids of the entry above (the ids it named are the revert commits, not the merges).
+
+## 2026-10-23: the proof's driver lets an author or a reviewer run its service's declared checks (P52, partial)
+
+**Decision.** In run 5 of the multi-service proof, step 10 failed. The driver's `tend()` answers each permission a session of the proof's tickets asks with the checkout rule (`answerFor`, `scripts/proof-inbox.ts`), and it denied the reviewer's requests to run the service's tests. The reviewer judged on the diff alone, asked for changes twice, and the ticket went back to Todo. The driver now allows once a request from an author or a reviewer to run exactly one of the checks declared in its service's frozen base (the script's name is declared there; the script that runs is the checkout's). Every other request keeps the answer it had.
+- The declared checks are `test`, `typecheck` and `lint` among the scripts of the service's `package.json`, as `npm test`, `npm run typecheck` and `npm run lint`. They are read from the frozen base of each proof repository when the run prepares its clean base, the same file the service's policy reads its scripts from. Without a clean base (the rehearsal with `PROOF_REPOS=none`) no check is declared, and the old rule answers.
+- The session's role and service come from `GET /api/sessions`, read once per pass of `tend()`. A lead, a reader, or a role the driver cannot read gets the old rule's answer.
+- `answerFor` is unchanged: the milestone 1 proof and the 48-hour proof's morning share it.
+- Each answer is traced in `result.json` and in the report's "Session permissions" section: the ticket, the session, its role and service, the command (cut to 160 characters), the answer, and the rule that gave it (`check`, `checkout`, `refused`, `not_a_command`). A role shown as unknown is a session the driver could not read in that pass of `tend()` (the sessions are read once per pass); it gets the checkout rule.
+
+**What it does not fix.** The ledger of run 5 shows that the reviewer's two requests on the third ticket were compound commands, not a bare check:
+- `npm test | tail; npm run typecheck | tail; git ls-files; grep "a\|b" ... | head`. It is read-only, but the checkout rule refuses it: `git ls-files` is not in its list of git commands, and its split does not read quotes, so it cuts the grep pattern at `\|`.
+- A check followed by a file written to `/tmp` through a heredoc. It is refused, and rightly.
+
+A bare `npm test` or `npm run typecheck` was already allowed by the checkout rule, and the service's policy allows it without asking (`run.safe`), so it never reaches the inbox. The exact rule makes the reviewer's checks explicit and traced, but alone it would not have changed step 10 of run 5. Widening the driver to compounds of checks and reads (a split that reads quotes, `git ls-files`) changes the answer to other requests, so it is left to the owner as a follow-up lane. The rest of P52 (the service's policy allowing only the declared test command, the verdict carrying the result) stays for milestone 3.
+
+**Tests.**
+- `test/scripts/proof-inbox.test.ts`: the declared checks read from a `package.json`; an author's or a reviewer's exact check, allowed once; a write outside the checkout, a network command or an install, refused whatever the role, run 5's first reviewer request among them; a lead, a reader, an empty or unknown role, answered by the checkout rule.
+- `test/scripts/proof-report.test.ts`: the report's permissions section.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
+
+## 2026-10-23: the proof's checkout rule reads a command with the service's parser, and a real run's start check reads the checks and the watchers (review 1 of pull request 279, followup 1; issue 277)
+
+**Decision 1: the checkout rule parses a command.** Followup 1 of review 1 of pull request 279: the exact rule of the entry above would not have changed step 10 of run 5. At the owner's request, the checkout rule (`insideCheckout`, `scripts/proof-inbox.ts`) now reads a command with the service's own shell parser (`parseList`, `src/session/policy.ts`) instead of splitting its text:
+- Quotes are understood, and every part of a list joined by `;`, `&&`, `||` or `|` is judged word for word, with the files its output redirections write.
+- Whatever the parser refuses is denied: a substitution, an expansion, a here-document, an input redirection, a subshell, a newline, a lone `&`.
+- `parseList` and `parseCommand` take an opt-in `globs` that only the driver passes. With it, an unquoted `*`, `?` or `[` is read in a word with no slash that does not start with a dot, so it names files of the current folder only. The policy never passes it, and its behaviour is unchanged (its tests pass as they were).
+- Newly allowed: `git ls-files`; `cd` into a folder of the checkout; `npm test` or `npm run <script>` with npm's options from a list, and after `--` the runner's options from a list (a name to match, a reporter) and files; `npx tsc --noEmit` with `-p` or `--project` inside the checkout. `npx tsc` fetches a package from the registry when the checkout has no TypeScript, as `npm ci` does: the egress proxy bounds it.
+- The rule is shared: `answerFor` answers with it in the milestone 1 proof (`inboxAction`) and in the 48-hour proof's morning (`morningAction`) too, so those proofs get the parsed reading as well, with what it allows and refuses below. The entry above said `answerFor` was unchanged; it no longer is.
+- Newly refused: `cd` alone (home) and `cd -`; an option whose value after `=` names a path outside the checkout (`--output=/tmp/x`, `--script-shell=/bin/sh`); `--require`, `--import` or any option not in the runner's list after `--`; a newline between two commands, which the first rule split and judged.
+- Run 5's reviewer request on the third ticket (`npm test 2>&1 | tail -15; npm run typecheck 2>&1 | tail -5; git ls-files; grep -rn "findWords\|words:" --include=* -r src README.md | grep -v "^src/words.ts" | head`) is allowed once.
+- Its other request and the earlier runs' reviewer requests stay refused: a scratch file written to `/tmp` through a here-document and run with `node`, or `${DATABASE_URL:+set}`.
+- Followups 2 and 4 of the same review: the comments say "declared in the frozen base" (the script that runs is the checkout's), and the refusal's rule is named `refused`.
+
+**Decision 2: a real run's start check (issue 277).** Before anything is set aside or recreated, a real run stops with code 64 (`StartRefusal`) and a clear message:
+- when no workflow of a proof repository's frozen base runs on both a push and a pull request to the run branch (`checksRunOn`, `workflowsAt`). The workflows are read without a YAML library: the top-level `on:` as a list, or as events filtered on `branches` and `branches-ignore` with GitHub's patterns. An event filtered on anything else (paths, tags, types, a flow mapping) does not count, so an unsure reading refuses;
+- when a deploy watcher of one of the run's services deploys another branch (its `--branch`, `main` by default), when a service has no watcher, or when the service of a running watcher cannot be read (`readWatchers`, `watcherRefusal`). Watchers are read from `/proc`: each `deploy/watch.ts` process, and the `cleared.example` label of the script it runs;
+- when a service's base in the workspace is not the run branch (`refusal`, as before; it now stops with 64 too).
+
+The rehearsal skips the workflows and the watchers: its forge and its brokers are stand-ins, and it has no watcher. A sanity check on the proof host, read only, found both watchers on `proof-run` and both repositories' checks running on it.
+
+**Tests.**
+- `test/scripts/proof-inbox.test.ts`: the reviewers' refused requests of run 5 and the earlier runs, verbatim from the ledger, allowed or refused as above; the common forms; the refusals.
+- `test/scripts/proof-base.test.ts`: the recorded workflows of both proof repositories, with branches `[main]` refused and `[main, proof-run]` accepted, and this repository's example, still on main, refused; the filters, and the unsure readings refused; the workflows of a commit read from a clone; the watchers read from a stand-in `/proc`; each refusal.
+- The guard of the proof scripts' pushes lists the line that reads the workflow event `push`, which is not a git push.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
+
+## 2026-10-23: the proof's checkout rule allows each program only with its options from a list (review 2 of pull request 279)
+
+**Decision.** Review 2 of pull request 279 found a security regression of round 2, blocking. With the parser, a quoted word is one word, and `sed` reads the first word that is not an option as its script: `sed -n 'w /tmp/pwn' 1p README.md` wrote a file outside the checkout, and `sed -n 'e id' 1p README.md` ran a command. Both were answered `allow_once`. At the owner's request, round 3 closes that and the review's followups in this pull request:
+- **sed**: `-n`, then a script that is exactly one word `^\d+(,\d+)?p$`, then files. Any other script or option is refused.
+- **Each piece of a word**: a quoted word holding spaces is also read piece by piece as a path, so `'w /tmp/pwn'` names `/tmp/pwn` and is refused, whatever the program.
+- **sort**: its ordering options only (`-k`, `-t`, `-n`, `-r`, `-u` and their long names). `--compress-program` (or any prefix of it), `-S`, `-T`, `-o` and `--files0-from` are refused.
+- **rg**: its search and output options only, from a list. `--pre`, `--pre-glob`, `-z`, `--search-zip` and ripgrep 14's `--hostname-bin`, which runs a program, are refused, and so is every option not listed.
+- **git**: only `status`, `diff`, `log`, `show`, `ls-files` and a listing `branch`, each with its options from a list. Every other subcommand (`add`, `commit`, `restore`, `rm`, `mv`, `push`, `stash`, `checkout`, `reset`) is refused, and so is every option not listed (`--output`, `--ext-diff`, `--textconv`, `--no-index`, `-D`, `-m`, `-c`, `-C`). A branch name would create a branch, so `branch` takes none. The policy still allows a session's plain `git add` and `git commit` on its own. Only the proof's own answer to a request that reached the inbox no longer allows them.
+- **rm and mv**: no longer allowed by the proof alone. The policy asks the owner for them, and the proof never deletes nor moves a file on its own (followup 4: `rm -rf *` had become possible once globs were read).
+- **A reporter**: `--test-reporter` and `--reporter` take a built-in name only (`spec`, `tap`, `dot`, `junit`, `lcov`, vitest's), never a path. `node --test` still takes no option at all (followup 3).
+
+- **Nothing under `.git`**: a path with a `.git` segment is refused, whether a word, a value after `=` or a redirection target. Git reads its configuration there and runs the programs it names: with `diff.external` set, a plain `git diff` runs it (checked with git in a scratch repository), and `core.fsmonitor` does the same for `git status`. An `echo … >> .git/config` was allowed before this change, in the base too. `.github` and `.gitignore` are other names and stay allowed.
+
+**Limit.** A session can still change what `npm test` runs, through its `package.json` or a `.npmrc` in the checkout. That is the checkout's own code, which `npm test` runs anyway (the limit of the first rule).
+
+**Tests.** `test/scripts/proof-inbox.test.ts`:
+- the review's two sed commands and other scripts, refused;
+- sort's and rg's program options, refused;
+- the git allow list both ways, the review's cases among them;
+- rm, mv and a reporter given by its path, refused;
+- every write or read under `.git` refused, the two commands that turn `git diff` and `git status` into a program among them;
+- the pieces of a quoted word;
+- the first rule's allowed list, now without `rm -r test/tmp` and `git add … && git commit …`, which moved to the refused list.
+
+Run 5's reviewer request stays allowed.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.

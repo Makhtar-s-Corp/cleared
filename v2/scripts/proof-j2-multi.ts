@@ -23,7 +23,10 @@
 // Every session proposes its session plan first (decision 22): the proof
 // gives each one of its tickets its Go from the inbox, as the owner would,
 // and answers a question one of their sessions asks with the option marked
-// recommended, else the first one, recorded in the report.
+// recommended, else the first one, recorded in the report. A permission
+// asked to run exactly one of its service's declared checks (test,
+// typecheck, lint) is allowed once to an author or a reviewer (run 5, step
+// 10); every permission's answer is traced in the report.
 // Before step 1 the run starts from a clean base (scripts/proof-base.ts):
 // the earlier runs' tickets set aside, each run branch recreated from its
 // frozen branch, and the watchers' deploys of it awaited. Nothing is ever
@@ -66,11 +69,11 @@ import { RELAY } from '../src/container/preview.ts';
 import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
 import { sessionNames, siblingAddress } from '../src/container/session-runtime.ts';
 import type { Ticket } from '../src/tickets/contract.ts';
-import { BaseError, baseModeOf, closeStale, frozenCommits, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, type BaseMode, type BaseSettings } from './proof-base.ts';
+import { BaseError, StartRefusal, baseModeOf, checksRunOn, closeStale, frozenCommits, readWatchers, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, watcherRefusal, workflowsAt, type BaseMode, type BaseSettings } from './proof-base.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
-import { answerFor, chooseAnswers } from './proof-inbox.ts';
+import { chooseAnswers, declaredChecks, permissionAnswer } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
-import { humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type AnsweredQuestion, type BaseReport, type MultiResult, type Step } from './proof-report.ts';
+import { PERMISSION_COMMAND_LIMIT, humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type AnsweredPermission, type AnsweredQuestion, type BaseReport, type MultiResult, type Step } from './proof-report.ts';
 import { MULTI_TICKETS, startMultiRehearsal, type MultiWorld } from './proof-rehearsal-multi.ts';
 import { said } from './proof-words.ts';
 
@@ -127,6 +130,9 @@ const saves: { at: string; status: number; kept: boolean | null }[] = [];
 let fake: MultiResult['fake'] = null;
 let proposal: string | null = null;
 const questions: AnsweredQuestion[] = [];
+const permissions: AnsweredPermission[] = [];
+// Each service's declared checks, read from its frozen base (prepareBase); none without a clean base.
+const checks: Record<string, string[]> = {};
 let base: BaseReport | null = null;
 let baseError: string | null = null;
 let human: { session: string; givenBackAt: string | null } | null = null;
@@ -148,7 +154,7 @@ async function capture(name: string): Promise<string> {
 
 function save(): void {
   const file = join(OUT, 'result.json');
-  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', tickets, steps, times, gestures, saves, fake, proposal, questions, base, baseError }, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', tickets, steps, times, gestures, saves, fake, proposal, questions, permissions, base, baseError }, null, 2)}\n`);
   chmodSync(file, 0o644);
 }
 
@@ -199,10 +205,14 @@ const minutesOf = (ticket: string): Map<number, number> => new Map((ledger((db) 
 
 // What the owner tends while the proof waits: the Go of a session plan of
 // one of the proof's tickets, a permission of one of them, answered by the
-// rule of the 48-hour proof's morning, and a question one of their sessions
-// asks, answered with its recommended option, else its first (proof-inbox.ts).
+// rule of the 48-hour proof's morning, except that an author or a reviewer
+// runs one of its service's declared checks (permissionAnswer, traced in the
+// report), and a question one of their sessions asks, answered with its
+// recommended option, else its first (proof-inbox.ts).
 async function tend(): Promise<void> {
   const ours = new Set(Object.values(tickets));
+  // Read once a pass, when a permission waits; unread, the role is unknown.
+  let sessions: SessionSummary[] | undefined;
   for (const item of await inbox()) {
     if (item.state !== 'waiting' || !ours.has(item.ticket)) continue;
     if (item.kind === 'session_plan') {
@@ -211,10 +221,19 @@ async function tend(): Promise<void> {
       gesture(`gave the Go to the session plan of ${item.ticket}${item.service ? ` on ${item.service}` : ''} (${item.plan.confidence})`);
       await until('the Go to be taken', async () => !(await inbox()).some((i) => i.id === item.id && i.state === 'waiting'), 60_000, 1_000, false);
     } else if (item.kind === 'permission') {
-      const decision = item.input.kind === 'execute' ? answerFor(item.input.command) : 'reject_once';
+      sessions ??= await api<SessionSummary[]>('/sessions').catch(() => []);
+      const session = sessions.find((s) => s.id === item.sessionId);
+      const command = item.input.kind === 'execute' ? item.input.command : undefined;
+      const service = session?.service;
+      const { decision, rule } = permissionAnswer({ role: session?.role, command, checks: service ? checks[service] ?? [] : [] });
       await openItem(item.id);
       await page.locator(`#detail [data-act="${decision}"]`).click();
-      gesture(`${decision} for ${item.id}`);
+      const shown = command?.replace(/\s+/g, ' ').trim();
+      permissions.push({
+        at: now(), ticket: item.ticket, session: item.sessionId, role: session?.role ?? null, service: service ?? null, answer: decision, rule,
+        command: shown === undefined ? null : shown.length > PERMISSION_COMMAND_LIMIT ? `${shown.slice(0, PERMISSION_COMMAND_LIMIT - 1)}…` : shown,
+      });
+      gesture(`${decision} for ${item.id} (${session?.role ?? 'unknown role'}, ${rule})`);
     } else if (item.kind === 'question') {
       await answerQuestion(item);
     }
@@ -351,10 +370,27 @@ async function prepareBase(settings: BaseSettings): Promise<string> {
   const workspace = await api<Workspace>('/workspace');
   const { commits, defaults } = await frozenCommits(runCommand, settings);
   const refused = refusal(settings, Object.fromEntries(workspace.services.map((s) => [s.name, s.base])), defaults);
-  if (refused) throw new BaseError(refused);
+  if (refused) throw new StartRefusal(refused);
+  // A real run's checks and deploys follow the run branch (issue 277): the
+  // rehearsal's forge and brokers are stand-ins, and it has no watcher.
+  if (!REHEARSAL) {
+    for (const repo of settings.repos) {
+      const workflows = await workflowsAt(runCommand, repo.clone, commits[repo.service] as string);
+      if (!checksRunOn(workflows, settings.run)) {
+        throw new StartRefusal(`no workflow of ${repo.service}'s ${settings.frozen} (${workflows.map((w) => w.path).join(', ') || 'none'}) runs on both a push and a pull request to ${settings.run}: its release card would wait for checks that never come; add ${settings.run} to the branches of its checks workflow on ${settings.frozen} (issue 277)`);
+      }
+    }
+    const watchers = await readWatchers();
+    const stray = watcherRefusal(watchers, settings.repos.map((r) => r.service), settings.run);
+    if (stray) throw new StartRefusal(stray);
+    log(`base: checks and watchers on ${settings.run} for ${settings.repos.map((r) => r.service).join(', ')}`);
+  }
   for (const repo of settings.repos) {
-    const found = await ticketChangesIn(repo.service, fileAt(runCommand, repo.clone, commits[repo.service] as string));
+    const read = fileAt(runCommand, repo.clone, commits[repo.service] as string);
+    const found = await ticketChangesIn(repo.service, read);
     if (found.length > 0) throw new BaseError(`the frozen base of ${repo.service} already holds a change of the proof's tickets: ${found.join('; ')}`);
+    checks[repo.service] = declaredChecks(await read('package.json'));
+    log(`base: ${repo.service} declares ${checks[repo.service]?.join(', ') || 'no check'}`);
   }
   const setAside: string[] = [];
   for (const id of await openEarlier()) {
@@ -402,7 +438,8 @@ if (signedIn && baseSettings) {
     save();
     await browser.close();
     if (world) await world.stop();
-    process.exit(1);
+    // A refusal of the start check is a setting to fix, as a missing one is (64).
+    process.exit(error instanceof StartRefusal ? 64 : 1);
   }
 }
 
@@ -703,7 +740,7 @@ for (const id of Object.values(tickets)) {
 const result: MultiResult = {
   mode: REHEARSAL ? 'rehearsal' : 'real', app: APP, startedAt: since, steps, times, tickets, ticketSteps,
   trains: ledger((db) => trainFacts(db)) ?? [], fake, human: human ? ledger((db) => humanFacts(db, (human as { session: string }).session, (human as { givenBackAt: string | null }).givenBackAt)) ?? null : null,
-  saves, sessionPlans: ledger((db) => sessionPlanFacts(db, since)) ?? [], gestures, stand_ins: world?.standIns ?? [], proposal, questions, base,
+  saves, sessionPlans: ledger((db) => sessionPlanFacts(db, since)) ?? [], gestures, stand_ins: world?.standIns ?? [], proposal, questions, permissions, base,
 };
 const durations = join(OUT, 'durations.md');
 writeFileSync(durations, renderMultiDurations(result));

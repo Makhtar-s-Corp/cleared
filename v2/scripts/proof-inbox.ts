@@ -7,6 +7,7 @@
 // plan, then the releases.
 import { RECOMMENDED } from '../app/web/components/choices/model.ts';
 import type { Question } from '../src/session/events.ts';
+import { parseList, type SimpleCommand } from '../src/session/policy.ts';
 
 // Work inside the checkout is allowed once; anything else is denied (issue
 // 157, item 4: the proof allowed once almost every request). The proof
@@ -14,67 +15,212 @@ import type { Question } from '../src/session/events.ts';
 // The session's checkout is /workspace in its container
 // (session/adapters/claude-code/map.ts).
 //
-// Its limit (review 1 of PR 181, F1): `npm test`, `npm run <script>` and
-// `node --test <file>` run the project's own code, which can reach whatever
-// the session's network allows. That is the work a ticket asks for, and the
-// egress proxy and the policy, not this rule, are what bound it. The rule
-// only keeps the proof from allowing a command that starts another program
-// itself.
+// The command is read by the service's own shell parser (parseList,
+// src/session/policy.ts), never split as a string: a list of simple commands
+// joined by ;, &&, || or |, each read word for word, quotes understood, with
+// its output redirections. Whatever the parser refuses is denied: a
+// substitution, an expansion ($, a backquote), a here-document, an input
+// redirection, a subshell, a newline, a lone &. Review 1 of PR 279: run 5's
+// reviewer asked `npm test 2>&1 | tail -15; ...; git ls-files; grep -rn
+// "a\|b" --include=* -r src README.md | ... | head`, read only, and the first
+// version of this rule cut it at the \| inside the quotes.
+//
+// Its limit (review 1 of PR 181, F1): `npm test`, `npm run <script>`, `npx
+// tsc` and `node --test <file>` run the project's own code or tools, which
+// can reach whatever the session's network allows; `npx tsc`, when the
+// checkout does not hold TypeScript, fetches a package from the registry, as
+// `npm ci` does. That is the work a ticket asks for, and the egress proxy and
+// the policy, not this rule, are what bound it. The rule only keeps the proof
+// from allowing a command that starts another program itself, or names a
+// path outside the checkout.
 const CHECKOUT = '/workspace';
-// The programs that read or change files of the checkout and start nothing.
-const LOCAL = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'rg', 'wc', 'sort', 'uniq', 'cut', 'tr', 'diff', 'echo', 'printf',
-  'mkdir', 'touch', 'rm', 'mv', 'cp', 'true', 'test', 'cd', 'pwd']);
-const NPM = new Set(['test', 'run', 'ci', 't']);
-const GIT = new Set(['status', 'diff', 'log', 'show', 'add', 'commit', 'rm', 'mv', 'restore', 'branch']);
+// The programs that read or add files of the checkout and have no option
+// that starts another program. rm and mv are not among them (review 2 of PR
+// 279): the proof answers alone, and what it allows once never deletes nor
+// moves a file; the policy asks the owner for them. rg and sort have their
+// own lists below.
+const LOCAL = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'wc', 'uniq', 'cut', 'tr', 'diff', 'echo', 'printf',
+  'mkdir', 'touch', 'cp', 'true', 'test', 'pwd']);
+// git: the read-only subcommands only, each with its options from a list
+// (review 2 of PR 279: no --output, --ext-diff, --textconv, -D, commit, push).
+// A word that is not an option is a revision or a path, which pathInside reads.
+const GIT_VIEW = ['--stat', '--shortstat', '--numstat', '--name-only', '--name-status', '--oneline', '-p', '--patch', '--no-patch', '-s',
+  '--cached', '--staged', '--no-color', '--color=never', '--graph', '--decorate', '--no-decorate', '--reverse', '--follow', '-w',
+  '--ignore-all-space', '--word-diff', '--first-parent', '--merges', '--no-merges', '--all', '--no-ext-diff', '--no-textconv', '--'];
+const GIT_SUBCOMMANDS: ReadonlyMap<string, { readonly flags: ReadonlySet<string>; readonly values: RegExp | null; readonly operands: boolean }> = new Map([
+  ['status', { flags: new Set(['-s', '--short', '-b', '--branch', '-sb', '-bs', '--porcelain', '--porcelain=v1', '--porcelain=v2', '-uno', '-unormal', '-uall', '--untracked-files=no', '--untracked-files=normal', '--untracked-files=all', '--']), values: null, operands: true }],
+  ['diff', { flags: new Set(GIT_VIEW), values: /^(-U\d+|--unified=\d+|--stat=\d+(,\d+)?)$/, operands: true }],
+  ['log', { flags: new Set(GIT_VIEW), values: /^(-\d+|-n\d+|--max-count=\d+|-U\d+|--(format|pretty|since|until|after|before|author|grep)=.*)$/, operands: true }],
+  ['show', { flags: new Set(GIT_VIEW), values: /^(-U\d+|--unified=\d+|--(format|pretty)=.*)$/, operands: true }],
+  ['ls-files', { flags: new Set(['-c', '--cached', '-m', '--modified', '-o', '--others', '-d', '--deleted', '--exclude-standard', '-s', '--stage', '--']), values: null, operands: true }],
+  // branch lists only: a name would create a branch.
+  ['branch', { flags: new Set(['--show-current', '-a', '--all', '-r', '--remotes', '--list', '-v', '-vv']), values: null, operands: false }],
+]);
+// rg: its search and output options only, a list as sort's and git's: no
+// --pre or --pre-glob (a program run on each file), no -z (decompressors), no
+// --hostname-bin (ripgrep 14 runs it).
+const RG_FLAGS = new Set(['--no-heading', '--heading', '--line-number', '--files-with-matches', '--files-without-match', '--ignore-case', '--smart-case',
+  '--case-sensitive', '--word-regexp', '--fixed-strings', '--count', '--invert-match', '--only-matching', '--hidden', '--no-ignore', '--files',
+  '--color=never', '--no-filename', '--with-filename', '--vimgrep', '--']);
+const RG_VALUES = new Set(['-A', '-B', '-C', '-m', '-g', '-t', '-T', '-e', '--after-context', '--before-context', '--context', '--max-count', '--glob',
+  '--iglob', '--type', '--type-not', '--regexp']);
+// sort: its ordering options; no --compress-program, no --output, no temporary folder.
+const SORT_FLAGS = new Set(['--numeric-sort', '--reverse', '--unique', '--human-numeric-sort', '--version-sort', '--ignore-case', '--general-numeric-sort',
+  '--month-sort', '--stable', '--dictionary-order', '--ignore-leading-blanks', '--zero-terminated']);
+// npm's own options a check may carry before its `--`.
+const NPM_OPTIONS = new Set(['-s', '--silent', '-q', '--quiet', '--if-present', '--no-audit', '--no-fund', '--prefer-offline']);
+// What a check may pass its test runner after `--` (node --test, vitest):
+// a name to match, or a built-in reporter by its name, never a module to load
+// (--require, --import, a reporter given by its path: review 2 of PR 279).
+const TEST_OPTIONS = new Set(['--test-name-pattern', '--test-skip-pattern', '--test-only', '--test-concurrency', '--test-timeout',
+  '--grep', '-g', '-t', '--testNamePattern', '--run', '--bail']);
+const REPORTER_OPTIONS = new Set(['--test-reporter', '--reporter']);
+const REPORTERS = new Set(['spec', 'tap', 'dot', 'junit', 'lcov', 'default', 'verbose', 'basic', 'json', 'tap-flat', 'hanging-process']);
+// `npx tsc` checks the types and writes nothing: --noEmit is required.
+const TSC_OPTIONS = new Set(['--noEmit', '--pretty', '--skipLibCheck', '--strict']);
+const TSC_VALUES = new Set(['-p', '--project']);
 // Variables a command may set before it: none that changes what runs.
 const VARIABLES = new Set(['NODE_ENV', 'CI', 'TZ', 'LANG', 'LC_ALL', 'FORCE_COLOR', 'NO_COLOR', 'DEBUG']);
 // What the first rule denied anywhere in the text, kept as a second check:
 // the names of programs that install, fetch or reach another machine.
-const NETWORK = /\b(apt-get|apt|apk|brew|sudo|su|pip3?|pipx|curl|wget|ssh|scp|sftp|rsync|nc|ncat|netcat|socat|telnet|ftp|npx|pnpm|yarn|bunx?|deno|docker|podman|kubectl|gh|python3?|perl|ruby|php|embedded-postgres)\b|\bnpm\s+(i|install|add|view|exec|x|publish|login|adduser|dlx|create|init)\b/;
+const NETWORK = /\b(apt-get|apt|apk|brew|sudo|su|pip3?|pipx|curl|wget|ssh|scp|sftp|rsync|nc|ncat|netcat|socat|telnet|ftp|pnpm|yarn|bunx?|deno|docker|podman|kubectl|gh|python3?|perl|ruby|php|embedded-postgres)\b|\bnpm\s+(i|install|add|view|exec|x|publish|login|adduser|dlx|create|init)\b/;
 
-// Each program's words beyond the ones above: what is safe to pass.
-function argumentsInside(program: string, words: readonly string[]): boolean {
-  // node runs a test file of the checkout, and nothing given on the line.
-  if (program === 'node') return words[0] === '--test' && words.slice(1).every((w) => !w.startsWith('-'));
-  // sed only prints lines: -n and a range such as 1,40p.
-  if (program === 'sed') return words.every((w) => w === '-n' || /^\d+(,\d+)?p$/.test(w) || (!w.startsWith('-') && !/^\d/.test(w)))
-    && words.includes('-n') && words.some((w) => /^\d+(,\d+)?p$/.test(w));
-  // find without the options that run a program or delete.
-  if (program === 'find') return !words.some((w) => /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)/.test(w));
-  return true;
+// A path a word names stays in the checkout: no absolute path elsewhere
+// (/dev/null aside), no way up, no home. An option's value after its = is
+// read too (--output=/tmp/x), and so is each piece of a quoted word that
+// holds spaces, which a program may read as a script of its own (review 2 of
+// PR 279: sed -n 'w /tmp/pwn').
+function pathInside(word: string): boolean {
+  return word.split(/\s+/).every(pieceInside);
 }
-
-// One simple command: its words, and where it reads or writes.
-function simpleInside(command: string): boolean {
-  const words = command.trim().split(/\s+/).filter(Boolean).map((word) => word.replace(/^['"]|['"]$/g, ''));
-  while (words[0] !== undefined && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
-    if (!VARIABLES.has(words[0].slice(0, words[0].indexOf('=')))) return false;
-    words.shift();
-  }
-  const [program, sub] = words;
-  if (program === undefined) return false;
-  const known = LOCAL.has(program) || program === 'node' || program === 'sed' || program === 'find'
-    || (program === 'npm' && sub !== undefined && NPM.has(sub)) || (program === 'git' && sub !== undefined && GIT.has(sub));
-  if (!known || !argumentsInside(program, words.slice(1))) return false;
-  // Every path it names stays in the checkout: no absolute path elsewhere
-  // (/dev/null aside), no way up, no home.
-  return words.every((word) => {
-    const path = word.replace(/^\d*[<>]+/, '');
+// Nothing under .git either: git reads its config there, and runs the
+// drivers and hooks it names (diff.external, core.fsmonitor), so a write to
+// it would turn a read-only git diff or git status into any program (review
+// 2 of PR 279). .github and .gitignore are other names.
+function pieceInside(word: string): boolean {
+  return [word, ...(word.includes('=') ? [word.slice(word.indexOf('=') + 1)] : [])].every((path) => {
     if (path === '' || /^\d+$/.test(path) || path === '/dev/null') return true;
     if (path.startsWith('~')) return false;
-    if (path.split('/').includes('..')) return false;
+    if (path.split('/').includes('..') || path.split('/').includes('.git')) return false;
     if (path.startsWith('/')) return path === CHECKOUT || path.startsWith(`${CHECKOUT}/`);
     return true;
   });
 }
 
+// npm test, npm t, npm ci or npm run <script>, npm's options from its list,
+// then after `--` the test runner's options from its list and files.
+function npmInside(words: readonly string[]): boolean {
+  const [sub, ...rest] = words;
+  let from = 0;
+  if (sub === 'run' && /^[A-Za-z0-9][A-Za-z0-9:._-]*$/.test(rest[0] ?? '')) from = 1;
+  else if (sub !== 'test' && sub !== 't' && sub !== 'ci') return false;
+  const dash = rest.indexOf('--');
+  if (!rest.slice(from, dash < 0 ? undefined : dash).every((word) => NPM_OPTIONS.has(word))) return false;
+  if (dash < 0) return true;
+  if (sub === 'ci') return false;
+  return testArgumentsInside(rest.slice(dash + 1));
+}
+
+// The test runner's words: options from its list, a reporter by its name, files.
+function testArgumentsInside(words: readonly string[]): boolean {
+  for (let at = 0; at < words.length; at++) {
+    const word = words[at] as string;
+    const name = word.split('=')[0] as string;
+    if (REPORTER_OPTIONS.has(name)) {
+      const value = word.includes('=') ? word.slice(word.indexOf('=') + 1) : words[++at];
+      if (value === undefined || !REPORTERS.has(value)) return false;
+    } else if (word.startsWith('-') && !TEST_OPTIONS.has(name)) return false;
+  }
+  return true;
+}
+
+function gitInside(words: readonly string[]): boolean {
+  const [sub, ...rest] = words;
+  const spec = sub === undefined ? undefined : GIT_SUBCOMMANDS.get(sub);
+  if (!spec) return false;
+  let operands = false;
+  for (const word of rest) {
+    if (operands || !word.startsWith('-')) { if (!spec.operands) return false; continue; }
+    if (word === '--') { operands = true; continue; }
+    if (!spec.flags.has(word) && !spec.values?.test(word)) return false;
+  }
+  return true;
+}
+
+// sed prints lines only: -n, then a script that is exactly one range such as
+// 1,40p, then files. Any other script is refused, as sed reads the first word
+// that is not an option as its script, whatever it holds (w writes a file, e
+// runs a command: review 2 of PR 279).
+function sedInside(words: readonly string[]): boolean {
+  const options = words.filter((w) => w.startsWith('-'));
+  const operands = words.filter((w) => !w.startsWith('-'));
+  return options.length > 0 && options.every((w) => w === '-n') && operands.length >= 1 && /^\d+(,\d+)?p$/.test(operands[0] as string);
+}
+
+function rgInside(words: readonly string[]): boolean {
+  for (let at = 0; at < words.length; at++) {
+    const word = words[at] as string;
+    if (!word.startsWith('-') || RG_FLAGS.has(word) || /^-[nliwFcSsHvoIx]+$/.test(word)) continue;
+    if (/^-[ABCm]\d+$/.test(word) || /^--(after-context|before-context|context|max-count)=\d+$/.test(word) || /^--(glob|iglob|type|type-not|regexp)=.+$/.test(word)) continue;
+    if (RG_VALUES.has(word) && words[at + 1] !== undefined) { at++; continue; }
+    return false;
+  }
+  return true;
+}
+
+function sortInside(words: readonly string[]): boolean {
+  for (let at = 0; at < words.length; at++) {
+    const word = words[at] as string;
+    if (!word.startsWith('-') || SORT_FLAGS.has(word) || /^-[bdfghinMRrsuVz]+$/.test(word) || /^(-k.+|-t.|--key=.+|--field-separator=.)$/.test(word)) continue;
+    if ((word === '-k' || word === '-t') && words[at + 1] !== undefined) { at++; continue; }
+    return false;
+  }
+  return true;
+}
+
+// npx tsc --noEmit, its options from its list, a project inside the checkout.
+function npxInside(words: readonly string[]): boolean {
+  const rest = words[0] === '--no-install' || words[0] === '--no' ? words.slice(1) : words;
+  if (rest[0] !== 'tsc') return false;
+  const args = rest.slice(1);
+  return args.includes('--noEmit') && args.every((word, at) => TSC_OPTIONS.has(word) || TSC_VALUES.has(word)
+    || (!word.startsWith('-') && TSC_VALUES.has(args[at - 1] ?? '')));
+}
+
+// Each program's words beyond its name: what is safe to pass.
+function argumentsInside(program: string, words: readonly string[]): boolean {
+  if (LOCAL.has(program)) return true;
+  if (program === 'rg') return rgInside(words);
+  if (program === 'sort') return sortInside(words);
+  // cd into a folder of the checkout: one folder named; no cd alone (home) nor cd - (the folder before).
+  if (program === 'cd') return words.length === 1 && words[0] !== '-';
+  if (program === 'git') return gitInside(words);
+  if (program === 'npm') return npmInside(words);
+  if (program === 'npx') return npxInside(words);
+  // node runs a test file of the checkout, and nothing given on the line.
+  if (program === 'node') return words[0] === '--test' && words.slice(1).every((w) => !w.startsWith('-'));
+  if (program === 'sed') return sedInside(words);
+  // find without the options that run a program or delete.
+  if (program === 'find') return !words.some((w) => /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)/.test(w));
+  return false;
+}
+
+// One simple command, as the parser read it: its words, and the files its redirections write.
+function simpleInside(command: SimpleCommand): boolean {
+  const words = [...command.words];
+  while (words[0] !== undefined && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
+    if (!VARIABLES.has(words[0].slice(0, words[0].indexOf('=')))) return false;
+    words.shift();
+  }
+  const [program, ...rest] = words;
+  if (program === undefined || !argumentsInside(program, rest)) return false;
+  return words.every(pathInside) && command.writes.every(pathInside);
+}
+
 export function insideCheckout(command: string): boolean {
-  // What the shell computes, or runs beside the command, cannot be judged from the text.
-  if (!command.trim() || /\$\(|`|\$\{|<\(|>\(|\$[A-Za-z_]/.test(command) || NETWORK.test(command)) return false;
-  // A file descriptor copied (2>&1) and both outputs sent to a file (&>)
-  // are not a command run in the background; every other & is.
-  const plain = command.replace(/\d*>&\d+/g, ' ').replace(/&>>?/g, '>');
-  return plain.split(/&&|\|\||[;|&\r\n]/).every(simpleInside);
+  if (NETWORK.test(command)) return false;
+  const list = parseList(command, { globs: true });
+  return list !== undefined && list.length > 0 && list.every(simpleInside);
 }
 
 export function answerFor(command: string): 'allow_once' | 'reject_once' {
@@ -151,6 +297,46 @@ export function morningAction(entries: readonly InboxEntry[], options: { readonl
 // What the morning leaves to the owner and the report counts.
 export function leftForOwner(entries: readonly InboxEntry[]): { readonly knowledge: number; readonly contract: number } {
   return { knowledge: entries.filter((e) => e.kind === 'knowledge').length, contract: entries.filter((e) => e.kind === 'contract').length };
+}
+
+// ---- the multi-service proof, a session's permission -----------------------------
+
+// Run 5 of the multi-service proof (step 10): the proof denied a reviewer's
+// requests to run the service's tests, so the reviewer judged on the diff
+// alone, asked for changes twice, and the ticket went back to Todo. An author
+// or a reviewer that asks to run exactly one of the checks declared in its
+// service's frozen base (test, typecheck or lint among the scripts of its
+// package.json there, which the service's policy reads too) is allowed once
+// under the rule `check`; everything else is answered by the rule above,
+// which also reads the common forms of a check (review 1 of PR 279). The
+// name is declared, not the script behind it: `npm test` runs the checkout's
+// package.json, which the author may have changed (review 1 of PR 279,
+// followup 2), as the rule above already allowed. A lead, a reader or a role
+// the proof cannot read is not an author's or a reviewer's checkout: the rule
+// above too.
+export const CHECK_SCRIPTS: readonly string[] = ['test', 'typecheck', 'lint'];
+const CHECKING_ROLES: ReadonlySet<string> = new Set(['author', 'reviewer']);
+
+// The check commands of a package.json's text: none when it is absent or unreadable.
+export function declaredChecks(packageJson: string | undefined): string[] {
+  let scripts: unknown;
+  try { scripts = (JSON.parse(packageJson ?? '') as { scripts?: unknown }).scripts; } catch { return []; }
+  if (typeof scripts !== 'object' || scripts === null) return [];
+  return CHECK_SCRIPTS.filter((name) => typeof (scripts as Record<string, unknown>)[name] === 'string')
+    .map((name) => (name === 'test' ? 'npm test' : `npm run ${name}`));
+}
+
+export type PermissionRule = 'check' | 'checkout' | 'refused' | 'not_a_command';
+export type PermissionAnswer = { readonly decision: 'allow_once' | 'reject_once'; readonly rule: PermissionRule };
+
+// `command` is absent for a request that is not a command (an edit, a fetch),
+// `role` when the proof could not read the session's.
+export function permissionAnswer(request: { readonly role: string | undefined; readonly command: string | undefined; readonly checks: readonly string[] }): PermissionAnswer {
+  const { role, command, checks } = request;
+  if (command === undefined) return { decision: 'reject_once', rule: 'not_a_command' };
+  const exact = command.trim().replace(/[ \t]+/g, ' ');
+  if (role !== undefined && CHECKING_ROLES.has(role) && checks.includes(exact)) return { decision: 'allow_once', rule: 'check' };
+  return answerFor(command) === 'allow_once' ? { decision: 'allow_once', rule: 'checkout' } : { decision: 'reject_once', rule: 'refused' };
 }
 
 // ---- the multi-service proof, a session's question -------------------------------

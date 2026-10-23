@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_SAFE_COMMANDS, evaluate, parseCommand, type Policy, type ToolRequest, type Verdict } from '../../src/session/policy.ts';
+import { DEFAULT_SAFE_COMMANDS, evaluate, parseCommand, parseList, type Policy, type ToolRequest, type Verdict } from '../../src/session/policy.ts';
 
 // The container sees the ticket checkout at /workspace. The credential path
 // is built in two parts only to keep this file readable by the repository
@@ -361,6 +361,24 @@ test('the shell-word parser reads quotes and escapes, and nothing else', () => {
   for (const text of ['a;b', 'a && b', 'a || b', 'a | b', 'a > b', 'a >> b', 'a < b', 'a 2> b', 'a &> b', '$(a)', '`a`', 'a\nb', '"a', "'a", 'a\\', '', '   ', '$X', '"$X"']) {
     assert.equal(parseCommand(text), undefined, JSON.stringify(text));
   }
+});
+
+// The proofs' driver passes `globs` (scripts/proof-inbox.ts, review 1 of PR
+// 279); the policy never does, and a bare glob stays refused by it.
+test('the parser reads a bare glob only when asked, and only one that names files of the current folder', () => {
+  for (const text of ['ls *', 'grep -r x --include=*', 'wc -l *.ts', 'ls a?c', 'ls [ab]']) {
+    assert.equal(parseCommand(text), undefined, text);
+    assert.equal(parseList(text), undefined, text);
+  }
+  assert.deepEqual(parseCommand('ls *', { globs: true }), ['ls', '*']);
+  assert.deepEqual(parseCommand('wc -l *.ts', { globs: true }), ['wc', '-l', '*.ts']);
+  assert.deepEqual(parseCommand('grep -r x --include=*', { globs: true }), ['grep', '-r', 'x', '--include=*']);
+  assert.deepEqual(parseList('npm test | tail; ls *.md', { globs: true })?.map((c) => c.words), [['npm', 'test'], ['tail'], ['ls', '*.md']]);
+  for (const text of ['ls src/*', 'cat .*', 'cd ".."*', 'ls /etc/*', 'ls ./*', 'cat .?']) assert.equal(parseCommand(text, { globs: true }), undefined, text);
+  // Everything else the parser refuses stays refused with it.
+  for (const text of ['a;b', '$(a)', '`a`', 'a\nb', '$X', 'ls {a,b}*']) assert.equal(parseCommand(text, { globs: true }), undefined, JSON.stringify(text));
+  // The policy's own verdict on a bare glob still asks.
+  assert.equal(evaluate(bash('ls *.ts'), { ...base, role: 'reviewer' }).decision, 'ask');
 });
 
 // docs/v2/milestone-2-plan.md, decision 10 and the acceptance of lane 1: a
