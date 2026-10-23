@@ -3317,7 +3317,7 @@ The browser job runs the new file.
 
 | Measure | `origin/v2` (`33a0cd8`) | This branch | Budget |
 | --- | --- | --- | --- |
-| Median of the runs' p95, by round | 26.9, 26.2, 26.7 ms | 30.8, 34.8, 30.8, 27.1 ms | under 100 ms |
+| Median of the runs' p95, by round | 26.9, 26.2, 26.7 ms | 30.8, 34.8, 30.8, 27.1 ms; after the art director's round 28.7, 24.0 ms | under 100 ms |
 | Documents loaded in twenty switches | 0 | 0 | 0 |
 | Requests to the API per switch, at most | 1 | 1 | 1 |
 
@@ -3372,7 +3372,28 @@ The sidebar costs about 3 to 4 ms per switch on this server. Its props are kept 
 - The capture script on the fixtures source: 72 files, no page error, no request off the origin, each looked at for secrets and names.
 - French: every new key is in both catalogs, which the catalog test holds. The browser tests run in English and fail on any marked key.
 - Before captures: `docs/v2/ui-overhaul/before/35/` (40 files; 39 byte for byte lane 34's "after", and the 768 lead-pill variation it logged).
-- After captures: `docs/v2/ui-overhaul/after/35/`.
+- After captures: `docs/v2/ui-overhaul/after/35/`. There are 102 files, in French, the default: the five screens; the palette on the tower, the inbox and a session; the sheet on the tower and on a session; a rail's tooltip from 768 px; and the empty tower and lead. Each is at 1440, 1280, 768 and 390, light and dark.
+
+**The art director's look** (`/tmp/cleared-reviews/35-ad.md`, a fresh session). All 17 items before the merge are taken:
+1. The palette's rows were 804 px tall over the inbox: the inbox's sheet styles a bare `.detail`. The palette's classes are prefixed now, and `test/shell/classes.test.ts` fails when a class the shell draws is styled unscoped by a screen's sheet.
+2. A typed word outranks a scatter of its letters, and the groups follow their best match: "upcoming" opens the session, not a long Knowledge title.
+3. A session offers its permission's three answers.
+4. The dialogs are taller; the sheet has two columns on a wide window; with no query, "Needs you" shows three rows.
+5. The focus goes back where it was, a field included. The shell reads it before the app behind the dialog is made inert, which took it away.
+6. The tower says what needs the person once: the heading, "Open inbox" beside it, then the rows. An empty tower has one line under its heading.
+7. On a phone the bar wraps. Ask about the code and Run a recipe are left to the palette there. At 768 px, the French chips wrapped past the bar's edge; they wrap inside it now.
+8. The lead's plan pane says what to do and offers it, as a block in its middle. Where the panes stack, the thread's action is the one shown.
+9. The sign-in page is on the tokens, and the phone's field size is a token (`--text-input`). The token test reads every size and weight of `app.css` and `tower.css`.
+10. The screens' own headings and the session's crumb ("Tower / ...") repeat the top bar. They are lanes 36's and 37's to drop, listed above.
+11. The sidebar is open from 1400 px, not 1280, for the reason given above: the session's middle column. The rail keeps every name, in its tooltips.
+12. The rail's icons, and the open sidebar's icon-only buttons, show an instant tooltip with their name and chord (opacity and transform, 140 ms), in place of the native `title`.
+13. On hover the chord shows before the count, which stays.
+14. The lead's state is in words at the sidebar's foot ("The lead is on"), and in the Plans tooltip.
+15. "Needs you" is the one name, in the tower, the sidebar and the palette. The plan's 2.3.3 says "Waiting for you"; this entry replaces it.
+16. English writes "45%". The no-break space of `plan_cost_total` was never lost: my rewrite had written it as the character, and it is the `\u00a0` escape again.
+17. The new captures are in the after set.
+
+**Beyond the file list in this round.** `app/src/config.ts`, `web/main.tsx` and `v2/README.md` for the French default. `app/messages/inbox.en.json`, `app/messages/ask.en.json` and their tests (`web/test/inbox/plan.test.tsx`, `web/test/ask/render.test.tsx`, `app/test/ask/model.test.ts`) for "45%": the inbox's plan-panel keys must equal the lead's, a test holds them alike. `app/test/main.test.ts`, for the default.
 
 - Pull request: (to fill), against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-shell`.

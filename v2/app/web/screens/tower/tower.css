@@ -10,7 +10,7 @@
 .ask:focus-within { box-shadow: 0 0 0 1px var(--ring), var(--e-bar); }
 .ask input { flex: 1 1 280px; min-width: 0; height: 32px; border: 0; background: transparent; font-size: var(--text-md); text-overflow: ellipsis; outline: 2px solid transparent; }
 .ask input::placeholder { color: var(--placeholder); }
-.ask-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); flex: none; }
+.ask-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); flex: 1 1 auto; min-width: 0; }
 /* The description shows once a title is written: the bar stays one line until then. */
 .ask textarea { display: none; flex-basis: 100%; min-height: 96px; resize: vertical; padding: var(--space-2) 0 2px; border: 0; border-top: 1px solid var(--hairline); background: transparent; color: inherit; font: inherit; outline: 2px solid transparent; }
 .ask textarea::placeholder { color: var(--placeholder); }
@@ -141,8 +141,6 @@
   .tower-side { grid-template-columns: minmax(0, 1fr); }
   /* The actions wrap under the field, New ticket at the end of their line; Ask about the code and Run a
      recipe stay in the palette (Ctrl-K or the top bar's search), so the bar is two lines at most. */
-  .ask-actions { flex: 1 1 100%; }
-  .ask-actions .primary { margin-left: auto; }
   .ask-actions [data-bar="ask"], .ask-actions [data-bar="recipe"] { display: none; }
 }
 /* the rows, by the width of their own column */
