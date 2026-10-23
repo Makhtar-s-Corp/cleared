@@ -7,7 +7,10 @@
 :root[data-theme="dark"] .session { --code-keyword: #C9A2FF; --code-string: #7EE2A0; --code-comment: #8F8F8F; --code-number: #F7B955; --code-function: #79B8FF; --code-definition: #EDEDED; --code-property: #B8B8B8; }
 
 
-.session { display: grid; grid-template-columns: 290px minmax(0, 1fr) 330px; gap: 18px; padding: 16px 28px 24px; align-items: start; }
+.session { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 18px; padding: 16px 28px 24px; align-items: start; }
+/* The screen's own width decides the columns, since the sidebar (lane 35) takes
+   its share of the window, open or folded: three from 1160 px, then two. */
+#screen:has(> [data-session-view] .session, > .session) { container: screen / inline-size; }
 .s-left, .s-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
 .eyebrow { margin-bottom: 4px; font-size: 12px; color: var(--text-faint); }
@@ -47,13 +50,19 @@
 .empty-box { padding: 12px; border: 1px dashed var(--dashed); border-radius: 8px; color: var(--text-faint); font-size: 13px; line-height: 1.5; }
 
 /* the conversation */
-.panel { display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 132px); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; }
-.panel-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); flex: none; }
+.panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 96px); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; }
+.panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); flex: none; }
+/* The status's phrase, its meta under it, Take over beside both (lane 36's art director). */
+.panel-head .phrase-title { min-width: 0; }
+.panel-head .meta { grid-column: 2; grid-row: 2; white-space: normal; }
+.panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; }
+/* The hand over that is not there yet leaves a narrow thread its composer's row. */
+@container panel (max-width: 640px) { .composer #handover { display: none; } .composer { flex-wrap: nowrap; } .composer input { flex: 1 1 0; } }
 .panel-head .dot.waiting { background: var(--awaiting); } .panel-head .dot.progress { background: var(--stage-progress); }
 .panel-head .dot.review { background: var(--stage-review); } .panel-head .dot.ended { background: var(--placeholder); }
 .phrase-title { font-size: 14px; font-weight: 600; }
-.panel-head .meta { margin-left: auto; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
-.panel-head .takeover-button { min-height: 30px; margin-left: 4px; padding: 0 12px; }
+.panel-head .meta { font-size: 12px; color: var(--text-faint); }
+.panel-head .takeover-button { min-height: 30px; padding: 0 12px; }
 .timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px; font-size: 13.5px; }
 .timeline .empty { margin: 8px 0; }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: 8px; padding: 6px 0; }
@@ -282,11 +291,6 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 
 @media (max-width: 1439px) {
   .cm-host .cm-editor { max-height: max(240px, calc(100vh - 540px)); }
-  /* The status's meta under its phrase, so Take over keeps its margin (lane 36's art director). */
-  .panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; }
-  .panel-head .phrase-title { min-width: 0; }
-  .panel-head .meta { grid-column: 2; grid-row: 2; margin-left: 0; white-space: normal; }
-  .panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; margin-left: 0; }
 }
 /* Below the widest screen the diff takes the panel's width; the files become a strip above it. */
 @media (max-width: 1439px) {
@@ -297,8 +301,15 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .file-pick .counts { flex-basis: auto; }
   .file-pick { box-shadow: inset 0 0 0 1px var(--hairline); }
 }
-@media (max-width: 1100px) {
+@container screen (max-width: 1159px) {
   .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
+  .s-left { grid-area: left; } .s-right { grid-area: right; } .panel { grid-area: panel; }
+}
+/* Under 760 px of screen (a tablet beside the folded sidebar, a phone): one column, the thread first. */
+@container screen (max-width: 759px) {
+  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; }
+}
+@media (max-width: 1100px) {
   .btn, .composer .btn { min-height: 44px; }
   .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
   /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
@@ -308,7 +319,6 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .mode button { min-height: 36px; }
   .composer input { height: 44px; flex-basis: 100%; }
   #send { margin-left: auto; }
-  .s-left { grid-area: left; } .s-right { grid-area: right; } .panel { grid-area: panel; }
 }
 @media (max-width: 767px) {
   .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 12px 16px 28px; }
