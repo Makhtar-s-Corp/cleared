@@ -34,16 +34,42 @@ import { parseList, type SimpleCommand } from '../src/session/policy.ts';
 // from allowing a command that starts another program itself, or names a
 // path outside the checkout.
 const CHECKOUT = '/workspace';
-// The programs that read or change files of the checkout and start nothing.
-const LOCAL = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'rg', 'wc', 'sort', 'uniq', 'cut', 'tr', 'diff', 'echo', 'printf',
-  'mkdir', 'touch', 'rm', 'mv', 'cp', 'true', 'test', 'pwd']);
-const GIT = new Set(['status', 'diff', 'log', 'show', 'add', 'commit', 'rm', 'mv', 'restore', 'branch', 'ls-files']);
+// The programs that read or add files of the checkout and have no option
+// that starts another program. rm and mv are not among them (review 2 of PR
+// 279): the proof answers alone, and what it allows once never deletes nor
+// moves a file; the policy asks the owner for them. rg and sort have their
+// own lists below.
+const LOCAL = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'wc', 'uniq', 'cut', 'tr', 'diff', 'echo', 'printf',
+  'mkdir', 'touch', 'cp', 'true', 'test', 'pwd']);
+// git: the read-only subcommands only, each with its options from a list
+// (review 2 of PR 279: no --output, --ext-diff, --textconv, -D, commit, push).
+// A word that is not an option is a revision or a path, which pathInside reads.
+const GIT_VIEW = ['--stat', '--shortstat', '--numstat', '--name-only', '--name-status', '--oneline', '-p', '--patch', '--no-patch', '-s',
+  '--cached', '--staged', '--no-color', '--color=never', '--graph', '--decorate', '--no-decorate', '--reverse', '--follow', '-w',
+  '--ignore-all-space', '--word-diff', '--first-parent', '--merges', '--no-merges', '--all', '--no-ext-diff', '--no-textconv', '--'];
+const GIT_SUBCOMMANDS: ReadonlyMap<string, { readonly flags: ReadonlySet<string>; readonly values: RegExp | null; readonly operands: boolean }> = new Map([
+  ['status', { flags: new Set(['-s', '--short', '-b', '--branch', '-sb', '-bs', '--porcelain', '--porcelain=v1', '--porcelain=v2', '-uno', '-unormal', '-uall', '--untracked-files=no', '--untracked-files=normal', '--untracked-files=all', '--']), values: null, operands: true }],
+  ['diff', { flags: new Set(GIT_VIEW), values: /^(-U\d+|--unified=\d+|--stat=\d+(,\d+)?)$/, operands: true }],
+  ['log', { flags: new Set(GIT_VIEW), values: /^(-\d+|-n\d+|--max-count=\d+|-U\d+|--(format|pretty|since|until|after|before|author|grep)=.*)$/, operands: true }],
+  ['show', { flags: new Set(GIT_VIEW), values: /^(-U\d+|--unified=\d+|--(format|pretty)=.*)$/, operands: true }],
+  ['ls-files', { flags: new Set(['-c', '--cached', '-m', '--modified', '-o', '--others', '-d', '--deleted', '--exclude-standard', '-s', '--stage', '--']), values: null, operands: true }],
+  // branch lists only: a name would create a branch.
+  ['branch', { flags: new Set(['--show-current', '-a', '--all', '-r', '--remotes', '--list', '-v', '-vv']), values: null, operands: false }],
+]);
+// rg: no --pre or --pre-glob (a program run on each file), no -z (decompressors).
+const RG_REFUSED = /^(--pre(-glob)?(=.*)?|--search-zip|-[A-Za-z]*z[A-Za-z]*)$/;
+// sort: its ordering options; no --compress-program, no --output, no temporary folder.
+const SORT_FLAGS = new Set(['--numeric-sort', '--reverse', '--unique', '--human-numeric-sort', '--version-sort', '--ignore-case', '--general-numeric-sort',
+  '--month-sort', '--stable', '--dictionary-order', '--ignore-leading-blanks', '--zero-terminated']);
 // npm's own options a check may carry before its `--`.
 const NPM_OPTIONS = new Set(['-s', '--silent', '-q', '--quiet', '--if-present', '--no-audit', '--no-fund', '--prefer-offline']);
 // What a check may pass its test runner after `--` (node --test, vitest):
-// a name to match or a reporter, never a module to load (--require, --import).
-const TEST_OPTIONS = new Set(['--test-name-pattern', '--test-skip-pattern', '--test-only', '--test-reporter', '--test-concurrency', '--test-timeout',
-  '--reporter', '--grep', '-g', '-t', '--testNamePattern', '--run', '--bail']);
+// a name to match, or a built-in reporter by its name, never a module to load
+// (--require, --import, a reporter given by its path: review 2 of PR 279).
+const TEST_OPTIONS = new Set(['--test-name-pattern', '--test-skip-pattern', '--test-only', '--test-concurrency', '--test-timeout',
+  '--grep', '-g', '-t', '--testNamePattern', '--run', '--bail']);
+const REPORTER_OPTIONS = new Set(['--test-reporter', '--reporter']);
+const REPORTERS = new Set(['spec', 'tap', 'dot', 'junit', 'lcov', 'default', 'verbose', 'basic', 'json', 'tap-flat', 'hanging-process']);
 // `npx tsc` checks the types and writes nothing: --noEmit is required.
 const TSC_OPTIONS = new Set(['--noEmit', '--pretty', '--skipLibCheck', '--strict']);
 const TSC_VALUES = new Set(['-p', '--project']);
@@ -55,8 +81,13 @@ const NETWORK = /\b(apt-get|apt|apk|brew|sudo|su|pip3?|pipx|curl|wget|ssh|scp|sf
 
 // A path a word names stays in the checkout: no absolute path elsewhere
 // (/dev/null aside), no way up, no home. An option's value after its = is
-// read too (--output=/tmp/x).
+// read too (--output=/tmp/x), and so is each piece of a quoted word that
+// holds spaces, which a program may read as a script of its own (review 2 of
+// PR 279: sed -n 'w /tmp/pwn').
 function pathInside(word: string): boolean {
+  return word.split(/\s+/).every(pieceInside);
+}
+function pieceInside(word: string): boolean {
   return [word, ...(word.includes('=') ? [word.slice(word.indexOf('=') + 1)] : [])].every((path) => {
     if (path === '' || /^\d+$/.test(path) || path === '/dev/null') return true;
     if (path.startsWith('~')) return false;
@@ -77,7 +108,53 @@ function npmInside(words: readonly string[]): boolean {
   if (!rest.slice(from, dash < 0 ? undefined : dash).every((word) => NPM_OPTIONS.has(word))) return false;
   if (dash < 0) return true;
   if (sub === 'ci') return false;
-  return rest.slice(dash + 1).every((word) => !word.startsWith('-') || TEST_OPTIONS.has(word.split('=')[0] as string));
+  return testArgumentsInside(rest.slice(dash + 1));
+}
+
+// The test runner's words: options from its list, a reporter by its name, files.
+function testArgumentsInside(words: readonly string[]): boolean {
+  for (let at = 0; at < words.length; at++) {
+    const word = words[at] as string;
+    const name = word.split('=')[0] as string;
+    if (REPORTER_OPTIONS.has(name)) {
+      const value = word.includes('=') ? word.slice(word.indexOf('=') + 1) : words[++at];
+      if (value === undefined || !REPORTERS.has(value)) return false;
+    } else if (word.startsWith('-') && !TEST_OPTIONS.has(name)) return false;
+  }
+  return true;
+}
+
+function gitInside(words: readonly string[]): boolean {
+  const [sub, ...rest] = words;
+  const spec = sub === undefined ? undefined : GIT_SUBCOMMANDS.get(sub);
+  if (!spec) return false;
+  let operands = false;
+  for (const word of rest) {
+    if (operands || !word.startsWith('-')) { if (!spec.operands) return false; continue; }
+    if (word === '--') { operands = true; continue; }
+    if (!spec.flags.has(word) && !spec.values?.test(word)) return false;
+  }
+  return true;
+}
+
+// sed prints lines only: -n, then a script that is exactly one range such as
+// 1,40p, then files. Any other script is refused, as sed reads the first word
+// that is not an option as its script, whatever it holds (w writes a file, e
+// runs a command: review 2 of PR 279).
+function sedInside(words: readonly string[]): boolean {
+  const options = words.filter((w) => w.startsWith('-'));
+  const operands = words.filter((w) => !w.startsWith('-'));
+  return options.length > 0 && options.every((w) => w === '-n') && operands.length >= 1 && /^\d+(,\d+)?p$/.test(operands[0] as string);
+}
+
+function sortInside(words: readonly string[]): boolean {
+  for (let at = 0; at < words.length; at++) {
+    const word = words[at] as string;
+    if (!word.startsWith('-') || SORT_FLAGS.has(word) || /^-[bdfghinMRrsuVz]+$/.test(word) || /^(-k.+|-t.|--key=.+|--field-separator=.)$/.test(word)) continue;
+    if ((word === '-k' || word === '-t') && words[at + 1] !== undefined) { at++; continue; }
+    return false;
+  }
+  return true;
 }
 
 // npx tsc --noEmit, its options from its list, a project inside the checkout.
@@ -92,16 +169,16 @@ function npxInside(words: readonly string[]): boolean {
 // Each program's words beyond its name: what is safe to pass.
 function argumentsInside(program: string, words: readonly string[]): boolean {
   if (LOCAL.has(program)) return true;
+  if (program === 'rg') return !words.some((w) => RG_REFUSED.test(w));
+  if (program === 'sort') return sortInside(words);
   // cd into a folder of the checkout: one folder named; no cd alone (home) nor cd - (the folder before).
   if (program === 'cd') return words.length === 1 && words[0] !== '-';
-  if (program === 'git') return words[0] !== undefined && GIT.has(words[0]);
+  if (program === 'git') return gitInside(words);
   if (program === 'npm') return npmInside(words);
   if (program === 'npx') return npxInside(words);
   // node runs a test file of the checkout, and nothing given on the line.
   if (program === 'node') return words[0] === '--test' && words.slice(1).every((w) => !w.startsWith('-'));
-  // sed only prints lines: -n and a range such as 1,40p.
-  if (program === 'sed') return words.every((w) => w === '-n' || /^\d+(,\d+)?p$/.test(w) || (!w.startsWith('-') && !/^\d/.test(w)))
-    && words.includes('-n') && words.some((w) => /^\d+(,\d+)?p$/.test(w));
+  if (program === 'sed') return sedInside(words);
   // find without the options that run a program or delete.
   if (program === 'find') return !words.some((w) => /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)/.test(w));
   return false;

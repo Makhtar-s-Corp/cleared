@@ -24,9 +24,9 @@ test('before it comes, another request of the ticket is answered from the inbox,
 test('work inside the checkout is allowed once; everything else is denied (issue 157, item 4)', () => {
   for (const command of [
     'npm test', 'npm test 2>&1 | tail -20', 'npm run typecheck; npm test', 'npm ci', 'node --test test/entries.test.ts',
-    'git status', 'git add src/store.ts && git commit -m "Trim names"', 'git diff HEAD~1 -- src/',
+    'git status', 'git diff HEAD~1 -- src/',
     'ls -la src', 'cat src/page.ts | head -50', 'grep -rn entries src test', 'sed -n 1,40p src/server.ts', 'mkdir -p test/fixtures',
-    'touch test/fixtures/entries.json', 'rm -r test/tmp', 'cp README.md /workspace/notes.md', 'npm test > /dev/null 2>&1',
+    'touch test/fixtures/entries.json', 'cp README.md /workspace/notes.md', 'npm test > /dev/null 2>&1',
     'NODE_ENV=test npm test', 'cd /workspace && npm test', 'npm test &> test/out.log', 'find src -name "*.ts"', 'node --test',
   ]) assert.equal(insideCheckout(command), true, command);
   for (const command of [
@@ -35,6 +35,8 @@ test('work inside the checkout is allowed once; everything else is denied (issue
     'rm -r /tmp/cleared-proof-scratch', 'cat ../other/secret', 'cat ~/.ssh/id_ed25519', 'ls /etc', 'npm test > /tmp/out',
     'echo $(id) | tail', 'echo `id`', 'bash -c "npm test"', 'python3 -c "print(1)"', 'docker ps', 'env', '',
     'cp README.md /workspace/../etc/x',
+    // Allowed by the first rule, refused since review 2 of PR 279: the proof never deletes, moves nor commits alone.
+    'git add src/store.ts && git commit -m "Trim names"', 'rm -r test/tmp',
   ]) assert.equal(insideCheckout(command), false, command);
 });
 
@@ -230,4 +232,59 @@ test('everything else stays refused: a scratch file outside the checkout, an exp
     // What the parser refuses.
     'npm test\nnpm run typecheck', 'npm test <<E\nx\nE', 'cat < /etc/passwd', 'echo "$HOME"', "echo 'a", 'npm test |& tail', 'ls {a,/etc}',
   ]) assert.equal(answerFor(command), 'reject_once', JSON.stringify(command));
+});
+
+// Review 2 of PR 279: the parser made a quoted word one word, which a
+// program may read as a script of its own. Each program below is allowed
+// only with its options from a list.
+test('sed prints lines only: a script that is exactly one range, else refused (review 2 of PR 279, blocking 1)', () => {
+  for (const command of ['sed -n 1,40p src/server.ts', 'sed -n 12p README.md test/a.ts', "sed -n '45,56p' test/words.test.ts", 'sed 1p -n README.md']) assert.equal(answerFor(command), 'allow_once', command);
+  for (const command of [
+    // The review's two: GNU sed reads the first word as its script, so w wrote the file and e ran the command.
+    "sed -n 'w /tmp/pwn' 1p README.md", "sed -n 'e id' 1p README.md",
+    "sed -n 'w out.txt' 1p README.md", "sed -n '1p;w x' README.md", "sed -n '1e id' README.md", "sed -n '1p' -e 'w x' README.md",
+    'sed -n README.md 1p', 'sed 1p README.md', 'sed -n -i 1p README.md', 'sed -n --expression=1p README.md', 'sed -n -f script.sed README.md', 'sed -n 1,40d README.md',
+    'sed -n 1p -s README.md', 'sed -n',
+  ]) assert.equal(answerFor(command), 'reject_once', command);
+});
+
+test('sort, rg: no option that runs another program (review 2 of PR 279, followup 1)', () => {
+  for (const command of ['sort README.md', 'sort -rn counts.txt | head', 'sort -t , -k 2 data.csv', 'sort -k2,2n -u data.txt', 'sort --numeric-sort --reverse x.txt',
+    'rg -n findWords src', 'rg --type ts -l "words:" src', 'grep -rn x src | sort | uniq -c']) assert.equal(answerFor(command), 'allow_once', command);
+  for (const command of [
+    'sort --compress-program=sh -S 1 README.md', 'sort --compress-program sh README.md', 'sort --compress=sh README.md', 'sort -S 1 README.md', 'sort -o out.txt README.md',
+    'sort -T tmp README.md', 'sort --output=out.txt README.md', 'sort --files0-from=list README.md',
+    'rg --pre sh x README.md', 'rg --pre=sh x README.md', 'rg --pre-glob "*" --pre sh x src', 'rg -z x src', 'rg --search-zip x src', 'rg -nz x src',
+  ]) assert.equal(answerFor(command), 'reject_once', command);
+});
+
+test('git: the read-only subcommands only, each with its options from a list (review 2 of PR 279, followup 2)', () => {
+  for (const command of [
+    'git status --short', 'git status -sb', 'git diff --stat', 'git diff origin/proof-run...HEAD --stat', 'git diff --cached -- src/words.ts', 'git diff -U5 HEAD~1',
+    'git log --oneline -3 origin/main', 'git log --oneline origin/proof-run..HEAD', "git log -1 --format='%H %s%n%b' 0d7fbb5", 'git log -n5 --stat -- src',
+    'git show --stat cc88a03', 'git show origin/proof-run:src/words.ts | tail -8', 'git ls-files', 'git ls-files --others --exclude-standard', 'git branch --show-current', 'git branch -a',
+  ]) assert.equal(answerFor(command), 'allow_once', command);
+  for (const command of [
+    'git diff --output=x', 'git diff --output=*', 'git diff --output x', 'git log -p --ext-diff', 'git show --textconv x', 'git diff --no-index a b',
+    'git branch -D main', 'git branch -m x', 'git branch new-branch', 'git restore --source=HEAD~5 .', 'git commit --amend --no-verify', 'git commit -m x',
+    'git add .', 'git rm x', 'git mv a b', 'git push origin proof-run', 'git stash', 'git checkout x', 'git reset --hard', 'git -c core.pager=less log',
+    'git -C /tmp status', 'git log --exec=x', 'git diff --color-moved=x --ext-diff', 'git', 'git log --output=/tmp/x',
+  ]) assert.equal(answerFor(command), 'reject_once', command);
+});
+
+test('rm and mv are never allowed alone; a reporter is a built-in name, never a path (review 2 of PR 279)', () => {
+  for (const command of ['rm x', 'rm -rf *', 'rm -r test/tmp', 'mv * x', 'mv a b', 'npm test && rm -rf dist']) assert.equal(answerFor(command), 'reject_once', command);
+  for (const command of ['npm test -- --test-reporter=dot', 'npm test -- --test-reporter dot test/a.ts', 'npm run test -- --reporter=verbose', 'npm test -- --reporter tap']) {
+    assert.equal(answerFor(command), 'allow_once', command);
+  }
+  for (const command of [
+    'npm test -- --test-reporter=./x.js', 'npm test -- --test-reporter ./x.js', 'npm test -- --test-reporter=/workspace/x.mjs', 'npm run test -- --reporter=./r.ts',
+    'npm test -- --reporter', 'npm test -- --test-reporter-destination=out.txt',
+    'node --test --test-reporter=./x.js test/a.ts', 'node --test --test-reporter ./x.js', 'node --test --test-reporter=dot test/a.ts',
+  ]) assert.equal(answerFor(command), 'reject_once', command);
+});
+
+test('a quoted word holding spaces: each piece is read as a path too (review 2 of PR 279)', () => {
+  for (const command of ['grep -rn "a /etc/passwd" src', 'cat "x ../y"', 'echo "see ~/notes"']) assert.equal(answerFor(command), 'reject_once', command);
+  for (const command of ['grep -rn "filter API" src', 'echo "typecheck ok"']) assert.equal(answerFor(command), 'allow_once', command);
 });

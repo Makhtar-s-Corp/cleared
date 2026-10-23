@@ -4033,3 +4033,28 @@ The rehearsal skips the workflows and the watchers: its forge and its brokers ar
 - The guard of the proof scripts' pushes lists the line that reads the workflow event `push`, which is not a git push.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
+
+## 2026-10-23: the proof's checkout rule allows each program only with its options from a list (review 2 of pull request 279)
+
+**Decision.** Review 2 of pull request 279 found a security regression of round 2, blocking. With the parser, a quoted word is one word, and `sed` reads the first word that is not an option as its script: `sed -n 'w /tmp/pwn' 1p README.md` wrote a file outside the checkout, and `sed -n 'e id' 1p README.md` ran a command. Both were answered `allow_once`. At the owner's request, round 3 closes that and the review's followups in this pull request:
+- **sed**: `-n`, then a script that is exactly one word `^\d+(,\d+)?p$`, then files. Any other script or option is refused.
+- **Each piece of a word**: a quoted word holding spaces is also read piece by piece as a path, so `'w /tmp/pwn'` names `/tmp/pwn` and is refused, whatever the program.
+- **sort**: its ordering options only (`-k`, `-t`, `-n`, `-r`, `-u` and their long names). `--compress-program` (or any prefix of it), `-S`, `-T`, `-o` and `--files0-from` are refused.
+- **rg**: `--pre`, `--pre-glob`, `-z` and `--search-zip` are refused.
+- **git**: only `status`, `diff`, `log`, `show`, `ls-files` and a listing `branch`, each with its options from a list. Every other subcommand (`add`, `commit`, `restore`, `rm`, `mv`, `push`, `stash`, `checkout`, `reset`) is refused, and so is every option not listed (`--output`, `--ext-diff`, `--textconv`, `--no-index`, `-D`, `-m`, `-c`, `-C`). A branch name would create a branch, so `branch` takes none. The policy still allows a session's plain `git add` and `git commit` on its own. Only the proof's own answer to a request that reached the inbox no longer allows them.
+- **rm and mv**: no longer allowed by the proof alone. The policy asks the owner for them, and the proof never deletes nor moves a file on its own (followup 4: `rm -rf *` had become possible once globs were read).
+- **A reporter**: `--test-reporter` and `--reporter` take a built-in name only (`spec`, `tap`, `dot`, `junit`, `lcov`, vitest's), never a path. `node --test` still takes no option at all (followup 3).
+
+**Limit.** `git diff`, `log` and `show` use the diff and textconv drivers the checkout's `.git/config` sets. A session cannot write that file without asking: an edit under `.git` asks, and the proof refuses a request that is not a command. The rule does not read that configuration.
+
+**Tests.** `test/scripts/proof-inbox.test.ts`:
+- the review's two sed commands and other scripts, refused;
+- sort's and rg's program options, refused;
+- the git allow list both ways, the review's cases among them;
+- rm, mv and a reporter given by its path, refused;
+- the pieces of a quoted word;
+- the first rule's allowed list, now without `rm -r test/tmp` and `git add … && git commit …`, which moved to the refused list.
+
+Run 5's reviewer request stays allowed.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
