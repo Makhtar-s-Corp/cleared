@@ -26,13 +26,13 @@ function Curve({ h, data, t, language }: { readonly h: HarnessConsumption; reado
   const name = harnessName(h.harness, t);
   return (
     <figure className="curve">
-      <figcaption className="curve-label">{t('consumption_tokens_per_day')}</figcaption>
+      <figcaption className="curve-label">{t('consumption_usage_per_day')}</figcaption>
       <svg viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={t('consumption_chart_label', { harness: name })} className="curve-svg" data-curve={h.harness}>
         <path className="curve-area" d={chart.area} />
         <path className="curve-line" d={chart.line} fill="none" />
         {chart.points.map((p) => (
           <circle key={p.day} className="curve-dot" cx={p.x} cy={p.y} r={2.5}>
-            <title>{t('consumption_day_tokens', { day: dayLong(p.day, language), tokens: tokensText(p.tokens, language) })}</title>
+            <title>{t('consumption_day_usage', { day: dayLong(p.day, language), tokens: tokensText(p.tokens, language) })}</title>
           </circle>
         ))}
       </svg>
@@ -55,7 +55,7 @@ function HarnessCard({ h, data, t, language }: { readonly h: HarnessConsumption;
       {used ? (
         <div className="harness-body">
           <div className="harness-figures">
-            <p className="harness-tokens"><span className="num" data-total={h.harness}>{tokensText(h.tokens, language)}</span> <span className="unit">{t('consumption_tokens_unit')}</span></p>
+            <p className="harness-tokens"><span className="num" data-total={h.harness}>{tokensText(h.tokens, language)}</span> <span className="unit">{t('consumption_usage_unit')}</span></p>
             <p className="harness-average">{t('consumption_average', { n: tokensText(average.tokens, language) })}</p>
           </div>
           <Curve h={h} data={data} t={t} language={language} />
