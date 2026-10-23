@@ -63,10 +63,10 @@ test('the English tower reads as the capture', async () => {
   const html = renderTower(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), t);
   const text = visibleText(html).join('\n');
   for (const expected of [
-    'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Needs you', 'Open inbox', 'Release · 12 min', 'Permission · 3 min', 'Plan · 25 min', 'Goal',
-    'The lead proposes 5 tickets, about 2 h of work and 4 % of the week.', 'Always on · context 31 % · refreshed 10 min ago',
+    'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12 min', 'Permission', '3 min', 'Plan', '25 min', 'Goal',
+    'The lead proposes 5 tickets, about 2 h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Network access and a new dependency. The author is paused until you answer.',
-    'Live sessions', 'Author', 'Reviewer', 'Open session', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
+    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /\sstyle=/, 'no inline style: the page runs under default-src \'self\'');
 });
@@ -101,7 +101,8 @@ test('nothing waiting says so, and a waiting question is a card of its own', asy
     inbox: [{ kind: 'question', id: 'q1', ticket: 'LOCAL-160', project: 'guestbook', since: new Date(FIXTURE_NOW.getTime() - 5 * 60_000).toISOString(), state: 'waiting', sessionId: 's', requestId: 'r', questions: [{ question: 'Which date format should the list use?' }] }],
   }, FIXTURE_NOW);
   assert.deepEqual(question.needs.map((n) => [n.kind, n.title, n.minutes]), [['question', 'Which date format should the list use?', 5]]);
-  assert.ok(visibleText(renderTower(question, t)).includes('Question · 5 min'));
+  const row = visibleText(renderTower(question, t));
+  assert.ok(row.includes('Question') && row.includes('5 min'), 'its kind and how long it waited, in the row');
 });
 
 test('a model name reads as the capture writes it', () => {

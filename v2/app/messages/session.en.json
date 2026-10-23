@@ -12,8 +12,6 @@
   "status_done": "Done",
   "status_stopped": "Stopped",
   "status_failed": "Stopped on an error",
-  "crumbs_label": "Where you are",
-  "crumb_tower": "Tower",
   "tab_author": "Author · {model}",
   "tab_reviewer": "Reviewer · {model}",
   "tab_author_waiting": "Author, waiting",

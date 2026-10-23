@@ -7,7 +7,22 @@
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
 //     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light,dark]
-//     [--via load|click]
+//     [--via load|click] [--language fr|en]
+//
+// The language is the app's default, French, unless --language en asks for
+// English (the owner's decision of 2026-10-23).
+//
+// More captures, named only (lane 35): palette and sheet (the tower with
+// the command palette or the shortcut sheet open, by their keys), the same
+// on the inbox and on a session (palette-inbox, palette-session,
+// sheet-session: each screen's sheet is on under them), rail-tooltip (the
+// sidebar folded, a screen's tooltip shown; from 768 px), and tower-empty
+// and lead-empty (the tower and the lead screen with their lists answered
+// empty in the page: no session, nothing waiting, no plan, no message).
+//
+// Lane 36's, named only: review (a reviewer's session, the view of its
+// ticket at its review), review-editor (its Editor) and review-takeover (its
+// Terminal after Take over, given back once captured).
 //
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
@@ -38,12 +53,13 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-// Screens a lane asks for by name, outside the default set (lane 36): a
-// reviewer's session, which is the view of its ticket at its review; its
-// Editor; and its Terminal after Take over (given back once captured, so
-// the next capture finds it as it was).
-export const EXTRA_SCREENS = ['review', 'review-editor', 'review-takeover'] as const;
-export type CaptureScreen = typeof SCREENS[number] | typeof EXTRA_SCREENS[number];
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover'] as const;
+export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
+// What an empty capture answers empty, in the page.
+const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
+const answerEmpty = (route: any) => (/\/lead\/stream/.test(route.request().url())
+  ? route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': empty\n\n' })
+  : route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
 const ACCOUNT = 'owner';
 
 // playwright-core is read untyped, as the proof scripts read it: its types need the DOM's,
@@ -59,17 +75,17 @@ async function listen(server: Server): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
+export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click'; readonly language?: 'fr' | 'en' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
   const themes = options.themes ?? ['light', 'dark'];
-  for (const s of screens) if (![...SCREENS, ...EXTRA_SCREENS].includes(s as CaptureScreen)) throw new Error(`unknown screen ${s}`);
+  for (const s of screens) if (![...SCREENS, ...EXTRAS].includes(s as CaptureScreen)) throw new Error(`unknown screen ${s}`);
   for (const w of widths) if (!WIDTHS[w]) throw new Error(`unknown width ${w}`);
   mkdirSync(options.out, { recursive: true });
 
   const preview = createServer();
   const previewBase = await listen(preview);
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase } });
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
   preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
   const errors: string[] = [];
   const away: string[] = [];
@@ -94,14 +110,19 @@ export async function capture(options: { readonly out: string; readonly screens?
         const author = sessions.find((s) => s.role === 'author') ?? sessions[0];
         const reviewer = sessions.find((s) => s.role === 'reviewer') ?? sessions[0];
         const paths: Readonly<Record<CaptureScreen, string>> = {
-          tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead', review: `/sessions/${reviewer?.id ?? ''}`,
-          'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
+          tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
+          palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
+          'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead',
+          review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
         for (const screen of screens) {
+          if (screen === 'rail-tooltip' && Number(w) < 768) continue;
           const path = paths[screen as CaptureScreen];
-          if (options.via === 'click') {
+          const empty = screen.endsWith('-empty');
+          if (empty) await page.route(EMPTY, answerEmpty);
+          if (options.via === 'click' && !empty) {
             const before = documents;
             await page.evaluate((href: string) => {
               const link = document.createElement('a');
@@ -125,6 +146,23 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.locator('#tab-terminal .xterm-rows').getByText('resumed on this session').waitFor({ timeout: 10_000 });
             await settle(page);
           }
+          const overlay = screen.startsWith('palette') ? 'palette' : screen.startsWith('sheet') ? 'sheet' : null;
+          if (overlay) {
+            await page.evaluate(() => document.getElementById('screen')?.focus({ preventScroll: true }));
+            await page.keyboard.press(overlay === 'palette' ? 'Control+k' : 'Shift+Slash');
+            await page.locator(overlay === 'palette' ? '#palette' : '#shortcuts').waitFor();
+            await page.waitForTimeout(250);
+          }
+          let folded = false;
+          if (screen === 'rail-tooltip') {
+            if (await page.locator('.app[data-sidebar="open"]').count() > 0) {
+              await page.evaluate(() => document.getElementById('screen')?.focus({ preventScroll: true }));
+              await page.keyboard.press('BracketLeft');
+              folded = true;
+            }
+            await page.locator('#nav a[href="/inbox"]').hover();
+            await page.waitForTimeout(300);
+          }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
           await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
@@ -132,6 +170,15 @@ export async function capture(options: { readonly out: string; readonly screens?
           if (screen === 'review-takeover') {
             await page.locator('#giveback').click();
             await page.locator('#takeover').waitFor({ timeout: 10_000 });
+          }
+          if (overlay) await page.keyboard.press('Escape');
+          if (folded) {
+            await page.mouse.move(0, 0);
+            await page.keyboard.press('BracketLeft');
+          }
+          if (empty) {
+            await page.unroute(EMPTY);
+            await page.goto(`${app.base}/`);
           }
         }
         await context.close();
@@ -159,16 +206,20 @@ async function settle(page: any): Promise<void> {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { out: { type: 'string' }, screens: { type: 'string' }, widths: { type: 'string' }, themes: { type: 'string' }, via: { type: 'string' } } });
+  const { values } = parseArgs({ options: { out: { type: 'string' }, screens: { type: 'string' }, widths: { type: 'string' }, themes: { type: 'string' }, via: { type: 'string' }, language: { type: 'string' } } });
   if (values.via !== undefined && values.via !== 'load' && values.via !== 'click') {
     console.error('capture-screens: --via is load or click');
+    process.exit(64);
+  }
+  if (values.language !== undefined && values.language !== 'fr' && values.language !== 'en') {
+    console.error('capture-screens: --language is fr or en');
     process.exit(64);
   }
   if (!values.out) {
     console.error('capture-screens: --out <folder> is required');
     process.exit(64);
   }
-  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load' });
+  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load', language: values.language === 'en' ? 'en' : 'fr' });
   for (const file of result.files) console.log(file);
   for (const error of result.errors) console.error(`page error: ${error}`);
   for (const url of result.away) console.error(`request off the app's origin: ${url}`);

@@ -6,13 +6,8 @@
 .session { --code-keyword: #7928CA; --code-string: #15803D; --code-comment: #707070; --code-number: #AB570A; --code-function: #0060DF; --code-definition: #171717; --code-property: #4D4D4D; }
 :root[data-theme="dark"] .session { --code-keyword: #C9A2FF; --code-string: #7EE2A0; --code-comment: #8F8F8F; --code-number: #F7B955; --code-function: #79B8FF; --code-definition: #EDEDED; --code-property: #B8B8B8; }
 
-.session-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 28px; font-size: 13px; color: var(--text-muted); }
-.crumbs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.crumbs .sep { color: var(--dashed); }
-.crumbs a { color: var(--text-muted); } .crumbs a:hover { color: var(--text); }
-.crumbs .here { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
 
-.session { display: grid; grid-template-columns: 290px minmax(0, 1fr) 330px; gap: 18px; padding: 0 28px 24px; align-items: start; }
+.session { display: grid; grid-template-columns: 290px minmax(0, 1fr) 330px; gap: 18px; padding: 16px 28px 24px; align-items: start; }
 .s-left, .s-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
 .eyebrow { margin-bottom: 4px; font-size: 12px; color: var(--text-faint); }
@@ -316,9 +311,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .s-left { grid-area: left; } .s-right { grid-area: right; } .panel { grid-area: panel; }
 }
 @media (max-width: 767px) {
-  .session-top { padding: 12px 16px; }
-  .crumbs a { padding: 13px 0; margin: -13px 0; }   /* a 44 px target, the look unchanged */
-  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 0 16px 28px; }
+  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 12px 16px 28px; }
   .panel { max-height: none; min-height: 0; }
   .timeline { overflow: visible; padding: 8px 12px; }
   .row { grid-template-columns: 40px 16px minmax(0, 1fr); gap: 6px; }

@@ -12,8 +12,6 @@
   "status_done": "Terminée",
   "status_stopped": "Arrêtée",
   "status_failed": "Arrêtée sur une erreur",
-  "crumbs_label": "Où vous êtes",
-  "crumb_tower": "Tour",
   "tab_author": "Auteur · {model}",
   "tab_reviewer": "Relecteur · {model}",
   "tab_author_waiting": "Auteur, en attente",

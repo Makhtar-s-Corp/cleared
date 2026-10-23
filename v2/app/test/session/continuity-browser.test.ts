@@ -120,7 +120,7 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     await page.locator('[data-filter="all"]').click();
 
     // Hidden: the view opens no stream and reads nothing.
-    await page.locator('header nav a[href="/inbox"]').click();
+    await page.locator('#nav a[href="/inbox"]').click();
     await page.waitForURL(`${app.base}/inbox`);
     await page.locator('[data-session-view]').first().waitFor({ state: 'hidden' });
     await page.waitForTimeout(300);

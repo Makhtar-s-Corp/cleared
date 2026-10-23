@@ -25,7 +25,7 @@ test('an answered ask: the question, what it is about, both turns with their ans
   assert.equal(markup.match(/<li class="turn"/g)?.length, 2);
   assert.ok(visibleText(markup).includes(ASK_ANSWER));
   assert.ok(visibleText(markup).includes(FOLLOW_QUESTION));
-  assert.match(markup, /data-ask-total=""[^>]*>[^<]*week used at 29 %/);
+  assert.match(markup, /data-ask-total=""[^>]*>[^<]*week used at 29%/);
   assert.match(markup, /<textarea[^>]*id="follow-input"[^>]*maxlength="4000"/);
   assert.equal(QUESTION_MAX, 4000);
   assert.match(markup, /<button[^>]*data-act="follow"[^>]*>Ask<\/button>/);

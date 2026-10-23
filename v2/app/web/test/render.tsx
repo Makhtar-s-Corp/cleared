@@ -13,13 +13,14 @@ import { Actions, Detail, InboxScreen, List } from '../screens/inbox/Inbox.tsx';
 import type { InboxView } from '../screens/inbox/model.ts';
 import { LeadScreen, MemoryBody, Side, Thread } from '../screens/lead/Lead.tsx';
 import type { LeadDraft, LeadView, SideOptions } from '../screens/lead/model.ts';
-import { Composer, Crumbs, LeftCards, RightCards, SessionIndex, StatusHead, ThreadFilter, Timeline } from '../screens/session/Session.tsx';
+import { Composer, LeftCards, RightCards, SessionIndex, StatusHead, ThreadFilter, Timeline } from '../screens/session/Session.tsx';
 import type { SessionView } from '../screens/session/model.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import type { SessionSummary } from '../../../src/api/types.ts';
 import { Bar, TowerBody } from '../screens/tower/Tower.tsx';
 import type { TowerModel } from '../screens/tower/model.ts';
-import { Header, type HeaderProps, type ShellScreen } from '../shell/Header.tsx';
+import { Sidebar, type SidebarProps } from '../shell/Sidebar.tsx';
+import type { ScreenName } from '../lib/routes.ts';
 import { NotifyMenuBody } from '../shell/NotifyButton.tsx';
 import type { NotifyView } from '../shell/notify.ts';
 
@@ -64,10 +65,9 @@ export const renderStatus = (view: SessionView, t: Translate) => html(<StatusHea
 export const renderTimeline = (view: SessionView, t: Translate) => html(<Timeline view={view} t={t} />);
 export const renderLeft = (view: SessionView, t: Translate) => html(<LeftCards view={view} t={t} />);
 export const renderRight = (view: SessionView, t: Translate) => html(<RightCards view={view} t={t} />);
-export const renderCrumbs = (view: SessionView, t: Translate) => html(<Crumbs view={view} t={t} />);
 export const renderComposer = (view: SessionView, t: Translate) => html(<Composer view={view} t={t} />);
 export const renderFilter = (view: SessionView, t: Translate) => html(<ThreadFilter view={view} t={t} />);
-export const renderSession = (view: SessionView, t: Translate) => `<div class="session-top" id="crumbs">${renderCrumbs(view, t)}</div><div class="session">`
+export const renderSession = (view: SessionView, t: Translate) => `<div class="session">`
   + `<aside class="s-left" id="s-left">${renderLeft(view, t)}</aside><section class="panel"><div class="panel-head" id="status">${renderStatus(view, t)}</div>`
   + `${renderFilter(view, t)}<div class="timeline" id="timeline">${renderTimeline(view, t)}</div><div class="panel-foot">${renderComposer(view, t)}</div></section>`
   + `<aside class="s-right" id="s-right">${renderRight(view, t)}</aside></div>`;
@@ -90,6 +90,6 @@ export const renderInbox = (view: InboxView, t: Translate) => html(<InboxScreen 
 // shell
 export const renderNotifyMenu = (view: NotifyView, t: Translate) => html(<NotifyMenuBody view={view} t={t} />);
 
-// The shell's header for a screen, before /api/me answers (no clock, no count).
-export const renderHeader = (screen: ShellScreen, t: Translate, extra: Partial<HeaderProps> = {}) =>
-  html(<Header t={t} screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} leadOn={false} now={null} language="en" {...extra} />);
+// The shell's sidebar for a screen, before /api/me answers (no count, no dot).
+export const renderSidebar = (screen: ScreenName, t: Translate, extra: Partial<SidebarProps> = {}) =>
+  html(<Sidebar t={t} mode="open" screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} lead="unknown" groups={[]} theme="light" {...extra} />);

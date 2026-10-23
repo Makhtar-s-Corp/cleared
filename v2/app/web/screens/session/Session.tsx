@@ -415,10 +415,6 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
   );
 }
 
-export function Crumbs({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
-  return <nav className="crumbs" aria-label={t('crumbs_label')}><a href="/">{t('crumb_tower')}</a><span className="sep" aria-hidden="true">/</span><span className="here">{view.ticket?.title ?? view.summary.ticket}</span><span className="id">{view.summary.ticket}</span></nav>;
-}
-
 export function Composer({ view, t, text = '', sending = false, interrupting = false, note = '', input, onText, onSend, onInterrupt, onHandover }: {
   readonly view: SessionView; readonly t: Translate; readonly text?: string; readonly sending?: boolean; readonly interrupting?: boolean; readonly note?: string;
   readonly input?: Ref<HTMLInputElement>;
@@ -953,7 +949,6 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   return (
     <>
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
-      <div className="session-top" id="crumbs"><Crumbs view={view} t={t} /></div>
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
         <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
@@ -1035,7 +1030,7 @@ function One({ id }: { readonly id: string }) {
     return () => { live = false; };
   }, [context, id, setLoaded]);
   if (loaded === 'failed') return <div className="index"><p className="empty error">{context.t('load_failed')}</p></div>;
-  if (!loaded) return <><div className="session-top" /><div className="session" aria-busy="true" /></>;
+  if (!loaded) return <div className="session" aria-busy="true" />;
   return <Live view={id} loaded={loaded} />;
 }
 

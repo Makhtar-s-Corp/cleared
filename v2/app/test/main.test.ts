@@ -14,11 +14,12 @@ const main = new URL('../main.ts', import.meta.url).pathname;
 const state = mkdtempSync(join(tmpdir(), 'cleared-v2-app-main-'));
 after(() => rmSync(state, { recursive: true, force: true }));
 
-test('the app listens on 127.0.0.1:8792 by default, reads the service on 8791, and uses the live service', () => {
+test('the app listens on 127.0.0.1:8792 by default, reads the service on 8791, uses the live service, and speaks French', () => {
   assert.equal(DEFAULT_APP_PORT, 8792);
   assert.deepEqual(readAppConfig({}), {
-    host: '127.0.0.1', port: 8792, source: 'service', serviceUrl: 'http://127.0.0.1:8791', language: 'en', project: '', publicOrigin: undefined,
+    host: '127.0.0.1', port: 8792, source: 'service', serviceUrl: 'http://127.0.0.1:8791', language: 'fr', project: '', publicOrigin: undefined,
   });
+  assert.equal(readAppConfig({ CLEARED_V2_APP_LANGUAGE: 'en' }).language, 'en', 'English when asked');
   const set = readAppConfig({
     CLEARED_V2_APP_PORT: '18792', CLEARED_V2_APP_SOURCE: 'fixtures', CLEARED_V2_PORT: '18791', CLEARED_V2_APP_LANGUAGE: 'fr', CLEARED_REPO: '/srv/checkouts/guestbook',
   });

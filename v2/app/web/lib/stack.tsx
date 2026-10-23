@@ -1,5 +1,5 @@
 // A session kept mounted (docs/v2/ui-overhaul-plan.md, U4, lane 34): drawn
-// in place while shown, hidden (display: none) while the person is
+// in place while shown, hidden (the hidden attribute) while the person is
 // elsewhere, never moved in the document, so its terminal, its editor, its
 // browser frame and their scroll stay as they were.
 //
@@ -41,5 +41,6 @@ export function KeptView({ id, shown, children }: { readonly id: string; readonl
     drawn.observe(element, { subtree: true, childList: true, attributes: true, attributeFilter: ['id'] });
     return () => drawn.disconnect();
   }, [shown]);
-  return <div ref={root} data-session-view={id} style={{ display: shown ? 'contents' : 'none' }}>{children}</div>;
+  // Shown: no box of its own; hidden: none (.kept-view, styles/app.css), with no inline style.
+  return <div ref={root} className="kept-view" data-session-view={id} hidden={!shown}>{children}</div>;
 }

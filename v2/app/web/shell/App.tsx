@@ -1,6 +1,8 @@
-// The shell in the browser: who is signed in, the clock, the inbox count,
-// the "Lead · always on" pill, the theme and notifications buttons, signing
-// out, and the screen of the address, with its catalog over the shell's.
+// The shell in the browser: who is signed in, the sidebar (the screens, the
+// inbox count, the lead's dot, the live sessions, the theme, notifications,
+// signing out), the screen's bar, the command palette, the keyboard and its
+// sheet (lane 35, docs/v2/ui-overhaul-plan.md, 2.2 and U8), and the screen
+// of the address, with its catalog over the shell's.
 //
 // One document for the whole app (docs/v2/ui-overhaul-plan.md, section
 // 2.1, lane 34): the router (lib/router.tsx) names the screen from the
@@ -14,8 +16,8 @@
 // screen keeps its scroll, has its title, turns on its own sheets
 // (lib/sheets.ts) and fails alone (lib/boundary.tsx).
 import { RouterProvider, useRouterState, type AnyRouter } from '@tanstack/react-router';
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from 'react';
-import type { LeadState } from '../../../src/api/types.ts';
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
+import type { LeadState, NextInboxItem, SessionSummary } from '../../../src/api/types.ts';
 import { json, serviceApi } from '@/lib/api.ts';
 import { ScreenBoundary } from '@/lib/boundary.tsx';
 import { Cache } from '@/lib/cache.ts';
@@ -29,8 +31,17 @@ import { KeptView } from '@/lib/stack.tsx';
 import { placeOf, pushStack, stackOrder, titleKey, type Place, type ScreenName } from '@/lib/routes.ts';
 import { ApiError, type Me, type ScreenContext } from '@/lib/screen.ts';
 import { showSheets } from '@/lib/sheets.ts';
-import { Header } from './Header.tsx';
-import { leadPillShown, waitingCount } from './model.ts';
+import { towerModel, type NeedCard } from '@/screens/tower/model.ts';
+import type { Ticket } from '../../../src/tickets/contract.ts';
+import { isMac } from './Kbd.tsx';
+import type { Action } from './keys.ts';
+import {
+  SIDEBAR_KEY, applyTheme, currentTheme, hrefOf, leadDot, sessionGroups, sessionRows, sidebarMode, toggledSidebar, waitingCount,
+  OPEN_FROM, RAIL_FROM, type SessionRow, type Theme,
+} from './model.ts';
+import { GESTURES, paletteItems, type PaletteItem } from './palette.ts';
+import { ShortcutSheet, pressTab, useShortcuts, walkRows } from './Shortcuts.tsx';
+import { Sidebar } from './Sidebar.tsx';
 
 export type ShellStart = {
   readonly language: Language;
@@ -68,7 +79,10 @@ export function App({ start }: { readonly start: ShellStart }) {
     stream.start();
     const release = interceptLinks(router, cache);
     // Every screen's chunk, once the first screen has drawn: a switch then waits for none.
-    const warm = setTimeout(() => { for (const name of SCREEN_NAMES) void loadScreen(name).catch(() => {}); }, 0);
+    const warm = setTimeout(() => {
+      for (const name of SCREEN_NAMES) void loadScreen(name).catch(() => {});
+      void loadPalette().catch(() => {});
+    }, 0);
     return () => {
       clearTimeout(warm);
       release();
@@ -125,7 +139,8 @@ const ScreenHost = memo(function ScreenHost({ screen, path, me, language, cache,
 // arrives a frame or two later), so the scroll is set again at each frame
 // until it holds, or for RESTORE_FRAMES at most; the scroll events of the
 // swap itself (the browser clamping to the new height) are not taken for
-// the person's.
+// the person's, and the person's own wheel, touch or key ends it at once
+// (review of pull request 248, F-b).
 const RESTORE_FRAMES = 30;
 
 function useScrollKept(key: string): void {
@@ -144,58 +159,109 @@ function useScrollKept(key: string): void {
     restoring.current = true;
     let frames = 0;
     let frame = 0;
+    const stop = () => {
+      cancelAnimationFrame(frame);
+      restoring.current = false;
+      for (const name of INTERRUPTS) window.removeEventListener(name, stop);
+    };
+    for (const name of INTERRUPTS) window.addEventListener(name, stop, { passive: true });
     const settle = () => {
       window.scrollTo(0, target);
       frames += 1;
       if (Math.abs(window.scrollY - target) < 1 || frames >= RESTORE_FRAMES) {
         // The last clamp's event comes after this frame: let it pass first.
-        frame = requestAnimationFrame(() => { restoring.current = false; });
+        frame = requestAnimationFrame(stop);
         return;
       }
       frame = requestAnimationFrame(settle);
     };
     settle();
-    return () => {
-      cancelAnimationFrame(frame);
-      restoring.current = false;
-    };
+    return stop;
   }, [key]);
 }
+
+const INTERRUPTS = ['wheel', 'touchstart', 'keydown'] as const;
+
+// The width's band, from two media queries: a phone, a tablet, a computer.
+const BANDS = [`(min-width: ${RAIL_FROM}px)`, `(min-width: ${OPEN_FROM}px)`];
+
+function useBand(): number {
+  const read = () => (typeof window === 'undefined' ? OPEN_FROM : BANDS.filter((query) => window.matchMedia(query).matches).length);
+  const band = useSyncExternalStore((change) => {
+    const lists = BANDS.map((query) => window.matchMedia(query));
+    for (const list of lists) list.addEventListener('change', change);
+    return () => { for (const list of lists) list.removeEventListener('change', change); };
+  }, read, () => 2);
+  return [0, RAIL_FROM, OPEN_FROM][band] ?? OPEN_FROM;
+}
+
+function storedSidebar(): string | null {
+  try { return localStorage.getItem(SIDEBAR_KEY); }
+  catch { return null; }
+}
+
+// What a shown element of a gesture is: drawn and not disabled.
+function shownGesture(selector: string): HTMLElement | null {
+  for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+    const off = (element as HTMLButtonElement).disabled || element.getAttribute('aria-disabled') === 'true';
+    if (!off && element.getClientRects().length > 0) return element;
+  }
+  return null;
+}
+
+type Overlay = 'palette' | 'sheet' | null;
+
+// The palette is a chunk of its own (cmdk and what it brings), loaded once
+// the first screen has drawn, so the first draw does not wait for it.
+const loadPalette = () => import('./Palette.tsx');
+const Palette = lazy(loadPalette);
 
 function Shell({ shared }: { readonly shared: Shared }) {
   const { start, cache, router } = shared;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const place: Place = placeOf(pathname) ?? { screen: 'tower', path: '/' };
   const t = useMemo(() => translator(screenCatalog(place.screen, start.language)), [place.screen, start.language]);
+  // The palette names what waits as the tower does: the shell's words over the tower's.
+  const towerT = useMemo(() => translator(screenCatalog('tower', start.language)), [start.language]);
   const [me, setMe] = useState<Me | null>(null);
-  const [now, setNow] = useState<Date | null>(null);
   const [waiting, setWaiting] = useState<number | null>(null);
-  const [leadOn, setLeadOn] = useState(false);
+  const [lead, setLead] = useState<LeadState | null | undefined>(undefined);
+  const [rows, setRows] = useState<readonly SessionRow[]>([]);
+  const [needs, setNeeds] = useState<readonly NeedCard[]>([]);
+  const [theme, setTheme] = useState<Theme>(() => currentTheme());
+  const [stored, setStored] = useState<string | null>(storedSidebar);
+  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [gestures, setGestures] = useState<readonly string[]>([]);
+  const mode = sidebarMode(stored, useBand());
+  const mac = useMemo(() => isMac(), []);
 
   useEffect(() => {
     json<Me>('/api/me').then(setMe, (error: unknown) => {
       if (error instanceof ApiError && error.status === 401) location.assign('/login');
     });
-    setNow(new Date());
-    const clock = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(clock);
   }, []);
 
   const raw = useMemo(() => (me ? serviceApi(me) : null), [me]);
   const readOnly = useMemo(() => serviceApi({ csrf: '' }), []);
   const shellReader = useReader(cache, raw ?? readOnly);
 
-  // The count and the pill, from the cache, each time it holds a new inbox
-  // or lead. This read is also what starts the lead after a service restart
-  // (the lead starts on its first route), so the lead does not wait for its
-  // own screen to be opened.
+  // The count, the lead's dot, the sessions and what waits, from the
+  // cache, each time it holds a new value of one of them. The lead's read
+  // is also what starts the lead after a service restart (the lead starts
+  // on its first route), so the lead does not wait for its own screen.
   const recount = useCallback(async () => {
-    const [items, lead] = await Promise.all([
-      shellReader.api<{ state: string }[]>('/inbox').catch(() => null),
+    const [items, leadState, sessions, tickets] = await Promise.all([
+      shellReader.api<NextInboxItem[]>('/inbox').catch(() => null),
       shellReader.api<LeadState>('/lead').catch(() => null),
+      shellReader.api<SessionSummary[]>('/sessions').catch(() => null),
+      shellReader.api<Ticket[]>('/tickets').catch(() => null),
     ]);
     setWaiting(items ? waitingCount(items) : null);
-    setLeadOn(leadPillShown(lead));
+    setLead(leadState);
+    if (sessions && tickets) setRows(sessionRows(sessions, tickets));
+    if (items && sessions && tickets) {
+      setNeeds(towerModel({ sessions, inbox: items, tickets, lead: null, leadLine: null, plans: [], weekLeft: null }, new Date()).needs);
+    }
   }, [shellReader]);
   useEffect(() => {
     void recount();
@@ -224,38 +290,134 @@ function Shell({ shared }: { readonly shared: Shared }) {
     drawn.current = stackOrder(drawn.current, stack.current);
   }
 
+  // The screen's name in its bar and the tab: a session's ticket and title.
+  const shownRow = place.session ? rows.find((row) => row.id === place.session) : undefined;
+  const here = shownRow ? t('top_session', { ticket: shownRow.ticket, title: shownRow.title }) : t(titleKey(place.screen));
+
   useScrollKept(place.path);
   useLayoutEffect(() => {
     showSheets(place.screen);
     document.body.dataset.screen = place.screen;
-    document.title = `${t('app_name')} · ${t(titleKey(place.screen))}`;
-  }, [place.screen, t]);
+  }, [place.screen]);
+  useLayoutEffect(() => {
+    document.title = `${t('app_name')} · ${here}`;
+  }, [t, here]);
 
   // A move in the page does what a page load did for a keyboard or a
   // screen reader: focus at the start of the new screen (the main region,
-  // which draws no ring), and its title said. Not on the first draw.
+  // which draws no ring), and its name said. A move started in the
+  // sidebar keeps the focus on the item pressed, as a native app's list
+  // of places does (lane 34's art director). Not on the first draw.
   const [said, say] = useState('');
   const moved = useRef(false);
+  const fromSidebar = useRef(false);
   useLayoutEffect(() => {
     if (!moved.current) { moved.current = true; return; }
-    document.getElementById('screen')?.focus({ preventScroll: true });
+    if (!fromSidebar.current) document.getElementById('screen')?.focus({ preventScroll: true });
+    fromSidebar.current = false;
     say(document.title);
   }, [place.path]);
+
+  const flipTheme = useCallback(() => {
+    const next: Theme = currentTheme() === 'dark' ? 'light' : 'dark';
+    applyTheme(next, true);
+    setTheme(next);
+  }, []);
+  const toggleSidebar = useCallback(() => {
+    const next = toggledSidebar(mode);
+    setStored(next);
+    try { localStorage.setItem(SIDEBAR_KEY, next); }
+    catch { /* the choice lasts for this page only */ }
+  }, [mode]);
+  // The focus a dialog gives back when it closes: where it was when the
+  // dialog opened (a field's typing goes on), read before the app behind the
+  // dialog is made inert, which takes the focus away (art director, item 5).
+  const back = useRef<HTMLElement | null>(null);
+  const open = useCallback((next: Exclude<Overlay, null>) => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !active.closest('.overlay')) back.current = active;
+    setOverlay(next);
+  }, []);
+  const shut = useRef<Overlay>(null);
+  useEffect(() => {
+    if (overlay === null && shut.current !== null && back.current?.isConnected) back.current.focus({ preventScroll: true });
+    shut.current = overlay;
+  }, [overlay]);
+  const openPalette = useCallback(() => {
+    setGestures(GESTURES.filter((g) => g.screen === place.screen && shownGesture(g.selector)).map((g) => g.id));
+    open('palette');
+  }, [place.screen, open]);
+
+  const runItem = useCallback((item: PaletteItem) => {
+    setOverlay(null);
+    const run = item.run;
+    // After the dialog has closed and given the focus back.
+    requestAnimationFrame(() => {
+      switch (run.kind) {
+        case 'navigate': navigate(run.href); break;
+        case 'theme': flipTheme(); break;
+        case 'sheet': open('sheet'); break;
+        case 'sidebar': toggleSidebar(); break;
+        case 'gesture': {
+          const gesture = GESTURES.find((g) => g.id === run.id);
+          const element = gesture ? shownGesture(gesture.selector) : null;
+          if (gesture?.focus) element?.focus();
+          else element?.click();
+          break;
+        }
+      }
+    });
+  }, [navigate, flipTheme, toggleSidebar, open]);
+
+  // The sidebar draws again only when what it shows changes (Sidebar is memo).
+  const groups = useMemo(() => sessionGroups(rows), [rows]);
+  const onSignOut = useCallback(() => void signOut(), [signOut]);
+  const onPick = useCallback((href: string) => { fromSidebar.current = href !== location.pathname; }, []);
+
+  const lastRow = useRef<HTMLElement | null>(null);
+  const runKey = useCallback((action: Action) => {
+    switch (action.kind) {
+      case 'palette': openPalette(); break;
+      case 'sheet': open('sheet'); break;
+      case 'sidebar': if (mode !== 'bar') toggleSidebar(); break;
+      case 'go': navigate(hrefOf(action.to)); break;
+      case 'next': case 'previous': case 'open': case 'back': walkRows(action.kind, lastRow); break;
+      case 'tab': pressTab(action.n); break;
+      case 'send': (document.activeElement?.closest('form') as HTMLFormElement | null)?.requestSubmit(); break;
+    }
+  }, [openPalette, toggleSidebar, navigate, mode, open]);
+  useShortcuts({ screen: place.screen, overlay: overlay !== null, mac, run: runKey });
+
+  const items = useMemo(() => (overlay === 'palette' ? paletteItems({ screen: place.screen, needs, sessions: rows, gestures, theme, t: towerT }) : []),
+    [overlay, place.screen, needs, rows, gestures, theme, towerT]);
 
   const host = (screen: ScreenName, path: string) => (me && raw
     ? <ScreenHost screen={screen} path={path} me={me} language={start.language} cache={cache} raw={raw} navigate={navigate} inboxChanged={inboxChanged} />
     : null);
   return (
     <>
-      <Header t={t} screen={place.screen} project={start.project} userName={start.userName} source={start.source} me={me}
-        waiting={waiting} leadOn={leadOn} now={now} language={start.language} onSignOut={() => void signOut()} />
-      <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
-      <main id="screen" className="screen" tabIndex={-1} style={{ outline: 'none' }}>
-        {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}
-        {drawn.current.map((id) => (
-          <KeptView key={id} id={id} shown={id === place.session}>{host('session', `/sessions/${id}`)}</KeptView>
-        ))}
-      </main>
+      <div className="app" data-sidebar={mode} inert={overlay !== null}>
+        <a className="skip" href="#screen">{t('skip_to_content')}</a>
+        <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
+          waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme}
+          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
+        <div className="main">
+          <div className="top-bar" id="top-bar">
+            <p className="top-title">{shownRow ? <><a className="crumb" href="/sessions">{t('title_session')}</a><span className="crumb" aria-hidden="true">/</span></> : null}<span className="here">{here}</span></p>
+            {/* The sample data says so on every screen of a computer; a phone's top bar says it (Sidebar.tsx). */}
+            {start.source === 'fixtures' ? <div className="top-actions"><p className="source-pill" id="source-pill">{t('source_fixtures')}</p></div> : null}
+          </div>
+          <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
+          <main id="screen" className="screen" tabIndex={-1}>
+            {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}
+            {drawn.current.map((id) => (
+              <KeptView key={id} id={id} shown={id === place.session}>{host('session', `/sessions/${id}`)}</KeptView>
+            ))}
+          </main>
+        </div>
+      </div>
+      {overlay === 'palette' ? <Suspense fallback={null}><Palette t={towerT} items={items} dark={theme === 'dark'} onRun={runItem} onClose={() => setOverlay(null)} /></Suspense> : null}
+      {overlay === 'sheet' ? <ShortcutSheet t={t} screen={place.screen} mac={mac} onClose={() => setOverlay(null)} /> : null}
     </>
   );
 }

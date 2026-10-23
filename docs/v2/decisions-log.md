@@ -3285,6 +3285,119 @@ The browser test itself, on the full Chromium build the CI installs and in CI mo
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-foundation` (pull request 248), at the orchestrator's request; no code of this lane acts on it.
 
+## 2026-10-23: the sidebar, the command palette, the keyboard and its sheet, the tokens, the tower as rows (the author's choices, lane 35, `v2-j2-ui-shell`)
+
+**Decision.** On 2026-10-23 between 01:40 and 03:10 (Europe/Paris), lane 35 of the interface overhaul ([ui-overhaul-plan.md](ui-overhaul-plan.md), section 7) delivers requirements 2.2.1 to 2.2.9 and 2.4, decisions U8 and U11, on lane 34's one document.
+
+- **The sidebar (2.2.1, U8).** The header is gone (`shell/Header.tsx` removed). `shell/Sidebar.tsx` shows the workspace and the button that folds it, a search that opens the palette, then Tower, Inbox with its count, Sessions, and Plans with the lead's dot, each with its chord on hover. Below them, the live sessions are grouped by state ("Needs you", "Working", "In review"), and at the foot the person (Sign out), the notifications and the theme. The clock is gone. The sample-data line sits in the screen's top bar on a computer and in the top bar on a phone, so it shows in every mode. The sidebar is open from 1400 px, a rail of icons from 768 px or when folded with `[`, and below 768 px a top bar and a bottom bar of four screens. The choice `[` stores survives a reload (`cleared-v2-sidebar`). It opens only from 1400 px because the session screen lays out by the window's width: with the sidebar open at 1280 its middle column fell to about 330 px. Once lane 36 lays it out by its own width, the threshold can come down. "Tickets", a screen that does not exist yet, is not drawn; "Plans" keeps its name and its chord (G then P), and its page is titled "Plans".
+- **The main column** keeps a 56 px top bar, which every screen's sheet already assumes (the session's `100vh - 132px`, the inbox's sticky `76px`, the lead's `100dvh - 56px`). It names the screen; on a session it names the ticket and its title, as does the tab's title ("Cleared · LOCAL-161 · Upcoming: group entries by week"). A move started in the sidebar keeps the focus on the item pressed; any other move (a row, Back, Forward) gives it to the screen. Both are said in the live region.
+- **The palette (2.2.2).** Cmd-K on a Mac, Ctrl-K elsewhere, opens `shell/Palette.tsx`, built on shadcn's `Command` (`components/ui/command.tsx`, cmdk). Its groups are what needs the person (the tower's words), the gestures of the screen shown, the screens with their chords, the sessions by ticket and title, then the theme, the sheet and the sidebar. A gesture is a button the screen already draws (Take over, Give back, Go, Approve, Allow once...): the palette lists it only while it is shown and enabled, and presses it, so no gesture logic is copied. Typing a ticket's number puts that ticket's sessions first. cmdk sorts the items inside a group but does not move the groups (it looks a group up by an id that is not its `data-value`), so the palette orders its groups itself. The dialog is the shell's own, not cmdk's: cmdk's is Radix's modal Dialog, whose scroll lock injects a `<style>` the page's policy refuses. The shell's dialog keeps the focus inside, closes on Esc, on a click outside or on its button, and gives the focus back. The palette is a chunk of its own, loaded after the first draw, so the entry is 551 KB (171 KB gzip) against lane 34's 538 KB (169 KB).
+- **The keyboard (2.2.3).** One table, `shell/keys.ts`, is both what the `?` sheet lists and what the one listener reads: G then T, I, S or P (1.2 s); J, K, Enter and Esc on the rows of the screen shown (the tower's, the sessions index's, the inbox's); 1 to 4 for a session's tabs; Cmd-Enter or Ctrl-Enter to send from a field; `[`; `?`. A screen's own keys go in `SCREEN_KEYS` under its name: the sheet lists them there, and the screen binds them itself (lane 37's A, T and R). No key fires while the person types, except the palette's and the send. Nothing reaches past the terminal, where Ctrl-K is the shell's own. A key the screen handled (`preventDefault`) is left alone. `[` and `?` typed with AltGr (Ctrl and Alt on Windows, as on a French keyboard) count.
+- **The tokens (2.2.5, 2.2.8).** Each theme is three colours, a base, a contrast and an accent (light: white, #171717, #0B63CE; dark: #0C0C0D, #EDEDED, #5AA9FF), plus the share by which each neutral mixes the contrast into the base (`color-mix` in sRGB). The kit's role names and shadcn's are read from those, so every screen's sheet keeps its variables: none of the variables they use is left undefined. The scale is four spacing steps (4, 8, 16, 24 px), three text sizes (12, 14, 20 px), two weights (400, 550), a 34 px row and a 140 ms motion (0 under reduced motion; opacity and transform only). The focus ring is an outline, which forced colours keep. The light link blue and the placeholders reach 4.5:1 (lane 34's audit, P1).
+- **The tower (2.2.4, 2.2.7).** What needs the person and the live sessions are rows: a kind, a title and one line, then the ticket and the age. The rows of a list share their columns (a subgrid) and lay out by their own column's width (container queries). Below 560 px a row has two lines and keeps its line. Amber marks a waiting row once, on its kind; the card's ring, stripe and dot are gone (lane 34's art director). Live sessions come in order: waiting, working, reviewing. A row's link is named by its title and described by the rest. The column beside the list is sections, one line per fact: the lead, the plans with the schedules, what landed. An empty tower says "Nothing needs you." with no line of zeros and no empty list under it. Each empty part is one quiet row with one action where there is one thing to do: New goal for the plans, none for the sessions (the bar above starts one). A failed load offers to try again. On a phone the bar is one line, with New ticket always in view. The rows keep `li.session-card`, `.id` and `a.open`, which the proof scripts click.
+- **The lead's empty states** (`screens/lead/Lead.tsx`, these two only): "No message yet." with "Give the lead a goal", which turns the field to a goal and focuses it, and "No plan yet." with no second action.
+- **No slop (2.4).** `test/shell/tokens.test.ts` keeps any gradient out of the app's sheets but `.grace-fill`, and keeps emoji, exclamation marks and em dashes out of every catalog. It holds AA contrast for every text colour on every ground it is drawn on, in both themes, computed from `app.css` itself. The shell's rules use only the scale's sizes and weights, and the motion only opacity and transform.
+
+- **French by default (the owner's decision of 2026-10-23, relayed by the orchestrator, blocking before the merge).** `CLEARED_V2_APP_LANGUAGE` defaults to `fr` (`app/src/config.ts`; `en` when asked), and the page falls back to French when the server names no language. The README says so.
+  - The shell, the palette, the `?` sheet, the sidebar's groups and the empty states read in French. The inbox is "Réception" in the sidebar and "Boîte de réception" in the top bar, as on its own screen. The key caps read "Entrée" and "Échap". On a phone, the sample-data word is "Exemple", so the project's name fits.
+  - Two tests check it. `web/test/shell/french.test.tsx` renders the sidebar, the palette, the sheet, the tower and the lead's empty states in fr. It fails on any English sentence, or English template, of the shell's, the tower's or the lead's catalogs that French does not share. It is first run on the English shell to prove it catches it. A browser test does the same on the real page in French.
+  - Words the service or the data write (a ticket's title, a session's phrase) stay as written, as plan 2.5.6 says.
+  - The capture script takes French unless `--language en`, and the after captures are in French.
+  - The rehearsal scripts start the app without naming a language, so they now run in French. Their selectors are ids, and the one label they match on already accepts "Recommandé". Lane 38 runs them.
+
+**Tests first.** Node: `test/shell/keys.test.ts` (every shortcut in the sheet is bound and every bound key is in the sheet, on every screen, focus and modifier; the chords and their timeout; the typing, terminal and AltGr cases), `palette.test.ts` (the palette's items and their order from the cache, the gestures of the screen shown and of no other, the ticket number's rank and the groups' order), `sidebar.test.ts` (the screens and their chords, the count, the lead's dot, the sessions' groups, the widths), `tokens.test.ts`. Vitest: `web/test/tower/rows.test.tsx`, and the shell and tower tests rewritten for the sidebar and the rows. Browser: `test/shell/shell-browser.test.ts` on the fixtures source covers four cases:
+- Ctrl-K, "161" and Enter open the session in the page, with one document and no policy violation.
+- The palette lists what waits, and a gesture runs.
+- `?` and Esc open and close the sheet, and the focus comes back; the G-chords move between screens.
+- J, K and Enter walk the tower's rows and open one; `[` folds the sidebar, and the fold survives a reload.
+
+The browser job runs the new file.
+
+**Measures** (the browser job's budget test in CI mode, three runs of twenty switches, p95 each, median of three; this server, the same Chromium; `origin/v2` measured beside it in a detached worktree):
+
+| Measure | `origin/v2` (`33a0cd8`) | This branch | Budget |
+| --- | --- | --- | --- |
+| Median of the runs' p95, by round | 26.9, 26.2, 26.7 ms | 30.8, 34.8, 30.8, 27.1 ms; after the art director's round 28.7, 24.0 ms | under 100 ms |
+| Documents loaded in twenty switches | 0 | 0 | 0 |
+| Requests to the API per switch, at most | 1 | 1 | 1 |
+
+The sidebar costs about 3 to 4 ms per switch on this server. Its props are kept stable, so it draws again only when what it shows changes.
+
+**Followups the lane took.** Issue 250: F-b, the scroll's restoration stops at the person's first wheel, touch or key; F7, `#screen`'s outline and a kept session's `display` are classes, with no inline style left. Issue 227, item 1: a recipe is picked by its service and its name, so two services' recipes of one name no longer both press. The run route still names it by name only, which a later route change needs. Issue 164, the bell and the menus: the person's and the notifications' menus are Radix popovers, which close on Esc and on a click outside. Lane 34's audit for lane 35: the contrast, the focus on a switch, the focus ring in forced colours, the header's three rows at 768, the dead "Tickets", and the bar squeezed at 768. Lane 34's art director for lane 35: the focus on a sidebar item, the names of the places, the header at 768, the sample-data line, and the amber stripe.
+
+**What lane 35 touched beyond its file list, and why.**
+- `v2/app/web/lib/stack.tsx`: a kept session's `display` became a class, for issue 250 F7.
+- `v2/app/web/test/render.tsx`: the shared helper rendered the removed header.
+- `v2/app/web/test/lead/render.test.tsx`: the lead's empty state's sentence.
+- `v2/app/test/switch-budget.ts`: the sidebar's links, with the header's kept as a fallback so a "before" still measures.
+- `v2/app/test/foundation/stack-browser.test.ts`: the sidebar's links, focus kept on a sidebar move, and a window short enough for the denser tower to scroll.
+- `.github/workflows/v2.yml`: the new browser file.
+- `v2/scripts/capture-screens.ts`: the palette, the sheet and the two empty states as captures.
+
+**Impeccable.** Installed at 4.7.0 in the lane's worktree with the owner's command. Its paths are in the shared exclude file and in no commit, and the hooks the installer wrote into `.claude/settings.local.json` were emptied before any edit. `init` wrote `PRODUCT.md` from the plan, with no interview: the plan's section 6 fixes its inputs. `document` recorded the incumbent system in `DESIGN.md`; the sheets were byte for byte lane 34's, whose scan it reused.
+- `audit` scored 17 of 20. Its two P2s for this lane are fixed: the rows' link names, and AltGr. Its other P2 is lane 36's and 37's: the session and inbox screens lay out by the window's width.
+- `critique` ran its two assessments as isolated agents. The heuristics scored 26 of 40 before the fixes. The detector found only the brief's fonts and a regular expression in a test, both false positives.
+- `typeset` and `layout` ran on the tower, each an isolated assessment with the detector's type and layout scopes run apart (only the fonts again).
+- The findings taken are in the tower's and the shell's last commit before the captures:
+  - the row line lost below 560 px (P1), the phone bar (P1), and what the empty tower said twice;
+  - one name for what needs the person;
+  - the weights, one left edge, the subgrid, and the column as sections;
+  - the palette on a phone, and the lead's dot as a shape.
+- `polish` ran last, on the captures.
+- The reports, kept beside the captures and not committed: `/tmp/cleared-captures/j2/overhaul/35/audit-35.md` and `critique-35.md`.
+
+**For lanes 36 to 38.**
+- Lane 36 (session):
+  - Lay the session out by its own width, so the sidebar can open from 1200 px.
+  - Drop the screen's own crumb ("Tower / ..."): the top bar names the ticket.
+  - Send wraps beside the rail at 1280.
+  - Put the screen's controls in the top bar's `.top-actions`, which today holds only the sample-data line.
+- Lane 37 (inbox):
+  - The inbox's heading repeats the top bar.
+  - "Boîte" against "Réception" in French.
+  - Its keys go in `SCREEN_KEYS.inbox`. `walkRows` already walks `a.item`, and a key the screen handles itself (`preventDefault`) is left to it.
+- Lane 38 (polish and mobile):
+  - Preload Geist and add a metric-matched fallback face (`app/src/server.ts`).
+  - Text sizes in rem, for the person's font size.
+  - The sign-in page on the tokens.
+  - The off-scale radii and 2 px gaps the critique listed.
+  - The button's ink variant still sets 500.
+  - A per-item action panel (answer a waiting row where it stands), a visible pending G chord, keys for the gestures, and the next or previous session.
+
+**Checks.** On this server:
+- `npm run typecheck`.
+- `npm test`: 1317 node tests (1299 pass, 18 skipped, 0 fail) and 191 Vitest tests pass.
+- The browser job's seven files, run by hand with the full Chromium: 16 tests, 16 pass.
+- `npm run guard -- --base origin/v2`: nothing refused.
+- The capture script on the fixtures source: 72 files, no page error, no request off the origin, each looked at for secrets and names.
+- French: every new key is in both catalogs, which the catalog test holds. The browser tests run in English and fail on any marked key.
+- Before captures: `docs/v2/ui-overhaul/before/35/` (40 files; 39 byte for byte lane 34's "after", and the 768 lead-pill variation it logged).
+- After captures: `docs/v2/ui-overhaul/after/35/`. There are 102 files, in French, the default: the five screens; the palette on the tower, the inbox and a session; the sheet on the tower and on a session; a rail's tooltip from 768 px; and the empty tower and lead. Each is at 1440, 1280, 768 and 390, light and dark.
+
+**The art director's look** (`/tmp/cleared-reviews/35-ad.md`, a fresh session). All 17 items before the merge are taken:
+1. The palette's rows were 804 px tall over the inbox: the inbox's sheet styles a bare `.detail`. The palette's classes are prefixed now, and `test/shell/classes.test.ts` fails when a class the shell draws is styled unscoped by a screen's sheet.
+2. A typed word outranks a scatter of its letters, and the groups follow their best match: "upcoming" opens the session, not a long Knowledge title.
+3. A session offers its permission's three answers.
+4. The dialogs are taller; the sheet has two columns on a wide window; with no query, "Needs you" shows three rows.
+5. The focus goes back where it was, a field included. The shell reads it before the app behind the dialog is made inert, which took it away.
+6. The tower says what needs the person once: the heading, "Open inbox" beside it, then the rows. An empty tower has one line under its heading.
+7. On a phone the bar wraps. Ask about the code and Run a recipe are left to the palette there. At 768 px, the French chips wrapped past the bar's edge; they wrap inside it now.
+8. The lead's plan pane says what to do and offers it, as a block in its middle. Where the panes stack, the thread's action is the one shown.
+9. The sign-in page is on the tokens, and the phone's field size is a token (`--text-input`). The token test reads every size and weight of `app.css` and `tower.css`.
+10. The screens' own headings and the session's crumb ("Tower / ...") repeat the top bar. They are lanes 36's and 37's to drop, listed above.
+11. The sidebar is open from 1400 px, not 1280, for the reason given above: the session's middle column. The rail keeps every name, in its tooltips.
+12. The rail's icons, and the open sidebar's icon-only buttons, show an instant tooltip with their name and chord (opacity and transform, 140 ms), in place of the native `title`.
+13. On hover the chord shows before the count, which stays.
+14. The lead's state is in words at the sidebar's foot ("The lead is on"), and in the Plans tooltip.
+15. "Needs you" is the one name, in the tower, the sidebar and the palette. The plan's 2.3.3 says "Waiting for you"; this entry replaces it.
+16. English writes "45%". The no-break space of `plan_cost_total` was never lost: my rewrite had written it as the character, and it is the `\u00a0` escape again.
+17. The new captures are in the after set.
+
+**Beyond the file list in this round.** `app/src/config.ts`, `web/main.tsx` and `v2/README.md` for the French default. `app/messages/inbox.en.json`, `app/messages/ask.en.json` and their tests (`web/test/inbox/plan.test.tsx`, `web/test/ask/render.test.tsx`, `app/test/ask/model.test.ts`) for "45%": the inbox's plan-panel keys must equal the lead's, a test holds them alike. `app/test/main.test.ts`, for the default.
+
+- Pull request: 252, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-ui-shell`.
+
 ## 2026-10-23: the session view follows the ticket, the handover row, the intent sentences, the step rows (the author's choices, lane 36, `v2-j2-ui-session-continuity`)
 
 **Decision.** On 2026-10-23 between 01:40 and 03:30 (Europe/Paris), lane 36 of the interface overhaul ([ui-overhaul-plan.md](ui-overhaul-plan.md), section 7) delivers requirements 2.3.1 to 2.3.4 and decisions U6 and U7 on the session screen, the intent function lane 37 will use, and the session items the art director of lane 34 left for this lane.
