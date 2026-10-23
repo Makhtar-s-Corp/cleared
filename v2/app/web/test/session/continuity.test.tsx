@@ -180,6 +180,8 @@ test('the whole ticket folds an ended session a later one followed into one row,
   assert.equal(fold?.[1], ENVELOPE_AUTHOR_ID);
   assert.match(fold?.[2] ?? '', /^Author · Opus · \d+ steps$/);
   assert.ok(markup.indexOf('class="earlier"') < markup.indexOf('data-row="handover"'), 'folded above the handover row');
+  // The handover row says whose session starts, for a reader of the page (the proof scripts, lane 38).
+  assert.match(markup, /<p class="handover" data-row="handover" data-session="[^"]+" data-role="reviewer">/);
   assert.doesNotMatch(html(<Timeline view={{ ...view, unfolded: new Set([ENVELOPE_AUTHOR_ID]) }} t={en} />), /class="earlier"/, 'seen live: never folded under the person\'s eyes');
   assert.doesNotMatch(html(<Timeline view={{ ...view, filter: 'author' }} t={en} />), /class="earlier"/);
   assert.match(html(<Timeline view={view} t={fr} />), /Auteur · Opus · \d+ étapes/);

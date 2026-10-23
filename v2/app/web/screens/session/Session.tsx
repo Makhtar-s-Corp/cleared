@@ -266,7 +266,7 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile }: {
 }
 
 export function HandoverRow({ handover, t }: { readonly handover: Handover; readonly t: Translate }) {
-  return <p className="handover" data-row="handover" data-session={handover.session}><span>{handoverLine(handover, t)}</span></p>;
+  return <p className="handover" data-row="handover" data-session={handover.session} data-role={handover.role}><span>{handoverLine(handover, t)}</span></p>;
 }
 
 // The thread of the ticket: each session's rows under its own view (its
