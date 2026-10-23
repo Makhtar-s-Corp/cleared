@@ -3917,8 +3917,12 @@ The LATER items are in the pull request's body as follow-ups.
 - **The modules start at start** (P62). The flow's engine, and with it the restart recovery and the release above, was built on the first request, so nothing ran until the app called the API. `Module` gets an optional `start(registry)`. `assemble` gives `App.start`, which `main.ts` calls once the service listens: one line, written down at the top of `main.ts` as the earlier exceptions are. The flow module builds its engine. The lead module builds the lead and its plans, as a lead route does, so the scheduler no longer waits for the app either (P33's followup). A test starts the real service over a ledger with a ticket left In Progress and sees it in Todo with no request made; with the start call removed, that test fails.
 - **The rehearsal** follows the real setup. Its bare copies have `proof-base` and a `proof-run` that an earlier run moved on. Its workspace and its two stand-in brokers (`startBroker`'s new `base` option, `main` when absent) name `proof-run`, and the proof recreates the run branch before ticket 1. Its ports stay 9700 to 9799.
 
+**Runs.** The multi rehearsal (`PROOF_REHEARSAL=1`, bare copies in a temporary folder, ports 9700 to 9799, the demo untouched) passed 12 of 12 twice in a row on 2026-10-23.
+- In the first run, each run branch was recreated at its `proof-base`, which `result.json` records, and the bare copies' main did not move. Ticket 3's question was answered "From 0 (Recommended)", the second option, and recorded.
+- In the second run, an earlier run had left ticket 1 Done with a knowledge item waiting and ticket 2 waiting for its approval. Both were set aside through the app before ticket 1: the first stayed Done, the second went back to Todo, and both items were settled by the owner account.
+
 **Not done here.**
-- The proof was not run: no disposable run branch exists yet on the proof repositories, and the demo stays as it is.
+- The real proof was not run: no disposable run branch exists yet on the proof repositories, and the demo stays as it is.
 - The message when Docker's pool is full (issue 265's third item) is a followup; the doctor's `pool` section says how much is left.
 - Two real runs in a row with the same score (P51) wait for the one-time setup.
 
