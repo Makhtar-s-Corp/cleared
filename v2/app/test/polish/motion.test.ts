@@ -22,3 +22,14 @@ test('what waits has a ring, not a glow, in both themes', () => {
 test('paragraphs and list items wrap pretty', () => {
   assert.match(SHEET, /p, li, dd \{ text-wrap: pretty; \}/);
 });
+
+test('the shared visually hidden class is the app sheet\'s only, not redefined by a screen (Impeccable\'s document, lane 38)', async () => {
+  const { readdirSync } = await import('node:fs');
+  const screens = new URL('../../web/screens/', import.meta.url);
+  for (const screen of readdirSync(screens)) {
+    if (screen === 'inbox') continue;   // lane 37's sheet, beside lane 38
+    for (const name of readdirSync(new URL(`${screen}/`, screens)).filter((n) => n.endsWith('.css'))) {
+      assert.doesNotMatch(readFileSync(new URL(`${screen}/${name}`, screens), 'utf8'), /\.sr-only\s*\{/, `${screen}/${name}`);
+    }
+  }
+});

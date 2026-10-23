@@ -6,7 +6,6 @@
 :root { --ok-text: #15803D; --ok-surface: #F2FBF5; --awaiting-outline: rgba(245,166,35,.55); }
 :root[data-theme="dark"] { --ok-text: var(--success); --ok-surface: rgba(61,208,104,.12); --awaiting-outline: rgba(245,166,35,.5); }
 
-.lead-screen .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 .lead-screen { display: grid; grid-template-columns: minmax(0, 1fr) clamp(420px, 42vw, 600px); gap: 20px; align-items: stretch; height: calc(100dvh - 56px); padding: 20px 28px; }
 .lead-screen[aria-busy="true"] { min-height: 240px; }
