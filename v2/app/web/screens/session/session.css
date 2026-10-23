@@ -8,6 +8,12 @@
 
 
 .session { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 18px; padding: 16px 28px 24px; align-items: start; }
+/* The Editor open on a wide screen (lane 38, the critique): the ticket's column steps aside and the diff takes its
+   width, as a review pane would; Changes and Checks stay on the right. */
+@container screen (min-width: 1160px) {
+  .session:has(#tab-editor-button[aria-selected="true"]) { grid-template-columns: minmax(0, 1fr) 300px; }
+  .session:has(#tab-editor-button[aria-selected="true"]) > .s-left { display: none; }
+}
 /* The screen's own width decides the columns, since the sidebar (lane 35) takes
    its share of the window, open or folded: three from 1160 px, then two. */
 #screen:has(> [data-session-view] .session, > .session) { container: screen / inline-size; }
