@@ -4062,21 +4062,30 @@ Run 5's reviewer request stays allowed.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-driver-review`.
 
-## 2026-10-23: Owner decision: the demo stopped and the 48-hour proof launched (step C)
+## 2026-10-23: Owner decision: the demo stopped and the 48-hour proof launched; the run stopped at step 04
 
-**Decision.** On 2026-10-23 at 18:49 (Europe/Paris) the owner approved, in writing: « Go, coupe la démo et lance la 48 h ». This lifts the cancellation of step C ordered at 08:12 the same day. Step C, as planned: stop the demo, restart the proof service in one-service mode, check that the inbox holds nothing the 48-hour proof's morning rule would answer, then launch the 48-hour proof ([milestone-2-plan.md](milestone-2-plan.md), section 2.1).
+**Decision.** On 2026-10-23 at 18:49 (Europe/Paris) the owner approved, in writing: « Go, coupe la démo et lance la 48 h ». The ops requests call this step C. It is defined there, not in this repository: stop the demo, restart the proof service in one-service mode, check that the inbox holds nothing the 48-hour proof's morning rule would answer, then launch the 48-hour proof. That proof is the one in [milestone-2-plan.md](milestone-2-plan.md), section 2.1.
 
-**What was done**, by the ops session:
-- The last multi-service run (12/12, on `5ad2da2`) left two release cards waiting: LOCAL-31 (the blocked train of step 10) and LOCAL-32 (the takeover's card of step 11). Both were set aside (`POST /api/tickets/:id/set-aside`): their trains halted, nothing approved or merged. LOCAL-13, LOCAL-15 and LOCAL-16 were not touched and stay in Todo. No lead plan holds them, so the night cannot start them and the morning has nothing of theirs to approve.
-- The demo (8796 to 8799) was stopped with its `stop.sh` (proxy, app, service). Its lead session's two containers, labelled `cleared.dev=v2`, were removed by name, without their volumes. Its two networks were kept. Nothing was pruned.
-- The proof service was restarted in one-service mode on Cleared `5ad2da2`, the head of v2. A signed-in read of `/api/workspace` shows one service, with base `proof-run`. The guestbook's release broker merges into `origin/proof-run`, and its deploy watcher deploys `proof-run`. The guard was clean.
-- The 48-hour proof's driver was launched at 18:54 (Europe/Paris), and the goal was sent at 18:54:11. The morning rule starts on 2026-10-24 at 08:00 (CEST). The lead's memory is read at the end, on 2026-10-25 at 17:54 (CET): summer time ends during the run.
+**What was done**, by the ops session (times in Europe/Paris):
+- At 18:53, the ops session set aside two release cards that the last multi-service run (12/12, on `5ad2da2`, the head of v2) had left waiting. They were LOCAL-31 (the blocked train of step 10) and LOCAL-32 (the takeover's card of step 11), and they went through `POST /api/tickets/:id/set-aside`. Their trains halted, and nothing was approved or merged. LOCAL-13, LOCAL-15 and LOCAL-16 were not touched and stay in Todo. No lead plan holds them.
+- At 18:53, the demo (8796 to 8799) was stopped with its `stop.sh` (proxy, app, service). Its lead session's two containers, labelled `cleared.dev=v2`, were removed by name, without their volumes. Its two networks were kept. Nothing was pruned.
+- At 18:53, the proof service was restarted in one-service mode on Cleared `5ad2da2`, the head of v2. A signed-in read of `/api/workspace` shows one service, with base `proof-run`. The guestbook's release broker merges into `origin/proof-run`, and its deploy watcher deploys `proof-run`. The guard was clean.
+- At 18:54, the 48-hour proof's driver was launched. The goal was sent at 18:54:11.
 
-**Consequences.**
-- The demo stays down for the 48 hours. Restarting it after the run is a new decision.
+**Consequences, as planned at the launch** (the Outcome below replaces them):
+- The demo would stay down for the 48 hours.
+- The morning rule would start on 2026-10-24 at 08:00 (CEST). The lead's memory would be read at the end, on 2026-10-25 at 17:54 (CET), because summer time ends during the run.
+- The morning rule answers every waiting item, whatever its ticket. The guard protects only the launch, so the only items expected were the run's own.
 - Nothing is pushed to the main branch of either proof repository: their heads are still `2127dd2` (filter API) and `0d7fbb5` (guestbook). The run merges into `proof-run` and rolls back there only.
-- The morning rule answers every waiting item, whatever its ticket. The guard protects only the launch. The only items expected are the run's own.
 - At the launch, 10 of Docker's 31 address-pool subnets were free. Two sets of networks are kept until a decision: the empty pair of session `abccbe43`, and the demo lead's pair.
-**Outcome.** The run stopped at step 04 (approve), at 19:04 (Europe/Paris): 4 steps ok, 5 skipped, 1 failed. The plan was approved and its five tickets created (LOCAL-33 to LOCAL-37), but none started. Each is held with the note « The flow could not start: guestbook is not a service of workspace cleared-example-guestbook ». The ledger's `services` table still lists the services of the multi-service workspace (`guestbook`, `filter-api`), written while the service ran on the workspace file. The lead's plan store reads that table (`src/lead/plans/store.ts`, `services()`), so each ticket is given the service `guestbook`. In one-service mode, though, the workspace's only service is named after the project, `cleared-example-guestbook` (`src/workspace/config.ts`), and the flow refuses the ticket. The 48-hour proof is not running. Relaunching it needs a code fix or a new decision. The demo stays stopped until then.
+
+**Outcome.**
+
+- **Result.** The run stopped at step 04 (approve), at 19:04: 4 steps ok, 5 skipped, 1 failed. The plan was approved and its five tickets were created (LOCAL-33 to LOCAL-37), but none started. Each is held with the note « The flow could not start: guestbook is not a service of workspace cleared-example-guestbook » (`v2/src/flow/engine.ts:302`). The 48-hour proof is not running. Nothing was pushed to any main.
+- **Cause.** The ledger's `services` table still lists the services of the multi-service workspace (`guestbook`, `filter-api`), written while the service ran on the workspace file. The lead's plan store reads that table (`v2/src/lead/plans/store.ts:97`, `services()`). An item that names no service gets the first one, so each ticket is given the service `guestbook` (`v2/src/lead/plans/store.ts:58`, `itemServices`). In one-service mode, though, the workspace's only service is named after the project, `cleared-example-guestbook` (`v2/src/workspace/config.ts:103`, `serviceNameOf`, used by `v2/src/flow/config.ts:159`). The flow therefore refuses every ticket.
+- **Next.**
+  - The owner decided at 19:19 that the fix is made in the lane `j2-single-service-fix`.
+  - Before the relaunch, the ops session puts LOCAL-33 to LOCAL-37 back in a clean state. Left as they are, the relaunch would find an approved plan holding those tickets, and the morning rule would answer whatever of theirs is waiting.
+  - The demo stays stopped.
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h`. Nothing was pushed to any main.
