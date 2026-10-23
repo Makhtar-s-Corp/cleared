@@ -53,7 +53,9 @@ test('the terminal\'s frame: opening, open with its size, and the host the termi
   assert.ok(visibleText(open).some((line) => line.includes('100 × 30')), 'the size the shell has');
   // One line under the terminal; what is journaled is its title (lane 36's art director).
   assert.match(open, /title="Each line you type is journaled; what it prints is not kept\."/);
-  assert.doesNotMatch(open.replace(/<[^>]*>/g, ' '), /journaled/, 'not a line of its own');
+  assert.doesNotMatch(open.replace(/<span class="sr-only">[^<]*<\/span>/g, '').replace(/<[^>]*>/g, ' '), /journaled/, 'not a line of its own');
+  // Read out too, since a title is reached by hover only (review of 251, item 3).
+  assert.match(open, /<span class="sr-only">Each line you type is journaled; what it prints is not kept\.<\/span>/);
   assert.doesNotMatch(open, /data-act="terminal_open"/, 'no Open again while open');
   for (const markup of [opening, open]) noInlineStyle(markup);
 });

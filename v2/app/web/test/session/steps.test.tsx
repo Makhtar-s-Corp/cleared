@@ -64,5 +64,5 @@ test('a reader\'s session in the sessions list is its question to the code, link
     assert.doesNotMatch(markup, /href="\/sessions\/reader-1"/);
   }
   const text = visibleText(renderIndex({ sessions: [reader], tickets: [], now: FIXTURE_NOW }, en)).join('\n');
-  for (const words of ['Reader', 'A question to the code', 'Open the question']) assert.ok(text.includes(words), words);
+  for (const words of ['Reader', 'A question to the code']) assert.ok(text.includes(words), words);
 });

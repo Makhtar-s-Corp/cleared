@@ -375,6 +375,12 @@ function Shell({ shared }: { readonly shared: Shared }) {
   const onPick = useCallback((href: string) => { fromSidebar.current = href !== location.pathname; }, []);
 
   const lastRow = useRef<HTMLElement | null>(null);
+  // The pointer used: Enter no longer opens the row the keys last walked to (review of 252, item 2).
+  useEffect(() => {
+    const forget = () => { lastRow.current = null; };
+    addEventListener('pointerdown', forget, true);
+    return () => removeEventListener('pointerdown', forget, true);
+  }, []);
   const runKey = useCallback((action: Action) => {
     switch (action.kind) {
       case 'palette': openPalette(); break;

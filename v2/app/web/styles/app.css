@@ -300,16 +300,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .lead-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .thread-start { list-style: none; }
 
-/* the sessions index's cards (screens/session), drawn as the tower drew its sessions before lane 35 */
-.index .sessions { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-.index .session-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: 10px; background: var(--surface); box-shadow: var(--e-card); min-width: 0; }
-.index .session-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
-.index .session-head .role { color: var(--text-secondary); font-weight: var(--weight-strong); }
-.index .session-head .id { margin-left: auto; }
-.index .session-title { font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; overflow-wrap: anywhere; }
-.index .phrase { margin-top: auto; padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); font-size: var(--text-md); overflow-wrap: anywhere; }
-.index .session-foot { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
-.index .open { margin-left: auto; white-space: nowrap; }
 .live { width: 7px; height: 7px; border-radius: 50%; background: var(--stage-progress); box-shadow: 0 0 0 3px var(--halo-progress); flex: none; animation: pulse 2.4s ease-in-out infinite; }
 .live.review { background: var(--stage-review); box-shadow: 0 0 0 3px var(--halo-review); }
 .live.waiting { background: var(--awaiting); box-shadow: 0 0 0 3px rgba(245,166,35,.18); animation: none; }
@@ -334,9 +324,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .login-error { margin-bottom: var(--space-3); padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); color: var(--danger-text); font-size: var(--text-md); }
 
 /* tablet and phone */
-@media (max-width: 1023px) {
-  .index .sessions { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 767px) {
   /* The sidebar becomes the top bar (the workspace, search, the person) and its screens a bar at the foot. */
   .app, .app[data-sidebar="rail"] { display: block; padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom)); }

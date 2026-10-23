@@ -174,13 +174,21 @@ test('a ticket that did not load still shows the session, and one with no checkl
   assert.ok(visibleText(none).includes('Only a description.'));
 });
 
-test('the sessions index lists the sessions with their ticket title, and says when there are none', () => {
+test('the sessions index lists one row per session, named by its ticket\'s title, and says when there are none', () => {
   const fixture = sessionFixture(FIXTURE_NOW);
   const html = renderIndex({ sessions: fixture.sessions, tickets: [fixture.ticket], now: FIXTURE_NOW }, en);
   const text = visibleText(html);
-  assert.ok(text.includes(TICKET_TITLE) && text.includes('Paused, waiting for you') && text.includes('Open session'));
-  assert.match(html, /href="\/sessions\/fixture-author"/);
-  assert.ok(visibleText(renderIndex({ sessions: [], tickets: [], now: FIXTURE_NOW }, en)).includes('No session yet. Move a ticket to Todo and one starts.'));
+  assert.ok(text.includes(TICKET_TITLE) && text.includes('Paused, waiting for you'));
+  // A row, as the tower's (lane 38, the art director of lane 36): the row is the link, with no "Open session" beside it.
+  assert.ok(!text.includes('Open session'));
+  const row = /<li class="session-card" data-phase="[a-z_]+"><a class="open index-row" href="\/sessions\/fixture-author" data-row="true" aria-labelledby="([^"]+)"[^>]*>/.exec(html);
+  assert.ok(row, 'the row is the link');
+  assert.match(html, new RegExp(`<span class="session-title" id="${row[1]}">${TICKET_TITLE}</span>`));
+  assert.match(html, /<span class="id">LOCAL-161<\/span>/, 'the ticket\'s number, which the proof scripts read');
+  assert.match(html, /<h1 class="index-head">Sessions <span class="n">\d+<\/span><\/h1>/);
+  const empty = renderIndex({ sessions: [], tickets: [], now: FIXTURE_NOW }, en);
+  assert.deepEqual(visibleText(empty).filter((line) => line !== 'Sessions'), ['No session yet.', 'One starts when a ticket moves to Todo.', 'New ticket']);
+  assert.match(empty, /<div class="empty-state block">/);
   assert.equal(USER.length > 0, true);
 });
 

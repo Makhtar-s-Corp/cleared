@@ -32,7 +32,7 @@
 .checks summary::-webkit-details-marker { display: none; }
 .checks summary:hover .caret { color: var(--text-muted); }
 .checks summary:hover .check-name { color: var(--text); text-decoration: underline; text-decoration-color: var(--dashed); text-underline-offset: 3px; }
-.checks summary .caret { margin-left: auto; color: var(--text-faint); transition: transform 120ms var(--ease); }
+.checks summary .caret { margin-left: auto; color: var(--text-faint); transition: transform var(--motion) var(--ease); }
 .checks details[open] > summary .caret { transform: rotate(90deg); }
 .checks .command { margin: 6px 0 2px 16px; }
 .light { width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; flex: none; background: var(--placeholder); }
@@ -47,7 +47,6 @@
 .changes .add, .changes .del { font-family: var(--mono); }
 .changes .link-button { min-height: 24px; text-align: left; color: var(--text); }
 .changes .link-button:hover { color: var(--link); }
-.empty-box { padding: 12px; border: 1px dashed var(--dashed); border-radius: 8px; color: var(--text-faint); font-size: var(--text-md); line-height: 1.5; }
 
 /* the conversation */
 .panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 96px); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; }
@@ -64,7 +63,6 @@
 .panel-head .meta { font-size: var(--text-sm); color: var(--text-faint); }
 .panel-head .takeover-button { min-height: 30px; padding: 0 12px; }
 .timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px; font-size: var(--text-md); }
-.timeline .empty { margin: 8px 0; }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: 8px; padding: 6px 0; }
 .row time { padding-top: 1px; font-size: var(--text-sm); color: var(--text-faint); }
 .glyph { color: var(--text-faint); text-align: center; }
@@ -79,11 +77,12 @@
 /* A step of the thread (lane 36, a worklog's row): the row is its summary,
    the detail opens under its text column. */
 details.row { display: block; padding: 0; }
-details.row > summary { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr) 14px; gap: 8px; padding: 6px 0; list-style: none; cursor: pointer; border-radius: 6px; }
+details.row > summary { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr) 14px; gap: 8px; margin-inline: -4px; padding: 6px 4px; list-style: none; cursor: pointer; border-radius: 6px; }
 details.row > summary::-webkit-details-marker { display: none; }
-details.row > summary:hover { background: var(--tab-fill); box-shadow: 0 0 0 4px var(--tab-fill); }
+/* The hover fills the row inside its own box (lane 36's art director: a ring outside it clipped on the first row). */
+details.row > summary:hover { background: var(--tab-fill); }
 /* The caret says a row opens: always there, quiet until the row is pointed at. */
-details.row > summary .caret { margin-top: 3px; color: var(--text-faint); transition: color 120ms var(--ease), transform 120ms var(--ease); }
+details.row > summary .caret { margin-top: 3px; color: var(--text-faint); transition: transform var(--motion) var(--ease); }
 details.row > summary:hover .caret, details.row > summary:focus-visible .caret, details.row[open] > summary .caret { color: var(--text-muted); }
 details.row[open] > summary .caret { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { details.row > summary .caret, .checks summary .caret, .earlier > summary .caret { transition: none; } }
@@ -92,10 +91,10 @@ details.row .what { display: flex; flex-wrap: wrap; align-items: baseline; colum
 details.row .what > .sub { margin: 0 0 0 auto; }
 /* An ended session a later one followed: one row until it is opened. */
 .earlier { margin: 4px 0; }
-.earlier > summary { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 52px; list-style: none; cursor: pointer; border-radius: 6px; color: var(--text-secondary); font-size: var(--text-md); }
+.earlier > summary { display: flex; align-items: center; gap: 8px; margin-inline: -4px; padding: 6px 4px 6px 56px; list-style: none; cursor: pointer; border-radius: 6px; color: var(--text-secondary); font-size: var(--text-md); }
 .earlier > summary::-webkit-details-marker { display: none; }
-.earlier > summary:hover { background: var(--tab-fill); box-shadow: 0 0 0 4px var(--tab-fill); }
-.earlier > summary .caret { color: var(--text-faint); transition: transform 120ms var(--ease); }
+.earlier > summary:hover { background: var(--tab-fill); }
+.earlier > summary .caret { color: var(--text-faint); transition: transform var(--motion) var(--ease); }
 .earlier[open] > summary .caret { transform: rotate(90deg); }
 .step-detail { margin: 2px 0 8px 72px; display: grid; gap: 6px; font-size: var(--text-sm); }
 .command, .output { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--sunken); font: var(--weight-regular) var(--text-sm)/1.55 var(--mono); overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -142,7 +141,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .composer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .composer input { flex: 1 1 200px; min-width: 0; height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); }
 .composer input::placeholder { color: var(--text-faint); }   /* 4.5:1 at least in both themes (lane 36's audit) */
-.composer input:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
+.composer input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .composer input:disabled { background: var(--sunken); }
 .composer .btn { min-height: 40px; }
 .composer-note { margin-top: 8px; font-size: var(--text-sm); color: var(--text-secondary); }
@@ -185,7 +184,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .plan-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .plan-change { display: grid; gap: 6px; margin-top: 12px; }
 .plan-change textarea { min-height: 76px; padding: 8px 10px; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: vertical; }
-.plan-change textarea:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
+.plan-change textarea:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .plan-note { margin-top: 8px; font-size: var(--text-sm); color: var(--text-secondary); }
 .plan-note:empty { display: none; }
 .go-line { display: flex; align-items: center; gap: 6px; margin-top: 14px; color: var(--ok-text); font-size: var(--text-md); }
@@ -286,8 +285,36 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .browser iframe { flex: 1; width: 100%; min-height: 480px; border: 0; border-radius: 8px; background: #FFFFFF; box-shadow: var(--e-outline); }
 .browser-empty { padding: 14px 16px; }
 
-.index { padding: 20px 28px 40px; display: flex; flex-direction: column; gap: 16px; }
-.index h1 { font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -.03em; line-height: 1.2; }
+/* The sessions index (lane 38): rows as the tower's, a role, the title and its phrase, then the model, the
+   ticket and the age, their columns shared by every row (a subgrid), laid out by the list's own width. */
+.index { container: index / inline-size; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); }
+.index-head { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
+.index-head .n { color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.index .sessions { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; column-gap: var(--space-3); list-style: none; margin: 0 calc(-1 * var(--space-2)); padding: 0; }
+.index .sessions > li { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+.index .sessions > li + li { border-top: 1px solid var(--hairline); }
+.index-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: var(--row); padding: var(--space-1) var(--space-2); border-radius: var(--radius); color: var(--text); font-size: var(--text-md); }
+.index-row:hover { background: var(--tab-fill); text-decoration: none; }
+.index-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; background: var(--selected); }
+.index-kind { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-secondary); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; }
+.index-main { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.index-main .session-title { flex: 0 1 auto; max-width: 70%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.index-main .phrase { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.index-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-3); color: var(--text-faint); font-size: var(--text-sm); white-space: nowrap; }
+.index-meta .model { display: inline-flex; align-items: center; gap: var(--space-2); }
+.index-meta .elapsed { min-width: 40px; text-align: right; }
+@container index (max-width: 720px) {
+  .index-meta .model { display: none; }
+}
+@container index (max-width: 560px) {
+  .index .sessions { display: block; }
+  .index-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main main" "kind meta"; row-gap: var(--space-1); min-height: 44px; padding: var(--space-2); }
+  .index-main { grid-area: main; flex-direction: column; align-items: stretch; gap: 2px; }
+  .index-main .session-title { max-width: none; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .index-main .phrase { flex: none; }
+  .index-kind { grid-area: kind; }
+  .index-meta { grid-area: meta; }
+}
 
 @media (max-width: 1439px) {
   .cm-host .cm-editor { max-height: max(240px, calc(100vh - 540px)); }
@@ -364,7 +391,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .editing-actions .btn { flex: 1 1 auto; }
   .edit-button { flex: 1 1 100%; min-height: 44px; }
   .browser { padding: 12px 8px; }
-  .index { padding: 20px 16px 32px; }
+  .index { padding: var(--space-3); }
 }
 @media (max-width: 479px) {
   .view-tab svg { display: none; }

@@ -12,9 +12,9 @@
 [data-choices-state] .choice-header { background: var(--tab-fill); color: var(--text-muted); }
 .choice-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .choice-options:has(.choice-desc) { display: grid; }   /* options that explain themselves read one per row */
-.choice { display: grid; grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: baseline; align-content: center; gap: 2px 8px; min-height: 36px; max-width: 100%; padding: 7px 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font: inherit; text-align: left; transition: box-shadow 150ms var(--ease, ease); }
+.choice { display: grid; grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: baseline; align-content: center; gap: 2px 8px; min-height: 36px; max-width: 100%; padding: 7px 12px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font: inherit; text-align: left; }
 .choice:hover:not(:disabled) { background: var(--surface); box-shadow: 0 0 0 1px var(--text-muted); }
-.choice:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--link); }
+.choice:focus-visible { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .choice[aria-pressed="true"] { box-shadow: 0 0 0 1.5px var(--ink); }
 .choice:disabled { opacity: .6; }
 .choice-label { font-weight: var(--weight-strong); }
@@ -22,7 +22,7 @@
 .choice-desc { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
 .choice-free { display: grid; gap: 6px; color: var(--text-muted); font-size: var(--text-sm); }
 .choice-free-input { height: 40px; padding: 0 12px; border-radius: 8px; background: var(--surface); box-shadow: var(--choice-field-ring); color: var(--text); font: inherit; font-size: var(--text-md); }
-.choice-free-input:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
+.choice-free-input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .choice-free-input:disabled { opacity: .6; }
 .choice-note { color: var(--danger-text); font-size: var(--text-sm); }
 .choice-actions { display: flex; justify-content: flex-end; margin-top: 2px; }
@@ -44,4 +44,3 @@
   .choice-free-input, .choice-send { min-height: 44px; }
   .choice-send { width: 100%; }
 }
-@media (prefers-reduced-motion: reduce) { .choice { transition: none; } }

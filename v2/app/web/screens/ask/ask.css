@@ -29,7 +29,7 @@
 .ask-total { text-wrap: pretty; margin: 14px 2px 0; color: var(--text-muted); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
 
 .ask-follow { margin-top: 24px; padding: 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
-.ask-follow textarea { display: block; width: 100%; min-height: 72px; padding: 10px 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: none; outline: none; }
+.ask-follow textarea { display: block; width: 100%; min-height: 72px; padding: 10px 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: none; outline: 2px solid transparent; }
 .ask-follow textarea::placeholder { color: var(--placeholder); }
 .ask-follow textarea:focus-visible { box-shadow: 0 0 0 1px var(--ink); }
 .follow-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }

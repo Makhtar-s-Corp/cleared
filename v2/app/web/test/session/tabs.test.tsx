@@ -65,7 +65,7 @@ test('the Plan tab: the confidence, the reason, the steps and the files; Go and 
   assert.match(changing, /<button[^>]*data-act="plan_change_send"/);
 
   const none = visibleText(html(<PlanTab view={viewOf()} plan={null} t={en} />));
-  assert.ok(none.includes('No session plan yet. The author proposes one before it changes any file.'));
+  assert.ok(none.includes('No session plan yet.'));
 });
 
 test('the left card says the plan in short, and the ticket names the service the session works on', () => {

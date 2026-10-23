@@ -153,6 +153,14 @@ test('J, K and Enter walk the tower\'s rows and open one, in the page', { skip }
     assert.equal(await focused(), rows[2]);
     await page.keyboard.press('k');
     assert.equal(await focused(), rows[1]);
+    // The pointer used since: Enter opens nothing the person walked away from (review of 252, item 2).
+    await page.locator('#top-bar .here').click();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+    assert.equal(page.url(), `${base}/`, 'Enter opens nothing once the pointer was used');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    assert.equal(await focused(), rows[1]);
     await page.keyboard.press('Enter');
     await page.waitForURL(`${base}${rows[1]}`);
     assert.ok(await marked(page), 'opened in the page');

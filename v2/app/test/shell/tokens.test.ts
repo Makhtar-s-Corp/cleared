@@ -125,7 +125,9 @@ test('four spacing steps, three text sizes and two weights, and every sheet of t
 });
 
 test('transitions are short and move only opacity and transform, and stop for reduced motion', () => {
-  const durations = [...SHEET.matchAll(/transition:\s*([^;}]+)/g)].map((m) => m[1]!);
+  // Every sheet of the app (lane 38), the inbox's once lane 37 has merged.
+  const sheets = files(WEB, /\.css$/).filter((file) => !PENDING.has(file.slice(WEB.length))).map((file) => readFileSync(file, 'utf8'));
+  const durations = sheets.flatMap((sheet) => [...sheet.matchAll(/transition:\s*([^;}]+)/g)].map((m) => m[1]!)).filter((value) => value !== 'none');
   for (const value of durations) {
     for (const part of value.split(',')) {
       assert.match(part.trim(), /^(opacity|transform) var\(--motion\)/, `transition: ${value}`);
@@ -133,6 +135,16 @@ test('transitions are short and move only opacity and transform, and stop for re
   }
   assert.match(LIGHT.get('--motion') ?? '', /^(1[2-5]\d|160)ms$/);
   assert.match(SHEET, /@media \(prefers-reduced-motion: reduce\) \{[^]*--motion: 0ms/);
+});
+
+test('no sheet takes the focus ring away: a field\'s own ring keeps a transparent outline, which forced colours draw', () => {
+  // The main region and the dialogs take the focus without a ring (they are not controls); the palette's field sits in its dialog.
+  const RINGLESS = new Set(['.screen:focus', '.dialog:focus', '.palette-input input']);
+  for (const file of files(WEB, /\.css$/)) {
+    if (PENDING.has(file.slice(WEB.length))) continue;
+    const sheet = readFileSync(file, 'utf8').replace(/\/\*[^]*?\*\//g, '');
+    for (const match of sheet.matchAll(/([^{}]+)\{[^}]*(?<![-\w])outline:\s*(?:none|0)\b/g)) assert.ok(RINGLESS.has(match[1]!.trim()), `${file}: ${match[1]!.trim()} has no outline`);
+  }
 });
 
 function files(dir: string, ext: RegExp): string[] {

@@ -21,7 +21,7 @@
 // changed file for editing (decision 33). Both packages load by a dynamic
 // import (lane 32).
 import {
-  ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, WarningCircle, X, type Icon,
+  ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { ConfirmableRule, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
@@ -36,7 +36,8 @@ import {
 import { harnessName, terminalChoice } from '@/components/terminal/model.ts';
 import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
-import { useScreen } from '@/lib/context.tsx';
+import { useGo, useScreen } from '@/lib/context.tsx';
+import { Empty } from '@/shell/Empty.tsx';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -278,7 +279,7 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile }: {
   const filter = view.filter ?? 'all';
   const entries = ticketThread(parts, filter);
   const views = new Map(parts.map((part) => [part.summary.id, part.summary.id === view.summary.id ? view : { ...view, summary: part.summary, thread: part.thread ?? emptyThread(part) }]));
-  if (entries.length === 0) return <p className="empty">{t('timeline_empty')}</p>;
+  if (entries.length === 0) return <Empty block icon={ChatText} text={t('timeline_empty')} />;
   const row = (entry: Extract<ThreadEntry, { kind: 'row' }>, index: number) => {
     const key = 'id' in entry.row ? `${entry.session}:${entry.row.kind}:${entry.row.id}` : `${entry.session}:${entry.row.kind}:${entry.row.at}:${index}`;
     return <RowView key={key} row={entry.row} view={views.get(entry.session) ?? view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} />;
@@ -410,7 +411,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
           </>
         )}
       </section>
-      <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="empty-box">{t('screen_empty')}</p></section>
+      <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="faint small">{t('screen_empty')}</p></section>
     </>
   );
 }
@@ -438,35 +439,41 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
   );
 }
 
-export function SessionIndex({ sessions, tickets, now, t }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate }) {
+export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate; readonly onNew?: () => void }) {
   const titles = new Map(tickets.map((ticket) => [ticket.id, ticket.title]));
   const minutes = (from: string) => Math.max(0, Math.floor((now.getTime() - Date.parse(from)) / 60_000));
-  // One card per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
+  // One row per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
   const tickets_ = new Set(sessions.filter((s) => s.role === 'author' || s.role === 'reviewer').map((s) => s.ticket));
   const shown = [
     ...sessions.filter((s) => s.role !== 'author' && s.role !== 'reviewer'),
     ...[...tickets_].flatMap((ticket) => { const own = ticketSessions(sessions, ticket); const acting = actingSession(own, own.at(-1)?.id ?? ''); return acting ? [acting] : []; }),
   ];
   const ordered = shown.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  // Rows as the tower's (lane 38): the row is the link, named by the title and described by the rest.
   return (
     <div className="index">
-      <h1>{t('index_title')}</h1>
-      {ordered.length === 0 ? <p className="empty">{t('index_empty')}</p> : (
+      <h1 className="index-head">{t('index_title')}{ordered.length > 0 ? <> <span className="n">{ordered.length}</span></> : null}</h1>
+      {ordered.length === 0 ? <Empty block icon={Terminal} text={t('index_empty')} note={t('index_empty_note')} action={{ label: t('index_new_ticket'), onClick: () => onNew?.() }} /> : (
         <ul className="sessions">
           {ordered.map((s) => {
             // A reader's session (decision 28) is its question's: the ask
             // screen shows it, and its ticket is the ask's id.
             const reader = s.role === 'reader';
+            const id = `index-${s.id.replace(/[^\w-]/g, '')}`;
             return (
-            <li key={s.id} className="session-card">
-              <span className="session-head"><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span>{reader ? null : <span className="id">{s.ticket}</span>}</span>
-              <span className="session-title">{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
-              <span className="phrase">{s.phase === 'waiting_human' ? t('status_waiting_human') : s.status}</span>
-              <span className="session-foot">
-                <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
-                <span className="elapsed">{t('minutes', { n: minutes(s.startedAt) })}</span>
-                {reader ? <a className="open" href={askHref(s.ticket)}>{t('open_ask')}</a> : <a className="open" href={`/sessions/${s.id}`}>{t('open_session')}</a>}
-              </span>
+            <li key={s.id} className="session-card" data-phase={s.phase}>
+              <a className="open index-row" href={reader ? askHref(s.ticket) : `/sessions/${s.id}`} data-row aria-labelledby={`${id}-title`} aria-describedby={`${id}-kind ${id}-phrase ${id}-meta`}>
+                <span className="index-kind session-head" id={`${id}-kind`}><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span></span>
+                <span className="index-main">
+                  <span className="session-title" id={`${id}-title`}>{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
+                  <span className="phrase" id={`${id}-phrase`}>{s.phase === 'waiting_human' ? t('status_waiting_human') : s.status}</span>
+                </span>
+                <span className="index-meta session-foot" id={`${id}-meta`}>
+                  <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
+                  {reader ? null : <span className="id">{s.ticket}</span>}
+                  <span className="elapsed">{t('minutes', { n: minutes(s.startedAt) })}</span>
+                </span>
+              </a>
             </li>
             );
           })}
@@ -506,6 +513,12 @@ function useShown(ref: { readonly current: Element | null }): boolean {
 
 function Index() {
   const { t, api, now } = useScreen();
+  const go = useGo();
+  // New ticket: the tower's bar, its field focused once the tower is drawn.
+  const newTicket = useCallback(() => {
+    go('/');
+    requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('ask-input')?.focus()));
+  }, [go]);
   const [data, setData] = useKept<{ sessions: SessionSummary[]; tickets: Ticket[] } | 'failed' | null>('sessions', null);
   const refresh = useCallback(async () => {
     try {
@@ -520,7 +533,7 @@ function Index() {
   useLive(() => void refresh());
   if (data === null) return null;
   if (data === 'failed') return <div className="index"><p className="empty error">{t('load_failed')}</p></div>;
-  return <SessionIndex sessions={data.sessions} tickets={data.tickets} now={now()} t={t} />;
+  return <SessionIndex sessions={data.sessions} tickets={data.tickets} now={now()} t={t} onNew={newTicket} />;
 }
 
 type Loaded = {
