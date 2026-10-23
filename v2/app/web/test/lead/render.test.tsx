@@ -24,6 +24,13 @@ async function view(over: Partial<LeadView> = {}): Promise<LeadView> {
   return { state: fixture.state, messages: fixture.messages, plans: fixture.plans, planId: null, now: FIXTURE_NOW, language: 'en', memory: null, ...over };
 }
 
+test('the screen is Plans, as the sidebar, the top bar and the title say; the lead is the chat\'s heading (lane 38\'s art director, item 5)', async () => {
+  const markup = renderLead(await view(), en);
+  assert.match(markup, /<h1 class="sr-only">Plans<\/h1>/);
+  assert.match(markup, /<h2 id="lead-title">Lead<\/h2>/);
+  assert.equal([...markup.matchAll(/<h1\b/g)].length, 1);
+});
+
 test('the header line says the lead is always on, its context share and when it was refreshed from memory', async () => {
   const { state } = await view();
   assert.deepEqual(headerLine(state, FIXTURE_NOW, en), { text: 'Always on · context 45% · refreshed from memory 10 min ago', tone: 'on' });

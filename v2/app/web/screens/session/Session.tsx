@@ -330,6 +330,11 @@ export function ThreadFilter({ view, t, onFilter }: { readonly view: SessionView
   );
 }
 
+// The screen's one heading: the ticket's number and title, read out; the top bar draws them (lane 38).
+export function SessionHeading({ view }: { readonly view: SessionView }) {
+  return <h1 className="sr-only">{view.summary.ticket} · {view.ticket?.title ?? view.summary.ticket}</h1>;
+}
+
 export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void }) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = ticketPlan(partsOf(view)) ?? view.thread.plan;
@@ -455,7 +460,8 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
   // Rows as the tower's (lane 38): the row is the link, named by the title and described by the rest.
   return (
     <div className="index">
-      <h1 className="index-head">{t('index_title')}{ordered.length > 0 ? <> <span className="n">{ordered.length}</span></> : null}</h1>
+      {/* The top bar names the screen (lane 38's art director): its heading is read out, not drawn twice. */}
+      <h1 className="sr-only">{t('index_title')}</h1>
       {ordered.length === 0 ? <Empty block icon={Terminal} text={t('index_empty')} note={t('index_empty_note')} action={{ label: t('index_new_ticket'), onClick: () => onNew?.() }} /> : (
         <ul className="sessions">
           {ordered.map((s) => {
@@ -966,6 +972,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     <>
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
+        <SessionHeading view={view} />
         <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />

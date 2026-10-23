@@ -17,7 +17,7 @@ import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { SessionAgent } from '../../screens/session/agent.ts';
 import { applyAll, emptyModel, threadOf, type SessionView, type StreamLike } from '../../screens/session/model.ts';
-import { LeftCards, RightCards, StatusHead, Timeline } from '../../screens/session/Session.tsx';
+import { LeftCards, RightCards, SessionHeading, StatusHead, Timeline } from '../../screens/session/Session.tsx';
 import { EditorTab, TakeoverButton } from '../../screens/session/Tabs.tsx';
 import { takeoverOf } from '../../screens/session/tabs.ts';
 import { actingSession, type TicketPart } from '../../screens/session/ticket.ts';
@@ -94,6 +94,10 @@ test('the checks: a check named by its command is said by its intent, the comman
   const changes = visibleText(/<ul class="changes">[\s\S]*?<\/ul>/.exec(markup)?.[0] ?? '');
   assert.deepEqual(changes, ['src/screens/Envelope.jsx', '+15', '−2', 'test/envelope.test.mjs', '+13'], 'the ticket\'s changes, the author\'s');
   assert.ok(visibleText(markup).includes('Review'), 'the time by step adds up the review');
+});
+
+test('the session view has one heading for the screen: its ticket\'s number and title, read out (lane 38\'s art director, item 5)', () => {
+  assert.match(html(<SessionHeading view={ticketView()} />), /^<h1 class="sr-only">LOCAL-152 · Envelope sheet shows its previous months<\/h1>$/);
 });
 
 test('a card with nothing to say is not drawn: no criteria, no plan, the ticket card alone', () => {

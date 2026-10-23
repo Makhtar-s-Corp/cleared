@@ -181,8 +181,9 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .lead-status { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
 .app[data-sidebar="rail"] .lead-status { display: none; }
 .side-foot .source-pill { display: none; }
-.source-pill { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--awaiting-pill); color: var(--awaiting-text); font-size: var(--text-sm); font-weight: var(--weight-strong); }
-.source-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--awaiting); flex: none; }
+.source-pill { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--sunken); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+/* Neutral (lane 38's art director): amber says what waits for the person, and nothing else. */
+.source-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex: none; }
 .person { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; min-height: 32px; padding: 0 var(--space-2) 0 var(--space-1); border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font-size: var(--text-md); text-align: left; cursor: pointer; }
 .person:hover, .person[data-state="open"] { background: var(--tab-fill); }
 .person .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -206,7 +207,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
    item of the rail, and the icon-only buttons of the open sidebar. */
 .app[data-sidebar="rail"] .sidebar { overflow: visible; }
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip]) { position: relative; }
-:is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip])::after { content: attr(data-tip); position: absolute; left: calc(100% + var(--space-2)); top: 50%; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font: var(--weight-regular) var(--text-sm)/1.4 var(--sans); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-4px, -50%); transition: opacity var(--motion) var(--ease), transform var(--motion) var(--ease); }
+:is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip])::after { content: attr(data-tip); position: absolute; left: calc(100% + var(--space-3)); top: 50%; z-index: 30; padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font: var(--weight-regular) var(--text-sm)/1.4 var(--sans); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-4px, -50%); transition: opacity var(--motion) var(--ease), transform var(--motion) var(--ease); }
 :is(.app[data-sidebar="rail"] [data-tip], .app[data-sidebar="open"] .sidebar .icon[data-tip]):is(:hover, :focus-visible)::after { opacity: 1; transform: translate(0, -50%); }
 /* The open sidebar's buttons at its right edge put theirs below. */
 .app[data-sidebar="open"] .side-head .icon[data-tip]::after { left: auto; right: 0; top: calc(100% + var(--space-1)); transform: translateY(-4px); }

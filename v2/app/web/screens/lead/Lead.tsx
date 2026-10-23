@@ -211,10 +211,11 @@ export function ReplyForm({ mode, changing = false, text, sending = false, note 
 export function LeadScreen({ view, t, draft = { text: '', goal: false } }: { readonly view: LeadView; readonly t: Translate; readonly draft?: LeadDraft }) {
   return (
     <div className="lead-screen">
+      <h1 className="sr-only">{t('nav_plans')}</h1>
       <section className="lead-card" aria-labelledby="lead-title">
         <div className="lead-top">
           <span className="lead-mark" aria-hidden="true">{t('lead_initial')}</span>
-          <div className="lead-who"><h1 id="lead-title">{t('lead_heading')}</h1><HeaderLine state={view.state} now={view.now} t={t} /></div>
+          <div className="lead-who"><h2 id="lead-title">{t('lead_heading')}</h2><HeaderLine state={view.state} now={view.now} t={t} /></div>
           <Button variant="link" className="link-button" id="lead-remember" aria-expanded={view.memory !== null} aria-controls="lead-memory">{t('lead_remember')}</Button>
         </div>
         <div id="lead-memory"><MemoryPanel view={view} t={t} /></div>
@@ -369,10 +370,12 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
 
   return (
     <div className="lead-screen">
+      {/* The screen is Plans, as the sidebar, the top bar and the title say; Lead is the chat's heading (lane 38). */}
+      <h1 className="sr-only">{t('nav_plans')}</h1>
       <section className="lead-card" aria-labelledby="lead-title">
         <div className="lead-top">
           <span className="lead-mark" aria-hidden="true">{t('lead_initial')}</span>
-          <div className="lead-who"><h1 id="lead-title">{t('lead_heading')}</h1><HeaderLine state={view.state} now={view.now} t={t} /></div>
+          <div className="lead-who"><h2 id="lead-title">{t('lead_heading')}</h2><HeaderLine state={view.state} now={view.now} t={t} /></div>
           <Button variant="link" className="link-button" id="lead-remember" aria-expanded={memory !== null} aria-controls="lead-memory" ref={remember} onClick={() => void openMemory()}>{t('lead_remember')}</Button>
         </div>
         <div id="lead-memory"><MemoryPanel view={view} t={t} onClose={() => { setMemory(null); remember.current?.focus(); }} /></div>

@@ -204,7 +204,8 @@ test('the sessions index lists one row per session, named by its ticket\'s title
   assert.ok(row, 'the row is the link');
   assert.match(html, new RegExp(`<span class="session-title" id="${row[1]}">${TICKET_TITLE}</span>`));
   assert.match(html, /<span class="id">LOCAL-161<\/span>/, 'the ticket\'s number, which the proof scripts read');
-  assert.match(html, /<h1 class="index-head">Sessions <span class="n">\d+<\/span><\/h1>/);
+  // The top bar names the screen: its heading is read out, not drawn twice (lane 38's art director, item 6).
+  assert.match(html, /<h1 class="sr-only">Sessions<\/h1>/);
   const empty = renderIndex({ sessions: [], tickets: [], now: FIXTURE_NOW }, en);
   assert.deepEqual(visibleText(empty).filter((line) => line !== 'Sessions'), ['No session yet.', 'One starts when a ticket moves to Todo.', 'New ticket']);
   assert.match(empty, /<div class="empty-state block">/);

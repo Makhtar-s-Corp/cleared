@@ -143,8 +143,13 @@
   /* The actions wrap under the field, New ticket at the end of their line; Ask about the code and Run a
      recipe stay in the palette (Ctrl-K or the top bar's search), so the bar is two lines at most. */
   .ask-actions [data-bar="ask"], .ask-actions [data-bar="recipe"] { display: none; }
-  /* Ask the lead too (lane 38): the lead's own field is the next block down, so the bar keeps one row. */
-  .ask-actions [data-lead="lead"] { display: none; }
+  /* A phone keeps the field and New ticket on one row (lane 38): a goal and the lead are the next block down and
+     in the palette. */
+  .ask-actions [data-lead] { display: none; }
+  .ask { flex-wrap: nowrap; }
+  .ask input { flex: 1 1 0; }
+  .ask-actions { flex: none; }
+  .ask:has(#ask-input:not(:placeholder-shown)), .ask:has(.ask-services) { flex-wrap: wrap; }
 }
 /* the rows, by the width of their own column */
 @container rows (max-width: 720px) {
@@ -168,4 +173,11 @@
   .recipe-bar { flex-direction: column; align-items: stretch; }
   .block-head .more { padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); }
   .row { min-height: 44px; }
+}
+
+/* The summary under the heading: each fact whole on its line (lane 38's art director). */
+#tower-heading + .muted .fact { white-space: nowrap; }
+/* Touch: the heads' links and the lead's name are 44 px tall, the heads kept tight (lane 38's art director). */
+@media (pointer: coarse) {
+  .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: -14px; }
 }

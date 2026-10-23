@@ -20,7 +20,7 @@
 .s-left, .s-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
 .eyebrow { margin-bottom: 4px; font-size: var(--text-sm); color: var(--text-faint); }
-.card-title { margin-bottom: 8px; font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.card-title { text-wrap: balance; margin-bottom: 8px; font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .desc { font-size: var(--text-md); color: var(--text-secondary); } .desc + .desc { margin-top: 8px; }
 .card-label { margin-bottom: 8px; font-size: var(--text-md); font-weight: var(--weight-strong); }
 .sub-label { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); color: var(--text-secondary); font-weight: var(--weight-strong); }
@@ -114,9 +114,8 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .read-paths .link-button, .file-detail .link-button { min-height: 24px; text-align: left; }
 /* Where the ticket passed from one session to the next (lane 36): a quiet
    divider with who took over and when, never a toast. */
-.handover { display: flex; align-items: center; gap: 12px; margin: 14px 0 10px; font-size: var(--text-sm); color: var(--text-muted); }
-.handover::before, .handover::after { content: ""; flex: 1 0 32px; height: 1px; background: var(--hairline); }
-.handover span { flex: 0 1 auto; text-align: center; text-wrap: balance; }
+/* One hairline above the centred sentence, which may wrap (lane 38's art director: side rules stubbed a second line). */
+.handover { margin: 14px 0 10px; padding-top: 10px; border-top: 1px solid var(--hairline); font-size: var(--text-sm); color: var(--text-muted); text-align: center; text-wrap: balance; }
 /* Author and Reviewer filter the thread: quiet chips under a hairline, not a second row of tabs. */
 .thread-filter { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--hairline); flex: none; overflow-x: auto; }
 .thread-filter .filter { min-height: 30px; padding: 3px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
@@ -298,8 +297,6 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* The sessions index (lane 38): rows as the tower's, a role, the title and its phrase, then the model, the
    ticket and the age, their columns shared by every row (a subgrid), laid out by the list's own width. */
 .index { container: index / inline-size; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); }
-.index-head { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
-.index-head .n { color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
 .index .sessions { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; column-gap: var(--space-3); list-style: none; margin: 0 calc(-1 * var(--space-2)); padding: 0; }
 .index .sessions > li { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
 .index .sessions > li + li { border-top: 1px solid var(--hairline); }
@@ -440,4 +437,9 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .ticket-step { grid-template-columns: 20px minmax(0, 1fr) auto; }
   .ticket-step .step-cost { grid-column: 2; }
   .ticket-step .step-this { display: block; margin: 2px 0 0; }
+}
+
+/* Touch: the file links and the step details' links are 44 px tall, the rows kept tight (lane 38's art director). */
+@media (pointer: coarse) {
+  .link-button { display: inline-flex; align-items: center; min-height: 44px; margin-block: -10px; }
 }
