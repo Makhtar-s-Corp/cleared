@@ -12,7 +12,7 @@ export function Keys({ keys, t, mac = isMac(), className = 'keys' }: { readonly 
       {keys.map((key, index) => (
         <Fragment key={index}>
           {index > 0 && t ? <span className="then">{t('keys_then')}</span> : null}
-          {key.split('+').map((part) => <kbd key={part}>{keyLabel(part, mac)}</kbd>)}
+          {key.split('+').map((part) => <kbd key={part}>{keyLabel(part, mac, t)}</kbd>)}
         </Fragment>
       ))}
     </span>

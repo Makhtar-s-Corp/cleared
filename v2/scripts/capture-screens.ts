@@ -7,7 +7,10 @@
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
 //     [--screens tower,inbox,sessions,session,lead] [--widths 1440,390] [--themes light,dark]
-//     [--via load|click]
+//     [--via load|click] [--language fr|en]
+//
+// The language is the app's default, French, unless --language en asks for
+// English (the owner's decision of 2026-10-23).
 //
 // Four more captures, named only (lane 35): palette and sheet (the tower
 // with the command palette or the shortcut sheet open, by their keys), and
@@ -66,7 +69,7 @@ async function listen(server: Server): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
+export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click'; readonly language?: 'fr' | 'en' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
   const themes = options.themes ?? ['light', 'dark'];
@@ -76,7 +79,7 @@ export async function capture(options: { readonly out: string; readonly screens?
 
   const preview = createServer();
   const previewBase = await listen(preview);
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase } });
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
   preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
   const errors: string[] = [];
   const away: string[] = [];
@@ -162,16 +165,20 @@ async function settle(page: any): Promise<void> {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { out: { type: 'string' }, screens: { type: 'string' }, widths: { type: 'string' }, themes: { type: 'string' }, via: { type: 'string' } } });
+  const { values } = parseArgs({ options: { out: { type: 'string' }, screens: { type: 'string' }, widths: { type: 'string' }, themes: { type: 'string' }, via: { type: 'string' }, language: { type: 'string' } } });
   if (values.via !== undefined && values.via !== 'load' && values.via !== 'click') {
     console.error('capture-screens: --via is load or click');
+    process.exit(64);
+  }
+  if (values.language !== undefined && values.language !== 'fr' && values.language !== 'en') {
+    console.error('capture-screens: --language is fr or en');
     process.exit(64);
   }
   if (!values.out) {
     console.error('capture-screens: --out <folder> is required');
     process.exit(64);
   }
-  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load' });
+  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load', language: values.language === 'en' ? 'en' : 'fr' });
   for (const file of result.files) console.log(file);
   for (const error of result.errors) console.error(`page error: ${error}`);
   for (const url of result.away) console.error(`request off the app's origin: ${url}`);

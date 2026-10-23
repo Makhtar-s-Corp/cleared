@@ -21,6 +21,7 @@ import { fixtureSource } from '../../fixtures/source.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { createPreviewHandler } from '../../src/preview.ts';
 import { PASSWORD, startApp } from '../support.ts';
+import { loadCatalog } from '../../src/catalog.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -28,11 +29,11 @@ declare const document: any;
 declare const window: any;
 declare const performance: any;
 
-async function withShell(run: (page: any, base: string) => Promise<void>): Promise<void> {
+async function withShell(run: (page: any, base: string) => Promise<void>, language: 'en' | 'fr' = 'en'): Promise<void> {
   const preview = createServer();
   await new Promise<void>((done) => preview.listen(0, '127.0.0.1', done));
   const previewBase = `http://127.0.0.1:${(preview.address() as AddressInfo).port}`;
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase } });
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase, language } });
   preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
@@ -57,7 +58,7 @@ async function withShell(run: (page: any, base: string) => Promise<void>): Promi
     await run(page, app.base);
     assert.deepEqual(errors, [], 'no page error');
     assert.deepEqual(await page.evaluate(() => window.violations ?? []), [], 'no policy violation: the palette and the sheet inject no style');
-    assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /⟦/, 'no missing key drawn');
+    assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /\u27e6/, 'no missing key drawn');
   } finally {
     await browser.close();
     await app.close();
@@ -167,4 +168,36 @@ test('[ folds the sidebar to a rail, the choice survives a reload, and [ opens i
     await page.locator('#sidebar-toggle').click();
     assert.equal(await mode(), 'open');
   });
+});
+
+// The English sentences the French catalogs of the shell, the tower and the lead do not share.
+function englishOf(text: string): string | undefined {
+  const all = (language: 'en' | 'fr') => Object.assign({}, ...(['shell', 'tower', 'lead'] as const).map((s) => loadCatalog(s, language))) as Record<string, string>;
+  const en = all('en');
+  const fr = all('fr');
+  for (const [key, value] of Object.entries(en)) {
+    if (fr[key] === value) continue;
+    const literal = value.split(/\{[a-z_]+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+?');
+    if (new RegExp(`^${literal}$`).test(text)) return key;
+  }
+  return undefined;
+}
+
+test('in French, the default: the sidebar, the top bar, the palette and the sheet draw no English', { skip }, async () => {
+  await withShell(async (page) => {
+    assert.equal(await page.locator('html').getAttribute('lang'), 'fr');
+    const lines = async (selector: string): Promise<string[]> => (await page.locator(selector).innerText()).split('\n').map((line: string) => line.trim()).filter(Boolean);
+    const texts = [...await lines('#sidebar'), ...await lines('#top-bar')];
+    await page.locator('#screen').focus();
+    await page.keyboard.press('Control+k');
+    texts.push(...await lines('#palette'));
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Shift+Slash');
+    texts.push(...await lines('#shortcuts'));
+    assert.ok(texts.includes('Tour') && texts.includes('Réception') && texts.includes('Rechercher'), 'the screens and the search, in French');
+    for (const text of texts) {
+      const key = englishOf(text);
+      assert.equal(key, undefined, `"${text}" is the English of ${key}`);
+    }
+  }, 'fr');
 });
