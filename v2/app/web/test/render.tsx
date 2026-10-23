@@ -85,7 +85,7 @@ export const renderPlanPanel = (plan: Plan, t: Translate, options: PlanPanelOpti
 export const renderList = (view: InboxView, t: Translate) => html(<List view={view} t={t} />);
 export const renderDetail = (view: InboxView, t: Translate) => html(<Detail view={view} t={t} />);
 export const renderActions = (item: InboxItem, view: InboxView, t: Translate) => html(<Actions item={item} view={view} t={t} />);
-export const renderInbox = (view: InboxView, t: Translate) => html(<InboxScreen view={view} t={t} />);
+export const renderInbox = (view: InboxView, t: Translate, extra: { readonly handledOpen?: boolean } = {}) => html(<InboxScreen view={view} t={t} {...extra} />);
 
 // shell
 export const renderNotifyMenu = (view: NotifyView, t: Translate) => html(<NotifyMenuBody view={view} t={t} />);

@@ -27,7 +27,7 @@
 // and a second approval is a 409.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
-  ContractItem, KnowledgeItem, NextInboxItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanConfidence, SessionPlanItem, SessionSummary, TrainState,
+  ContractItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanConfidence, SessionPlanItem, SessionSummary, TrainState,
 } from '../../src/api/types.ts';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
@@ -216,6 +216,39 @@ export function knowledgeItem(now: Date = FIXTURE_NOW): KnowledgeItem {
     kind: 'knowledge', id: 'knowledge:fixture-158-author:1', ticket: RELEASE_TICKET, project: FIXTURE_PROJECT, since: ago(now, 50), state: 'waiting',
     sessionId: 'fixture-158-author', text: 'The archive page reuses the list\'s heading: a heading changes in both templates.', level: 'service', service: 'guestbook', outcome: null,
   };
+}
+
+// The owner's capture of 2026-10-22 22:02 (docs/v2/ui-overhaul-plan.md, 1.5
+// and 11, lane 37): a reviewer's chained reads and tests, with no description
+// from the harness, asking because one part is not allowed on its own; the
+// policy's sentence in English beside its code.
+export const REVIEW_COMMAND = 'git log -5 --oneline; git merge-base main HEAD; git show 3f9c2a1 --stat; npm test 2>&1 | tail -8';
+
+// What the inbox's requests look like after an evening (lane 37): the
+// reviewer's compound request that waits, a request answered earlier, and one
+// that expired with its session (the store hands it as handled, as it does
+// every request a session's end closes). The fixture source lists them, on
+// its own sessions' ids.
+type Asker = { readonly id: string; readonly ticket: string };
+export function requestItems(now: Date, sessions: { readonly reviewer: Asker; readonly author: Asker }): PermissionItem[] {
+  const base = { project: FIXTURE_PROJECT, tool: 'Bash' } as const;
+  return [
+    {
+      ...base, kind: 'permission', id: `permission:${sessions.reviewer.id}:request-review-1`, ticket: sessions.reviewer.ticket, since: ago(now, 2), state: 'waiting',
+      sessionId: sessions.reviewer.id, requestId: 'request-review-1', input: { kind: 'execute', command: REVIEW_COMMAND },
+      suggestion: { decision: 'ask', rule: 'default', reason: 'git merge-base main HEAD is not a command the policy allows on its own' }, reasonCode: 'not_allowed',
+    },
+    {
+      ...base, kind: 'permission', id: `permission:${sessions.author.id}:request-answered`, ticket: sessions.author.ticket, since: ago(now, 95), state: 'handled',
+      sessionId: sessions.author.id, requestId: 'request-answered', input: { kind: 'execute', command: 'npx vitest run docs', description: 'Run the docs tests' },
+      suggestion: { decision: 'ask', rule: 'default', reason: 'The command is not on the list of safe commands.' },
+    },
+    {
+      ...base, kind: 'permission', id: `permission:${sessions.author.id}:request-expired`, ticket: sessions.author.ticket, since: ago(now, 140), state: 'handled',
+      sessionId: sessions.author.id, requestId: 'request-expired', input: { kind: 'execute', command: 'npm run db:migrate', description: 'Apply the new migration to the test database' },
+      suggestion: { decision: 'ask', rule: 'default', reason: 'The command is not on the list of safe commands.' },
+    },
+  ];
 }
 
 export type InboxFixtureOptions = {

@@ -2,8 +2,9 @@
 // routes answered in the app's process from the tower fixture and, for the
 // lead and its plans (milestone 2, section 7.1), from the lead fixture; and
 // ticket creation into an in-memory ticket store, so the screens work
-// before the service does. It approves, answers, moves and sends nothing:
-// every other write is a 404. The session tabs' routes (lane 20) are
+// before the service does. It approves, moves and sends nothing: every
+// other write is a 404, but a session request's answer (lane 37), kept in
+// memory, which hands its inbox item as handled. The session tabs' routes (lane 20) are
 // answered too: the workspace, a session's files (the session fixture's
 // contents), and Take over and Give back, kept in memory; no session of the
 // tower's has a plan waiting, so a Go or a Change is a 409. Lane 27's
@@ -22,7 +23,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
-import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
@@ -31,7 +32,7 @@ import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
 import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
-import { contractItem, knowledgeItem } from './inbox.ts';
+import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -74,6 +75,15 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   // LOCAL-152's reviewer resumes on its own story (envelopeReviewer, below).
   const human = fixtureHuman({ resumed: (id) => (id === envelopeReviewer?.id ? ENVELOPE_RESUMED : undefined) });
   const decided: (ContractItem | KnowledgeItem)[] = [contractItem(now()), knowledgeItem(now())];
+  // Lane 37: the reviewer's compound request, and two that no longer wait (one answered, one expired).
+  const asker = (find: (s: { readonly role: string; readonly ticket: string }) => boolean) => {
+    const session = fixture.sessions.find(find) ?? fixture.sessions[0];
+    return { id: session?.id ?? '', ticket: session?.ticket ?? '' };
+  };
+  const requests = requestItems(now(), { reviewer: asker((s) => s.role === 'reviewer'), author: asker((s) => s.ticket === 'LOCAL-160') });
+  // The requests answered from the screens, kept in memory: each is handled once (lane 37's art director).
+  const answered = new Set<string>();
+  const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
   // The first author's ticket and LOCAL-163 run in four steps, each live
   // author on the service step of the filter API (lane 23's shape).
@@ -128,7 +138,17 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     });
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
-    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...decided, ...lead.inbox]);
+    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...requests.filter((item) => item.state === 'waiting'), ...decided, ...lead.inbox, ...requests.filter((item) => item.state === 'handled')].map(asked));
+    // A session's request answered: the item is handled, a second answer is a 409 (the service's answer route).
+    if (method === 'POST' && collection === 'sessions' && id && sub === 'requests' && parts[4] === 'answer' && parts.length === 5) {
+      const key = `${decodeURIComponent(id)}\n${decodeURIComponent(parts[3] ?? '')}`;
+      const item = [...fixture.inbox, ...requests].find((i) => (i.kind === 'permission' || i.kind === 'question') && `${i.sessionId}\n${i.requestId}` === key && i.state === 'waiting');
+      if (!item) return sendJson(response, 404, { error: 'no request waits' });
+      if (answered.has(key)) return sendJson(response, 409, { error: 'answered already' });
+      answered.add(key);
+      response.once('finish', () => changed('inbox', null));
+      return sendJson(response, 200, { accepted: true });
+    }
     if (method === 'GET' && collection === 'recipes' && parts.length === 1) return sendJson(response, 200, RECIPES);
     if (method === 'GET' && collection === 'schedules' && parts.length === 1) return sendJson(response, 200, schedulesFixture(now()));
     if (method === 'POST' && collection === 'recipes' && id && sub === 'run' && parts.length === 3) {

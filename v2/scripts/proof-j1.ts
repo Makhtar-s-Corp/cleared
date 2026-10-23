@@ -169,9 +169,8 @@ async function waitAnswering(done: () => Promise<boolean>, timeout: number): Pro
     for (const request of await open.all()) {
       const text = (await request.innerText()).replace(/\s+/g, ' ').trim();
       if (text.includes(SCRATCH)) continue;
-      // The command alone is judged, from the row's code chip (issue 157, item 4).
-      const chip = request.locator('.request-title code');
-      const answer = answerFor(await chip.count() > 0 ? await chip.first().innerText() : text);
+      // The command alone is judged, from the card's data-command (issue 157, item 4; lane 37 titles the card by its intent).
+      const answer = answerFor((await request.getAttribute('data-command')) ?? text);
       await request.locator(`[data-answer="${answer}"]`).click();
       otherRequests.push({ command: text.slice(0, 300), answer, at: new Date().toISOString() });
       console.log(`proof: ${answer} for a session request: ${text.slice(0, 120)}`);

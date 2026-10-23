@@ -75,7 +75,7 @@ const PAIRS: readonly (readonly [string, readonly string[]])[] = [
   ['--text', GROUNDS], ['--text-secondary', GROUNDS], ['--text-muted', GROUNDS], ['--text-faint', GROUNDS],
   ['--placeholder', ['--canvas', '--surface', '--sunken', '--popover']],
   ['--link', ['--canvas', '--surface', '--sidebar', '--sunken', '--awaiting-surface', '--popover']],
-  ['--awaiting-text', ['--canvas', '--surface', '--sidebar', '--awaiting-pill', '--awaiting-surface']],
+  ['--awaiting-text', ['--canvas', '--surface', '--sidebar', '--awaiting-pill', '--awaiting-surface', '--selected']],   // --selected: the inbox's shown row (lane 37)
   ['--danger-text', ['--canvas', '--surface', '--sunken']],
   ['--on-ink', ['--ink']], ['--count-ink', ['--awaiting']],
 ];

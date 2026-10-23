@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../lib/i18n.ts';
-import { formatModel, newTicket, towerModel, type TowerData } from '../screens/tower/model.ts';
+import { formatModel, needTitle, newTicket, towerModel, type TowerData } from '../screens/tower/model.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
 
@@ -27,9 +27,11 @@ function strings(value: unknown, into: Set<string> = new Set()): Set<string> {
 test('the fixture is the capture\'s data: three waiting items, the plan last, four live sessions, two landed today', async () => {
   const data = await towerFixture(FIXTURE_NOW);
   const model = towerModel(data, FIXTURE_NOW);
-  assert.deepEqual(model.needs.map((n) => [n.kind, n.ticket, n.minutes, n.title]), [
+  // A permission is titled by its intent, as the inbox titles it (lane 37), not by the harness's words.
+  const words = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
+  assert.deepEqual(model.needs.map((n) => [n.kind, n.ticket, n.minutes, needTitle(n, words)]), [
     ['release', 'LOCAL-158', 12, '“Comings and goings” replaces “Departures and arrivals”'],
-    ['permission', 'LOCAL-161', 3, 'Install date-fns to group dates by week'],
+    ['permission', 'LOCAL-161', 3, 'Install date-fns'],
     ['plan', '', 25, 'Make the guestbook readable on desktop'],
   ]);
   assert.deepEqual(model.live.map((s) => [s.role, s.ticket, s.title, s.status, formatModel(s.harness, s.model), s.minutes]), [
@@ -59,13 +61,13 @@ test('every word on the tower comes from the catalog or from the data', async ()
 });
 
 test('the English tower reads as the capture', async () => {
-  const t = translator(loadCatalog('tower', 'en'));
+  const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
   const html = renderTower(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), t);
   const text = visibleText(html).join('\n');
   for (const expected of [
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12 min', 'Permission', '3 min', 'Plan', '25 min', 'Goal',
     'The lead proposes 5 tickets, about 2 h of work and 4% of the week.', 'Always on · context 31% · refreshed 10 min ago',
-    'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Network access and a new dependency. The author is paused until you answer.',
+    'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Install date-fns', 'The command calls the network. The author is paused until you answer.',
     'Live sessions', 'All sessions', 'Author', 'Reviewer', '18 min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /\sstyle=/, 'no inline style: the page runs under default-src \'self\'');

@@ -19,7 +19,7 @@
   --mix-tab-fill: 5%; --mix-selected: 8%; --mix-hairline: 9%; --mix-outline: 9%; --mix-input: 15%; --mix-dashed: 20%;
   --mix-placeholder: 62%; --mix-faint: 65%; --mix-muted: 70%; --mix-secondary: 78%;
   /* what no mix gives: amber for what waits for the person, green, red */
-  --awaiting: #F5A623; --awaiting-text: #AB570A; --awaiting-surface: #FFFBF2; --awaiting-pill: #FFF8EB; --count-ink: #1A1305;
+  --awaiting: #F5A623; --awaiting-text: #9A4D08; --awaiting-surface: #FFFBF2; --awaiting-pill: #FFF8EB; --count-ink: #1A1305;
   --success: #16A34A; --danger: #EE0000; --danger-text: #C40000;
   --stage-review: #0A9DB0;
   --harness-claude: #D97757; --harness-codex: #10A37F; --harness-other: #8F8F8F;

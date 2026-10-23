@@ -16,8 +16,9 @@ import { LEAD_TICKET, afterPlanRefusal, detailKey, failure, ordered, readPlan, t
 import { strings, visibleText } from '../render.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
-const en = translator(loadCatalog('inbox', 'en'));
-const fr = translator(loadCatalog('inbox', 'fr'));
+// The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
+const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
+const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('inbox', 'fr') });
 
 function viewOf(overrides: Partial<InboxView> = {}): InboxView {
   const fixture = inboxFixture(FIXTURE_NOW);
@@ -39,10 +40,10 @@ test('the screen\'s lead ticket is the service\'s', () => {
 test('the plan card reads as the capture\'s: Plan, its age, its title, its tickets, its time and its share of the week', () => {
   const html = renderInbox(viewOf(), en);
   const shown = visibleText(html);
-  for (const expected of ['4 waiting', 'Plan', '25 min', PLAN_TITLE]) assert.ok(shown.includes(expected), `missing: ${expected}`);
+  for (const expected of ['Waiting · 4', 'Plan', '25 min', PLAN_TITLE]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.equal(lineOf(html, `plan:${PLAN_ID}`), '5 tickets · 2 h 15 · 3.9% of the week');
   const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]?.split(':')[0]);
-  assert.deepEqual(order, ['release', 'permission', 'plan', 'question', 'permission'], 'the capture\'s order: release, permission, plan, question');
+  assert.deepEqual(order, ['release', 'permission', 'plan', 'question'], 'the capture\'s order: release, permission, plan, question; the handled group folded');
 });
 
 test('without a measured week the card says the cost, and one ticket is in the singular', () => {
@@ -103,11 +104,11 @@ test('an approved plan leaves the waiting list; its line says how it runs, and i
   assert.equal(lineOf(html, `plan:${PLAN_ID}`), 'Lead · Running · 0 of 5 landed');
   assert.ok(visibleText(html).includes('LOCAL-301'));
   assert.deepEqual(acts(html), []);
-  assert.ok(visibleText(html).includes('This no longer waits for you.'));
+  assert.ok(visibleText(html).includes('Handled.'));
   const local = new Map<string, Local>([[`plan:${PLAN_ID}`, { kind: 'plan_approved', at: FIXTURE_NOW.toISOString() }]]);
   const done = visibleText(renderInbox({ ...view, local }, en));
   assert.ok(done.includes('Approved by you at 09:41. The tickets start in order, the first ones now.'), done.join('|'));
-  const handledUnknown = renderInbox(viewOf({ items, plans: new Map() }), en);
+  const handledUnknown = renderInbox(viewOf({ items, plans: new Map() }), en, { handledOpen: true });
   assert.equal(lineOf(handledUnknown, `plan:${PLAN_ID}`), 'Lead · no longer waits for you');
 });
 
@@ -130,7 +131,7 @@ test('the lead\'s question is shown, with its choices, and sends the person to t
   assert.doesNotMatch(html, /<button[^>]*data-answer=/, 'its choices are lines, not buttons');
   assert.match(html, /data-choices-state="read"/);
   const handled: QuestionItem = { ...question, state: 'handled' };
-  assert.equal(lineOf(renderInbox(viewOf({ items: [handled] }), en), handled.id), 'Lead · no longer waits for you');
+  assert.equal(lineOf(renderInbox(viewOf({ items: [handled] }), en, { handledOpen: true }), handled.id), 'Lead · no longer waits for you');
 });
 
 test('the lead\'s sentinel ticket is never on screen', () => {
