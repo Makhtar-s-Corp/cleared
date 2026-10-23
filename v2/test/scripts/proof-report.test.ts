@@ -359,7 +359,7 @@ test('the multi-service durations: the steps, the steps of each ticket, the trai
     questions: [{ at: '2026-10-23T09:20:00.000Z', ticket: 'LOCAL-3', session: '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b', question: 'Should the positions count from 0 or from 1?', options: ['From 1', 'From 0 (Recommended)'], answer: 'From 0 (Recommended)', how: 'recommended' }],
     permissions: [
       { at: '2026-10-23T09:21:00.000Z', ticket: 'LOCAL-3', session: '7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f', role: 'reviewer', service: 'filter-api', command: 'npm run typecheck', answer: 'allow_once', rule: 'check' },
-      { at: '2026-10-23T09:22:00.000Z', ticket: 'LOCAL-3', session: '7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f', role: null, service: null, command: 'curl -s http://filter-api:8080/check | tail', answer: 'reject_once', rule: 'outside' },
+      { at: '2026-10-23T09:22:00.000Z', ticket: 'LOCAL-3', session: '7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f', role: null, service: null, command: 'curl -s http://filter-api:8080/check | tail', answer: 'reject_once', rule: 'refused' },
     ],
     base: { frozen: 'proof-base', run: 'proof-run', repos: [{ service: 'guestbook', commit: 'a'.repeat(40), closed: [] }, { service: 'filter-api', commit: 'b'.repeat(40), closed: [7, 9] }], setAside: ['LOCAL-20', 'LOCAL-22'] },
   };
@@ -373,7 +373,7 @@ test('the multi-service durations: the steps, the steps of each ticket, the trai
     '## The clean base', 'Each run branch `proof-run` was recreated from the frozen `proof-base`.', '| guestbook | aaaaaaaaaaaa | none |', '| filter-api | bbbbbbbbbbbb | #7, #9 |',
     'Earlier runs\' tickets put back to a clean state: LOCAL-20, LOCAL-22.',
     '## Session permissions', '| 2026-10-23T09:21:00.000Z | LOCAL-3 | 7c1d2e3f | reviewer | filter-api | npm run typecheck | allow_once | check |',
-    '| 2026-10-23T09:22:00.000Z | LOCAL-3 | 7c1d2e3f | unknown | unknown | curl -s http://filter-api:8080/check \\| tail | reject_once | outside |',
+    '| 2026-10-23T09:22:00.000Z | LOCAL-3 | 7c1d2e3f | unknown | unknown | curl -s http://filter-api:8080/check \\| tail | reject_once | refused |',
     '1 declared check allowed once; 1 other request answered by the checkout rule.',
   ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
   // A run that asked nothing and reset no base says so.

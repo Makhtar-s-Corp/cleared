@@ -412,7 +412,7 @@ export type AnsweredPermission = {
   readonly service: string | null;
   readonly command: string | null;
   readonly answer: 'allow_once' | 'reject_once';
-  readonly rule: 'check' | 'checkout' | 'outside' | 'not_a_command';
+  readonly rule: 'check' | 'checkout' | 'refused' | 'not_a_command';
 };
 export const PERMISSION_COMMAND_LIMIT = 160;
 

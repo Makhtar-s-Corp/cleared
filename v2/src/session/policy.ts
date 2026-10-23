@@ -89,20 +89,27 @@ const ask = (rule: string, reason: string): Verdict => ({ decision: 'ask', rule,
 // else: a list, a pipe, a redirection, a substitution, an expansion, a
 // newline, an unclosed quote, or nothing at all. Quotes and backslashes are
 // understood; every other special character is refused, so that what runs is
-// exactly the words returned.
-export function parseCommand(text: string): readonly string[] | undefined {
+// exactly the words returned. `globs` (the proofs' driver only,
+// scripts/proof-inbox.ts) also reads an unquoted *, ? or [ in a word with no
+// slash that does not start with a dot: it names files of the current folder
+// only, never `..` nor another folder; the policy never passes it.
+export type ParseOptions = { readonly globs?: boolean };
+export function parseCommand(text: string, options: ParseOptions = {}): readonly string[] | undefined {
   const words: string[] = [];
   let word = '';
   let started = false;
   let bare = '';                                  // the unquoted characters of the word, for brace expansion
+  let globbed = false;                            // an unquoted *, ? or [ in the word (options.globs)
   let i = 0;
   const end = () => {
     if (started) {
       if (/\{[^}]*(?:,|\.\.)[^}]*\}/.test(bare)) return false;
+      if (globbed && (word.includes('/') || word.startsWith('.'))) return false;
       words.push(word);
     }
     word = '';
     bare = '';
+    globbed = false;
     started = false;
     return true;
   };
@@ -143,6 +150,12 @@ export function parseCommand(text: string): readonly string[] | undefined {
       word += next;
       started = true;
       i += 2;
+    } else if (options.globs && '*?['.includes(c)) {
+      word += c;
+      bare += c;
+      globbed = true;
+      started = true;
+      i++;
     } else if (';&|<>()`$\n\r*?['.includes(c)) {
       return undefined;
     } else if ((c === '#' || c === '~') && !started) {
@@ -185,7 +198,7 @@ export type SimpleCommand = {
 // input redirection or a here-document (parseCommand refuses <), and
 // whatever parseCommand refuses in a part or a target. Quotes and
 // backslashes are skipped whole, so a separator inside them is a character.
-export function parseList(text: string): readonly SimpleCommand[] | undefined {
+export function parseList(text: string, options: ParseOptions = {}): readonly SimpleCommand[] | undefined {
   const list: SimpleCommand[] = [];
   let part = '';
   let writes: string[] = [];
@@ -205,7 +218,7 @@ export function parseList(text: string): readonly SimpleCommand[] | undefined {
     return j < text.length ? text.slice(i, j + 1) : false;
   };
   const end = (next: SimpleCommand['after']): boolean => {
-    const words = parseCommand(part);
+    const words = parseCommand(part, options);
     if (!words) return false;
     list.push({ words, after, writes, redirected });
     part = '';
