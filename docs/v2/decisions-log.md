@@ -3792,8 +3792,9 @@ The browser job on GitHub's runner read 46.0, 75.7, 58.9 and 83.9 ms over this p
 **Captures.** All are on the fixtures source, in both themes, at 1440, 1280, 768 and 390.
 - Before, at origin/v2 `f16f9b1`: `docs/v2/ui-overhaul/before/durations/{fr,en}/`, tower, sessions, session and inbox. The English set was taken with `--language en`.
 - After: `docs/v2/ui-overhaul/after/durations/{fr,en}/`, the same screens plus `account` (the menu with its language choice). The browser asks for the language too: the capture script now sets the context's locale, since the page follows the browser.
-- 144 files. Each was looked at for secrets and names before the commit: none.
-- Copies are in `/tmp/cleared-captures/j2/overhaul/durations/`.
+- `sessions-day-later-1440-light.png`, before and after, in French: the sessions index with the page's clock a day and two hours after the fixtures'. Before, it says "1585 min"; after, "1 j 2 h". A script in the author's scratchpad took it (the fixtures' data at their clock, the page's clock moved), not the repository's capture script.
+- 146 files. Each was looked at for secrets and names before the commit: none.
+- Copies are in `/tmp/cleared-captures/j2/overhaul/durations/`, and the six the orchestrator asked for are in `/tmp/cleared-captures/j2/overhaul/i18n/`: `i18n-before-{fr,en}.png` (the tower at `f16f9b1`), `i18n-after-{fr,en}.png` (the tower with the account menu and its language choice open), `durations-{before,after}.png` (the sessions index a day later).
 
 **Measures.** The budget test (`budget-browser.test.ts`, `CI=true`: three runs of twenty switches, 1440x900, the fixtures) ran twice on origin/v2 `f16f9b1` and on this head, alternating, between 09:12 and 09:13, load average 1.6 to 2.9:
 
