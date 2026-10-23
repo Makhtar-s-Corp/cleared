@@ -4,12 +4,13 @@
 // never a real remote.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  BaseError, FROZEN_BRANCH, RUN_BRANCH, closeStale, defaultBranchOf, frozenCommits, readBaseSettings, reader, recreate, refusal, runCommand, ticketChangesIn, type BaseSettings, type Run,
+  BaseError, FROZEN_BRANCH, baseModeOf, RUN_BRANCH, closeStale, defaultBranchOf, frozenCommits, readBaseSettings, reader, recreate, refusal, runCommand, ticketChangesIn, type BaseSettings, type Run,
 } from '../../scripts/proof-base.ts';
 import { rehearsalWorkspace } from '../../scripts/proof-rehearsal-multi.ts';
 
@@ -60,16 +61,67 @@ test('the settings: none without PROOF_REPOS; the clones by service; the branche
 test('the guards: never main or master, never the default branch, never the frozen branch, and only the branch the workspace merges into', () => {
   const repos = [{ service: 'guestbook', clone: '/c/g' }, { service: 'filter-api', clone: '/c/f' }];
   const bases = { guestbook: 'proof-run', 'filter-api': 'proof-run' };
-  assert.equal(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, bases, { guestbook: 'main', 'filter-api': 'main' }), undefined);
-  assert.match(refusal({ frozen: 'proof-base', run: 'main', repos }, { guestbook: 'main', 'filter-api': 'main' }) ?? '', /never writes main/);
-  assert.match(refusal({ frozen: 'proof-base', run: 'master', repos }, bases) ?? '', /never writes main or master/);
-  assert.match(refusal({ frozen: 'proof-run', run: 'proof-run', repos }, bases) ?? '', /only ever read/);
-  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, bases, { 'filter-api': 'proof-run' }) ?? '', /default branch of filter-api/);
-  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, { guestbook: 'proof-run', 'filter-api': 'main' }) ?? '', /base of filter-api is main/);
-  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: repos.slice(0, 1) }, bases) ?? '', /no clone is named for filter-api/);
-  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: [...repos, { service: 'other', clone: '/c/o' }] }, bases) ?? '', /other is not a service/);
-  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: [] }, {}) ?? '', /no proof repository/);
-  for (const name of ['-f', 'a..b', 'x.lock', 'with space', '']) assert.match(refusal({ frozen: 'proof-base', run: name, repos }, bases) ?? '', /not a branch name/, name);
+  const defaults = { guestbook: 'main', 'filter-api': 'main' };
+  assert.equal(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, bases, defaults), undefined);
+  assert.match(refusal({ frozen: 'proof-base', run: 'main', repos }, { guestbook: 'main', 'filter-api': 'main' }, defaults) ?? '', /never writes main/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'master', repos }, bases, defaults) ?? '', /never writes main or master/);
+  assert.match(refusal({ frozen: 'proof-run', run: 'proof-run', repos }, bases, defaults) ?? '', /only ever read/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, bases, { guestbook: 'main', 'filter-api': 'proof-run' }) ?? '', /default branch of filter-api/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, { guestbook: 'proof-run', 'filter-api': 'main' }, defaults) ?? '', /base of filter-api is main/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: repos.slice(0, 1) }, bases, defaults) ?? '', /no clone is named for filter-api/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: [...repos, { service: 'other', clone: '/c/o' }] }, bases, { ...defaults, other: 'main' }) ?? '', /other is not a service/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: [] }, {}, {}) ?? '', /no proof repository/);
+  for (const name of ['-f', 'a..b', 'x.lock', 'with space', '']) assert.match(refusal({ frozen: 'proof-base', run: name, repos }, bases, defaults) ?? '', /not a branch name/, name);
+});
+
+test('the guards fail closed (review 1 of pull request 275, followup 1): an unread default branch, a run branch not named proof-<something>', () => {
+  const repos = [{ service: 'guestbook', clone: '/c/g' }, { service: 'filter-api', clone: '/c/f' }];
+  const bases = { guestbook: 'proof-run', 'filter-api': 'proof-run' };
+  // ls-remote --symref said no default branch: refused, whatever the run branch is.
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, bases, { guestbook: 'main', 'filter-api': null }) ?? '', /default branch of filter-api's repository could not be read/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, bases, { guestbook: 'main' }) ?? '', /default branch of filter-api's repository could not be read/);
+  // A default branch named neither main nor master (v2, develop) is still never the run branch: the run branch is proof-<something>.
+  for (const run of ['v2', 'develop', 'proof', 'proof-', 'run-proof', 'Proof-run']) {
+    const named = { guestbook: run, 'filter-api': run };
+    assert.match(refusal({ frozen: 'proof-base', run, repos }, named, { guestbook: 'trunk', 'filter-api': 'trunk' }) ?? '', /always proof-<something>/, run);
+  }
+  assert.equal(refusal({ frozen: 'proof-base', run: 'proof-run-2', repos }, { guestbook: 'proof-run-2', 'filter-api': 'proof-run-2' }, { guestbook: 'main', 'filter-api': 'main' }), undefined);
+});
+
+test('a workspace whose base is main or master for any service is refused, named service by service (review 1 of pull request 275, followup 2)', () => {
+  const repos = [{ service: 'guestbook', clone: '/c/g' }, { service: 'filter-api', clone: '/c/f' }];
+  const defaults = { guestbook: 'main', 'filter-api': 'main' };
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, { guestbook: 'main', 'filter-api': 'proof-run' }, defaults) ?? '', /base of guestbook is main: the proof's tickets would merge into it/);
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos }, { guestbook: 'master', 'filter-api': 'main' }, defaults) ?? '', /guestbook is master, filter-api is main/);
+  // Even a service with no clone named: its base alone refuses the run.
+  assert.match(refusal({ frozen: 'proof-base', run: 'proof-run', repos: repos.slice(0, 1) }, { guestbook: 'proof-run', 'filter-api': 'main' }, defaults) ?? '', /base of filter-api is main/);
+});
+
+test('a real run needs PROOF_REPOS; PROOF_REPOS=none is the rehearsal\'s only (review 1 of pull request 275, followup 2)', () => {
+  assert.throws(() => baseModeOf({}, false), /PROOF_REPOS is not set: a real run starts from its clean base/);
+  assert.throws(() => baseModeOf({ PROOF_REPOS: '  ' }, false), /PROOF_REPOS is not set/);
+  assert.throws(() => baseModeOf({ PROOF_REPOS: 'none' }, false), /none is for the rehearsal only/);
+  assert.deepEqual(baseModeOf({ PROOF_REPOS: 'guestbook=/c/g,filter-api=/c/f' }, false), { kind: 'reset', settings: readBaseSettings({ PROOF_REPOS: 'guestbook=/c/g,filter-api=/c/f' }) });
+  assert.throws(() => baseModeOf({ PROOF_REPOS: 'guestbook=relative' }, false), BaseError);
+  // The rehearsal resets its own bare copies, unless PROOF_REPOS=none.
+  assert.deepEqual(baseModeOf({}, true), { kind: 'reset', settings: undefined });
+  assert.deepEqual(baseModeOf({ PROOF_REPOS: 'none' }, true), { kind: 'none' });
+  assert.throws(() => baseModeOf({ PROOF_REPOS: 'guestbook=/c/g' }, true), /resets its own bare copies/);
+});
+
+test('the driver stops before anything else when a real run has no PROOF_REPOS, or PROOF_REPOS=none', () => {
+  const driver = fileURLToPath(new URL('../../scripts/proof-j2-multi.ts', import.meta.url));
+  for (const [repos, said] of [[undefined, /PROOF_REPOS is not set/], ['none', /none is for the rehearsal only/]] as const) {
+    // Paths that do not exist: the driver must stop before it reads either.
+    const missing = join(root, 'missing');
+    const env: NodeJS.ProcessEnv = { ...process.env, PROOF_PLAYWRIGHT: missing, PROOF_PASSWORD_FILE: missing, PROOF_OUT: join(root, 'driver-out') };
+    delete env.PROOF_REHEARSAL;
+    delete env.PROOF_REPOS;
+    if (repos !== undefined) env.PROOF_REPOS = repos;
+    const run = spawnSync(process.execPath, ['--no-warnings', driver], { env, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(run.status, 64, run.stderr);
+    assert.match(run.stderr, said);
+  }
 });
 
 test('the default branch as ls-remote --symref says it', () => {
@@ -105,13 +157,17 @@ test('the run branch is recreated at the frozen commit; main and the frozen bran
   assert.deepEqual(pushes, [['push', '--quiet', '--force', 'origin', `${w.frozen}:refs/heads/${RUN_BRANCH}`]], 'one push, to the run branch, named in full');
 });
 
-test('recreate refuses main, master, the frozen branch and the default branch before any push', async () => {
+test('recreate refuses main, master, the frozen branch, the default branch, an unread default branch and a run branch not named proof-<something>, before any push', async () => {
   const w = world('refuse');
   const calls: string[][] = [];
   const run: Run = async (_command, args) => { calls.push([...args]); return ''; };
   const repo = { service: 'guestbook', clone: w.clone };
-  for (const [over, fallback] of [[{ run: 'main' }, 'trunk'], [{ run: 'master' }, 'trunk'], [{ run: 'proof-base' }, 'main'], [{ run: 'trunk' }, 'trunk']] as const)
-    await assert.rejects(recreate(run, repo, settingsFor([repo], over), w.frozen, fallback), BaseError, JSON.stringify(over));
+  const cases: readonly [Partial<BaseSettings>, string | null][] = [
+    [{ run: 'main' }, 'trunk'], [{ run: 'master' }, 'trunk'], [{ run: 'proof-base' }, 'main'], [{ run: 'proof-run' }, 'proof-run'],
+    [{ run: 'proof-run' }, null], [{ run: 'v2' }, 'trunk'], [{ run: 'develop' }, 'main'], [{ run: 'proof-' }, 'main'],
+  ];
+  for (const [over, fallback] of cases)
+    await assert.rejects(recreate(run, repo, settingsFor([repo], over), w.frozen, fallback), BaseError, `${JSON.stringify(over)} with ${fallback}`);
   await assert.rejects(recreate(run, repo, settingsFor([repo]), 'not-a-commit', 'main'), BaseError);
   assert.deepEqual(calls, []);
   assert.equal(git(w.origin, 'rev-parse', 'refs/heads/main'), w.main);

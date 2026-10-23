@@ -3950,3 +3950,25 @@ The LATER items are in the pull request's body as follow-ups.
 - The lane had first numbered its own lines P50 to P53. Before its merge they became P60 to P62, and its release line was folded into P50: an id is never reused, and none of the lane's ids had been merged.
 - P53 and P54 build on this lane. Set aside (P61) is the service side of a Close, without its reason or its screen. The proof script's answer to a question (P60) is one of P54's criteria.
 - Recorded by: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`, at the owner's request relayed by the ops session.
+
+## 2026-10-23: the clean base's guards fail closed, and a real run needs PROOF_REPOS (review 1 of pull request 275, followups 1 and 2)
+
+**Decision.** Review 1 of pull request 275 passed with two followups on the no-push-to-main guarantee, fixed before review 2 at the orchestrator's request (P51):
+- **Followup 1.** When `git ls-remote --symref` gave no default branch, the guard went on. A default branch named neither main nor master (`v2`, `develop`) could then be force-pushed if `PROOF_RUN_BRANCH` named it.
+  - `refusal` and `recreate` now refuse when a repository's default branch cannot be read.
+  - Both also refuse a run branch that does not start with `proof-`, so no ordinary branch name can be the target.
+- **Followup 2.** Without `PROOF_REPOS`, a real run reset nothing and ran on the branches as it found them. A workspace still on main would then merge the proof's tickets into main.
+  - A real run without `PROOF_REPOS` now stops before it signs in (`baseModeOf`, exit 64).
+  - `PROOF_REPOS=none` is accepted by the rehearsal only, where it skips the reset of its own bare copies.
+  - `refusal` also refuses any workspace whose base is main or master, naming each such service, even one with no clone named.
+
+**Tests.** `test/scripts/proof-base.test.ts`:
+- an unread default branch, refused by `refusal` and by `recreate` before any push;
+- run branches `v2`, `develop`, `proof`, `proof-`, `run-proof` and `Proof-run`, refused;
+- a workspace base of main or master, refused;
+- `baseModeOf` in both modes;
+- the driver itself, started without `PROOF_REPOS` and with `PROOF_REPOS=none`, exiting 64 with the reason before it opens a browser.
+
+Followups 3 to 7 of the review stay open for the next round.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j2-proof-clean-base`.

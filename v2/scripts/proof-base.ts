@@ -16,25 +16,31 @@
 //      refspec, after the guards below;
 //   4. the run waits until each watcher deploys the frozen commit and each
 //      service's health answers.
-// The guards refuse a run branch named main or master, the repository's
-// default branch, the frozen branch itself, or one the workspace does not
-// name as every service's base; and a frozen commit that already holds a
-// change one of the proof's tickets asks for (an empty contract diff never
-// makes the inbox item step 3 waits for).
+// The guards fail closed. They refuse a run branch that does not start with
+// proof-, or is named main or master, or is the repository's default
+// branch, or one whose default branch cannot be read, or the frozen branch
+// itself, or one the workspace does not name as every service's base; a
+// workspace whose base is main or master for any service; and a frozen
+// commit that already holds a change one of the proof's tickets asks for
+// (an empty contract diff never makes the inbox item step 3 waits for).
+// A real run without PROOF_REPOS is refused: it would merge into whatever
+// the workspace names. PROOF_REPOS=none skips the reset, in the rehearsal only.
 //
-//   PROOF_REPOS          service=<clone>[,service=<clone>]: a clone of each proof
-//                        repository that may push its run branch (unset: no reset,
-//                        the run takes the branches as it finds them)
+//   PROOF_REPOS          service=<absolute path of a clone>[,...]: a clone of each
+//                        proof repository that may push its run branch; required by
+//                        a real run; none, in the rehearsal only, skips the reset
 //   PROOF_REMOTE         the clones' remote (default origin)
 //   PROOF_BASE_BRANCH    the frozen base branch (default proof-base)
-//   PROOF_RUN_BRANCH     the run branch (default proof-run)
+//   PROOF_RUN_BRANCH     the run branch (default proof-run; always proof-<something>)
 //   PROOF_DEPLOY_MINUTES how long the watchers have to deploy the base (default 10)
 import { spawn } from 'node:child_process';
 
 export const FROZEN_BRANCH = 'proof-base';
 export const RUN_BRANCH = 'proof-run';
-// Branches a run never writes, whatever the settings say.
+// Branches a run never writes, whatever the settings say; a run branch is always proof-<something>.
 const NEVER = new Set(['main', 'master']);
+export const RUN_PREFIX = 'proof-';
+const runName = (name: string): boolean => name.startsWith(RUN_PREFIX) && name.length > RUN_PREFIX.length;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
 
 export type ProofRepo = { readonly service: string; readonly clone: string };
@@ -42,6 +48,22 @@ export type BaseSettings = { readonly frozen: string; readonly run: string; read
 
 export class BaseError extends Error {
   override name = 'BaseError';
+}
+
+// What the run does with the base, from the environment: a real run needs
+// PROOF_REPOS, and PROOF_REPOS=none is the rehearsal's only (it skips the
+// reset of its own bare copies). Throws BaseError, which stops the run.
+export type BaseMode = { readonly kind: 'reset'; readonly settings: BaseSettings | undefined } | { readonly kind: 'none' };
+export function baseModeOf(env: NodeJS.ProcessEnv, rehearsal: boolean): BaseMode {
+  const text = env.PROOF_REPOS?.trim() ?? '';
+  if (rehearsal) {
+    if (text === '') return { kind: 'reset', settings: undefined };        // the rehearsal's own copies
+    if (text === 'none') return { kind: 'none' };
+    throw new BaseError('PROOF_REPOS: the rehearsal resets its own bare copies; set it to none to skip that, or leave it unset');
+  }
+  if (text === '') throw new BaseError('PROOF_REPOS is not set: a real run starts from its clean base (docs/v2/proof-clean-base.md), so it names a clone of each proof repository');
+  if (text === 'none') throw new BaseError('PROOF_REPOS=none is for the rehearsal only: a real run always starts from its clean base');
+  return { kind: 'reset', settings: readBaseSettings(env) };
 }
 
 // The settings from the environment, or undefined when PROOF_REPOS is unset.
@@ -64,16 +86,20 @@ export function readBaseSettings(env: NodeJS.ProcessEnv): BaseSettings | undefin
 }
 
 // Why the run branch may not be recreated, or undefined when it may.
-// `defaults` holds each repository's default branch, as its remote says;
-// `bases` each service's base, as the workspace says (GET /api/workspace).
-export function refusal(settings: Pick<BaseSettings, 'frozen' | 'run' | 'repos'>, bases: Readonly<Record<string, string>>, defaults: Readonly<Record<string, string | null>> = {}): string | undefined {
+// `defaults` holds each repository's default branch, as its remote says
+// (null when it could not be read: refused); `bases` each service's base,
+// as the workspace says (GET /api/workspace).
+export function refusal(settings: Pick<BaseSettings, 'frozen' | 'run' | 'repos'>, bases: Readonly<Record<string, string>>, defaults: Readonly<Record<string, string | null>>): string | undefined {
   const { frozen, run } = settings;
   for (const [what, name] of [['the run branch', run], ['the frozen branch', frozen]] as const)
     if (!BRANCH.test(name) || name.includes('..') || name.endsWith('/') || name.endsWith('.lock')) return `${what} is not a branch name: "${name}"`;
   if (NEVER.has(run)) return `the run branch is ${run}: a run never writes main or master`;
+  if (!runName(run)) return `the run branch is ${run}: a run branch is always ${RUN_PREFIX}<something>`;
   if (run === frozen) return `the run branch and the frozen branch are both ${run}: the frozen branch is only ever read`;
-  if (settings.repos.length === 0) return 'no proof repository is named';
   const services = Object.keys(bases);
+  const onMain = services.filter((s) => NEVER.has(bases[s] as string));
+  if (onMain.length > 0) return `the workspace's base of ${onMain.map((s) => `${s} is ${bases[s]}`).join(', ')}: the proof's tickets would merge into it; point the workspace at ${run} (docs/v2/proof-clean-base.md)`;
+  if (settings.repos.length === 0) return 'no proof repository is named';
   const missing = services.filter((s) => !settings.repos.some((r) => r.service === s));
   if (missing.length > 0) return `no clone is named for ${missing.join(', ')}: every service of the workspace starts from its frozen branch`;
   for (const repo of settings.repos) {
@@ -81,6 +107,7 @@ export function refusal(settings: Pick<BaseSettings, 'frozen' | 'run' | 'repos'>
     if (base === undefined) return `${repo.service} is not a service of the workspace`;
     if (base !== run) return `the workspace's base of ${repo.service} is ${base}, not ${run}: the run would not merge into the branch it recreates`;
     const fallback = defaults[repo.service];
+    if (fallback === undefined || fallback === null) return `the default branch of ${repo.service}'s repository could not be read: the run branch is not recreated without knowing it`;
     if (fallback === run) return `${run} is the default branch of ${repo.service}'s repository: a run never recreates it`;
   }
   return undefined;
@@ -163,7 +190,8 @@ export async function closeStale(run: Run, repo: ProofRepo, branch: string): Pro
 // The run branch recreated at the frozen commit: the only push a run makes,
 // to refs/heads/<run>, named in full. The guards are checked again here.
 export async function recreate(run: Run, repo: ProofRepo, settings: BaseSettings, commit: string, defaultBranch: string | null): Promise<void> {
-  if (NEVER.has(settings.run) || settings.run === settings.frozen || settings.run === defaultBranch) throw new BaseError(`${repo.service}: ${settings.run} is never pushed by a run`);
+  if (defaultBranch === null) throw new BaseError(`${repo.service}: the default branch could not be read, so nothing is pushed`);
+  if (NEVER.has(settings.run) || !runName(settings.run) || settings.run === settings.frozen || settings.run === defaultBranch) throw new BaseError(`${repo.service}: ${settings.run} is never pushed by a run`);
   if (!/^[0-9a-f]{40}$/.test(commit)) throw new BaseError(`${repo.service}: not a commit: ${commit}`);
   await run('git', ['push', '--quiet', '--force', settings.remote, `${commit}:refs/heads/${settings.run}`], repo.clone);
 }

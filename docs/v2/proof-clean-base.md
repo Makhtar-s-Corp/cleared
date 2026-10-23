@@ -20,13 +20,16 @@ Before its first ticket, the proof does four things, in this order (`v2/scripts/
 
 ### The guards
 
-The run refuses to recreate the run branch, and stops, when:
+The guards fail closed. The run refuses to recreate the run branch, and stops, when:
 
-- it is named `main` or `master`;
-- it is the repository's default branch, as `git ls-remote --symref origin HEAD` says;
+- it does not start with `proof-` (`proof-run`, `proof-run-2`), or it is named `main` or `master`;
+- it is the repository's default branch, as `git ls-remote --symref origin HEAD` says, or that default branch cannot be read;
 - it has the same name as the frozen branch;
+- the workspace names `main` or `master` as the base of any service;
 - the workspace does not name it as every service's base (`GET /api/workspace`);
 - a service of the workspace has no clone in `PROOF_REPOS`.
+
+A real run also refuses to start without `PROOF_REPOS`: it would merge into whatever the workspace names. `PROOF_REPOS=none` is accepted by the rehearsal only, where it skips the reset of its own bare copies.
 
 It also refuses a frozen commit that already holds a change one of the proof's tickets asks for:
 
@@ -71,13 +74,13 @@ Do this on the machine that runs the proof, with the owner's agreement. Every na
 
    | Variable | Value |
    | --- | --- |
-   | `PROOF_REPOS` | `guestbook=<clone of the guestbook repository>,filter-api=<clone of the filter API repository>`: clones that can push `proof-run` and where `gh` is signed in |
+   | `PROOF_REPOS` | `guestbook=<absolute path of a clone of the guestbook repository>,filter-api=<absolute path of a clone of the filter API repository>`: clones that can push `proof-run` and where `gh` is signed in. Required by a real run |
    | `PROOF_REMOTE` | the clones' remote, `origin` by default |
    | `PROOF_BASE_BRANCH` | `proof-base` by default |
-   | `PROOF_RUN_BRANCH` | `proof-run` by default |
+   | `PROOF_RUN_BRANCH` | `proof-run` by default; always `proof-<something>` |
    | `PROOF_DEPLOY_MINUTES` | how long the watchers have to deploy the base, 10 by default |
 
-   Without `PROOF_REPOS`, the proof resets nothing and runs on the branches as it finds them.
+   Without `PROOF_REPOS`, a real run stops before it signs in.
 
 To move the frozen base later, push a new commit to `proof-base` after a written decision. That push is never to `main`.
 
@@ -90,4 +93,4 @@ To move the frozen base later, push a new commit to `proof-base` after a written
 
 ## The rehearsal
 
-`PROOF_REHEARSAL=1` exercises the same path on bare copies in a temporary folder. Each copy has a `proof-base` and a `proof-run` that an earlier run moved on. The workspace and the two stand-in brokers name `proof-run`. The proof recreates the run branch before its first ticket. It closes no pull request, because the forge stand-in has none from an earlier run, and waits for no watcher.
+`PROOF_REHEARSAL=1` exercises the same path on bare copies in a temporary folder (`PROOF_REPOS` unset; `PROOF_REPOS=none` skips the reset there). Each copy has a `proof-base` and a `proof-run` that an earlier run moved on. The workspace and the two stand-in brokers name `proof-run`. The proof recreates the run branch before its first ticket. It closes no pull request, because the forge stand-in has none from an earlier run, and waits for no watcher.

@@ -24,10 +24,12 @@
 // gives each one of its tickets its Go from the inbox, as the owner would,
 // and answers a question one of their sessions asks with the option marked
 // recommended, else the first one, recorded in the report.
-// Before step 1, when PROOF_REPOS names the proof repositories' clones, the
-// run starts from a clean base (scripts/proof-base.ts): the earlier runs'
-// tickets set aside, each run branch recreated from its frozen branch, and
-// the watchers' deploys of it awaited. Nothing is ever pushed to main.
+// Before step 1 the run starts from a clean base (scripts/proof-base.ts):
+// the earlier runs' tickets set aside, each run branch recreated from its
+// frozen branch, and the watchers' deploys of it awaited. Nothing is ever
+// pushed to main. A real run without PROOF_REPOS, or whose workspace merges
+// into main or master, stops before it starts; PROOF_REPOS=none skips the
+// reset in the rehearsal only.
 // The times come from the app's routes, as the screens read them, and from
 // the ledger, read only, when it is given.
 //
@@ -64,7 +66,7 @@ import { RELAY } from '../src/container/preview.ts';
 import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
 import { sessionNames, siblingAddress } from '../src/container/session-runtime.ts';
 import type { Ticket } from '../src/tickets/contract.ts';
-import { BaseError, closeStale, frozenCommits, reader as fileAt, readBaseSettings, recreate, refusal, runCommand, ticketChangesIn, type BaseSettings } from './proof-base.ts';
+import { BaseError, baseModeOf, closeStale, frozenCommits, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, type BaseMode, type BaseSettings } from './proof-base.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
 import { answerFor, chooseAnswers } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
@@ -86,8 +88,10 @@ const minutes = (name: string, fallback: number): number => {
 const startedAt = new Date();
 const STEP_MS = minutes('PROOF_STEP_MINUTES', REHEARSAL ? 6 : 60) * 60_000;
 const DEADLINE = REHEARSAL ? startedAt.getTime() + minutes('PROOF_TIMEOUT_MINUTES', 40) * 60_000 : Number.POSITIVE_INFINITY;
-let baseSettings: BaseSettings | undefined;
-try { baseSettings = REHEARSAL ? undefined : readBaseSettings(env); } catch (error) { console.error(`proof: ${(error as Error).message}`); process.exit(64); }
+// A real run always starts from its clean base: without PROOF_REPOS it stops here.
+let baseMode: BaseMode;
+try { baseMode = baseModeOf(env, REHEARSAL); } catch (error) { console.error(`proof: ${(error as Error).message}`); process.exit(64); }
+let baseSettings: BaseSettings | undefined = baseMode.kind === 'reset' ? baseMode.settings : undefined;
 const OUT = env.PROOF_OUT ?? `/tmp/cleared-captures/j2/multi-${REHEARSAL ? 'rehearsal' : 'proof'}`;
 const log = (line: string) => console.log(`proof: ${line}`);
 mkdirSync(OUT, { recursive: true });
@@ -98,7 +102,7 @@ if (REHEARSAL) {
   const started = world;
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void started.stop().finally(() => process.exit(130)); });
 }
-if (world) baseSettings = world.base;
+if (world && baseMode.kind === 'reset') baseSettings = world.base;
 const APP = (world?.appUrl ?? env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').replace(/\/$/, '');
 const OWNER = world?.owner ?? env.PROOF_OWNER ?? 'owner';
 const PASSWORD_FILE = (world?.passwordFile ?? env.PROOF_PASSWORD_FILE) as string;
