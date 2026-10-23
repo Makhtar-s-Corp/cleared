@@ -21,7 +21,7 @@ import { LeftCards, RightCards, StatusHead, Timeline } from '../../screens/sessi
 import { EditorTab, TakeoverButton } from '../../screens/session/Tabs.tsx';
 import { takeoverOf } from '../../screens/session/tabs.ts';
 import { actingSession, type TicketPart } from '../../screens/session/ticket.ts';
-import { html, visibleText } from '../render.tsx';
+import { html, renderIndex, visibleText } from '../render.tsx';
 
 const catalog = (language: 'en' | 'fr') => translator({ ...loadCatalog('shell', language), ...loadCatalog('session', language) });
 const en = catalog('en');
@@ -60,8 +60,8 @@ test('one thread of the ticket: the author\'s steps, the handover row, the revie
   const handover = rows.indexOf('handover');
   assert.ok(handover > 0, 'a handover row, after the author\'s rows');
   assert.deepEqual(rows.slice(handover), ['handover', 'run', 'run', 'read'], 'then the reviewer\'s');
-  assert.ok(visibleText(markup).includes('Reviewer (Sonnet) took over at 09:37; the author\'s work is above'));
-  assert.ok(visibleText(html(<Timeline view={view} t={fr} />)).includes('Le relecteur (Sonnet) a pris la suite à 09:37 ; le travail de l\'auteur est au-dessus'));
+  assert.ok(visibleText(markup).includes('Reviewer · Sonnet · from 09:37'));
+  assert.ok(visibleText(html(<Timeline view={view} t={fr} />)).includes('Relecteur · Sonnet · depuis 09:37'));
   const status = visibleText(html(<StatusHead view={view} t={en} />));
   assert.deepEqual(status.slice(0, 1), ['Reading the diff of src/screens/Envelope.jsx']);
   assert.deepEqual([status[1], /^4 min/.test(status[2] ?? '')], ['Reviewer · Sonnet ·', true], 'the status says whose it is when the ticket has two');
@@ -131,7 +131,7 @@ test('every word of the ticket view comes from the catalogs, French included', (
   const words = (t: Translate) => [html(<Timeline view={view} t={t} />), html(<RightCards view={view} t={t} />), html(<LeftCards view={view} t={t} />), html(<StatusHead view={view} t={t} />)].flatMap(visibleText);
   assert.ok(words(sentinel).some((line) => line.includes('«handover_reviewer»')));
   const french = words(fr).join('\n');
-  for (const english of ['took over', 'Read the repository', 'Commit the changes', 'edits', 'Show the changes']) assert.ok(!french.includes(english), english);
+  for (const english of ['from 09', 'Read the repository', 'Commit the changes', 'edits', 'Show the changes']) assert.ok(!french.includes(english), english);
   assert.doesNotMatch(french, /⟦/);
 });
 
@@ -163,4 +163,24 @@ test('a thread\'s stream pauses while its view is hidden, and goes on after the 
   assert.match(stream.opened[1]?.url ?? '', /\/sessions\/s1\/events\?after=3$/, 'shown again: from the last event read');
   stop();
   assert.ok(stream.opened[1]?.closed);
+});
+
+test('the whole ticket folds an ended session a later one followed into one row, unless the view saw it live or a filter shows it', () => {
+  const view = ticketView();
+  const markup = html(<Timeline view={view} t={en} />);
+  const fold = /<details class="earlier" data-session="([^"]+)"><summary>[\s\S]*?<span>([^<]+)<\/span><\/summary>/.exec(markup);
+  assert.equal(fold?.[1], ENVELOPE_AUTHOR_ID);
+  assert.match(fold?.[2] ?? '', /^Author · Opus · \d+ steps$/);
+  assert.ok(markup.indexOf('class="earlier"') < markup.indexOf('data-row="handover"'), 'folded above the handover row');
+  assert.doesNotMatch(html(<Timeline view={{ ...view, unfolded: new Set([ENVELOPE_AUTHOR_ID]) }} t={en} />), /class="earlier"/, 'seen live: never folded under the person\'s eyes');
+  assert.doesNotMatch(html(<Timeline view={{ ...view, filter: 'author' }} t={en} />), /class="earlier"/);
+  assert.match(html(<Timeline view={view} t={fr} />), /Auteur · Opus · \d+ étapes/);
+});
+
+test('the sessions index has one card per ticket: the session its view acts on', () => {
+  const view = ticketView();
+  const markup = renderIndex({ sessions: view.siblings, tickets: [view.ticket!], now: FIXTURE_NOW }, en);
+  assert.equal([...markup.matchAll(/class="session-card"/g)].length, 1);
+  assert.match(markup, /href="\/sessions\/fixture-2"/);
+  assert.ok(visibleText(markup).includes('Reviewer'));
 });

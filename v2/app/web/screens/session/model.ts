@@ -430,6 +430,7 @@ export type SessionView = {
   // session alone, the whole thread.
   readonly parts?: readonly TicketPart[];
   readonly filter?: Filter;
+  readonly unfolded?: ReadonlySet<string>;               // the ticket's sessions this view saw live: never folded
 };
 
 // Who took the session over (decision 30, lane 20): what this tab knows,

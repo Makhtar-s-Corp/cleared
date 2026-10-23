@@ -6,7 +6,7 @@
 // captured at each width in each theme, then everything is stopped.
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
-//     [--screens tower,inbox,sessions,session,lead,review] [--widths 1440,390] [--themes light,dark]
+//     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light,dark]
 //     [--via load|click]
 //
 // --via load (the default) opens each screen's address as a page; --via
@@ -38,9 +38,11 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-// Screens a lane asks for by name, outside the default set: a reviewer's
-// session (lane 36, the ticket's view at its review).
-export const EXTRA_SCREENS = ['review'] as const;
+// Screens a lane asks for by name, outside the default set (lane 36): a
+// reviewer's session, which is the view of its ticket at its review; its
+// Editor; and its Terminal after Take over (given back once captured, so
+// the next capture finds it as it was).
+export const EXTRA_SCREENS = ['review', 'review-editor', 'review-takeover'] as const;
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRA_SCREENS[number];
 const ACCOUNT = 'owner';
 
@@ -93,6 +95,7 @@ export async function capture(options: { readonly out: string; readonly screens?
         const reviewer = sessions.find((s) => s.role === 'reviewer') ?? sessions[0];
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead', review: `/sessions/${reviewer?.id ?? ''}`,
+          'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -111,9 +114,25 @@ export async function capture(options: { readonly out: string; readonly screens?
             if (documents !== before) errors.push(`${w} ${theme}: ${screen} loaded a document`);
           } else await page.goto(`${app.base}${path}`);
           await settle(page);
+          if (screen === 'review-editor') {
+            await page.locator('[role="tab"][aria-controls="tab-editor"]').click();
+            await page.locator('#tab-editor table.code').waitFor({ timeout: 10_000 });
+            await settle(page);
+          }
+          if (screen === 'review-takeover') {
+            await page.locator('#takeover').click();
+            await page.locator('#tab-terminal [data-terminal-state="open"]').waitFor({ timeout: 10_000 });
+            await page.locator('#tab-terminal .xterm-rows').getByText('resumed on this session').waitFor({ timeout: 10_000 });
+            await settle(page);
+          }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
           await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
+          if (screen === 'review-editor') await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
+          if (screen === 'review-takeover') {
+            await page.locator('#giveback').click();
+            await page.locator('#takeover').waitFor({ timeout: 10_000 });
+          }
         }
         await context.close();
       }

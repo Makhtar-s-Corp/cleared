@@ -52,7 +52,7 @@ import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, Takeove
 import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
   actingSession, editsOf, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
-  type Filter, type Handover, type TicketPart,
+  type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askHref } from '@/screens/ask/model.ts';
 import './session.css';
@@ -146,7 +146,8 @@ function ToolLine({ row, view, t, onAnswer, onFile }: { readonly row: ToolRow; r
   const summary = resultSummary(row.output);
   const subs: ReactNode[] = [];
   if (input?.kind === 'edit') subs.push(<Counts key="counts" added={input.added} removed={input.removed} />);
-  if (summary) {
+  // A command that went well says nothing more; a count or a failure does.
+  if (summary && summary.key !== 'done') {
     const text = summary.key === 'passed' || summary.key === 'failed' ? t(summary.key === 'passed' ? 'result_count_ok' : 'result_failed', { n: summary.n ?? 0 }) : t(`result_${summary.key}`);
     subs.push(<span key="result" className={summary.tone === 'ok' ? 'ok' : 'bad'}>{text}</span>);
   }
@@ -270,19 +271,40 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile }: {
   readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile;
 }) {
   const parts = partsOf(view);
-  const entries = ticketThread(parts, view.filter ?? 'all');
+  const filter = view.filter ?? 'all';
+  const entries = ticketThread(parts, filter);
   const views = new Map(parts.map((part) => [part.summary.id, part.summary.id === view.summary.id ? view : { ...view, summary: part.summary, thread: part.thread ?? emptyThread(part) }]));
   if (entries.length === 0) return <p className="empty">{t('timeline_empty')}</p>;
-  return (
-    <>
-      {entries.map((entry, index) => {
-        if (entry.kind === 'handover') return <HandoverRow key={`handover:${entry.session}`} handover={entry} t={t} />;
-        const row = entry.row;
-        const key = 'id' in row ? `${entry.session}:${row.kind}:${row.id}` : `${entry.session}:${row.kind}:${row.at}:${index}`;
-        return <RowView key={key} row={row} view={views.get(entry.session) ?? view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} />;
-      })}
-    </>
-  );
+  const row = (entry: Extract<ThreadEntry, { kind: 'row' }>, index: number) => {
+    const key = 'id' in entry.row ? `${entry.session}:${entry.row.kind}:${entry.row.id}` : `${entry.session}:${entry.row.kind}:${entry.row.at}:${index}`;
+    return <RowView key={key} row={entry.row} view={views.get(entry.session) ?? view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} />;
+  };
+  // The whole ticket: an ended session a later one followed is folded into
+  // one row (who, how many steps), unless the view saw it live.
+  const last = [...parts].sort((a, b) => Date.parse(a.summary.startedAt) - Date.parse(b.summary.startedAt)).at(-1)?.summary.id;
+  const folded = (session: string) => {
+    const summary = parts.find((p) => p.summary.id === session)?.summary;
+    return filter === 'all' && session !== last && summary !== undefined && !isLive(summary) && !view.unfolded?.has(session);
+  };
+  const out: ReactNode[] = [];
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index] as ThreadEntry;
+    if (entry.kind === 'handover') { out.push(<HandoverRow key={`handover:${entry.session}`} handover={entry} t={t} />); continue; }
+    if (!folded(entry.session)) { out.push(row(entry, index)); continue; }
+    const start = index;
+    const rows: ReactNode[] = [];
+    while (index < entries.length && entries[index]?.kind === 'row' && (entries[index] as { session: string }).session === entry.session) { rows.push(row(entries[index] as Extract<ThreadEntry, { kind: 'row' }>, index)); index++; }
+    index--;
+    const summary = parts.find((p) => p.summary.id === entry.session)?.summary;
+    const who = summary && (summary.role === 'author' || summary.role === 'reviewer') ? t(`tab_${summary.role}`, { model: family(summary.model) }) : '';
+    out.push(
+      <details key={`earlier:${entry.session}:${start}`} className="earlier" data-session={entry.session}>
+        <summary><CaretRight className="caret" size={12} aria-hidden="true" /><span>{t(rows.length === 1 ? 'earlier_one' : 'earlier_other', { who, n: rows.length })}</span></summary>
+        {rows}
+      </details>,
+    );
+  }
+  return <>{out}</>;
 }
 
 const emptyThread = (part: TicketPart): SessionThread => ({ lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, ...(part.thread ?? {}) });
@@ -349,7 +371,7 @@ function CheckRow({ check, t }: { readonly check: { readonly name: string; reado
   );
 }
 
-export function RightCards({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
+export function RightCards({ view, t, onFile }: { readonly view: SessionView; readonly t: Translate; readonly onFile?: OpenFile }) {
   const parts = partsOf(view);
   const files = ticketFiles(parts);
   const checks = ticketChecks(parts);
@@ -359,7 +381,12 @@ export function RightCards({ view, t }: { readonly view: SessionView; readonly t
       <section className="card" aria-labelledby="changes-title">
         <h3 id="changes-title" className="card-label">{t('changes_title')}</h3>
         {files.length === 0 ? <p className="faint small">{t('changes_none')}</p>
-          : <ul className="changes">{files.map((f) => <li key={f.path}><span className="path">{f.path}</span><span><Counts added={f.added} removed={f.removed} /></span></li>)}</ul>}
+          : <ul className="changes">{files.map((f) => (
+            <li key={f.path}>
+              {onFile ? <button type="button" className="link-button path" data-act="open_change" onClick={() => onFile(f.path, 'diff')}>{f.path}</button> : <span className="path">{f.path}</span>}
+              <span><Counts added={f.added} removed={f.removed} /></span>
+            </li>
+          ))}</ul>}
       </section>
       <section className="card" aria-labelledby="checks-title">
         <h3 id="checks-title" className="card-label">{t('checks_title')}</h3>
@@ -414,7 +441,13 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
 export function SessionIndex({ sessions, tickets, now, t }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate }) {
   const titles = new Map(tickets.map((ticket) => [ticket.id, ticket.title]));
   const minutes = (from: string) => Math.max(0, Math.floor((now.getTime() - Date.parse(from)) / 60_000));
-  const ordered = [...sessions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  // One card per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
+  const tickets_ = new Set(sessions.filter((s) => s.role === 'author' || s.role === 'reviewer').map((s) => s.ticket));
+  const shown = [
+    ...sessions.filter((s) => s.role !== 'author' && s.role !== 'reviewer'),
+    ...[...tickets_].flatMap((ticket) => { const own = ticketSessions(sessions, ticket); const acting = actingSession(own, own.at(-1)?.id ?? ''); return acting ? [acting] : []; }),
+  ];
+  const ordered = shown.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   return (
     <div className="index">
       <h1>{t('index_title')}</h1>
@@ -670,14 +703,20 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     setThreads((before) => (before.get(session) === thread ? before : new Map([...before, [session, thread]])));
   }, []);
 
+  // The sessions this view saw live stay unfolded once they end: nothing folds under the person's eyes.
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set(ticketSessions(loaded.sessions, ticketId).filter(isLive).map((s) => s.id)));
+  useEffect(() => {
+    const live = sessions.filter((s) => isLive(s) && !unfolded.has(s.id));
+    if (live.length > 0) setUnfolded((before) => new Set([...before, ...live.map((s) => s.id)]));
+  }, [sessions, unfolded]);
   const parts: TicketPart[] = useMemo(() => sessions.map((summary) => ({ summary, thread: threads.get(summary.id) })), [sessions, threads]);
   const actingThread = threads.get(id);
   const actingDetail = details.get(id);
   const view: SessionView = useMemo(() => ({
     summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps,
     thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null },
-    parts, filter,
-  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, actingThread, actingDetail, parts, filter]);
+    parts, filter, unfolded,
+  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));
   const takeover = takeoverOf({ takenOver: actingTaken, me: view.me, role: acting.role, ended });
   const terminal = terminalChoice({ offered: context.me.terminal, takeover });
@@ -964,7 +1003,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
             {tab === 'browser' ? <BrowserTab view={browser} t={t} /> : null}
           </div>
         </section>
-        <aside className="s-right" id="s-right" aria-label={t('right_label')}><RightCards view={view} t={t} /></aside>
+        <aside className="s-right" id="s-right" aria-label={t('right_label')}><RightCards view={view} t={t} onFile={openFile} /></aside>
       </div>
       <p className="sr-only" role="status" aria-live="polite">{said}</p>
     </>

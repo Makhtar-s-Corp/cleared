@@ -1,6 +1,6 @@
 // The session view follows the ticket (docs/v2/ui-overhaul-plan.md, 2.3.1,
 // 2.3.2 and U6, lane 36): one thread of the ticket's sessions in order, a
-// handover row before each session after the first saying who took over
+// handover row before each session after the first saying who carries on
 // and when, Author and Reviewer as filters of that thread; the session the
 // view acts on; what the ticket's sessions changed, checked and spent; the
 // consecutive edits of one file merged into one row (Devin's); and the
@@ -80,14 +80,14 @@ test('one thread: the author\'s rows, a handover row with who and when, then the
   ]);
   const handover = entries.find((e) => e.kind === 'handover') as Handover;
   assert.deepEqual([handover.session, handover.at, handover.model], ['reviewer-1', at(20), 'Sonnet']);
-  assert.equal(handoverLine(handover, en), 'Reviewer (Sonnet) took over at 09:20; the author\'s work is above');
-  assert.equal(handoverLine(handover, fr), 'Le relecteur (Sonnet) a pris la suite à 09:20 ; le travail de l\'auteur est au-dessus');
+  assert.equal(handoverLine(handover, en), 'Reviewer · Sonnet · from 09:20');
+  assert.equal(handoverLine(handover, fr), 'Relecteur · Sonnet · depuis 09:20');
   const back: Handover = { ...handover, role: 'author', model: 'Opus', after: 'reviewer' };
-  assert.equal(handoverLine(back, en), 'Author (Opus) took over again at 09:20; the review is above');
-  assert.equal(handoverLine(back, fr), 'L\'auteur (Opus) a repris à 09:20 ; la relecture est au-dessus');
+  assert.equal(handoverLine(back, en), 'Author · Opus · again from 09:20');
+  assert.equal(handoverLine(back, fr), 'Auteur · Opus · de nouveau depuis 09:20');
   const again: Handover = { ...handover, role: 'author', model: 'Opus', after: 'author' };
-  assert.equal(handoverLine(again, en), 'A new author session (Opus) started at 09:20; the last one is above');
-  assert.equal(handoverLine(again, fr), 'Une nouvelle session d\'auteur (Opus) a commencé à 09:20 ; la précédente est au-dessus');
+  assert.equal(handoverLine(again, en), 'New author session · Opus · from 09:20');
+  assert.equal(handoverLine(again, fr), 'Nouvelle session d\'auteur · Opus · depuis 09:20');
 });
 
 test('Author and Reviewer filter the thread: one role\'s rows, no handover row; a session not yet read adds nothing', () => {

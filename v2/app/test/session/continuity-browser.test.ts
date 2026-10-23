@@ -70,10 +70,12 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     const loaded = documents;
 
     // The reviewer starts: the change stream says so.
+    const started = Date.now();
     startReview(fixture);
     source.changed('session', REVIEWER_ID);
     source.changed('ticket', TICKET_ID);
     await page.locator('#timeline [data-row="handover"]').waitFor({ state: 'attached' });
+    console.log(`measure handover_row_ms ${Date.now() - started}`);
     await page.waitForFunction(() => document.querySelector('#status .phrase-title')?.textContent === 'Reading the diff of src/engine/upcoming.mjs');
     await page.waitForURL(new RegExp(`/sessions/${REVIEWER_ID}#editor$`));
     const after = await page.evaluate(() => ({
@@ -89,9 +91,9 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     assert.deepEqual({ view: after.view, diff: after.diff, added: after.added, views: after.views, navigations: after.navigations },
       { view: 'view', diff: 'diff', added: 24, views: 1, navigations: 1 }, 'the same view and the same diff, in one document, one view of the ticket');
     assert.equal(documents, loaded, 'no document loaded');
-    assert.match(after.handover ?? '', /^Reviewer \(Sonnet\) took over at \d\d:\d\d; the author's work is above$/);
+    assert.match(after.handover ?? '', /^Reviewer · Sonnet · from \d\d:\d\d$/);
     assert.deepEqual(after.rows.slice(after.rows.indexOf('handover')), ['handover', 'run', 'read'], 'the reviewer\'s rows below it');
-    assert.match(after.said, /Reviewer \(Sonnet\) took over/, 'said once, politely');
+    assert.match(after.said, /Reviewer · Sonnet · from/, 'said once, politely');
 
     // Take over on the reviewer: its terminal, opened once.
     await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
