@@ -53,7 +53,7 @@
   "wants_other": "Veut utiliser {tool}",
   "allow_once": "Autoriser une fois",
   "allow_always": "Toujours pour ce projet",
-  "deny": "Refuser, faire avec l'existant",
+  "deny": "Refuser",
   "deny_message": "Refusé. Faites avec l'existant.",
   "who_you": "vous",
   "who_other": "un collègue",

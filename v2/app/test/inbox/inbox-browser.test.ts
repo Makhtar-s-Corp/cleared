@@ -153,7 +153,7 @@ test('the "Traité" group is folded under what waits, with its count, and opens 
   });
 });
 
-test('a row\'s answer shows its item, says what it did there, and puts the focus on that line', { skip }, async () => {
+test('a row\'s answer shows its item, says what it did there, and puts the focus on its detail', { skip }, async () => {
   await withInbox(async (page, base) => {
     const sent: string[] = [];
     await page.route(/\/api\/service\/sessions\/[^/]+\/requests\/[^/]+\/answer$/, async (route: any) => {
@@ -166,7 +166,9 @@ test('a row\'s answer shows its item, says what it did there, and puts the focus
     await page.locator('#detail .d-done').waitFor();
     assert.match(await page.evaluate(() => document.location.hash), /request-review-1/, 'the answered item is the one shown');
     assert.equal((await page.locator('#detail .d-done').innerText()).trim(), 'Refusé. Le motif est transmis à la session.');
-    await page.waitForFunction(() => document.activeElement?.id === 'd-done', undefined, { timeout: 2000 });
+    await page.waitForFunction(() => document.activeElement?.id === 'detail', undefined, { timeout: 2000 });
+    await page.waitForTimeout(300);
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'detail', 'and it stays there once the cache has moved the item');
     assert.equal((await page.locator('#inbox-live').innerText()).trim(), 'Refusé. Le motif est transmis à la session.');
     assert.equal(sent.length, 1);
     assert.match(sent[0] ?? '', /\/requests\/request-review-1\/answer$/);

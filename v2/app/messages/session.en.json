@@ -53,7 +53,7 @@
   "wants_other": "Wants to use {tool}",
   "allow_once": "Allow once",
   "allow_always": "Always in this project",
-  "deny": "Deny, use what we have",
+  "deny": "Deny",
   "deny_message": "Not allowed. Use what we have.",
   "who_you": "you",
   "who_other": "a teammate",

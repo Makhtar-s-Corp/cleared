@@ -100,7 +100,6 @@
 .d-answers .btn kbd { background: transparent; box-shadow: inset 0 0 0 1px currentColor; color: inherit; opacity: .6; }
 .d-answers .deny-reason { flex: 1 1 240px; }
 .d-answers .deny-reason input { height: 44px; }
-.d-done:focus { outline: none; }
 .d-answers .d-done { flex: 1 1 100%; padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--sunken); }
 .d-actions:empty { display: none; }
 .fold { margin-top: var(--space-3); border-top: 1px solid var(--hairline); padding-top: var(--space-2); }

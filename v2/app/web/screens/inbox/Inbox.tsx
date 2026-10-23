@@ -316,7 +316,7 @@ function PermissionAnswers({ item, view, t, note, reason, onReason, onAct }: {
   const busy = local?.kind === 'busy';
   const status = <p className="d-note" id="d-note" role="status">{note}</p>;
   if (local?.kind === 'settled') return <><p className="d-done">{t('settled')}</p>{status}</>;
-  if (local?.kind === 'answered') return <><p className="d-done" id="d-done" tabIndex={-1}>{t(`answered_${local.decision}`)}</p>{status}</>;
+  if (local?.kind === 'answered') return <><p className="d-done" id="d-done">{t(`answered_${local.decision}`)}</p>{status}</>;
   if (item.state === 'handled') return <><p className="d-done">{t('handled_note')}</p>{status}</>;
   const act = (name: Answer, primary: boolean) => (
     <Button variant={primary ? 'ink' : 'outline'} className={primary ? 'btn primary' : 'btn'} data-act={name} disabled={busy} onClick={() => onAct?.(name)}
@@ -739,6 +739,16 @@ export default function Inbox() {
   // the request shown, Space peeks at the row walked to; Esc leaves the item,
   // never from a field (the text typed there stays). Handled here, the shell
   // leaves them alone (preventDefault).
+  // Once the answer is drawn, the detail takes the focus (the pressed button
+  // is gone with the answers); the detail's inside is drawn again when the
+  // cache moves the item to what was handled, the detail itself stays.
+  const focusDone = useRef(false);
+  useLayoutEffect(() => {
+    if (!focusDone.current || !document.getElementById('d-done')) return;
+    focusDone.current = false;
+    detail.current?.focus({ preventScroll: true });
+  });
+
   const keyState = useRef({ shown: undefined as Item | undefined, visible: false, busy: false });
   useEffect(() => {
     let lastG = -Infinity;
@@ -778,10 +788,10 @@ export default function Inbox() {
       const after = await run();
       change((next) => { if (after) next.set(item.id, after); else next.delete(item.id); });
       setNote('');
-      // An answer's line takes the focus, where the pressed button was, and is said once.
+      // The answer is said once, and the detail that shows it takes the focus.
       if (after?.kind === 'answered') {
         setSaid(t(`answered_${after.decision}`));
-        requestAnimationFrame(() => document.getElementById('d-done')?.focus({ preventScroll: true }));
+        focusDone.current = true;
       }
       if (gesture === 'plan_change' || gesture === 'contract_send_back') setMessage('');
       context.inboxChanged();
@@ -910,6 +920,7 @@ export default function Inbox() {
     if (location.hash !== `#${encodeURIComponent(item.id)}`) {
       peeking.current = true;                        // the answer's line takes the focus, not the detail
       location.hash = encodeURIComponent(item.id);
+      setHash(location.hash);                        // the detail shows it now, not at the hashchange (which would draw it again)
     }
     onAct(act, { reason: '', answers: noAnswers(undefined), message: '' }, item);
   };

@@ -36,7 +36,7 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
     TICKET_TITLE, 'LOCAL-161', 'Done when', 'Entries grouped by week, Monday first', 'Same totals as today, a test proves it', 'Plan of the session',
     'Paused, waiting for you', '18 min · 35,500 tokens',
     'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run the project\'s tests', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
-    'Wants to run', 'npm install date-fns', 'Network access and a new dependency.', 'Allow once', 'Always in this project', 'Deny, use what we have',
+    'Wants to run', 'npm install date-fns', 'Network access and a new dependency.', 'Allow once', 'Always in this project', 'Deny',
     'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Screen so far', 'Hand over to Codex', 'Interrupt', 'Send',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
 });
