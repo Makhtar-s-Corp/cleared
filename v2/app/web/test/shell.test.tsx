@@ -3,7 +3,7 @@
 // what makes the app installable on a Home Screen (manifest, service
 // worker, icons).
 import { test } from 'vitest';
-import { renderBar, renderHeader } from './render.tsx';
+import { renderBar, renderSidebar } from './render.tsx';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../lib/i18n.ts';
 import assert from 'node:assert/strict';
@@ -39,17 +39,19 @@ test('the Plans tab opens /lead, and /lead and /plans/<id> mount the lead screen
   } finally {
     await app.close();
   }
-  assert.match(renderHeader('lead', shell), /<a href="\/lead" aria-current="page">Plans<\/a>/);
-  const tower = renderHeader('tower', shell);
-  assert.match(tower, /<a href="\/lead">Plans<\/a>/);
-  assert.ok(tower.indexOf('>Plans<') > tower.indexOf('>Tickets<'), 'after Tickets, as the capture orders the tabs');
+  assert.match(renderSidebar('lead', shell), /<a class="nav-item" href="\/lead" data-nav="lead" aria-current="page" data-tip="Plans · G P">[^]*?<span class="nav-label">Plans<\/span>/);
+  const tower = renderSidebar('tower', shell);
+  assert.match(tower, /<a class="nav-item" href="\/lead" data-nav="lead" data-tip="Plans · G P">/);
+  assert.ok(tower.indexOf('>Plans<') > tower.indexOf('>Sessions<'), 'after Sessions');
+  assert.doesNotMatch(tower, /Tickets/, 'no screen that does not exist yet (lane 34\'s audit)');
 });
 
-test('the header carries the notifications button, hidden until the page knows what it can offer', () => {
-  const html = renderHeader('tower', shell);
+test('the sidebar\'s foot carries the notifications button, hidden until the page knows what it can offer', () => {
+  const html = renderSidebar('tower', shell);
   assert.match(html, /<div class="notify" id="notify" hidden="">/);
   assert.match(html, /<button type="button" class="icon" id="notify-summary" aria-label="Notifications"/);
-  assert.ok(html.indexOf('id="notify"') < html.indexOf('id="clock"'), 'before the clock');
+  assert.ok(html.indexOf('id="person"') < html.indexOf('id="notify"') && html.indexOf('id="notify"') < html.indexOf('id="theme"'), 'between the person and the theme');
+  assert.doesNotMatch(html, /id="clock"/, 'no clock (U8)');
 });
 
 test('the manifest, the service worker and the icons are served without a session, and every page links them', async () => {

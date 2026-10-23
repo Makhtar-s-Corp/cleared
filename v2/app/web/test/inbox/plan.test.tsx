@@ -40,7 +40,7 @@ test('the plan card reads as the capture\'s: Plan, its age, its title, its ticke
   const html = renderInbox(viewOf(), en);
   const shown = visibleText(html);
   for (const expected of ['4 waiting', 'Plan', '25 min', PLAN_TITLE]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  assert.equal(lineOf(html, `plan:${PLAN_ID}`), '5 tickets · 2 h 15 · 3.9 % of the week');
+  assert.equal(lineOf(html, `plan:${PLAN_ID}`), '5 tickets · 2 h 15 · 3.9% of the week');
   const order = [...html.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]?.split(':')[0]);
   assert.deepEqual(order, ['release', 'permission', 'plan', 'question', 'permission'], 'the capture\'s order: release, permission, plan, question');
 });
@@ -60,8 +60,8 @@ test('the plan\'s detail is lane 8\'s plan panel under the inbox\'s eyebrow, wit
   for (const expected of [
     'Plan to approve', 'Lead', 'Open on the lead\'s screen', PLAN_TITLE,
     'A GET /entries.json route that lists the entries', 'The time each entry was written, on the page', 'After 1, 2, 3 and 4',
-    'Full circuit', 'Fast lane', '45 min · 1.0 %', '1 h 15 · 1.4 %',
-    'About 2 h 15 of work', '3.9 % of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets',
+    'Full circuit', 'Fast lane', '45 min · 1.0%', '1 h 15 · 1.4%',
+    'About 2 h 15 of work', '3.9% of the week', 'Up to 2 sessions at a time', 'Estimates from 23 similar tickets',
     'Signed in as demo', 'Change the plan', 'Approve the plan and start',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<section class="plan-panel awaiting" data-plan="plan-3"/);
@@ -76,7 +76,7 @@ test('a plan not read yet, or not readable, still shows what the inbox item says
   const html = renderInbox(viewOf({ selected: `plan:${PLAN_ID}`, plans: new Map() }), en);
   const shown = visibleText(html);
   for (const expected of [
-    'Plan to approve', PLAN_TITLE, proposedPlan(FIXTURE_NOW).summary, '5 tickets', 'About 2 h 15 of work', '3.9 % of the week', 'Approve the plan and start',
+    'Plan to approve', PLAN_TITLE, proposedPlan(FIXTURE_NOW).summary, '5 tickets', 'About 2 h 15 of work', '3.9% of the week', 'Approve the plan and start',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /class="plan-panel/);
   assert.deepEqual(acts(html), ['approve_plan']);

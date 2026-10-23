@@ -12,7 +12,7 @@
 // lead engine answers the pending question from that route (decision 8).
 // The plan's gestures call the plan routes at once: approving a plan starts
 // tickets, which is reversible, so there is no grace (decision 6).
-import { ArrowCounterClockwise, TrainSimple, WarningCircle } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ChatCircleText, ListChecks, TrainSimple, WarningCircle } from '@phosphor-icons/react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react';
 import type { LeadMemory, LeadMessage, LeadState, Plan } from '../../../../src/api/types.ts';
 import { OwnChoices } from '@/components/choices/Choices.tsx';
@@ -26,6 +26,7 @@ import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
 import { planStateLine, type PlanAction } from '@/plan-panel/model.ts';
 import { PlanPanel } from '@/plan-panel/PlanPanel.tsx';
+import { Empty } from '@/shell/Empty.tsx';
 import '@/screens/lead/lead.css';
 import { isLeadThread, LEAD_AGENT, LeadAgent, type LeadThread } from './agent.ts';
 import {
@@ -76,8 +77,12 @@ export function TrainRow({ line, now, language, t }: { readonly line: TrainLine;
   );
 }
 
-export function Thread({ view, t, busy = false, onAnswer }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly onAnswer?: (reply: Reply) => void }) {
-  if (view.messages.length === 0 && !view.trains?.length) return <li className="thread-empty">{t('lead_thread_empty')}</li>;
+// An empty thread or plan side (lane 35, docs/v2/ui-overhaul-plan.md,
+// 2.2.7): one sentence, and the one thing to do, give the lead a goal.
+export function Thread({ view, t, busy = false, onAnswer, onStart }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly onAnswer?: (reply: Reply) => void; readonly onStart?: () => void }) {
+  if (view.messages.length === 0 && !view.trains?.length) {
+    return <li className="thread-start"><Empty icon={ChatCircleText} id="thread-empty" text={t('lead_thread_empty')} action={{ label: t('lead_start_goal'), onClick: () => onStart?.() }} /></li>;
+  }
   const shown = choosePlan(view.plans, view.planId)?.id;
   let previous: number | undefined;
   return (
@@ -167,13 +172,14 @@ function MemoryPanel({ view, t, onClose }: { readonly view: LeadView; readonly t
   );
 }
 
-export function Side({ view, t, busy = false, note = null, onAction }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly note?: string | null; readonly onAction?: (plan: Plan, action: PlanAction) => void }) {
+export function Side({ view, t, busy = false, note = null, onAction, onStart }: { readonly view: LeadView; readonly t: Translate; readonly busy?: boolean; readonly note?: string | null; readonly onAction?: (plan: Plan, action: PlanAction) => void; readonly onStart?: () => void }) {
   const shown = choosePlan(view.plans, view.planId);
   const others = otherPlans(view.plans, shown);
   return (
     <>
       {shown ? <PlanPanel plan={shown} t={t} options={{ language: view.language, busy, note, services: true }} onAction={(action) => onAction?.(shown, action)} />
-        : <p className="empty plan-empty">{view.planId === null ? t('lead_no_plan') : t('lead_plan_missing', { id: view.planId })}</p>}
+        : view.planId === null ? <Empty icon={ListChecks} id="plan-empty" block text={t('lead_no_plan')} note={t('lead_no_plan_note')} action={{ label: t('lead_start_goal'), onClick: () => onStart?.() }} />
+        : <p className="empty plan-empty">{t('lead_plan_missing', { id: view.planId })}</p>}
       {others.length === 0 ? null : (
         <section className="other-plans" aria-labelledby="other-plans-title">
           <h2 id="other-plans-title">{t('lead_other_plans')}</h2>
@@ -359,6 +365,8 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
     queueMicrotask(() => side.current?.querySelector<HTMLButtonElement>('[data-plan-action]:not([data-plan-action="change"])')?.focus());
   };
 
+  const startGoal = () => { setGoal(true); setChanging(false); field.current?.focus(); };
+
   return (
     <div className="lead-screen">
       <section className="lead-card" aria-labelledby="lead-title">
@@ -369,12 +377,12 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
         </div>
         <div id="lead-memory"><MemoryPanel view={view} t={t} onClose={() => { setMemory(null); remember.current?.focus(); }} /></div>
         <ol className="thread" id="thread" aria-label={t('lead_thread_label')} ref={threadRef} onScroll={onScroll}>
-          <Thread view={view} t={t} busy={sending} onAnswer={(reply) => { if (view.state.pendingQuestion) void deliver(reply); }} />
+          <Thread view={view} t={t} busy={sending} onAnswer={(reply) => { if (view.state.pendingQuestion) void deliver(reply); }} onStart={startGoal} />
         </ol>
         <ReplyForm mode={mode} changing={changing} text={text} sending={sending} note={note} t={t} fieldRef={field} onText={setText}
           onGoal={() => { setGoal((current) => !current); setChanging(false); field.current?.focus(); }} onSubmit={submit} onKeyDown={keyDown} />
       </section>
-      <div className="plan-side" id="plan-side" ref={side}><Side view={view} t={t} busy={planBusy} note={planNote} onAction={(plan, action) => void act(plan, action)} /></div>
+      <div className="plan-side" id="plan-side" ref={side}><Side view={view} t={t} busy={planBusy} note={planNote} onAction={(plan, action) => void act(plan, action)} onStart={startGoal} /></div>
     </div>
   );
 }

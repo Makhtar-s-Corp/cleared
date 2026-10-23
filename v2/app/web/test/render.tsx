@@ -19,7 +19,8 @@ import type { Ticket } from '../../../src/tickets/contract.ts';
 import type { SessionSummary } from '../../../src/api/types.ts';
 import { Bar, TowerBody } from '../screens/tower/Tower.tsx';
 import type { TowerModel } from '../screens/tower/model.ts';
-import { Header, type HeaderProps, type ShellScreen } from '../shell/Header.tsx';
+import { Sidebar, type SidebarProps } from '../shell/Sidebar.tsx';
+import type { ScreenName } from '../lib/routes.ts';
 import { NotifyMenuBody } from '../shell/NotifyButton.tsx';
 import type { NotifyView } from '../shell/notify.ts';
 
@@ -89,6 +90,6 @@ export const renderInbox = (view: InboxView, t: Translate) => html(<InboxScreen 
 // shell
 export const renderNotifyMenu = (view: NotifyView, t: Translate) => html(<NotifyMenuBody view={view} t={t} />);
 
-// The shell's header for a screen, before /api/me answers (no clock, no count).
-export const renderHeader = (screen: ShellScreen, t: Translate, extra: Partial<HeaderProps> = {}) =>
-  html(<Header t={t} screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} leadOn={false} now={null} language="en" {...extra} />);
+// The shell's sidebar for a screen, before /api/me answers (no count, no dot).
+export const renderSidebar = (screen: ScreenName, t: Translate, extra: Partial<SidebarProps> = {}) =>
+  html(<Sidebar t={t} mode="open" screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} lead="unknown" groups={[]} theme="light" {...extra} />);

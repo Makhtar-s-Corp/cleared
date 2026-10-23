@@ -15,7 +15,7 @@ import './styles/app.css';
 
 const data = document.body.dataset;
 const lang = document.documentElement.lang;
-const language = isLanguage(lang) ? lang : 'en';
+const language = isLanguage(lang) ? lang : 'fr';
 const root = createRoot(document.getElementById('root')!);
 const app = data.screen === 'app';
 // The first screen's sheets, on before anything is drawn.

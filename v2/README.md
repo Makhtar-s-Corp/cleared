@@ -55,7 +55,7 @@ Then open `http://127.0.0.1:8792/` and sign in. Check that the port is free firs
 | `CLEARED_V2_APP_PORT` | `8792` | The service's reserved ports are refused, and so is the service's own port. |
 | `CLEARED_V2_APP_SOURCE` | `service` | `fixtures` answers the service's read routes from sample data played by the fake adapter, and creates tickets in memory. The header then says "Sample data, not the service". |
 | `CLEARED_V2_PORT` | `8791` | Where the app finds the service, on `127.0.0.1`. |
-| `CLEARED_V2_APP_LANGUAGE` | `en` | `en` or `fr`. |
+| `CLEARED_V2_APP_LANGUAGE` | `fr` | `fr` or `en`. |
 | `CLEARED_V2_APP_PROJECT` | the last part of `CLEARED_REPO` | The project name in the header. |
 | `CLEARED_V2_APP_ORIGIN` | none | The address the browser uses when a proxy on this machine serves the app, such as `https://<machine>.<tailnet>.ts.net:8443`. Writes must come from it. |
 

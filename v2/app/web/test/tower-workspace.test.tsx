@@ -25,7 +25,7 @@ test('a session taken over reads "taken over by you" in place of its phrase, wit
   const markup = renderTowerBody(towerModel(await workspaceFixture(FIXTURE_NOW), FIXTURE_NOW, OWNER_ID), en);
   const card = /<li class="session-card taken"[^]*?<\/li>/.exec(markup)?.[0] ?? '';
   assert.match(card, /<span class="live taken" aria-hidden="true"><\/span>/);
-  assert.match(card, /<span class="phrase taken-line"><svg[^>]*aria-hidden="true"[^]*?<\/svg>Taken over by you · 6 min<\/span>/);
+  assert.match(card, /<span class="phrase taken-line"[^>]*><svg[^>]*aria-hidden="true"[^]*?<\/svg>Taken over by you · 6 min<\/span>/);
   assert.match(card, /<span class="svc-tag">filter-api<\/span>/);
   assert.match(card, /href="\/sessions\/fixture-taken-170"/);
   assert.equal(markup.match(/<span class="svc-tag">/g)?.length, 5, 'every live session names its service');

@@ -10,7 +10,7 @@ import { FIXTURE_NOW, OWNER_ID, RECIPES, schedulesFixture, ticketSteps, towerFix
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../lib/i18n.ts';
 import { Bar, RecipeForm } from '../screens/tower/Tower.tsx';
-import { towerModel } from '../screens/tower/model.ts';
+import { recipeKey, towerModel } from '../screens/tower/model.ts';
 import { html, renderTowerBody, visibleText } from './render.tsx';
 
 const en = translator(loadCatalog('tower', 'en'));
@@ -28,10 +28,10 @@ test('a live session of a ticket in steps names its step and service', async () 
 test('a contract and a knowledge item in Needs you, each linked to its inbox item', async () => {
   const base = await towerFixture(FIXTURE_NOW);
   const markup = renderTowerBody(towerModel({ ...base, inbox: [...base.inbox, contractItem(FIXTURE_NOW), knowledgeItem(FIXTURE_NOW)] }, FIXTURE_NOW), en);
-  assert.match(markup, new RegExp(`<a class="need" href="/inbox#${encodeURIComponent(contractItem(FIXTURE_NOW).id)}">`));
-  assert.match(markup, /Contract · 40 min/);
+  assert.match(markup, new RegExp(`<a class="need row" href="/inbox#${encodeURIComponent(contractItem(FIXTURE_NOW).id)}" data-row="true" data-kind="contract"[^>]*>`));
+  assert.match(markup, /<span class="row-kind wait-line"[^>]*>Contract<\/span>[^]*?<span class="age">40 min<\/span>/);
   assert.match(markup, /Contract of filter-api/);
-  assert.match(markup, /Knowledge · 50 min/);
+  assert.match(markup, /<span class="row-kind wait-line"[^>]*>Knowledge<\/span>[^]*?<span class="age">50 min<\/span>/);
   assert.ok(visibleText(markup).includes(knowledgeItem(FIXTURE_NOW).text));
 });
 
@@ -57,7 +57,7 @@ test('the bar: "Ask about the code" always, "Run a recipe" once a recipe exists'
 });
 
 test('the recipe form: a choice per recipe, the picked one\'s parameters, the required ones marked', () => {
-  const markup = html(<RecipeForm t={en} recipes={RECIPES} picked={update.name} values={{ version: '2' }} note="" />);
+  const markup = html(<RecipeForm t={en} recipes={RECIPES} picked={recipeKey(update)} values={{ version: '2' }} note="" />);
   assert.match(markup, /<form class="recipe-form" id="recipe-form"/);
   assert.match(markup, /<button[^>]*aria-pressed="true"[^>]*data-recipe="dependency-update"[^>]*>/);
   assert.match(markup, /<button[^>]*aria-pressed="false"[^>]*data-recipe="weekly-review"[^>]*>/);
@@ -69,8 +69,8 @@ test('the recipe form: a choice per recipe, the picked one\'s parameters, the re
   assert.match(markup, /A ticket, as a one-ticket plan/);
   // Run is outlined while a required parameter is missing, in ink once it can run: one ink gesture on screen.
   assert.doesNotMatch(/<button[^>]*data-act="recipe_run"[^>]*>/.exec(markup)?.[0] ?? '', /primary/);
-  assert.match(html(<RecipeForm t={en} recipes={RECIPES} picked={update.name} values={{ package: 'pg' }} note="" />), /<button[^>]*class="chip-button primary"[^>]*data-act="recipe_run"/);
-  const goal = html(<RecipeForm t={en} recipes={RECIPES} picked="weekly-review" values={{}} note="" />);
+  assert.match(html(<RecipeForm t={en} recipes={RECIPES} picked={recipeKey(update)} values={{ package: 'pg' }} note="" />), /<button[^>]*class="chip-button primary"[^>]*data-act="recipe_run"/);
+  const goal = html(<RecipeForm t={en} recipes={RECIPES} picked="guestbook/weekly-review" values={{}} note="" />);
   assert.match(goal, /A goal, sent to the lead/);
   assert.match(goal, /This recipe takes no parameter\./);
   const none = html(<RecipeForm t={en} recipes={RECIPES} picked={null} values={{}} note="" />);
