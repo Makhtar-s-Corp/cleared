@@ -2,13 +2,13 @@
 // thin call to the workspace modules of lane 5 or to the lock's own client;
 // the flow's tests replace all of them (FlowEffects in engine.ts).
 import { execFile, spawn } from 'node:child_process';
-import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
-import { basename, join, posix, relative, resolve, sep } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readApprovalRecord } from '../approval/record.ts';
 import { stateDirectory } from '../approval/service.ts';
 import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type MemoryContext, type MemoryLevel } from '../workspace/briefing.ts';
-import { git, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
+import { checkBranchName, git, projectCheckout, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { variantFolder } from './variants.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
@@ -95,19 +95,33 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   // no hook either; a checkout whose .git is a link, a linked worktree or has
   // alternates is refused. The range from the service's base to that ref.
   // `as`: the private ref's own name, for a variant's checkout (issue #271),
-  // since the variants of a ticket share its branch's name.
-  const fetchBranch = async (ticket: string, service: ServiceConfig, workdir: string, as?: string) => {
+  // since the variants of a ticket share its branch's name, and for a
+  // resumed ticket's (issue #272); `branch`: a resumed ticket's, else the ticket's own.
+  const fetchBranch = async (ticket: string, service: ServiceConfig, workdir: string, as?: string, branch = ticketBranch(ticket)) => {
     const { dir, base } = of(service);
     const gitDir = join(workdir, '.git');
     if (!lstatSync(gitDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the ticket's checkout of ${service.name} has no .git folder of its own`);
     for (const parts of [['commondir'], ['objects', 'info', 'alternates']])
       if (lstatSync(join(gitDir, ...parts), { throwIfNoEntry: false })) throw new Error(`the ticket's checkout of ${service.name} cannot be read safely: .git/${parts.join('/')} is present`);
-    const branch = ticketBranch(ticket);
     // Per service: two folder services of one repository share its checkout.
     const ref = as ?? `refs/cleared/step/${service.name}/${branch}`;
     await git(dir, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
       'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', gitDir, `+refs/heads/${branch}:${ref}`]);
     return { dir, ref, range: `refs/remotes/origin/${base}...${ref}` };
+  };
+  // A one-service ticket's branch `previous`, fetched into `ref` of the
+  // service's checkout (fetchBranch), and `commit` checked to be in its
+  // history (issue #272).
+  const inHistory = async (ticket: string, commit: string, previous: string, ref: string) => {
+    if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('not a commit');
+    const service = workspace.services[0] as ServiceConfig;
+    const workdir = join(config.workdirRoot, ticket);
+    if (!lstatSync(workdir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the ticket has no checkout at ${workdir}`);
+    const { dir } = await fetchBranch(ticket, service, workdir, ref, previous);
+    const head = (await git(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim();
+    try { await git(dir, ['merge-base', '--is-ancestor', commit, head]); }
+    catch { throw new Error(`the commit ${commit.slice(0, 12)} is not in the history of ${previous}`); }
+    return { dir, head, service, workdir };
   };
   const DIFF_ARGS = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
 
@@ -160,11 +174,11 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     // base has it; a provider that cannot be fetched is left out of the
     // briefing, never in the way of the session.
     // A variant (issue #271) has its own clone, <workdirs>/<ticket>.variant-<round>-<position>, on the ticket branch.
-    async prepareWorkdir({ ticket, role, service, variant }) {
+    async prepareWorkdir({ ticket, role, service, variant, branch }) {
       if (role === 'author') await refresh(service);
       const { dir, base } = of(service);
       const workdir = service ? join(config.workdirRoot, ticket.id, service.name) : join(config.workdirRoot, variant ? variantFolder(ticket.id, variant) : ticket.id);
-      await ticketCheckout({ project: dir, workdir, base, branch: ticketBranch(ticket.id) });
+      await ticketCheckout({ project: dir, workdir, base, branch: branch ?? ticketBranch(ticket.id) });
       const own = sessionService(service);
       // The workspace's memory reads the first service's checkout, which a
       // session on another service may be the first to need.
@@ -174,6 +188,41 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       const lessons = workspace.services.length > 1 ? { service: ownLevel(own) ? own.name : null, contract: lessonContract(own)?.name ?? null } : undefined;
       await writeBriefing({ project: dir, base, workdir }, read.workspace, { levels: read.levels, ...(lessons ? { lessons } : {}) });
       return { workdir, briefing: flatBriefing(read) };
+    },
+
+    // The tip of the checkout, from its files (issue #272).
+    async head({ workdir }) {
+      return readTip(workdir);
+    },
+
+    // Before the ticket's sessions stop: the step's commit is in the branch's
+    // history (inHistory), the branch read into refs/cleared/replay/<ticket>/check.
+    // Then, once they stopped, the resume: the branch kept in the service's
+    // checkout under refs/cleared/replay/<ticket>/<n>/previous, the commit
+    // checked again; the checkout renamed aside, never deleted; then a
+    // new checkout on `branch`, from that commit alone, which the author's
+    // prepareWorkdir reuses. The base the new branch reads against stays
+    // the service's base.
+    async replayCheck({ ticket, commit, previous }) {
+      await inHistory(ticket, commit, previous, `refs/cleared/replay/${ticket}/check`);
+    },
+
+    async replay({ ticket, n, commit, branch, previous }) {
+      await checkBranchName(branch, 'resume branch');
+      const kept = `refs/cleared/replay/${ticket}/${n}`;
+      const { dir, head: previousHead, service, workdir } = await inHistory(ticket, commit, previous, `${kept}/previous`);
+      await git(dir, ['update-ref', `${kept}/start`, commit]);
+      const aside = join(dirname(workdir), `.${ticket}.before-r${n}`);
+      if (existsSync(aside)) throw new Error(`${aside} already exists`);
+      renameSync(workdir, aside);
+      try {
+        await ticketCheckout({ project: dir, workdir, base: of(service).base, branch, start: `${kept}/start` });
+      } catch (error) {
+        // The ticket keeps its checkout as it was.
+        if (!existsSync(workdir)) renameSync(aside, workdir);
+        throw error;
+      }
+      return { previousHead, aside };
     },
 
     async captureHandover(input) {

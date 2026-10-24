@@ -31,7 +31,7 @@ import { createCleaner } from '../../src/session/clean.ts';
 import type { AgUiEvent, Question, SessionEvent, SessionState } from '../../src/session/events.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
-import { emptyModel, applyAll } from '../web/screens/session/model.ts';
+import { ENDED, REPLAY_MAX, emptyModel, applyAll, stepCommit } from '../web/screens/session/model.ts';
 import type { PreviewAnswer, PreviewUpstream } from '../src/preview.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { FIXTURE_NOW, FIXTURE_PROJECT } from './tower.ts';
@@ -66,6 +66,12 @@ export const MONTH_QUESTION: Question = {
 };
 
 const MINUTE = 60_000;
+
+// The author's branch as the flow journals it (issue #272): at the ticket's
+// base when the session starts, then at the author's commit.
+export const BASE_COMMIT = '3f1c9a0d2b7e4c6a8f0e1d2c3b4a5968778695a4';
+export const AUTHOR_COMMIT = '9b2e7d4c1a0f3e6d8c5b2a1f0e9d8c7b6a5f4e3d';
+const checkpoint = (commit: string, branch = `cleared/${TICKET_ID}`): AgUiEvent => ({ type: 'CUSTOM', name: 'cleared.checkpoint', value: { commit, branch } });
 
 // The session's preview key (decision 20): what the service issued when its
 // containers started, the unguessable segment of its preview address.
@@ -451,6 +457,7 @@ export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly ques
     { type: 'STEP_FINISHED', stepName: 'workspace' },
     { type: 'STEP_STARTED', stepName: 'author' },
     { type: 'RUN_STARTED', threadId: AUTHOR_ID, runId: 'turn-1' },
+    checkpoint(BASE_COMMIT),
     { type: 'STATE_SNAPSHOT', snapshot: { status: 'Reading src/screens/Upcoming.jsx', phase: 'working', steps: steps(null), files: [], checks: [{ name: 'Targeted tests', state: 'pending' }, { name: 'Full suite', state: 'pending' }], usage } },
     text('prompt-1', 'user', `${TICKET_TITLE}\n\n${TICKET_BODY}`, 'cleared'),
     call('read-1', 'Read', { kind: 'read', path: 'src/screens/Upcoming.jsx' }, { kind: 'read', path: 'src/screens/Upcoming.jsx', bytes: 2210 }),
@@ -501,6 +508,7 @@ export function sessionFixture(now: Date = FIXTURE_NOW, options: { readonly ques
     call('run-3', 'Bash', { kind: 'execute', command: 'npm test 2>&1 | tail -8', description: 'Run the full suite' }, { kind: 'execute', output: '# tests 22\n# pass 22\n# fail 0\n', cut: 0, isError: false }),
     delta({ checks: [{ name: 'Targeted tests', state: 'passed' }, { name: 'Full suite', state: 'passed' }] }),
     call('run-4', 'Bash', { kind: 'execute', command: 'git add -A && git commit -q -m "Upcoming: group entries by week"', description: 'Commit the change' }, { kind: 'execute', output: '', cut: 0, isError: false }),
+    checkpoint(AUTHOR_COMMIT),
     text('assistant-2', 'assistant', 'The upcoming list is grouped by week, Monday first, under its month. The totals are the same, and the full suite passes.'),
     { type: 'RUN_FINISHED', threadId: AUTHOR_ID, runId: 'turn-1', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: 0.62 } },
     { type: 'STEP_FINISHED', stepName: 'author' },
@@ -903,6 +911,48 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       if (typeof message !== 'string' || !message.trim() || message.length > 2000) return sendJson(response, 400, { error: 'message must be a non-empty text of at most 2000 characters' });
       player(id as string).play(stamp, text(`change-${calls.length}`, 'user', message, user), delta({ phase: 'working', status: 'Working' }));
       return sendJson(response, 200, { accepted: true });
+    }
+    // Resume from here (flow/replay.ts): the ticket's live sessions stopped,
+    // and a new author on the resume branch, at the step's commit.
+    if (sub === 'replay' && parts.length === 3) {
+      const { seq, message } = (body ?? {}) as { seq?: unknown; message?: unknown };
+      if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 1) return sendJson(response, 400, { error: 'seq must be the number of an event of the session' });
+      if (typeof message !== 'string' || !message.trim() || message.length > REPLAY_MAX) return sendJson(response, 400, { error: `message must be a non-empty text of at most ${REPLAY_MAX} characters` });
+      if (detail.role !== 'author') return sendJson(response, 400, { error: `session ${id} is the ${detail.role}'s: a ticket is resumed from a step of an author's session` });
+      const model = emptyModel();
+      applyAll(model, fixture.store.events.after(id as string));
+      const from = model.lastSeq >= seq ? stepCommit(model.checkpoints, seq) : undefined;
+      if (!from) return sendJson(response, 400, { error: `no commit of session ${id} is known at its event ${seq}` });
+      const n = fixture.sessions.filter((s) => s.id.startsWith(`${AUTHOR_ID}-r`)).length + 1;
+      const resumed = `${AUTHOR_ID}-r${n}`;
+      const branch = `cleared/${TICKET_ID}.r${n}`;
+      for (const [index, summary] of fixture.sessions.entries()) {
+        if (ENDED.has(summary.phase)) continue;
+        player(summary.id).play(stamp, { type: 'RUN_ERROR', message: 'The owner resumed the ticket from an earlier step: this session was stopped.', code: 'replayed' }, delta({ phase: 'stopped', status: 'Stopped' }));
+        fixture.sessions[index] = { ...summary, phase: 'stopped', status: 'Stopped', updatedAt: stamp.toISOString() };
+      }
+      const value = { from: id as string, to: resumed, seq, commit: from.commit, branch, previous: model.checkpoints.at(-1)?.branch ?? from.branch, by: user, message: message.trim() };
+      // Each summary says its last event, as the service's does: the stopped sessions and the one left are read again.
+      const left = player(id as string).play(stamp, { type: 'CUSTOM', name: 'cleared.replay', value });
+      for (const [index, summary] of fixture.sessions.entries()) {
+        const last = fixture.store.events.after(summary.id).at(-1);
+        if (last && last.seq !== summary.lastSeq) fixture.sessions[index] = { ...summary, lastSeq: last.seq, updatedAt: last.at };
+      }
+      void left;
+      const stored = player(resumed).play(stamp,
+        { type: 'STEP_STARTED', stepName: 'workspace' }, { type: 'STEP_FINISHED', stepName: 'workspace' }, { type: 'STEP_STARTED', stepName: 'author' },
+        { type: 'RUN_STARTED', threadId: resumed, runId: 'turn-1' },
+        { type: 'STATE_SNAPSHOT', snapshot: { status: 'Working', phase: 'working', steps: [{ name: 'author', startedAt: stamp.toISOString(), finishedAt: null }], files: [], checks: [], usage: {} } },
+        checkpoint(from.commit, branch),
+        { type: 'CUSTOM', name: 'cleared.replay', value },
+      );
+      fixture.sessions.push({
+        id: resumed, project: fixture.project, ticket: TICKET_ID, role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: 'working', status: 'Working',
+        startedAt: stamp.toISOString(), updatedAt: stamp.toISOString(), lastSeq: (stored.at(-1) as SessionEvent).seq,
+      });
+      changed('session', resumed);
+      changed('ticket', TICKET_ID);
+      return sendJson(response, 200, { accepted: true, session: resumed, branch, commit: from.commit });
     }
     if (sub === 'interrupt' && parts.length === 3) {
       const waiting = fixture.inbox.filter((i) => (i.kind === 'question' || i.kind === 'permission') && i.sessionId === id && i.state === 'waiting');
