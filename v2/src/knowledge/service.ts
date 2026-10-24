@@ -114,7 +114,9 @@ export class Knowledge {
       .map((item) => key(item.level, item.service, item.text)));
     const name = this.#deps.serviceOf?.(handover.sessionId) ?? handover.service ?? this.#deps.workspace.services[0]?.name;
     const own = name ? this.#service(name) : undefined;
-    const contract = this.#contractOf(own);
+    // The contract the session's step builds against, when its handover names one (flow/effects.ts), else the first it has or consumes.
+    const named = handover.contract ? this.#service(handover.contract) : undefined;
+    const contract = named?.contract ? named : this.#contractOf(own);
     const items: KnowledgeItem[] = [];
     for (const proposal of proposals) {
       let level: KnowledgeLevel = proposal.level;

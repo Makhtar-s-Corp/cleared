@@ -8,110 +8,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ContractItem, ReleaseItem, TicketStep } from '../../src/api/types.ts';
-import type { LeverReader } from '../../src/consumption/levers.ts';
-import type { SiblingSpec } from '../../src/container/services.ts';
-import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
+import { FlowEngine } from '../../src/flow/engine.ts';
 import { describeFlowEvent } from '../../src/lead/prompts.ts';
-import type { ServiceLock } from '../../src/release/lock.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
-import type { ServiceConfig, WorkspaceConfig } from '../../src/workspace/config.ts';
 import { finished, quickAuthor, setup, started, text, until, type Setup } from './support.ts';
-
-const service = (name: string, extra: Partial<ServiceConfig> = {}): ServiceConfig => ({
-  name, kind: 'repository', repo: `example-org/${name}`, url: `https://example.invalid/${name}.git`, base: 'main', path: null, dir: `/srv/${name}`,
-  healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: `/run/${name}/release.sock`, brokerState: `/state/${name}`, ...extra,
-});
-
-const WORKSPACE: WorkspaceConfig = {
-  id: 'guestbook', name: 'Guestbook and its filter', file: '/etc/cleared/workspace.conf',
-  services: [
-    service('guestbook', { consumes: ['filter-api'], run: { dockerfile: 'Dockerfile', port: 8793 }, brokerSocket: null, brokerState: null }),
-    service('filter-api', { run: { dockerfile: 'Dockerfile', port: 8795 }, contract: { format: 'openapi', path: 'contract/openapi.yaml' } }),
-  ],
-};
-const HEAD: Record<string, string> = { guestbook: 'a'.repeat(40), 'filter-api': 'b'.repeat(40) };
-
-// A turn that waits for a message before it ends: two of them prove two steps live at once.
-const waiting = (id: string): readonly FakeStep[] => [started, ...text(id, 'Working on it.'), { awaitMessage: true }, finished(0.5)];
-const failing: readonly FakeStep[] = [started, { emit: { type: 'RUN_ERROR', message: 'the container stopped', code: 'exit' } }];
-
-// What the runtime plans for a session on a service (planSiblings): both services real, the filter API with its contract.
-const planned = (ticket: string, own: string): SiblingSpec[] => [
-  { name: 'guestbook', port: 8793, real: { base: '/state/siblings/guestbook/c1', dockerfile: 'Dockerfile', tag: 'cleared-v2-base-guestbook:c1', checkout: `/work/${ticket}/guestbook` } },
-  {
-    name: 'filter-api', port: 8795, contract: '/state/siblings/filter-api/c2/contract/openapi.yaml',
-    real: { base: '/state/siblings/filter-api/c2', dockerfile: 'Dockerfile', tag: 'cleared-v2-base-filter-api:c2', checkout: `/work/${ticket}/filter-api` },
-  },
-];
-
-type Read = Awaited<ReturnType<NonNullable<FlowEffects['stepChanges']>>>;
-const contractRead = (n: number, extra: string[] = []): Read => ({
-  files: ['contract/openapi.yaml', ...extra],
-  contract: { path: 'contract/openapi.yaml', diff: `@@ -1 +1 @@\n-ok\n+severity ${n}\n`, blob: `blob-${n}`, snapshot: `/work/LOCAL-2/.validated/contract-${n}/openapi.yaml` },
-});
-
-function locks(t: () => Setup): (svc: ServiceConfig) => ServiceLock {
-  return (svc) => ({
-    service: svc.name,
-    async recordReview() {},
-    async ask() { return { requestedAt: new Date(t().clock.now).toISOString() }; },
-    check() { return undefined; },
-    async sign() {},
-    async release() { return { outcome: 'queued', message: '' }; },
-    async rollback() { return { ok: true, message: '' }; },
-  });
-}
-
-type Options = { authors?: (readonly FakeStep[])[]; reads?: Record<string, Read[]>; reopen?: readonly FakeStep[]; levers?: LeverReader };
-
-async function stepped(options: Options = {}) {
-  let t: Setup | undefined;
-  const reads = options.reads ?? {};
-  const asked: { service: string; snapshot?: string }[] = [];
-  const effects: Partial<FlowEffects> = {
-    async settings(svc) {
-      return {
-        verdict: 'no blocking issues', safeCommands: [], hosts: [], services: [], scripts: ['test'],
-        ...(svc?.name === 'guestbook' ? { serviceUrls: { 'filter-api': 'FILTER_URL' } } : {}),
-      };
-    },
-    async prepareWorkdir({ ticket, role, service: svc }) {
-      return { workdir: svc ? `/work/${ticket.id}/${svc.name}` : `/work/${ticket.id}`, briefing: { projectPage: `${role}`, decisions: [], glossary: [], lessons: [], lastHandover: null } };
-    },
-    async siblings({ ticket, service: svc }) { return planned(ticket, svc.name); },
-    async stepChanges({ service: svc, snapshot }) {
-      asked.push({ service: svc.name, ...(snapshot ? { snapshot } : {}) });
-      const next = reads[svc.name]?.shift();
-      if (next) return next;
-      return svc.name === 'filter-api' ? contractRead(9) : { files: ['src/page.ts'], contract: null };
-    },
-    async publish(input) {
-      const name = input.service?.name ?? 'guestbook';
-      return { url: `https://example.invalid/${name}/pull/7`, number: 7, head: HEAD[name] as string, created: true };
-    },
-    async changes(input) {
-      const name = input.service?.name ?? 'guestbook';
-      const file = name === 'filter-api' ? 'contract/openapi.yaml' : 'src/page.ts';
-      return { files: [file], diff: `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-a\n+b\n` };
-    },
-    // Each service's ticket branch, as the reviewer is given it.
-    async branchChanges({ service: svc }) {
-      const diff = (file: string, line: string) => `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-ok\n+${line}\n`;
-      return svc.name === 'filter-api'
-        ? { files: ['contract/openapi.yaml', 'src/check.ts'], diff: diff('contract/openapi.yaml', 'severity 2') + diff('src/check.ts', 'answers a severity') }
-        : { files: ['src/page.ts'], diff: diff('src/page.ts', 'held for review') };
-    },
-  };
-  t = await setup({
-    scripts: { authors: options.authors ?? [quickAuthor, waiting('s1'), waiting('s2'), quickAuthor], ...(options.reopen ? { reopen: options.reopen } : {}) },
-    config: { workspace: WORKSPACE, steps: true }, effects, locks: locks(() => t as Setup), ...(options.levers ? { levers: options.levers } : {}),
-  });
-  const ticket = await t.tickets.create({ title: 'Held for review', body: 'An entry the filter flags is held for review instead of refused.\n\n- [ ] a flagged entry is held', project: 'guestbook', services: ['guestbook', 'filter-api'] }, { kind: 'human', id: 'u1' });
-  const steps = async () => (await t.engine.ticketSteps(ticket.id)) as TicketStep[];
-  const states = async () => (await steps()).map((s) => `${s.position} ${s.kind} ${s.service} ${s.state}`);
-  const contract = () => t.inbox.contracts({ ticket: ticket.id }).at(-1) as ContractItem | undefined;
-  return { t: t as Setup, ticket, steps, states, contract, asked };
-}
+import { contractRead, failing, planned, stepped, waiting } from './steps-harness.ts';
 
 test('a two-service ticket: the contract step, sent back once and validated, the two service steps in parallel with a fake each, the integration with real siblings, then one release card', async () => {
   const { t, ticket, steps, states, contract, asked } = await stepped({ reads: { 'filter-api': [contractRead(1), contractRead(2), contractRead(2)] } });
@@ -262,16 +163,176 @@ test('a step that fails stops the ticket\'s other steps, keeps what is done, and
   await t.engine.close();
 });
 
-test('the provider\'s service step that changed the validated contract puts the ticket back', async () => {
-  const { t, ticket, states, contract } = await stepped({ authors: [quickAuthor, quickAuthor, waiting('s2')], reads: { 'filter-api': [contractRead(1), contractRead(5)] } });
+// Lane j3-contract-notes (P160): lane 23 put the ticket back when a service
+// step changed the validated contract; the change now reopens the contract
+// step, with the owner's approval, and the ticket is not put back.
+test('a service step that changed the validated contract reopens the contract step: a new contract item, the ticket not put back, the other running step held', async () => {
+  const { t, ticket, states, contract, asked } = await stepped({ authors: [quickAuthor, quickAuthor, waiting('s2')], reads: { 'filter-api': [contractRead(1), contractRead(5)] } });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  const first = contract() as ContractItem;
+  await t.engine.approveContract(first.id, 'u1');
+  await until(() => proposals(t, ticket.id) === 2, 'the reopened contract item');
+  await t.engine.settled();
+  const item = contract() as ContractItem;
+  assert.notEqual(item.id, first.id);
+  assert.equal(item.state, 'waiting');
+  assert.equal(item.step, first.step, 'the contract step\'s own item');
+  assert.equal(item.service, 'filter-api');
+  assert.match(item.diff, /severity 5/);
+  assert.equal((await t.tickets.get(ticket.id))?.status, 'In Progress', 'not put back');
+  assert.equal(t.flowEvents.some((e) => e.type === 'ticket_put_back'), false);
+  assert.deepEqual(await states(), ['1 contract filter-api validating', '2 service filter-api waiting', '3 service guestbook waiting', '4 integration guestbook waiting']);
+  assert.equal(t.store.sessions.get(t.startedSessions[2]!.id)?.status, 'stopped', 'the other running step ran on the old contract: it is stopped');
+  assert.match(asked.filter((a) => a.service === 'filter-api').at(-1)?.snapshot ?? '', /\.validated\/step-1-2$/, 'the new contract is kept under the next round of the contract step');
+  await t.engine.close();
+});
+
+test('the reopened contract, approved, makes the steps that ran on the old one run again against the new one', async () => {
+  const { t, ticket, states, contract } = await stepped({
+    authors: [quickAuthor, [started, note('n1', OWN_NOTE), { awaitMessage: true }, finished(0.5)], quickAuthor, quickAuthor, quickAuthor, quickAuthor, quickAuthor],
+    reads: { 'filter-api': [contractRead(1), contractRead(5), contractRead(5), contractRead(5)] },
+  });
   await t.engine.start(ticket.id, 'u1');
   await until(() => contract() !== undefined, 'the contract item');
   await t.engine.approveContract((contract() as ContractItem).id, 'u1');
-  await until(async () => (await t.tickets.get(ticket.id))?.status === 'Todo', 'the put back');
+  await until(() => t.startedSessions.length === 3, 'the two service steps');
+  await until(async () => (await states())[2] === '3 service guestbook done', 'the guestbook step done on the old contract');
+  await t.engine.send(t.startedSessions[1]!.id, 'Go on.', 'u1');
+  await until(() => proposals(t, ticket.id) === 2, 'the reopened contract item');
   await t.engine.settled();
-  assert.equal((await states())[1], '2 service filter-api failed');
-  const back = t.flowEvents.find((e) => e.type === 'ticket_put_back');
-  assert.match(back?.type === 'ticket_put_back' ? back.note : '', /validated contract/);
+  assert.deepEqual(await states(), ['1 contract filter-api validating', '2 service filter-api waiting', '3 service guestbook done', '4 integration guestbook waiting']);
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.ticket === ticket.id), 'the release item', 5000);
+  await t.engine.settled();
+  const guestbook = t.startedSessions.filter((s) => s.input.service === 'guestbook' && /the step of/.test(s.input.prompt));
+  assert.equal(guestbook.length, 2, 'the guestbook step ran again');
+  assert.ok(guestbook[1]!.input.siblings?.some((s) => s.name === 'filter-api' && s.contract === '/work/LOCAL-2/.validated/contract-5/openapi.yaml'), 'against the contract as validated the second time');
+  assert.deepEqual(await states(), ['1 contract filter-api done', '2 service filter-api done', '3 service guestbook done', '4 integration guestbook done']);
+  const prompt = t.startedSessions.find((s) => s.input.service === 'filter-api' && /the step of/.test(s.input.prompt) && s.id !== t.startedSessions[1]!.id)?.input.prompt ?? '';
+  assert.match(prompt, /changed the contract/, 'the step that asked for the change is told it was validated');
+  assert.doesNotMatch(prompt, new RegExp(OWN_NOTE), 'a step\'s own earlier note is not handed back to it');
+  assert.match(guestbook[1]!.input.prompt, new RegExp(OWN_NOTE), 'the other step is handed it');
+  assert.ok((await t.tickets.comments(ticket.id)).some((c) => /changed the validated contract/.test(c.body)), 'a comment on the ticket says what happened');
+  await t.engine.close();
+});
+
+test('a reopened contract sent back resumes the contract step\'s session with the owner\'s message', async () => {
+  const { t, ticket, contract } = await stepped({ authors: [quickAuthor, quickAuthor, waiting('s2')], reads: { 'filter-api': [contractRead(1), contractRead(5), contractRead(6)] } });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => proposals(t, ticket.id) === 2, 'the reopened contract item');
+  await t.engine.settled();
+  const item = contract() as ContractItem;
+  await t.engine.sendBackContract(item.id, 'Name the field reason.', 'u1');
+  await until(() => proposals(t, ticket.id) === 3, 'the third contract item');
+  await t.engine.settled();
+  assert.ok(t.store.events.after(t.startedSessions[0]!.id).some(({ event }) => JSON.stringify(event).includes('Name the field reason.')), 'the contract step\'s own session was told');
+  assert.match(contract()?.diff ?? '', /severity 6/);
+  await t.engine.close();
+});
+
+// Every contract item of the ticket, waiting or answered.
+const proposals = (t: Setup, ticket: string): number => t.inbox.contracts({ ticket }).length + t.inbox.contracts({ ticket, state: 'handled' }).length;
+
+const OWN_NOTE = 'Keep the severity a string.';
+const note = (id: string, body: string): FakeStep => ({ hostCall: { toolCallId: id, name: 'leave_note', input: { text: body } } });
+const noting = (body: string): readonly FakeStep[] => [started, note('n1', body), ...text('a1', 'Done.'), finished(0.3)];
+const NOTE = 'The check answers a severity as a string, not a number.';
+
+// Lane j3-contract-notes (P161): notes between the sessions of a ticket's steps.
+test('a note a step\'s session leaves is journaled, cleaned, seen by the lead, and handed to every later step\'s session', async () => {
+  const { t, ticket, contract } = await stepped({
+    authors: [noting(`${NOTE} The key is sk-abcdef123456.`), quickAuthor, quickAuthor, quickAuthor],
+    reads: { 'filter-api': [contractRead(1), contractRead(1), contractRead(1)] },
+    clean: (value) => value.replace(/sk-[a-z0-9]+/g, '[redacted]'),
+  });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.ticket === ticket.id), 'the release item', 5000);
+  await t.engine.settled();
+  const [contractStep, ...later] = t.startedSessions.slice(0, 4);
+  const journaled = t.store.events.after(contractStep!.id).flatMap(({ event }) => (event.type === 'CUSTOM' && event.name === 'cleared.step_note' ? [event.value] : []));
+  assert.equal(journaled.length, 1);
+  assert.equal(journaled[0]?.text, `${NOTE} The key is [redacted].`);
+  assert.equal(journaled[0]?.service, 'filter-api');
+  assert.equal(journaled[0]?.step, 1);
+  assert.doesNotMatch(contractStep!.input.prompt, /BEGIN NOTES/, 'the first step has none to read');
+  assert.equal(later.length, 3);
+  for (const next of later) {
+    assert.match(next.input.prompt, /--- BEGIN NOTES FROM THE OTHER STEPS ---[^]*step 1[^]*the contract step of filter-api[^]*The check answers a severity as a string[^]*--- END NOTES ---/);
+    assert.doesNotMatch(next.input.prompt, /sk-abcdef/);
+    const read = t.store.events.after(next.id).flatMap(({ event }) => (event.type === 'CUSTOM' && event.name === 'cleared.step_notes_read' ? [event.value] : []));
+    assert.equal(read.length, 1, 'what the session was handed is journaled on it');
+  }
+  const seen = t.flowEvents.filter((e) => e.type === 'step_note');
+  assert.equal(seen.length, 1);
+  const line = describeFlowEvent(seen[0] as never) ?? '';
+  assert.match(line, /filter-api/);
+  assert.match(line, /severity as a string/);
+  await t.engine.close();
+});
+
+test('a step\'s own earlier notes are not handed back to it, and a note is handed once to a reopened session', async () => {
+  const { t, ticket, contract } = await stepped({
+    authors: [quickAuthor, noting('Check the empty entry.'), waiting('s2')],
+    reads: { 'filter-api': [contractRead(1), contractRead(5), contractRead(6)] },
+  });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => proposals(t, ticket.id) === 2, 'the reopened contract item');
+  await t.engine.settled();
+  await t.engine.sendBackContract((contract() as ContractItem).id, 'Name the field reason.', 'u1');
+  await until(() => proposals(t, ticket.id) === 3, 'the third contract item');
+  await t.engine.settled();
+  const contractEvents = JSON.stringify(t.store.events.after(t.startedSessions[0]!.id).map((e) => e.event));
+  assert.match(contractEvents, /BEGIN NOTES FROM THE OTHER STEPS/);
+  assert.match(contractEvents, /Check the empty entry\./, 'the contract step\'s session, reopened, was handed the service step\'s note');
+  assert.equal(contractEvents.split('Check the empty entry.').length - 1 >= 1, true);
+  await t.engine.sendBackContract((contract() as ContractItem).id, 'And the type.', 'u1');
+  await until(() => proposals(t, ticket.id) === 4, 'the fourth contract item');
+  await t.engine.settled();
+  const after = JSON.stringify(t.store.events.after(t.startedSessions[0]!.id).map((e) => e.event));
+  assert.equal(after.split('BEGIN NOTES FROM THE OTHER STEPS').length - 1, 1, 'the note is handed once');
+  await t.engine.close();
+});
+
+test('a note is refused when empty or too long, and a one-service ticket\'s session has no such tool', async () => {
+  const { t, ticket } = await stepped({ authors: [[started, note('n1', '   '), note('n2', 'x'.repeat(5000)), ...text('a1', 'Done.'), finished(0.3)]], reads: { 'filter-api': [contractRead(1)] } });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => proposals(t, ticket.id) === 1, 'the contract item');
+  await t.engine.settled();
+  const calls = t.store.events.after(t.startedSessions[0]!.id).flatMap(({ event }) => (event.type === 'CUSTOM' && event.name === 'cleared.host_call' ? [event.value.outcome] : []));
+  assert.deepEqual(calls, ['refused', 'refused']);
+  assert.equal(t.flowEvents.some((e) => e.type === 'step_note'), false);
+  await t.engine.close();
+  const one = await setup({ scripts: { author: quickAuthor }, config: { steps: true } });
+  await one.engine.start(one.ticket.id, 'u1');
+  await until(() => one.inbox.list().some((i) => i.kind === 'release'), 'the release item', 5000);
+  assert.equal(one.startedSessions[0]?.input.tools, undefined);
+  await one.engine.close();
+});
+
+// Lane j3-contract-notes (P163): the handover of a step is filed in the
+// memory of the contract the step builds against.
+test('a step\'s handover names the contract its step builds against', async () => {
+  const captured: { service?: string; contract?: string }[] = [];
+  const { t, ticket, contract } = await stepped({
+    authors: [quickAuthor, quickAuthor, quickAuthor, quickAuthor], reads: { 'filter-api': [contractRead(1), contractRead(1), contractRead(1)] },
+    effects: { async captureHandover(input) { captured.push({ ...(input.contract ? { contract: input.contract } : {}), service: input.workdir.split('/').at(-1) as string }); return 'entry'; } },
+  });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.ticket === ticket.id), 'the release item', 5000);
+  await t.engine.settled();
+  const byService = (name: string) => captured.filter((c) => c.service === name).map((c) => c.contract);
+  // The contract step and the provider's service step: its own contract; the consumer's service step: the one it consumes; its integration step names none.
+  assert.deepEqual(byService('filter-api'), ['filter-api', 'filter-api']);
+  assert.deepEqual(byService('guestbook'), ['filter-api', undefined]);
   await t.engine.close();
 });
 
