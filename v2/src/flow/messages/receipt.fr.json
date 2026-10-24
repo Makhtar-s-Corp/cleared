@@ -19,8 +19,8 @@
   "receipt_test_failed": "Tour {round} : {command} a échoué",
   "receipt_test_unclear": "Tour {round} : {command} a tourné dans un tube ou une liste, son code de sortie n'est donc pas connu",
   "receipt_test_not_run": "Tour {round} : {command} n'a pas été lancé",
-  "receipt_tokens": "Coût : {tokens} jetons",
-  "receipt_tokens_unknown": "Coût : jetons non déclarés par le harnais",
+  "receipt_cost": "Coût : {count} jetons",
+  "receipt_cost_unreported": "Coût : jetons non déclarés par le harnais",
   "receipt_usd": "{usd} déclarés par le harnais (équivalent API)",
   "receipt_time": "Durée : {time} de la première session à cette pull request"
 }

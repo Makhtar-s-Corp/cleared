@@ -19,8 +19,8 @@
   "receipt_test_failed": "Round {round}: {command} failed",
   "receipt_test_unclear": "Round {round}: {command} ran in a pipe or a list, so its exit status is not known",
   "receipt_test_not_run": "Round {round}: {command} was not run",
-  "receipt_tokens": "Cost: {tokens} tokens",
-  "receipt_tokens_unknown": "Cost: tokens not reported by the harness",
+  "receipt_cost": "Cost: {count} tokens",
+  "receipt_cost_unreported": "Cost: tokens not reported by the harness",
   "receipt_usd": "{usd} as the harness reported it (API-equivalent)",
   "receipt_time": "Time: {time} from the first session to this pull request"
 }

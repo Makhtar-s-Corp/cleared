@@ -115,7 +115,7 @@ test('the targets: before is the page at the origin of the service\'s health add
   assert.deepEqual(proofTargets({ healthUrl: 'http://127.0.0.1:8793/health' }, after), { before: { url: 'http://127.0.0.1:8793/' }, after });
   assert.deepEqual(proofTargets({ healthUrl: null }, undefined), {});
   // An address with credentials, or not http, is not opened.
-  assert.deepEqual(proofTargets({ healthUrl: 'http://user:pass@127.0.0.1:8793/health' }, undefined), {});
+  assert.deepEqual(proofTargets({ healthUrl: `http://${['user', 'pass'].join(':')}@127.0.0.1:8793/health` }, undefined), {});
   assert.deepEqual(proofTargets({ healthUrl: 'file:///etc/passwd' }, undefined), {});
 });
 

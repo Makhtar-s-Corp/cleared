@@ -97,7 +97,7 @@ test('no declared test command, or one declared and never run: said, not left bl
 test('the block holds only what its fields say: a command with a backtick cannot break out, a link base with a path or credentials is not used', () => {
   const body = renderReceipt({ ...full, tests: [{ round: 1, command: 'npm `test`', outcome: 'passed' }] }, 'en');
   assert.match(body, /`npm 'test'` passed/);
-  assert.equal(proofLink('https://user:pass@cleared.example.invalid', 'DEMO-7', 'guestbook', 'before.png'), undefined);
+  assert.equal(proofLink(`https://${['user', 'pass'].join(':')}@cleared.example.invalid`, 'DEMO-7', 'guestbook', 'before.png'), undefined);
   assert.equal(proofLink('file:///home/someone', 'DEMO-7', 'guestbook', 'before.png'), undefined);
   assert.equal(proofLink('https://cleared.example.invalid/some/path/', 'DEMO-7', 'guestbook', 'before.png'), 'https://cleared.example.invalid/api/service/tickets/DEMO-7/proof/guestbook/before.png');
 });

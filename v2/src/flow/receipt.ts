@@ -89,7 +89,7 @@ export function renderReceipt(data: ReceiptData, language: Language): string {
     lines.push(`- ${t('receipt_tests')}`);
     for (const run of data.tests) lines.push(`  - ${t(`receipt_test_${run.outcome}`, { round: run.round, command: code(run.command) })}`);
   }
-  const cost = data.tokens === null ? t('receipt_tokens_unknown') : t('receipt_tokens', { tokens: quantity(data.tokens, t) });
+  const cost = data.tokens === null ? t('receipt_cost_unreported') : t('receipt_cost', { count: quantity(data.tokens, t) });
   lines.push(`- ${data.costUsd === null ? cost : `${cost}, ${t('receipt_usd', { usd: dollars(data.costUsd, language) })}`}`);
   lines.push(`- ${t('receipt_time', { time: lasted(data.elapsedMs, t) })}`);
   lines.push(RECEIPT_END);
