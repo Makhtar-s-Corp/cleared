@@ -431,8 +431,10 @@ export class FlowEngine {
         this.#checked.set(release.id, now);
         const checks = await this.#checksOf(release);
         if (checks && checks !== release.pr.checks) this.inbox.setReleaseChecks(release.id, checks);
-        if (checks === 'failed') await this.#checksFailed(release, ticket);
-        else if (checks === 'passed' && release.repair?.state === 'pushed') await this.#repairSaid(release, { ...release.repair, state: 'repaired', at: this.#at() });
+        // A repair resumes or starts a container: it runs beside the tick, which goes on.
+        if (checks === 'failed') void this.#track(this.#checksFailed(release, ticket).catch((error: unknown) => console.error(`cleared-v2: the repair of ${ticket.id}'s checks failed (${error instanceof Error ? error.name : typeof error})`)));
+        // Green after a repair, or after the owner ran a job again once the attempts were spent.
+        else if (checks === 'passed' && (release.repair?.state === 'pushed' || release.repair?.state === 'gave_up')) await this.#repairSaid(release, { ...release.repair, state: 'repaired', at: this.#at() });
         continue;
       }
       this.#checked.delete(release.id);
@@ -485,8 +487,9 @@ export class FlowEngine {
   // ---- the repair of failed checks (issue #273) ----------------------------
 
   // The checks of a waiting release failed. Read again once a minute, so
-  // each step below happens once: a failure on another head than the card's
-  // (the push's checks not reported yet) waits for the next reading.
+  // each step below happens once (#repairing is set before the first await):
+  // a failure on another head than the card's (the push's checks not
+  // reported yet) waits for the next reading.
   async #checksFailed(release: ReleaseItem, ticket: Ticket): Promise<void> {
     const id = ticket.id;
     const last = release.repair;

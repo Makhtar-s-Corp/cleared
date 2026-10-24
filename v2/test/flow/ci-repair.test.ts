@@ -65,6 +65,7 @@ test('a failed check reopens the author on the ticket branch; the fix is reviewe
   const told = userTexts(t, author).at(-1) ?? '';
   assert.match(told, /checks of pull request #7 failed on the branch cleared\/LOCAL-1/);
   assert.match(told, /repair attempt 1 of 2/);
+  assert.match(told, /do not skip, delete or weaken the failing check/);
   assert.match(told, /--- BEGIN FAILED CHECK: test ---\npush 1: expected 2 to equal 3\n--- END FAILED CHECK: test ---/);
   // Its review counts its own rounds: round 1, not the original flow's.
   assert.deepEqual(t.flowEvents.filter((e) => e.type === 'review_verdict').map((e) => (e as { round: number }).round), [1, 1]);
@@ -84,8 +85,9 @@ test('a failed check reopens the author on the ticket branch; the fix is reviewe
   await t.engine.close();
 });
 
-test('at most two attempts: checks still red after the second, the card says so and nothing more starts', async () => {
-  const { t, ci } = await released(['failed', 'failed', 'failed']);
+test('at most two attempts: checks still red after the second, the card says so and nothing more starts; a job run again green says repaired', async () => {
+  const results: ('failed' | 'passed')[] = ['failed', 'failed', 'failed'];
+  const { t, ci } = await released(results);
   await minute(t);
   await nextCard(t, 1);
   await minute(t);
@@ -107,6 +109,12 @@ test('at most two attempts: checks still red after the second, the card says so 
   assert.deepEqual(repairs(t).map((e) => e.state), ['started', 'pushed', 'started', 'pushed', 'gave_up']);
   assert.ok((await t.tickets.comments(t.ticket.id)).some((c) => c.body === 'The checks of pull request #7 still fail after 2 repair attempts: test. Nothing more is tried: the owner decides.'));
   assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Needs Approval');
+  // The owner runs the flaky job again on the forge: the same head turns green.
+  results[2] = 'passed';
+  await minute(t);
+  assert.equal(waitingCard(t)?.pr.checks, 'passed');
+  assert.deepEqual({ ...waitingCard(t)?.repair, at: undefined }, { attempt: 2, limit: 2, state: 'repaired', checks: ['test'], at: undefined });
+  assert.equal(ci.pushes.length, 3);
   await t.engine.close();
 });
 
