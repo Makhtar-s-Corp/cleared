@@ -386,7 +386,11 @@ export class FlowEngine {
       if (go) await this.#go(live, 'delay').catch((error: unknown) => console.error(`cleared-v2: the Go by the delay of ${live.id} failed (${error instanceof Error ? error.name : typeof error})`));
       else await this.#stopTicket(live, 'no_plan', 'The author proposed no session plan: the session was stopped.', noPlanNote(minutes), 'stopped', 'failed');
     }
-    await this.#questionTick(now);
+    // Scanned synchronously too: asking the lead writes and yields nothing.
+    for (const { live, item, minutes } of this.#dueQuestions(now)) {
+      if (item.timeout?.answers) await this.#applyDeclared(live, item, item.timeout.answers, minutes);
+      else await this.#park(live, item, minutes);
+    }
     const tickets = this.registry.ticketStore;
     for (const release of this.inbox.waitingReleases()) {
       const ticket = await tickets.get(release.ticket);
@@ -2059,24 +2063,21 @@ export class FlowEngine {
   }
 
   // Each waiting question of a session this engine runs, awake or stopped by
-  // the watchdog, past its delay: the lead is asked once; past the lead's
-  // window, the declared answer is applied, else the ticket is parked. A
-  // session the owner took over waits for the owner.
-  async #questionTick(now: number): Promise<void> {
+  // the watchdog, past its delay: the lead is asked once, here; past the
+  // lead's window, it is due, for its declared answer or its ticket's park.
+  // A session the owner took over waits for the owner.
+  #dueQuestions(now: number): { live: Live; item: QuestionItem; minutes: number }[] {
     const lead = this.config.questionLeadMs ?? QUESTION_LEAD_MINUTES * 60_000;
+    const due: { live: Live; item: QuestionItem; minutes: number }[] = [];
     for (const item of this.inbox.waitingQuestions(this.config.project)) {
       const timeout = item.timeout;
       const live = this.#live.get(item.sessionId) ?? this.#dormant.get(item.sessionId);
       if (!timeout || !live || this.#paused.has(live.id) || now < Date.parse(timeout.at)) continue;
       const minutes = Math.round((now - Date.parse(item.since)) / 60_000);
-      if (!timeout.leadAt) {
-        this.#questionToLead(item, timeout, now, lead, minutes);
-        continue;
-      }
-      if (now < Date.parse(timeout.leadAt) + lead) continue;
-      if (timeout.answers) await this.#applyDeclared(live, item, timeout.answers, minutes);
-      else await this.#park(live, item, minutes);
+      if (!timeout.leadAt) this.#questionToLead(item, timeout, now, lead, minutes);
+      else if (now >= Date.parse(timeout.leadAt) + lead) due.push({ live, item, minutes });
     }
+    return due;
   }
 
   #questionTimedOut(item: QuestionItem, stage: 'lead' | 'default' | 'parked', minutes: number, answers: Readonly<Record<string, string>> | null): void {

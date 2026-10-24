@@ -222,3 +222,24 @@ test('a listener that throws or rejects is logged and dropped; the others and th
     console.error = log;
   }
 });
+
+test('a team\'s question past its delay says question_timed_out, after the inbox item has the time the lead was asked (issue #290)', async () => {
+  const t = await setup({ scripts: { author: [started, { question: { requestId: 'q1', questions: [{ question: 'Which order?', options: [{ label: 'Newest first (Recommended)' }] }] } }] } });
+  await t.engine.start(t.ticket.id, 'u1');
+  const author = t.startedSessions[0]!.id;
+  await until(() => t.inbox.waitingFor(author) === 1);
+  await t.engine.settled();
+  let leadAt: string | undefined;
+  t.engine.subscribe((event) => {
+    if (event.type === 'question_timed_out') leadAt = t.inbox.items().find((i) => i.kind === 'question' && i.state === 'waiting' && 'timeout' in i)?.timeout?.leadAt;
+  });
+  t.clock.now += 30 * 60_000;
+  await t.engine.tick();
+  record(t);
+  const [timedOut] = of(t, 'question_timed_out');
+  assert.deepEqual({ ...timedOut, at: undefined }, {
+    type: 'question_timed_out', at: undefined, project: 'guestbook', ticket: t.ticket.id, session: author, requestId: 'q1', item: `question:${author}:q1`,
+    stage: 'lead', minutes: 30, leadMinutes: 10, questions: ['Which order?'], answers: { 'Which order?': 'Newest first (Recommended)' },
+  });
+  assert.equal(leadAt, new Date(t.clock.now).toISOString(), 'said after the write');
+});
