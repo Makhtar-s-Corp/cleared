@@ -5025,3 +5025,11 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Resources.** No Docker object, no network, no tunnel, no secret, no real account; `restart.test.ts` starts the service as a process on a free loopback port, the lead on the rehearsal's fake adapter, every folder in the temporary directory.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-plan-schedules`.
+
+## 2026-10-25 01:09 — Ten ideas inspired by reasonmachines.com (owner decision)
+
+**Decision.** Makhtar validated ten ideas; they come before the remaining matrix gaps. Matrix lines P210-P219, issues #326-#335 (label `v2`).
+
+**Order.** Lanes start as slots free: P210 proof receipt, P211 cost per resolved ticket, P212 launch a ticket from chat; then P213 harness auto-pick, P214 ticket templates, P215 code Q&A with GitHub line links, P216 local agents via MCP, P217 mobile UI, P218 post-deploy verification (Cleared never deploys), P219 prompt-cache token reduction.
+
+**Rules.** Money amounts only from a real source, else tokens and time; chat launch tested with a fake, no real Slack setup; no real Cursor/Codex accounts until the owner's trials.
