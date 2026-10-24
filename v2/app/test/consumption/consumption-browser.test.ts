@@ -112,7 +112,7 @@ test('each lever acts on the service in one click, is drawn as pressed, and surv
     await page.locator('[data-choice="model:default"]').click();
     await page.locator('[data-lever="model"][data-active="no"]').waitFor();
     assert.equal((await levers(page) as { paused: boolean }).paused, false);
-    assert.equal(await page.locator('.levers-note').innerText(), '');
+    assert.equal(await page.locator('.levers-note').count(), 0);
   });
 });
 

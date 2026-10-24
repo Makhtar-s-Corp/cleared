@@ -45,7 +45,7 @@ export function consumptionRoutes(deps: ConsumptionRouteDeps): Route[] {
         const body = await readJson(c.request);
         if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new HttpError(400, 'the body is an object: { model?, maxLanes?, paused? }');
         try {
-          const set = new LeverStore(target.db, target.project).set(body as LeversChange, user as UserId, now().toISOString(), target.config.reviewerModel);
+          const set = new LeverStore(target.db, target.project).set(body as LeversChange, user as UserId, now().toISOString(), target.config.reviewerModel, target.config.authorModel);
           send(c.response, 200, leverChoices(set, target.config));
         } catch (error) {
           if (error instanceof LeverError) throw new HttpError(400, error.message);

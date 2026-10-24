@@ -87,7 +87,7 @@
 .choice[aria-pressed="true"], .choice[data-state="on"] { background: var(--ink); color: var(--on-ink); box-shadow: none; }
 .choice:disabled { cursor: default; opacity: 0.6; }
 .choice:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.levers-note { min-height: 1.4em; margin: 10px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
+.levers-note { margin: 10px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
 
 .consumption-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--hairline); color: var(--text-muted); font-size: var(--text-sm); }
 .consumption-foot p { margin: 0; }

@@ -4610,6 +4610,21 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - Resources: no Docker object, no network, no tunnel, no port. The tests run in memory.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ci-repair`.
 
+## 2026-10-24: the Consumption screen's review follow-ups (the author's choices, lane `j3-consumption-followups`, issue #293)
+
+**Decision.** Five of the six follow-ups of #289 are done; the sixth stays open (item 6).
+1. The French partial-cost line is "partiel : {reported} sur {turns} tours", with no plural to agree.
+2. The screen keeps showing one window per harness, the seven-day one (the server returns both, seven-day first); the footer now says so rather than showing both, which the matrix wording does not ask.
+3. A pause longer than `GOAL_PLAN_HOURS` (6) leaves the plan of a waiting goal run unapproved by the scheduler; it waits in the inbox for the owner. Documented in the scheduler's header, behaviour unchanged.
+4. The levers' note is rendered only when there is a message.
+5. `AUTHOR_MODELS` stays the list of choices, but `modelChoices` (consumption/levers.ts) adds the configured author model and a model stored earlier, never the reviewers'. That one set is both the options `leverChoices` offers and the validation of `LeverStore.set` (which takes the configured author model as a fifth argument, the route passing it), so no offered toggle is refused. A stored model that was left for another choice drops out. Not read from the configuration alone: the configuration names one model, not the choices.
+6. Left open: the matrix status stays partial until a real Claude Code session reports its windows, and the dollars await the owner.
+
+**Consequences.**
+- No new table, setting or event. `set` now accepts the configured author model and the stored one, as the options do. The engine's fallback for a model that is the reviewer's is unchanged.
+- Resources: no Docker object, no network, no tunnel, no port.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-consumption-followups`.
+
 ## 2026-10-24: Resume from here, a ticket started again from a step of its author's thread (the author's choices, lane `j3-replay`)
 
 **The need.** Issue #272, approved by the owner on 2026-10-23 at 11:51 (P57, Devin's item 14). A session that went the wrong way had to start again from the beginning. The criteria: each step of the thread offers "Reprendre d'ici", the branch goes back to the step's commit, the old continuation stays readable, a service test and a browser test.
