@@ -17,6 +17,9 @@
 //      on the Origin: budget.ts). A goal is an owner turn to the lead, as
 //      the creator; the plan the lead proposes for that goal (goal-<seq>)
 //      within GOAL_PLAN_HOURS is approved for the creator at the next tick.
+//      A pause longer than GOAL_PLAN_HOURS outlasts that window: the plan of
+//      a goal run that was waiting is then no longer approved here, and it
+//      waits in the inbox for the owner, as any plan does.
 //   4. The Consumption screen's pause stops all of this: no run is taken,
 //      no goal plan approved, until the owner resumes.
 //   5. A release still waits for the owner: nothing here approves one.

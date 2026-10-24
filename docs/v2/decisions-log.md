@@ -4609,3 +4609,17 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - Known limit: an approval clicked while the checks are red, and still in its undo window when the repair starts, is not cancelled by the repair. The lock still refuses to merge a red head.
 - Resources: no Docker object, no network, no tunnel, no port. The tests run in memory.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ci-repair`.
+
+## 2026-10-24: the Consumption screen's review follow-ups (the author's choices, lane `j3-consumption-followups`, issue #293)
+
+**Decision.** Five of the six follow-ups of #289 are done; the sixth (the matrix stays "partial" until a real Claude Code session reports its windows, the dollars await the owner) is a state, not a change.
+1. The French partial-cost line is "partiel : {reported} sur {turns} tours", with no plural to agree.
+2. The screen keeps showing one window per harness, the seven-day one (the server returns both, seven-day first); the footer now says so rather than showing both, which the matrix wording does not ask.
+3. A pause longer than `GOAL_PLAN_HOURS` (6) leaves the plan of a waiting goal run unapproved by the scheduler; it waits in the inbox for the owner. Documented in the scheduler's header, behaviour unchanged.
+4. The levers' note is rendered only when there is a message.
+5. `AUTHOR_MODELS` stays the list of choices, but `leverChoices` adds the configured author model and a model stored earlier, so the toggle of the model in force is always pressed. Not read from the configuration alone: the configuration names one model, not the choices.
+
+**Consequences.**
+- No new table, setting or event. The engine's fallback for a model that is the reviewer's is unchanged.
+- Resources: no Docker object, no network, no tunnel, no port.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-consumption-followups`.

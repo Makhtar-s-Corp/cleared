@@ -67,5 +67,5 @@
   "consumption_lever_failed": "The change did not go through. Try again.",
   "consumption_read_failed": "The service does not answer for now. This page tries again by itself.",
   "consumption_down": "Consumption is not available: the service runs no project.",
-  "consumption_footer_data": "Figures come from the sessions of this project, read from its ledger."
+  "consumption_footer_data": "Figures come from the sessions of this project, read from its ledger. When a harness reports both windows, the seven-day one is shown."
 }

@@ -122,7 +122,7 @@ test('the cost is shown only for an agent that reported one, and says when it is
   assert.equal(view.rows[0]?.partial, null);
   const partial = { ...data, harnesses: data.harnesses.map((h) => (h.harness === 'claude-code' ? { ...h, costTurns: { reported: 9, turns: 14 } } : h)) };
   assert.equal(costView(partial, 'en', en)?.rows[0]?.partial, 'partial: 9 of 14 turns reported');
-  assert.equal(costView(partial, 'fr', fr)?.rows[0]?.partial, `partiel${NBSP}: 9 tours sur 14 l'indiquent`);
+  assert.equal(costView(partial, 'fr', fr)?.rows[0]?.partial, `partiel${NBSP}: 9 sur 14 tours`);
   const none = { ...data, harnesses: data.harnesses.map((h) => ({ ...h, costUsd: null })) };
   assert.equal(costView(none, 'en', en), null, 'no cost reported anywhere: nothing at all, no estimate');
 });

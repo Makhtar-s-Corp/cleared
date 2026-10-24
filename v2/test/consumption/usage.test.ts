@@ -6,7 +6,7 @@ process.env.TZ = 'UTC';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WINDOW_MS, consumption, dayOf, lastDays, projectQuota, zoneOf } from '../../src/consumption/usage.ts';
+import { WINDOW_MS, consumption, dayOf, lastDays, leverChoices, projectQuota, zoneOf } from '../../src/consumption/usage.ts';
 import { NO_LEVERS } from '../../src/consumption/levers.ts';
 import type { Harness } from '../../src/session/contract.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
@@ -143,4 +143,14 @@ test('the levers are returned with the model the owner may choose: never the rev
   assert.deepEqual(levers.maxLanes, { choice: null, options: [1, 2, 3] });
   assert.equal(levers.paused, false);
   store.close();
+});
+
+test('the model options keep the configured author and a model stored earlier', () => {
+  const config = { authorModel: 'claude-future-9', reviewerModel: 'claude-sonnet-5-5' };
+  const configured = leverChoices({ model: null, maxLanes: null, paused: false }, config).model;
+  assert.equal(configured.current, 'claude-future-9');
+  assert.ok(configured.options.includes('claude-future-9'), 'the default has a toggle to show pressed');
+  assert.ok(!configured.options.includes('claude-sonnet-5-5'), "the reviewer's model is never an option");
+  const stored = leverChoices({ model: 'claude-old-1', maxLanes: null, paused: false }, config).model;
+  assert.ok(stored.options.includes('claude-old-1'));
 });
