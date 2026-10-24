@@ -1,6 +1,6 @@
 // A minimal protobuf reader for the fake (owner decision O11), with no
 // dependency, as yaml.ts: the image has no `npm install`, and the fake needs
-// the shape of the messages, not a codec. The subset, which the README states:
+// the shape of the messages, not a codec. The subset (stated in the decisions-log entry of lane j3-contract-formats):
 //   - `syntax = "proto3";` first, an optional `package`, top-level `option`s;
 //   - messages (nested ones too), enums, `oneof`, `map<K, V>`, `repeated`,
 //     `optional`, `reserved`, and services with unary `rpc`s;
