@@ -108,8 +108,15 @@ const SERVICE_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 // ledger's folder.
 export function levelDirectory(env: NodeJS.ProcessEnv, kind: LevelKind, name: string): string {
   if (!SERVICE_NAME.test(name)) throw new BriefingError(`"${name}" is not a service name`);
-  const state = env.CLEARED_STATE_DIR || env.ORCH_STATE_DIR || dirname(ledgerPath(env));
-  return join(state, kind === 'service' ? 'services' : 'contracts', name, 'memory');
+  return join(stateFolder(env), kind === 'service' ? 'services' : 'contracts', name, 'memory');
+}
+
+export function stateFolder(env: NodeJS.ProcessEnv): string {
+  return env.CLEARED_STATE_DIR || env.ORCH_STATE_DIR || dirname(ledgerPath(env));
+}
+
+export function serviceNameOk(name: string): boolean {
+  return SERVICE_NAME.test(name);
 }
 
 // A level's context, derived from the workspace's: its own state folder and
@@ -259,7 +266,10 @@ function block(content: string): string {
 // `## Lessons for the contract` goes to, if any (workspace/handover.ts).
 export type LessonTargets = { readonly service: string | null; readonly contract: string | null };
 
-export type RenderOptions = { readonly levels?: readonly LevelBriefing[]; readonly lessons?: LessonTargets };
+// The generated project page of the session's service (workspace/project-page.ts).
+export type GeneratedPage = { readonly service: string; readonly text: string };
+
+export type RenderOptions = { readonly levels?: readonly LevelBriefing[]; readonly lessons?: LessonTargets; readonly page?: GeneratedPage };
 
 const LEVEL_SECTIONS = ['Page', 'Decisions linked to this ticket', 'Glossary', 'Lessons for this role'] as const;
 
@@ -303,6 +313,7 @@ export function renderBriefing(briefing: Briefing, options: RenderOptions = {}):
     const items = sections[i] ?? [];
     text += `\n## ${name}\n${items.length ? items.map(block).join('') : 'None.\n'}`;
   });
+  if (options.page?.text.trim()) text += `\n## Generated page of the service ${options.page.service}\n${block(options.page.text)}`;
   for (const level of options.levels ?? []) text += renderLevel(level);
   return text;
 }

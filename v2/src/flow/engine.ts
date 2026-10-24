@@ -154,6 +154,10 @@ export type FlowEffects = {
   ciFailures?(input: { readonly pr: number; readonly service?: ServiceConfig }): Promise<CiFailures>;
   // The lock's merge (`request_release` without --ask), after the human's approval.
   mergeRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
+  // After a merge: the project pages of the workspace's services are made
+  // again from their new base (issue #274). Absent: none. A failure is
+  // logged and never stops the flow.
+  updateProjectPages?(input: { readonly ticket: TicketId; readonly pr: number }): Promise<void>;
   // What a published head changes against the base: its files, and the diff
   // the release card's flags are read from (release/flags.ts). Absent: none.
   changes?(input: { readonly ticket: TicketId; readonly head: string; readonly service?: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
@@ -732,6 +736,9 @@ export class FlowEngine {
     if (merge.outcome === 'merged') {
       state.mergedAt = this.#now().toISOString();
       this.#follow(c);
+      const pages = this.#effects.updateProjectPages;
+      if (pages) void this.#track(Promise.resolve().then(() => pages.call(this.#effects, { ticket: c.ticket, pr: c.pr }))
+        .catch((error) => { console.error(`cleared-v2: the project pages were not made again after pull request #${c.pr} (${name(error)})`); }));
     } else if (merge.outcome === 'refused') {
       state.refused = `The lock refused to merge pull request #${c.pr}: ${merge.message || 'no reason given'}`;
       state.inFlight = true;
