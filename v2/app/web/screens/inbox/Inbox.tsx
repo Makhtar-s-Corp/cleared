@@ -344,8 +344,9 @@ const ANSWER_KEY: Readonly<Record<Answer, string>> = { allow_once: 'A', allow_al
 // the detail with its other fields and sent from the bar.
 type Answers = ChoiceDraft;
 
-function QuestionBody({ item, view, t, answers, onDraft }: {
+function QuestionBody({ item, view, t, answers, onDraft, onAnswer }: {
   readonly item: QuestionItem; readonly view: InboxView; readonly t: Translate; readonly answers: Answers; readonly onDraft?: (draft: Answers) => void;
+  readonly onAnswer?: (draft: Answers) => void;
 }) {
   // The lead's question is read here and answered on the lead's screen.
   const lead = isLead(item);
@@ -360,8 +361,10 @@ function QuestionBody({ item, view, t, answers, onDraft }: {
       <h2 className="sr-only">{t('kind_question')}</h2>
       {/* The question first, on the colour of what waits; the ticket under it (DESIGN.md, 4). */}
       <div className={`questions${item.state === 'waiting' ? ' waits' : ''}${lead ? ' read' : ''}`}>
+        {/* A click on the only choice of one question answers it, as the bar's Send would (issue #269). */}
         <Choices questions={item.questions} t={t} requestId={item.requestId} send="bar" free={waiting}
-          status={waiting ? { kind: 'waiting', draft: answers, busy } : { kind: 'read' }} onDraft={onDraft} />
+          status={waiting ? { kind: 'waiting', draft: answers, busy } : { kind: 'read' }} onDraft={onDraft}
+          onAnswer={onAnswer ? (_answers, chosen) => onAnswer({ picks: [chosen], free: [''] }) : undefined} />
       </div>
       {title ? <p className="d-ticket for-question">{title}</p> : null}
       {deadline ? <p className="d-deadline">{deadline}</p> : null}
@@ -643,7 +646,8 @@ export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMes
           : item.kind === 'contract' ? <ContractBody item={item} view={view} t={t} />
           : item.kind === 'knowledge' ? <KnowledgeBody item={item} t={t} />
           : item.kind === 'variants' ? <VariantsBody item={item} view={view} t={t} busy={view.local.get(item.id)?.kind === 'busy'} onAct={(act) => onAct?.(act, { reason, answers, message })} />
-          : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers} />}
+          : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers}
+              onAnswer={onAct ? (draft) => { setAnswers(draft); onAct('answer', { reason, answers: draft, message }); } : undefined} />}
       </div>
       <div className="d-actions" id="d-actions">
         <Actions item={item} view={view} t={t} note={note} reason={reason} ready={ready} message={message} onReason={setReason} onMessage={onMessage}

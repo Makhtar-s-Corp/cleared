@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FlowConfigError, PLAN_GO_MINUTES, loadFlowConfig, parseConf, projectSettings, workspaceOf } from '../../src/flow/config.ts';
+import { FlowConfigError, PLAN_GO_MINUTES, QUESTION_DEFAULTS, loadFlowConfig, parseConf, projectSettings, workspaceOf } from '../../src/flow/config.ts';
 import { publicWorkspace } from '../../src/workspace/config.ts';
 
 const conf = `
@@ -46,6 +46,18 @@ test('[session] plan_go_minutes is the delay of a session plan\'s Go, when the s
   assert.equal('planGoMinutes' in read(''), false);
   assert.equal(PLAN_GO_MINUTES, 10);
   for (const wrong of ['soon', '0', '-5']) assert.throws(() => read(`[session]\nplan_go_minutes = ${wrong}\n`), (error: unknown) => error instanceof FlowConfigError && /plan_go_minutes/.test(error.message), wrong);
+});
+
+test('[session] question_timeout_minutes and question_default are the project\'s own delay and default for its questions (issue #269)', () => {
+  const read = (conf: string) => projectSettings(parseConf(`[merge]\nverdict = ok\n${conf}`));
+  assert.equal(read('[session]\nquestion_timeout_minutes = 5\n').questionTimeoutMinutes, 5);
+  assert.equal(read('[session]\nquestion_timeout_minutes = 0.5\n').questionTimeoutMinutes, 0.5);
+  for (const rule of QUESTION_DEFAULTS) assert.equal(read(`[session]\nquestion_default = ${rule}\n`).questionDefault, rule);
+  // Unset, the service's delay and the recommended option apply, and the settings carry nothing new.
+  assert.equal('questionTimeoutMinutes' in read(''), false);
+  assert.equal('questionDefault' in read(''), false);
+  for (const wrong of ['soon', '0', '-5']) assert.throws(() => read(`[session]\nquestion_timeout_minutes = ${wrong}\n`), (error: unknown) => error instanceof FlowConfigError && /question_timeout_minutes/.test(error.message), wrong);
+  for (const wrong of ['Recommended', 'last', 'none']) assert.throws(() => read(`[session]\nquestion_default = ${wrong}\n`), (error: unknown) => error instanceof FlowConfigError && /question_default must be one of recommended, first, park/.test(error.message), wrong);
 });
 
 test('[session] service_urls and [merge] guarded_paths reach the settings when the service sets them (lane 23)', () => {

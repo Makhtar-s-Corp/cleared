@@ -13,7 +13,9 @@
 // the build's manifest; a question of several choices is answered with its
 // Send; every author proposes a session plan, and the morning gives its Go
 // to one that waits (a medium or low confidence holds its ticket until
-// then); a knowledge item is left to the owner and counted; each release
+// then); a team's question is answered from the inbox with its recommended
+// option, else its first, in one click when one click answers it (issue
+// #269, proof-inbox.ts); a knowledge item is left to the owner and counted; each release
 // card's intent groups and flags are read before it is approved.
 //
 //   node scripts/proof-j2.ts                       the real run, against the running app
@@ -38,8 +40,8 @@
 //                          this machine's clock; the rehearsal: PROOF_NIGHT_MINUTES after the start)
 //   PROOF_HOURS            when step 8 reads the lead, after the goal (default 48)
 //   PROOF_WATCH_MINUTES    the night watch's interval (default 5; the rehearsal: 10 seconds)
-//   PROOF_OWNER_APPROVES=1 the owner approves the releases and answers the permissions in
-//                          the morning; the proof only watches and measures
+//   PROOF_OWNER_APPROVES=1 the owner approves the releases and answers the permissions and
+//                          the team's questions in the morning; the proof only watches and measures
 //   PROOF_NOTIFICATIONS    skipped (the real run's default: the owner decided on 2026-10-22,
 //                          question 2 of the replan, option (b), that the proof sends no
 //                          notification to the Mac, so it runs on the inbox only and records
@@ -64,7 +66,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { LeadMemory, LeadMessage, LeadState, NextInboxItem, Plan, SessionSummary } from '../src/api/types.ts';
-import { leftForOwner, morningAction, type InboxEntry } from './proof-inbox.ts';
+import { answerInInbox, leftForOwner, morningAction, type InboxEntry, type QuestionChoice } from './proof-inbox.ts';
 import { blockageLine, planBlockage, startCheck, type StartDecision } from './proof-plan.ts';
 import {
   NOTIFICATIONS_SKIPPED_NOTE, PLANTED, changes, commitmentOutcomes, duration, highestShare, notificationCount, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, sessionPlanFacts, track,
@@ -136,6 +138,8 @@ page.setDefaultTimeout(30_000);
 const steps: Step[] = [];
 const times: Record<string, string> = {};
 const answers: { at: string; text: string }[] = [];
+// The team's questions answered in the morning, as the multi-service proof keeps them.
+const questions: (QuestionChoice & { at: string; ticket: string; session: string })[] = [];
 const gestures: { at: string; what: string }[] = [];
 const watchLog: { at: string; lines: string[] }[] = [];
 const timeline = newTimeline();
@@ -170,7 +174,7 @@ async function capture(name: string, target: any = page): Promise<string> {
 
 function save(): void {
   const file = join(OUT, 'result.json');
-  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', planId, resumed, startRefusal, blocked: lastBlocked, planted, steps, times, answers, gestures, timeline, morning, watch: watchLog }, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', planId, resumed, startRefusal, blocked: lastBlocked, planted, steps, times, answers, questions, gestures, timeline, morning, watch: watchLog }, null, 2)}\n`);
   chmodSync(file, 0o644);
 }
 
@@ -543,7 +547,7 @@ if (approved) {
       const waiting = (await api<NextInboxItem[]>('/inbox')).filter((i) => i.state === 'waiting');
       left = leftForOwner(waiting.map(toEntry));
       const fresh = waiting.filter((i) => Date.now() - (approvedAt.get(i.id) ?? 0) > 5 * 60_000);
-      const action = morningAction(fresh.map(toEntry), { releases: !OWNER_APPROVES, plan: !OWNER_APPROVES });
+      const action = morningAction(fresh.map(toEntry), { releases: !OWNER_APPROVES, plan: !OWNER_APPROVES, questions: !OWNER_APPROVES });
       if (action.kind === 'wait') {
         const left = action.left.join(', ');
         // A line when what waits changes, and every 30 minutes while it does not (issue 285).
@@ -573,6 +577,14 @@ if (approved) {
       } else if (action.kind === 'plan') {
         await page.locator('#detail [data-act="approve_plan"]').click();
         gesture(`approved the plan from the inbox (${action.id})`);
+      } else if (action.kind === 'question') {
+        const item = waiting.find((i) => i.id === action.id);
+        if (item?.kind === 'question') {
+          const chosen = await answerInInbox(page, item.questions);
+          const at = now();
+          for (const choice of chosen) questions.push({ at, ticket: item.ticket, session: item.sessionId, ...choice });
+          gesture(`answered the question of ${item.ticket} (${chosen.map((c) => `${c.how}: ${c.answer}`).join('; ')})`);
+        }
       } else {
         // The card as it is shown: its intent groups and its flags (decision 23).
         const item = waiting.find((i) => i.id === action.id);

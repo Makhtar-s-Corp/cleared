@@ -5,7 +5,8 @@
 // for the next. The morning of the milestone 2 proof (scripts/proof-j2.ts):
 // the permissions the night left, then the session plans' Go, then the
 // plan, then the releases.
-import { RECOMMENDED } from '../app/web/components/choices/model.ts';
+import { RECOMMENDED, answersOnClick } from '../app/web/components/choices/model.ts';
+import { LEAD_TICKET } from '../src/lead/contract.ts';
 import type { Question } from '../src/session/events.ts';
 import { parseList, type SimpleCommand } from '../src/session/policy.ts';
 
@@ -262,6 +263,7 @@ export type MorningAction =
   | { readonly kind: 'session_plan'; readonly id: string; readonly session: string }
   | { readonly kind: 'plan'; readonly id: string }
   | { readonly kind: 'release'; readonly id: string }
+  | { readonly kind: 'question'; readonly id: string }
   // Nothing to do now; `left` says what still waits and why.
   | { readonly kind: 'wait'; readonly left: readonly string[] };
 
@@ -271,13 +273,18 @@ export type MorningAction =
 // morning, and the plan would otherwise never end); the plan next; then a
 // release once its checks passed (the lock queues one whose checks still
 // run). `releases` and `plan` false leave those, and the Go, to the owner
-// (PROOF_OWNER_APPROVES=1). A question is the owner's; so is a knowledge
+// (PROOF_OWNER_APPROVES=1). A team's question comes after a permission
+// when `questions` says the proof answers it (chooseAnswers, below), and is
+// the owner's otherwise; the lead's is always the owner's; so is a knowledge
 // item, which the run counts (leftForOwner); a contract item is validated
 // by the multi-service proof at its step 3 only, never here.
-export function morningAction(entries: readonly InboxEntry[], options: { readonly releases: boolean; readonly plan: boolean }): MorningAction {
+export function morningAction(entries: readonly InboxEntry[], options: { readonly releases: boolean; readonly plan: boolean; readonly questions?: boolean }): MorningAction {
   const permission = entries.find((entry) => entry.kind === 'permission');
   // A permission that is not a command (an edit outside, a fetch) is denied.
   if (permission) return { kind: 'permission', id: permission.id, decision: permission.command === undefined ? 'reject_once' : answerFor(permission.command) };
+  // A team's question pauses its session as a permission does (issue #269).
+  const question = entries.find((entry) => entry.kind === 'question' && entry.ticket !== LEAD_TICKET);
+  if (question && options.questions) return { kind: 'question', id: question.id };
   const held = entries.find((entry) => entry.kind === 'session_plan' && entry.session !== undefined);
   if (held && options.plan) return { kind: 'session_plan', id: held.id, session: held.session as string };
   const plan = entries.find((entry) => entry.kind === 'plan');
@@ -366,4 +373,44 @@ export function chooseAnswers(questions: readonly Question[]): QuestionChoice[] 
     if (first !== undefined) return { question: q.question, options, answer: first, how: 'first' };
     return { question: q.question, options, answer: FREE_ANSWER, how: 'free' };
   });
+}
+
+// The gestures that give those answers in the inbox (issue #269): a free
+// answer typed in its field, an option clicked; the bar's Send last, unless
+// one click on the only choice of one question answers it.
+export type InboxGesture = { readonly kind: 'free'; readonly index: number; readonly text: string } | { readonly kind: 'option'; readonly index: number; readonly label: string };
+
+export function inboxGestures(questions: readonly Question[], chosen: readonly QuestionChoice[]): { readonly gestures: readonly InboxGesture[]; readonly send: boolean } {
+  const gestures = chosen.map((choice, index): InboxGesture => (choice.how === 'free' ? { kind: 'free', index, text: choice.answer } : { kind: 'option', index, label: choice.answer }));
+  return { gestures, send: !(answersOnClick(questions) && gestures.length === 1 && gestures[0]?.kind === 'option') };
+}
+
+// The part of Playwright's page the inbox's answer uses.
+type Locator = {
+  fill(text: string): Promise<void>;
+  click(): Promise<void>;
+  nth(index: number): Locator;
+  evaluateAll<T>(run: (nodes: { getAttribute(name: string): string | null }[]) => T): Promise<T>;
+};
+export type InboxPage = { locator(selector: string): Locator };
+
+// The question shown in the inbox's detail, answered by those gestures.
+// Each option is found by its data-answer read back, never by its label
+// written into a selector.
+export async function answerInInbox(page: InboxPage, questions: readonly Question[]): Promise<QuestionChoice[]> {
+  const chosen = chooseAnswers(questions);
+  const { gestures, send } = inboxGestures(questions, chosen);
+  for (const gesture of gestures) {
+    if (gesture.kind === 'free') {
+      await page.locator(`#detail [data-free="${gesture.index}"]`).fill(gesture.text);
+      continue;
+    }
+    const options = page.locator(`#detail [data-q="${gesture.index}"][data-answer]`);
+    const labels = await options.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-answer')));
+    const at = labels.indexOf(gesture.label);
+    if (at < 0) throw new Error(`the question "${chosen[gesture.index]?.question ?? ''}" shows no option "${gesture.label}"`);
+    await options.nth(at).click();
+  }
+  if (send) await page.locator('#detail [data-act="answer"]').click();
+  return chosen;
 }

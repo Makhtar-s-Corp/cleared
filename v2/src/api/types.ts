@@ -124,6 +124,10 @@ export type QuestionTimeout = {
   readonly leadUntil: string;
   readonly answers: Readonly<Record<string, string>> | null;
   readonly leadAt?: string;
+  // The project's [session] question_default when it is not `recommended`
+  // (issue #269): `first`, the answers may be first options the session did
+  // not recommend; `park`, there are none.
+  readonly rule?: 'first' | 'park';
 };
 
 type Capture = { readonly desktop: string | null; readonly phone: string | null };   // image URLs, or none yet
