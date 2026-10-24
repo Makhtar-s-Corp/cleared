@@ -200,7 +200,7 @@ test('a reviewer\'s chained reads and checks are allowed by the policy, with no 
   const t = await setup();
   try {
     const author = input(t.workdir);
-    const handle = await t.adapter.start({ ...author, role: 'reviewer', policy: { ...author.policy, role: 'reviewer' } });
+    const handle = await t.adapter.start({ ...author, role: 'reviewer', policy: { ...author.policy, role: 'reviewer', testCommand: ['npm', 'test'] } });
     const runner = t.runners[0] as FakeRunner;
     const command = 'git log --oneline -5; git merge-base main HEAD; git show --stat HEAD && npm test 2>&1 | tail -20';
     runner.say({ type: 'permission_request', requestId: 'r-review', toolName: 'Bash', toolUseId: 'toolu_1', input: { command } });

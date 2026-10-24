@@ -8,6 +8,7 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
+import { parseCommand } from '../session/policy.ts';
 import { WorkspaceError, loadWorkspace, parseConf, serviceNameOf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
 
 // The format of agents.conf is read by workspace/config.ts, which reads the
@@ -78,6 +79,10 @@ export type ProjectSettings = {
   // given to its sibling in a step's trial environment (lane 23).
   readonly serviceUrls?: Readonly<Record<string, string>>;
   readonly guardedPaths?: readonly string[]; // [merge] guarded_paths, when set: the release card's `config` flag reads them (lane 23)
+  // [session] test_command, its words: the one command a reviewer runs
+  // (issue #268). Not declared, `npm test` when package.json has a test
+  // script, else none: the reviewer then runs no code.
+  readonly testCommand?: readonly string[];
   // A team's question of this project (issue #269): [session]
   // question_timeout_minutes, when set, its delay (the service's
   // CLEARED_V2_QUESTION_TIMEOUT_MINUTES otherwise), and [session]
@@ -112,6 +117,7 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
   const planGoMinutes = positive(sections.session?.plan_go_minutes, '[session] plan_go_minutes', false);
   const serviceUrls = urlVariables(sections.session?.service_urls);
   const guardedPaths = list(sections.merge?.guarded_paths);
+  const testCommand = testCommandOf(sections.session?.test_command, scripts);
   const questionTimeoutMinutes = positive(sections.session?.question_timeout_minutes, '[session] question_timeout_minutes', false);
   const questionDefault = questionDefaultOf(sections.session?.question_default);
   return {
@@ -119,6 +125,7 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
     ...(planGoMinutes === undefined ? {} : { planGoMinutes }),
     ...(serviceUrls === undefined ? {} : { serviceUrls }),
     ...(guardedPaths.length === 0 ? {} : { guardedPaths }),
+    ...(testCommand === undefined ? {} : { testCommand }),
     ...(questionTimeoutMinutes === undefined ? {} : { questionTimeoutMinutes }),
     ...(questionDefault === undefined ? {} : { questionDefault }),
   };
@@ -129,6 +136,16 @@ function questionDefaultOf(value: string | undefined): QuestionDefault | undefin
   if (word === undefined || word === '') return undefined;
   if (!(QUESTION_DEFAULTS as readonly string[]).includes(word)) throw new FlowConfigError(`[session] question_default must be one of ${QUESTION_DEFAULTS.join(', ')}, not "${word}"`);
   return word as QuestionDefault;
+}
+
+// One simple command, read as the policy reads a session's: no list, pipe,
+// redirection or expansion, so that what the reviewer may run is exactly it.
+function testCommandOf(value: string | undefined, scripts: readonly string[]): readonly string[] | undefined {
+  const text = value?.trim();
+  if (!text) return scripts.includes('test') ? ['npm', 'test'] : undefined;
+  const words = parseCommand(text);
+  if (!words) throw new FlowConfigError(`[session] test_command must be one simple command (no list, pipe, redirection or expansion), not "${text}"`);
+  return words;
 }
 
 // `<service>:<VARIABLE>` pairs, the variable an upper-case name ending in

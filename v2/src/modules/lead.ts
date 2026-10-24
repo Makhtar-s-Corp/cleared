@@ -9,7 +9,9 @@
 // 29, lane 26) are built with the plans and run through them: their tables
 // and routes are this module's, the scheduler ticks every minute, and the
 // runner starts a schedule's tickets with the schedule's budget on their
-// Origin (schedules/budget.ts).
+// Origin (schedules/budget.ts). The quota reading (issue #270) is its too,
+// beside the Consumption screen it feeds: each harness's windows read every
+// CLEARED_V2_QUOTA_MINUTES (60; 0 turns it off) into quota_readings.
 import { homedir } from 'node:os';
 import { workspaceOf } from '../flow/config.ts';
 import { runtime as flowRuntime } from '../flow/runtime.ts';
@@ -26,6 +28,8 @@ import { Recipes } from '../recipes/service.ts';
 import { gitRecipeSource } from '../recipes/source.ts';
 import { budgetedFlow } from '../schedules/budget.ts';
 import { LEVERS_TABLE, LeverStore } from '../consumption/levers.ts';
+import { QUOTA_TABLES, QuotaReader, READ_MINUTES, claudeCodeQuotaSource } from '../consumption/quota.ts';
+import { claudeCodeRuntime } from '../session/adapters/claude-code.ts';
 import { consumptionRoutes } from '../consumption/routes.ts';
 import { scheduleRoutes } from '../schedules/routes.ts';
 import { Scheduler } from '../schedules/scheduler.ts';
@@ -41,6 +45,7 @@ let planConfig: PlanConfig | undefined;
 let plans: PlanRunner | undefined;
 let recipes: Recipes | undefined;
 let schedules: Scheduler | undefined;
+let quota: QuotaReader | undefined;
 
 export const leadRuntime = createLeadRuntime({ flow: flowRuntime, extensions: planExtensions(() => plans) });
 
@@ -77,6 +82,32 @@ export function plansOf(registry: Registry): PlanRunner | undefined {
   return plans;
 }
 
+// The hourly quota reading of the flow's project, once the flow runs.
+export function quotaOf(registry: Registry): QuotaReader | undefined {
+  if (quota) return quota;
+  const flow = flowRuntime.engine(registry);
+  if (!flow || !store) return undefined;
+  const env = process.env;
+  const minutes = quotaMinutes(env.CLEARED_V2_QUOTA_MINUTES);
+  if (minutes === 0) return undefined;
+  quota = new QuotaReader({
+    db: store.db, project: flow.config.project,
+    sources: [claudeCodeQuotaSource({ loginFile: claudeCodeRuntime(env).loginFile })],
+    clean: (text) => cleanText(text, { secrets: secretValues(env), servicePaths: [] }),
+  });
+  quota.startTimer(minutes * 60_000);
+  return quota;
+}
+
+// CLEARED_V2_QUOTA_MINUTES: a whole number of minutes, 0 for none; anything else is the default, said.
+export function quotaMinutes(value: string | undefined): number {
+  if (value === undefined || value.trim() === '') return READ_MINUTES;
+  const minutes = Number(value);
+  if (Number.isInteger(minutes) && minutes >= 0) return minutes;
+  console.error(`cleared-v2: CLEARED_V2_QUOTA_MINUTES is a whole number of minutes, not "${value}": the quota is read every ${READ_MINUTES} minutes`);
+  return READ_MINUTES;
+}
+
 // The recipes and the scheduler, built with the plans.
 export function recipesOf(registry: Registry): Recipes | undefined {
   plansOf(registry);
@@ -89,7 +120,7 @@ export function schedulesOf(registry: Registry): Scheduler | undefined {
 }
 
 const lead: Module = {
-  tables: [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE],
+  tables: [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE, ...QUOTA_TABLES],
   routes: [
     // A lead route builds the plans too, so a service the tower polls runs its plans.
     ...createLeadRoutes({
@@ -130,6 +161,7 @@ const lead: Module = {
   start: (registry) => {
     plansOf(registry);
     leadRuntime.lead(registry);
+    quotaOf(registry);
   },
 };
 

@@ -146,8 +146,11 @@ function servicesParagraph(services: readonly ReviewService[], contracts: readon
 export function reviewPrompt(input: {
   readonly ticket: TicketText; readonly base: string; readonly verdict: string; readonly humanEdits?: readonly HumanEdit[];
   readonly services?: readonly ReviewService[]; readonly contracts?: readonly ReviewContract[];
+  readonly testCommand?: readonly string[];
 }): string {
   const { ticket, base, verdict } = input;
+  // The one command that runs code a reviewer may run (issue #268).
+  const tests = input.testCommand?.join(' ');
   const edits = input.humanEdits ?? [];
   const services = input.services ?? [];
   return [
@@ -155,7 +158,10 @@ export function reviewPrompt(input: {
     '',
     `The change answers ticket ${ticket.id}: ${ticket.title}`,
     ticket.body.trim() ? `\n${ticket.body.trim()}\n` : '',
-    `Read \`CLAUDE.md\`. Read the entire change with \`git diff ${base}...HEAD\` and \`git log ${base}..HEAD\`. Open touched files and their callers. Do not edit anything and do not send anything. You may run the project's tests.`,
+    `Read \`CLAUDE.md\`. Read the entire change with \`git diff ${base}...HEAD\` and \`git log ${base}..HEAD\`. Open touched files and their callers. Do not edit anything and do not send anything.`,
+    tests
+      ? `Run the service's tests with exactly \`${tests}\`, alone, not in a pipe or a list, so that its exit status is the tests'. It is the only command that runs code you may run: any other is refused. Its result is added to your verdict and to the ticket.`
+      : 'The service declares no test command: you run no command that runs code, and you judge from the code.',
     '',
     ...(services.length > 1 ? servicesParagraph(services, input.contracts ?? []) : []),
     ...(edits.length > 0 ? [
@@ -175,6 +181,7 @@ export function reviewPrompt(input: {
     '',
     `Verdict: “fix before merge” or “${verdict}”.`,
     'Defects: one per line, most serious first, as `file:line`, actual behavior, triggering input, expected behavior.',
+    ...(tests ? [`Tests: what \`${tests}\` showed, and whether a failure is the change's.`] : []),
     'To verify: what you could not establish.',
     'Questions for the user: one closed question per line with a recommendation, or “None.”',
     '',

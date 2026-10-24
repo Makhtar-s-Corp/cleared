@@ -145,6 +145,22 @@ export function projectionLines(quota: Quota, h: Pick<HarnessConsumption, 'harne
   }
 }
 
+// Where the figure comes from and when it was read, and the harness's last
+// quota reading when it failed (issue #270): a failure is said, with its
+// reason as the service gives it, and never hides the figure read before it.
+export type ReadingLine = { readonly kind: 'seen' | 'failed'; readonly text: string };
+
+export function readingLines(h: Pick<HarnessConsumption, 'lastReading'>, quota: Quota | undefined, zone: string, language: Language, t: Translate): ReadingLine[] {
+  const out: ReadingLine[] = [];
+  if (quota) {
+    const source = t(quota.source === 'session' ? 'consumption_source_session' : 'consumption_source_reading');
+    out.push({ kind: 'seen', text: t('consumption_quota_seen', { when: moment(quota.observedAt, zone, language), source }) });
+  }
+  const last = h.lastReading;
+  if (last && !last.ok) out.push({ kind: 'failed', text: t('consumption_reading_failed', { when: moment(last.at, zone, language), reason: last.error ?? '' }) });
+  return out;
+}
+
 export const resetIn = (quota: Pick<Quota, 'resetsAt'>, now: Date, t: Translate): string => t('consumption_reset_in', { time: duration(minutesUntil(quota.resetsAt, now), t) });
 
 // The sentence above the quotas: the first harness to reach 100 % before its

@@ -212,7 +212,7 @@ test('secret.read looks at the paths a request names, never at the text it write
 });
 
 test('the reviewer role cannot edit, commit or push', () => {
-  const reviewer = { role: 'reviewer' as const };
+  const reviewer = { role: 'reviewer' as const, testCommand: ['npm', 'test'] };
   check([
     { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/a.ts', content: 'x' } }, policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'MultiEdit', request: { tool: 'MultiEdit', input: { file_path: '/workspace/a.ts', edits: [] } }, policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
@@ -220,7 +220,7 @@ test('the reviewer role cannot edit, commit or push', () => {
     { name: 'git commit', request: bash('git commit -m done'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'git push to the ticket branch', request: bash('git push origin ticket-1'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'reading stays allowed', request: { tool: 'Read', input: { file_path: '/workspace/a.ts' } }, policy: reviewer, decision: 'allow', rule: 'read.workdir' },
-    { name: 'tests stay allowed', request: bash('npm test'), policy: reviewer, decision: 'allow', rule: 'run.safe' },
+    { name: 'the declared tests stay allowed', request: bash('npm test'), policy: reviewer, decision: 'allow', rule: 'reviewer.tests' },
   ]);
 });
 
@@ -430,7 +430,7 @@ test('compound commands: the separators, the redirection forms, and the rule of 
 });
 
 test('a compound command never lets a reviewer write a file', () => {
-  const reviewer = { role: 'reviewer' as const };
+  const reviewer = { role: 'reviewer' as const, testCommand: ['npm', 'test'] };
   check([
     { name: 'a redirection into the workdir', request: bash('npm test > out.txt'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'a pipe of reads', request: bash('npm test 2>&1 | tail -5'), policy: reviewer, decision: 'allow', rule: 'shell.compound_safe' },
