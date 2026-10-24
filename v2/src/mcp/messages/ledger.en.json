@@ -21,7 +21,7 @@
   "error_date": "{value} is a day (2026-10-20) or a moment (2026-10-20T09:00:00Z).",
   "error_dates_order": "to comes before from.",
   "error_cursor": "This cursor is not the next value of a page of this tool. Search again without it.",
-  "error_secret_term": "The search term is shaped like a secret. Secrets are removed from the history, so it cannot be found.",
+  "error_term_shape": "The search term is shaped like a secret. Secrets are removed from the history, so it cannot be found.",
   "error_after_seq": "after_seq is a whole number from 0 up.",
   "error_no_session": "No session has this id.",
   "error_unknown_argument": "{name} is not an argument of this tool.",

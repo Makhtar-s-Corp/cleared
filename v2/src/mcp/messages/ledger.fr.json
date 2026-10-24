@@ -21,7 +21,7 @@
   "error_date": "{value} est un jour (2026-10-20) ou un moment (2026-10-20T09:00:00Z).",
   "error_dates_order": "to vient avant from.",
   "error_cursor": "Ce curseur n'est pas la valeur next d'une page de cet outil. Cherchez de nouveau sans lui.",
-  "error_secret_term": "Le terme cherché a la forme d'un secret. Les secrets sont retirés de l'historique, il ne peut donc pas être trouvé.",
+  "error_term_shape": "Le terme cherché a la forme d'un secret. Les secrets sont retirés de l'historique, il ne peut donc pas être trouvé.",
   "error_after_seq": "after_seq est un nombre entier à partir de 0.",
   "error_no_session": "Aucune session n'a cet id.",
   "error_unknown_argument": "{name} n'est pas un argument de cet outil.",

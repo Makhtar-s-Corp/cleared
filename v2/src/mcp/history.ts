@@ -158,7 +158,7 @@ export class LedgerHistory {
   #term(text: string | undefined): string | undefined {
     const term = text?.trim();
     if (!term) return undefined;
-    if (this.#redactor.changes(term)) throw new HistoryError('error_secret_term');
+    if (this.#redactor.changes(term)) throw new HistoryError('error_term_shape');
     return term;
   }
 
