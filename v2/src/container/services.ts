@@ -13,6 +13,7 @@
 // and gives each image what the session needs to reach it.
 import { closeSync, constants, lstatSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ContractFormat } from '../api/types.ts';
 
 export type ServiceSpec = {
   readonly alias: string;
@@ -109,7 +110,8 @@ export type SiblingSpec = {
     readonly tag: string;                        // the base layer's tag
     readonly checkout?: string;                  // the ticket checkout of the service: the ticket layer
   };
-  readonly contract?: string;                    // host path of the OpenAPI file the fake answers from
+  readonly contract?: string;                    // host path of the contract file the fake answers from
+  readonly contractFormat?: ContractFormat;      // its format; none is OpenAPI 3
   readonly env?: Readonly<Record<string, string>>;
 };
 
@@ -172,7 +174,7 @@ export type SiblingSource = {
   readonly kind: 'repository' | 'folder';
   readonly path: string | null;                  // a folder of a monorepo: run and contract are relative to it
   readonly run: { readonly dockerfile: string; readonly port: number } | null;
-  readonly contract: { readonly format: 'openapi'; readonly path: string } | null;
+  readonly contract: { readonly format: ContractFormat; readonly path: string } | null;
 };
 
 export type SiblingPlan = {
@@ -181,7 +183,7 @@ export type SiblingPlan = {
   readonly ownCheckout: string;                  // its ticket checkout: the session's workdir
   readonly checkoutOf: (name: string) => string | undefined;   // another service's ticket checkout, when the ticket has one
   readonly baseOf: (name: string) => Promise<{ readonly dir: string; readonly commit: string } | undefined>;
-  readonly contractPort: (file: string) => number | undefined;
+  readonly contractPort: (file: string, format: ContractFormat) => number | undefined;
 };
 
 export const DEFAULT_FAKE_PORT = 8080;
@@ -200,10 +202,11 @@ export async function planSiblings(plan: SiblingPlan): Promise<SiblingSpec[]> {
     const root = service.path ? join(base.dir, service.path) : base.dir;
     const contract = service.contract ? join(root, service.contract.path) : undefined;
     const checkout = own ? plan.ownCheckout : plan.checkoutOf(service.name);
-    const port = service.run?.port ?? (contract === undefined ? undefined : plan.contractPort(contract)) ?? DEFAULT_FAKE_PORT;
+    const port = service.run?.port ?? (contract === undefined || !service.contract ? undefined : plan.contractPort(contract, service.contract.format)) ?? DEFAULT_FAKE_PORT;
     siblings.push({
       name: service.name, port,
       ...(contract === undefined ? {} : { contract }),
+      ...(service.contract && service.contract.format !== 'openapi' ? { contractFormat: service.contract.format } : {}),
       ...(service.run ? {
         real: {
           base: root, dockerfile: service.run.dockerfile, tag: `cleared-v2-base-${service.name}:${base.commit.slice(0, 12)}`,

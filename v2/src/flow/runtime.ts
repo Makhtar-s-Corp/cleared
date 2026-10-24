@@ -109,8 +109,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return lstatSync(dir, { throwIfNoEntry: false })?.isDirectory() ? dir : undefined;
       },
       baseOf: (name) => exported(flow, name, join(stateDir(), 'siblings', name)),
-      contractPort: (file) => {
-        try { return contractPort(readContract(readFileSync(file, 'utf8'), file)); } catch { return undefined; }
+      contractPort: (file, format) => {
+        try { return contractPort(readContract(readFileSync(file, 'utf8'), file, format)); } catch { return undefined; }
       },
     });
   }

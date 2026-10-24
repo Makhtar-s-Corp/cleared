@@ -32,14 +32,14 @@ test('a runner file imports Node built-ins, the runner\'s own files, and the res
   assert.match(dockerfile, /@anthropic-ai\/claude-agent-sdk@0\.3\.306 zod@4\.6\.7/);
 });
 
-// The fake image (milestone 2, decision 20) copies fake.ts and yaml.ts one
-// by one, and runs with no dependency: each file imports Node built-ins and
-// the other one only.
+// The fake image (milestone 2, decision 20) copies its files one
+// by one (fake.ts, yaml.ts and, since M11, schema.ts, proto.ts and events.ts), and runs with no dependency: each file imports Node built-ins and
+// the others only.
 test('the fake image copies every file it loads, and the fake imports nothing outside them', () => {
   const fakeFolder = new URL('../../images/fake/', import.meta.url);
   const fakeDockerfile = readFileSync(new URL('Dockerfile', fakeFolder), 'utf8');
   const fakeFiles = readdirSync(fakeFolder).filter((name) => name.endsWith('.ts'));
-  assert.deepEqual(fakeFiles.sort(), ['fake.ts', 'yaml.ts']);
+  assert.deepEqual(fakeFiles.sort(), ['events.ts', 'fake.ts', 'proto.ts', 'schema.ts', 'yaml.ts']);
   for (const name of fakeFiles) {
     assert.match(fakeDockerfile, new RegExp(`^COPY ${name.replace('.', '\\.')} \\./${name.replace('.', '\\.')}$`, 'm'), name);
     const text = readFileSync(new URL(name, fakeFolder), 'utf8');
