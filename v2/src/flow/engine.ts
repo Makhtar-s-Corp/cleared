@@ -1662,7 +1662,8 @@ export class FlowEngine {
     this.#origins.delete(ticket);
     this.#channels.delete(ticket);
     this.#steps.hold(ticket);
-    await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
+    await tickets.comment(ticket, this.#clean(note), SERVICE)
+      .catch((error: unknown) => console.error(`cleared-v2: the ${reason} note could not be written on ${ticket} (${error instanceof Error ? error.name : typeof error})`));
     try {
       await tickets.move(ticket, tickets.states.todo, SERVICE);
     } catch (error) {
@@ -2194,7 +2195,8 @@ export class FlowEngine {
   // QUESTION_DEFAULT and said on the ticket, in the ledger and on the bus.
   async #applyDeclared(live: Live, item: QuestionItem, answers: Readonly<Record<string, string>>, minutes: number): Promise<void> {
     const waited = `${asked(item.questions)} waited ${duration(minutes)} with no answer from the owner or the lead`;
-    await this.registry.ticketStore.comment(item.ticket, this.#clean(`${waited}: the answer the session declared applies.\n${answerLines(answers)}`), SERVICE).catch(() => undefined);
+    await this.registry.ticketStore.comment(item.ticket, this.#clean(`${waited}: the answer the session declared applies.\n${answerLines(answers)}`), SERVICE)
+      .catch((error: unknown) => console.error(`cleared-v2: the declared answer of ${item.id} could not be said on ${item.ticket} (${error instanceof Error ? error.name : typeof error})`));
     this.#questionTimedOut(item, 'default', minutes, answers);
     const answer: Answer = { decision: { kind: 'answer', answers }, by: 'policy', rule: QUESTION_DEFAULT };
     const dormant = this.#dormant.get(live.id);

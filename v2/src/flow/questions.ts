@@ -1,7 +1,7 @@
 // A team's question that waits too long (issue #290, lane j3-autonomy): the
 // answer its session declared, and the words that tell a session, a ticket
 // and the ledger what became of it. The flow decides when (engine.ts,
-// #questionTick); this file only reads and says.
+// #dueQuestions); this file only reads and says.
 import type { Question } from '../session/events.ts';
 
 // The label the harness's AskUserQuestion gives the option it recommends,

@@ -15,7 +15,7 @@ import { flowPort } from '../../src/lead/engine.ts';
 import { leadHandlers, type LeadToolHost } from '../../src/lead/tools.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
-import type { Role } from '../../src/session/contract.ts';
+import type { HostCallContext, Role } from '../../src/session/contract.ts';
 import type { CustomValue } from '../../src/session/events.ts';
 import { IdleWatchdog, type IdleOutcome } from '../../src/session/watchdog.ts';
 import { FakeDocker } from '../container/fake-docker.ts';
@@ -178,7 +178,8 @@ test('the lead decides a stopped session\'s question with its own tool: at 30 mi
   assert.deepEqual(t.flowEvents.filter((e) => e.type === 'question_timed_out').map((e) => e.type === 'question_timed_out' && e.stage), ['lead']);
   // The lead's tool as its session calls it, over the engine's port (lead/tools.ts).
   const host = { flow: flowPort(t.engine), inbox: t.inbox, clean: (text: string) => text } as unknown as LeadToolHost;
-  const answered = await leadHandlers(host).answer_question({ session: t.id, requestId: 'q1', answers: [{ question: 'Which order?', answer: 'Oldest first' }] });
+  const context: HostCallContext = { sessionId: 'lead-session-1', turn: 't' };
+  const answered = await leadHandlers(host).answer_question!({ session: t.id, requestId: 'q1', answers: [{ question: 'Which order?', answer: 'Oldest first' }] }, context);
   assert.deepEqual(answered, { answered: `question:${t.id}:q1` });
   await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release');
   const messages = t.store.events.after(t.id).flatMap((e) => (e.event.type === 'TEXT_MESSAGE_CONTENT' ? [e.event.delta] : []));
