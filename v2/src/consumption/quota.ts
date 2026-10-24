@@ -1,4 +1,4 @@
-// The quota reading (issue #270, docs/v2/requirements-matrix.md, P70): each
+// The quota reading (issue #270, docs/v2/requirements-matrix.md, P71): each
 // hour, each harness's usage windows are read from a source that answers in
 // data, not from a terminal's screen, and every attempt is kept in the
 // ledger, a failed one with its reason.

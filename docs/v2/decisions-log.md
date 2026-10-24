@@ -4355,13 +4355,13 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **Decision.**
 
-1. **One declared test command per service** (`flow/config.ts`, P69).
+1. **One declared test command per service** (`flow/config.ts`, P70).
    - The key is `[session] test_command` in the service's `.cleared/agents.conf`, read at the base branch like the other keys. Its value is one simple command, read with the policy's own parser: a list, a pipe, a redirection or an expansion stops the configuration.
    - When the key is absent: `npm test` if `package.json` at the base has a `test` script, else no command. Until now the reviewer could already run `npm test`, so a service that declares nothing keeps that.
    - The guestbook and the filter API examples declare `test_command = npm test`.
    - Not chosen: v1's `[fast_lane] tests_command`. It belongs to another section and it takes the changed files as `{files}`.
 
-2. **The reviewer's policy allows that command and nothing else that runs code or writes** (`session/policy.ts`, P69).
+2. **The reviewer's policy allows that command and nothing else that runs code or writes** (`session/policy.ts`, P70).
    - Allowed: the declared command, word for word, under the rule `reviewer.tests`. It is also allowed in a pipe or a list of reads, such as `npm test 2>&1 | tail -20`.
    - The reads stay as they were: milestone 1's reads (`run.safe`) and the reviewer's own reads (`reviewer.read`).
    - Refused, wherever they stand in a command:
@@ -4377,7 +4377,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - Not chosen: asking the inbox for the other checks. The issue says the policy allows the declared command "and nothing else", and a request that asks is a person's decision, not the policy's.
    - The consequence for the proofs: a reviewer's `npm run typecheck` is now refused by the policy. Before, it went to the inbox and the proof's driver allowed it once (P52's driver part). The driver's rule stays for the author.
 
-3. **The run goes into the verdict and the ticket's thread, read from the ledger** (`flow/review-tests.ts`, `flow/engine.ts`, P69).
+3. **The run goes into the verdict and the ticket's thread, read from the ledger** (`flow/review-tests.ts`, `flow/engine.ts`, P70).
    - The run is read from the reviewer's turn in the ledger, never from its report: the last call of the declared command, paired with its result.
      - `passed` or `failed`: it ran alone, and its result says whether it was an error.
      - `unclear`: it ran in a pipe or a list, where the exit status is the last program's.
@@ -4390,7 +4390,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - The review prompt names the command and asks for it to run alone, not in a pipe, and for a `Tests:` line in the report.
    - Not chosen: refusing a pass whose tests failed. The verdict stays the reviewer's. The failure is in its row, in the thread and in the announcement, where the owner sees it before approving. It may also be an old failure the change does not touch.
 
-4. **The quota's source answers in data** (`consumption/quota.ts`, P70).
+4. **The quota's source answers in data** (`consumption/quota.ts`, P71).
    - For Claude Code, the source is `GET https://api.anthropic.com/api/oauth/usage`, called with the service's login: a setup-token token, or the access token of a credentials file, read as the session runner reads it.
    - It is the endpoint the CLI's `/usage` reads. In the installed CLI 2.1.310, `fetchUtilization` calls it, and its schema gives each window a `utilization` and a `resets_at` ISO text, both nullable.
    - The utilization is in percent, not a fraction: `/usage` prints it as `${Math.floor(l.utilization)}% used`, with no multiplication. The CLI's rate limit headers give a fraction, which the session mapper already converts.
@@ -4408,7 +4408,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
      - a probe turn of the harness, which spends tokens every hour;
      - reading the status line's `rate_limits`, which exists only inside a running session, where `cleared.rate_limit` already reads the same windows.
 
-5. **Every hour, every attempt is kept, a failure without blocking** (`QuotaReader`, `modules/lead.ts`, P70).
+5. **Every hour, every attempt is kept, a failure without blocking** (`QuotaReader`, `modules/lead.ts`, P71).
    - **The timer.** The lead module's start runs a first reading, then one every `CLEARED_V2_QUOTA_MINUTES` minutes (60 by default). The timer never keeps the process alive, and 0 turns the reading off.
    - **The ledger.** `quota_readings` gets one row per window read, with its time, its source and its reset time. A failed reading is one row with `ok` set to 0 and its reason. Nothing is deleted.
    - **A failure** is a health notification `quota_read_failed`, once for a run of failures: the first one after a reading that worked. Nothing waits for the reading. The plans and the schedules go on with the newest figure they have.
@@ -4416,14 +4416,14 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - The three codes have their sentence in lib's catalog, in French and in English (`lib/notify/contract.mjs`, `lib/i18n`). A health notification passes the quiet hours, so a 75 percent alert reaches the owner at night too.
    - A notification that cannot be queued is written to the service's log and never stops a reading.
 
-6. **One newest figure, read by the stop, the schedules and the screen** (`latestQuota`, P70).
+6. **One newest figure, read by the stop, the schedules and the screen** (`latestQuota`, P71).
    - The newest figure is the newest of the readings that worked and the sessions' own `cleared.rate_limit` reports. It is none once its reset time has passed.
    - It replaces three copies of the same query: the plan runner's stop, the scheduler's `weekShare` and the Consumption screen's `quotaOf`.
    - So no lane starts at or above `CLEARED_V2_WEEK_STOP_PERCENT` (85 by default), even when no session has reported since the window filled.
    - The stop now reads the five-hour window too, with its own sentence in the lead's thread. The issue says no lane starts above 85 percent, and a five-hour window at 90 percent stops a session as surely as the week does.
    - The scheduler still reads the seven-day window only, against a schedule's own cap. The plan runner stops whatever the scheduler lets through.
 
-7. **The Consumption screen says where each figure comes from** (`app/web/screens/consumption`, P70).
+7. **The Consumption screen says where each figure comes from** (`app/web/screens/consumption`, P71).
    - Under each quota, a line says when the figure was read and where: from the agent's usage page, or from a session's report.
    - When the harness's last reading failed, a line in the danger colour says when, with the reason as the service gives it, which is English. The figure read before it stays.
    - The line is shown in French and in English, and dates go through Intl.
