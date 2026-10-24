@@ -212,6 +212,17 @@ test('a session on the consuming service is briefed with the contract it calls, 
   assert.equal(existsSync(join(filter.dir, 'contract', 'openapi.md')), true);
 });
 
+test('every service of several is told the decisions headings and where each is filed (C2)', async () => {
+  const { flow, guestbook, filter } = twoServices();
+  const own = readFileSync(join((await flow.prepareWorkdir({ ticket: ticketOn('filter-api'), role: 'author', service: filter })).workdir, 'CLAUDE.md'), 'utf8');
+  assert.match(own, /`## Decisions for the workspace` \(filed in the workspace's memory\)/);
+  assert.match(own, /`## Decisions for the service` \(filed in the memory of the service filter-api\)/);
+  assert.match(own, /`## Decisions for the contract` \(filed in the memory of the contract of filter-api\)/);
+  const shared = readFileSync(join((await flow.prepareWorkdir({ ticket: ticketOn('guestbook'), role: 'author', service: guestbook })).workdir, 'CLAUDE.md'), 'utf8');
+  assert.match(shared, /`## Decisions for the service` \(filed in the workspace's memory, which is this service's\)/);
+  assert.ok(!shared.includes('`## Decisions for the contract`'), 'a service with no contract is not offered the heading');
+});
+
 test('the handover of a session on a service files its lessons in that service\'s memory and in its contract\'s', async () => {
   const { env, flow, filter } = twoServices();
   const { workdir } = await flow.prepareWorkdir({ ticket: ticketOn('filter-api'), role: 'author', service: filter });
