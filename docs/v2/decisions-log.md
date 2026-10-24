@@ -4952,7 +4952,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** `test/flow/close-pr.test.ts` and a case of `test/flow/train.test.ts` were committed alone (`e9c3c8d`) and failed on `origin/v2` (no `flow/pr-close.ts`, no effect). One assertion of the refusal test was wrong and was corrected with the code: it listed the foreign head among the ticket's branches, so the pull request was rightly accepted; the test now lists a head only in the cases of a base branch, which are refused whatever the caller lists. With the code, the 14 tests of `close-pr.test.ts` and the train case pass.
 
-**Checks.** `npm run typecheck`; the tests; `npm run guard -- --base origin/v2`.
+**Checks.** On the branch merged with `origin/v2` (`3d5122d`): `npm run typecheck`; `node --test` over `test/` (1453 tests, 1451 pass, 2 skipped, 0 fail); over `app/test/` after `npm run build` (401 tests, 359 pass, 42 skipped, 0 fail: the browser tests are skipped here, no Chrome or Playwright was set, and this lane changes no screen); Vitest (271 tests pass); `npm run guard -- --base origin/v2`.
 
 **Resources.** No Docker object, no network (a fake `gh` on PATH), no tunnel, no secret. `npm ci` in `v2/` only. The first piloted project untouched.
 
