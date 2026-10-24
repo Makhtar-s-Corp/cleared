@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { signedIn, startApp } from './support.ts';
@@ -86,6 +87,41 @@ test('a server started before the build says so, on every page', async () => {
     assert.match(await page.text(), /npm run build/);
   } finally {
     await running.close();
+  }
+});
+
+// Issue 185, item 2: npm run build under a running app empties dist/
+// (emptyOutDir), so a page that kept naming the old hashed files drew
+// nothing until a restart. The manifest is read again once it changed.
+test('a rebuild under a running server: the next page names the new build\'s files, and a build being written says so', async () => {
+  const dist = mkdtempSync(join(tmpdir(), 'cleared-v2-dist-'));
+  const manifest = join(dist, '.vite', 'manifest.json');
+  const build = (hash: string, at: number) => {
+    mkdirSync(join(dist, '.vite'), { recursive: true });
+    writeFileSync(manifest, JSON.stringify({ 'main.tsx': { file: `assets/main-${hash}.js`, css: [`assets/main-${hash}.css`], isEntry: true, src: 'main.tsx' } }));
+    // The modification time set, so the test does not hang on the clock's resolution.
+    utimesSync(manifest, at, at);
+  };
+  build('first', 1_700_000_000);
+  const running = await startApp({ extra: { distDir: dist } });
+  try {
+    const first = await (await fetch(`${running.base}/login`)).text();
+    assert.match(first, /src="\/assets\/main-first\.js"/);
+    assert.match(first, /href="\/assets\/main-first\.css"/);
+    // vite build: the folder emptied, then the new files and their manifest.
+    rmSync(join(dist, '.vite'), { recursive: true });
+    const during = await fetch(`${running.base}/login`);
+    assert.equal(during.status, 503, 'between the two builds, the page says the build is missing');
+    assert.match(await during.text(), /npm run build/);
+    build('second', 1_700_000_060);
+    const second = await (await fetch(`${running.base}/login`)).text();
+    assert.match(second, /src="\/assets\/main-second\.js"/);
+    assert.doesNotMatch(second, /main-first/, 'no link to a file the rebuild removed');
+    const again = await (await fetch(`${running.base}/login`)).text();
+    assert.match(again, /main-second\.js/, 'an unchanged manifest keeps the bundle read');
+  } finally {
+    await running.close();
+    rmSync(dist, { recursive: true, force: true });
   }
 });
 

@@ -51,7 +51,7 @@
 // as any write. The manifest, the service worker and the icons are served
 // without a session, so the app can be added to a Home Screen.
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join } from 'node:path';
@@ -248,9 +248,18 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   // Each request's language (catalog.ts, languageOf), and the shell's words in it.
   const languageFor = (request: IncomingMessage): Language => languageOf(request.headers, options.language);
   const shellFor = (language: Language) => translator(loadCatalog('shell', language));
-  // Read once, at the first page: a server started before the build says so on every page.
-  let bundle: Bundle | undefined;
-  const built = (): Bundle => (bundle ??= readBundle(distDir));
+  // Read at the first page, and again when the build's manifest changed: a
+  // rebuild under a running server empties dist/ (emptyOutDir), and pages
+  // naming the old hashed files would draw nothing until a restart (issue
+  // 185, item 2). A server started before the build says so on every page.
+  const manifestFile = join(distDir, '.vite', 'manifest.json');
+  let bundle: { readonly changed: number; readonly value: Bundle } | undefined;
+  const built = (): Bundle => {
+    let changed = -1;
+    try { changed = statSync(manifestFile).mtimeMs; } catch { /* readBundle says the build is missing */ }
+    if (bundle?.changed !== changed) bundle = { changed, value: readBundle(distDir) };
+    return bundle.value;
+  };
 
   const send = (response: ServerResponse, status: number, body: string, type = 'text/html; charset=utf-8', headers: Record<string, string> = {}) => {
     response.writeHead(status, { 'content-type': type, 'content-length': String(Buffer.byteLength(body)), 'cache-control': 'no-store', ...headers });
