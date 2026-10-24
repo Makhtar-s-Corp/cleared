@@ -34,6 +34,7 @@ Run from `v2/`:
 | --- | --- | --- |
 | `CLEARED_V2_HOST` | `127.0.0.1` | This machine only. |
 | `CLEARED_V2_PORT` | `8791` | Refused: 80 and 443 (the machine's public proxy, see [Decisions](../docs/concepts.md#decisions)), 8787 and 8788 (the v1 dashboard and app), 8790. A port already in use stops the service with a message. |
+| `CLEARED_V2_EDITOR_SSH_HOST` | none | For Open in an editor: the host your VS Code or Cursor reaches this server by over SSH, as your ssh config names it, with an optional `user@` (letters, digits, dots, dashes, underscores; anything else stops the service at start). Unset, the links open the session's checkout on the machine the browser is on (`vscode://file/<path>`); set, they are the remote ones (`vscode://vscode-remote/ssh-remote+<host>/<path>`). The service runs no editor. |
 
 `GET /health` (and `HEAD`) answers `200` with `{"status":"ok"}`. Any other path is `404`; another method on `/health` is `405`; a request target the URL parser refuses (such as `//[`) is `400`.
 

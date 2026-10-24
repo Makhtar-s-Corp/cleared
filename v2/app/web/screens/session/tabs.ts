@@ -14,7 +14,7 @@
 //
 // The browser may only `import type` from v2/src, so the container's name
 // is copied here and a test keeps it equal to session-runtime.ts's.
-import type { SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
+import type { EditorLinks, SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Role } from '../../../../src/session/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { fixed } from '../../lib/time.ts';
@@ -199,4 +199,23 @@ export function stepCost(row: StepRow, language: 'en' | 'fr', t: Translate): str
   if (row.costUsd === null) return undefined;
   const amount = fixed(row.costUsd, 2, language);
   return t('ticket_step_cost', { amount });
+}
+
+// Open in an editor (flow/editor.ts): the service's answer, kept only when
+// every link is the address of the editor it names (vscode:// or cursor://,
+// no space, quote or angle bracket), so the screen never puts anything else
+// in an href; null when there is nothing to offer.
+const EDITOR_SCHEMES: Readonly<Record<string, string>> = { vscode: 'vscode:', cursor: 'cursor:' };
+export function editorOffer(answer: unknown): EditorLinks | null {
+  if (typeof answer !== 'object' || answer === null) return null;
+  const { mode, links } = answer as { mode?: unknown; links?: unknown };
+  if ((mode !== 'local' && mode !== 'ssh') || !Array.isArray(links) || links.length === 0) return null;
+  const kept: { editor: 'vscode' | 'cursor'; url: string }[] = [];
+  for (const link of links as { editor?: unknown; url?: unknown }[]) {
+    if (typeof link !== 'object' || link === null || typeof link.editor !== 'string' || typeof link.url !== 'string') return null;
+    const scheme = EDITOR_SCHEMES[link.editor];
+    if (!scheme || !link.url.startsWith(`${scheme}//`) || /[\s"'<>\\`]/.test(link.url)) return null;
+    kept.push({ editor: link.editor as 'vscode' | 'cursor', url: link.url });
+  }
+  return { mode, links: kept };
 }

@@ -24,7 +24,7 @@ import {
   ArrowCounterClockwise, ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import type { ConfirmableRule, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
+import type { ConfirmableRule, EditorLinks, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
@@ -54,8 +54,8 @@ import {
   type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type ReplayRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import { CloseTicket } from './CloseTicket.tsx';
-import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
-import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
+import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
+import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
   actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
@@ -711,6 +711,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [tab, setTab] = useState<Tab>(() => tabOf(window.location.hash));
   const [filter, setFilter] = useState<Filter>('all');
   const [taken, setTaken] = useState<{ readonly id: string; readonly by: TakenOver | null } | null>(null);   // what a gesture of this tab knows, newer than the list
+  const [editor, setEditor] = useState<EditorLinks | null>(null);    // the links that open the checkout in an editor (flow/editor.ts)
+  const [editorOpen, setEditorOpen] = useState(false);
   const [gesture, setGesture] = useState(false);              // a take over, a give back, a Go or a Change on its way
   const [changing, setChanging] = useState(false);
   const [change, setChange] = useState('');
@@ -834,6 +836,14 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     parts, filter, unfolded,
   }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));
+  // Asked again when the session changes or ends; 403, 409 and the rest: no button.
+  useEffect(() => {
+    let current = true;
+    setEditor(null);
+    setEditorOpen(false);
+    context.api<unknown>(`/sessions/${encodeURIComponent(id)}/editor`).then((answer) => { if (current) setEditor(editorOffer(answer)); }, () => {});
+    return () => { current = false; };
+  }, [context, id, ended]);
   const takeover = takeoverOf({ takenOver: actingTaken, me: view.me, role: acting.role, ended });
   const terminal = terminalChoice({ offered: context.me.terminal, takeover });
   // An author's live session, not another account's: the service checks the rest at the save.
@@ -1083,7 +1093,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />
           <div className="panel-head" id="status">
             <StatusHead view={view} t={t} />
-            <TakeoverButton t={t} takeover={takeover} busy={gesture} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />
+            <div className="head-actions">
+              <OpenInEditor t={t} offer={editor} expanded={editorOpen} onToggle={() => setEditorOpen((open) => !open)} />
+              <TakeoverButton t={t} takeover={takeover} busy={gesture} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />
+            </div>
           </div>
           <div className="tab-panel" {...panel('terminal')}>
             {terminal.kind === 'web' ? (

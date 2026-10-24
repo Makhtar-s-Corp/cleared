@@ -62,7 +62,10 @@
 /* The status's phrase, its meta under it, Take over beside both (lane 36's art director). */
 .panel-head .phrase-title { min-width: 0; }
 .panel-head .meta { grid-column: 2; grid-row: 2; white-space: normal; }
-.panel-head .takeover-button { grid-column: 3; grid-row: 1 / span 2; }
+.panel-head .head-actions { grid-column: 3; grid-row: 1 / span 2; display: flex; align-items: center; gap: 8px; position: relative; }
+.panel-head .open-editor-button { min-height: 30px; padding: 0 12px; }
+.open-editor-links { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; width: max-content; max-width: min(320px, 80vw); background: var(--surface, var(--bg)); border: 1px solid var(--hairline); border-radius: var(--radius, 8px); }
+.open-editor-links a.btn { text-decoration: none; min-height: 30px; padding: 0 12px; display: inline-flex; align-items: center; }
 /* The hand over that is not there yet leaves a narrow thread its composer's row. */
 @container panel (max-width: 640px) { .composer #handover { display: none; } .composer { flex-wrap: nowrap; } .composer input { flex: 1 1 0; } }
 .panel-head .dot.waiting { background: var(--awaiting); } .panel-head .dot.progress { background: var(--stage-progress); }
@@ -367,7 +370,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .s-left > .card:not(:first-child) { grid-area: left; }
 }
 @media (max-width: 1100px) {
-  .btn, .composer .btn, .panel-head .takeover-button { min-height: 44px; }
+  .btn, .composer .btn, .panel-head .takeover-button, .panel-head .open-editor-button, .open-editor-links a.btn { min-height: 44px; }
   .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
   /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
   .panel { height: auto; max-height: calc(100vh - 132px); }
