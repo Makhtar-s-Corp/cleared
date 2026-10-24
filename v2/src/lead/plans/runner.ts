@@ -26,7 +26,7 @@
 //   3. A release that landed (merged and healthy) lands its item; a rollback
 //      is a put back; a release live but not healthy holds its item.
 //   4. Paused, a plan starts nothing; its running tickets go on.
-//   5. At the week stop (the seven-day window at CLEARED_V2_WEEK_STOP_PERCENT)
+//   5. At the week stop (the seven-day or the five-hour window at CLEARED_V2_WEEK_STOP_PERCENT)
 //      or past CLEARED_V2_DAY_BUDGET_USD spent since midnight, when it is
 //      set, nothing new starts, and the lead and the owner are told once.
 //   6. A plan is done when every item has landed or is cancelled.
@@ -41,6 +41,7 @@
 // is in memory, so each tick also reads the tickets themselves: an item
 // running whose ticket is back in Todo, and not run by the flow, is a put
 // back that was missed.
+import { latestQuota } from '../../consumption/quota.ts';
 import type { Plan, PlanItemState } from '../../api/types.ts';
 import { FlowError, QUICK_LABEL } from '../../flow/engine.ts';
 import type { FlowEvent, FlowListener, Origin } from '../../flow/events.ts';
@@ -570,21 +571,22 @@ export class PlanRunner {
 
   // ---- the week stop -----------------------------------------------------------
 
-  // The seven-day window at or above the stop, from the harness's last
-  // report while that window runs (the mapper reports a change only, and
-  // nothing runs to report the reset of a window that stopped the plans);
-  // or, when the day budget is set, the cost of the project's sessions
-  // since midnight (the server's time) past it.
+  // A window of the subscription at or above the stop, the seven-day one
+  // first, from its newest figure while it runs (consumption/quota.ts: the
+  // hourly reading, or a session's report, since the mapper reports a change
+  // only, and nothing runs to report the reset of a window that stopped the
+  // plans); or, when the day budget is set, the cost of the project's
+  // sessions since midnight (the server's time) past it. The five-hour window
+  // stops them too (issue #270: no lane starts above the stop).
   #stop(): Stop | undefined {
     const db = this.#deps.store.db;
     const project = this.#deps.project;
-    const week = db.prepare(`SELECT json_extract(event, '$.value.usedPercent') AS used, json_extract(event, '$.value.resetsAt') AS resets FROM session_events
-      WHERE project = ? AND type = 'CUSTOM' AND json_extract(event, '$.name') = 'cleared.rate_limit' AND json_extract(event, '$.value.window') = 'seven_day'
-      ORDER BY at DESC, rowid DESC LIMIT 1`).get(project) as { used: number | null; resets: string | null } | undefined;
     const limit = this.#deps.config.weekStopPercent;
-    const running = !week?.resets || Date.parse(week.resets) > this.#now().getTime();
-    if (week && typeof week.used === 'number' && running && week.used >= limit)
-      return { kind: 'week', text: `The seven-day window of the subscription is at ${week.used} %: the plans start nothing new until it falls below ${limit} %.` };
+    for (const window of ['seven_day', 'five_hour'] as const) {
+      const quota = latestQuota(db, { project, window, now: this.#now() });
+      if (quota && quota.usedPercent >= limit)
+        return { kind: 'week', text: `The ${window === 'seven_day' ? 'seven-day' : 'five-hour'} window of the subscription is at ${quota.usedPercent} %: the plans start nothing new until it falls below ${limit} %.` };
+    }
     const budget = this.#deps.config.dayBudgetUsd;
     if (budget === undefined) return undefined;
     const midnight = new Date(this.#now());

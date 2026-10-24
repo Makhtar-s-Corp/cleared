@@ -12,6 +12,7 @@ import { DEFAULT_PLAN_CONFIG, PlanError, PlanRunner, loadPlanConfig, type PlanCo
 import { LEAD_TICKET } from '../../../src/lead/contract.ts';
 import { LeadConfigError } from '../../../src/lead/config.ts';
 import { NOTIFY_TABLES } from '../../../src/notify/queue.ts';
+import { QUOTA_TABLES } from '../../../src/consumption/quota.ts';
 import { applyTables } from '../../../src/store/db.ts';
 import type { FakeStep } from '../../../src/session/adapters/fake.ts';
 import { ledgerRow, quickAuthor, releaseRow, setup, started, until, type SetupOptions } from '../../flow/support.ts';
@@ -354,4 +355,22 @@ test('an item already held is not announced twice', async () => {
   t.runner.onFlowEvent(unhealthy);
   t.runner.onFlowEvent(unhealthy);
   assert.equal(t.lead.events.filter((e) => /not healthy/.test(e.text)).length, 1);
+});
+
+// Issue #270: the stop reads the hourly quota reading too, so no lane starts
+// above it when no session reported since, and the five-hour window stops
+// the plans as the seven-day one does.
+test('the stop from a quota reading alone, and from the five-hour window', async () => {
+  for (const window of ['seven_day', 'five_hour'] as const) {
+    const t = await plans();
+    applyTables(t.store.db, QUOTA_TABLES);
+    t.store.db.prepare("INSERT INTO quota_readings (project, harness, source, at, ok, window, used_percent, resets_at) VALUES ('guestbook', 'claude-code', 'claude-code /api/oauth/usage', ?, 1, ?, 86, ?)")
+      .run(iso(t.clock.now - 600_000), window, iso(t.clock.now + 3_600_000));
+    const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
+    await t.runner.approve(plan, 'u1');
+    await t.tick();
+    assert.equal(await t.status(t.itemsOf(plan)[0]!.ticket), 'Todo', window);
+    const said = window === 'seven_day' ? /seven-day window of the subscription is at 86 %/ : /five-hour window of the subscription is at 86 %/;
+    assert.equal(t.lead.events.filter((e) => said.test(e.text)).length, 1, window);
+  }
 });
