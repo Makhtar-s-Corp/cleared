@@ -535,7 +535,8 @@ export class PlanRunner {
 
   // The seven-day window at or above the stop, from the harness's last
   // report while that window runs (the mapper reports a change only, and
-  // nothing runs to report the reset of a window that stopped the plans);
+  // nothing runs to report the reset of a window that stopped the plans;
+  // Claude Code's: another harness's window is its own, as in weekShare);
   // or, when the day budget is set, the cost of the project's sessions
   // since midnight (the server's time) past it.
   #stop(): Stop | undefined {
@@ -543,6 +544,7 @@ export class PlanRunner {
     const project = this.#deps.project;
     const week = db.prepare(`SELECT json_extract(event, '$.value.usedPercent') AS used, json_extract(event, '$.value.resetsAt') AS resets FROM session_events
       WHERE project = ? AND type = 'CUSTOM' AND json_extract(event, '$.name') = 'cleared.rate_limit' AND json_extract(event, '$.value.window') = 'seven_day'
+        AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_events.session_id AND s.harness <> 'claude-code')
       ORDER BY at DESC, rowid DESC LIMIT 1`).get(project) as { used: number | null; resets: string | null } | undefined;
     const limit = this.#deps.config.weekStopPercent;
     const running = !week?.resets || Date.parse(week.resets) > this.#now().getTime();

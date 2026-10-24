@@ -77,7 +77,11 @@ const commandOf = (item: Record<string, unknown>): string => {
 
 // The request of an item the policy has a say on, or undefined (a message,
 // a reasoning, a todo list). A file_change names several files: one request
-// per file, the first the policy does not allow decides.
+// per file, the first the policy does not allow decides. Codex names the
+// files, not their text, and reports the change once it is made: the
+// requests carry no text, so the policy cannot read a change of
+// package.json as "none" by comparing the changed file with itself; it asks
+// (scripts.change), which ends the turn.
 export function codexCalls(item: Record<string, unknown>): CodexCall[] {
   const callId = str(item.id);
   const kind = str(item.type);
@@ -90,8 +94,7 @@ export function codexCalls(item: Record<string, unknown>): CodexCall[] {
       return changes.map((change) => {
         const file_path = absolute(change.path);
         if (change.kind === 'delete') return { callId, kind, request: { tool: 'Delete', input: { file_path } } };
-        if (change.kind === 'add') return { callId, kind, request: { tool: 'Write', input: { file_path, content: '' } } };
-        return { callId, kind, request: { tool: 'Edit', input: { file_path, old_string: '', new_string: '' } } };
+        return { callId, kind, request: { tool: change.kind === 'add' ? 'Write' : 'Edit', input: { file_path } } };
       });
     }
     case 'mcp_tool_call':
