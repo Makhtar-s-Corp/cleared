@@ -4,9 +4,11 @@
 //   read-only policy, same branch) -> on a pass: refresh the project, publish
 //   the branch, record the review, ask the lock for the human's approval ->
 //   the inbox shows the release until the ticket reaches the go state.
-//   A requested change reopens the author with the report; a ticket that
-//   cannot go on (idle, over budget, a failed run, a refused publish, no
-//   verdict, too many rounds) goes back to Todo with a note.
+//   A requested change reopens the author with the report, and the author's
+//   answer reopens the same reviewer: the ticket's review channel (issue
+//   291, flow/channel.ts), bounded by FlowConfig.maxReviewRounds; a ticket
+//   that cannot go on (idle, over budget, a failed run, a refused publish,
+//   no verdict, too many rounds) goes back to Todo with a note.
 //
 // The engine owns what the plan gives lane 7: the inbox items and their
 // state, the measured steps, the idle stop and the budget stop. Everything
@@ -88,6 +90,7 @@ import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
 import type { LeverReader } from '../consumption/levers.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
+import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
@@ -188,6 +191,7 @@ type Live = {
   lastActivity: number;
   closed: boolean;
   waitOpen: boolean;                                                // a waiting_human step is open
+  turnFrom?: number;                                                // a resumed session's last seq before its new turn: its verdict or its answer is read after it
 };
 
 type Watcher = { wait(ms: number): Promise<void>; close(): void };
@@ -272,6 +276,7 @@ export class FlowEngine {
   #stepOf = new Map<SessionId, string>();                           // the step an author session works on
   #launching = new Set<string>();                                   // steps whose session is being started
   #finishing = new Set<TicketId>();                                 // tickets whose last step is done: the review starts once
+  #channels = new Map<TicketId, { readonly reviewer: SessionId; readonly round: number }>();   // the review channel waiting for the author's answer (issue 291)
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -740,6 +745,7 @@ export class FlowEngine {
     if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
     this.#active.add(ticketId);
     this.#flows.set(ticketId, new Set());
+    this.#channels.delete(ticketId);
     if (origin) this.#origins.set(ticketId, origin);
     else this.#origins.delete(ticketId);
     this.#finishing.delete(ticketId);
@@ -1613,6 +1619,7 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     this.#active.delete(ticket);
     this.#origins.delete(ticket);
+    this.#channels.delete(ticket);
     this.#steps.hold(ticket);
     await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
     try {
@@ -1648,10 +1655,18 @@ export class FlowEngine {
     const ticket = await tickets.get(id);
     if (!ticket) return;
     await tickets.move(id, tickets.states.review, SERVICE);
+    const open = this.#channels.get(id);
+    if (open) {
+      this.#channels.delete(id);
+      return this.#answerReviewer(ticket, author, open);
+    }
     await this.#startReview(ticket, author.input.workdir);
   }
 
-  async #startReview(ticket: Ticket, workdir: string): Promise<void> {
+  // `channel`: a reviewer started again because the last one could not be
+  // resumed is given the channel so far, and its last message, the
+  // author's answer, is journaled on it.
+  async #startReview(ticket: Ticket, workdir: string, channel?: readonly ChannelMessage[]): Promise<void> {
     const adapter = this.registry.sessionAdapters[HARNESS];
     const began = this.#now();
     try {
@@ -1664,9 +1679,12 @@ export class FlowEngine {
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
       // The reviewer's git commands name its own service's base.
       const base = this.#several ? (this.#servicesOf(ticket)[0] as ServiceConfig).base : this.config.base;
+      const prompt = reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)) });
       const live = await this.#launch(adapter, ticket, 'reviewer', this.#reviewerModel(ticket), prepared.workdir || workdir, prepared.briefing, settings,
-        reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)) }));
+        channel ? `${prompt}\n\n${channelPrompt(channel)}` : prompt);
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
+      const answer = channel?.at(-1);
+      if (answer) this.#journal({ id: live.id, ticket: ticket.id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
       this.#snapshot(live.id, ticket.id);
       this.#supervise(live, 0);
     } catch (error) {
@@ -1718,7 +1736,8 @@ export class FlowEngine {
   async #reviewDone(reviewer: Live): Promise<void> {
     const { ticket: id, project } = reviewer.input;
     const session = { id: reviewer.id, ticket: id, project };
-    const report = lastReport(this.#store.events.after(reviewer.id));
+    // A resumed reviewer's report is the one of its new turn.
+    const report = lastReport(this.#store.events.after(reviewer.id, reviewer.turnFrom ?? 0));
     const parsed = report === undefined ? undefined : parseVerdict(report, reviewer.settings.verdict);
     this.#step(session, 'STEP_FINISHED', 'review');
     await this.#close(reviewer, 'done');
@@ -1726,18 +1745,31 @@ export class FlowEngine {
       await this.#putBack(id, 'The review gave no verdict (no "Verdict:" line in its report), so nothing was published. Move the ticket to Todo to run it again.', 'no_verdict');
       return;
     }
-    const round = this.#flowRows(id).filter((row) => row.role === 'reviewer').length;
+    // A round is a verdict: a resumed reviewer gives several in one session.
+    const round = this.#rounds(id) + 1;
     this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: reviewer.id, verdict: parsed.verdict, round } });
     this.#emit({ type: 'review_verdict', at: this.#at(), project, ticket: id, session: reviewer.id, verdict: parsed.verdict, round });
     if (parsed.verdict === 'pass') return this.#publishAndAsk(reviewer, report, round);
-    if (round >= this.config.maxReviewRounds) {
-      await this.#putBack(id, `The review still asked for changes after ${round} review rounds, so the ticket goes back to Todo. The last report:\n\n${report}`, 'too_many_rounds');
+    const limit = this.config.maxReviewRounds;
+    if (round >= limit) {
+      await this.#putBack(id, `The review still asked for changes after ${round} review round${round === 1 ? '' : 's'}, so the ticket goes back to Todo. The last report:\n\n${report}`, 'too_many_rounds');
       return;
     }
-    await this.#reopenAuthor(reviewer, report, round);
+    const request: ChannelMessage = { round, limit, from: 'reviewer', text: this.#clean(report) };
+    this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
+    await this.#reopenAuthor(reviewer, report, request);
   }
 
-  async #reopenAuthor(reviewer: Live, report: string, round: number): Promise<void> {
+  // The verdicts the reviewers of the ticket's current flow gave.
+  #rounds(ticket: TicketId): number {
+    return this.#flowRows(ticket).filter((row) => row.role === 'reviewer').reduce((n, row) => n + verdictsOf(this.#store.events.after(row.id)), 0);
+  }
+
+  // The request goes to the author through the channel: the author's
+  // session resumed, else a new one; its answer goes back to `reviewer`
+  // when its turn ends (#authorDone).
+  async #reopenAuthor(reviewer: Live, report: string, request: ChannelMessage): Promise<void> {
+    const { round } = request;
     const id = reviewer.input.ticket;
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
@@ -1749,7 +1781,9 @@ export class FlowEngine {
       return;
     }
     await tickets.move(id, tickets.states.progress, SERVICE);
-    const message = reviewRequestMessage(report, round);
+    // Set before the author can answer: a scripted turn ends inside send().
+    this.#channels.set(id, { reviewer: reviewer.id, round });
+    const message = reviewRequestMessage(report, round, request.limit);
     const began = this.#now();
     const lastSeq = authorRow ? (this.#store.events.after(authorRow.id).at(-1)?.seq ?? 0) : 0;
     // Reopening is resume, then the request as the next message. Either
@@ -1760,10 +1794,11 @@ export class FlowEngine {
       let handle: SessionHandle | undefined;
       try { handle = await this.#resume(adapter, authorRow.id); } catch { handle = undefined; }
       if (handle) {
-        const live: Live = { id: authorRow.id, input: kept.input, settings: kept.settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
+        const live: Live = { id: authorRow.id, input: kept.input, settings: kept.settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false, turnFrom: lastSeq };
         this.#live.set(live.id, live);
         this.#setPhase(live, 'working');
         this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
+        this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
         this.#supervise(live, lastSeq);
         try {
           await handle.send({ text: message, by: FLOW_USER });
@@ -1784,11 +1819,53 @@ export class FlowEngine {
       const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings,
         `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined);
       this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
+      this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
       this.#snapshot(live.id, id);
       this.#supervise(live, 0);
     } catch (error) {
       await this.#putBack(id, `The author could not be reopened after the review: ${name(error)}`, 'reopen_failed');
     }
+  }
+
+  // The author's answer goes back through the channel: to the reviewer
+  // that asked, resumed under its own id, which gives its next verdict;
+  // else to a new reviewer, given the channel so far.
+  async #answerReviewer(ticket: Ticket, author: Live, open: { readonly reviewer: SessionId; readonly round: number }): Promise<void> {
+    const id = ticket.id;
+    const limit = this.config.maxReviewRounds;
+    const answer: ChannelMessage = { round: open.round, limit, from: 'author', text: this.#clean(lastSaid(this.#store.events.after(author.id, author.turnFrom ?? 0)) ?? NO_ANSWER) };
+    this.#journal({ id: author.id, ticket: id, project: author.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    const kept = this.#inputs.get(open.reviewer);
+    const began = this.#now();
+    if (adapter && kept) {
+      const lastSeq = this.#store.events.after(open.reviewer).at(-1)?.seq ?? 0;
+      let handle: SessionHandle | undefined;
+      try { handle = await this.#resume(adapter, open.reviewer); } catch { handle = undefined; }
+      if (handle) {
+        const live: Live = { id: open.reviewer, input: kept.input, settings: kept.settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false, turnFrom: lastSeq };
+        const session = { id: live.id, ticket: id, project: live.input.project };
+        this.#live.set(live.id, live);
+        this.#setPhase(live, 'reviewing');
+        this.#step(session, 'STEP_STARTED', 'review', began);
+        this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
+        this.#snapshot(live.id, id);
+        this.#supervise(live, lastSeq);
+        try {
+          await handle.send({ text: answerMessage(answer.text, open.round, limit), by: FLOW_USER });
+          return;
+        } catch {
+          live.closed = true;
+          this.#live.delete(live.id);
+          await handle.stop().catch(() => undefined);
+          this.#step(session, 'STEP_FINISHED', 'review');
+          this.#setPhase(live, 'done');
+        }
+      }
+    }
+    // What the ticket's reviewers sent and were sent so far, then the answer.
+    const channel = this.#flowRows(id).filter((row) => row.role === 'reviewer').flatMap((row) => channelOf(this.#store.events.after(row.id)));
+    await this.#startReview(ticket, author.input.workdir, [...channel, answer]);
   }
 
   // ---- a pass: publish, record, ask the lock -------------------------------
