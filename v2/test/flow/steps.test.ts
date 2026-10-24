@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ContractItem, ReleaseItem, TicketStep } from '../../src/api/types.ts';
+import type { LeverReader } from '../../src/consumption/levers.ts';
 import type { SiblingSpec } from '../../src/container/services.ts';
 import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import { describeFlowEvent } from '../../src/lead/prompts.ts';
@@ -61,7 +62,7 @@ function locks(t: () => Setup): (svc: ServiceConfig) => ServiceLock {
   });
 }
 
-type Options = { authors?: (readonly FakeStep[])[]; reads?: Record<string, Read[]>; reopen?: readonly FakeStep[] };
+type Options = { authors?: (readonly FakeStep[])[]; reads?: Record<string, Read[]>; reopen?: readonly FakeStep[]; levers?: LeverReader };
 
 async function stepped(options: Options = {}) {
   let t: Setup | undefined;
@@ -103,7 +104,7 @@ async function stepped(options: Options = {}) {
   };
   t = await setup({
     scripts: { authors: options.authors ?? [quickAuthor, waiting('s1'), waiting('s2'), quickAuthor], ...(options.reopen ? { reopen: options.reopen } : {}) },
-    config: { workspace: WORKSPACE, steps: true }, effects, locks: locks(() => t as Setup),
+    config: { workspace: WORKSPACE, steps: true }, effects, locks: locks(() => t as Setup), ...(options.levers ? { levers: options.levers } : {}),
   });
   const ticket = await t.tickets.create({ title: 'Held for review', body: 'An entry the filter flags is held for review instead of refused.\n\n- [ ] a flagged entry is held', project: 'guestbook', services: ['guestbook', 'filter-api'] }, { kind: 'human', id: 'u1' });
   const steps = async () => (await t.engine.ticketSteps(ticket.id)) as TicketStep[];
@@ -311,5 +312,24 @@ test('a service\'s [merge] guarded_paths reach the release card as the config fl
   await t.engine.settled();
   const card = t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release');
   assert.deepEqual(card?.flags?.find((f) => f.kind === 'config')?.files, ['deploy/run.sh']);
+  await t.engine.close();
+});
+
+// The Consumption screen's lane lever (O15): the plan allows two steps at
+// once, the owner's cap of one lets the second wait until the first is done.
+test('the lanes lever caps the steps that run at once: the second service step waits for the first', async () => {
+  const levers = { model: null, maxLanes: 1, paused: false };
+  const { t, ticket, states, contract } = await stepped({ reads: { 'filter-api': [contractRead(1), contractRead(1), contractRead(1)] }, levers: { read: () => levers } });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => t.startedSessions.length === 2, 'the first service step');
+  await t.engine.settled();
+  assert.deepEqual(await states(), ['1 contract filter-api done', '2 service filter-api running', '3 service guestbook waiting', '4 integration guestbook waiting']);
+  assert.equal(t.startedSessions.length, 2, 'only one service step runs under a cap of one');
+
+  await t.engine.send(t.startedSessions[1]!.id, 'Go on.', 'u1');
+  await until(() => t.startedSessions.length === 3, 'the second service step, once the first is done');
+  assert.equal(t.startedSessions[2]?.input.service, 'guestbook');
   await t.engine.close();
 });

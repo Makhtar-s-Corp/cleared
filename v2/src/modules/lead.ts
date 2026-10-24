@@ -25,6 +25,8 @@ import { recipeRoutes } from '../recipes/routes.ts';
 import { Recipes } from '../recipes/service.ts';
 import { gitRecipeSource } from '../recipes/source.ts';
 import { budgetedFlow } from '../schedules/budget.ts';
+import { LEVERS_TABLE, LeverStore } from '../consumption/levers.ts';
+import { consumptionRoutes } from '../consumption/routes.ts';
 import { scheduleRoutes } from '../schedules/routes.ts';
 import { Scheduler } from '../schedules/scheduler.ts';
 import { SCHEDULE_TABLES } from '../schedules/store.ts';
@@ -70,7 +72,7 @@ export function plansOf(registry: Registry): PlanRunner | undefined {
     }),
     plans, lead, inbox: flow.inbox, workspace: services, clean,
   });
-  schedules = new Scheduler({ db: store.db, project: fc.project, recipes, plans, lead, weekStopPercent: planConfig.weekStopPercent });
+  schedules = new Scheduler({ db: store.db, project: fc.project, recipes, plans, lead, weekStopPercent: planConfig.weekStopPercent, levers: new LeverStore(store.db, fc.project) });
   schedules.startTimer();
   return plans;
 }
@@ -87,7 +89,7 @@ export function schedulesOf(registry: Registry): Scheduler | undefined {
 }
 
 const lead: Module = {
-  tables: [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES],
+  tables: [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE],
   routes: [
     // A lead route builds the plans too, so a service the tower polls runs its plans.
     ...createLeadRoutes({
@@ -100,6 +102,14 @@ const lead: Module = {
     ...createPlanRoutes({ plans: plansOf, proof: () => flowRuntime.proof() }),
     ...recipeRoutes({ recipes: recipesOf, proof: () => flowRuntime.proof() }),
     ...scheduleRoutes({ schedules: schedulesOf, proof: () => flowRuntime.proof() }),
+    // The Consumption screen (O15): its read, and the three levers it turns.
+    ...consumptionRoutes({
+      target: (registry) => {
+        const flow = flowRuntime.engine(registry);
+        return flow && store ? { db: store.db, project: flow.config.project, config: flow.config } : undefined;
+      },
+      proof: () => flowRuntime.proof(),
+    }),
   ],
   provide: (deps) => {
     try {

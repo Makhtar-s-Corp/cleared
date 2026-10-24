@@ -7,6 +7,7 @@ process.env.TZ = 'UTC';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { LeverReader } from '../../src/consumption/levers.ts';
 import { DEFAULT_PLAN_CONFIG, PlanRunner } from '../../src/lead/plans/runner.ts';
 import { PLAN_TABLES } from '../../src/lead/plans/store.ts';
 import { NOTIFY_TABLES } from '../../src/notify/queue.ts';
@@ -42,7 +43,7 @@ Make the README clear.
 const iso = (ms: number) => new Date(ms).toISOString();
 const MINUTE = 60_000;
 
-async function scheduler(options: { readonly author?: readonly FakeStep[]; readonly files?: Record<string, string> } = {}) {
+async function scheduler(options: { readonly author?: readonly FakeStep[]; readonly files?: Record<string, string>; readonly levers?: LeverReader } = {}) {
   const t = await setup({ scripts: { author: options.author ?? [started, ...text('a1', 'Done.'), finished(0.3)] } });
   applyTables(t.store.db, [...PLAN_TABLES, ...NOTIFY_TABLES, ...SCHEDULE_TABLES]);
   t.users.users.set('u2', { id: 'u2', name: 'Second' });
@@ -64,7 +65,7 @@ async function scheduler(options: { readonly author?: readonly FakeStep[]; reado
     plans, lead, inbox: t.inbox, workspace: [], clean: (s) => s, now,
   });
   const events: ScheduleEvent[] = [];
-  schedules = new Scheduler({ db: t.store.db, project: 'guestbook', recipes: service, plans, lead, weekStopPercent: 85, now });
+  schedules = new Scheduler({ db: t.store.db, project: 'guestbook', recipes: service, plans, lead, weekStopPercent: 85, now, ...(options.levers ? { levers: options.levers } : {}) });
   schedules.subscribe((event) => { events.push(event); });
   const settle = async () => {
     for (let i = 0; i < 4; i++) { await t.engine.settled(); await plans.settled(); }
@@ -278,4 +279,26 @@ test('a scheduled goal tells the lead the owner is away: it asks nothing and wri
   assert.match(t.posts[0]!.text, /away/);
   assert.match(t.posts[0]!.text, /ask (?:the owner )?nothing/i);
   assert.match(t.posts[0]!.text, /assumptions/);
+});
+
+// The Consumption screen's pause (O15): nothing starts while it is on, the
+// run due meanwhile stays due, and the resume takes it once.
+test('the pause lever takes no run while it is on, and the resume takes the missed run once', async () => {
+  const state = { model: null, maxLanes: null, paused: true };
+  const t = await scheduler({ levers: { read: () => state } });
+  const created = await t.schedules.create({ recipe: 'bump-dependency', parameters: { package: 'pg' }, every: 'day 03:00', budgetUsd: 2, weekCapPercent: 60 }, 'u2');
+
+  await t.at(OCT_22_0300 + 30_000);
+  await t.at(OCT_22_0300 + 6 * 60 * MINUTE);
+  assert.equal(t.plans.list().length, 0, 'paused: no plan');
+  assert.deepEqual(t.events, [], 'paused: nothing said');
+  assert.equal(t.schedules.get(created.id)?.nextRunAt, iso(OCT_22_0300), 'the run due is still due');
+  assert.equal(t.schedules.get(created.id)?.lastRunAt, null);
+
+  state.paused = false;
+  await t.at(OCT_22_0300 + 7 * 60 * MINUTE);
+  assert.equal(t.plans.list().length, 1, 'resumed: the missed run starts');
+  await t.at(OCT_22_0300 + 8 * 60 * MINUTE);
+  assert.equal(t.plans.list().length, 1, 'once, not once per tick or per missed day');
+  assert.equal(t.schedules.get(created.id)?.nextRunAt, iso(OCT_22_0300 + 24 * 60 * MINUTE), 'the next run is the next 03:00 after the resume');
 });

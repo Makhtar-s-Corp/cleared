@@ -16,7 +16,9 @@
 //      on the Origin: budget.ts). A goal is an owner turn to the lead, as
 //      the creator; the plan the lead proposes for that goal (goal-<seq>)
 //      within GOAL_PLAN_HOURS is approved for the creator at the next tick.
-//   4. A release still waits for the owner: nothing here approves one.
+//   4. The Consumption screen's pause stops all of this: no run is taken,
+//      no goal plan approved, until the owner resumes.
+//   5. A release still waits for the owner: nothing here approves one.
 //
 // Each run is said once as a ScheduleEvent and kept in schedule_runs. A run
 // that failed (skipped by the week, a recipe gone or refused, a start that
@@ -25,6 +27,7 @@
 // failed for the same reason; a run that went well tells the lead by its
 // plan's service line and notifies nothing.
 import type { DatabaseSync } from 'node:sqlite';
+import type { LeverReader } from '../consumption/levers.ts';
 import type { CreateScheduleBody, Schedule } from '../api/types.ts';
 import type { PlanLead, PlanRunner } from '../lead/plans/runner.ts';
 import { NotifyQueue } from '../notify/queue.ts';
@@ -46,6 +49,8 @@ export type SchedulerDeps = {
   readonly plans: Pick<PlanRunner, 'store'>;
   readonly lead: Pick<PlanLead, 'enqueue'>;
   readonly weekStopPercent: number;
+  // The Consumption screen's pause (consumption/levers.ts): nothing starts while it is on.
+  readonly levers?: LeverReader;
   readonly now?: () => Date;
 };
 
@@ -172,6 +177,8 @@ export class Scheduler {
     const now = this.#now();
     const at = now.toISOString();
     const events: ScheduleEvent[] = [];
+    // Paused from the Consumption screen: a run due now stays due, and is taken once at the resume.
+    if (this.#deps.levers?.read().paused) return events;
     for (const schedule of this.store.due(at)) {
       const next = schedule.every ? nextRun(schedule.every, now).toISOString() : null;
       if (!this.store.claim(schedule.id, schedule.nextRunAt as string, next, at)) continue;
