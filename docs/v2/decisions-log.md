@@ -4383,7 +4383,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **Decision.**
 
-1. **The start check** (`startCheck`, `v2/scripts/proof-plan.ts`, P70).
+1. **The start check** (`startCheck`, `v2/scripts/proof-plan.ts`, P73).
    - Both drivers read the plans right after sign-in. A run that sends a new goal stops with exit 64 before its first gesture when a plan is approved and not paused. The reason names the plan, its items' states and the ways out.
    - A paused plan does not refuse a new goal: the runner starts nothing of it. This was the orchestrator's workaround of 19:50.
    - The multi-service proof has no plan of its own to take over. Its only way out is to pause the plan. A service with no lead (the plans answer 503) has no plan.
@@ -4402,7 +4402,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - The blockage is logged when it starts, changes and ends, at night too. While the morning waits, a "nothing to do" line comes every 30 minutes, not only when what waits changes.
    - Step 7 fails when the same blockage lasts `PROOF_STUCK_MINUTES`, 90 by default, counted from when it was first seen, the night included. Then step 8 reads the lead at once instead of waiting out the hours left. 90 is above the service's own delays: a question's 30 minutes, then the lead's 10, and the watchdog's 15. So the lead gets its turn to start a held or parked item with `start_ticket` first.
    - `result.json` and `durations.md` keep the last blockage and say whether it stopped step 7.
-4. **Issue #185, each point.**
+4. **Issue #185, each point** (P74).
    - **Item 1: the log understated CopilotKit's hosts.** Done. Item 7 of the #184 entry now names `cdn.copilotkit.ai` beside `telemetry.copilotkit.ai`, twice each in the agent chunk of today's build, in ignore lists only. A Risk line names the trajectory collector, which is dead weight in the bundle. The body of merged pull request 184 was left as it is.
    - **The owner's added point: `agents__unsafe_dev_only`.** Checked in `@copilotkit/core` 1.77.2 (`dist/index.mjs`):
      - the constructor (line 6583) hands the agents to `AgentRegistry.initialize` (line 1702), which only keeps them in the page;
