@@ -241,5 +241,16 @@
   "giveback_note": "Hands the session back and tells it what you changed.",
   "earlier_one": "{who} · 1 step",
   "earlier_other": "{who} · {n} steps",
-  "terminal_journaled": "Each line you type is journaled; what it prints is not kept."
+  "terminal_journaled": "Each line you type is journaled; what it prints is not kept.",
+  "resume_here": "Resume from here",
+  "resume_label": "What should the session do instead, from this step?",
+  "resume_where": "The branch goes back to commit {commit}, as it was before this step, on a new branch. What follows stays readable in the thread.",
+  "resume_send": "Resume",
+  "resume_cancel": "Cancel",
+  "resume_empty": "Say what to do instead.",
+  "resume_failed": "The ticket was not resumed. Try again.",
+  "resume_owner": "Only the owner account resumes a ticket from a step.",
+  "replay_left": "Resumed from a step above by {who}: a new session goes on below, on {branch} from {commit}. What follows that step here is the earlier attempt.",
+  "replay_resumed": "Resumed by {who} from a step of the earlier session, on {branch} from {commit}.",
+  "replay_instruction": "Corrected instruction"
 }

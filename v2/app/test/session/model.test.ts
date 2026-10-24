@@ -154,10 +154,10 @@ test('a message of the review channel is a row with its side, its round and its 
     { seq: 3, at: at(80), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 2, limit: 3, from: 'author', text: 'Again.' } } },
   ]);
   assert.deepEqual(timeline(model), [
-    { kind: 'channel', at: at(0), from: 'reviewer', round: 1, limit: 3, text: 'Defects: a.ts:3' },
-    { kind: 'channel', at: at(72), from: 'author', round: 1, limit: 3, text: 'Fixed.', afterMs: 72 * 60_000 },
-    { kind: 'channel', at: at(80), from: 'author', round: 2, limit: 3, text: 'Again.' },
-  ], 'an answer whose request this session did not log has no wait');
+    { kind: 'channel', at: at(0), from: 'reviewer', round: 1, limit: 3, text: 'Defects: a.ts:3', seq: 1 },
+    { kind: 'channel', at: at(72), from: 'author', round: 1, limit: 3, text: 'Fixed.', afterMs: 72 * 60_000, seq: 2 },
+    { kind: 'channel', at: at(80), from: 'author', round: 2, limit: 3, text: 'Again.', seq: 3 },
+  ], 'an answer whose request this session did not log has no wait; each row keeps its first event (issue #272)');
 });
 
 test('a command result reads as the capture shows it, and never as markup', () => {

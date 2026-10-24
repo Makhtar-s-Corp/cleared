@@ -21,7 +21,7 @@
 // changed file for editing (decision 33). Both packages load by a dynamic
 // import (lane 32).
 import {
-  ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
+  ArrowCounterClockwise, ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { ConfirmableRule, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
@@ -30,6 +30,7 @@ import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
+import { Textarea } from '@/components/ui/textarea.tsx';
 import {
   editorReducer, editorStart, lastTurnFiles, putFile, readOnlyWhy, saveOutcome, type EditorAction, type EditorState, type ReadOnlyWhy, type Scope,
 } from '@/components/editor/model.ts';
@@ -49,8 +50,8 @@ import { ApiError } from '@/lib/screen.ts';
 import { formatModel, harnessSquare, liveDot } from '../tower/model.ts';
 import { isSessionThread, SessionAgent, sessionAgentId } from './agent.ts';
 import {
-  ENDED, answerBody, answerLine, clock, decisionOf, duration, family, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, statusMeta, statusTone, takenOverOf, target, verb,
-  type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
+  ENDED, REPLAY_MAX, answerBody, answerLine, clock, decisionOf, duration, family, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, shortCommit, statusMeta, statusTone, stepCommit, takenOverOf, target, verb, who,
+  type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type ReplayRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import { BrowserTab, Confidence, Criteria, EditorTab, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
@@ -80,8 +81,9 @@ function Frame({ kind, at, icon, refused = false, children }: { readonly kind: s
 
 // A step of the thread (a command, an edit, a read: Devin's worklog): one
 // row that opens its detail, folded until the person asks.
-function Step({ kind, at, icon, refused = false, line, detail }: {
-  readonly kind: string; readonly at: string; readonly icon: Icon; readonly refused?: boolean; readonly line: ReactNode; readonly detail: ReactNode;
+// `resume`: its Resume from here (issue #272), under the detail.
+function Step({ kind, at, icon, refused = false, line, detail, resume }: {
+  readonly kind: string; readonly at: string; readonly icon: Icon; readonly refused?: boolean; readonly line: ReactNode; readonly detail: ReactNode; readonly resume?: ReactNode;
 }) {
   return (
     <details className={refused ? 'row step refused' : 'row step'} data-row={kind}>
@@ -91,7 +93,7 @@ function Step({ kind, at, icon, refused = false, line, detail }: {
         <div className="what">{line}</div>
         <CaretRight className="caret" size={12} aria-hidden="true" />
       </summary>
-      <div className="step-detail">{detail}</div>
+      <div className="step-detail">{detail}{resume}</div>
     </details>
   );
 }
@@ -155,7 +157,7 @@ function RequestCard({ row, request, view, t, onAnswer }: { readonly row: ToolRo
   );
 }
 
-function ToolLine({ row, view, t, onAnswer, onFile }: { readonly row: ToolRow; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onFile?: OpenFile }) {
+function ToolLine({ row, view, t, onAnswer, onFile, resume }: { readonly row: ToolRow; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onFile?: OpenFile; readonly resume?: ReactNode }) {
   const request = row.request;
   if (request?.state === 'waiting') return <RequestCard row={row} request={request} view={view} t={t} onAnswer={onAnswer} />;
   const input = row.input;
@@ -179,7 +181,7 @@ function ToolLine({ row, view, t, onAnswer, onFile }: { readonly row: ToolRow; r
   if (input?.kind === 'execute') {
     const output = row.output?.kind === 'execute' ? tail(row.output.output) : '';
     return (
-      <Step kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused}
+      <Step kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused} resume={resume}
         line={<><div>{intentSentence(input.command, t)}</div>{sub}</>}
         detail={<><CommandLines command={input.command} />{output ? <pre className="output"><code>{output}</code></pre> : null}</>} />
     );
@@ -187,12 +189,12 @@ function ToolLine({ row, view, t, onAnswer, onFile }: { readonly row: ToolRow; r
   const line = <><div>{label}{shown ? <>{' '}<Code text={shown} /></> : null}</div>{sub}</>;
   if (input?.kind === 'edit') {
     return (
-      <Step kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused} line={line}
+      <Step kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused} line={line} resume={resume}
         detail={<FileDetail path={input.path} added={input.added} removed={input.removed} count={1} t={t} onFile={onFile} />} />
     );
   }
   if (!shown) return <Frame kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused}>{line}</Frame>;
-  return <Step kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused} line={line} detail={<pre className="command"><code>{shown}</code></pre>} />;
+  return <Step kind={frameKind} at={row.at} icon={GLYPH[kind] ?? DotOutline} refused={refused} line={line} resume={resume} detail={<pre className="command"><code>{shown}</code></pre>} />;
 }
 
 type OpenFile = (path: string, mode: 'diff' | 'file') => void;
@@ -207,18 +209,18 @@ function FileDetail({ path, added, removed, count, t, onFile }: { readonly path:
   );
 }
 
-function EditsLine({ row, t, onFile }: { readonly row: EditsRow; readonly t: Translate; readonly onFile?: OpenFile | undefined }) {
+function EditsLine({ row, t, onFile, resume }: { readonly row: EditsRow; readonly t: Translate; readonly onFile?: OpenFile | undefined; readonly resume?: ReactNode }) {
   return (
-    <Step kind="edit" at={row.at} icon={PencilSimple}
+    <Step kind="edit" at={row.at} icon={PencilSimple} resume={resume}
       line={<><div>{t('verb_edit')} <Code text={row.path} /></div><div className="sub"><Counts added={row.added} removed={row.removed} />{` · ${t('edits_count', { n: row.count })}`}</div></>}
       detail={<FileDetail path={row.path} added={row.added} removed={row.removed} count={row.count} t={t} onFile={onFile} />} />
   );
 }
 
-function ReadLine({ row, t, onFile }: { readonly row: ReadRow; readonly t: Translate; readonly onFile?: OpenFile | undefined }) {
+function ReadLine({ row, t, onFile, resume }: { readonly row: ReadRow; readonly t: Translate; readonly onFile?: OpenFile | undefined; readonly resume?: ReactNode }) {
   const [first = '', ...others] = row.paths;
   return (
-    <Step kind="read" at={row.at} icon={Eye}
+    <Step kind="read" at={row.at} icon={Eye} resume={resume}
       line={<div>{t('verb_read')} <Code text={first} />{others.length > 0 ? ` ${t(others.length === 1 ? 'and_more_one' : 'and_more_other', { n: others.length })}` : null}</div>}
       detail={(
         <ul className="read-paths">
@@ -251,16 +253,72 @@ function QuestionView({ row, view, t, onQuestion }: { readonly row: QuestionRow;
   );
 }
 
-function RowView({ row, view, t, onAnswer, onQuestion, onFile }: {
+// Resume from here (issue #272): what the service answered.
+export type ResumeOutcome = 'resumed' | 'owner' | 'failed';
+// Resume from here on a step: the session, the step's first event, the corrected instruction.
+type Resume = (session: string, seq: number, message: string) => Promise<ResumeOutcome>;
+
+// Resume from here, under a step's detail: the button opens the corrected
+// instruction, which says where the branch goes back to and that what
+// follows stays readable.
+export function ResumeFrom({ session, seq, commit, t, onResume }: { readonly session: string; readonly seq: number; readonly commit: string; readonly t: Translate; readonly onResume?: Resume }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const id = `resume-${session.replace(/[^\w-]/g, '')}-${seq}`;
+  if (!open) {
+    return (
+      <button type="button" className="link-button resume-open" data-act="resume_open" data-seq={seq} onClick={() => { setOpen(true); setNote(''); }}>
+        <ArrowCounterClockwise size={14} aria-hidden="true" />{t('resume_here')}
+      </button>
+    );
+  }
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const message = text.trim();
+    if (!message) { setNote(t('resume_empty')); return; }
+    setBusy(true);
+    const outcome = await (onResume?.(session, seq, message) ?? Promise.resolve<ResumeOutcome>('failed'));
+    setBusy(false);
+    if (outcome === 'resumed') { setOpen(false); setText(''); setNote(''); }
+    else setNote(t(outcome === 'owner' ? 'resume_owner' : 'resume_failed'));
+  };
+  return (
+    <form className="resume-form" data-seq={seq} onSubmit={(event) => void submit(event)}>
+      <label htmlFor={id} className="small">{t('resume_label')}</label>
+      <p className="faint small">{t('resume_where', { commit: shortCommit(commit) })}</p>
+      <Textarea id={id} maxLength={REPLAY_MAX} rows={3} value={text} disabled={busy} onChange={(event) => setText(event.target.value)} />
+      <div className="plan-actions">
+        <Button variant="ink" className="btn primary" type="submit" data-act="resume_send" disabled={busy}>{t('resume_send')}</Button>
+        <Button className="btn" data-act="resume_cancel" disabled={busy} onClick={() => { setOpen(false); setNote(''); }}>{t('resume_cancel')}</Button>
+      </div>
+      <p className="plan-note" role="status">{note}</p>
+    </form>
+  );
+}
+
+// Where a resumed ticket went on, or came from: the branch, the commit, and the instruction, folded.
+function ReplayLine({ row, view, t }: { readonly row: ReplayRow; readonly view: SessionView; readonly t: Translate }) {
+  const values = { who: who(row.by, view, t), branch: row.branch, commit: shortCommit(row.commit) };
+  return (
+    <Step kind="replay" at={row.at} icon={ArrowCounterClockwise}
+      line={<div>{t(row.side === 'left' ? 'replay_left' : 'replay_resumed', values)}</div>}
+      detail={<><p className="small">{t('replay_instruction')}</p><div className="prose">{row.message}</div></>} />
+  );
+}
+
+function RowView({ row, view, t, onAnswer, onQuestion, onFile, resume }: {
   readonly row: Row; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile | undefined;
+  readonly resume?: ReactNode;
 }) {
   switch (row.kind) {
     case 'read':
-      return <ReadLine row={row} t={t} onFile={onFile} />;
+      return <ReadLine row={row} t={t} onFile={onFile} resume={resume} />;
     case 'edits':
-      return <EditsLine row={row} t={t} onFile={onFile} />;
+      return <EditsLine row={row} t={t} onFile={onFile} resume={resume} />;
     case 'tool':
-      return <ToolLine row={row} view={view} t={t} onAnswer={onAnswer} onFile={onFile} />;
+      return <ToolLine row={row} view={view} t={t} onAnswer={onAnswer} onFile={onFile} resume={resume} />;
     // The session's prose is a row of the worklog, flat (lane 36's art
     // director); the person's own message keeps a quiet bubble.
     case 'message':
@@ -279,12 +337,14 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile }: {
       return <Frame kind="verdict" at={row.at} icon={Check}><div>{t(row.verdict === 'changes_requested' ? 'verdict_changes' : 'verdict_ok', { round: row.round })}</div></Frame>;
     case 'channel':
       return (
-        <Step kind="channel" at={row.at} icon={ArrowRight}
+        <Step kind="channel" at={row.at} icon={ArrowRight} resume={resume}
           line={<div>{t(row.from === 'reviewer' ? 'channel_request' : 'channel_answer', { round: row.round, limit: row.limit })}{row.afterMs === undefined ? null : <span className="sub">{` · ${t('channel_after', { time: duration(row.afterMs, t) })}`}</span>}</div>}
           detail={<div className="prose">{row.text}</div>} />
       );
     case 'plan':
       return <Frame kind="plan" at={row.at} icon={row.go ? Check : ListChecks}><div>{row.go ? goLine(row, view.me, t) : t(`row_plan_${row.confidence}`)}</div></Frame>;
+    case 'replay':
+      return <ReplayLine row={row} view={view} t={t} />;
   }
 }
 
@@ -294,8 +354,8 @@ export function HandoverRow({ handover, t }: { readonly handover: Handover; read
 
 // The thread of the ticket: each session's rows under its own view (its
 // requests answer it, its questions wait in it), a handover row between.
-export function Timeline({ view, t, onAnswer, onQuestion, onFile }: {
-  readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile;
+export function Timeline({ view, t, onAnswer, onQuestion, onFile, onResume }: {
+  readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile; readonly onResume?: Resume;
 }) {
   const parts = partsOf(view);
   const filter = view.filter ?? 'all';
@@ -304,7 +364,14 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile }: {
   if (entries.length === 0) return <Empty block icon={ChatText} text={t('timeline_empty')} />;
   const row = (entry: Extract<ThreadEntry, { kind: 'row' }>, index: number) => {
     const key = 'id' in entry.row ? `${entry.session}:${entry.row.kind}:${entry.row.id}` : `${entry.session}:${entry.row.kind}:${entry.row.at}:${index}`;
-    return <RowView key={key} row={entry.row} view={views.get(entry.session) ?? view} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} />;
+    // Each step of an author's thread resumes from the commit it began from,
+    // once the flow journaled its branch; not a step of the continuation a
+    // resume left, which the ticket's branch no longer holds.
+    const own = views.get(entry.session) ?? view;
+    const left = own.thread.rows.reduce((first, r) => (r.kind === 'replay' && r.side === 'left' ? Math.min(first, r.step) : first), Infinity);
+    const commit = own.summary.role === 'author' && entry.row.seq !== undefined && entry.row.seq < left ? stepCommit(own.thread.checkpoints ?? [], entry.row.seq) : undefined;
+    const resume = commit && entry.row.seq !== undefined ? <ResumeFrom session={entry.session} seq={entry.row.seq} commit={commit.commit} t={t} onResume={onResume} /> : undefined;
+    return <RowView key={key} row={entry.row} view={own} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} resume={resume} />;
   };
   // The whole ticket: an ended session a later one followed is folded into
   // one row (who, how many steps), unless the view saw it live.
@@ -334,7 +401,7 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile }: {
   return <>{out}</>;
 }
 
-const emptyThread = (part: TicketPart): SessionThread => ({ lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, ...(part.thread ?? {}) });
+const emptyThread = (part: TicketPart): SessionThread => ({ lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [], ...(part.thread ?? {}) });
 
 // Author and Reviewer filter the ticket's thread (lane 36): the whole
 // ticket, or one role's rows, once the ticket has two sessions.
@@ -758,7 +825,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const actingDetail = details.get(id);
   const view: SessionView = useMemo(() => ({
     summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps,
-    thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null },
+    thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [] },
     parts, filter, unfolded,
   }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));
@@ -960,6 +1027,18 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     setGesture(false);
   };
 
+  // Resume from here (flow/replay.ts): the ticket's new author joins this view, which follows it.
+  const resumeFrom: Resume = async (session, seq, message) => {
+    try {
+      await context.api(`/sessions/${encodeURIComponent(session)}/replay`, { method: 'POST', body: { seq, message } });
+      select('terminal');
+      context.inboxChanged();
+      return 'resumed';
+    } catch (error) {
+      return error instanceof ApiError && error.status === 403 ? 'owner' : 'failed';
+    }
+  };
+
   // The session plan's Go and Change (flow/plan-gate.ts).
   const planPost = async (path: string, body: unknown, failure: string): Promise<boolean> => {
     setGesture(true);
@@ -1012,7 +1091,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
                 <ThreadFilter view={view} t={t} onFilter={setFilter} />
                 <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}>
                   <TakeoverNotice view={view} t={t} why={terminal.kind === 'notice' ? terminal.why : undefined} />
-                  <Timeline view={view} t={t} onFile={openFile}
+                  <Timeline view={view} t={t} onFile={openFile} onResume={resumeFrom}
                     onAnswer={(requestId, kind, session) => void answer(requestId, kind, session)}
                     onQuestion={(requestId, given, chosen, session) => void answerQuestion(requestId, given, chosen, session)} />
                 </div>
