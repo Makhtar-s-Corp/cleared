@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PLAN_TABLES } from '../../../src/lead/plans/store.ts';
 import { DEFAULT_PLAN_CONFIG, PlanRunner, type PlanConfig } from '../../../src/lead/plans/runner.ts';
-import { retryContext } from '../../../src/lead/plans/retry.ts';
+import { isTestCommand, retryContext } from '../../../src/lead/plans/retry.ts';
 import { NOTIFY_TABLES } from '../../../src/notify/queue.ts';
 import type { FakeStep } from '../../../src/session/adapters/fake.ts';
 import { toolArgs, toolResult } from '../../../src/session/events.ts';
@@ -134,6 +134,8 @@ test('the retry context: the reviewer\'s last report and the last failing test r
   write('author-1', 1, toolResult('a-r', 'a', { kind: 'execute', output: `old failure token-1234\n${'x'.repeat(9000)}\nthe end`, cut: 0, isError: true }));
   write('author-1', 2, toolArgs('b', { kind: 'execute', command: 'ls' }));
   write('author-1', 2, toolResult('b-r', 'b', { kind: 'execute', output: 'nothing here', cut: 0, isError: true }));
+  write('author-1', 2, toolArgs('d', { kind: 'execute', command: 'cat test/missing.txt' }));
+  write('author-1', 2, toolResult('d-r', 'd', { kind: 'execute', output: 'cat: test/missing.txt: No such file', cut: 0, isError: true }));
   write('author-1', 3, toolArgs('c', { kind: 'execute', command: 'npm test' }));
   write('author-1', 3, toolResult('c-r', 'c', { kind: 'execute', output: 'all green', cut: 0, isError: false }));
   put('reviewer-1', 'reviewer', 4);
@@ -150,6 +152,13 @@ test('the retry context: the reviewer\'s last report and the last failing test r
   assert.match(context.tests!.output, /the end$/, 'its end kept, where a test runner says what failed');
   assert.doesNotMatch(context.tests!.output, /token-1234/, 'cleaned');
   assert.deepEqual(retryContext(t.store, 'LOCAL-999', (text) => text), { review: undefined, tests: undefined });
+});
+
+test('a test command is a test runner, not a line that holds the word test (issue 299)', () => {
+  for (const yes of ['npm test', 'npm run typecheck', 'npm run test:unit -- --watch=false', 'pnpm lint', 'npx vitest run', 'cd v2 && npm test', 'CI=1 npm test', 'node --test test/a.test.ts', 'pytest -x', 'python3 -m pytest', 'make test', 'cargo test', 'go test ./...'])
+    assert.ok(isTestCommand(yes), yes);
+  for (const no of ['cat test/x', 'ls tests', 'grep -r check src', 'git checkout test', 'echo lint', 'rm -rf test', 'npm install', 'npm run build', 'sed -n 1,5p vitest.config.ts', 'testify run'])
+    assert.ok(!isTestCommand(no), no);
 });
 
 test('a ticket parked on an unanswered question frees its slot: the item is parked, not counted, said in the thread, and the next item starts; the lead may start it again', async () => {

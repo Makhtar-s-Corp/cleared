@@ -131,3 +131,23 @@ test('a badly set up project stops the service with exit code 64 and a message',
   assert.equal(code, 64);
   assert.match(stderr, /CLEARED_V2_PROJECT_DIR is not set/);
 });
+
+test('the modules stop in reverse order, awaited, and a stop that fails does not hold the others (issue 299)', async () => {
+  const order: string[] = [];
+  const stopper = (name: string, fail = false) => ({ ...emptyModule, stop: async () => { await Promise.resolve(); order.push(name); if (fail) throw new Error('boom'); } });
+  const store = openStore(':memory:');
+  try {
+    const app = assemble({ sessions: emptyModule, users: stopper('users'), tickets: emptyModule, flow: stopper('flow', true), approval: emptyModule, inbox: emptyModule, lead: stopper('lead'), notify: emptyModule, knowledge: emptyModule }, { store });
+    const errors = console.error;
+    console.error = () => {};
+    try { await app.stop?.(); } finally { console.error = errors; }
+    assert.deepEqual(order, ['lead', 'flow', 'users']);
+  } finally {
+    store.close();
+  }
+});
+
+test('the flow module stops without having started, and twice', async () => {
+  await flow.stop?.();
+  await flow.stop?.();
+});

@@ -83,6 +83,10 @@ export type Module = {
   // not wait for the first request (the flow's restart recovery, the lead's
   // stopped sessions released). Never throws.
   readonly start?: (registry: Registry) => void;
+  // Called once at the service's stop, before the store closes: what a
+  // module started on a timer is ended and the pass it runs awaited.
+  // Never throws.
+  readonly stop?: () => Promise<void>;
 };
 
 // lead and notify: milestone 2 (docs/v2/milestone-2-plan.md, decision 14);
@@ -123,6 +127,7 @@ export type App = {
   readonly tables: readonly string[];
   readonly routes: readonly Route[];
   readonly start?: () => void;                         // each module's start, in module order (assemble sets it)
+  readonly stop?: () => Promise<void>;                 // each module's stop, in reverse module order, awaited (assemble sets it)
 };
 
 // The modules' tables and routes in module order, and the registry with
@@ -158,7 +163,12 @@ export function assemble(modules: Readonly<Record<ModuleName, Module>>, deps: Mo
       try { modules[name].start?.(registry); } catch (error) { console.error(`cleared-v2: the ${name} module could not start (${error instanceof Error ? error.name : typeof error})`); }
     }
   };
-  return { registry, tables, routes, start };
+  const stop = async () => {
+    for (const name of [...MODULE_NAMES].reverse()) {
+      try { await modules[name].stop?.(); } catch (error) { console.error(`cleared-v2: the ${name} module could not stop (${error instanceof Error ? error.name : typeof error})`); }
+    }
+  };
+  return { registry, tables, routes, start, stop };
 }
 
 export type Match =

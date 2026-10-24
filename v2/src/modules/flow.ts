@@ -69,6 +69,13 @@ const flow: Module = {
     });
     watchdog.startTimer();
   },
+  // Ends the watchdog's timer and awaits the pass it runs, so that the store
+  // does not close under it; a second start builds a new one.
+  stop: async () => {
+    const ending = watchdog;
+    watchdog = undefined;
+    await ending?.close();
+  },
 };
 
 export default flow;
