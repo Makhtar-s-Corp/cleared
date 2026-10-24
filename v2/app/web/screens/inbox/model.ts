@@ -47,6 +47,7 @@ import type { Translate } from '../../lib/i18n.ts';
 import type { CommandPart } from '../../lib/intent.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason, requestTitle, targetOf } from '../../lib/request.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
+import { closeFailureKey, type Closed } from '../../lib/close.ts';
 import type { Focus } from '../../shell/keys.ts';
 import { planStateLine } from '../../plan-panel/model.ts';
 import { clock, duration, estimate, fixed, since } from '../../lib/time.ts';
@@ -90,6 +91,8 @@ export type Local =
   | { readonly kind: 'plan_changed'; readonly at: string }     // a Change sent to its author
   | { readonly kind: 'decided'; readonly decision: Decided; readonly at: string }   // a contract or a knowledge item answered from this page
   | { readonly kind: 'chosen'; readonly position: number; readonly at: string }     // a variant chosen from this page (issue #271)
+  | Closed                                                     // the ticket closed from this page (issue #249)
+  | { readonly kind: 'close' }                                 // Close asked once: the reason's field is open
   | { readonly kind: 'settled' };                              // settled without the person
 
 export type Decided = 'approve' | 'send_back' | 'reject';
@@ -337,10 +340,11 @@ export async function rejectKnowledge(api: Api, item: KnowledgeItem, now: Date):
 }
 
 // What a handled contract or knowledge item says the owner did (its `outcome`).
-export function outcomeLine(item: ContractItem | KnowledgeItem, view: InboxView, t: Translate): string {
+export function outcomeLine(item: ContractItem | KnowledgeItem | ReleaseItem, view: InboxView, t: Translate): string {
   const outcome = item.outcome;
   if (!outcome) return t('handled_note');
   const values = { who: outcome.by === view.me.id ? t('by_you') : outcome.by, time: clock(outcome.at) };
+  if (item.kind === 'release' && outcome.decision === 'close') return t('closed_by', { ...values, reason: outcome.reason });
   if (item.kind === 'contract') return outcome.decision === 'send_back' ? t('contract_sent_back_by', { ...values, message: outcome.message }) : t('contract_validated_by', values);
   return t(outcome.decision === 'approve' ? 'knowledge_approved_by' : 'knowledge_rejected_by', values);
 }
@@ -378,7 +382,7 @@ export function decidedLine(local: Extract<Local, { kind: 'decided' }>, item: Co
   return t(`decided_${item.kind}_${local.decision}`, { time: clock(local.at) });
 }
 
-export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change'
+export type Gesture = 'approve' | 'undo' | 'send_back' | 'close' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change'
   | 'contract_approve' | 'contract_send_back' | 'knowledge_approve' | 'knowledge_reject' | 'variant_choose';
 
 // How a refusal of the service reads. An answer to a request that no longer
@@ -395,6 +399,9 @@ export function failure(error: unknown, gesture: Gesture): { readonly key: strin
       return { key: status === 503 ? 'approve_setup' : 'approve_failed', settled: false };
     case 'undo':
       return { key: status === 409 ? 'undo_late' : 'undo_failed', settled: false };
+    // 404 or 409: the ticket is done, approved, landing or gone; 400: the service refused the reason.
+    case 'close':
+      return { key: status === 403 ? 'decided_user' : closeFailureKey(status), settled: false };
     case 'send_back':
       return { key: status === 409 ? 'send_back_conflict' : 'send_back_failed', settled: false };
     // 409: approved elsewhere, replaced by a newer proposal or rejected; the

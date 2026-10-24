@@ -335,5 +335,17 @@
   "repair_gave_up": "Toujours en échec après {n} tentatives ({checks})\u00a0: rien de plus n'est tenté, à vous de décider",
   "repair_refused": "Pas de réparation\u00a0: la branche est une branche de base",
   "repair_checks_unnamed": "les contrôles",
-  "release_repair_gave_up": "{ticket} · Contrôles toujours en échec après {n} tentatives de réparation"
+  "release_repair_gave_up": "{ticket} · Contrôles toujours en échec après {n} tentatives de réparation",
+  "close": "Fermer",
+  "close_field": "Pourquoi la fermer\u202f?",
+  "close_rule": "Un ticket fermé n'est ni fusionné ni déployé. La carte reste dans l'historique avec votre raison.",
+  "close_send": "Fermer le ticket",
+  "close_keep": "La garder",
+  "close_empty": "Dites pourquoi le ticket est fermé.",
+  "close_long": "Une raison fait au plus {n} caractères.",
+  "close_conflict": "Le ticket n'a pas pu être fermé\u00a0: il est approuvé, terminé, ou il a changé d'état.",
+  "close_invalid": "Le service a refusé la raison\u00a0: un texte d'au plus 2000 caractères.",
+  "close_failed": "La fermeture n'a pas atteint le service. Réessayez.",
+  "closed_done": "Fermé à {time}. Rien n'a été fusionné. La carte reste dans l'historique.",
+  "closed_by": "Fermé par {who} à {time}\u00a0: «\u00a0{reason}\u00a0»"
 }

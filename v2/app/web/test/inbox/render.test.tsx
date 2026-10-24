@@ -76,7 +76,7 @@ test('with nothing chosen, the computer shows the first item, and the phone show
   assert.match(chosen, /<a class="back" href="#"/);
 });
 
-test('a release shows its announcement, the before and after, the sessions line, the change line and the two buttons', () => {
+test('a release shows its announcement, the before and after, the sessions line, the change line and its three buttons', () => {
   const view = viewOf({ selected: idOf('release'), open: true });
   const html = renderInbox(view, en);
   const shown = visibleText(html);
@@ -85,14 +85,14 @@ test('a release shows its announcement, the before and after, the sessions line,
     'Two testers out of two found it clearer. The heading changes on the list and on the archive, nothing else.',
     'What changes on screen', 'Desktop', 'Phone', 'Before', 'After',
     'Sessions', 'Opus wrote it in 2\u00a0min · Sonnet reviewed it in 6\u00a0min, one round', 'Change', 'PR #42', 'all checks green',
-    'Signed in as demo', 'Send back', 'Approve the release', '3f9c2a1',
+    'Signed in as demo', 'Close', 'Send back', 'Approve the release', '3f9c2a1',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-158-author">/);
   assert.match(html, /<a href="https:\/\/example\.invalid\/guestbook\/pull\/42"[^>]*>PR #42<\/a>/);
   assert.match(html, /<img[^>]*src="\/api\/service\/captures\/before-desktop\.svg"/);
   assert.match(html, /<img[^>]*src="\/api\/service\/captures\/after-desktop\.svg"/);
   assert.match(html, /<button[^>]*aria-pressed="true"[^>]*data-frame="desktop"/);
-  assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['send_back', 'approve']);
+  assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['close', 'send_back', 'approve']);
   assert.match(html, /aria-label="Approve the release: pull request 42 at 3f9c2a1d5e7b40c8a6f1d2e3b4c5a6978d0e1f2a"/, 'every version it approves is in its accessible name');
   const phone = renderInbox({ ...view, frame: 'phone' }, en);
   assert.match(phone, /<img[^>]*src="\/api\/service\/captures\/after-phone\.svg"/);
