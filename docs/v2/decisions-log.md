@@ -5007,3 +5007,21 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Resources.** No Docker object, no network, no tunnel, no secret; the tests listen on port 0 on loopback.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-batch-sessions`, after the tests and a checkpoint of Sonnet 5.5 (claude-sonnet-5-5) before the Orca restart.
+
+## 2026-10-25: Three gaps of milestone 2 closed: the plan's hold in the policy, the schedules' first tick, the schedule_failed line (the author's choices, lane `j2-plan-schedules`, P29, P33, P34, C12)
+
+**The need.** The matrix kept three lines `partial`: P29 (`flow/engine.ts` `policyFor` did not set `planning`, so the rule `plan.before_go` of `session/policy.ts` was tested but never reached a real harness), P33 and C12 (a service restarted with no browser open ran no schedule), P34 (lib's catalog had no `schedule_failed` line, so a failed run said "a health problem was detected").
+
+**Decision.**
+1. **P29, the policy.** `#launch` gives a plan author's policy `planning: true` from its start, so the hold is on before the gate exists (a harness may ask the policy during `start`). `policyFor` then reads the gate: held while its phase is not `working` (`planning`, `held`, `unplanned`, and again after a Change), free from the Go. The session is found by its policy object (`live.input.policy === input.policy`), which an adapter's copy of the input keeps; a policy found nowhere keeps the start's value, which fails closed. A reviewer, a lead and a session with no plan are never `planning`.
+2. **P33, the first tick.** The scheduler was already built at start (P62), but its timer first ticks a minute later. Measured before the change: the due schedule was taken after 61 s, not within 20 s. `FlowEngine.recovered` keeps the restart recovery the runtime starts, and the lead module's `start` ticks the scheduler once it is done: the recovery goes first, so it cannot put back to Todo a ticket the tick just started. The claim is the same `UPDATE` as before, so a schedule is taken once whichever tick finds it. A failed first tick is said by the error's name. A route that builds the plans later (a service whose lead was off at start) does not tick at once.
+3. **P34, the catalog.** `schedule_failed` is in `HEALTH_CODES` (`lib/notify/contract.mjs`) with `notify_health_schedule_failed` in `lib/i18n/en.json` ("a scheduled run failed") and `fr.json` ("une exécution planifiée a échoué"). `week_stop` already had its line.
+4. **Lines.** P180 (the policy), P181 (the first tick), P182 (the catalog line); P29, P33, P34 and C12 are `done`.
+
+**Tests first.** `9901940` (P29), `0ad8836` (P34) and `af6af57` (P33) were committed before any code. On the old code: `test/flow/plan-policy.test.ts` failed (`planning` undefined), `test/notify.test.mjs`'s new test failed (the unknown-code sentence), `test/schedules/restart.test.ts` failed (no run within 20 s; with 80 s it passed at 61 s, which is the timer's minute). The code followed in `24066f5` and `51b8a20`. `af6af57` also renamed the third P29 test, which was named for a reviewer and tested a session with no plan.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no network, no tunnel, no secret, no real account; `restart.test.ts` starts the service as a process on a free loopback port, the lead on the rehearsal's fake adapter, every folder in the temporary directory.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-plan-schedules`.
