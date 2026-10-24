@@ -110,6 +110,18 @@ export type QuestionItem = InboxBase & {
   readonly sessionId: SessionId;
   readonly requestId: string;
   readonly questions: readonly Question[];
+  // A team's question (issue #290): at `at` the Lead is asked to decide, by
+  // `leadUntil`; then `answers`, the session's declared answer (each
+  // question's "(Recommended)" option), apply, or with none the ticket is
+  // parked. `leadAt`: when the Lead was asked. The lead's own questions have none.
+  readonly timeout?: QuestionTimeout;
+};
+
+export type QuestionTimeout = {
+  readonly at: string;
+  readonly leadUntil: string;
+  readonly answers: Readonly<Record<string, string>> | null;
+  readonly leadAt?: string;
 };
 
 type Capture = { readonly desktop: string | null; readonly phone: string | null };   // image URLs, or none yet
@@ -383,7 +395,9 @@ export type HumanEdit = {
 
 // ---------------------------------------------------------------- milestone 2: plans
 
-export type PlanItemState = 'waiting' | 'ready' | 'running' | 'needs_approval' | 'landed' | 'put_back' | 'held' | 'cancelled';
+// `parked`: its ticket's question waited past its delay and the lead's,
+// with no declared answer (issue #290): its slot is free, the lead starts it again.
+export type PlanItemState = 'waiting' | 'ready' | 'running' | 'needs_approval' | 'landed' | 'put_back' | 'held' | 'parked' | 'cancelled';
 
 // An estimate from the project's history (section 5.2): medians of `samples`
 // done tickets of the same size and lane, or the defaults below 3 samples.

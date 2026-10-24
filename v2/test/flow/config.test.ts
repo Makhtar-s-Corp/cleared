@@ -98,11 +98,14 @@ const M1_ENV = {
 test('the milestone 1 variables make a one-service workspace, and the flow configuration is the one milestone 1 had', () => {
   const config = loadFlowConfig(M1_ENV);
   assert.ok(config);
-  const { workspace, authorTools, steps, ...rest } = config;
+  const { workspace, authorTools, steps, questionTimeoutMs, questionLeadMs, ...rest } = config;
   // The author's host tools and the session plan's gate (lane 17), and the
-  // ticket's steps (lane 23), on in every configuration the service reads.
+  // ticket's steps (lane 23), on in every configuration the service reads;
+  // so is a team's question's delay (issue #290).
   assert.equal(authorTools, true);
   assert.equal(steps, true);
+  assert.equal(questionTimeoutMs, 30 * 60_000);
+  assert.equal(questionLeadMs, 10 * 60_000);
   // The fields and values of the milestone 1 FlowConfig, unchanged.
   assert.deepEqual(rest, {
     project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://github.com/example-org/cleared-example-guestbook.git',

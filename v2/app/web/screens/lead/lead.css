@@ -112,6 +112,8 @@
 .item-state.running { color: var(--text); font-weight: var(--weight-strong); }
 .item-state.waiting, .item-state.cancelled { color: var(--text-faint); }
 .item-state.held, .item-state.put_back { color: var(--danger-text); }
+/* Parked waits for an answer, it did not fail. */
+.item-state.parked { color: var(--awaiting-text); }
 .lane { padding: 2px 8px; border-radius: 999px; font-size: var(--text-sm); white-space: nowrap; }
 .lane.full { background: var(--surface-muted); color: var(--text-secondary); }
 .lane.fast { background: var(--surface-muted); color: var(--text-secondary); }   /* a lane is a fact, not a success (lane 38) */

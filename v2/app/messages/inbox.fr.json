@@ -136,6 +136,7 @@
   "plan_item_landed": "Livré",
   "plan_item_put_back": "Remis à faire",
   "plan_item_held": "Retenu",
+  "plan_item_parked": "Mis de côté",
   "plan_item_cancelled": "Annulé",
   "plan_estimate": "{time} · {share}",
   "plan_week_share": "{n}\u202f%",
