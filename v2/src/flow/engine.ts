@@ -239,6 +239,7 @@ const HARNESS = 'claude-code' as const;
 // a ticket with this label, and its author is Haiku (unless Haiku reviews).
 export const QUICK_LABEL = 'Quick';
 export const QUICK_MODEL = 'claude-haiku-5-5';
+export const CLOSE_REASON_MAX = 2000;                              // the longest reason a Close gives
 const SERVICE: Actor = { kind: 'agents', id: 'cleared-v2' };
 const FLOW_USER = 'cleared';                                       // the author of the message that reopens a session
 const QUESTION_DEFAULT = 'question_default';                       // the rule of an answer the session declared, applied at its delay's end
@@ -528,8 +529,9 @@ export class FlowEngine {
 
   // A release item ends when its approval does, or when a newer one replaces
   // it: its approval step closes on the session it started on.
-  #settleRelease(id: string, ticket: TicketId, project: string, by: UserId | 'system'): boolean {
-    if (!this.inbox.handle(id, by)) return false;
+  // A close keeps its reason on the card (`closed`).
+  #settleRelease(id: string, ticket: TicketId, project: string, by: UserId | 'system', closed?: string): boolean {
+    if (!(closed === undefined ? this.inbox.handle(id, by) : this.inbox.closeRelease(id, by, closed))) return false;
     const sessionId = this.inbox.releaseSession(id);
     if (!sessionId) return true;
     this.#step({ id: sessionId, ticket, project }, 'STEP_FINISHED', 'approval');
@@ -1337,21 +1339,43 @@ export class FlowEngine {
   // tickets aside, so that each run starts with nothing of theirs open
   // (scripts/proof-base.ts).
   async setAside(id: TicketId, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
+    const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
+    return this.#takeOut(id, by, { message: 'The owner set the ticket aside: this session was stopped.', code: 'set_aside', reason: 'set_aside', note, refusal: 'it is not set aside' });
+  }
+
+  // Close (POST /api/tickets/:id/close, issue #249): a ticket that should
+  // never ship, closed with the reason the owner gives. It is set aside
+  // (the same service side, #takeOut) and also says why: the release card
+  // is handled with an outcome holding the reason, who and when, so it
+  // stays in the history, and the comment on the ticket keeps the reason.
+  // It never merges or deploys. A done ticket has shipped: it is refused.
+  async closeTicket(id: TicketId, reason: string, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
+    const given = reason.trim();
+    if (given === '') throw new FlowError('invalid', 'a Close says why');
+    if (given.length > CLOSE_REASON_MAX) throw new FlowError('invalid', `a Close’s reason is at most ${CLOSE_REASON_MAX} characters`);
+    const note = `The owner closed this ticket (${by}): ${given}\nIts sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.`;
+    return this.#takeOut(id, by, { message: 'The owner closed the ticket: this session was stopped.', code: 'closed', reason: 'closed', note, refusal: 'it is not closed', closed: given, refuseDone: true });
+  }
+
+  async #takeOut(id: TicketId, by: UserId, how: {
+    readonly message: string; readonly code: string; readonly reason: PutBackReason; readonly note: string; readonly refusal: string;
+    readonly closed?: string; readonly refuseDone?: boolean;
+  }): Promise<{ readonly sessions: number; readonly items: number }> {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
     if (!ticket || ticket.project !== this.config.project) throw new FlowError('not_found', `unknown ticket ${id}`);
-    if (ticket.status === tickets.states.go) throw new FlowError('conflict', `${id} is in “${ticket.status}”: it is not set aside`);
-    if (this.#trains.latest(id)?.state === 'landing') throw new FlowError('conflict', `the train of ${id} is landing: it is not set aside`);
+    if (ticket.status === tickets.states.go) throw new FlowError('conflict', `${id} is in “${ticket.status}”: ${how.refusal}`);
+    if (how.refuseDone && ticket.status === tickets.states.done) throw new FlowError('conflict', `${id} is in “${ticket.status}”: ${how.refusal}`);
+    if (this.#trains.latest(id)?.state === 'landing') throw new FlowError('conflict', `the train of ${id} is landing: ${how.refusal}`);
     const done = ticket.status === tickets.states.done;
-    const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
-    const { sessions, items } = await this.#stopAll(id, by, 'The owner set the ticket aside: this session was stopped.', 'set_aside', note);
+    const { sessions, items } = await this.#stopAll(id, by, how.message, how.code, how.note, how.closed);
     if (done) return { sessions, items };
-    if (ticket.status !== tickets.states.todo) await this.#putBack(id, note, 'set_aside');
+    if (ticket.status !== tickets.states.todo) await this.#putBack(id, how.note, how.reason);
     else {
       this.#origins.delete(id);
       this.#steps.hold(id);
-      this.#dropVariants(id, note);
-      await tickets.comment(id, note, SERVICE).catch(() => undefined);
+      this.#dropVariants(id, how.note);
+      await tickets.comment(id, how.note, SERVICE).catch(() => undefined);
     }
     return { sessions, items };
   }
@@ -1359,7 +1383,7 @@ export class FlowEngine {
   // Every session of the ticket stops, `message` on each live one's thread
   // under `code`, and everything of it that waits in the inbox is settled; a
   // train not yet approved is halted (Set aside, Resume from here).
-  async #stopAll(id: TicketId, by: UserId, message: string, code: string, note: string): Promise<{ readonly sessions: number; readonly items: number }> {
+  async #stopAll(id: TicketId, by: UserId, message: string, code: string, note: string, closed?: string): Promise<{ readonly sessions: number; readonly items: number }> {
     // No step of it starts while its sessions stop.
     this.#active.delete(id);
     let sessions = 0;
@@ -1375,7 +1399,7 @@ export class FlowEngine {
     let items = 0;
     for (const item of this.inbox.items()) {
       if (item.ticket !== id || item.state !== 'waiting') continue;
-      if (item.kind === 'release' ? this.#settleRelease(item.id, id, item.project, by) : this.inbox.handle(item.id, by)) items++;
+      if (item.kind === 'release' ? this.#settleRelease(item.id, id, item.project, by, closed) : this.inbox.handle(item.id, by)) items++;
     }
     this.#trains.haltActive(id);
     return { sessions, items };

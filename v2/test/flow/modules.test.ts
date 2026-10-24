@@ -41,7 +41,7 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
     'GET /api/tickets/:id/variants', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback',
     'POST /api/sessions/:id/giveback', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/replay', 'POST /api/sessions/:id/takeover',
     'POST /api/sessions/:id/terminal/close', 'POST /api/sessions/:id/terminal/input', 'POST /api/sessions/:id/terminal/open', 'POST /api/sessions/:id/terminal/resize',
-    'POST /api/tickets', 'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/variants/:id/choose', 'PUT /api/sessions/:id/files/*',
+    'POST /api/tickets', 'POST /api/tickets/:id/close', 'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/variants/:id/choose', 'PUT /api/sessions/:id/files/*',
   ]);
   assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
   assert.equal(inbox.tables.length, 1);
@@ -53,7 +53,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
-  assert.equal(routeKeys(app).length, 30);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272)
+  assert.equal(routeKeys(app).length, 31);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), and Close (issue #249)
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor', 'codex']);
   assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
 });

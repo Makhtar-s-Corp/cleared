@@ -252,5 +252,16 @@
   "resume_owner": "Only the owner account resumes a ticket from a step.",
   "replay_left": "Resumed from a step above by {who}: a new session goes on below, on {branch} from {commit}. What follows that step here is the earlier attempt.",
   "replay_resumed": "Resumed by {who} from a step of the earlier session, on {branch} from {commit}.",
-  "replay_instruction": "Corrected instruction"
+  "replay_instruction": "Corrected instruction",
+  "close": "Close",
+  "close_field": "Why close this ticket?",
+  "close_rule": "A closed ticket is not merged or deployed. The card stays in the history with your reason.",
+  "close_send": "Close the ticket",
+  "close_keep": "Keep it",
+  "close_empty": "Say why the ticket is closed.",
+  "close_long": "A reason has at most {n} characters.",
+  "close_conflict": "The ticket could not be closed: it was approved, it is done, or it moved.",
+  "close_invalid": "The service refused the reason: some text of at most 2000 characters.",
+  "close_failed": "Closing did not reach the service. Try again.",
+  "closed_done": "Closed at {time}. Nothing was merged. The card stays in the history."
 }
