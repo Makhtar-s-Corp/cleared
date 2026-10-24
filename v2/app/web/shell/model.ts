@@ -45,6 +45,7 @@ export const NAV: readonly NavItem[] = [
   { screen: 'inbox', href: '/inbox', label: 'nav_inbox', go: 'inbox', chord: ['G', 'I'] },
   { screen: 'session', href: '/sessions', label: 'nav_sessions', go: 'sessions', chord: ['G', 'S'] },
   { screen: 'lead', href: '/lead', label: 'nav_plans', go: 'lead', chord: ['G', 'P'] },
+  { screen: 'consumption', href: '/consumption', label: 'nav_consumption', go: 'consumption', chord: ['G', 'C'] },
 ];
 
 export const hrefOf = (to: GoScreen): string => NAV.find((item) => item.go === to)?.href ?? '/';

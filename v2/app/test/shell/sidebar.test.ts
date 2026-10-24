@@ -11,8 +11,8 @@ import type { LeadState, SessionSummary } from '../../../src/api/types.ts';
 
 const lead = (phase: LeadState['phase']): LeadState => ({ phase } as LeadState);
 
-test('the four screens in order, each with its address and the chord that reaches it', () => {
-  assert.deepEqual(NAV.map((item) => [item.screen, item.href]), [['tower', '/'], ['inbox', '/inbox'], ['session', '/sessions'], ['lead', '/lead']]);
+test('the screens in order, each with its address and the chord that reaches it', () => {
+  assert.deepEqual(NAV.map((item) => [item.screen, item.href]), [['tower', '/'], ['inbox', '/inbox'], ['session', '/sessions'], ['lead', '/lead'], ['consumption', '/consumption']]);
   for (const item of NAV) {
     const chord = SHORTCUTS.find((s) => s.action.kind === 'go' && s.action.to === item.go);
     assert.ok(chord, item.screen);

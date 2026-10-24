@@ -86,6 +86,7 @@ import { PLAN_GO_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } f
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
+import type { LeverReader } from '../consumption/levers.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
@@ -154,6 +155,10 @@ export type FlowDeps = {
   // Releases the containers and networks of stopped sessions, by name
   // (Docker.releaseStopped): after the restart recovery (issue 265).
   readonly release?: (sessions: readonly SessionId[]) => Promise<{ readonly containers: readonly string[]; readonly networks: readonly string[] }>;
+  // The Consumption screen's levers (consumption/levers.ts): the author model
+  // of the sessions that start from now on and the most steps run at once.
+  // Nothing is overridden when absent.
+  readonly levers?: LeverReader;
 };
 
 export type FlowErrorKind = 'not_found' | 'conflict' | 'invalid' | 'unavailable';
@@ -257,6 +262,7 @@ export class FlowEngine {
   #runner: TrainRunner;
   #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
   #release: FlowDeps['release'];
+  #levers: LeverReader | undefined;
   #resuming = new Set<SessionId>();                                 // sessions whose container a resume is starting: never released
   #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
   #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
@@ -278,6 +284,7 @@ export class FlowEngine {
     this.#workspace = workspaceOf(deps.config);
     this.#locks = deps.locks;
     this.#release = deps.release;
+    this.#levers = deps.levers;
     this.#trains = new TrainStore(deps.store.db, this.#now);
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
@@ -810,7 +817,8 @@ export class FlowEngine {
         await this.#stepsDone(id);
         break;
       }
-      const limit = Math.max(1, this.#origins.get(id)?.maxParallel ?? STEP_PARALLEL);
+      const planned = Math.max(1, this.#origins.get(id)?.maxParallel ?? STEP_PARALLEL);
+      const limit = Math.min(planned, this.#levers?.read().maxLanes ?? planned);
       if (steps.filter((step) => step.state === 'running').length >= limit) break;
       const next = steps.find((step) => step.state === 'waiting'
         && step.after.every((position) => steps.find((other) => other.position === position)?.state === 'done')
@@ -1115,8 +1123,15 @@ export class FlowEngine {
   // Haiku for a Quick ticket, unless Haiku reviews it or a service it
   // touches is `full` (decision 24), which refuses the fast lane.
   #authorModel(ticket: Ticket): string {
-    if (!ticket.labels.includes(QUICK_LABEL) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.config.authorModel;
-    return this.#servicesOf(ticket).some((service) => service.sensitivity === 'full') ? this.config.authorModel : QUICK_MODEL;
+    if (!ticket.labels.includes(QUICK_LABEL) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.#chosenModel(ticket);
+    return this.#servicesOf(ticket).some((service) => service.sensitivity === 'full') ? this.#chosenModel(ticket) : QUICK_MODEL;
+  }
+
+  // The configured author model, or the one the owner chose on the Consumption
+  // screen, unless the ticket's reviewer is on that model: the reviewer is another one.
+  #chosenModel(ticket: Ticket): string {
+    const chosen = this.#levers?.read().model;
+    return chosen && chosen !== this.#reviewerModel(ticket) ? chosen : this.config.authorModel;
   }
 
   // The reviewer a `reviewer:<model>` sensitivity names, on the first service
