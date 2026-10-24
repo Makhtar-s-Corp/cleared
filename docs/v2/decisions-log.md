@@ -4976,10 +4976,9 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** The tests were committed alone in `0b009a9`, before any code: there, `test/flow/batch.test.ts`, `test/flow/batch-routes.test.ts` and `app/web/test/tower-batch.test.tsx` do not load (`flow/batch.ts` and the model's exports do not exist), the route counts of `test/api/types.test.ts`, `test/flow/api.test.ts` and `test/flow/modules.test.ts` fail, and the browser test calls `lanes` and `quota`, which the fixtures did not have.
 
-**Checks** (after merging `origin/v2` at `cb4badc`, pull requests 316, 318, 319, 320 and 322). `npm run typecheck` and `npm run build` pass. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1859 tests, 1852 pass, 2 skipped, 5 fail. All 278 Vitest tests pass. The batch browser test passes in French and in English. The run was on a loaded machine (load average 32 on 12 cores, other lanes running):
+**Checks** (after merging `origin/v2` at `cb4badc`, pull requests 316, 318, 319, 320 and 322). `npm run typecheck` and `npm run build` pass. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1874 tests, 1870 pass, 2 skipped, 2 fail. All 278 Vitest tests pass. The batch browser test passes in French and in English.
 - `app/test/notify/browser.test.ts` ("a headless browser registers the worker...") fails the same way on `origin/v2` in this environment, checked in a temporary worktree.
-- `test/mcp/followups.test.ts` ("the server process whose client closed its stdout...", a write EPIPE) passes 3 of 3 when run alone.
-- `app/test/polish/first-paint-browser.test.ts`, `app/test/session/editor-browser.test.ts` and `app/test/foundation/budget-browser.test.ts` timed out under the load. Run alone right after, all three pass.
+- `app/test/foundation/budget-browser.test.ts` ("twenty switches") measured a p95 of 110.7 ms against its 100 ms budget in the full run, where the test files run in parallel. Its request and document assertions pass. Run alone three times, its median p95 is 35.8 to 38.7 ms on this branch, against 31.6 to 33.8 ms on `origin/v2` in a temporary worktree: the Tower's extra `/batches` read costs about 4 ms, far under the budget. In the earlier runs of this lane, under heavy load (load average 32 on 12 cores), it, `first-paint-browser`, `editor-browser` and `test/mcp/followups.test.ts` also failed once each, and each passed when run alone.
 
 `npm run guard -- --base origin/v2`: nothing refused.
 
