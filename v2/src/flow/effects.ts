@@ -16,6 +16,7 @@ import { forgeEnvironments, publish } from '../workspace/publish.ts';
 import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
 import { failedChecks, jobOf, logTail } from './ci-repair.ts';
+import { closePullRequest } from './pr-close.ts';
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
@@ -301,6 +302,14 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
         checks.push({ ...check, log });
       }
       return { head: failures.head, checks: [...checks, ...failures.checks.slice(5)] };
+    },
+
+    // A Close closes the ticket's pull request (issue #249, P114), through
+    // gh on the host as the repair reads one; never --delete-branch.
+    async closePullRequest({ pr, branches, reason, service }) {
+      const { gh } = await forge(service);
+      const { dir, repo, base } = of(service);
+      return closePullRequest({ pr, repo, dir, base, branches, reason, env: gh });
     },
 
     // What the published head changes against the base, read in the

@@ -4911,3 +4911,28 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-handover-codex`.
 
+
+## 2026-10-24: Owner decision: closing a ticket in Cleared closes its pull request on GitHub (P114, issue #249, lane `j3-close-ticket-pr`)
+
+**Decision (the owner, 2026-10-24 at 23:51).** Closing a ticket in Cleared also closes its pull request on GitHub, with a comment that gives the reason for the Close. The branch is never deleted. This answers the question P114 left open on 2026-10-24 (the Close of P110 to P113 settled the card and the ticket and left the forge as it was, see "Close a release card or a ticket", item 5).
+
+**What the author did with it (lane `j3-close-ticket-pr`, matrix P114 and P170 to P173).**
+1. **Through gh on the host, as the CI repair is (P77).** The pull request is read and closed with the host's `gh` and the forge's credential (`flow/pr-close.ts`, the new `closePullRequest` effect of `FlowEffects`, wired in `flow/effects.ts` on the service's repository). No session touches the forge. The effect is optional: an engine without it closes the ticket and leaves the forge as it is.
+2. **Only a pull request Cleared opened.** The pull requests are the ones of the ticket's release cards, which Cleared makes from what it publishes (a repair reuses the pull request, so the cards of one ticket name it once; a train closes one per service, on that service's repository). `gh pr view` must then show a head that is one of the ticket's own branches (`cleared/<ticket>`, or the branch of a resume, issue #272). A pull request on any other branch is refused, a head that is the service's base or `main` or `master` is refused whatever the caller lists (`onBase`, the repair's rule): never on main.
+3. **Idempotent.** A pull request already closed or already merged is left alone, with no comment and no error, so a second Close, or a Close after an approval, does nothing on the forge.
+4. **The comment gives the reason.** `gh pr close <n> --repo <repo> --comment "Closed from Cleared: <reason>"` followed by a line that says the branch is kept. The reason is the owner's text (1 to 2000 characters, already checked by the Close) and reaches gh as one argument inside that sentence, so it can never be read as a flag. `--delete-branch` is never passed, and a test reads every argument of every call to check it.
+5. **A failure is said and never blocks.** The ticket is taken out of the flow first (the Close of P110 is unchanged), then the pull requests are closed. A pull request that gh cannot close, or that is refused, is said in a comment on the ticket ("the pull request #n was not closed on GitHub: close it by hand if it should be"), with the end of gh's message cut to 300 characters, and in the service's log by the error's name only. The Close answers as before.
+6. **Not changed.** The API's answer, the routes and the screens. A done ticket is still refused before anything is done, so no pull request of a shipped ticket is touched. The proof's own script still closes its pull requests itself (P51).
+
+**Not done, and why.**
+- A pull request that no release card names (published, then its card gone) is not found; a ticket that never published has none. The owner closes those on the forge.
+- The Close's screen does not say whether the pull request was closed; the ticket's comment says it when it was not. A line on the card would be a lane of its own.
+- The real `gh` was not run: the tests use a fake `gh` on PATH that records its arguments, as `test/workspace/publish.test.ts` does. Closing a real pull request is the owner's check on the first real Close.
+
+**Tests first.** `test/flow/close-pr.test.ts` and a case of `test/flow/train.test.ts` were committed alone (`e9c3c8d`) and failed on `origin/v2` (no `flow/pr-close.ts`, no effect). With the code, the 14 tests of `close-pr.test.ts` and the train case pass.
+
+**Checks.** `npm run typecheck`; the tests; `npm run guard -- --base origin/v2`.
+
+**Resources.** No Docker object, no network (a fake `gh` on PATH), no tunnel, no secret. `npm ci` in `v2/` only. The first piloted project untouched.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-close-ticket-pr`.

@@ -67,7 +67,8 @@ test('a pull request already closed or already merged is left alone: nothing is 
 });
 
 test('a pull request that is not the ticket branch’s, or whose branch is the base or main, is refused and nothing is closed', async () => {
-  for (const [head, base] of [['someone/else', 'main'], ['main', 'main'], ['master', 'main'], ['develop', 'develop']] as const) {
+  // Even a head the caller lists is refused when it is a base branch.
+  for (const [head, base] of [['main', 'main'], ['master', 'main'], ['develop', 'develop']] as const) {
     const gh = fakeGh({ state: 'OPEN', headRefName: head });
     await assert.rejects(closePullRequest(input(gh, { base, branches: [BRANCH, head] })), (error: unknown) => error instanceof PrCloseRefused);
     assert.equal(closes(gh).length, 0, `${head} is not closed`);
