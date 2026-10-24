@@ -395,3 +395,44 @@ function baseResult(over: Partial<ProofResult> = {}): ProofResult {
     notifications: null, tickets: {}, gestures: [], planDoneAt: null, stand_ins: [], notificationsSkipped: null, loginCuts: [], sessionPlans: [], cards: [], leftForOwner: { knowledge: 0, contract: 0 }, ...over,
   };
 }
+
+// ---- issue 285: a run that took over an approved plan ----------------------------
+
+test('a plan taken over: an item already started reads as unseen, not as kept or broken; one still waiting is read as before', () => {
+  const t = newTimeline();
+  // The first reading after the take-over: 2 had landed, 3 was running, 5 waited.
+  track(t, snap('2026-10-24T17:00:00.000Z', { plan: { id: 'p1', state: 'approved', items: items(['put_back', 'landed', 'running', 'held', 'waiting']) } }));
+  const atResume = { 1: 'put_back', 2: 'landed', 3: 'running', 4: 'held', 5: 'waiting' };
+  assert.equal(orderCheck(t, 3, 2).state, 'done', 'without the take-over, the same reading would pass');
+  assert.deepEqual(orderCheck(t, 3, 2, atResume), { state: 'open', note: 'item 3 was running when the run took the plan over: its start came before, unseen' });
+  track(t, snap('2026-10-24T18:00:00.000Z', { plan: { id: 'p1', state: 'approved', items: items(['put_back', 'landed', 'landed', 'held', 'running']) } }));
+  assert.deepEqual(orderCheck(t, 5, 3, atResume), { state: 'done', note: 'item 5 started at 2026-10-24T18:00:00.000Z, after item 3 landed at 2026-10-24T18:00:00.000Z' });
+});
+
+test('the durations of a run that took a plan over: the take-over, the blockage that stopped step 7, the times before it named so', () => {
+  const text = renderDurations(baseResult({
+    steps: [{ n: 1, name: 'goal', status: 'skipped', seenAt: '2026-10-24T17:00:00.000Z', note: 'took over plan p1' }],
+    times: { resumed_at: '2026-10-24T17:00:00.000Z' },
+    items: {
+      1: { title: 'Entries as JSON', ticket: 'LOCAL-33', states: { landed: '2026-10-24T17:00:05.000Z' } },
+      2: { title: 'Trimmed names', ticket: 'LOCAL-34', states: { put_back: '2026-10-24T17:00:05.000Z', running: '2026-10-24T17:00:40.000Z' } },
+      3: { title: 'Names in the feed', ticket: 'LOCAL-35', states: { parked: '2026-10-24T19:00:00.000Z' } },
+    },
+    resumed: { planId: 'p1', at: '2026-10-24T17:00:00.000Z', items: { 1: 'landed', 2: 'put_back', 3: 'waiting' } },
+    blocked: { since: '2026-10-24T19:00:00.000Z', line: 'plan p1 has nothing running and nothing to approve: 3 (LOCAL-35) parked', failed: true },
+    planDoneAt: null,
+  }));
+  for (const expected of [
+    'Took over plan p1 at 2026-10-24T17:00:00.000Z, its items then 1:landed 2:put_back 3:waiting: no goal was sent and nothing before the take-over is measured.',
+    'Blocked since 2026-10-24T19:00:00.000Z: plan p1 has nothing running and nothing to approve: 3 (LOCAL-35) parked. Step 7 stopped on it.',
+    '| taken over → plan done | the plan is not done |',
+    '| 1 | Entries as JSON | LOCAL-33 |  |  | landed before the take-over |  |',
+    '| 2 | Trimmed names | LOCAL-34 | 2026-10-24T17:00:40.000Z |  |  | 2026-10-24T17:00:05.000Z |',
+    '| 3 | Names in the feed | LOCAL-35 |  |  |  | 2026-10-24T19:00:00.000Z |',
+  ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
+  assert.ok(!text.includes('goal sent → plan done'), text);
+  const done = renderDurations(baseResult({ times: { resumed_at: '2026-10-24T17:00:00.000Z' }, resumed: { planId: 'p1', at: '2026-10-24T17:00:00.000Z', items: {} }, planDoneAt: '2026-10-24T20:30:00.000Z', blocked: { since: '2026-10-24T18:00:00.000Z', line: 'x', failed: false } }));
+  assert.ok(done.includes('| taken over → plan done | 3 h 30 |'), done);
+  assert.ok(done.includes('Was blocked since 2026-10-24T18:00:00.000Z: x'), done);
+  assert.ok(!renderDurations(baseResult()).includes('Took over'), 'a run that sent its goal says nothing of a take-over');
+});

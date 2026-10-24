@@ -81,8 +81,12 @@ export function track(timeline: Timeline, snap: Snapshot): Timeline {
 export type Outcome = { readonly state: 'done' | 'open' | 'broken'; readonly note: string };
 
 // "3 after 2" (planted commitment 3): item `item` starts only once item
-// `after` landed. Read from the first time each was seen so.
-export function orderCheck(timeline: Timeline, item: number, after: number): Outcome {
+// `after` landed. Read from the first time each was seen so. A run that took
+// over a plan (issue 285) gives each item's state at the take-over: an item
+// that had already started then started unseen, so its order is not read.
+export function orderCheck(timeline: Timeline, item: number, after: number, atResume?: Readonly<Record<number, string>>): Outcome {
+  const before = atResume?.[item];
+  if (before !== undefined && before !== 'waiting' && before !== 'ready') return { state: 'open', note: `item ${item} was ${before} when the run took the plan over: its start came before, unseen` };
   const started = timeline.items[item]?.states.running;
   const landed = timeline.items[after]?.states.landed;
   if (!started) return { state: 'open', note: `item ${item} has not started${landed ? `; item ${after} landed at ${landed}` : ''}` };
@@ -583,6 +587,13 @@ export type ProofResult = {
   readonly sessionPlans: readonly SessionPlanFact[];       // read from the ledger: empty when it was not
   readonly cards: readonly ReleaseCard[];                  // each release card the morning approved, as it was shown
   readonly leftForOwner: { readonly knowledge: number; readonly contract: number };
+  // A run that took over an approved plan (PROOF_RESUME_PLAN, issue 285):
+  // the plan, when, and each item's state then. Steps 1 to 3 are skipped and
+  // the measures run from `at`.
+  readonly resumed?: { readonly planId: string; readonly at: string; readonly items: Readonly<Record<number, string>> } | null;
+  // The last blockage the run saw (proof-plan.ts): since when, what, and
+  // whether it outlasted PROOF_STUCK_MINUTES and failed step 7.
+  readonly blocked?: { readonly since: string; readonly line: string; readonly failed: boolean } | null;
 };
 
 export function duration(from: string | undefined | null, to: string | undefined | null): string {
@@ -607,6 +618,14 @@ export function renderDurations(r: ProofResult): string {
     '',
     `Run from ${r.startedAt} against ${r.app}. Goal: ${r.goal}`,
     '',
+    ...(r.resumed ? [
+      `Took over plan ${r.resumed.planId} at ${r.resumed.at}, its items then ${Object.entries(r.resumed.items).map(([n, state]) => `${n}:${state}`).join(' ')}: no goal was sent and nothing before the take-over is measured.`,
+      '',
+    ] : []),
+    ...(r.blocked ? [
+      `${r.blocked.failed ? 'Blocked' : 'Was blocked'} since ${r.blocked.since}: ${r.blocked.line}${r.blocked.failed ? '. Step 7 stopped on it.' : ''}`,
+      '',
+    ] : []),
     '## Steps',
     '',
     row('Step', 'Name', 'Status', 'Seen at', 'Note'),
@@ -622,7 +641,9 @@ export function renderDurations(r: ProofResult): string {
     ...(r.notificationsSkipped ? [] : [row('plan proposed → plan notification sent', duration(t.plan_proposed_at, r.notifications?.firstAt.plan))]),
     row('plan proposed → approved', duration(t.plan_proposed_at, t.approved_at)),
     row('approved → first session start', duration(t.approved_at, t.first_start_at)),
-    row('goal sent → plan done', r.planDoneAt ? duration(t.goal_sent_at, r.planDoneAt) : 'the plan is not done'),
+    r.resumed
+      ? row('taken over → plan done', r.planDoneAt ? duration(r.resumed.at, r.planDoneAt) : 'the plan is not done')
+      : row('goal sent → plan done', r.planDoneAt ? duration(t.goal_sent_at, r.planDoneAt) : 'the plan is not done'),
     '',
     `Questions asked: ${r.answers.length}. Most plan items running at once: ${r.maxRunning}.`,
     '',
@@ -630,7 +651,12 @@ export function renderDurations(r: ProofResult): string {
     '',
     row('Item', 'Title', 'Ticket', 'Started', 'Needs approval', 'Landed', 'Put back'),
     row('---', '---', '---', '---', '---', '---', '---'),
-    ...Object.entries(r.items).map(([n, i]) => row(n, i.title, i.ticket ?? '', i.states.running ?? '', i.states.needs_approval ?? '', i.states.landed ?? '', i.states.put_back ?? i.states.held ?? '')),
+    ...Object.entries(r.items).map(([n, i]) => {
+      // An item already past a state when the run took the plan over: that state's time is before the take-over.
+      const was = r.resumed?.items[Number(n)];
+      const seen = (state: string) => (was === state ? `${state} before the take-over` : i.states[state] ?? '');
+      return row(n, i.title, i.ticket ?? '', seen('running'), seen('needs_approval'), seen('landed'), i.states.put_back ?? i.states.held ?? i.states.parked ?? '');
+    }),
     '',
     '## The lead',
     '',
