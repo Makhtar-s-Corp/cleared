@@ -77,13 +77,13 @@ const effects = (changed: Record<string, string[]>): Partial<FlowEffects> => ({
   },
 });
 
-async function train(options: { services?: string[]; changed?: Record<string, string[]>; outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string }; pages?: string[] } = {}) {
+async function train(options: { services?: string[]; changed?: Record<string, string[]>; outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string }; pages?: string[]; extra?: Partial<FlowEffects> } = {}) {
   const calls: Call[] = [];
   let t: Setup | undefined;
   const pages = options.pages;
   t = await setup({
     scripts: { author: quickAuthor }, config: { workspace: WORKSPACE },
-    effects: { ...effects(options.changed ?? { guestbook: ['src/page.ts'], 'filter-api': ['src/check.ts'] }), ...(pages ? { async updateProjectPages(input: { ticket: string; pr: number }) { pages.push(`${input.ticket}:${input.pr}`); } } : {}) },
+    effects: { ...effects(options.changed ?? { guestbook: ['src/page.ts'], 'filter-api': ['src/check.ts'] }), ...options.extra, ...(pages ? { async updateProjectPages(input: { ticket: string; pr: number }) { pages.push(`${input.ticket}:${input.pr}`); } } : {}) },
     locks: locks(() => t as Setup, calls, options),
   });
   const ticket = await t.tickets.create({ title: 'Held for review', body: 'An entry the filter flags is held for review instead of refused.', project: 'guestbook', services: options.services ?? ['guestbook', 'filter-api'] }, { kind: 'human', id: 'u1' });
@@ -398,4 +398,23 @@ test('a ticket published again halts its older train: one approval never lands t
   await tick(t, 1000);
   assert.deepEqual(calls.filter((c) => c.what === 'release').map((c) => c.service), ['filter-api'], 'the new train alone lands');
   await t.engine.close();
+});
+
+test('a Close closes the pull request of each service of the train, each on its own repository, and the ticket is closed even if one fails', async () => {
+  const seen: string[] = [];
+  const { t, ticket } = await train({
+    extra: {
+      async closePullRequest(request) {
+        seen.push(`${request.service?.name}#${request.pr}:${request.reason}`);
+        if (request.service?.name === 'guestbook') throw new Error('gh pr close failed');
+        return 'closed';
+      },
+    },
+  });
+  await t.engine.closeTicket(ticket.id, 'Not needed any more.', 'u1');
+  assert.deepEqual(seen.sort(), ['filter-api#7:Not needed any more.', 'guestbook#7:Not needed any more.']);
+  assert.equal((await t.tickets.get(ticket.id))?.status, 'Todo');
+  const last = (await t.tickets.comments(ticket.id)).at(-1)?.body ?? '';
+  assert.match(last, /guestbook/);
+  assert.match(last, /not closed on GitHub/);
 });

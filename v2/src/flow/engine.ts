@@ -123,6 +123,7 @@ import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
+import type { PrClose } from './pr-close.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { ReplayStore, replayPrompt, stepCommit, type Checkpoint, type Replay } from './replay.ts';
@@ -155,6 +156,11 @@ export type FlowEffects = {
   // with their logs' last lines when the forge gives them (issue #273).
   // Absent: a repair starts on the checks' state alone, told nothing of them.
   ciFailures?(input: { readonly pr: number; readonly service?: ServiceConfig }): Promise<CiFailures>;
+  // A Close closes the ticket's pull request on the forge, with `reason` in
+  // its comment, and never deletes the branch (issue #249, P114, pr-close.ts).
+  // Only a pull request on one of `branches` is closed; one already closed or
+  // merged is left alone; a failure throws. Absent: the forge is left as it is.
+  closePullRequest?(input: { readonly pr: number; readonly branches: readonly string[]; readonly reason: string; readonly service?: ServiceConfig }): Promise<PrClose>;
   // The lock's merge (`request_release` without --ask), after the human's approval.
   mergeRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
   // After a merge: the project pages of the workspace's services are made
@@ -1428,7 +1434,48 @@ export class FlowEngine {
     if (given === '') throw new FlowError('invalid', 'a Close says why');
     if (given.length > CLOSE_REASON_MAX) throw new FlowError('invalid', `a Close’s reason is at most ${CLOSE_REASON_MAX} characters`);
     const note = `The owner closed this ticket (${by}): ${given}\nIts sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.`;
-    return this.#takeOut(id, by, { message: 'The owner closed the ticket: this session was stopped.', code: 'closed', reason: 'closed', note, refusal: 'it is not closed', closed: given, refuseDone: true });
+    const pulls = this.#pullRequestsOf(id);
+    const result = await this.#takeOut(id, by, { message: 'The owner closed the ticket: this session was stopped.', code: 'closed', reason: 'closed', note, refusal: 'it is not closed', closed: given, refuseDone: true });
+    await this.#closePullRequests(id, pulls, given);
+    return result;
+  }
+
+  // The pull requests of the ticket's release cards, each once: the cards
+  // Cleared made from what it published (a repair reuses the pull request).
+  // Read before the Close settles the cards.
+  #pullRequestsOf(id: TicketId): { readonly pr: number; readonly service?: ServiceConfig }[] {
+    const found = new Map<string, { pr: number; service?: ServiceConfig }>();
+    for (const item of this.inbox.items()) {
+      if (item.kind !== 'release' || item.ticket !== id) continue;
+      if (item.train) {
+        for (const stop of item.train.services) {
+          const service = this.#workspace.services.find((s) => s.name === stop.service);
+          if (stop.pr && service) found.set(`${service.name}#${stop.pr.number}`, { pr: stop.pr.number, service });
+        }
+      } else found.set(`#${item.pr.number}`, { pr: item.pr.number });
+    }
+    return [...found.values()];
+  }
+
+  // After a Close (issue #249, P114): the pull requests are closed on the
+  // forge with the reason. The ticket is closed whatever happens here; what
+  // could not be closed is said on the ticket, for the owner to do by hand.
+  async #closePullRequests(id: TicketId, pulls: readonly { readonly pr: number; readonly service?: ServiceConfig }[], reason: string): Promise<void> {
+    const close = this.#effects.closePullRequest;
+    if (!close || pulls.length === 0) return;
+    const branches = [...new Set([this.#branchOf(id), ticketBranch(id)])];
+    const failed: string[] = [];
+    for (const { pr, service } of pulls) {
+      try {
+        await close.call(this.#effects, { pr, branches, reason, ...(service ? { service } : {}) });
+      } catch (error) {
+        console.error(`cleared-v2: the pull request #${pr} of ${id} was not closed (${error instanceof Error ? error.name : typeof error})`);
+        const said = error instanceof Error ? error.message.replace(/\s+/g, ' ').slice(0, 300) : 'unknown error';
+        failed.push(`#${pr}${service && this.#several ? ` of ${service.name}` : ''} (${said})`);
+      }
+    }
+    if (failed.length > 0)
+      await this.registry.ticketStore.comment(id, this.#clean(`The ticket is closed, but the pull request ${failed.join(', ')} was not closed on GitHub: close it by hand if it should be. The branch was not touched.`), SERVICE).catch(() => undefined);
   }
 
   async #takeOut(id: TicketId, by: UserId, how: {
