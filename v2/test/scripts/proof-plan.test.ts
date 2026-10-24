@@ -67,7 +67,7 @@ async function world(t: test.TestContext) {
   const landed = async (ticket: string) => {
     active.delete(ticket);
     await tickets.move(ticket as TicketId, tickets.states.done, AGENTS);
-    await emit({ type: 'release_landed', at: at(), project: 'guestbook', ticket: ticket as TicketId, pr: 1 });
+    await emit({ type: 'release_landed', at: at(), project: 'guestbook', ticket: ticket as TicketId, pr: 1, health: 'healthy' });
     await runner.settled();
   };
   // The plans as GET /api/plans gives them, which is what the driver reads.
