@@ -4349,3 +4349,49 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - **Not done.** v1's `runs` and `events` tables, the inbox and the lead's tables are not served. No HTTP transport. The real ledger was never read: the tests use a ledger made in a temporary folder.
 - **Resources.** No Docker object, no port, no tunnel. The proof run, its state folder and its service were not touched.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ledger-mcp`.
+
+## 2026-10-24: the proof's driver takes over an approved plan and says when a plan is blocked; the React port's follow-ups (the author's choices, lane `j3-driver-resume`)
+
+**The defects.**
+- **Issue #285.** The 48-hour proof's driver always sent a new goal. On 2026-10-23 it could not take over plan-1, approved with its five items put back, so the orchestrator paused plan-1 and started again from the beginning (the plan-2 entry above).
+- **The 24-hour run** (the endurance proof's end, above). From 08:47 to 15:45 step 07 printed "nothing to do now" once, then nothing. Three items were held and LOCAL-42 waited on a question. Lane `j3-autonomy` (#297) now lets the plan go on, but the driver still could not tell a plan that waits from a plan that cannot move.
+- **Issue #185.** The review follow-ups of the React port (#184).
+
+**Decision.**
+
+1. **The start check** (`startCheck`, `v2/scripts/proof-plan.ts`, P70).
+   - Both drivers read the plans right after sign-in. A run that sends a new goal stops with exit 64 before its first gesture when a plan is approved and not paused. The reason names the plan, its items' states and the ways out.
+   - A paused plan does not refuse a new goal: the runner starts nothing of it. This was the orchestrator's workaround of 19:50.
+   - The multi-service proof has no plan of its own to take over. Its only way out is to pause the plan. A service with no lead (the plans answer 503) has no plan.
+   - Steps 2 and 3 of the 48-hour proof now take only a plan proposed after the goal, never one left from before.
+2. **The take-over** (`PROOF_RESUME_PLAN=<id>`, `v2/scripts/proof-j2.ts`).
+   - The plan must be approved or paused, and no other plan may be approved.
+   - Steps 1 to 3 are recorded as skipped. Step 4, `resume`, opens `/plans/<id>`; for a paused plan it clicks the panel's Resume, the owner's gesture. It then plants the two commitments, as after an approval.
+   - Every measure runs from the take-over: the ledger's facts, the 48 hours (`PROOF_HOURS`), the night messages.
+   - The report says what the plan was at the take-over. An item already running or landed then reads "… before the take-over", and its order ("3 after 2") is not read, since its start was never seen.
+   - The rehearsal refuses `PROOF_RESUME_PLAN`: its service is new and has no plan.
+   - The take-over is proven by the tests only. It was never run against the proof's service.
+3. **A blocked plan** (`planBlockage`, `PROOF_STUCK_MINUTES`).
+   - A plan is blocked when nothing runs, nothing waits for approval, and nothing was put back (the runner starts that again), and every item left is held, parked, ready but not started (the week stop or the day budget), or after one of those or a cancelled one. A paused plan is blocked as a whole.
+   - The rule is a state, not "no change for N minutes". A night with long sessions is not blocked, and a blocked plan is seen at once.
+   - The blockage is logged when it starts, changes and ends, at night too. While the morning waits, a "nothing to do" line comes every 30 minutes, not only when what waits changes.
+   - Step 7 fails when the same blockage lasts `PROOF_STUCK_MINUTES`, 90 by default, counted from when it was first seen, the night included. Then step 8 reads the lead at once instead of waiting out the hours left. 90 is above the service's own delays: a question's 30 minutes, then the lead's 10, and the watchdog's 15. So the lead gets its turn to start a held or parked item with `start_ticket` first.
+   - `result.json` and `durations.md` keep the last blockage and say whether it stopped step 7.
+4. **Issue #185, each point.**
+   - **Item 1: the log understated CopilotKit's hosts.** Done. Item 7 of the #184 entry now names `cdn.copilotkit.ai` beside `telemetry.copilotkit.ai`, twice each in the agent chunk of today's build, in ignore lists only. A Risk line names the trajectory collector, which is dead weight in the bundle. The body of merged pull request 184 was left as it is.
+   - **The owner's added point: `agents__unsafe_dev_only`.** Checked in `@copilotkit/core` 1.77.2 (`dist/index.mjs`):
+     - the constructor (line 6583) hands the agents to `AgentRegistry.initialize` (line 1702), which only keeps them in the page;
+     - `NODE_ENV` changes nothing there;
+     - with no `runtimeUrl`, `connectRuntime` returns at once (line 1739);
+     - the learning bridge starts only with a `learning` option or a runtime.
+     The app's server has no CopilotKit route; `src/` and `app/src/` name none. Nothing is exposed, so no priority lane is needed.
+     A test now requires no runtime address, a connection status still `disconnected`, and no request over three connects and detaches with ten minutes of timers. The address is the check that matters: under Node the core skips the runtime connection anyway, as there is no `window`. A planted `runtimeUrl` fails the test.
+   - **Item 2: a rebuild under a running app.** Done. `createAppHandler` reads the manifest again when its modification time changes. While no manifest is there (Vite is writing the build), a page answers 503, which says to build. Each page now costs one `stat`. The test fails on the old code.
+   - **Item 3: the lock file and the guard.** Done. `test/scripts/guard.test.ts` runs `scripts/guard.ts --base` in a repository made in a temporary folder. A secret-shaped line in `v2/package-lock.json` fails the tree pass while the strict pass says nothing refused. The same line in another file fails both passes. The line is a secret pattern, since without `CLEARED_REPO` there is no private-term list, and it is built at run time so the test file holds none.
+   - **Item 4: CI built twice.** Done. The verify job's Build step is gone, since `npm test` builds first. The browser job keeps its own build.
+   - **Item 5: the design notes** (the phone header's height, the sign-in page's autofocus, the outline "play"). Not done: these are the owner's visual decisions and need captures.
+   - **Item 6: the reviewer's coverage gap** (the 1280 and 768 captures, the dark pairs, `choices-*`). Not done: it asks for a second review, not a change.
+
+**Resources.** No Docker object, no network, no tunnel. Only the fake-adapter rehearsal ran, on free loopback ports. The proof's service, its state folder and the example repositories were not touched.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-driver-resume`.
