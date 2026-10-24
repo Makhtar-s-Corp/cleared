@@ -147,7 +147,8 @@ export function leverChoices(current: Levers, config: { readonly authorModel: st
   return {
     model: {
       current: current.model ?? config.authorModel, choice: current.model, reviewer: config.reviewerModel,
-      options: AUTHOR_MODELS.filter((model) => model !== config.reviewerModel),
+      // The list can drift from the configuration: the configured author and a model stored earlier stay options, so a toggle shows pressed.
+      options: [...new Set([...AUTHOR_MODELS, config.authorModel, ...(current.model ? [current.model] : [])])].filter((model) => model !== config.reviewerModel),
     },
     maxLanes: { choice: current.maxLanes, options: [1, 2, 3] },
     paused: current.paused,
