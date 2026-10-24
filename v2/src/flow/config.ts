@@ -41,6 +41,9 @@ export type FlowConfig = {
   // the notifications link to; the proof receipt links its captures there
   // (P210). None: the receipt says the captures are kept by Cleared.
   readonly linkBase?: string | undefined;
+  // How long the proof receipt's captures may take before the ticket goes
+  // on without them (P210); 90 seconds when unset. The tests set it short.
+  readonly proofTimeoutMs?: number;
   // The workspace and its services. loadFlowConfig always sets it; a
   // configuration written without it reads as its one-service workspace
   // (workspaceOf).

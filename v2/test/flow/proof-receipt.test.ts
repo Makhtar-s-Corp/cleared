@@ -35,13 +35,13 @@ const TAKEN: ProofCapture = { before: 'before.png', after: 'after.png', video: '
 
 type Seen = { input: { ticket: string; session: string; dir: string; service?: { name: string } }; status: string | undefined };
 
-async function run(options: { capture?: (input: Seen['input']) => Promise<ProofCapture>; reviewers?: readonly (readonly FakeStep[])[]; rounds?: number } = {}) {
+async function run(options: { capture?: (input: Seen['input']) => Promise<ProofCapture>; reviewers?: readonly (readonly FakeStep[])[]; rounds?: number; proofTimeoutMs?: number } = {}) {
   const receipts: (ReceiptData | undefined)[] = [];
   const seen: Seen[] = [];
   let t: Setup | undefined;
   t = await setup({
     scripts: { author: quickAuthor, reviewers: options.reviewers ?? [reviewer(REPORT_PASS, call('t1', 'npm test', '# pass 1', false))] },
-    config: { linkBase: 'https://cleared.example.invalid', maxReviewRounds: options.rounds ?? 2 },
+    config: { linkBase: 'https://cleared.example.invalid', maxReviewRounds: options.rounds ?? 2, ...(options.proofTimeoutMs ? { proofTimeoutMs: options.proofTimeoutMs } : {}) },
     effects: {
       settings,
       async publish(input) { receipts.push(input.receipt); return { url: 'https://example.invalid/pull/7', number: 7, head: 'abc123', created: true }; },
@@ -104,6 +104,12 @@ test('a capture that throws is journaled as failed, by its code only, and the pu
   assert.deepEqual(receipts[0]?.captures, [{ service: 'guestbook', missing: [{ part: 'before', reason: 'failed' }, { part: 'after', reason: 'failed' }, { part: 'video', reason: 'failed' }] }]);
   assert.ok(t.inbox.list().some((i) => i.kind === 'release'));
   assert.doesNotMatch(JSON.stringify(receipts[0]), /token=|crashed|127\.0\.0\.1/);
+});
+
+test('a capture that never ends is given up at the cap, and the ticket goes on', async () => {
+  const { receipts } = await run({ capture: () => new Promise<ProofCapture>(() => {}), proofTimeoutMs: 50 });
+  assert.equal(receipts.length, 1);
+  assert.deepEqual(receipts[0]?.captures.map((c) => c.missing.map((m) => m.reason)), [['failed', 'failed', 'failed']]);
 });
 
 test('a flow with no capture effect publishes a receipt with no captures', async () => {

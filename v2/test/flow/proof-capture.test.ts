@@ -14,11 +14,14 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SERVICE_PROOF_HEADER } from '../../src/api/types.ts';
-import { FLOW_MS, captureProof, playwrightBrowser, previewAddress, proofTargets, type ProofBrowser } from '../../src/flow/proof-capture.ts';
+import { FLOW_MS, captureProof, playwrightBrowser, previewAddress, proofTargets, type ProofBrowser, type ProofContext } from '../../src/flow/proof-capture.ts';
 
 const dirOf = () => mkdtempSync(join(tmpdir(), 'cleared-v2-proof-'));
 
-type Seen = { contexts: { options: Record<string, unknown>; closed: boolean; urls: string[] }[]; closed: boolean; wheels: number };
+// What a context let through: each request's address, and the headers it was continued with, or `aborted`.
+type Routed = { url: string; outcome: Record<string, string> | 'aborted' };
+type Seen = { contexts: { options: Record<string, unknown>; closed: boolean; urls: string[]; routed: Routed[]; sockets: boolean }[]; closed: boolean; wheels: number };
+const FOREIGN = 'https://elsewhere.example.invalid/pixel.png';
 
 // A browser that writes a file where Playwright would, on a clock that the
 // page's waits move.
@@ -27,14 +30,25 @@ function fakeBrowser(options: { failOn?: string } = {}) {
   const seen: Seen = { contexts: [], closed: false, wheels: 0 };
   const browser: ProofBrowser = {
     async newContext(contextOptions) {
-      const context = { options: contextOptions as Record<string, unknown>, closed: false, urls: [] as string[] };
+      const context = { options: contextOptions as Record<string, unknown>, closed: false, urls: [] as string[], routed: [] as Routed[], sockets: false };
       seen.contexts.push(context);
+      let handler: Parameters<ProofContext['route']>[1] | undefined;
+      // The page asks for its own address, then for one elsewhere, as a page the session wrote may.
+      const request = async (url: string) => {
+        const answer: Routed = { url, outcome: 'aborted' };
+        await handler?.({ async continue(options) { answer.outcome = options?.headers ?? {}; }, async abort() { answer.outcome = 'aborted'; } }, { url: () => url, headers: () => ({ accept: '*/*' }) });
+        context.routed.push(answer);
+      };
       return {
+        async route(_url, given) { handler = given; },
+        async routeWebSocket() { context.sockets = true; },
         async newPage() {
           return {
             async goto(url: string) {
               if (options.failOn && url.startsWith(options.failOn)) throw Object.assign(new Error('net::ERR_CONNECTION_REFUSED at http://127.0.0.1:1/?token=abc'), { name: 'Error' });
               context.urls.push(url);
+              await request(url);
+              await request(FOREIGN);
               clock += 300;
             },
             async screenshot({ path }: { path: string }) { writeFileSync(path, 'png'); },
@@ -67,14 +81,21 @@ test('before and after are screenshots of their pages; the video is the after pa
     // The flow lasts its time, measured, not assumed.
     assert.ok((got.videoMs ?? 0) >= FLOW_MS && (got.videoMs ?? 0) < FLOW_MS + 2000, String(got.videoMs));
     assert.ok(seen.wheels >= 4, 'the flow scrolls the page');
-    // One context per page: only the after one records, and only it carries the preview's header.
+    // One context per page: only the after one records, and only the preview's own requests carry its header.
     const [before, after] = seen.contexts;
     assert.deepEqual(before?.urls, [BEFORE.url]);
     assert.equal(before?.options.recordVideo, undefined);
-    assert.equal(before?.options.extraHTTPHeaders, undefined);
+    // The before page's own requests go on as they are (no header of the app), the rest is aborted.
+    assert.deepEqual(before?.routed, [{ url: BEFORE.url, outcome: {} }, { url: FOREIGN, outcome: 'aborted' }]);
     assert.deepEqual(after?.urls, [AFTER.url]);
     assert.ok(after?.options.recordVideo);
-    assert.deepEqual(after?.options.extraHTTPHeaders, AFTER.headers);
+    assert.deepEqual(after?.routed, [{ url: AFTER.url, outcome: { accept: '*/*', ...AFTER.headers } }, { url: FOREIGN, outcome: 'aborted' }]);
+    // No context sends a header to every host, keeps a service worker or a WebSocket.
+    for (const context of seen.contexts) {
+      assert.equal(context.options.extraHTTPHeaders, undefined);
+      assert.equal(context.options.serviceWorkers, 'block');
+      assert.ok(context.sockets, 'its WebSockets are closed');
+    }
     assert.ok(seen.contexts.every((c) => c.closed) && seen.closed, 'every context and the browser are closed');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -121,12 +142,14 @@ test('the targets: before is the page at the origin of the service\'s health add
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 
-function page(title: string, colour: string): Promise<{ server: Server; url: string; headers: string[] }> {
+function page(title: string, colour: string, elsewhere = ''): Promise<{ server: Server; url: string; headers: string[] }> {
   const headers: string[] = [];
   const server = createServer((request, response) => {
     headers.push(String(request.headers['x-cleared-proof'] ?? ''));
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(`<!doctype html><title>${title}</title><body style="background:${colour};height:3000px"><h1>${title}</h1></body>`);
+    // A page the session wrote that reaches for another address, as an image, a fetch and a WebSocket.
+    const reach = elsewhere ? `<img src="${elsewhere}pixel.png"><script>fetch('${elsewhere}data').catch(() => {}); try { new WebSocket('${elsewhere.replace('http', 'ws')}socket'); } catch {}</script>` : '';
+    response.end(`<!doctype html><title>${title}</title><body style="background:${colour};height:3000px"><h1>${title}</h1>${reach}</body>`);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
     const address = server.address();
@@ -134,9 +157,10 @@ function page(title: string, colour: string): Promise<{ server: Server; url: str
   }));
 }
 
-test('a real Chromium: two PNG pages and a WebM video of the flow', { skip: PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set', timeout: 120_000 }, async () => {
+test('a real Chromium: two PNG pages and a WebM video of the flow; the after page reaches no other address', { skip: PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set', timeout: 120_000 }, async () => {
+  const other = await page('Elsewhere', '#000');
   const before = await page('Oldest first', '#fff');
-  const after = await page('Newest first', '#eee');
+  const after = await page('Newest first', '#eee', other.url);
   const dir = dirOf();
   try {
     const browser = await playwrightBrowser(process.env);
@@ -151,7 +175,9 @@ test('a real Chromium: two PNG pages and a WebM video of the flow', { skip: PLAY
     assert.ok(statSync(join(dir, 'flow.webm')).size > 1000);
     assert.ok((got.videoMs ?? 0) >= 3000);
     assert.ok(after.headers.includes('p') && !before.headers.includes('p'), 'the preview\'s header goes to the after page only');
+    assert.deepEqual(other.headers, [], 'no request of the after page left its own address');
   } finally {
+    other.server.close();
     rmSync(dir, { recursive: true, force: true });
     before.server.close();
     after.server.close();

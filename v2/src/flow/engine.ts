@@ -144,6 +144,7 @@ export type { MergeOutcome } from '../release/lock.ts';
 // workspace's (its first service, which the milestone 1 fields name).
 // The receipts' captures, under the checkouts' root, a folder no ticket is named.
 export const PROOF_FOLDER = '.proof';
+export const PROOF_TIMEOUT_MS = 90_000;
 
 export type FlowEffects = {
   settings(service?: ServiceConfig): Promise<ProjectSettings>;    // the service's settings at its base branch
@@ -2653,16 +2654,22 @@ export class FlowEngine {
 
   // The captures of `service`, taken while the author's session and its
   // trial environment still run, journaled on the session. A capture that
-  // throws loses the captures, never the ticket.
+  // throws, or still runs at the cap, loses the captures, never the ticket.
   async #captureProof(live: Live, service: ServiceConfig): Promise<void> {
     const capture = this.#effects.captureProof;
     if (!capture) return;
     const { ticket: id, project } = live.input;
+    const failed: ProofCapture = { missing: (['before', 'after', 'video'] as const).map((part) => ({ part, reason: 'failed' as const })) };
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let got: ProofCapture;
     try {
-      got = await capture({ ticket: id, session: live.id, service, dir: this.#proofDir(id, service.name) });
+      // A browser that hangs is given up after the cap: the ticket goes on without its captures.
+      const late = new Promise<ProofCapture>((resolve) => { timer = setTimeout(() => resolve(failed), this.config.proofTimeoutMs ?? PROOF_TIMEOUT_MS); });
+      got = await Promise.race([capture({ ticket: id, session: live.id, service, dir: this.#proofDir(id, service.name) }), late]);
     } catch {
-      got = { missing: (['before', 'after', 'video'] as const).map((part) => ({ part, reason: 'failed' as const })) };
+      got = failed;
+    } finally {
+      clearTimeout(timer);
     }
     this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, ...got } });
   }

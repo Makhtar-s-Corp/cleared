@@ -6,6 +6,12 @@
 // each, and records a video of about 20 seconds of the flow on the after
 // page: it scrolls down the page and back up.
 //
+// The after page is code the session wrote, run by a Chromium on the host.
+// Each page may reach its own address only: every other request is
+// aborted, every WebSocket closed and service workers blocked, so the page
+// gets no network the session's container does not have, and the app's
+// proof is added to the preview's own requests only, never sent elsewhere.
+//
 // The service has no runtime dependency (v2/README.md): playwright-core is
 // loaded when a capture runs, from CLEARED_V2_PLAYWRIGHT when it names an
 // installed one, else from v2's own development dependencies, and Chromium
@@ -44,15 +50,25 @@ export interface ProofPage {
   waitForTimeout(ms: number): Promise<void>;
   video(): { saveAs(path: string): Promise<void> } | null;
 }
+export interface ProofRequest {
+  url(): string;
+  headers(): Record<string, string>;
+}
+export interface ProofRoute {
+  continue(options?: { headers?: Record<string, string> }): Promise<void>;
+  abort(): Promise<void>;
+}
 export interface ProofContext {
   newPage(): Promise<ProofPage>;
+  route(url: string, handler: (route: ProofRoute, request: ProofRequest) => Promise<void>): Promise<void>;
+  routeWebSocket(url: RegExp, handler: (socket: { close(): Promise<void> }) => Promise<void>): Promise<void>;
   close(): Promise<void>;
 }
 export interface ProofBrowser {
   newContext(options: {
     viewport: { width: number; height: number };
     recordVideo?: { dir: string; size: { width: number; height: number } };
-    extraHTTPHeaders?: Readonly<Record<string, string>>;
+    serviceWorkers: 'block';
   }): Promise<ProofContext>;
   close(): Promise<void>;
 }
@@ -97,6 +113,15 @@ export async function playwrightBrowser(env: NodeJS.ProcessEnv = process.env): P
   }
 }
 
+// A context whose pages reach `target` only, with its headers there.
+async function confine(context: ProofContext, target: ProofTarget): Promise<void> {
+  await context.route('**/*', async (route, request) => {
+    if (!request.url().startsWith(target.url)) return route.abort();
+    return route.continue(target.headers ? { headers: { ...request.headers(), ...target.headers } } : undefined);
+  });
+  await context.routeWebSocket(/.*/, (socket) => socket.close());
+}
+
 async function quietly(run: () => Promise<unknown>): Promise<void> {
   try { await run(); } catch { /* already closed */ }
 }
@@ -129,7 +154,8 @@ export async function captureProof(input: {
     else {
       let context: ProofContext | undefined;
       try {
-        context = await browser.newContext({ viewport: VIEWPORT });
+        context = await browser.newContext({ viewport: VIEWPORT, serviceWorkers: 'block' });
+        await confine(context, input.before);
         const page = await context.newPage();
         await page.goto(input.before.url, { waitUntil: 'load', timeout: PAGE_TIMEOUT_MS });
         await page.screenshot({ path: join(dir, PROOF_FILES.before), fullPage: true });
@@ -150,7 +176,8 @@ export async function captureProof(input: {
       let began = 0;
       let ended = 0;
       try {
-        context = await browser.newContext({ viewport: VIEWPORT, recordVideo: { dir: raw, size: VIEWPORT }, ...(input.after.headers ? { extraHTTPHeaders: input.after.headers } : {}) });
+        context = await browser.newContext({ viewport: VIEWPORT, recordVideo: { dir: raw, size: VIEWPORT }, serviceWorkers: 'block' });
+        await confine(context, input.after);
         began = now();
         const page = await context.newPage();
         video = page.video();
