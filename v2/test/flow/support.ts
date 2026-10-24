@@ -46,14 +46,19 @@ export type Scripts = {
   readonly authors?: readonly (readonly FakeStep[])[];       // one per author session started, then `author`
   readonly reviewers?: readonly (readonly FakeStep[])[];     // one per review round
   readonly reopen?: readonly FakeStep[] | 'throw' | 'send_fails';
+  // A reviewer resumed through the review channel (issue 291) waits for the
+  // author's answer, then plays the next script of `reviewers`; 'throw': it
+  // cannot be resumed.
+  readonly reviewerResume?: 'throw';
   readonly stops?: SessionId[];                                // filled with the ids of resumed handles that were stopped
 };
 
 export type Started = { readonly input: StartInput; readonly id: SessionId };
 
 // An adapter that plays the script of the session's role. A reviewer round
-// takes the next script of the list. resume reopens an author under its own
-// id, as the real adapter does, or throws.
+// takes the next script of the list, whether the reviewer is started or
+// resumed. resume reopens a session under its own id, as the real adapter
+// does, or throws.
 export function scriptedAdapter(store: Store, scripts: Scripts, started_: Started[]): SessionAdapter {
   const authors = [...(scripts.authors ?? [])];
   const reviewers = [...(scripts.reviewers ?? [reviewerScript(REPORT_PASS)])];
@@ -70,6 +75,10 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
     },
     async resume(id): Promise<SessionHandle> {
       const input = inputs.get(id);
+      if (input?.role === 'reviewer') {
+        if (scripts.reviewerResume === 'throw') throw new Error(`cannot resume ${id}`);
+        return createFakeAdapter({ log: store.events, script: [{ awaitMessage: true }, ...(reviewers.shift() ?? reviewerScript(REPORT_PASS))], newId: () => id }).start(input);
+      }
       if (!input || scripts.reopen === 'throw') throw new Error(`cannot resume ${id}`);
       const handle = await createFakeAdapter({ log: store.events, script: scripts.reopen === 'send_fails' || scripts.reopen === undefined ? reopenScript : scripts.reopen, newId: () => id }).start(input);
       if (scripts.reopen !== 'send_fails') return handle;

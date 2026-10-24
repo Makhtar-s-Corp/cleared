@@ -69,7 +69,9 @@ test('loadFlowConfig reads the environment and refuses what is missing or unsafe
   assert.equal(config?.authorModel, 'claude-opus-5-5');
   assert.equal(config?.reviewerModel, 'claude-sonnet-5-5');
   assert.equal(config?.idleMs, 15 * 60 * 1000);
-  assert.equal(config?.maxReviewRounds, 2);
+  assert.equal(config?.maxReviewRounds, 3, 'the author-reviewer channel\'s bound (issue 291)');
+  assert.equal(loadFlowConfig({ ...env, CLEARED_V2_REVIEW_ROUNDS: '5' })?.maxReviewRounds, 5);
+  assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_REVIEW_ROUNDS: '1.5' }), FlowConfigError);
   assert.equal(config?.budgetUsd, undefined);
   assert.equal(config?.workdirRoot, '/state/work');
   assert.equal(config?.steps, true, 'a ticket runs in steps (lane 23)');
@@ -103,11 +105,12 @@ test('the milestone 1 variables make a one-service workspace, and the flow confi
   // ticket's steps (lane 23), on in every configuration the service reads.
   assert.equal(authorTools, true);
   assert.equal(steps, true);
-  // The fields and values of the milestone 1 FlowConfig, unchanged.
+  // The fields and values of the milestone 1 FlowConfig, unchanged but the
+  // review rounds' default, 3 since the review channel (issue 291).
   assert.deepEqual(rest, {
     project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://github.com/example-org/cleared-example-guestbook.git',
     repo: 'example-org/cleared-example-guestbook', base: 'trunk', workdirRoot: '/state/work', authorModel: 'claude-opus-5-5',
-    reviewerModel: 'claude-sonnet-5-5', idleMs: 15 * 60_000, maxReviewRounds: 2, budgetUsd: undefined, mergeRetryMs: 60_000,
+    reviewerModel: 'claude-sonnet-5-5', idleMs: 15 * 60_000, maxReviewRounds: 3, budgetUsd: undefined, mergeRetryMs: 60_000,
   });
   // Its id is the old project value, so every existing row stays in it.
   assert.deepEqual(workspace, {

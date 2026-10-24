@@ -148,3 +148,21 @@ test('the time by step adds up every session of the ticket; the plan is the late
   assert.deepEqual(steps.map((s) => [s.name, s.ms / 60_000, s.open]), [['author', 18, false], ['review', 4, true]]);
   assert.equal(ticketPlan(PARTS), null);
 });
+
+// The review channel (issue 291): each message is journaled on the sender's
+// session and on the receiver's; the whole ticket shows it once, where it
+// arrived, and a filter shows both sides of one role.
+test('the review channel shows each message once in the whole ticket, where it arrived; a role\'s filter shows what it sent and received', () => {
+  const request = { round: 1, limit: 3, from: 'reviewer' as const, text: 'Verdict: fix before merge\nDefects: src/a.ts:3' };
+  const answer = { round: 1, limit: 3, from: 'author' as const, text: 'Fixed the sort.' };
+  const channel = (value: typeof request | typeof answer): AgUiEvent => ({ type: 'CUSTOM', name: 'cleared.review_channel', value });
+  const author = threadFrom('author-1', 0, [...message('a1', 'assistant', 'Done.'), channel(request), ...message('a2', 'assistant', 'Fixed the sort.'), channel(answer)]);
+  const reviewer = threadFrom('reviewer-1', 20, [...message('r1', 'assistant', request.text), channel(request), channel(answer), ...message('r2', 'assistant', 'Verdict: no blocking issues')]);
+  const parts: TicketPart[] = [{ summary: AUTHOR, thread: author }, { summary: REVIEWER, thread: reviewer }];
+  const line = (e: ReturnType<typeof ticketThread>[number]) => (e.kind === 'handover' ? 'handover' : e.row.kind === 'channel' ? `${e.session} channel ${e.row.from}` : `${e.session} ${e.row.kind}`);
+  assert.deepEqual(ticketThread(parts, 'all').map(line), [
+    'author-1 message', 'author-1 channel reviewer', 'author-1 message', 'handover', 'reviewer-1 message', 'reviewer-1 channel author', 'reviewer-1 message',
+  ]);
+  assert.deepEqual(ticketThread(parts, 'author').map(line), ['author-1 message', 'author-1 channel reviewer', 'author-1 message', 'author-1 channel author']);
+  assert.deepEqual(ticketThread(parts, 'reviewer').map(line), ['reviewer-1 message', 'reviewer-1 channel reviewer', 'reviewer-1 channel author', 'reviewer-1 message']);
+});

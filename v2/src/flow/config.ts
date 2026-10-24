@@ -28,7 +28,7 @@ export type FlowConfig = {
   readonly authorModel: string;
   readonly reviewerModel: string;           // another model than the author's
   readonly idleMs: number;                  // a session with no activity for this long is stopped
-  readonly maxReviewRounds: number;         // the reviews a ticket gets before it goes back
+  readonly maxReviewRounds: number;         // the verdicts of a ticket's review channel before it goes back (issue 291)
   readonly budgetUsd: number | undefined;   // the ticket's budget; none when unset
   readonly mergeRetryMs: number;            // a merge the lock queued is asked again after this long
   // The workspace and its services. loadFlowConfig always sets it; a
@@ -140,7 +140,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     authorModel,
     reviewerModel: env.CLEARED_V2_REVIEWER_MODEL || 'claude-sonnet-5-5',
     idleMs: minutes * 60_000,
-    maxReviewRounds: positive(env.CLEARED_V2_REVIEW_ROUNDS, 'CLEARED_V2_REVIEW_ROUNDS', true) ?? 2,
+    maxReviewRounds: positive(env.CLEARED_V2_REVIEW_ROUNDS, 'CLEARED_V2_REVIEW_ROUNDS', true) ?? 3,
     budgetUsd: positive(env.CLEARED_V2_BUDGET_USD, 'CLEARED_V2_BUDGET_USD', false),
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
     workspace,

@@ -5,7 +5,10 @@
 // train. The fixture was written by this test on the engine before lane 16
 // (`CLEARED_V2_WRITE_FIXTURE=1`), and the run is compared with it, with the
 // configuration as milestone 1 writes it and with its one-service
-// workspace spelled out.
+// workspace spelled out. It was written again for the review channel
+// (issue 291): the second round resumes the first reviewer with the
+// author's answer instead of starting another, and both sessions log the
+// exchange.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';

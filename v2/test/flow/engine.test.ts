@@ -114,16 +114,17 @@ test('a requested change reopens the author session with the request; the second
   await t.engine.start(t.ticket.id, 'u1');
   await until(() => kinds(t).includes('release:waiting'), 'the release item', 5000);
   const roles = t.startedSessions.map((s) => s.input.role);
-  assert.deepEqual(roles, ['author', 'reviewer', 'reviewer'], 'the author is reopened by resume, not started again');
+  // The author and the reviewer are reopened by resume, not started again (the review channel, issue 291).
+  assert.deepEqual(roles, ['author', 'reviewer'], 'the author and the reviewer are reopened by resume, not started again');
   assert.equal(t.recorder.records.length, 1, 'only the passing round is recorded: a request for change has no pull request');
   assert.equal(t.recorder.records[0]?.round, 2);
-  const userMessages = events(t).filter((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && e.event.messageId.includes('-user-'));
+  const userMessages = t.store.events.after(t.startedSessions[0]!.id).filter((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && e.event.messageId.includes('-user-'));
   assert.equal(userMessages.length, 1);
   assert.match(userMessages[0]?.event.type === 'TEXT_MESSAGE_CONTENT' ? userMessages[0].event.delta : '', /sorts the wrong way/);
   const verdicts = events(t).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === 'cleared.review_verdict' ? [`${e.event.value.verdict}:${e.event.value.round}`] : []));
   assert.deepEqual(verdicts, ['changes_requested:1', 'pass:2']);
   assert.deepEqual(t.calls.filter((c) => c.startsWith('publish') || c === 'refreshProject').length, 2, 'one refresh and one publish, after the passing round only');
-  assert.equal((t.store.sessions.list({ ticket: t.ticket.id })).length, 3);
+  assert.equal((t.store.sessions.list({ ticket: t.ticket.id })).length, 2);
   const release = t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release');
   assert.equal(release?.sessions.find((s) => s.role === 'reviewer')?.rounds, 2);
 });
@@ -132,7 +133,7 @@ test('when the author cannot be resumed, a new author session starts with the re
   const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), reviewerScript(REPORT_PASS)], reopen: 'throw' } });
   await t.engine.start(t.ticket.id, 'u1');
   await until(() => kinds(t).includes('release:waiting'), 'the release item', 5000);
-  assert.deepEqual(t.startedSessions.map((s) => s.input.role), ['author', 'reviewer', 'author', 'reviewer']);
+  assert.deepEqual(t.startedSessions.map((s) => s.input.role), ['author', 'reviewer', 'author'], 'a new author; the reviewer is resumed');
   assert.match(t.startedSessions[2]!.input.prompt, /sorts the wrong way/);
   assert.match(t.startedSessions[2]!.input.prompt, /Newest entry first/);
 });
