@@ -2,7 +2,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { API_ROUTES, ASK_ROUTES, CONSUMPTION_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, SERVICE_USER_HEADER, TERMINAL_ROUTES, VARIANT_ROUTES, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, ASK_ROUTES, BATCH_ROUTES, CONSUMPTION_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, SERVICE_USER_HEADER, TERMINAL_ROUTES, VARIANT_ROUTES, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createApiRoutes } from '../../src/api/routes.ts';
 import { filesRoutes } from '../../src/flow/files.ts';
 import { planGateRoutes } from '../../src/flow/plan-gate.ts';
@@ -64,7 +64,8 @@ test('the service declares every route of the API but the approval, which is lan
   // items and the skill, lane 24's (knowledge/); the questions to the code,
   // lane 25's (reader/), each of which rewrites this comment to name its
   // module.
-  const ahead = [...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...CONSUMPTION_ROUTES];
+  // The batches' three routes are flow/batch.ts's, registered by the flow module (requirement C6).
+  const ahead = [...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...CONSUMPTION_ROUTES, ...BATCH_ROUTES];
   assert.ok(SESSION_PLAN_ROUTES.every((route) => declared.includes(route)), 'lane 17 serves the Go and the Change');
   assert.ok(SESSION_TABS_ROUTES.every((route) => declared.includes(route)), 'lane 20 serves the files, the take over and the give back');
   assert.ok(STEP_ROUTES.every((route) => declared.includes(route)), 'lane 23 serves the steps and the contract item');
