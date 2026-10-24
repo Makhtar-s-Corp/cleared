@@ -32,6 +32,11 @@ export const fixed = (value: number, digits: number, language: 'en' | 'fr'): str
 // A count in a language, grouped as the language groups ("35 500" or "35,500").
 export const count = (value: number, language: 'en' | 'fr'): string => new Intl.NumberFormat(language).format(value);
 
+// A count grouped as the catalog's language groups it, for a screen that draws
+// it on its own ("+12 345" lines, an editor scope's "1,234"); a sentence of
+// the catalog gets the same from the translator.
+export const quantity = (value: number, t: Translate): string => new Intl.NumberFormat(locale(t)).format(value);
+
 // A decimal number in the catalog's locale: "3,9" in French, "3.9" in English.
 export const decimal = (value: number, t: Translate, min: number, max: number): string =>
   new Intl.NumberFormat(locale(t), { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: false }).format(value);
