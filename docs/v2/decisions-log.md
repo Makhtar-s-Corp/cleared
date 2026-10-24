@@ -4431,3 +4431,4 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The health notifications' text comes from lib's catalog, which has no line for `quota_75`, `quota_85` or `quota_read_failed`. Their code says which one it is. The text is the generic health line, as P34 noted for `schedule_failed`.
 - A ticket of several services reviews in the first service's checkout. Its test command is that service's.
 - The test command runs in the author's checkout, which the reviewer shares. A runner that writes a cache or a coverage file there is not refused: the policy reads the command, not what the program does.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-review-tests-quota`.
