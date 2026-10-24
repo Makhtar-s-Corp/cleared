@@ -9,7 +9,7 @@
 import type { Interrupt } from '@ag-ui/core';
 import type { SessionPlan, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
-import type { AgUiEvent, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
+import type { AgUiEvent, CustomValue, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { ChoiceStatus } from '../../components/choices/model.ts';
@@ -75,7 +75,11 @@ export type ChannelRow = {
   readonly kind: 'channel'; readonly at: string; readonly from: 'reviewer' | 'author'; readonly round: number; readonly limit: number; readonly text: string;
   readonly afterMs?: number;
 };
-export type Row =
+// A ticket resumed from a step (issue #272): on the session left, where
+// the ticket went on; on the new session, where it came from.
+export type ReplayRow = { readonly kind: 'replay'; readonly at: string; readonly side: 'left' | 'resumed' } & CustomValue['cleared.replay'];
+// `seq`: the stored event that began the row, which Resume from here names.
+export type Row = (
   | ToolRow
   | ReadRow
   | EditsRow
@@ -86,7 +90,12 @@ export type Row =
   | { readonly kind: 'error'; readonly at: string; readonly message: string }
   | { readonly kind: 'verdict'; readonly at: string; readonly verdict: 'pass' | 'changes_requested'; readonly round: number }
   | ChannelRow
-  | { readonly kind: 'plan'; readonly at: string; readonly confidence: SessionPlan['confidence']; readonly go: SessionPlan['go'] };
+  | { readonly kind: 'plan'; readonly at: string; readonly confidence: SessionPlan['confidence']; readonly go: SessionPlan['go'] }
+  | ReplayRow
+) & { readonly seq?: number };
+
+// The tip of the author's branch the flow journaled (issue #272), at its event's seq.
+export type Checkpoint = CustomValue['cleared.checkpoint'] & { readonly seq: number };
 
 export type Step = { name: SessionState['steps'][number]['name']; startedAt: string; finishedAt: string | null };
 
@@ -108,10 +117,11 @@ export type SessionModel = {
   readonly requests: Map<string, ToolRow>;
   readonly questions: Map<string, QuestionRow>;
   plan: SessionPlan | null;                         // the last cleared.session_plan: the proposal, or its Go
+  readonly checkpoints: Checkpoint[];               // the author's branch at each move (issue #272)
 };
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, checkpoints: [] };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -162,6 +172,13 @@ export function applyEvent(model: SessionModel, stored: SessionEvent): boolean {
   model.lastAt = stored.at;
   const { at } = stored;
   const event: AgUiEvent = stored.event;
+  const count = model.rows.length;
+  addEvent(model, stored, at, event);
+  for (const row of model.rows.slice(count)) (row as { seq?: number }).seq ??= stored.seq;
+  return true;
+}
+
+function addEvent(model: SessionModel, stored: SessionEvent, at: string, event: AgUiEvent): void {
   switch (event.type) {
     case 'TEXT_MESSAGE_START': {
       const row: MessageRow = { kind: 'message', id: event.messageId, at, role: event.role, by: event.name, text: '' };
@@ -217,15 +234,14 @@ export function applyEvent(model: SessionModel, stored: SessionEvent): boolean {
       model.rows.push({ kind: 'error', at, message: event.message });
       break;
     case 'CUSTOM':
-      custom(model, at, event);
+      custom(model, stored, at, event);
       break;
     default:
       break;                                        // TEXT_MESSAGE_END, TOOL_CALL_END, REASONING_*: nothing to show
   }
-  return true;
 }
 
-function custom(model: SessionModel, at: string, event: Extract<AgUiEvent, { type: 'CUSTOM' }>): void {
+function custom(model: SessionModel, stored: SessionEvent, at: string, event: Extract<AgUiEvent, { type: 'CUSTOM' }>): void {
   switch (event.name) {
     case 'cleared.permission_request': {
       const { requestId, toolCallId, tool, input, suggestion } = event.value;
@@ -287,6 +303,12 @@ function custom(model: SessionModel, at: string, event: Extract<AgUiEvent, { typ
       model.plan = event.value;
       model.rows.push({ kind: 'plan', at, confidence: event.value.confidence, go: event.value.go });
       break;
+    case 'cleared.checkpoint':
+      model.checkpoints.push({ ...event.value, seq: stored.seq });
+      break;
+    case 'cleared.replay':
+      model.rows.push({ kind: 'replay', at, side: stored.sessionId === event.value.from ? 'left' : 'resumed', ...event.value });
+      break;
     default:
       break;
   }
@@ -300,13 +322,13 @@ export function applyAll(model: SessionModel, events: readonly SessionEvent[]): 
 }
 
 // An edit nobody was asked about, which did not fail: one that merges.
-const quietEdit = (row: Row): row is ToolRow & { input: Extract<ToolInput, { kind: 'edit' }> } =>
+const quietEdit = (row: Row): row is ToolRow & { readonly seq?: number; input: Extract<ToolInput, { kind: 'edit' }> } =>
   row.kind === 'tool' && row.input?.kind === 'edit' && !row.request && !(row.output && 'ok' in row.output && !row.output.ok);
 
 const asEdits = (row: Row): EditsRow | undefined => (row.kind === 'edits' ? row
   : quietEdit(row) ? {
     kind: 'edits', at: row.at, path: row.input.path, added: row.input.added, removed: row.input.removed, count: 1, ids: [row.id],
-    each: [{ at: row.at, added: row.input.added, removed: row.input.removed }],
+    each: [{ at: row.at, added: row.input.added, removed: row.input.removed }], ...(row.seq === undefined ? {} : { seq: row.seq }),
   } : undefined);
 
 // The rows as the screen shows them: the ticket's prompt and empty messages
@@ -319,8 +341,8 @@ export function timeline(model: SessionModel): Row[] {
     if (row.kind === 'tool' && row.name === PLAN_TOOL) continue;
     const previous = out[out.length - 1];
     if (row.kind === 'tool' && row.input?.kind === 'read' && !row.request) {
-      if (previous?.kind === 'read') out[out.length - 1] = { kind: 'read', at: previous.at, paths: [...previous.paths, row.input.path] };
-      else out.push({ kind: 'read', at: row.at, paths: [row.input.path] });
+      if (previous?.kind === 'read') out[out.length - 1] = { ...previous, paths: [...previous.paths, row.input.path] };
+      else out.push({ kind: 'read', at: row.at, paths: [row.input.path], ...(row.seq === undefined ? {} : { seq: row.seq }) });
       continue;
     }
     if (quietEdit(row)) {
@@ -412,6 +434,7 @@ export type SessionThread = {
   readonly interrupts: readonly QuestionInterrupt[];
   readonly steps: readonly Step[];
   readonly plan: SessionPlan | null;
+  readonly checkpoints: readonly Checkpoint[];
 };
 
 export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
@@ -424,8 +447,23 @@ export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
 export function threadOf(model: SessionModel): SessionThread {
   return {
     lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan,
+    checkpoints: [...model.checkpoints],
   };
 }
+
+// The commit a step of the thread began from (issue #272): the last
+// checkpoint before the row's first event, else the session's first, which
+// the flow read before the session started; the service's own rule
+// (src/flow/replay.ts stepCommit), which a test keeps the same.
+export function stepCommit(checkpoints: readonly Checkpoint[], seq: number): Checkpoint | undefined {
+  return checkpoints.findLast((c) => c.seq < seq) ?? checkpoints[0];
+}
+
+// The longest corrected instruction, as the service takes it (src/flow/replay.ts MAX_REPLAY).
+export const REPLAY_MAX = 2000;
+
+// A commit as the thread names it: its first twelve characters.
+export const shortCommit = (commit: string): string => commit.slice(0, 12);
 
 // ------------------------------------------------------------------ wording
 

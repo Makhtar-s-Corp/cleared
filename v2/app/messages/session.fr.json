@@ -241,5 +241,16 @@
   "giveback_note": "Rend la main à la session et lui dit ce que vous avez changé.",
   "earlier_one": "{who} · 1 étape",
   "earlier_other": "{who} · {n} étapes",
-  "terminal_journaled": "Chaque ligne tapée est journalisée\u202f; ce qu'il affiche n'est pas conservé."
+  "terminal_journaled": "Chaque ligne tapée est journalisée\u202f; ce qu'il affiche n'est pas conservé.",
+  "resume_here": "Reprendre d'ici",
+  "resume_label": "Que doit faire la session à la place, à partir de cette étape\u202f?",
+  "resume_where": "La branche revient au commit {commit}, tel qu'il était avant cette étape, sur une nouvelle branche. La suite reste lisible dans le fil.",
+  "resume_send": "Reprendre",
+  "resume_cancel": "Annuler",
+  "resume_empty": "Dites ce qu'il faut faire à la place.",
+  "resume_failed": "Le ticket n'a pas été repris. Réessayez.",
+  "resume_owner": "Seul le compte propriétaire reprend un ticket depuis une étape.",
+  "replay_left": "Repris depuis une étape ci-dessus par {who}\u00a0: une nouvelle session continue plus bas, sur {branch} depuis {commit}. Ce qui suit cette étape ici est la tentative précédente.",
+  "replay_resumed": "Repris par {who} depuis une étape de la session précédente, sur {branch} depuis {commit}.",
+  "replay_instruction": "Consigne corrigée"
 }
