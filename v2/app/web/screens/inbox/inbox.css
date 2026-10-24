@@ -65,6 +65,8 @@
 .d-ticket .sep { margin: 0 6px; }
 .decide-rule { margin: 0 0 16px; color: var(--text-secondary); font-size: var(--text-md); }
 .d-ticket.for-question { margin: 16px 0 0; }
+/* When the question stops waiting for the owner, and what then applies (issue #290). */
+.d-deadline { margin: var(--space-2) 0 0; color: var(--awaiting-text); font-size: var(--text-md); }
 .d-ticket.for-question::before { content: ""; display: block; width: 56px; height: 3px; margin-bottom: 8px; background: var(--awaiting); }
 .d-body > .facts:last-child { padding-top: 14px; border-top: 1px solid var(--hairline); }
 .announce { padding: 12px 14px; border-radius: 10px; background: var(--canvas); box-shadow: var(--e-outline); color: var(--text-secondary); }

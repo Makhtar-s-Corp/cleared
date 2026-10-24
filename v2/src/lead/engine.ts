@@ -39,7 +39,7 @@ import type { Store } from '../store/db.ts';
 import { HANDOVER_LIMITS, commitmentLine, realLeadEffects, renderLeadBriefing, type LeadEffects, type LeadEffectsConfig, type MemoryHit } from './briefing.ts';
 import { loadLeadConfig, type LeadConfig } from './config.ts';
 import { LEAD_TICKET, bindLeadTools, capAnswer, type LeadHandlers } from './contract.ts';
-import { HANDOVER_REQUEST, againTurn, commitmentDue, describeFlowEvent, earlierAnswer, eventTurn, goalTurn, openingPrompt, serviceTurn } from './prompts.ts';
+import { HANDOVER_REQUEST, againTurn, commitmentDue, describeFlowEvent, earlierAnswer, eventTurn, goalTurn, openingPrompt, questionToLead, serviceTurn } from './prompts.ts';
 import { LeadStore, type HandoverRecord } from './store.ts';
 import { leadHandlers } from './tools.ts';
 
@@ -168,6 +168,11 @@ export class LeadEngine {
     this.#started = true;
     this.#unsubscribe = this.#deps.flow.subscribe((event) => {
       if (event.ticket === LEAD_TICKET || event.project !== this.#deps.project.name) return;
+      // A team's question past its delay is the lead's to decide now, in its thread (issue #290).
+      if (event.type === 'question_timed_out' && event.stage === 'lead') {
+        this.serviceLine(this.#clean(questionToLead(event)));
+        return;
+      }
       const line = describeFlowEvent(event);
       if (line) this.store.enqueue('flow', this.#clean(line));
     });

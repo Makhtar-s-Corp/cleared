@@ -46,7 +46,20 @@ export type FlowConfig = {
   // loadFlowConfig always sets it; a configuration written without it runs
   // one author per ticket, as before.
   readonly steps?: boolean;
+  // A team's question to the owner (issue #290): past questionTimeoutMs
+  // from when it was asked, the lead is asked to decide, for questionLeadMs;
+  // then the session's declared answer applies, or the ticket is parked.
+  // loadFlowConfig always sets both; a configuration written without them
+  // takes QUESTION_TIMEOUT_MINUTES and QUESTION_LEAD_MINUTES.
+  readonly questionTimeoutMs?: number;
+  readonly questionLeadMs?: number;
 };
+
+// How long a team's question waits for the owner before the lead decides
+// (CLEARED_V2_QUESTION_TIMEOUT_MINUTES), and how long the lead has before
+// the session's declared answer applies or its ticket is parked.
+export const QUESTION_TIMEOUT_MINUTES = 30;
+export const QUESTION_LEAD_MINUTES = 10;
 
 // How long a high-confidence session plan waits for a Go before it starts
 // by itself, and a session that proposed none before it is put back, when
@@ -134,6 +147,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
   const workdirRoot = env.CLEARED_V2_WORKDIRS || join(state, 'work');
   if (!isAbsolute(workdirRoot)) throw new FlowConfigError('CLEARED_V2_WORKDIRS must be an absolute path');
   const minutes = positive(env.CLEARED_V2_IDLE_MINUTES, 'CLEARED_V2_IDLE_MINUTES', false) ?? 15;
+  const question = positive(env.CLEARED_V2_QUESTION_TIMEOUT_MINUTES, 'CLEARED_V2_QUESTION_TIMEOUT_MINUTES', false) ?? QUESTION_TIMEOUT_MINUTES;
   return {
     project: workspace.id, projectDir: first.dir, repoUrl: first.url, repo: first.repo,
     base: first.base, workdirRoot,
@@ -143,6 +157,8 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     maxReviewRounds: positive(env.CLEARED_V2_REVIEW_ROUNDS, 'CLEARED_V2_REVIEW_ROUNDS', true) ?? 3,
     budgetUsd: positive(env.CLEARED_V2_BUDGET_USD, 'CLEARED_V2_BUDGET_USD', false),
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
+    questionTimeoutMs: question * 60_000,
+    questionLeadMs: QUESTION_LEAD_MINUTES * 60_000,
     workspace,
     authorTools: true,
     steps: true,

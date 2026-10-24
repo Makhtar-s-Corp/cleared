@@ -87,7 +87,8 @@ test('a plan the service answers in a shape the panel does not know is not hande
   const plan = proposedPlan(FIXTURE_NOW);
   assert.equal(readPlan(plan), plan);
   assert.equal(readPlan({ ...plan, state: 'archived' }), undefined);
-  assert.equal(readPlan({ ...plan, items: [{ ...plan.items[0], state: 'parked' }] }), undefined);
+  assert.equal(readPlan({ ...plan, items: [{ ...plan.items[0], state: 'frozen' }] }), undefined);
+  assert.ok(readPlan({ ...plan, items: [{ ...plan.items[0], state: 'parked' }] }), 'an item parked on its question (issue #290) is read');
   assert.equal(readPlan({ ...plan, items: [{ ...plan.items[0], lane: 'slow' }] }), undefined);
   assert.equal(readPlan({ ...plan, totals: null }), undefined);
   assert.equal(readPlan(null), undefined);

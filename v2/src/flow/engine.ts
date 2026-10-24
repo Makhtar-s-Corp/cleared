@@ -62,15 +62,23 @@
 // its summary and its state, until Give back resumes it. The flow leaves a
 // paused session alone: no idle stop, no Go of the delay, no review, no
 // message; a restart stops it as any live session.
+//
+// A plan must not freeze on a person (issue #290): a team's question has
+// its own delay (FlowConfig.questionTimeoutMs, from when it was asked),
+// past which the lead is asked to decide, then the answer the session
+// declared (flow/questions.ts) is applied, or the ticket is parked. The
+// idle watchdog (session/watchdog.ts) stops, through idleStop, a session
+// that waits for a person: its containers go, its question stays, and the
+// answer resumes it in a new container from its volume (#wake).
 import { posix } from 'node:path';
-import type { PermissionItem, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver, TicketStep } from '../api/types.ts';
+import type { InboxItem, PermissionItem, QuestionItem, QuestionTimeout, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver, TicketStep } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
 import { HostToolRefused, type Answer, type Briefing, type Decision, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
-import { readToolInput, readToolOutput, type AgUiEvent, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
+import { readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
@@ -84,7 +92,10 @@ import { TrainStore, view, type Stop } from '../release/store.ts';
 import { TrainRunner } from '../release/train.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import { AUTHOR_TOOLS, bindAuthorTools, readChangesReport, readSessionPlan } from './author-tools.ts';
-import { PLAN_GO_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
+import { PLAN_GO_MINUTES, QUESTION_LEAD_MINUTES, QUESTION_TIMEOUT_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
+import { answerLines, asked, declaredAnswers } from './questions.ts';
+import { duration } from '../lead/plans/estimates.ts';
+import { ledgerEvent } from '../store/ledger-events.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
@@ -182,6 +193,7 @@ export const QUICK_LABEL = 'Quick';
 export const QUICK_MODEL = 'claude-haiku-5-5';
 const SERVICE: Actor = { kind: 'agents', id: 'cleared-v2' };
 const FLOW_USER = 'cleared';                                       // the author of the message that reopens a session
+const QUESTION_DEFAULT = 'question_default';                       // the rule of an answer the session declared, applied at its delay's end
 
 type Live = {
   readonly id: SessionId;
@@ -277,6 +289,11 @@ export class FlowEngine {
   #launching = new Set<string>();                                   // steps whose session is being started
   #finishing = new Set<TicketId>();                                 // tickets whose last step is done: the review starts once
   #channels = new Map<TicketId, { readonly reviewer: SessionId; readonly round: number }>();   // the review channel waiting for the author's answer (issue 291)
+  // Sessions the watchdog stopped while they waited for a person (issue
+  // #290): their ticket's flow goes on, what they wait for stays in the
+  // inbox, and the answers given since are told to them when they resume.
+  #dormant = new Map<SessionId, Live>();
+  #told = new Map<SessionId, string[]>();
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -380,6 +397,11 @@ export class FlowEngine {
     for (const { live, minutes, go } of this.#dueGates(now)) {
       if (go) await this.#go(live, 'delay').catch((error: unknown) => console.error(`cleared-v2: the Go by the delay of ${live.id} failed (${error instanceof Error ? error.name : typeof error})`));
       else await this.#stopTicket(live, 'no_plan', 'The author proposed no session plan: the session was stopped.', noPlanNote(minutes), 'stopped', 'failed');
+    }
+    // Scanned synchronously too: asking the lead writes and yields nothing.
+    for (const { live, item, minutes } of this.#dueQuestions(now)) {
+      if (item.timeout?.answers) await this.#applyDeclared(live, item, item.timeout.answers, minutes);
+      else await this.#park(live, item, minutes);
     }
     const tickets = this.registry.ticketStore;
     for (const release of this.inbox.waitingReleases()) {
@@ -1061,6 +1083,10 @@ export class FlowEngine {
       await this.#close(live, 'stopped', note);
       sessions++;
     }
+    for (const dormant of [...this.#dormant.values()].filter((d) => d.input.ticket === id)) {
+      this.#endDormant(dormant, 'stopped');
+      sessions++;
+    }
     let items = 0;
     for (const item of this.inbox.items()) {
       if (item.ticket !== id || item.state !== 'waiting') continue;
@@ -1389,9 +1415,9 @@ export class FlowEngine {
   // gets its Go (`go`); a session that proposed none in its delay is put back.
   #dueGates(now: number): { live: Live; minutes: number; go: boolean }[] {
     const due: { live: Live; minutes: number; go: boolean }[] = [];
-    for (const live of this.#live.values()) {
+    for (const live of [...this.#live.values(), ...this.#dormant.values()]) {
       const gate = this.#gates.get(live.id);
-      if (live.closed || !gate || gate.heldAt === undefined || this.#paused.has(live.id)) continue;
+      if ((live.closed && !this.#dormant.has(live.id)) || !gate || gate.heldAt === undefined || this.#paused.has(live.id)) continue;
       const minutes = live.settings.planGoMinutes ?? PLAN_GO_MINUTES;
       if (now < gate.heldAt + minutes * 60_000) continue;
       if (gate.phase === 'held' && gate.plan?.confidence === 'high') due.push({ live, minutes, go: true });
@@ -1422,6 +1448,11 @@ export class FlowEngine {
     this.#snapshot(live.id, live.input.ticket);
     live.lastActivity = this.#now().getTime();
     const minutes = live.settings.planGoMinutes ?? PLAN_GO_MINUTES;
+    const dormant = this.#dormant.get(live.id);
+    if (dormant) {
+      await this.#wake(dormant, goMessage(by, minutes, this.#origins.get(live.input.ticket)));
+      return;
+    }
     try {
       await live.handle.send({ text: goMessage(by, minutes, this.#origins.get(live.input.ticket)), by: FLOW_USER });
     } catch (error) {
@@ -1431,14 +1462,15 @@ export class FlowEngine {
 
   // The owner's Go, from the session plan's inbox item (POST /api/sessions/:id/plan/go).
   async planGo(id: SessionId, by: UserId): Promise<void> {
-    await this.#go(this.#writable(id), by);
+    await this.#go(this.#dormant.get(id) ?? this.#writable(id), by);
   }
 
   // The owner's Change: the plan's item handled, and the author reopened with
   // the message; its next proposal replaces the plan (POST .../plan/change).
   async planChange(id: SessionId, message: string, by: UserId): Promise<void> {
     if (message.trim() === '') throw new FlowError('invalid', 'a Change says what to change in the plan');
-    const live = this.#writable(id);
+    const dormant = this.#dormant.get(id);
+    const live = dormant ?? this.#writable(id);
     const gate = this.#gates.get(id);
     if (!gate || gate.phase !== 'held' || !gate.plan) throw new FlowError('conflict', `session ${id} has no session plan waiting for its Go`);
     const waiting = this.inbox.sessionPlan(id);
@@ -1449,7 +1481,8 @@ export class FlowEngine {
     this.#setPhase(live, 'working');
     this.#snapshot(id, live.input.ticket);
     live.lastActivity = this.#now().getTime();
-    await live.handle.send({ text: changeMessage(message), by });
+    if (dormant) await this.#wake(dormant, changeMessage(message), by);
+    else await live.handle.send({ text: changeMessage(message), by });
   }
 
   // ---- watching a session -------------------------------------------------
@@ -1485,7 +1518,8 @@ export class FlowEngine {
           return;
         }
         case 'cleared.question': {
-          const item = this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions: event.value.questions });
+          const questions = event.value.questions;
+          const item = this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions, timeout: (since) => this.#questionTimeout(since, questions) });
           this.#waitStarts(live);
           this.#emit({ type: 'question_raised', at: this.#at(), project: session.project, ticket: session.ticket, session: live.id, requestId: event.value.requestId, item: item.id });
           return;
@@ -1611,17 +1645,25 @@ export class FlowEngine {
         this.#journal({ id: live.id, ticket, project: live.input.project }, { type: 'RUN_ERROR', message: this.#clean(runMessage), code });
       await this.#close(live, live.id === from.id ? phase : 'stopped', note);
     }
+    // A session the watchdog stopped has no container left: what it waited for goes with it.
+    for (const dormant of [...this.#dormant.values()].filter((d) => d.input.ticket === ticket)) {
+      if (code !== undefined && runMessage !== undefined)
+        this.#journal({ id: dormant.id, ticket, project: dormant.input.project }, { type: 'RUN_ERROR', message: this.#clean(runMessage), code });
+      this.#endDormant(dormant, dormant.id === from.id ? phase : 'stopped');
+    }
     await this.#putBack(ticket, note, reason);
   }
 
   // True when the ticket was moved: `ticket_put_back` is said only then.
   async #putBack(ticket: TicketId, note: string, reason: PutBackReason): Promise<boolean> {
     const tickets = this.registry.ticketStore;
+    for (const dormant of [...this.#dormant.values()].filter((d) => d.input.ticket === ticket)) this.#endDormant(dormant, 'stopped');
     this.#active.delete(ticket);
     this.#origins.delete(ticket);
     this.#channels.delete(ticket);
     this.#steps.hold(ticket);
-    await tickets.comment(ticket, this.#clean(note), SERVICE).catch(() => undefined);
+    await tickets.comment(ticket, this.#clean(note), SERVICE)
+      .catch((error: unknown) => console.error(`cleared-v2: the ${reason} note could not be written on ${ticket} (${error instanceof Error ? error.name : typeof error})`));
     try {
       await tickets.move(ticket, tickets.states.todo, SERVICE);
     } catch (error) {
@@ -2076,6 +2118,8 @@ export class FlowEngine {
   }
 
   async send(id: SessionId, text: string, by: UserId): Promise<void> {
+    const dormant = this.#dormant.get(id);
+    if (dormant) return this.#wake(dormant, text, by);
     const live = this.#writable(id);
     live.lastActivity = this.#now().getTime();
     await live.handle.send({ text, by });
@@ -2083,6 +2127,8 @@ export class FlowEngine {
   }
 
   async answer(id: SessionId, requestId: string, decision: Decision, by: UserId): Promise<void> {
+    const dormant = this.#dormant.get(id);
+    if (dormant) return this.#answerStopped(dormant, requestId, decision, by);
     const live = this.#writable(id);
     const item = this.inbox.find(id, requestId);
     if (!item || item.state !== 'waiting') throw new FlowError('not_found', `no request ${requestId} is waiting in session ${id}`);
@@ -2101,6 +2147,225 @@ export class FlowEngine {
   async interrupt(id: SessionId): Promise<void> {
     await this.#liveSession(id).handle.interrupt();
   }
+
+  // ---- a plan that does not freeze on a person (issue #290) -----------------
+
+  // A team's question's delay, from when it was asked, and what its end applies.
+  #questionTimeout(since: Date, questions: readonly Question[]): QuestionTimeout {
+    const wait = this.config.questionTimeoutMs ?? QUESTION_TIMEOUT_MINUTES * 60_000;
+    const lead = this.config.questionLeadMs ?? QUESTION_LEAD_MINUTES * 60_000;
+    return { at: new Date(since.getTime() + wait).toISOString(), leadUntil: new Date(since.getTime() + wait + lead).toISOString(), answers: declaredAnswers(questions) };
+  }
+
+  // Each waiting question of a session this engine runs, awake or stopped by
+  // the watchdog, past its delay: the lead is asked once, here; past the
+  // lead's window, it is due, for its declared answer or its ticket's park.
+  // A session the owner took over waits for the owner.
+  #dueQuestions(now: number): { live: Live; item: QuestionItem; minutes: number }[] {
+    const lead = this.config.questionLeadMs ?? QUESTION_LEAD_MINUTES * 60_000;
+    const due: { live: Live; item: QuestionItem; minutes: number }[] = [];
+    for (const item of this.inbox.waitingQuestions(this.config.project)) {
+      const timeout = item.timeout;
+      const live = this.#live.get(item.sessionId) ?? this.#dormant.get(item.sessionId);
+      if (!timeout || !live || this.#paused.has(live.id) || now < Date.parse(timeout.at)) continue;
+      const minutes = Math.round((now - Date.parse(item.since)) / 60_000);
+      if (!timeout.leadAt) this.#questionToLead(item, timeout, now, lead, minutes);
+      else if (now >= Date.parse(timeout.leadAt) + lead) due.push({ live, item, minutes });
+    }
+    return due;
+  }
+
+  #questionTimedOut(item: QuestionItem, stage: 'lead' | 'default' | 'parked', minutes: number, answers: Readonly<Record<string, string>> | null): void {
+    const at = this.#at();
+    const kind = stage === 'lead' ? 'question_to_lead' : stage === 'default' ? 'question_default' : 'question_parked';
+    ledgerEvent(this.#store.db, { at, kind, ticket: item.ticket, source: 'flow', detail: { session: item.sessionId, requestId: item.requestId, item: item.id, minutes, ...(stage === 'default' ? { answers } : {}) } });
+    this.#emit({
+      type: 'question_timed_out', at, project: item.project, ticket: item.ticket, session: item.sessionId, requestId: item.requestId, item: item.id,
+      stage, minutes, leadMinutes: Math.round((this.config.questionLeadMs ?? QUESTION_LEAD_MINUTES * 60_000) / 60_000), questions: item.questions.map((q) => q.question), answers,
+    });
+  }
+
+  // The lead decides now (lead/engine.ts says it in its thread and gives it a turn); the owner still may.
+  #questionToLead(item: QuestionItem, timeout: QuestionTimeout, now: number, lead: number, minutes: number): void {
+    this.inbox.questionToLead(item.id, new Date(now).toISOString(), new Date(now + lead).toISOString());
+    this.#questionTimedOut(item, 'lead', minutes, timeout.answers);
+  }
+
+  // The answer the session declared, applied as a policy's answer under
+  // QUESTION_DEFAULT and said on the ticket, in the ledger and on the bus.
+  async #applyDeclared(live: Live, item: QuestionItem, answers: Readonly<Record<string, string>>, minutes: number): Promise<void> {
+    const waited = `${asked(item.questions)} waited ${duration(minutes)} with no answer from the owner or the lead`;
+    await this.registry.ticketStore.comment(item.ticket, this.#clean(`${waited}: the answer the session declared applies.\n${answerLines(answers)}`), SERVICE)
+      .catch((error: unknown) => console.error(`cleared-v2: the declared answer of ${item.id} could not be said on ${item.ticket} (${error instanceof Error ? error.name : typeof error})`));
+    this.#questionTimedOut(item, 'default', minutes, answers);
+    const answer: Answer = { decision: { kind: 'answer', answers }, by: 'policy', rule: QUESTION_DEFAULT };
+    const dormant = this.#dormant.get(live.id);
+    if (dormant) {
+      if (!this.#settleStopped(dormant, item, answer.decision, 'policy')) return;
+      await this.#wake(dormant, `${waited}, so the default you declared, the option you recommended, applies:\n${answerLines(answers)}\nCarry on with it.`);
+      return;
+    }
+    try {
+      await live.handle.answer(item.requestId, answer);
+    } catch (error) {
+      // The harness lost the request: the ticket cannot be told, so it is parked.
+      console.error(`cleared-v2: the declared answer of ${item.id} could not be given (${error instanceof Error ? error.name : typeof error})`);
+      await this.#park(live, item, minutes);
+      return;
+    }
+    if (this.inbox.handle(item.id, 'policy')) this.#answered(item.id, item.ticket, live.id, item.requestId, 'policy');
+    this.#waitEnds(live);
+  }
+
+  // No declared answer: the ticket is parked, its sessions stopped with what
+  // a resume needs (the adapter keeps the volume), its slot in the plan free.
+  async #park(live: Live, item: QuestionItem, minutes: number): Promise<void> {
+    const waited = `${asked(item.questions)} waited ${duration(minutes)} with no answer from the owner or the lead`;
+    this.#questionTimedOut(item, 'parked', minutes, null);
+    await this.#stopTicket(live, 'parked', `${waited}: the session was stopped and its ticket parked.`,
+      `${waited}, and the session declared no answer: the ticket is parked, its session stopped with what a resume needs. The rest of the plan goes on; start it again with the answer.`, 'stopped', 'parked');
+  }
+
+  // The watchdog's question (session/watchdog.ts): this engine stops a
+  // session of its own the watchdog found idle. One that waits for a person
+  // is stopped keeping what a resume needs (#suspend); one that waits for
+  // nothing is stopped as the idle rule stops it, its ticket put back. One
+  // the owner took over is the human's, and one a resume starts is moving.
+  // 'unknown': this engine does not run it.
+  async idleStop(id: SessionId): Promise<'stopped' | 'skipped' | 'unknown'> {
+    if (this.#dormant.has(id)) return 'skipped';
+    const live = this.#live.get(id);
+    if (!live || live.closed) return 'unknown';
+    if (this.#paused.has(id) || this.#resuming.has(id)) return 'skipped';
+    if (this.inbox.waitingFor(id) > 0 || this.#holds(id)) {
+      await this.#suspend(live);
+      return 'stopped';
+    }
+    const minutes = Math.round(this.config.idleMs / 60_000);
+    await this.#stopTicket(live, 'idle', `No activity for ${minutes} minutes: the session was stopped.`,
+      `The session stopped after ${minutes} minutes without activity. Move the ticket to Todo to start it again.`, 'stopped', 'idle');
+    return 'stopped';
+  }
+
+  // Its containers go, its volume, its ticket's flow and what it waits for
+  // stay. Closed first, so that the end of its stream is not a failure.
+  async #suspend(live: Live): Promise<void> {
+    const minutes = Math.round(this.config.idleMs / 60_000);
+    live.closed = true;
+    this.#live.delete(live.id);
+    this.#dormant.set(live.id, live);
+    const session = { id: live.id, ticket: live.input.ticket, project: live.input.project };
+    this.#journal(session, { type: 'RUN_ERROR', message: `No activity for ${minutes} minutes while it waited for a person: its containers were stopped, with what a resume needs. The answer resumes it.`, code: 'idle' });
+    this.#setPhase(live, 'stopped');
+    this.#snapshot(live.id, live.input.ticket);
+    await live.handle.stop().catch(() => undefined);
+    this.#notify(live.id);
+    this.#emit({ type: 'session_stopped', at: this.#at(), project: live.input.project, ticket: live.input.ticket, session: live.id, role: live.input.role, phase: 'stopped', reason: `idle ${minutes} minutes while it waited for a person; the answer resumes it` });
+  }
+
+  // A stopped session's request answered: the item handled, the answer
+  // journaled as the adapter would have, and what to tell the session kept
+  // for its resume. False when someone else handled it first.
+  #settleStopped(dormant: Live, item: InboxItem, decision: Decision, by: UserId | 'policy'): boolean {
+    if (!this.inbox.handle(item.id, by)) return false;
+    const session = { id: dormant.id, ticket: dormant.input.ticket, project: dormant.input.project };
+    const requestId = item.kind === 'question' || item.kind === 'permission' ? item.requestId : '';
+    this.#journal(session, by !== 'policy' && item.kind === 'question'
+      ? { type: 'CUSTOM', name: 'cleared.answered', value: { requestId, by } }
+      : { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId, decision: decision.kind, by, ...(by === 'policy' ? { rule: QUESTION_DEFAULT } : {}) } });
+    this.#answered(item.id, item.ticket, dormant.id, requestId, by);
+    return true;
+  }
+
+  // The answer from the inbox, the lead or a person to a session the
+  // watchdog stopped: once nothing else of it waits, it resumes with what
+  // it was answered.
+  async #answerStopped(dormant: Live, requestId: string, decision: Decision, by: UserId): Promise<void> {
+    const item = this.inbox.find(dormant.id, requestId);
+    if (!item || item.state !== 'waiting') throw new FlowError('not_found', `no request ${requestId} is waiting in session ${dormant.id}`);
+    const asks = item.kind === 'question';
+    if (asks !== (decision.kind === 'answer')) throw new FlowError('invalid', asks ? 'a question is answered with an answer' : 'a permission request is answered with allow or reject');
+    if (!this.#settleStopped(dormant, item, decision, by)) return;
+    if (decision.kind === 'allow_always' && item.kind === 'permission') {
+      const pattern = patternOf(item);
+      if (pattern) this.#store.policyRules.learn({ project: item.project, tool: item.tool, pattern, by, at: this.#now().toISOString() });
+    }
+    const who = by === 'lead' ? 'the lead' : 'the owner';
+    const told = this.#told.get(dormant.id) ?? [];
+    if (item.kind === 'question' && decision.kind === 'answer') told.push(`${who} answered your question:\n${answerLines(decision.answers)}`);
+    else if (item.kind === 'permission') {
+      const what = `${item.tool}${patternOf(item) ? `: ${patternOf(item)}` : ''}`;
+      told.push(decision.kind === 'reject_once' || decision.kind === 'reject_always'
+        ? `${who} refused your request (${what}): ${decision.message}`
+        : `${who} allowed your request (${what}): run it again.`);
+    }
+    this.#told.set(dormant.id, told);
+    if (this.inbox.waitingFor(dormant.id) > 0) return;
+    this.#told.delete(dormant.id);
+    await this.#wake(dormant, `While your session was stopped, ${told.join('\n')}\nCarry on.`);
+  }
+
+  // A session the watchdog stopped, resumed from its volume by the
+  // harness's resume and told `text`. What it still waited for cannot be
+  // answered any more (its harness lost the request): it is settled, and
+  // the session is told to ask again. One that cannot be resumed fails its ticket.
+  async #wake(dormant: Live, text: string, by: UserId | 'cleared' = FLOW_USER): Promise<void> {
+    if (this.#dormant.get(dormant.id) !== dormant) return;
+    this.#dormant.delete(dormant.id);
+    const session = { id: dormant.id, ticket: dormant.input.ticket, project: dormant.input.project };
+    const left = this.inbox.items().filter((i): i is QuestionItem => i.kind === 'question' && i.state === 'waiting' && i.sessionId === dormant.id);
+    this.inbox.handleSession(dormant.id, 'system');
+    const told = this.#told.get(dormant.id) ?? [];
+    this.#told.delete(dormant.id);
+    const words = [
+      ...(told.length > 0 ? [`While your session was stopped, ${told.join('\n')}`] : []),
+      text,
+      ...left.map((q) => `Your question ${asked(q.questions)} was not answered while your session was stopped: ask it again if you still need it.`),
+    ].join('\n\n');
+    const lastSeq = this.#store.events.after(dormant.id).at(-1)?.seq ?? 0;
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    let handle: SessionHandle;
+    try {
+      if (!adapter) throw new Error('no session adapter is configured');
+      handle = await this.#resume(adapter, dormant.id);
+    } catch (error) {
+      if (dormant.waitOpen) this.#step(session, 'STEP_FINISHED', 'waiting_human');
+      this.#journal(session, { type: 'RUN_ERROR', message: this.#clean(`The session could not be resumed: ${name(error)}`), code: 'error' });
+      this.#setPhase(dormant, 'failed');
+      this.#snapshot(dormant.id, dormant.input.ticket);
+      await this.#stopTicket(dormant, undefined, undefined, `The session stopped while it waited could not be resumed: ${name(error)}`, 'failed', 'failed');
+      return;
+    }
+    const live: Live = { ...dormant, handle, closed: false, lastActivity: this.#now().getTime() };
+    this.#live.set(live.id, live);
+    this.#waitEnds(live);
+    if (!this.#holds(live.id)) this.#setPhase(live, live.input.role === 'reviewer' ? 'reviewing' : 'working');
+    this.#snapshot(live.id, live.input.ticket);
+    this.#supervise(live, lastSeq);
+    try {
+      await handle.send({ text: words, by });
+    } catch (error) {
+      await this.#stopTicket(live, 'error', `The resumed session could not be told: ${name(error)}`, `The session was resumed, but it could not be told: ${name(error)}`, 'failed', 'failed');
+    }
+  }
+
+  // A stopped session that will not resume: what it waited for goes with it.
+  #endDormant(dormant: Live, phase: 'stopped' | 'failed'): void {
+    if (!this.#dormant.delete(dormant.id)) return;
+    this.#told.delete(dormant.id);
+    const session = { id: dormant.id, ticket: dormant.input.ticket, project: dormant.input.project };
+    if (dormant.waitOpen) {
+      dormant.waitOpen = false;
+      this.#step(session, 'STEP_FINISHED', 'waiting_human');
+    }
+    const gate = this.#gates.get(dormant.id);
+    if (gate?.stepOpen) this.#step(session, 'STEP_FINISHED', 'plan_gate');
+    if (gate && gate.phase !== 'working') this.#gates.delete(dormant.id);
+    this.#setPhase(dormant, phase);
+    this.inbox.handleSession(dormant.id, 'system');
+    this.#snapshot(dormant.id, dormant.input.ticket);
+  }
+
 
   // ---- take over and give back (decision 30, lane 20) ---------------------
 

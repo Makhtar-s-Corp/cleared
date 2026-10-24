@@ -27,7 +27,7 @@ import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
-  changeMessage, chosen, clock, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
+  changeMessage, chosen, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   sessionLink, sessionOf, sessionsLine, shareLine, short,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
@@ -352,6 +352,7 @@ function QuestionBody({ item, view, t, answers, onDraft }: {
   const waiting = item.state === 'waiting' && !lead;
   const title = lead ? undefined : ticketTitle(view, item.ticket);
   const busy = view.local.get(item.id)?.kind === 'busy';
+  const deadline = deadlineLine(item, view.now, t);
   return (
     <>
       {lead ? <Eyebrow item={item} kind={t('eyebrow_lead_question')} open={undefined} openKey="" t={t} />
@@ -363,6 +364,7 @@ function QuestionBody({ item, view, t, answers, onDraft }: {
           status={waiting ? { kind: 'waiting', draft: answers, busy } : { kind: 'read' }} onDraft={onDraft} />
       </div>
       {title ? <p className="d-ticket for-question">{title}</p> : null}
+      {deadline ? <p className="d-deadline">{deadline}</p> : null}
     </>
   );
 }

@@ -13,6 +13,8 @@ test('the author prompt carries the ticket and its criteria, and says what Clear
   assert.match(text, /never push/i);
   // The guard refuses a publish whose commit messages carry an address.
   assert.match(text, /no email address/i);
+  // A question's declared answer, which its delay applies (issue #290).
+  assert.match(text, /end the label of the one you would take with "\(Recommended\)"/);
 });
 
 test('the review prompt is the v1 one with the project verdict phrase and the base branch filled in', () => {
