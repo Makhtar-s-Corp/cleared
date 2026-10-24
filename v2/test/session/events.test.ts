@@ -36,6 +36,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.terminal_opened', 'cleared.terminal_input', 'cleared.terminal_closed', 'cleared.human_edit',
     // Milestone 3: the author-reviewer channel (issue 291).
     'cleared.review_channel',
+    // Milestone 3: the author's branch at each step, and a resume from a step (issue #272).
+    'cleared.checkpoint', 'cleared.replay',
   ]);
 });
 

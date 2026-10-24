@@ -57,6 +57,11 @@ export const CUSTOM_NAMES = [
   // Milestone 3 (issue 291): a message of a ticket's author-reviewer
   // channel, journaled by the flow on the sender's session and the receiver's.
   'cleared.review_channel',
+  // Milestone 3 (issue #272): the tip of the author's branch, journaled by
+  // the flow at the start and after a tool call that moved it; and a ticket
+  // resumed from a step, journaled on the session left and on the new one.
+  'cleared.checkpoint',
+  'cleared.replay',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -163,6 +168,18 @@ export type CustomValue = {
   // reviewer's request for change or the author's answer, cleaned, with the
   // round it belongs to and the rounds the flow allows (`limit`).
   'cleared.review_channel': { readonly round: number; readonly limit: number; readonly from: 'reviewer' | 'author'; readonly text: string };
+  // The commit the author's branch points at (issue #272), read from the
+  // checkout's files without git: a step of the thread resumes from the last
+  // one journaled before it.
+  'cleared.checkpoint': { readonly commit: string; readonly branch: string };
+  // A ticket resumed from a step (issue #272, flow/replay.ts): the session
+  // left (`from`) and the step (`seq`, the first event of the step's row),
+  // the commit the new branch starts at, the new session (`to`), who asked
+  // and the corrected instruction, cleaned. The same value on both sessions.
+  'cleared.replay': {
+    readonly from: SessionId; readonly to: SessionId; readonly seq: number; readonly commit: string; readonly branch: string; readonly previous: string;
+    readonly by: UserId; readonly message: string;
+  };
 };
 
 type Base = { readonly timestamp?: number };
