@@ -593,8 +593,9 @@ function allowedEdit(request: ToolRequest, policy: Policy, context: PolicyContex
   const path = request.input.file_path ?? request.input.notebook_path;
   if (typeof path !== 'string' || !inside(policy.workdir, path)) return undefined;
   const parts = relative(policy.workdir, path).split('/');
-  // Generated (CLAUDE.md), locked (.claude/) or run by git on the host (.git/).
-  if (parts.includes('.claude') || parts.includes('.git') || parts.at(-1) === 'CLAUDE.md') return undefined;
+  // Generated (CLAUDE.md), locked (.claude/, and .cursor/, where the Cursor
+  // harness's permissions are written) or run by git on the host (.git/).
+  if (parts.includes('.claude') || parts.includes('.cursor') || parts.includes('.git') || parts.at(-1) === 'CLAUDE.md') return undefined;
   const name = parts.at(-1);
   if (name === 'package-lock.json' || name === 'npm-shrinkwrap.json') return ask('install.package', 'an edit of the lock file changes the installed packages');
   if (name === 'package.json') {

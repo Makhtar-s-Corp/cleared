@@ -137,7 +137,7 @@ export const DEFAULT_MODE: TerminalMode = 'harness';
 export const otherMode = (mode: TerminalMode): TerminalMode => (mode === 'harness' ? 'shell' : 'harness');
 
 // The harness's name before the service says it (TerminalOpened.name).
-const HARNESS_NAMES: Readonly<Record<Harness, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+const HARNESS_NAMES: Readonly<Record<Harness, string>> = { 'claude-code': 'Claude Code', codex: 'Codex', cursor: 'Cursor' };
 export const harnessName = (harness: Harness): string => HARNESS_NAMES[harness] ?? harness;
 
 // ----------------------------------------------------------------- stream

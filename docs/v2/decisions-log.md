@@ -4169,6 +4169,19 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - When the service cannot release a stopped session's networks (« the stopped sessions' containers and networks could not be released »), they are still removed by hand on a written decision, as here.
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
 
+## 2026-10-23: Cursor harness on the session adapter contract (lane j3-cursor-harness)
+
+**Decision.** The author of the lane added a Cursor adapter beside Claude Code (matrix B5.1c, O6, B6.3 for its Cursor part, P42). These are the author's choices, not the owner's decisions; the owner's real trial is open.
+
+- **Driving.** `agent -p --output-format stream-json`, one process per message in the session's container, resumed on the chat id Cursor names in its first line. No SDK exists for it.
+- **Guard.** Print mode has no way to hold a call for a person, so the adapter fails closed in two layers: the policy compiled into Cursor's permissions file (deny first, never `--force`), and the unchanged policy evaluated on every reported call, which ends the turn on a deny and on an ask. A tripwire, not a prevention; stated in `docs/adapters.md`.
+- **Usage.** Cursor's documented stream has no tokens and no cost: the run reports the model and a null cost, and nothing is estimated.
+- **Take over.** The running turn ends, the terminal runs `agent --resume <chat> --model <model>` through a launcher that reads the key file inside the container, messages wait for Give back, and the next turn resumes the chat.
+- **Login.** A Cursor API key file only. The host's browser login (owner note of 2026-10-22) is not used: where it lives is unverified.
+- **Not done.** `images/session/Dockerfile` has no Cursor program (no pinned install source). Codex has no v2 adapter. Hand over, cross-harness review and two sessions on one ticket are not delivered.
+- **Resources.** No Docker object was created, no port opened, no Cursor account used. The proof run, its state folder and its service were not touched.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-cursor-harness`.
+
 ## 2026-10-24: a ticket's author and reviewer settle a review in their own channel, three rounds by default (the author's choices, lane `j3-review-channel`, issue #291)
 
 **The need.** Before this lane, the review loop already reopened the author with the report. But each round after the first started a new reviewer, with no memory of its own report and without the author's answer. Neither the exchange nor the author's side of it was shown anywhere: the flow's messages are hidden from the session screen. Two requests for change sent the ticket back to Todo (`CLEARED_V2_REVIEW_ROUNDS`, 2 by default). Issue #291 asks for a channel per ticket between the author and the reviewer, a bounded number of rounds before any return to Todo, every exchange in the ledger and on the screen, in French and in English.
