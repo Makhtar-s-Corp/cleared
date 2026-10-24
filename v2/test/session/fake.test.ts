@@ -144,8 +144,8 @@ test('the example script plays a whole author turn the app can render', withStor
   }
 }));
 
-test('the fake adapter is never registered: claude-code and cursor are (lane 4, milestone 3)', () => {
-  assert.deepEqual(Object.keys(adapterFactories), ['claude-code', 'cursor']);
+test('the fake adapter is never registered: claude-code, cursor and codex are (lane 4, milestone 3)', () => {
+  assert.deepEqual(Object.keys(adapterFactories), ['claude-code', 'cursor', 'codex']);
 });
 
 test('an interrupt with no message left in the script ends the session and its readers (review round 2, finding 5)', withStore(async (store) => {

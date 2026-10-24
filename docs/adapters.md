@@ -740,6 +740,67 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 12. Layer 2 sees a call only on `tool_call/started`; check a real stream does not send a call only as `completed`.
 13. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
 
+## Codex harness (milestone 3, lane j3-codex-harness)
+
+Written on 2026-10-24 **without a Codex account, a Codex session or a single model call**: the owner decided that Codex is tested without an account (O6). The Codex program on this server was asked for `--help` only. Everything below separates what was recorded on 2026-10-21 (the proofs earlier on this page), what the documentation and the TypeScript SDK's item types say (not run), and what the tests prove against fakes. The owner's trial list is at the end.
+
+### Which mode, and the decision gate
+
+The recommendation above names the app server for the v2 adapter, but its decision gate is **still open**: no run on the pinned version has shown which `approvalPolicy` sends every command and file write to the client, and this lane could not run one. The adapter therefore uses the mode the gate allows, `codex exec --json` (labelled "Stable", recorded in proofs 7 and 8), with approvals `never`, which is the same position as the Cursor adapter: nobody can be asked mid-turn, so an `ask` of the policy ends the turn. The app server stays the target once the gate passes (a true ask in the inbox, `turn/interrupt`, `turn/steer`).
+
+### From the help of `codex-cli 0.163.0` on this server (2026-10-24, `--help` only)
+
+- `codex exec [OPTIONS] [PROMPT]`: the prompt is read from the standard input when it is `-`. Options used: `--json`, `--skip-git-repo-check`, `-m`, `-c key=value` (TOML value). Not used: `--ephemeral` (an ephemeral thread cannot be resumed), `--dangerously-bypass-approvals-and-sandbox`, `--approve-for-me`.
+- `codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]` has `--json`, `-m`, `-c` but **no `--sandbox`**: the adapter passes the sandbox as `-c sandbox_mode="..."` on every turn.
+- `codex resume [OPTIONS] [SESSION_ID]` (the interactive program) has `--no-daemon` ("without the shared background server") and `--include-non-interactive` (threads started by `exec`), `-m`, `-s`, `-a`, `-c`.
+- A rollout file of this server (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>.jsonl`, written by a v1 run) has `token_count` lines whose `rate_limits` hold a `primary` and a `secondary` window, each with `used_percent` (a percent), `window_minutes` (10080 for the week) and `resets_at` (seconds), and whose `info.total_token_usage.total_tokens` is `input_tokens + output_tokens`. Only the shape was read; no value was kept.
+
+### How the adapter drives it
+
+| Need | Cursor | Codex (this adapter) |
+| --- | --- | --- |
+| Process | one `docker exec` per message | one `docker exec` per message: `codex exec --json ... -`, then `codex exec resume --json ... <thread> -` on the thread from Codex's `thread.started` line (held in memory; also written to `<state>/codex-threads/<session>.thread`, which nothing reads back yet) |
+| Login | API key file into `CURSOR_API_KEY` | the mounted Codex API key file (`CLEARED_CODEX_API_KEY_FILE`, else `<state>/codex.key`), read in the container into `CODEX_API_KEY`; never a command word, `codex login` never run, so no credential is written to the session's volume; `OPENAI_API_KEY` unset; `shell_environment_policy.exclude` names both so Codex's commands do not inherit them |
+| Home | `CURSOR_CONFIG_DIR` on the config volume | `CODEX_HOME` on the session's config volume (`<config>/codex`): the rollout survives between turns and across Take over, and the host's own Codex configuration is never read |
+| Guard | permissions file, then the policy on every call | **two layers, failing closed** (below) |
+| Usage | the model only | each turn's tokens from `turn.completed`, counted so that the screen's sum is Codex's own total (below); `total_cost_usd: null`; the rate windows from the rollout after each finished turn |
+| Take over | `agent --resume <chat>` | the running turn ends, `codex resume --no-daemon --include-non-interactive -m <m> -c approval_policy="on-request" -c sandbox_mode=<the role's> <thread>` in the web terminal, messages refused until Give back |
+| Give back | the next turn resumes the chat | the next turn resumes the thread the human left |
+
+**Guard.** 1. Codex's own sandbox, chosen by the role (`codex/interactive.ts`, `sandboxOf`): `read-only` for a reviewer, a reader, the lead and an author whose session plan waits for its Go; `workspace-write` for an author at work, with `sandbox_workspace_write.network_access=true` because the container's egress (B5.4d) is the network's guard and the tests reach the session's services through it. Approvals are `never`. No program ever gets `danger-full-access`, a `--dangerously-*` flag, `--full-auto`, `--approve-for-me` or `--ephemeral` (a test checks every role and both programs). 2. Every item Codex reports is evaluated once by the unchanged policy: a `command_execution` as `Bash` (the command read inside its `bash -lc '...'` wrapper), each file of a `file_change` as `Edit`, `Write` or `Delete`, an `mcp_tool_call` as `mcp__<server>__<tool>`, a `web_search` as `WebSearch`. Only an allow lets the turn go on; a deny or an ask kills the program in the container, says so in the thread (`cleared.permission_answered`, then `policy_stop`) and waits for the next message. A command is seen when it starts, but a file change only once it is made: for edits this layer reports after the fact, and the sandbox is what refuses. The policy now locks `.codex/` in the checkout as it locks `.cursor/` (a project's own Codex configuration could otherwise be changed by a session).
+
+**Usage.** Codex counts the cached input inside `input_tokens` and the reasoning inside `output_tokens` (a rollout's `total_tokens` is `input_tokens + output_tokens`). The Consumption screen adds input, output, cache read and cache write, so a turn's usage says `inputTokens = input_tokens - cached_input_tokens - cache_write_input_tokens`, `cachedInputTokens`, `cacheWriteInputTokens` and `outputTokens` as given: their sum is Codex's total. The session's state adds its turns, since Codex reports each turn alone (proof 8: the second turn's input is the whole thread again).
+
+**Quota.** The recorded `exec --json` stream has no rate limits. After each finished turn the launcher runs a fixed program in the container (`RATE_LIMITS`) that prints the last `token_count` line of that thread's rollout, at most 64 KiB, and nothing else; the adapter keeps only `rate_limits` from it and says `cleared.rate_limit` for the week (10080 minutes) and the five hours (300 minutes), `used_percent` already a percent, once per change. A window of another length is not guessed. A failed read says nothing.
+
+**Failures** are fixed sentences by exit code and a stderr pattern (`codex_login`, `codex_not_installed`, `codex_exit`, `codex_launch`), and `codex_error` for `turn.failed` or `error`. Codex's own words are never journaled.
+
+**Reachability.** Registered as `codex`; the terminal route picks the adapter by the session's harness. As for Cursor, the flow and the lead start every session as `claude-code` (`HARNESS` in `flow/engine.ts` and `lead/engine.ts`), so no ticket can name `codex` yet.
+
+**Image.** The session image does not contain Codex (`npm i -g @openai/codex@<pinned>` is the documented install; adding it to the image is the owner's trial, with the pinned version). A turn in an image without it ends with `codex_not_installed`. `CodexRuntime.image` names an image that has it.
+
+**Probe.** `node scripts/doctor.ts codex` runs `codex --version` and `codex login status` only, never `login`, never a turn. It was not run on this server, which holds the owner's live Codex login; its tests use stand-in programs.
+
+### Proven with fakes (`test/session/codex/`)
+
+- The mapper (`map.test.ts`) on the recorded lines (thread, turn, message, usage) and on lines written from the documentation (commands, file changes, web search, failure, labelled in `fixtures.ts`): the usage arithmetic against a rollout's real total, the session's sum of turns, the command unwrapped, one request per changed file, rate limits from a rollout-shaped line, no cost.
+- The adapter on a fake launcher (`adapter.test.ts`): the prompt on stdin only, the thread kept and resumed, the sandbox for each role and no bypass flag, the reviewer's file change and writing command stop its turn, a denied read and an ask stop the turn and leave nothing in the inbox, allowed calls pass and are checked once, the quota read after a finished turn only, failures by code without the program's words, interrupt, stop, handover rejected, Take over (the author's and the reviewer's sandbox), Give back, a turn that will not end refusing the hand over, a malformed thread id not kept.
+- The launcher programs (`launcher.test.ts`) run by `/bin/sh` with a stand-in `codex` on a PATH of linked tools only (this machine's own Codex can never be found): the key in the environment only, the other key unset, the words of each program, exit 127 and 3, the rollout's last `token_count` line and nothing else, `docker exec` on the labelled container.
+- The probe with stand-in programs (`probe.test.ts`).
+
+### Needs a real Codex trial by the owner
+
+1. Record one real `exec --json` turn with a command, a file change and a refused write, and replace the unrecorded lines of `fixtures.ts`; check the `command` shape (string or list, the `bash -lc` wrapper) and whether `file_change` ever comes as `item.started`.
+2. Whether `codex exec` honours `CODEX_API_KEY` from the environment with a fresh `CODEX_HOME`, and whether the interactive `codex resume` does too (if it does not, Take over shows Codex's own sign-in screen: a login stored on the volume would then be a decision for the owner).
+3. Whether Codex's Linux sandbox starts inside the session container (no capability, `no-new-privileges`): v1 saw it fail on a socket mount on the host. If it cannot, every command fails, which is safe but useless; running with the container as the only sandbox is the owner's decision, never a default.
+4. Whether `exec resume` reads the prompt from `-` as `exec` does, and whether `-c sandbox_mode` takes effect on a resumed thread.
+5. The interactive program's trust prompt for the checkout (the adapter does not pre-trust it, so a project's `.codex/config.toml` is not loaded), and that `--no-daemon` leaves nothing running after Give back.
+6. Whether `exec --json` ever carries `rate_limits` itself, and that the rollout path (`sessions/*/*/*/rollout-*-<thread>.jsonl`) holds for the pinned version.
+7. That ending the turn's process (`END_TURN`: TERM to the program and its children, then KILL) stops the native binary under the npm wrapper.
+8. The egress hosts (`CODEX_HOSTS` in `codex.ts`: `api.openai.com`, `chatgpt.com`, `auth.openai.com`, from the documentation) and Codex in a session image at a pinned version.
+9. The briefing: the generated context file is `CLAUDE.md`; Codex reads `AGENTS.md`. Writing it under that name too is a later lane.
+10. The decision gate above: run the app server's approval test on the pinned version; if it passes, the adapter can move to the app server and an ask can wait in the inbox.
+
 ## v1 adapter contract
 
 This is the contract implemented today by `adapters/claude.sh` and `adapters/codex.sh`, which run one `run` per prompt.

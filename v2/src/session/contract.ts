@@ -134,9 +134,8 @@ export type ToolKind = 'read' | 'edit' | 'delete' | 'move' | 'search' | 'execute
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
 // The adapter's interactive resume, or why there is none: an adapter
-// without the method (Codex until its own comes; Cursor's is
-// cursor.ts) or with no
-// adapter at all is unsupported, and so is one that fails, whose error
+// without the method (the fake; Cursor's is cursor.ts, Codex's codex.ts) or
+// with no adapter at all is unsupported, and so is one that fails, whose error
 // stays on the host.
 export async function interactiveResume(adapter: SessionAdapter | undefined, id: SessionId): Promise<InteractiveResume> {
   if (!adapter) return { supported: false, reason: 'This session has no harness adapter here: open the Shell instead.' };
