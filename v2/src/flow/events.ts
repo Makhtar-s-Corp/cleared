@@ -3,6 +3,7 @@
 // (the store, the inbox, the ticket). The lead (lane 5), the notifications
 // (lane 6) and the plan runner (lane 7) learn of a ticket's life through
 // FlowEngine.subscribe, never by reading the flow's tables.
+import type { CiRepair } from '../api/types.ts';
 import type { Role, SessionId, UserId } from '../session/contract.ts';
 import type { TicketId } from '../tickets/contract.ts';
 
@@ -63,6 +64,9 @@ export type FlowEvent =
   // A train says it once, naming the service whose watch failed.
   | Base & OfService & { readonly type: 'rolled_back'; readonly pr: number; readonly note: string }
   | Base & { readonly type: 'ticket_put_back'; readonly reason: PutBackReason; readonly note: string }
+  // The repair of a release's failed checks (issue #273): each step of it,
+  // as the card's `repair` says it.
+  | Base & { readonly type: 'ci_repair'; readonly pr: number; readonly attempt: number; readonly limit: number; readonly state: CiRepair['state']; readonly checks: readonly string[] }
   | Base & { readonly type: 'question_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string }
   | Base & { readonly type: 'permission_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly tool: string }
   | Base & { readonly type: 'request_answered'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly by: UserId | 'policy' | 'system' }
@@ -82,7 +86,7 @@ export type FlowEventType = FlowEvent['type'];
 export const FLOW_EVENT_TYPES: readonly FlowEventType[] = [
   'ticket_started', 'author_done', 'review_verdict', 'release_requested', 'release_approved', 'release_merged', 'release_landed',
   'release_unhealthy', 'rolled_back', 'ticket_put_back', 'question_raised', 'permission_raised', 'request_answered', 'session_stopped',
-  'question_timed_out',
+  'question_timed_out', 'ci_repair',
 ];
 
 // A listener is called in the flow's own turn, after the write: it must

@@ -205,3 +205,38 @@ export function stepLines(events: readonly SessionEvent[]): string[] {
     .filter((e): e is SessionEvent & { event: Extract<AgUiEvent, { type: 'STEP_STARTED' | 'STEP_FINISHED' }> } => e.event.type === 'STEP_STARTED' || e.event.type === 'STEP_FINISHED')
     .map((e) => `${e.event.type === 'STEP_STARTED' ? '+' : '-'}${e.event.stepName}`);
 }
+
+// A CI the flow tests play instead of the forge (issue #273): each publish
+// pushes a new head, and the checks of the n-th head are `results[n]`,
+// passed once the list is done. `stale`: after each push, the forge still
+// reports the head before it for that many readings of the checks, as a
+// forge that has not seen the push yet. Nothing reaches GitHub.
+export type SimulatedCi = ReturnType<typeof simulatedCi>;
+export function simulatedCi(results: readonly ('failed' | 'passed' | 'pending')[], options: { readonly stale?: number } = {}) {
+  const heads: string[] = [];
+  const pushes: { branch: string; head: string; created: boolean }[] = [];
+  const reads: string[] = [];                               // the head each reading of the checks saw
+  let stale = 0;
+  let seen = '';
+  const state = (head: string) => results[heads.indexOf(head)] ?? 'passed';
+  const effects: Partial<FlowEffects> = {
+    async publish(input) {
+      const head = (heads.length + 1).toString(16).padStart(40, '0');
+      heads.push(head);
+      pushes.push({ branch: input.branch, head, created: heads.length === 1 });
+      stale = options.stale ?? 0;
+      return { url: 'https://example.invalid/pull/7', number: 7, head, created: heads.length === 1 };
+    },
+    async prChecks() {
+      seen = stale > 0 && heads.length > 1 ? heads.at(-2) as string : heads.at(-1) ?? '';
+      if (stale > 0) stale -= 1;
+      reads.push(seen);
+      return state(seen);
+    },
+    async ciFailures() {
+      const n = heads.indexOf(seen) + 1;
+      return { head: seen, checks: state(seen) === 'failed' ? [{ name: 'test', url: 'https://example.invalid/actions/runs/1/job/2', log: `push ${n}: expected 2 to equal 3` }] : [] };
+    },
+  };
+  return { effects, heads, pushes, reads };
+}

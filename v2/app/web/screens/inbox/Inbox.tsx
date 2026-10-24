@@ -29,7 +29,7 @@ import {
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
   changeMessage, chosen, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
-  sessionLink, sessionOf, sessionsLine, shareLine, short,
+  repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
@@ -229,6 +229,7 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
   // service keeps milestone 1's frames, empty or not.
   const pictures = !train || [item.captures.before, item.captures.after].some((c) => c.desktop || c.phone);
   const waits = item.state === 'waiting' && approvable(item);
+  const repair = repairLine(item, t);
   return (
     <>
       <Eyebrow item={item} kind={t(waits ? 'eyebrow_release' : 'kind_release')} open={open && sessionLink(open.id)} openKey="open_sessions" t={t} />
@@ -240,6 +241,7 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
       {pictures ? <Shots item={item} view={view} t={t} onFrame={onFrame} /> : null}
       <dl className="facts">
         {item.sessions.length > 0 ? <Fact label={t('facts_sessions')}>{sessionsLine(item, t)}</Fact> : null}
+        {repair ? <Fact label={t('facts_repair')}><span data-repair={item.repair?.state}>{repair}</span></Fact> : null}
         {train ? <Fact label={t('facts_checks')}>{t(`checks_${CHECKS[item.pr.checks]}`)}</Fact> : (
           <Fact label={t('facts_change')}>
             {isWebLink(item.pr.url) ? <a href={item.pr.url} rel="noopener noreferrer">{pr}</a> : pr}

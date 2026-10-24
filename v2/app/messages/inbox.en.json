@@ -302,5 +302,13 @@
   "handled_group": "Handled · {n}",
   "waiting_group": "Waiting · {n}",
   "answers_label": "Answers to “{title}”",
-  "inbox_retry": "Try again"
+  "inbox_retry": "Try again",
+  "facts_repair": "Repair of the checks",
+  "repair_started": "{checks} failed: attempt {n} of {limit} started on the ticket branch",
+  "repair_pushed": "Attempt {n} of {limit} published, checks running",
+  "repair_repaired": "Repaired by attempt {n} of {limit}",
+  "repair_gave_up": "Still failing after {n} attempts ({checks}): nothing more is tried, you decide",
+  "repair_refused": "Not repaired: the branch is a base branch",
+  "repair_checks_unnamed": "the checks",
+  "release_repair_gave_up": "{ticket} · Checks still failing after {n} repair attempts"
 }

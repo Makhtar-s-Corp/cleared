@@ -147,6 +147,23 @@ export type ReleaseItem = InboxBase & {
   // default (lane 16) gives none; lane 18 fills them.
   readonly groups?: readonly ReleaseGroup[];
   readonly flags?: readonly ReleaseFlag[];
+  // The repair of its failed checks (issue #273, flow/ci-repair.ts): absent
+  // until a check fails on the card's head; carried by the card a repair
+  // publishes, so the attempts count across cards.
+  readonly repair?: CiRepair;
+};
+
+// `started`: a failed check reopened the author on the ticket branch, the
+// card is handled; `pushed`: the attempt's commit is published, its checks
+// run; `repaired`: they passed; `gave_up`: they failed again after the last
+// attempt, the owner decides; `refused`: the branch is a base branch, so
+// nothing was started. `checks`: the names of the checks that failed.
+export type CiRepair = {
+  readonly attempt: number;
+  readonly limit: number;
+  readonly state: 'started' | 'pushed' | 'repaired' | 'gave_up' | 'refused';
+  readonly checks: readonly string[];
+  readonly at: string;
 };
 
 // The author's report of its changes (`report_changes`, decision 23), kept

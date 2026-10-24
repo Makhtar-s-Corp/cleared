@@ -302,5 +302,13 @@
   "handled_group": "Traité · {n}",
   "waiting_group": "En attente · {n}",
   "answers_label": "Réponses à «\u00a0{title}\u00a0»",
-  "inbox_retry": "Réessayer"
+  "inbox_retry": "Réessayer",
+  "facts_repair": "Réparation des contrôles",
+  "repair_started": "Échec de {checks}\u00a0: tentative {n} sur {limit} lancée sur la branche du ticket",
+  "repair_pushed": "Tentative {n} sur {limit} publiée, contrôles en cours",
+  "repair_repaired": "Réparé par la tentative {n} sur {limit}",
+  "repair_gave_up": "Toujours en échec après {n} tentatives ({checks})\u00a0: rien de plus n'est tenté, à vous de décider",
+  "repair_refused": "Pas de réparation\u00a0: la branche est une branche de base",
+  "repair_checks_unnamed": "les contrôles",
+  "release_repair_gave_up": "{ticket} · Contrôles toujours en échec après {n} tentatives de réparation"
 }
