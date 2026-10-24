@@ -31,6 +31,7 @@ test('an author whose plan waits for its Go changes nothing but its HANDOVER.md,
   const author = t.startedSessions[0]!;
   const policy = () => t.engine.policyFor(author.input);
   assert.equal(policy().planning, true);
+  assert.equal(t.engine.policyFor({ ...author.input }).planning, true, 'an adapter\'s copy of the input is held too');
   for (const request of [edit, bash('git commit -m wip'), bash('git add .'), bash('git push origin x'), bash('git checkout main'), bash('rm src/entries.ts')]) {
     const verdict = evaluate(request, policy());
     assert.deepEqual([verdict.decision, 'rule' in verdict ? verdict.rule : undefined], ['deny', 'plan.before_go'], JSON.stringify(request));
@@ -55,7 +56,7 @@ test('the Go lifts the rule: the author edits once its plan has its Go', async (
   await t.engine.close();
 });
 
-test('a reviewer and a session of a configuration without a plan are never held', async () => {
+test('a session of a configuration without a plan is never held', async () => {
   const t = await setup({ scripts: { author: [started, ...text('a1', 'Done.'), finished(0.3)] } });
   await t.engine.start(t.ticket.id, 'u1');
   const author = t.startedSessions[0]!;
