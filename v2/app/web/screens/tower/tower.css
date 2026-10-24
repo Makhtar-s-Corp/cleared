@@ -133,6 +133,19 @@
 .recipe-note { margin: 0; min-width: 0; color: var(--text-muted); font-size: var(--text-md); }
 .recipe-bar .chip-button { flex: none; }
 
+/* a batch (requirement C6): one ticket per line, then a card per batch under way */
+.batch-form textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); }
+.batches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.batch-head { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; font-size: var(--text-md); }
+.batch-line { color: var(--text); }
+.batch-hold { margin: var(--space-1) 0 0; color: var(--awaiting-text); font-size: var(--text-sm); }
+.batch-items { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
+.batch-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 var(--space-2); padding: var(--space-1) 0; font-size: var(--text-sm); }
+.batch-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.batch-item-state { grid-column: 1; color: var(--text-muted); }
+.batch-item .id { grid-column: 2; grid-row: 1; color: var(--text-faint); }
+.batch-item[data-item-state="failed"] .batch-item-state { color: var(--danger-text); }
+
 /* narrower: the column under the main one, then the bar's actions under its field */
 @container tower (max-width: 980px) {
   .tower { grid-template-columns: minmax(0, 1fr); }

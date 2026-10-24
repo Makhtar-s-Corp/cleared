@@ -1837,6 +1837,13 @@ export class FlowEngine {
     return this.#track(this.start(ticketId, by, origin, variants).catch(() => undefined));
   }
 
+  // start() in the background for the batches' runner (requirement C6,
+  // flow/batch.ts): waited for by settled() as begin is, its failure handed
+  // back to the caller, which says it on the batch's item.
+  launch(ticketId: TicketId, by: UserId): Promise<void> {
+    return this.#track(this.start(ticketId, by));
+  }
+
   // ---- after a restart -----------------------------------------------------
 
   // What the last process left running cannot go on: its sessions died

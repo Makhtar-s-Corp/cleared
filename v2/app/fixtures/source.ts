@@ -20,10 +20,14 @@
 // or a lane's fixture calls. Lane 36's ticket LOCAL-152 has its author's
 // session, done, before the reviewer the tower shows (envelopeStory of
 // fixtures/session.ts), so its view follows the ticket from one to the other.
+// The batches (requirement C6) are the service's own runner (flow/batch.ts)
+// over the created tickets and the consumption fixture's levers and windows;
+// its flow only moves a ticket to In Progress, and each read runs a pass.
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
 import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
@@ -66,7 +70,12 @@ function ticketBody(value: unknown, project: string): CreateTicketBody | undefin
 
 // `ask`: a session's question that arrives while the page is open, said on
 // the change stream as the service's inbox says it (issue #269's browser test).
-export type FixtureSource = DataSource & { changed(kind: ChangeKind, id: string | null): void; ask(item: QuestionItem): void };
+// `lanes` and `quota`: the Consumption screen's lanes, and the seven-day
+// window of the subscription reported now, which the batches read.
+export type FixtureSource = DataSource & {
+  changed(kind: ChangeKind, id: string | null): void; ask(item: QuestionItem): void;
+  lanes(n: number | null): void; quota(percent: number): void;
+};
 
 export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
@@ -95,6 +104,10 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   };
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
   const consumption = consumptionFixture(project, now);
+  const batches = new BatchRunner({
+    db: consumption.db, tickets: created, project, levers: consumption.levers, weekStopPercent: 85, now,
+    flow: { launch: async (ticket, by) => { await created.move(ticket, created.states.progress, { kind: 'human', id: by }); }, subscribe: () => () => undefined },
+  });
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
   // The first author's ticket and LOCAL-163 run in four steps, each live
   // author on the service step of the filter API (lane 23's shape).
@@ -146,6 +159,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (collection === 'contracts' || collection === 'knowledge') changed('inbox', null);
       else if (collection === 'sessions' && id) changed('session', decodeURIComponent(id));
       else if (collection === 'tickets') { changed('ticket', id ? decodeURIComponent(id) : null); if (sub === 'close') changed('inbox', null); }
+      else if (collection === 'batches') changed('ticket', null);
     });
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
@@ -178,6 +192,25 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendJson(response, 400, { error: 'the body is an object: { model?, maxLanes?, paused? }' });
         const done = consumption.write(body as Record<string, never>, user);
         return sendJson(response, done.status, done.body);
+      }
+    }
+    // The batches (requirement C6): the service's checks, and a pass before each read.
+    if (collection === 'batches') {
+      try {
+        if (method === 'POST' && parts.length === 1) {
+          const body = await readJson(request);
+          if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendJson(response, 400, { error: 'the body is an object: { project, tickets }' });
+          const { project: named, tickets: lines, ...rest } = body as Record<string, unknown>;
+          if (Object.keys(rest).length > 0 || named !== project) return sendJson(response, 400, { error: `a batch has a project, ${project}, and tickets` });
+          return sendJson(response, 200, await batches.create({ tickets: lines }, user));
+        }
+        if (method === 'GET' && parts.length <= 2) {
+          await batches.tick();
+          return sendJson(response, 200, id ? await batches.get(decodeURIComponent(id)) : await batches.list());
+        }
+      } catch (error) {
+        if (error instanceof BatchError) return sendJson(response, error.kind === 'invalid' ? 400 : 404, { error: error.message });
+        throw error;
       }
     }
     if (method === 'GET' && collection === 'recipes' && parts.length === 1) return sendJson(response, 200, RECIPES);
@@ -310,6 +343,12 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     ask(item) {
       asking.push(item);
       changed('inbox', null);
+    },
+    lanes(n) {
+      consumption.write({ maxLanes: n }, 'fixtures');
+    },
+    quota(percent) {
+      consumption.report('seven_day', percent);
     },
     forward(request, response, forward) {
       handle(request, response, forward.method, new URL(forward.path, 'http://fixtures'), forward.user.id).catch(() => {

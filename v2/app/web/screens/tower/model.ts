@@ -10,8 +10,9 @@
 // a recipe" with its parameters, and "Ask about the code" (screens/ask/).
 // towerModel and the wording functions are pure, so the tests run them
 // without a browser; loadTower reads the service, and Tower.tsx draws it.
+import { BATCH_MAX, BATCH_MIN } from '../../../../src/api/types.ts';
 import type {
-  ApiSessionPhase, ContractItem, CreateTicketBody, InboxItem, KnowledgeItem, LeadMessage, LeadPhase, LeadState, NextInboxItem, Plan, PlanItemInbox, PlanItemState, Recipe,
+  ApiSessionPhase, Batch, BatchHold, BatchItem, ContractItem, CreateBatchBody, CreateTicketBody, InboxItem, KnowledgeItem, LeadMessage, LeadPhase, LeadState, NextInboxItem, Plan, PlanItemInbox, PlanItemState, Recipe,
   ReleaseItem, RunRecipeBody, Schedule, SessionPlanItem, SessionSummary, TicketStep, TrainState, Workspace,
 } from '../../../../src/api/types.ts';
 import type { Harness, Role } from '../../../../src/session/contract.ts';
@@ -34,6 +35,7 @@ export type TowerData = {
   readonly recipes?: readonly Recipe[] | null;  // null or absent: the service has no recipes to run (lane 26's route)
   readonly schedules?: readonly Schedule[] | null;
   readonly steps?: Readonly<Record<string, readonly TicketStep[]>>;   // a live ticket's steps, by ticket, in a workspace of several services
+  readonly batches?: readonly Batch[] | null;   // null or absent: the service has no batches to show (requirement C6)
 };
 
 // The lead's ticket (LEAD_TICKET in src/lead/contract.ts, which the browser
@@ -138,6 +140,8 @@ export type TowerModel = {
   readonly askServices: readonly string[];      // the workspace's services, whatever their number: a question's target names one
   readonly recipes: readonly Recipe[];          // none: no "Run a recipe"
   readonly schedules: readonly ScheduleRow[];
+  readonly batches: readonly BatchRow[];        // the three newest batches
+  readonly project: string | null;              // the workspace's id, as tickets and batches name it; null when GET /api/workspace could not be read
   readonly now: Date;                           // when the model was made: a schedule's next run says "tomorrow" from it
 };
 
@@ -283,7 +287,8 @@ export function towerModel(data: TowerData, now: Date, viewer?: string): TowerMo
     needs, live, landed, lead, plans: data.plans.filter((p) => UNDER_WAY.has(p.state)).map(planRow), weekLeft: data.weekLeft,
     services: several ? serviceRows(several, live, data.inbox) : [], serviceNames: several ? several.services.map((service) => service.name) : [],
     askServices: Array.isArray(data.workspace?.services) ? data.workspace.services.map((service) => service.name) : [],
-    recipes: Array.isArray(data.recipes) ? data.recipes : [], schedules: Array.isArray(data.schedules) ? scheduleRows(data.schedules) : [], now,
+    recipes: Array.isArray(data.recipes) ? data.recipes : [], schedules: Array.isArray(data.schedules) ? scheduleRows(data.schedules) : [],
+    batches: Array.isArray(data.batches) ? batchRows(data.batches) : [], project: typeof data.workspace?.id === 'string' ? data.workspace.id : null, now,
   };
 }
 
@@ -434,6 +439,74 @@ export function createTicket(api: ScreenContext['api'], input: { readonly title:
   return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services, input.variants) });
 }
 
+// A batch of tickets (requirement C6): the form's lines, one title each,
+// blank ones skipped, 2 to 20 of at most 200 characters, refused in the
+// page before any call; the side card's rows, the three newest batches.
+export const BATCH_LINES_MIN = BATCH_MIN;
+export const BATCH_LINES_MAX = BATCH_MAX;
+export const BATCH_TITLE_MAX = 200;
+
+export type BatchProblem = 'few' | 'many' | 'long';
+
+export function batchLines(text: string): { readonly titles: readonly string[]; readonly problem: BatchProblem | null } {
+  const titles = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const problem = titles.length < BATCH_LINES_MIN ? 'few' : titles.length > BATCH_LINES_MAX ? 'many' : titles.some((title) => title.length > BATCH_TITLE_MAX) ? 'long' : null;
+  return { titles, problem };
+}
+
+// The catalog's sentence of a refused form, with its limit.
+export function batchProblem(problem: BatchProblem, t: Translate): string {
+  return t(`batch_${problem}`, { n: problem === 'few' ? BATCH_LINES_MIN : problem === 'many' ? BATCH_LINES_MAX : BATCH_TITLE_MAX });
+}
+
+export const batchBody = (project: string, titles: readonly string[]): CreateBatchBody => ({ project, tickets: titles.map((title) => ({ title })) });
+
+export function startBatch(api: ScreenContext['api'], project: string, titles: readonly string[]): Promise<Batch> {
+  return api<Batch>('/batches', { method: 'POST', body: batchBody(project, titles) });
+}
+
+export function batchFailure(error: unknown): string {
+  const status = error instanceof ApiError ? error.status : 0;
+  return status === 400 ? 'batch_refused' : status === 503 ? 'batch_off' : 'batch_failed';
+}
+
+export type BatchRow = {
+  readonly id: string;
+  readonly total: number;
+  readonly started: number;
+  readonly waiting: number;
+  readonly failed: number;
+  readonly hold: BatchHold | null;
+  readonly items: readonly BatchItem[];
+};
+
+export const BATCH_ROWS = 3;
+
+export function batchRows(batches: readonly Batch[]): BatchRow[] {
+  return batches.slice(0, BATCH_ROWS).map((batch) => ({
+    id: batch.id, total: batch.items.length, hold: batch.hold, items: batch.items,
+    started: batch.items.filter((item) => item.state === 'started').length,
+    waiting: batch.items.filter((item) => item.state === 'queued').length,
+    failed: batch.items.filter((item) => item.state === 'failed').length,
+  }));
+}
+
+// "2 of 5 started · 2 waiting · 1 failed", a part of none left out.
+export function batchLine(row: BatchRow, t: Translate): string {
+  return [
+    t('batch_line_begun', { started: row.started, total: row.total }),
+    ...(row.waiting > 0 ? [t('batch_line_queue', { n: row.waiting })] : []),
+    ...(row.failed > 0 ? [t('batch_line_errors', { n: row.failed })] : []),
+  ].join(' · ');
+}
+
+// What holds the queue: the quota stop, or a lane to wait for; nothing when no ticket waits.
+export function holdLine(hold: BatchHold | null, t: Translate): string {
+  if (!hold) return '';
+  if (hold.reason === 'lanes') return t('batch_hold_lanes', { running: hold.running, lanes: hold.lanes });
+  return t(hold.window === 'seven_day' ? 'batch_hold_seven_day' : 'batch_hold_five_hour', { percent: hold.percent, stop: hold.stop });
+}
+
 // How many authors a new ticket may start with (issue #271): one, or 2 to 4
 // variants, on a workspace of one service only.
 export const VARIANT_CHOICES: readonly number[] = [1, 2, 3, 4];
@@ -495,7 +568,7 @@ export const REFRESH_MS = 10_000;
 // the last seq already seen.
 export async function loadTower(api: ScreenContext['api'], thread: LeadThread): Promise<{ readonly data: TowerData; readonly thread: LeadThread }> {
   const optional = <T,>(path: string, fallback: T): Promise<T> => api<T>(path).catch(() => fallback);
-  const [sessions, inbox, tickets, lead, messages, plans, workspace, recipes, schedules] = await Promise.all([
+  const [sessions, inbox, tickets, lead, messages, plans, workspace, recipes, schedules, batches] = await Promise.all([
     api<SessionSummary[]>('/sessions'), api<NextInboxItem[]>('/inbox'), api<Ticket[]>('/tickets'),
     optional<LeadState | null>('/lead', null),
     optional<LeadMessage[]>(thread.after > 0 ? `/lead/messages?after=${thread.after}` : '/lead/messages', []),
@@ -503,10 +576,11 @@ export async function loadTower(api: ScreenContext['api'], thread: LeadThread): 
     optional<Workspace | null>('/workspace', null),
     optional<Recipe[] | null>('/recipes', null),
     optional<Schedule[] | null>('/schedules', null),
+    optional<Batch[] | null>('/batches', null),
   ]);
   // A live author's step, in a workspace of several services only, each ticket read once.
   const live = Array.isArray(workspace?.services) && workspace.services.length >= 2 ? [...new Set(sessions.filter((s) => s.role === 'author' && isLive(s)).map((s) => s.ticket))] : [];
   const steps = Object.fromEntries(await Promise.all(live.map(async (ticket) => [ticket, await optional<TicketStep[]>(`/tickets/${encodeURIComponent(ticket)}/steps`, [])] as const)));
   const next = lastLeadLine(messages, thread);
-  return { data: { sessions, inbox, tickets, lead, leadLine: next.line, plans, weekLeft: null, workspace, recipes, schedules, steps }, thread: next };
+  return { data: { sessions, inbox, tickets, lead, leadLine: next.line, plans, weekLeft: null, workspace, recipes, schedules, steps, batches }, thread: next };
 }
