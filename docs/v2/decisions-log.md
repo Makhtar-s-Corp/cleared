@@ -4715,3 +4715,25 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - No Docker object, no network, no tunnel, no port, no secret: the tests build their secret-shaped values at run time and run on temporary folders. The read-only folder test is skipped for root.
 - The answers of `search_sessions` and `search_events` gain `partial`; the sort of rows at one moment changes.
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-ledger-mcp-followups`.
+
+## 2026-10-24: follow-ups of the Cursor harness (the author's choices, lane `j3-cursor-followups`, issue #294)
+
+**The need.** Issue #294 lists six follow-ups of pull request 288 (the Cursor harness). Matrix lines P86 and P87, checked free on `origin/v2` and in the open pull requests 308 (P82) and 309 (P78 to P80).
+
+**What was already done.** Reading `origin/v2` first, three of the six were fixed by the review commit `1609429` of pull request 288, after the issue was written, and have tests:
+- Follow-up 1 (`handedOver` set before the wait): `interactive()` sets it before `endRunningTurn`, and resets it if the turn does not end. `adapter.test.ts`, "Take over: a message sent while the turn ends does not start a turn beside the human".
+- Follow-up 2 (two terminal events on `stop()`): the close handler skips `cancelled('waiting_human')` while `closing`. `adapter.test.ts`, "stop on a running turn leaves one terminal event, not two".
+- Follow-up 5 (side effects on Claude Code): items 9 and 10 of the owner's trial list in `docs/adapters.md`.
+
+**Decision.**
+1. **Follow-up 4: a test through the adapter, not a longer deny list.** `permissions.test.ts` already proved `evaluate` denies `cat` and `head` on the credential file. The test added plays eight readers and two environment-file reads as Cursor `shell` calls through the real guard (P86). Denying `cat` or `less` in layer 1 would refuse every legitimate read of the checkout, and the policy already matches the credential's name in any word of a command.
+2. **Follow-up 3: pinned, not changed.** The keep-out was already true (`HARNESS` is a constant in the engines). A test now says so (P87), so a later change has to meet the owner's trial first. The docs already call layer 2 a tripwire and list the trial (items 2 and 12).
+3. **Follow-up 6 left.** The chat id is written and not read back, as with Claude Code. Reading it back is a service-restart feature for both harnesses, not a Cursor one.
+
+**Not done, and why.** Whether `.cursor/cli.json` is honoured in print mode needs a real Cursor account, and none is used here (O6).
+
+**Checks.** `npm run typecheck`; `npm test` (1683 node tests pass, 38 skipped, 0 fail; 260 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no network, no tunnel, no port. Fakes only.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-cursor-followups`.
