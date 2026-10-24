@@ -34,10 +34,11 @@
 // waits for its Go is told nothing by the engine, and nothing here either:
 // the Go tells it, and the reviewer's prompt names the files.
 import type { IncomingMessage } from 'node:http';
-import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../api/types.ts';
+import { HANDOVER_MODEL, HANDOVER_MODEL_MAX, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../api/types.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
-import type { UserId } from '../session/contract.ts';
+import type { Harness, UserId } from '../session/contract.ts';
+import { HANDOVER_HARNESSES } from '../session/handover.ts';
 import type { HumanSide } from '../terminal/human.ts';
 import { FlowError, type FlowEngine } from './engine.ts';
 import { humanEditNotice, userName } from './human-edits.ts';
@@ -96,6 +97,23 @@ function merged(edits: readonly { readonly path: string; readonly added: number;
   return [...out.values()];
 }
 
+const MAX_BODY = 4096;
+
+// The JSON object of a request; an empty body is an empty object.
+async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY) throw new HttpError(413, 'the request body is too large');
+    chunks.push(chunk as Buffer);
+  }
+  let value: unknown;
+  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { throw new HttpError(400, 'the request body is not JSON'); }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new HttpError(400, 'the request body is not a JSON object');
+  return value as Record<string, unknown>;
+}
+
 // The owner account of milestone 2: the first of the users table.
 export async function ownerOf(registry: Registry): Promise<UserId | undefined> {
   return (await registry.users.list())[0]?.id;
@@ -127,6 +145,18 @@ export function takeoverRoutes(deps: TakeoverDeps): Route[] {
         const taken = await engine.takeOver(id, user);
         await deps.human?.(context.registry)?.takenOver(id);
         answer(context, 200, { accepted: true, by: taken.by });
+      }),
+    },
+    {
+      // Hand over (B6.3): the author's work goes to the other harness of the contract, in the same checkout.
+      method: 'POST', path: '/api/sessions/:id/handover',
+      handle: write(async (engine, user, id, context) => {
+        const { harness, model } = await readBody(context.request);
+        if (typeof harness !== 'string') throw new HttpError(400, `harness must be ${HANDOVER_HARNESSES.join(' or ')}`);
+        if (!(HANDOVER_HARNESSES as readonly string[]).includes(harness)) throw new HttpError(400, `work is not handed to ${harness.slice(0, 40)}: only ${HANDOVER_HARNESSES.join(' and ')}`);
+        if (model !== undefined && (typeof model !== 'string' || model.length > HANDOVER_MODEL_MAX || !HANDOVER_MODEL.test(model))) throw new HttpError(400, `model must be a name of 1 to ${HANDOVER_MODEL_MAX} letters, digits and . _ : / -`);
+        const handed = await engine.handOver(id, user, { harness: harness as Harness, ...(typeof model === 'string' ? { model } : {}) });
+        answer(context, 200, { accepted: true, ...handed });
       }),
     },
     {

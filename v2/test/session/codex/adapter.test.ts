@@ -14,7 +14,7 @@ import { PassThrough } from 'node:stream';
 import { LOGIN_FILE_MOUNT } from '../../../src/container/session-runtime.ts';
 import { createCodexAdapter, type CodexLauncher, type CodexRuntime } from '../../../src/session/adapters/codex.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
-import { NotImplemented, interactiveResume, type Role, type StartInput } from '../../../src/session/contract.ts';
+import { HandoverRefused, interactiveResume, type Role, type StartInput } from '../../../src/session/contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../../src/session/policy.ts';
 import { THREAD, commandDone, commandStarted, fileChange, says, threadStarted, tokenCount, turnCompleted, turnStarted, webSearch } from './fixtures.ts';
@@ -343,7 +343,23 @@ test('interrupt ends the turn as cancelled; stop removes the container and close
     assert.ok(t.launcher.calls.some((call) => call.startsWith('stop ')));
     await assert.rejects(handle.send({ text: 'x', by: 'user-1' }), /stopped/);
     await assert.rejects(handle.answer('r', { decision: { kind: 'allow_once' }, by: 'user-1' }), /stopped/);
-    await assert.rejects(handle.handover({ harness: 'claude-code', model: 'm' }), NotImplemented);
+    await assert.rejects(handle.handover({ harness: 'claude-code', model: 'm' }), /stopped/);
+  } finally { t.done(); }
+});
+
+test('handover gives up a note to claude-code, from the journal; it refuses Cursor and Codex itself (B6.3, P150)', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const turn = await t.launcher.nextTurn(0);
+    turn.say(threadStarted(), says('item_0', 'The sort is half done.'));
+    await until(() => t.log.all.some((e) => e.event.type === 'TEXT_MESSAGE_END'));
+    const out = await handle.handover({ harness: 'claude-code', model: 'claude-opus-5-5' });
+    assert.deepEqual({ session: out.session, from: out.from, to: out.to }, { session: handle.id, from: 'codex', to: { harness: 'claude-code', model: 'claude-opus-5-5' } });
+    assert.match(out.note, /The sort is half done\./);
+    await assert.rejects(handle.handover({ harness: 'cursor', model: 'm' }), HandoverRefused);
+    await assert.rejects(handle.handover({ harness: 'codex', model: 'm' }), HandoverRefused);
+    await handle.stop();
   } finally { t.done(); }
 });
 

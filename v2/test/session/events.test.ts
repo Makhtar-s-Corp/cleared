@@ -40,6 +40,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.checkpoint', 'cleared.replay',
     // Milestone 3: the notes between the sessions of a ticket's steps (M4).
     'cleared.step_note', 'cleared.step_notes_read',
+    // Milestone 3: an author handed over to the other harness (B6.3).
+    'cleared.handed_over',
   ]);
 });
 

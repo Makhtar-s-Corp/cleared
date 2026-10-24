@@ -6,7 +6,7 @@
 // readToolOutput. Nothing here depends on @ag-ui/core at run time; a test
 // checks every type name against its EventType.
 import type { ChangesReport, HumanEdit, SessionPlan, TerminalMode } from '../api/types.ts';
-import type { Decision, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
+import type { Decision, Harness, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
 import type { Verdict } from './policy.ts';
 
 export const EVENT_TYPES = [
@@ -66,6 +66,9 @@ export const CUSTOM_NAMES = [
   // for the ticket's other steps, and the notes a session was handed.
   'cleared.step_note',
   'cleared.step_notes_read',
+  // Milestone 3 (B6.3, P152): an author's work handed to the other harness,
+  // journaled by the flow on the session left and on the new one.
+  'cleared.handed_over',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -190,6 +193,13 @@ export type CustomValue = {
   'cleared.replay': {
     readonly from: SessionId; readonly to: SessionId; readonly seq: number; readonly commit: string; readonly branch: string; readonly previous: string;
     readonly by: UserId; readonly message: string;
+  };
+  // An author handed over to the other harness (flow/engine.ts, handOver):
+  // the session left, the one that carries on, who asked. The same value on both.
+  'cleared.handed_over': {
+    readonly from: { readonly session: SessionId; readonly harness: Harness; readonly model: string };
+    readonly to: { readonly session: SessionId; readonly harness: Harness; readonly model: string };
+    readonly by: UserId;
   };
 };
 
