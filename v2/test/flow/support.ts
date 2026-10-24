@@ -48,8 +48,9 @@ export type Scripts = {
   readonly reopen?: readonly FakeStep[] | 'throw' | 'send_fails';
   // A reviewer resumed through the review channel (issue 291) waits for the
   // author's answer, then plays the next script of `reviewers`; 'throw': it
-  // cannot be resumed.
-  readonly reviewerResume?: 'throw';
+  // cannot be resumed; 'send_fails': it is resumed but the answer cannot be
+  // sent to it (its container is gone), and no round of `reviewers` is spent.
+  readonly reviewerResume?: 'throw' | 'send_fails';
   readonly stops?: SessionId[];                                // filled with the ids of resumed handles that were stopped
 };
 
@@ -78,6 +79,10 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
       const input = inputs.get(id);
       if (input?.role === 'reviewer') {
         if (scripts.reviewerResume === 'throw') throw new Error(`cannot resume ${id}`);
+        if (scripts.reviewerResume === 'send_fails') {
+          const handle = await createFakeAdapter({ log: store.events, script: [{ awaitMessage: true }], newId: () => id, ...(now ? { now } : {}) }).start(input);
+          return { ...handle, send: async () => { throw new Error('the container is gone'); } };
+        }
         return createFakeAdapter({ log: store.events, script: [{ awaitMessage: true }, ...(reviewers.shift() ?? reviewerScript(REPORT_PASS))], newId: () => id, ...(now ? { now } : {}) }).start(input);
       }
       if (!input || scripts.reopen === 'throw') throw new Error(`cannot resume ${id}`);

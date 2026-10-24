@@ -2231,8 +2231,9 @@ export class FlowEngine {
 
   // `channel`: a reviewer started again because the last one could not be
   // resumed is given the channel so far, and its last message, the
-  // author's answer, is journaled on it.
-  async #startReview(ticket: Ticket, workdir: string, channel?: readonly ChannelMessage[]): Promise<void> {
+  // author's answer, is journaled on it, unless `journaled`: a reviewer
+  // resumed took it before its send failed.
+  async #startReview(ticket: Ticket, workdir: string, channel?: readonly ChannelMessage[], journaled = false): Promise<void> {
     const adapter = this.registry.sessionAdapters[HARNESS];
     const began = this.#now();
     try {
@@ -2250,7 +2251,7 @@ export class FlowEngine {
         channel ? `${prompt}\n\n${channelPrompt(channel)}` : prompt);
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
       const answer = channel?.at(-1);
-      if (answer) this.#journal({ id: live.id, ticket: ticket.id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
+      if (answer && !journaled) this.#journal({ id: live.id, ticket: ticket.id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
       this.#snapshot(live.id, ticket.id);
       this.#supervise(live, 0);
     } catch (error) {
@@ -2363,12 +2364,15 @@ export class FlowEngine {
   // Reopening is resume, then `message` as the next message. Either
   // failing (another process started the session, its container is gone)
   // falls back to a new author, told the ticket and `message`; what that
-  // start throws is the caller's. `journal`: written on the author's session.
+  // start throws is the caller's. `journal`: written on the author's session,
+  // once: on the resumed one, else (resume failed) on the new one, but not
+  // again on the new one when the resumed one took it and its send failed.
   async #reopenWith(ticket: Ticket, adapter: SessionAdapter, authorRow: { readonly id: SessionId } | undefined, message: string, journal?: AgUiEvent): Promise<void> {
     const id = ticket.id;
     const kept = authorRow ? this.#inputs.get(authorRow.id) : undefined;
     const began = this.#now();
     const lastSeq = authorRow ? (this.#store.events.after(authorRow.id).at(-1)?.seq ?? 0) : 0;
+    let journaled = false;
     if (authorRow && kept) {
       let handle: SessionHandle | undefined;
       try { handle = await this.#resume(adapter, authorRow.id); } catch { handle = undefined; }
@@ -2378,6 +2382,7 @@ export class FlowEngine {
         this.#setPhase(live, 'working');
         this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
         if (journal) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
+        journaled = true;
         this.#supervise(live, lastSeq);
         try {
           await handle.send({ text: message, by: FLOW_USER });
@@ -2396,7 +2401,7 @@ export class FlowEngine {
     const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings,
       `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined);
     this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
-    if (journal) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
+    if (journal && !journaled) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
     this.#snapshot(live.id, id);
     this.#supervise(live, 0);
   }
@@ -2412,6 +2417,7 @@ export class FlowEngine {
     const adapter = this.registry.sessionAdapters[HARNESS];
     const kept = this.#inputs.get(open.reviewer);
     const began = this.#now();
+    let journaled = false;
     if (adapter && kept) {
       const lastSeq = this.#store.events.after(open.reviewer).at(-1)?.seq ?? 0;
       let handle: SessionHandle | undefined;
@@ -2423,6 +2429,7 @@ export class FlowEngine {
         this.#setPhase(live, 'reviewing');
         this.#step(session, 'STEP_STARTED', 'review', began);
         this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
+        journaled = true;
         this.#snapshot(live.id, id);
         this.#supervise(live, lastSeq);
         try {
@@ -2438,10 +2445,11 @@ export class FlowEngine {
       }
     }
     // What the ticket's reviewers sent and were sent so far, then the answer
-    // (journaled already on a reviewer resumed whose send failed).
+    // (journaled already on a reviewer resumed whose send failed: the new
+    // reviewer is given it in its prompt, and it is not journaled twice).
     const channel = this.#flowRows(id).filter((row) => row.role === 'reviewer').flatMap((row) => channelOf(this.#store.events.after(row.id)))
       .filter((m) => !(m.from === 'author' && m.round === answer.round));
-    await this.#startReview(ticket, author.input.workdir, [...channel, answer]);
+    await this.#startReview(ticket, author.input.workdir, [...channel, answer], journaled);
   }
 
   // ---- a pass: publish, record, ask the lock -------------------------------
