@@ -43,6 +43,7 @@ export type PutBackReason =
   | 'variants_failed'       // every variant of the ticket failed (issue #271)
   | 'restart'               // the service restarted while the ticket ran
   | 'set_aside'             // the owner set the ticket aside (FlowEngine.setAside)
+  | 'closed'                // the owner closed the ticket with a reason (FlowEngine.closeTicket, issue #249)
   | 'parked';               // its question waited past its delay and the lead's, with no declared answer (issue #290)
 
 type Base = { readonly at: string; readonly project: string; readonly ticket: TicketId };

@@ -335,5 +335,17 @@
   "repair_gave_up": "Still failing after {n} attempts ({checks}): nothing more is tried, you decide",
   "repair_refused": "Not repaired: the branch is a base branch",
   "repair_checks_unnamed": "the checks",
-  "release_repair_gave_up": "{ticket} · Checks still failing after {n} repair attempts"
+  "release_repair_gave_up": "{ticket} · Checks still failing after {n} repair attempts",
+  "close": "Close",
+  "close_field": "Why close this ticket?",
+  "close_rule": "A closed ticket is not merged or deployed. The card stays in the history with your reason.",
+  "close_send": "Close the ticket",
+  "close_keep": "Keep it",
+  "close_empty": "Say why the ticket is closed.",
+  "close_long": "A reason has at most {n} characters.",
+  "close_conflict": "The ticket could not be closed: it was approved, it is done, or it moved.",
+  "close_invalid": "The service refused the reason: some text of at most 2000 characters.",
+  "close_failed": "Closing did not reach the service. Try again.",
+  "closed_done": "Closed at {time}. Nothing was merged. The card stays in the history.",
+  "closed_by": "Closed by {who} at {time}: “{reason}”"
 }

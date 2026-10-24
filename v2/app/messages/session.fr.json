@@ -257,5 +257,16 @@
   "resume_owner": "Seul le compte propriétaire reprend un ticket depuis une étape.",
   "replay_left": "Repris depuis une étape ci-dessus par {who}\u00a0: une nouvelle session continue plus bas, sur {branch} depuis {commit}. Ce qui suit cette étape ici est la tentative précédente.",
   "replay_resumed": "Repris par {who} depuis une étape de la session précédente, sur {branch} depuis {commit}.",
-  "replay_instruction": "Consigne corrigée"
+  "replay_instruction": "Consigne corrigée",
+  "close": "Fermer",
+  "close_field": "Pourquoi fermer ce ticket\u202f?",
+  "close_rule": "Un ticket fermé n'est ni fusionné ni déployé. La carte reste dans l'historique avec votre raison.",
+  "close_send": "Fermer le ticket",
+  "close_keep": "Le garder",
+  "close_empty": "Dites pourquoi le ticket est fermé.",
+  "close_long": "Une raison fait au plus {n} caractères.",
+  "close_conflict": "Le ticket n'a pas pu être fermé\u00a0: il est approuvé, terminé, ou il a changé d'état.",
+  "close_invalid": "Le service a refusé la raison\u00a0: un texte d'au plus 2000 caractères.",
+  "close_failed": "La fermeture n'a pas atteint le service. Réessayez.",
+  "closed_done": "Fermé à {time}. Rien n'a été fusionné. La carte reste dans l'historique."
 }

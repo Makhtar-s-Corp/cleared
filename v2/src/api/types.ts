@@ -151,6 +151,8 @@ export type ReleaseItem = InboxBase & {
   // until a check fails on the card's head; carried by the card a repair
   // publishes, so the attempts count across cards.
   readonly repair?: CiRepair;
+  // The owner closed the ticket with this card waiting (issue #249): the reason, who and when.
+  readonly outcome?: { readonly decision: 'close'; readonly reason: string; readonly by: UserId; readonly at: string };
 };
 
 // `started`: a failed check reopened the author on the ticket branch, the
@@ -640,6 +642,7 @@ export type ApiRoutes = {
   'POST /api/tickets/:id/move': { readonly body: MoveTicketBody; readonly response: Ticket };
   // The owner sets a ticket aside: out of the flow, nothing of it waiting, in Todo, not started again.
   'POST /api/tickets/:id/set-aside': { readonly body: null; readonly response: { readonly sessions: number; readonly items: number } };
+  'POST /api/tickets/:id/close': { readonly body: { readonly reason: string }; readonly response: { readonly sessions: number; readonly items: number } };
   'POST /api/tickets/:id/approve': { readonly body: ApproveBody; readonly response: { readonly accepted: true; readonly by: UserId } };
   'GET /api/inbox': { readonly body: null; readonly response: NextInboxItem[] };   // the replanned kinds included (inbox/store.ts list)
   // The replanned milestone 2: the workspace (lane 14), and the trial
@@ -723,6 +726,7 @@ const routes = {
   'GET /api/tickets/:id': true,
   'POST /api/tickets/:id/move': true,
   'POST /api/tickets/:id/set-aside': true,
+  'POST /api/tickets/:id/close': true,
   'POST /api/tickets/:id/approve': true,
   'GET /api/inbox': true,
   'GET /api/workspace': true,

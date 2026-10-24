@@ -461,3 +461,9 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 @media (pointer: coarse) {
   .link-button { display: inline-flex; align-items: center; min-height: 44px; margin-block: -10px; }
 }
+
+/* Close, on the ticket card (issue #249) */
+.close-ticket { display: grid; gap: 8px; margin-top: 12px; }
+.close-ticket .change-field textarea { min-height: 64px; max-height: 180px; padding: 10px 12px; border-radius: 8px; background: var(--surface); box-shadow: var(--field-ring); color: var(--text); line-height: 1.45; resize: vertical; field-sizing: content; }
+.close-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+#close-open { margin-top: 12px; }

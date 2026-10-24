@@ -17,7 +17,7 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/sessions/:id/requests/:requestId/answer',
     'POST /api/tickets',
     'POST /api/tickets/:id/approve',
-    'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside',
+    'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/tickets/:id/close',
     // Issue #271: a ticket's variants and the owner's choice.
     'GET /api/tickets/:id/variants', 'POST /api/variants/:id/choose',
     // Milestone 2, section 7.1.
@@ -75,7 +75,7 @@ test('the API lists every route the app lanes build against, once', () => {
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 58);
+  assert.equal(keys.length, 59);
   const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...VARIANT_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES, ...CONSUMPTION_ROUTES];
   assert.deepEqual(ahead.filter((route) => !API_ROUTES.includes(route)), []);
   assert.equal(new Set(ahead).size, ahead.length, 'each route of a later lane is in one list');

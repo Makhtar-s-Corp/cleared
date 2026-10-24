@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sameProof } from '../modules/users.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { workspaceOf } from '../flow/config.ts';
-import { FlowError, type FlowEngine } from '../flow/engine.ts';
+import { CLOSE_REASON_MAX, FlowError, type FlowEngine } from '../flow/engine.ts';
 import type { Decision, UserId } from '../session/contract.ts';
 import { TicketError } from '../tickets/contract.ts';
 import { publicWorkspace } from '../workspace/config.ts';
@@ -226,6 +226,16 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
     {
       method: 'POST', path: '/api/tickets/:id/set-aside',
       handle: guarded(true, async (engine, user, c) => send(c.response, 200, await engine.setAside(param(c, 'id'), user as UserId))),
+    },
+    // The owner closes a ticket with a reason: set aside, and the reason kept
+    // on its release card and its comments (FlowEngine.closeTicket, issue #249).
+    {
+      method: 'POST', path: '/api/tickets/:id/close',
+      handle: guarded(true, async (engine, user, c) => {
+        const body = await readJson(c.request);
+        const reason = text(body.reason, 'a reason', CLOSE_REASON_MAX) as string;
+        send(c.response, 200, await engine.closeTicket(param(c, 'id'), reason, user as UserId));
+      }),
     },
   ];
 

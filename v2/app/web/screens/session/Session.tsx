@@ -53,6 +53,7 @@ import {
   ENDED, REPLAY_MAX, answerBody, answerLine, clock, decisionOf, duration, family, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, shortCommit, statusMeta, statusTone, stepCommit, takenOverOf, target, verb, who,
   type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type ReplayRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
+import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
@@ -424,7 +425,10 @@ export function SessionHeading({ view }: { readonly view: SessionView }) {
   return <h1 className="sr-only">{view.summary.ticket} · {view.ticket?.title ?? view.summary.ticket}</h1>;
 }
 
-export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void }) {
+// A ticket that shipped, or is approved, is not closed.
+const closable = (ticket: Ticket | undefined): boolean => ticket !== undefined && ticket.status !== 'Done' && ticket.status !== 'Ready to Ship';
+
+export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void; readonly close?: ReactNode }) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = ticketPlan(partsOf(view)) ?? view.thread.plan;
   const service = serviceLine(view.summary.service, t, stepsView(view.steps, view.summary.id));
@@ -435,6 +439,7 @@ export function LeftCards({ view, t, onPlan }: { readonly view: SessionView; rea
         <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
         {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
+        {close}
       </section>
       {parsed.criteria.length > 0 ? (
         <section className="card" aria-labelledby="criteria-title">
@@ -1083,7 +1088,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
         <SessionHeading view={view} />
-        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} /></aside>
+        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} close={closable(view.ticket) ? <CloseTicket ticket={view.summary.ticket} api={context.api} now={context.now} t={t} onClosed={() => context.inboxChanged()} /> : undefined} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />
           <div className="panel-head" id="status">

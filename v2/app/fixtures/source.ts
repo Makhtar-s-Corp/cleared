@@ -87,6 +87,12 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   // The requests answered from the screens, kept in memory: each is handled once (lane 37's art director).
   const answered = new Set<string>();
   const asking: QuestionItem[] = [];
+  // The tickets closed from the screens (issue #249), kept in memory: a closed ticket's release card is handled, with the reason.
+  const closed = new Map<string, { readonly reason: string; readonly by: string; readonly at: string }>();
+  const shut = (item: NextInboxItem): NextInboxItem => {
+    const outcome = item.kind === 'release' ? closed.get(item.ticket) : undefined;
+    return item.kind === 'release' && outcome ? { ...item, state: 'handled', outcome: { decision: 'close', ...outcome } } : item;
+  };
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
   const consumption = consumptionFixture(project, now);
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
@@ -139,11 +145,11 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (response.statusCode >= 300) return;
       if (collection === 'contracts' || collection === 'knowledge') changed('inbox', null);
       else if (collection === 'sessions' && id) changed('session', decodeURIComponent(id));
-      else if (collection === 'tickets') changed('ticket', id ? decodeURIComponent(id) : null);
+      else if (collection === 'tickets') { changed('ticket', id ? decodeURIComponent(id) : null); if (sub === 'close') changed('inbox', null); }
     });
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
-    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...requests.filter((item) => item.state === 'waiting'), ...asking, ...decided, ...lead.inbox, ...requests.filter((item) => item.state === 'handled')].map(asked));
+    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...requests.filter((item) => item.state === 'waiting'), ...asking, ...decided, ...lead.inbox, ...requests.filter((item) => item.state === 'handled')].map(asked).map(shut));
     // A session's request answered: the item is handled, a second answer is a 409 (the service's answer route).
     if (method === 'POST' && collection === 'sessions' && id && sub === 'requests' && parts[4] === 'answer' && parts.length === 5) {
       const key = `${decodeURIComponent(id)}\n${decodeURIComponent(parts[3] ?? '')}`;
@@ -153,6 +159,16 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       answered.add(key);
       response.once('finish', () => changed('inbox', null));
       return sendJson(response, 200, { accepted: true });
+    }
+    // Close (issue #249): the reason is mandatory; the ticket's release card is handled with it; a second close is a 409.
+    if (method === 'POST' && collection === 'tickets' && id && sub === 'close' && parts.length === 3) {
+      const ticket = decodeURIComponent(id);
+      const reason = ((await readJson(request)) as { reason?: unknown }).reason;
+      if (typeof reason !== 'string' || reason.trim() === '' || reason.length > 2000) return sendJson(response, 400, { error: 'a reason is mandatory' });
+      if (!tickets.some((t) => t.id === ticket)) return sendJson(response, 404, { error: 'unknown ticket' });
+      if (closed.has(ticket)) return sendJson(response, 409, { error: 'closed already' });
+      closed.set(ticket, { reason: reason.trim(), by: user, at: now().toISOString() });
+      return sendJson(response, 200, { sessions: 0, items: 1 });
     }
     // The consumption screen (O15): the service's own read and levers over a week of invented turns.
     if (collection === 'consumption') {

@@ -76,10 +76,16 @@ export class InboxStore {
 
   // Handles a waiting item of `kind` and writes what the person did into
   // it; true when this call handled it, so an item is answered once.
-  #settle(id: string, kind: 'contract' | 'knowledge' | 'variants', by: UserId, outcome: object): boolean {
+  #settle(id: string, kind: 'contract' | 'knowledge' | 'variants' | 'release', by: UserId, outcome: object): boolean {
     const result = this.#changed(this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ?, payload = json_set(payload, '$.outcome', json(?)) WHERE id = ? AND kind = ? AND state = 'waiting'")
       .run(this.#now().toISOString(), by, JSON.stringify(outcome), id, kind));
     return Number(result.changes) > 0;
+  }
+
+  // A release card closed by the owner (issue #249): handled, its outcome
+  // keeping the reason, who and when. True when this call handled it.
+  closeRelease(id: string, by: UserId, reason: string): boolean {
+    return this.#settle(id, 'release', by, { decision: 'close', reason, by, at: this.#now().toISOString() });
   }
 
   addPermission(input: Base & Pick<PermissionItem, 'tool' | 'input' | 'suggestion'> & { readonly sessionId: SessionId; readonly requestId: string }): PermissionItem {

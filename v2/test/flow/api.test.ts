@@ -91,6 +91,7 @@ const cases = (): Case[] => {
     { route: 'GET /api/tickets/:id', path: () => `/api/tickets/${t.ticket.id}`, ok: 200 },
     { route: 'POST /api/tickets/:id/move', path: () => `/api/tickets/${parked.id}/move`, body: () => ({ status: 'In Review' }), ok: 200 },
     { route: 'POST /api/tickets/:id/set-aside', path: () => `/api/tickets/${parked.id}/set-aside`, ok: 200 },
+    { route: 'POST /api/tickets/:id/close', path: () => `/api/tickets/${parked.id}/close`, body: () => ({ reason: 'A rehearsal ticket.' }), ok: 200 },
     { route: 'GET /api/inbox', path: () => '/api/inbox', ok: 200 },
   ];
 };
@@ -137,6 +138,7 @@ test('a write needs a user the service knows; a read does not', async () => {
     ['POST', '/api/tickets', { title: 'x', project: 'guestbook' }],
     ['POST', `/api/tickets/${parked.id}/move`, { status: 'In Review' }],
     ['POST', `/api/tickets/${parked.id}/set-aside`, undefined],
+    ['POST', `/api/tickets/${parked.id}/close`, { reason: 'x' }],
   ] as const;
   for (const [method, path, body] of writes) {
     assert.equal((await call(method, path, { ...signed, 'content-type': 'application/json' }, body)).status, 403, `${path} without a user`);
@@ -316,4 +318,16 @@ test('variants: the routes check the proof, the user and the body, and name an u
   for (const body of [{}, { variant: '2' }, { variant: 0 }, { variant: 5 }, { variant: 1.5 }])
     assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', person, body)).status, 400, JSON.stringify(body));
   assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', person, { variant: 1 })).status, 404);
+});
+
+test('close: a reason is mandatory, an unknown ticket and a done one are refused, and a close keeps its reason', async () => {
+  const path = `/api/tickets/${parked.id}/close`;
+  for (const body of [undefined, {}, { reason: '' }, { reason: '   ' }, { reason: 5 }, { reason: 'x'.repeat(2001) }])
+    assert.equal((await call('POST', path, person, body)).status, 400, JSON.stringify(body));
+  assert.equal((await call('POST', '/api/tickets/LOCAL-999/close', person, { reason: 'why' })).status, 404);
+  const done = await t.tickets.create({ title: 'Done', project: 'guestbook' }, { kind: 'human', id: 'u1' });
+  await t.tickets.move(done.id, 'Done', { kind: 'agents', id: 'cleared-v2' });
+  assert.equal((await call('POST', `/api/tickets/${done.id}/close`, person, { reason: 'why' })).status, 409);
+  assert.deepEqual((await call('POST', path, person, { reason: 'A rehearsal ticket.' })).json, { sessions: 0, items: 0 });
+  assert.match((await t.tickets.comments(parked.id)).at(-1)?.body ?? '', /A rehearsal ticket\./);
 });

@@ -41,7 +41,7 @@ test('a two-service train waiting for its approval: the landing order, each pull
   for (const expected of ['Landing order', 'filter-api', 'PR #7', 'guestbook', 'PR #43', 'Waits for your approval', 'guestbook consumes filter-api and is changed in this ticket.'])
     assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.match(html, /href="https:\/\/example.invalid\/filter-api\/pull\/7"/);
-  assert.deepEqual(acts(html), ['send_back', 'approve']);
+  assert.deepEqual(acts(html), ['close', 'send_back', 'approve']);
   const approve = /<button[^>]*data-act="approve"[^>]*>/.exec(html)?.[0] ?? '';
   assert.ok(approve.includes(FILTER_HEAD) && approve.includes(GUESTBOOK_HEAD), 'the button names both versions');
   assert.ok(text.includes('2 pull requests'), 'the button says it approves two pull requests');
@@ -100,7 +100,7 @@ test('the blocked card has no Approve: it says why, proposes the way out, and po
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
   const buttons = acts(html);
   assert.ok(!buttons.includes('approve'), 'no Approve');
-  assert.deepEqual(buttons, ['send_back'], 'it can still be sent back');
+  assert.deepEqual(buttons, ['close', 'send_back'], 'it can still be sent back');
   assert.match(html, /<a[^>]*href="\/lead"[^>]*>Ask the Lead to add the step<\/a>/);
   // The list says it too, without opening it.
   assert.ok(shown(renderInbox(viewOf([item], { selected: undefined, open: false }), en)).includes(`${BLOCKED_TICKET} · Blocked: a consumer is not changed`));
@@ -129,7 +129,7 @@ test('a one-service release is drawn as before: no train, no groups, its pull re
   assert.doesNotMatch(html, /data-train=/);
   assert.doesNotMatch(html, /data-group=/);
   assert.ok(shown(html).includes('PR #42'));
-  assert.deepEqual(acts(html), ['send_back', 'approve']);
+  assert.deepEqual(acts(html), ['close', 'send_back', 'approve']);
 });
 
 test('the session plan waiting for its Go: the steps, the files, the confidence with its reason, Change and Go', () => {

@@ -4781,6 +4781,29 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-project-page`.
 
+## 2026-10-24: Close a release card or a ticket (the author's choices, lane `j3-reject-close`, issue #249)
+
+**The need.** A release card offered Approve (merge and deploy) and Send back (a new flow). A ticket that should never ship, such as a rehearsal ticket of a proof run, stayed waiting, and the proof's launch guard refused to start while a release waited. The owner approved "Rejeter ou Fermer une carte" on 2026-10-23. Matrix lines P53 (filled) and P110 to P114, checked free on `origin/v2` (P95 to P109 belong to other lanes).
+
+**Decision.**
+1. **One word, Close, one route.** `POST /api/tickets/:id/close` with a mandatory reason serves the release card and the ticket's page. The owner's text allows either word; Close says what happens (the ticket ends), and Reject already means refusing a knowledge item.
+2. **Set aside is reused, not changed.** `FlowEngine.setAside` and `closeTicket` share one private path (`#takeOut`); set aside's messages, codes and refusals are as before, and its tests are untouched. Close adds the reason: on the ticket's comment (with who closed it), on the `ticket_put_back` event (reason `closed`), and on the release card as an `outcome` `{ decision: 'close', reason, by, at }`.
+3. **No seventh state.** A closed ticket is in Todo, as a ticket set aside is, with its comment and its event; the tracker's six states and the configuration do not change. Done would count it as landed in the Tower, and a new state would change the tracker contract. The cost: nothing marks a closed ticket in Todo except its last comment and the journal. If the owner wants a closed ticket hidden from Todo, that is a state and a tracker change of its own.
+4. **A done ticket is refused (409).** It shipped; there is nothing to close. Set aside keeps its rule (a done ticket's waiting knowledge item is settled).
+5. **The pull request is left alone (P114).** The issue proposes closing it without deleting the branch. That is a forge write the service has no effect for today (only the proof's script runs `gh pr close`, P51), it is outward-facing, and it is not among the owner's three criteria. Not done; the question is open. Until then the owner closes the pull request on the forge, or the proof's script does.
+6. **"Stays in the history" is the inbox's history.** The inbox shows what was handled in the last day (`InboxStore.list`), so the closed card is listed there for a day, like every handled card. The reason and who closed it stay for good in the ticket's comment. No new history screen.
+7. **The ticket's Close is on the session screen**, so a ticket that never started has no page to close it from; the route serves it (a call, or a later screen).
+8. **The Tower** lists what waits in the inbox, so a handled card leaves it without a change of its own; the browser test reads it before and after.
+9. **The fixtures source closes in memory**, as it answers a request, so the browser test runs on the real screens in French and in English.
+
+**Tests first.** The tests were written before the code and run on `origin/v2`: 4 of the 5 tests of `test/flow/close.test.ts`, the API cases and route lists that name the new route, the model tests of `app/test/inbox/close.test.ts` (their module did not exist), the 4 browser tests and the 3 Vitest tests all failed there. The one that passes on the old code, "set aside is as it was", pins P61 on purpose. Three existing Vitest tests that list a release card's buttons now list Close first.
+
+**Checks.** `npm run typecheck`; `npm test`; the browser test with `CLEARED_V2_PLAYWRIGHT`; `npm run guard -- --base origin/v2`. `app/test/notify/browser.test.ts` fails on `origin/v2` too in this environment.
+
+**Resources.** No Docker object, no network, no tunnel, no port, no secret.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-reject-close`.
+
 ## 2026-10-24: open the session's checkout in VS Code or Cursor (the author's choices, lane `j3-open-editor`, item 19 of the Devin complement, matrix C19)
 
 **The need.** Milestone 3, item 19 of [complement-devin.md](complement-devin.md): from the session screen, a button that opens the session's worktree in VS Code or Cursor. Matrix lines P120 to P125, checked free on `origin/v2` (it ends at P105; `j3-reject-close` holds P110 and above, as the owner said, and this lane starts at P120).
@@ -4802,8 +4825,8 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The remote link uses the SSH host as written; the user name, key and port are the person's ssh config's. A tailnet name is the owner's to put in `CLEARED_V2_EDITOR_SSH_HOST` and is never in the repository.
 - A `devcontainer`/container-attach link (`attached-container`) for the session's Docker container: not asked, and the container is a Docker object.
 
-**Checks.** Tests first and committed alone (`2a1b250`): on `origin/v2` the service test does not load (no `flow/editor.ts`: 0 of its 8 tests run), the 6 Vitest tests fail, and the browser test (skipped without `CLEARED_V2_PLAYWRIGHT`) fails at that commit in Chrome: it times out waiting for `#open-editor`. The test's assertions were then adjusted in the implementation commit (the encoded-folder pattern, a sibling folder that exists, the blank host read as unset, then an apostrophe in the folder's name), with no change to what each test checks. The browser test ran in Chrome through `playwright-core` from a folder outside the repository: 1 test, pass. The route lists and counts that three older tests pin (`test/api/types.test.ts`, `test/flow/modules.test.ts`, `test/flow/api.test.ts`) now include the new route. `npm run typecheck`; `npm test` (1767 node tests: 1728 pass, 39 skipped, 0 fail; 266 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
+**Checks.** Tests first and committed alone (`2a1b250`): on `origin/v2` the service test does not load (no `flow/editor.ts`: 0 of its 8 tests run), the 6 Vitest tests fail, and the browser test (skipped without `CLEARED_V2_PLAYWRIGHT`) fails at that commit in Chrome: it times out waiting for `#open-editor`. The test's assertions were then adjusted in the implementation commit (the encoded-folder pattern, a sibling folder that exists, the blank host read as unset, then an apostrophe in the folder's name), with no change to what each test checks. The browser test ran in Chrome through `playwright-core` from a folder outside the repository: 1 test, pass. The route lists and counts that three older tests pin (`test/api/types.test.ts`, `test/flow/modules.test.ts`, `test/flow/api.test.ts`) now include the new route. `npm run typecheck`; `npm test` (1781 node tests: 1738 pass, 43 skipped, 0 fail; 269 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
 
-**Resources.** No Docker object, no network, no tunnel, no port; the browser test listened on a loopback port chosen by the system, outside the reserved ones. Nothing installed globally (`npm ci` in `v2/` only). GetSeetu untouched.
+**Resources.** No Docker object, no network, no tunnel, no port; the browser test listened on a loopback port chosen by the system, outside the reserved ones. Nothing installed globally (`npm ci` in `v2/` only). The first piloted project untouched.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-open-editor`.

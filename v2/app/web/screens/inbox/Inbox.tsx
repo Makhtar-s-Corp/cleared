@@ -5,6 +5,7 @@
 // contract to validate or send back, and knowledge to approve or reject
 // (model.ts says what each gesture calls). A release of several services is
 // a train (TrainBody).
+import { CLOSE_REASON_MAX, closeReason, closeTicket } from '@/lib/close.ts';
 import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CaretRight, CheckCircle, Circle, CircleNotch, LockSimple, Tray, WarningCircle } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TicketVariant, TrainState, TrainStop, VariantsItem } from '../../../../src/api/types.ts';
@@ -531,12 +532,14 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
   if (local?.kind === 'answered') return done(t(`answered_${local.decision}`));
   if (local?.kind === 'approved') return done(t('approved', { time: clock(local.at) }));
   if (local?.kind === 'sent_back') return done(t('sent_back', { time: clock(local.at) }));
+  if (local?.kind === 'closed') return done(t('closed_done', { time: clock(local.at) }));
   if (local?.kind === 'plan_approved') return done(t('approved_plan', { time: clock(local.at) }));
   if (local?.kind === 'plan_go') return done(t('plan_go_done', { time: clock(local.at) }));
   if (local?.kind === 'plan_changed') return done(t('plan_changed_done', { time: clock(local.at) }));
   if (local?.kind === 'decided' && (item.kind === 'contract' || item.kind === 'knowledge')) return done(decidedLine(local, item, t));
   if (local?.kind === 'chosen') return done(t('variant_chosen_done', { n: local.position, time: clock(local.at) }));
   if (item.state === 'handled') {
+    if (item.kind === 'release' && item.outcome) return done(outcomeLine(item, view, t));
     if (item.kind === 'release' && item.train) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
     if (item.kind === 'contract' || item.kind === 'knowledge') return done(outcomeLine(item, view, t));
     if (item.kind === 'variants') return done(chosenLine(item, view, t));
@@ -560,11 +563,24 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
           </>
         );
       }
+      // Close asks why: the reason is mandatory, and the card stays in the history with it.
+      if (local?.kind === 'close' || (busy && message !== '')) {
+        return (
+          <>
+            <p className="decide-rule">{t('close_rule')}</p>
+            <label className="change-field" htmlFor="close-message"><span className="sr-only">{t('close_field')}</span>
+              <Textarea id="close-message" maxLength={CLOSE_REASON_MAX} rows={2} autoComplete="off" placeholder={t('close_field')} disabled={busy} value={message} onChange={(event) => onMessage?.(event.target.value)} />
+            </label>
+            <div className="d-buttons">{act('close_keep', t('close_keep'), false, busy)}{act('close_send', t('close_send'), true, busy)}</div>
+            {status}
+          </>
+        );
+      }
       if (local?.kind === 'confirm') return <><p className="d-confirm">{t('confirm_send_back')}</p><div className="d-buttons">{act('keep', t('keep'))}{act('send_back_confirm', t('send_back_confirm'), true)}</div>{status}</>;
       // A blocked train can still be sent back, or completed by the lead;
       // a train that lands or landed was approved already.
       if (item.train?.blocked || item.train?.state === 'blocked') {
-        return <><p className="d-done">{t('blocked_done')}</p><div className="d-buttons">{act('send_back', t('send_back'), false, busy)}<Button asChild variant="ink" className="btn primary ask-lead"><a href="/lead">{t('ask_lead')}</a></Button></div>{status}</>;
+        return <><p className="d-done">{t('blocked_done')}</p><div className="d-buttons">{act('close', t('close'), false, busy)}{act('send_back', t('send_back'), false, busy)}<Button asChild variant="ink" className="btn primary ask-lead"><a href="/lead">{t('ask_lead')}</a></Button></div>{status}</>;
       }
       if (item.train && !approvable(item)) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
       const versions = item.heads.map((h) => t('version', { pr: h.pr, head: h.head })).join(', ');
@@ -572,7 +588,7 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
       // A train's approval names its number of pull requests, on one line.
       const label = item.heads.length > 1 ? <span>{t('approve_count', { n: item.heads.length })}</span>
         : <><span>{t('approve')}</span>{first ? <span className="commit">{short(first.head)}</span> : null}</>;
-      return <>{signed}<div className="d-buttons">{act('send_back', t('send_back'), false, busy)}{act('approve', label, true, busy, { 'aria-label': t('approve_label', { versions }), title: versions })}</div>{status}</>;
+      return <>{signed}<div className="d-buttons">{act('close', t('close'), false, busy)}{act('send_back', t('send_back'), false, busy)}{act('approve', label, true, busy, { 'aria-label': t('approve_label', { versions }), title: versions })}</div>{status}</>;
     }
     case 'question':
       // Disabled until every question has a choice or a free answer.
@@ -863,7 +879,7 @@ export default function Inbox() {
         setSaid(t(`answered_${after.decision}`));
         focusDone.current = true;
       }
-      if (gesture === 'plan_change' || gesture === 'contract_send_back') setMessage('');
+      if (gesture === 'plan_change' || gesture === 'contract_send_back' || gesture === 'close') setMessage('');
       context.inboxChanged();
       void load();                                   // the list shows the item handled at once
     } catch (error) {
@@ -910,6 +926,20 @@ export default function Inbox() {
       case 'keep':
         change((next) => next.delete(item.id));
         return;
+      case 'close':
+        change((next) => next.set(item.id, { kind: 'close' }));
+        return;
+      case 'close_keep':
+        change((next) => next.delete(item.id));
+        setMessage('');
+        setNote('');
+        return;
+      case 'close_send': {
+        const checked = closeReason(given.message);
+        if ('error' in checked) { setNote(t(checked.error, { n: CLOSE_REASON_MAX })); return; }
+        void act(item, 'close', () => closeTicket(api, item.ticket, checked.reason, context.now()));
+        return;
+      }
       case 'approve_plan':
         if (item.kind === 'plan') void act(item, 'approve_plan', async () => {
           const plan = readPlan(await approvePlan(api, item));
