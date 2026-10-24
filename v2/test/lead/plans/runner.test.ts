@@ -258,6 +258,20 @@ test('the week stop: at 85 % of the seven-day window nothing new starts, the lea
   await t.settle();
 });
 
+test('the week stop reads Claude Code\'s window: a Codex session\'s lower one does not lift it (milestone 3)', async () => {
+  const t = await plans();
+  t.store.events.append({ at: iso(t.clock.now), sessionId: 'author-old', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 86, resetsAt: null } } });
+  const at = iso(t.clock.now + 1000);
+  t.store.sessions.put({ id: 'codex-1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'codex', model: 'gpt-6-luna', status: 'working', createdAt: at, updatedAt: at });
+  t.store.events.append({ at, sessionId: 'codex-1', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 5, resetsAt: null } } });
+  const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
+  await t.runner.approve(plan, 'u1');
+  await t.tick();
+  await t.tick();
+  assert.equal(await t.status(t.itemsOf(plan)[0]!.ticket), 'Todo', 'still stopped at 86 %');
+  assert.equal(t.lead.events.filter((e) => /seven-day/.test(e.text)).length, 1);
+});
+
 test('the day budget stops new starts once today\'s sessions cost more', async () => {
   const t = await plans({ plan: { dayBudgetUsd: 1.5, maxParallel: 1 } });
   const finished = (cost: number) => ({ type: 'RUN_FINISHED', threadId: 't', runId: 'r', outcome: { type: 'success' }, usage: [], result: { stopReason: 'end_turn', total_cost_usd: cost } }) as const;
