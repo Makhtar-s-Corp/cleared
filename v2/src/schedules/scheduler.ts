@@ -62,9 +62,12 @@ const usd = (amount: number) => `$${Number(amount.toFixed(2))}`;
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 
 // The seven-day window's share, as the plan runner reads it (lead/plans/runner.ts #stop).
+// The week is Claude Code's subscription: a window another harness reports
+// (Codex's, milestone 3) is its own, never this one.
 export function weekShare(db: DatabaseSync, project: string, now: Date): number | undefined {
   const week = db.prepare(`SELECT json_extract(event, '$.value.usedPercent') AS used, json_extract(event, '$.value.resetsAt') AS resets FROM session_events
     WHERE project = ? AND type = 'CUSTOM' AND json_extract(event, '$.name') = 'cleared.rate_limit' AND json_extract(event, '$.value.window') = 'seven_day'
+      AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_events.session_id AND s.harness <> 'claude-code')
     ORDER BY at DESC, rowid DESC LIMIT 1`).get(project) as { used: number | null; resets: string | null } | undefined;
   if (!week || typeof week.used !== 'number') return undefined;
   const running = !week.resets || Date.parse(week.resets) > now.getTime();

@@ -52,7 +52,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
   assert.equal(routeKeys(app).length, 27);   // 20, lane 31's five terminal routes and the save, and set aside (lane j2-proof-clean-base)
-  assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor']);
+  assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor', 'codex']);
   assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
 });
 
@@ -80,7 +80,7 @@ test('a configured runtime builds one engine over the registry of the request, w
   assert.equal(runtime.engine(registry), engine, 'one engine per process');
   assert.equal(engine.config.budgetUsd, 5);
   assert.equal(engine.registry, registry);
-  assert.deepEqual(Object.keys(runtime.adapters()), ['claude-code', 'cursor']);
+  assert.deepEqual(Object.keys(runtime.adapters()), ['claude-code', 'cursor', 'codex']);
   await engine.close();
 });
 

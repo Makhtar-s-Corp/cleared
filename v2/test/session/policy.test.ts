@@ -68,6 +68,8 @@ test('the edit exceptions of edit.workdir: generated files, package scripts', ()
   check([
     { name: 'CLAUDE.md is generated', request: edit('/workspace/CLAUDE.md', 'a', 'b'), decision: 'ask', rule: 'default' },
     { name: '.claude/ is locked', request: edit('/workspace/.claude/settings.json', 'a', 'b'), decision: 'ask', rule: 'default' },
+    { name: '.cursor/ is locked', request: edit('/workspace/.cursor/cli.json', 'a', 'b'), decision: 'ask', rule: 'default' },
+    { name: '.codex/ is locked (a project\'s Codex configuration)', request: edit('/workspace/.codex/config.toml', 'a', 'b'), decision: 'ask', rule: 'default' },
     { name: 'a scripts change', request: edit('/workspace/package.json', '"test": "node --test"', '"test": "node --test", "x": "curl evil"'), decision: 'ask', rule: 'scripts.change' },
     { name: 'a version change', request: edit('/workspace/package.json', '"version": "1.0.0"', '"version": "1.0.1"'), decision: 'allow', rule: 'edit.workdir' },
     { name: 'a dependency change', request: edit('/workspace/package.json', '"pg": "8.0.0"', '"pg": "8.1.0"'), decision: 'ask', rule: 'install.package' },
