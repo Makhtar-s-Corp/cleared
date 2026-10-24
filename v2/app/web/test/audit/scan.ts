@@ -41,6 +41,9 @@ const KEY_SHAPE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 // The names of the counts a screen draws; said through Intl (quantity in lib/time.ts), never as they are.
 const NUMBER_NAMES: ReadonlySet<string> = new Set(['added', 'removed', 'count', 'total', 'all', 'last', 'size', 'bytes', 'lines']);
 
+// The names of numbers that are identifiers, never counts.
+const IDENTIFIER_NAMES: ReadonlySet<string> = new Set(['number', 'pr', 'port', 'seq', 'year', 'issue']);
+
 const isNode = (value: unknown): value is Node => typeof value === 'object' && value !== null && typeof (value as Node).type === 'string';
 
 function children(node: Node): Node[] {
@@ -220,6 +223,15 @@ export function scan(file: string, source: string, options: { readonly formatter
               const quasis = (part.node.quasis as Node[]).map((q) => String((q.value as { cooked: string }).cooked));
               out.prefixes.push({ line: lineOf(part.node.start), prefix: quasis[0] ?? '', suffix: quasis[quasis.length - 1] ?? '' });
             } else out.dynamic.push({ line: lineOf(part.node.start), code: source.slice(part.node.start, part.node.end) });
+          }
+        }
+        // An identifier given to a sentence as a number would be grouped like a count ("PR #1,234"): it goes as a string.
+        if (options.formatter !== false && callee.type === 'Identifier' && translators.has(String(callee.name)) && args[1]?.type === 'ObjectExpression') {
+          for (const property of (args[1].properties as Node[])) {
+            if (property.type !== 'Property') continue;
+            const value = property.value as Node;
+            const last = value.type === 'MemberExpression' ? nameOf(value.property as Node) : value.type === 'Identifier' ? nameOf(value) : '';
+            if (IDENTIFIER_NAMES.has(last)) add('formatter:identifier-as-number', value, source.slice(value.start, value.end));
           }
         }
         if (callee.type === 'Identifier' && ['alert', 'confirm', 'prompt'].includes(String(callee.name))) {
