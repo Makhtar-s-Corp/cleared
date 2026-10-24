@@ -5008,6 +5008,24 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-batch-sessions`, after the tests and a checkpoint of Sonnet 5.5 (claude-sonnet-5-5) before the Orca restart.
 
+## 2026-10-25: Three gaps of milestone 2 closed: the plan's hold in the policy, the schedules' first tick, the schedule_failed line (the author's choices, lane `j2-plan-schedules`, P29, P33, P34, C12)
+
+**The need.** The matrix kept three lines `partial`: P29 (`flow/engine.ts` `policyFor` did not set `planning`, so the rule `plan.before_go` of `session/policy.ts` was tested but never reached a real harness), P33 and C12 (a service restarted with no browser open ran no schedule), P34 (lib's catalog had no `schedule_failed` line, so a failed run said "a health problem was detected").
+
+**Decision.**
+1. **P29, the policy.** `#launch` gives a plan author's policy `planning: true` from its start, so the hold is on before the gate exists (a harness may ask the policy during `start`). `policyFor` then reads the gate: held while its phase is not `working` (`planning`, `held`, `unplanned`, and again after a Change), free from the Go. The session is found by its policy object (`live.input.policy === input.policy`), which an adapter's copy of the input keeps; a policy found nowhere keeps the start's value, which fails closed. A reviewer, a lead and a session with no plan are never `planning`.
+2. **P33, the first tick.** The scheduler was already built at start (P62), but its timer first ticks a minute later. Measured before the change: the due schedule was taken after 61 s, not within 20 s. `FlowEngine.recovered` keeps the restart recovery the runtime starts, and the lead module's `start` ticks the scheduler once it is done: the recovery goes first, so it cannot put back to Todo a ticket the tick just started. The claim is the same `UPDATE` as before, so a schedule is taken once whichever tick finds it. A failed first tick is said by the error's name. A route that builds the plans later (a service whose lead was off at start) does not tick at once.
+3. **P34, the catalog.** `schedule_failed` is in `HEALTH_CODES` (`lib/notify/contract.mjs`) with `notify_health_schedule_failed` in `lib/i18n/en.json` ("a scheduled run failed") and `fr.json` ("une exécution planifiée a échoué"). `week_stop` already had its line.
+4. **Lines.** P180 (the policy), P181 (the first tick), P182 (the catalog line); P29, P33, P34 and C12 are `done`.
+
+**Tests first.** `9901940` (P29), `0ad8836` (P34) and `af6af57` (P33) were committed before any code. On the old code: `test/flow/plan-policy.test.ts` failed (`planning` undefined), `test/notify.test.mjs`'s new test failed (the unknown-code sentence), `test/schedules/restart.test.ts` failed (no run within 20 s; with 80 s it passed at 61 s, which is the timer's minute). The code followed in `24066f5` and `51b8a20`. `af6af57` also renamed the third P29 test, which was named for a reviewer and tested a session with no plan.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no network, no tunnel, no secret, no real account; `restart.test.ts` starts the service as a process on a free loopback port, the lead on the rehearsal's fake adapter, every folder in the temporary directory.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-plan-schedules`.
+
 ## 2026-10-25: rule 2 of the matrix read for milestones 1, 2 and "always" (the author's choices, lane `j2-matrix-audit`)
 
 **The need.** Rule 2 of `requirements-matrix.md`: before `v2` is merged into `main`, every line of the milestone and of "always" is `done` with a green test, or the merge waits. This lane reads every line that is not `done` at `origin/v2` `0baaf81` and says what is missing. Documentation only, no code.
@@ -5018,7 +5036,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 3. **Now `done`** (merged, named tests green, no real run in the proof column): O5 (the merge times of the plan's waves follow its order), O7 (the seed pull request of the filter API's repository is merged, its check passes), O20, O21 (the log entries of lanes 34 to 38 name Impeccable's findings), O22, O24, P46, P48, P49, P50 (the `doctor pool` run of 2026-10-23 is the one the line records), P60, P61, P62, P63 and P64. Their "Delivered by" now carries the number where it said the lane only (275, 279, 282).
 4. **Not `done`, and why.** O17 is `partial` (a real review of a two-service ticket, proof j2-multi steps 5 and 6). P47 is `partial`: no run of the gated real-adapter test is recorded. P51 stays open: two real runs in a row. B5.5b, M7, C2, C11 and O12 name code that is still missing, each checked in the source (`settingSources: []` in the runner, `DECISION_HEADINGS` told by no briefing, no ask from the Plan tab, `allowedEdit` with no verdict for `.claude/`). The lines that wait for proof j2 or j2-multi, for the owner or for milestone 4 keep their status with the reason, and the new section "Reste avant v2 -> main" lists them in three groups: code to write, real proof, owner.
 5. **Stale test names found.** B5.10a to B5.10e, D1, D5 and D16 are `done` but named test files that the React port deleted (`app/test/tower.test.ts`, `session/render.test.ts`, `lead/render.test.ts`, `lead/reply.test.ts`, `inbox/plan.test.ts`, `inbox/render.test.ts`, `shell.test.ts`), as are `app/test/notify/button.test.ts` (B5.10g) and `app/web/test/french.test.tsx` (O20, replaced by `i18n.test.tsx`). The cells now name the Vitest files that replaced them, which pass here; the statuses do not change.
-6. **Left alone, as ordered.** O23, P29, P33, P34 and C12 (lanes `j2-i18n-audit` and `j2-plan-schedules`): only listed in the new section.
+6. **Left alone, as ordered.** O23 (lane `j2-i18n-audit`). P29, P33, P34 and C12 (lane `j2-plan-schedules`) were not edited here; pull request 323 merged into `v2` meanwhile and made them `done` (P180 to P182), which this branch took in the merge of `origin/v2`; the new section no longer lists them.
 
 **Checks.** The runs of item 2; `npm run guard -- --base origin/v2`.
 

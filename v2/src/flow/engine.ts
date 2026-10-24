@@ -337,6 +337,8 @@ export class FlowEngine {
   #checked = new Map<string, number>();                             // when a release's checks were last read
   #files = new Map<SessionId, { seq: number; open: Map<string, string>; files: string[] }>();
   #workspace: WorkspaceConfig;
+  // The restart recovery the runtime started, so that what must follow it can wait (the schedules' first tick).
+  recovered: Promise<void> = Promise.resolve();
   #trains: TrainStore;
   #runner: TrainRunner;
   #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
@@ -1942,7 +1944,7 @@ export class FlowEngine {
     const tools = given.length > 0 ? given : undefined;
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness, model, workdir, briefing,
-      policy: this.#policy(role, settings, tools), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
+      policy: this.#policy(role, settings, tools, author === 'plan'), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
       ...(step?.siblings ? { siblings: step.siblings } : {}),
     };
     const handle = await adapter.start(input);
@@ -1961,9 +1963,15 @@ export class FlowEngine {
   // runtime gives the adapters: the "Always in this project" answers as they
   // are now, and the files the ticket's sessions edited so far, so that the
   // deletion rule knows them. The lead's is its own (lane 5).
+  // An author whose session plan waits for its Go is `planning` (plan.before_go):
+  // from its start, before its gate exists, until the Go, and again after a Change.
+  // The session is found by its policy object, which an adapter's copy of the input keeps.
   policyFor(input: StartInput): Policy {
     if (input.role === 'lead' || input.project !== this.config.project) return input.policy;
-    return { ...input.policy, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket, input.workdir) };
+    const live = input.role === 'author' ? [...this.#live.values()].find((candidate) => candidate.input.policy === input.policy) : undefined;
+    const gate = live ? this.#gates.get(live.id) : undefined;
+    const planning = input.role === 'author' && (gate ? gate.phase !== 'working' : input.policy.planning === true);
+    return { ...input.policy, planning, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket, input.workdir) };
   }
 
   // An edit counts once its result says it was made: a refused or failed
@@ -1998,9 +2006,9 @@ export class FlowEngine {
     return [...out];
   }
 
-  #policy(role: Role, settings: ProjectSettings, tools?: readonly HostTool[]): Policy {
+  #policy(role: Role, settings: ProjectSettings, tools?: readonly HostTool[], planning = false): Policy {
     return {
-      role, base: this.config.base, workdir: WORKDIR_MOUNT, scripts: settings.scripts, credentialFile: LOGIN_FILE_MOUNT,
+      role, ...(planning ? { planning } : {}), base: this.config.base, workdir: WORKDIR_MOUNT, scripts: settings.scripts, credentialFile: LOGIN_FILE_MOUNT,
       safeCommands: [...DEFAULT_SAFE_COMMANDS, ...settings.safeCommands], allowedHosts: settings.hosts, forbiddenHosts: [],
       ticketFiles: [], learned: [...this.#store.policyRules.learned(this.config.project), ...toolRules(tools)],
       ...(role === 'reviewer' && settings.testCommand ? { testCommand: settings.testCommand } : {}),

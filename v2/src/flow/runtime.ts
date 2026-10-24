@@ -78,7 +78,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     engine.startTimer();
     // What the last process left running is stopped and put back (decision 12 of milestone 2).
     const recovering = engine;
-    void recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
+    recovering.recovered = recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
     return engine;
   }
 

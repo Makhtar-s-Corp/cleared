@@ -158,10 +158,14 @@ const lead: Module = {
   // The lead and its plans are built at start, as a lead route builds them:
   // a restart's live generation is ended, and the stopped leads' containers
   // and networks are released, without waiting for the tower to poll.
+  // The schedules come due while the service is down: their first tick is
+  // the start's, after the flow's recovery, not the timer's a minute later (P33).
   start: (registry) => {
     plansOf(registry);
     leadRuntime.lead(registry);
     quotaOf(registry);
+    const first = schedules;
+    if (first) void flowRuntime.engine(registry)?.recovered.then(() => first.tick()).catch((error) => console.error(`cleared-v2: the schedules' first tick failed (${error instanceof Error ? error.name : typeof error})`));
   },
 };
 
