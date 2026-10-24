@@ -4392,7 +4392,9 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 4. **The quota's source answers in data** (`consumption/quota.ts`, P70).
    - For Claude Code, the source is `GET https://api.anthropic.com/api/oauth/usage`, called with the service's login: a setup-token token, or the access token of a credentials file, read as the session runner reads it.
-   - It is the endpoint the CLI's `/usage` reads. In the installed CLI 2.1.310, `fetchUtilization` calls it, and its schema gives each window a `utilization` in percent and a `resets_at` ISO text, both nullable. It is not a model call: nothing is spent.
+   - It is the endpoint the CLI's `/usage` reads. In the installed CLI 2.1.310, `fetchUtilization` calls it, and its schema gives each window a `utilization` and a `resets_at` ISO text, both nullable.
+   - The utilization is in percent, not a fraction: `/usage` prints it as `${Math.floor(l.utilization)}% used`, with no multiplication. The CLI's rate limit headers give a fraction, which the session mapper already converts.
+   - It is not a model call: nothing is spent.
    - The answer is read strictly. A window absent or null is skipped. A window whose figures are not numbers or dates is a failed reading, and so is an answer with neither window: if the shape changes, a wrong figure would be worse than none.
    - Every failure is said in words that never carry the token or the answer's body:
      - no token;
@@ -4411,6 +4413,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - **The ledger.** `quota_readings` gets one row per window read, with its time, its source and its reset time. A failed reading is one row with `ok` set to 0 and its reason. Nothing is deleted.
    - **A failure** is a health notification `quota_read_failed`, once for a run of failures: the first one after a reading that worked. Nothing waits for the reading. The plans and the schedules go on with the newest figure they have.
    - **The alerts.** A window at 75 and then at 85 percent raises a health notification `quota_75` or `quota_85`, once per window cycle, keyed by its reset time. The alerts are kept in `quota_alerts`, so a restart does not alert again. The next cycle alerts again.
+   - The three codes have their sentence in lib's catalog, in French and in English (`lib/notify/contract.mjs`, `lib/i18n`). A health notification passes the quiet hours, so a 75 percent alert reaches the owner at night too.
    - A notification that cannot be queued is written to the service's log and never stops a reading.
 
 6. **One newest figure, read by the stop, the schedules and the screen** (`latestQuota`, P70).
@@ -4428,7 +4431,6 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Limits.**
 - The endpoint's answer is read from the shape the CLI's code expects. The fixtures under `test/consumption/fixtures/` are written to that shape with invented figures. No account was read: the lane runs on fakes only.
 - If a setup-token token lacks the scope the endpoint needs, every reading fails visibly with "the endpoint refused the login (HTTP 403)". The plans then keep the sessions' own reports, as before.
-- The health notifications' text comes from lib's catalog, which has no line for `quota_75`, `quota_85` or `quota_read_failed`. Their code says which one it is. The text is the generic health line, as P34 noted for `schedule_failed`.
 - A ticket of several services reviews in the first service's checkout. Its test command is that service's.
 - The test command runs in the author's checkout, which the reviewer shares. A runner that writes a cache or a coverage file there is not refused: the policy reads the command, not what the program does.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-review-tests-quota`.
