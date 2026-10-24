@@ -5007,3 +5007,21 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Resources.** No Docker object, no network, no tunnel, no secret; the tests listen on port 0 on loopback.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-batch-sessions`, after the tests and a checkpoint of Sonnet 5.5 (claude-sonnet-5-5) before the Orca restart.
+
+## 2026-10-25: rule 2 of the matrix read for milestones 1, 2 and "always" (the author's choices, lane `j2-matrix-audit`)
+
+**The need.** Rule 2 of `requirements-matrix.md`: before `v2` is merged into `main`, every line of the milestone and of "always" is `done` with a green test, or the merge waits. This lane reads every line that is not `done` at `origin/v2` `0baaf81` and says what is missing. Documentation only, no code.
+
+**Decision.**
+1. **Pull requests.** `gh pr view` shows every pull request the lines name as `MERGED` into `v2`, and each merge commit is an ancestor of `origin/v2` (238, 240, 242, 244, 248, 251, 252, 255, 256, 275, 279 and 282 checked one by one). The only open pull request that touches the matrix is 323 (lane `j2-plan-schedules`).
+2. **Tests.** `npm ci` and `npm run build` in `v2/`; then the files the lines name: 94 node files (836 tests, 834 pass, 2 skipped, 0 fail), 7 Vitest files (54 pass), and the 9 browser files with `CLEARED_V2_PLAYWRIGHT` (25 tests, 0 skipped, 0 fail). The 2 skipped are the gated `test/terminal/real-harness.test.ts` (`CLEARED_V2_REAL_HARNESS=1`). The `verify` and `browser` checks of `v2` at `0baaf81` are green.
+3. **Now `done`** (merged, named tests green, no real run in the proof column): O5 (the merge times of the plan's waves follow its order), O7 (the seed pull request of the filter API's repository is merged, its check passes), O20, O21 (the log entries of lanes 34 to 38 name Impeccable's findings), O22, O24, P46, P48, P49, P50 (the `doctor pool` run of 2026-10-23 is the one the line records), P60, P61, P62, P63 and P64. Their "Delivered by" now carries the number where it said the lane only (275, 279, 282).
+4. **Not `done`, and why.** O17 is `partial` (a real review of a two-service ticket, proof j2-multi steps 5 and 6). P47 is `partial`: no run of the gated real-adapter test is recorded. P51 stays open: two real runs in a row. B5.5b, M7, C2, C11 and O12 name code that is still missing, each checked in the source (`settingSources: []` in the runner, `DECISION_HEADINGS` told by no briefing, no ask from the Plan tab, `allowedEdit` with no verdict for `.claude/`). The lines that wait for proof j2 or j2-multi, for the owner or for milestone 4 keep their status with the reason, and the new section "Reste avant v2 -> main" lists them in three groups: code to write, real proof, owner.
+5. **Stale test names found.** B5.10a to B5.10e, D1, D5 and D16 are `done` but named test files that the React port deleted (`app/test/tower.test.ts`, `session/render.test.ts`, `lead/render.test.ts`, `lead/reply.test.ts`, `inbox/plan.test.ts`, `inbox/render.test.ts`, `shell.test.ts`), as are `app/test/notify/button.test.ts` (B5.10g) and `app/web/test/french.test.tsx` (O20, replaced by `i18n.test.tsx`). The cells now name the Vitest files that replaced them, which pass here; the statuses do not change.
+6. **Left alone, as ordered.** O23, P29, P33, P34 and C12 (lanes `j2-i18n-audit` and `j2-plan-schedules`): only listed in the new section.
+
+**Checks.** The runs of item 2; `npm run guard -- --base origin/v2`.
+
+**Resources.** No Docker object, no port opened, no tunnel, no secret; the browser tests listen on port 0 on loopback; the Claude login was not used and the gated real-harness test was not run.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-matrix-audit`.
