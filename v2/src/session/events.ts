@@ -54,6 +54,9 @@ export const CUSTOM_NAMES = [
   'cleared.terminal_input',
   'cleared.terminal_closed',
   'cleared.human_edit',
+  // Milestone 3 (issue 291): a message of a ticket's author-reviewer
+  // channel, journaled by the flow on the sender's session and the receiver's.
+  'cleared.review_channel',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -150,6 +153,10 @@ export type CustomValue = {
   'cleared.terminal_closed': { readonly by: UserId | 'system'; readonly reason: 'give_back' | 'idle' | 'closed' | 'exit'; readonly outputBytes: number };
   // A file a human changed in the checkout (decision 33): never its content.
   'cleared.human_edit': Omit<HumanEdit, 'at'>;
+  // A message of the ticket's author-reviewer channel (issue 291): the
+  // reviewer's request for change or the author's answer, cleaned, with the
+  // round it belongs to and the rounds the flow allows (`limit`).
+  'cleared.review_channel': { readonly round: number; readonly limit: number; readonly from: 'reviewer' | 'author'; readonly text: string };
 };
 
 type Base = { readonly timestamp?: number };

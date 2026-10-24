@@ -34,6 +34,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     // (decisions 22 and 23), and the four names lane 31 emits (decisions 32 and 33).
     'cleared.session_plan', 'cleared.changes',
     'cleared.terminal_opened', 'cleared.terminal_input', 'cleared.terminal_closed', 'cleared.human_edit',
+    // Milestone 3: the author-reviewer channel (issue 291).
+    'cleared.review_channel',
   ]);
 });
 

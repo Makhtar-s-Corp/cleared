@@ -141,6 +141,11 @@ test('the ledger facts: notifications by kind, the lead\'s turns, cost and highe
   const landed = ledgerFacts(db, since);
   assert.deepEqual(landed.tickets, { 'LOCAL-1': { sessions: 3, reviewRounds: 2, costUsd: 0.52, startedAt: '2026-10-22T21:01:00.000Z', lastAt: '2026-10-22T21:01:00.000Z', landedAt: '2026-10-22T23:00:00.000Z' } });
   assert.equal(facts.maxLive, 1);
+  // A reviewer resumed through the review channel (issue 291) gives its rounds' verdicts in one session.
+  session('a2', 'LOCAL-2', 'author'); session('r3', 'LOCAL-2', 'reviewer');
+  for (const [round, verdict] of [[1, 'changes_requested'], [2, 'changes_requested'], [3, 'pass']] as const)
+    store.events.append({ at: '2026-10-22T21:40:00.000Z', sessionId: 'r3', ticket: 'LOCAL-2', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: 'r3', verdict, round } } });
+  assert.equal(ledgerFacts(db, since).tickets['LOCAL-2']?.reviewRounds, 3);
   // A ledger without the v1 events table yet has no notifications.
   const bare = openStore(':memory:');
   assert.deepEqual(ledgerFacts(bare.db, since).notifications, { count: 0, byKind: {}, firstAt: {} });

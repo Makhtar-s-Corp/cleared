@@ -240,3 +240,25 @@ test('a waiting request asks its question with who asks, says why in the person\
   const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
   assert.ok(visibleText(renderSession(viewOf(), fr)).includes('Autoriser l\'auteur à installer date-fns ?'));
 });
+
+// The review channel (issue 291): the reviewer's request and the author's
+// answer, each a row that says its side and its round, the answer how long
+// the request waited, in a duration of lib/time.ts; the text opens below.
+test('the review channel\'s messages read in English and in French, the wait as a duration, the text in the row\'s detail', () => {
+  const model = emptyModel();
+  const at = (minute: number) => new Date(2026, 9, 21, 9, minute).toISOString();
+  const channel = (seq: number, minute: number, from: 'reviewer' | 'author', text: string) =>
+    ({ seq, at: at(minute), sessionId: AUTHOR_ID, ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM' as const, name: 'cleared.review_channel' as const, value: { round: 2, limit: 3, from, text } } });
+  applyAll(model, [channel(1, 0, 'reviewer', 'Defects: src/entries.ts:3 sorts the wrong way'), channel(2, 72, 'author', 'Sorted newest first.')]);
+  // The author's filter: its own answer is hidden from the whole ticket, which shows it on the reviewer's side.
+  const html = renderSession(on(model, { filter: 'author' }), en);
+  assert.equal(count(html, /data-row="channel"/g), 2);
+  assert.equal(count(renderSession(on(model), en), /data-row="channel"/g), 1);
+  const text = visibleText(html);
+  for (const expected of ['Reviewer to author: changes asked, round 2 of 3', 'Author to reviewer: answer, round 2 of 3', 'answered in 1h 12m', 'Defects: src/entries.ts:3 sorts the wrong way', 'Sorted newest first.'])
+    assert.ok(text.some((line) => line.includes(expected)), `missing: ${expected}`);
+  const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
+  const french = visibleText(renderSession(on(model, { filter: 'author' }), fr));
+  for (const expected of ['Du relecteur à l\'auteur : changements demandés, tour 2 sur 3', 'De l\'auteur au relecteur : réponse, tour 2 sur 3', 'répondu en 1 h 12'])
+    assert.ok(french.some((line) => line.includes(expected)), `manque : ${expected}`);
+});

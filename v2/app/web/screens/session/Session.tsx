@@ -277,6 +277,12 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile }: {
       return <Frame kind="error" at={row.at} icon={WarningCircle} refused><div className="bad">{row.message}</div></Frame>;
     case 'verdict':
       return <Frame kind="verdict" at={row.at} icon={Check}><div>{t(row.verdict === 'changes_requested' ? 'verdict_changes' : 'verdict_ok', { round: row.round })}</div></Frame>;
+    case 'channel':
+      return (
+        <Step kind="channel" at={row.at} icon={ArrowRight}
+          line={<div>{t(row.from === 'reviewer' ? 'channel_request' : 'channel_answer', { round: row.round, limit: row.limit })}{row.afterMs === undefined ? null : <span className="sub">{` · ${t('channel_after', { time: duration(row.afterMs, t) })}`}</span>}</div>}
+          detail={<div className="prose">{row.text}</div>} />
+      );
     case 'plan':
       return <Frame kind="plan" at={row.at} icon={row.go ? Check : ListChecks}><div>{row.go ? goLine(row, view.me, t) : t(`row_plan_${row.confidence}`)}</div></Frame>;
   }
