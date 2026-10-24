@@ -18,7 +18,8 @@
 // does not hold: a term made of them narrows nothing. A call reads at most
 // SCAN_LIMIT rows: a search that reaches it answers what it found, says it
 // is partial and gives the value to go on from the last row read.
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { StoreError } from '../store/db.ts';
@@ -57,17 +58,22 @@ function openReadOnly(target: string): DatabaseSync {
 }
 
 // A ledger in WAL mode is read through its -shm file, which a read only
-// connection in a folder it cannot write to cannot make. When the service is
-// stopped (it leaves no -wal) the file is read as it is, `immutable`: a
-// ledger with a -wal may be written to, so it is never read that way.
+// connection in a folder it cannot write to cannot make. When the folder
+// cannot be written to (the service cannot run in it) and has no -wal, the
+// file is read as it is, `immutable`, as a snapshot: a ledger with a -wal may
+// be written to, so it is never read that way.
+function writable(folder: string): boolean {
+  try { accessSync(folder, constants.W_OK); return true; } catch { return false; }
+}
+
 export function openLedgerReadOnly(path: string): DatabaseSync {
   if (!existsSync(path)) throw new StoreError(`no ledger at ${path}: start the service once, or set CLEARED_STATE_DIR (or ORCH_LEDGER) to the folder of an existing one`);
   try {
     return openReadOnly(path);
   } catch (error) {
-    try {
-      if (!existsSync(`${path}-wal`)) return openReadOnly(`${pathToFileURL(path).href}?immutable=1`);
-    } catch { /* the first error is the one said */ }
+    if (!writable(dirname(path)) && !existsSync(`${path}-wal`)) {
+      try { return openReadOnly(`${pathToFileURL(path).href}?immutable=1`); } catch { /* the first error is the one said */ }
+    }
     throw new StoreError(`cannot open the ledger at ${path} to read it: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

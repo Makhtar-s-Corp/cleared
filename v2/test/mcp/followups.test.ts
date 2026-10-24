@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
 import { LedgerHistory, openLedgerReadOnly } from '../../src/mcp/history.ts';
-import { MARKER_TEXTS, createRedactor } from '../../src/mcp/redact.ts';
+import { MARKER_TEXTS, createRedactor, cutStrings } from '../../src/mcp/redact.ts';
 import { createLedgerServer, serveStdio } from '../../src/mcp/server.ts';
 import { openStore } from '../../src/store/db.ts';
 import { ENV, SECRETS, SESSIONS, makeLedger } from './support.ts';
@@ -150,6 +150,16 @@ test('the name of a key is cleaned like its value, in an event, a search and a t
   assert.equal(out.rawEvent, undefined);
   const twice = redactor.whole({ [SECRETS.github]: 1, [`${SECRETS.github}x`.replace('R', 'S')]: 2 }) as Record<string, unknown>;
   assert.equal(Object.keys(twice).length, 2, 'two keys cleaned to one marker keep both values');
+});
+
+test('a key named like a property of every object is kept as it is, by whole, value and cutStrings', () => {
+  const event = JSON.parse('{"constructor":1,"toString":{"valueOf":2},"__proto__":3,"hasOwnProperty":4}') as Record<string, unknown>;
+  for (const out of [redactor.whole(event), redactor.value(event), cutStrings(event)] as Record<string, unknown>[]) {
+    assert.deepEqual(Object.keys(out).sort(), ['__proto__', 'constructor', 'hasOwnProperty', 'toString']);
+    assert.equal(out.constructor, 1);
+    assert.deepEqual(out.toString, { valueOf: 2 });
+    assert.equal(Object.getOwnPropertyDescriptor(out, '__proto__')?.value, 3);
+  }
 });
 
 test('a key that is a secret is cleaned in the stored event too, found by neither search nor timeline', () => {

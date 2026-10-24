@@ -87,13 +87,13 @@ export function cutStrings(value: unknown, limit: number = TEXT_LIMIT): unknown 
 // An object from entries whose names may have become the same by cleaning or
 // cutting: the later ones are numbered, so that no value is lost.
 function named(entries: readonly (readonly [string, unknown])[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [name, entry] of entries) {
+  const used = new Set<string>();
+  return Object.fromEntries(entries.map(([name, entry]) => {
     let unique = name;
-    for (let n = 2; unique in out; n++) unique = `${name} (${n})`;
-    out[unique] = entry;
-  }
-  return out;
+    for (let n = 2; used.has(unique); n++) unique = `${name} (${n})`;
+    used.add(unique);
+    return [unique, entry];
+  }));
 }
 
 export function createRedactor(options: RedactorOptions): Redactor {
