@@ -4693,6 +4693,29 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - No Docker object, no network, no tunnel, no port, no secret. The tests run in memory.
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-autonomy-followups`.
 
+## 2026-10-24: follow-ups of the ledger's MCP server (the author's choices, lane `j3-ledger-mcp-followups`, issue #301)
+
+**Context.** Issue #301 lists six follow-ups of PR #298. All six are handled here (P95 to P100). One point the issue did not ask for is noted below.
+
+**Decisions.**
+1. **A marker is searched by its words, not by the stored text.** The LIKE that narrows the rows reads the stored text, which holds no `[removed: ...]`, so a search for a marker found nothing. The term is cut at its brackets (nothing else holds one) and a piece that is a part of a marker's words narrows nothing; the filter on the cleaned text decides. A short common word of a marker ("token", "key") therefore reads without narrowing, which the scan limit bounds. `MARKER_TEXTS` is the one list of the markers, and a test checks that every marker the cleaner writes on the fixture is in it, so a new category cannot bring the defect back unseen.
+2. **A call reads at most 2000 rows.** The cost of a search is the cleaning of each row it reads, found or not. At the limit it answers `partial: true` with what it found and a `next` after the last row read, found or not, so an empty page can still go on and the cursors reach every match once. The limit is a constructor option for the tests.
+3. **The cursor is the stored time and rowid, not an id.** Built on the cleaned id, two sessions whose ids read the same once cleaned were skipped, and building it on the raw id would have put a stored string, perhaps secret-shaped, in a value any client decodes (it is base64 of JSON). The order of rows at one moment is now the order they were written. A cursor of the old shape is refused as `error_cursor`. A session keeps its rowid when it is updated (`ON CONFLICT(id) DO UPDATE`, not a replace), and events are only appended, so a row cannot move between two pages.
+4. **Key names are cleaned; a name is a secret's unless it holds an innocent word.** `whole` cleans each key and decides the id keys and `rawEvent` on the stored name; keys cleaned to the same text are numbered, so no value is lost. For `NAME=value`, a rule on the name's shape (the word between underscores) would have missed `PGPASSWORD`, `SSHPASS`, `APIKEY` and `GITHUBTOKEN`, which cannot be told from `BYPASS` by their letters. So the broad match stays and a short list of words that only hold the letters (`BYPASS`, `AUTHOR`, `KEYBOARD`, `MONKEY`, `COMPASS`...) is removed from the name before it is judged. A word missing from the list costs a hidden value, never a shown secret.
+5. **EPIPE ends the server as a closed input would.** The client being gone is not an error: the input is let go (it stayed open and kept the process alive) and the command exits with 0. Any other failure of stdout is thrown and the command exits with 74 and says it on stderr.
+6. **A stopped service's ledger in a read-only folder is read `immutable`.** The WAL mode reads through a `-shm` file that a read-only connection in such a folder cannot make; the open failed. When it fails, the folder cannot be written to (the service cannot run in it) and the ledger has no `-wal`, it is opened again as `file:...?immutable=1`, a snapshot. With a `-wal`, or in a folder that can be written to, it never is: the ledger may be written to and `immutable` would hide committed rows. The concurrent read in WAL is pinned by a test; it passed on the old code, and opening every ledger `immutable` makes it fail.
+
+**Limits.**
+- At the scan limit, `partial` and `next` are decided by the rows that passed the LIKE on the stored text. For a term that cleaning leaves unchanged, the answer tells whether at least 2001 stored rows hold it and where the 2000th is. The text of a secret is never shown, and a term shaped like a secret is refused or finds nothing; the position of a row is not a secret.
+
+**Not done, and why.**
+- `createdAt`, `updatedAt` and an event's `at` are shown as stored, not cleaned, as before this lane. They are timestamps the service writes; a writer that put something else there is outside what this lane was asked.
+
+**Consequences.**
+- No Docker object, no network, no tunnel, no port, no secret: the tests build their secret-shaped values at run time and run on temporary folders. The read-only folder test is skipped for root.
+- The answers of `search_sessions` and `search_events` gain `partial`; the sort of rows at one moment changes.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-ledger-mcp-followups`.
+
 ## 2026-10-24: follow-ups of the review channel (the author's choices, lane `j3-review-channel-followups`, issue #296)
 
 **Context.** Issue #296 lists five follow-ups of the review channel (#295). Four are done here (P90 to P92), one is left, with why.

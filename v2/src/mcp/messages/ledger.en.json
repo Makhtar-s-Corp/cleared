@@ -1,7 +1,7 @@
 {
-  "instructions": "Read-only history of the Cleared ledger: sessions, their events, review verdicts and decisions. Secrets, keys and service folders are removed from every answer. Search with search_sessions or search_events, then read one session in order with get_session_timeline. Each answer is one page: pass its next value back to get the following one.",
-  "tool_search_sessions": "Finds sessions, newest first. A session gives its ticket, project, role, harness, model, status, service, its number of events and how long it ran.",
-  "tool_search_events": "Finds session events, newest first: messages, tool calls and their cleaned results, steps, review verdicts (type cleared.review_verdict), questions and permission answers.",
+  "instructions": "Read-only history of the Cleared ledger: sessions, their events, review verdicts and decisions. Secrets, keys and service folders are removed from every answer. Search with search_sessions or search_events, then read one session in order with get_session_timeline. Each answer is one page: pass its next value back to get the following one. A search that reads a great many rows stops and answers partial: true, with the matches it found so far, perhaps none; pass its next value back to go on.",
+  "tool_search_sessions": "Finds sessions, newest first. A session gives its ticket, project, role, harness, model, status, service, its number of events and how long it ran. A partial answer (partial: true) stopped before the end: pass next back to go on.",
+  "tool_search_events": "Finds session events, newest first: messages, tool calls and their cleaned results, steps, review verdicts (type cleared.review_verdict), questions and permission answers. A partial answer (partial: true) stopped before the end: pass next back to go on.",
   "tool_get_session_timeline": "Reads one session and its events in order, a page at a time.",
   "arg_text_sessions": "Words to find in the session's id, ticket, project, role, harness, model, status or service, without regard to case.",
   "arg_text_events": "Words to find in the event's cleaned content, without regard to case. A term shaped like a secret is refused.",
