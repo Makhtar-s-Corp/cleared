@@ -4931,6 +4931,33 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-contract-notes`.
 
+## 2026-10-24: Owner decision: closing a ticket in Cleared closes its pull request on GitHub (P114, issue #249, lane `j3-close-ticket-pr`)
+
+**Decision (the owner, 2026-10-24 at 23:51).** Closing a ticket in Cleared also closes its pull request on GitHub, with a comment that gives the reason for the Close. The branch is never deleted. This answers the question P114 left open on 2026-10-24 (the Close of P110 to P113 settled the card and the ticket and left the forge as it was, see "Close a release card or a ticket", item 5).
+
+**What the author did with it (lane `j3-close-ticket-pr`, matrix P114 and P170 to P173).**
+1. **Through gh on the host, as the CI repair is (P77).** The pull request is read and closed with the host's `gh` and the forge's credential (`flow/pr-close.ts`, the new `closePullRequest` effect of `FlowEffects`, wired in `flow/effects.ts` on the service's repository). No session touches the forge. The effect is optional: an engine without it closes the ticket and leaves the forge as it is.
+2. **Only a pull request Cleared opened.** The pull requests are the ones of the ticket's release cards, which Cleared makes from what it publishes (a repair reuses the pull request, so the cards of one ticket name it once; a train closes one per service, on that service's repository). `gh pr view` must then show a head that is one of the ticket's own branches (`cleared/<ticket>`, or the branch of a resume, issue #272). A pull request on any other branch is refused, a head that is the service's base or `main` or `master` is refused whatever the caller lists (`onBase`, the repair's rule): never on main.
+3. **Idempotent.** A pull request already closed or already merged is left alone, with no comment and no error, so a second Close, or a Close after an approval, does nothing on the forge.
+4. **The comment gives the reason.** `gh pr close <n> --repo <repo> --comment "Closed from Cleared: <reason>"` followed by a line that says the branch is kept. The reason is the owner's text (1 to 2000 characters, already checked by the Close) and reaches gh as one argument inside that sentence, so it can never be read as a flag. `--delete-branch` is never passed, and a test reads every argument of every call to check it.
+5. **A failure is said and never blocks.** The ticket is taken out of the flow first (the Close of P110 is unchanged), then the pull requests are closed. A pull request that gh cannot close, or that is refused, is said in a comment on the ticket ("the pull request #n was not closed on GitHub: close it by hand if it should be"), with the end of gh's message cut to 300 characters and cleaned by the service's cleaner (as P77 cleans what it passes on), and in the service's log by the error's name only. The Close answers as before.
+6. **Not changed.** The API's answer, the routes and the screens. A done ticket is still refused before anything is done, so no pull request of a shipped ticket is touched. The proof's own script still closes its pull requests itself (P51).
+
+**Not done, and why.**
+- A pull request that no release card names (published, then its card gone) is not found; a ticket that never published has none. The owner closes those on the forge.
+- The Close's screen does not say whether the pull request was closed; the ticket's comment says it when it was not. A line on the card would be a lane of its own.
+- The real `gh` was not run: the tests use a fake `gh` on PATH that records its arguments, as `test/workspace/publish.test.ts` does. Closing a real pull request is the owner's check on the first real Close.
+
+**The Close waits for the forge.** The Close's answer comes after gh has run (at most 30 seconds per call, two calls per pull request, more for a train); the app's client sets no timeout of its own, so the owner does not see an error on a Close that worked. A slower forge makes the click slower, not wrong.
+
+**Tests first.** `test/flow/close-pr.test.ts` and a case of `test/flow/train.test.ts` were committed alone (`e9c3c8d`) and failed on `origin/v2` (no `flow/pr-close.ts`, no effect). One assertion of the refusal test was wrong and was corrected with the code: it listed the foreign head among the ticket's branches, so the pull request was rightly accepted; the test now lists a head only in the cases of a base branch, which are refused whatever the caller lists. With the code, the 14 tests of `close-pr.test.ts` and the train case pass.
+
+**Checks.** On the branch merged with `origin/v2` (`3d5122d`): `npm run typecheck`; `node --test` over `test/` (1453 tests, 1451 pass, 2 skipped, 0 fail); over `app/test/` after `npm run build` (401 tests, 359 pass, 42 skipped, 0 fail: the browser tests are skipped here, no Chrome or Playwright was set, and this lane changes no screen); Vitest (271 tests pass); `npm run guard -- --base origin/v2`.
+
+**Resources.** No Docker object, no network (a fake `gh` on PATH), no tunnel, no secret. `npm ci` in `v2/` only. The first piloted project untouched.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-close-ticket-pr`.
+
 ## 2026-10-24: Batches of tickets (the author's choices, lane `j3-batch-sessions`, requirement C6)
 
 **The need.** Requirement C6, "Multiple sessions in batches" (milestone 3, line `later` until now): several tickets launched at once, each its own session, without going past the lanes the Consumption screen allows or the week stop of the subscription. Matrix lines C6 (filled) and P140 to P144, checked free on `origin/v2` (P120 to P125 are #316's and P130 to P135 #315's, both merged).
@@ -4949,7 +4976,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** The tests were committed alone in `0b009a9`, before any code: there, `test/flow/batch.test.ts`, `test/flow/batch-routes.test.ts` and `app/web/test/tower-batch.test.tsx` do not load (`flow/batch.ts` and the model's exports do not exist), the route counts of `test/api/types.test.ts`, `test/flow/api.test.ts` and `test/flow/modules.test.ts` fail, and the browser test calls `lanes` and `quota`, which the fixtures did not have.
 
-**Checks** (after merging `origin/v2` at `3d5122d`, pull requests 316, 318, 319 and 320). `npm run typecheck` and `npm run build` pass. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1859 tests, 1852 pass, 2 skipped, 5 fail. All 278 Vitest tests pass. The batch browser test passes in French and in English. The run was on a loaded machine (load average 32 on 12 cores, other lanes running):
+**Checks** (after merging `origin/v2` at `cb4badc`, pull requests 316, 318, 319, 320 and 322). `npm run typecheck` and `npm run build` pass. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1859 tests, 1852 pass, 2 skipped, 5 fail. All 278 Vitest tests pass. The batch browser test passes in French and in English. The run was on a loaded machine (load average 32 on 12 cores, other lanes running):
 - `app/test/notify/browser.test.ts` ("a headless browser registers the worker...") fails the same way on `origin/v2` in this environment, checked in a temporary worktree.
 - `test/mcp/followups.test.ts` ("the server process whose client closed its stdout...", a write EPIPE) passes 3 of 3 when run alone.
 - `app/test/polish/first-paint-browser.test.ts`, `app/test/session/editor-browser.test.ts` and `app/test/foundation/budget-browser.test.ts` timed out under the load. Run alone right after, all three pass.
