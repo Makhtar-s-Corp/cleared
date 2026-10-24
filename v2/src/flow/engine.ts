@@ -1863,8 +1863,10 @@ export class FlowEngine {
         }
       }
     }
-    // What the ticket's reviewers sent and were sent so far, then the answer.
-    const channel = this.#flowRows(id).filter((row) => row.role === 'reviewer').flatMap((row) => channelOf(this.#store.events.after(row.id)));
+    // What the ticket's reviewers sent and were sent so far, then the answer
+    // (journaled already on a reviewer resumed whose send failed).
+    const channel = this.#flowRows(id).filter((row) => row.role === 'reviewer').flatMap((row) => channelOf(this.#store.events.after(row.id)))
+      .filter((m) => !(m.from === 'author' && m.round === answer.round));
     await this.#startReview(ticket, author.input.workdir, [...channel, answer]);
   }
 
