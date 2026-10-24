@@ -34,7 +34,7 @@ const LETTERS = /\p{L}/u;
 
 // What is left of a draw once the catalog's words are taken out: the data's own.
 function written(markup: string): string[] {
-  return visibleText(markup).map((text) => text.replace(/«[^»]*»/g, '').replace(/[\s·,.:;()%$/\\|  –—-]+/g, ' ').trim()).filter((text) => LETTERS.test(text));
+  return visibleText(markup).map((text) => text.replace(/«[^»]*»/g, '').replace(/[\s·,.:;()%$/\\|  \u2013\u2014-]+/g, ' ').trim()).filter((text) => LETTERS.test(text));
 }
 
 // A word the component wrote is the same in both languages' draws; a date or a

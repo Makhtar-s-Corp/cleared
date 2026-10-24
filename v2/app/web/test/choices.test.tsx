@@ -72,7 +72,7 @@ test('a free answer typed before a redraw is drawn again; one over the limit say
   assert.match(markup, /value="Under the second &lt;month&gt;"/);
   assert.match(markup, /data-choice-send="true">Send the answer/);
   const long = render([week], { kind: 'waiting', draft: typeFree(emptyDraft([week]), 0, 'x'.repeat(2001)) });
-  assert.match(long, /<p class="choice-note" role="status">An answer is at most 2000 characters\.<\/p>/);
+  assert.match(long, /<p class="choice-note" role="status">An answer is at most 2,000 characters\.<\/p>/);
   assert.match(long, /data-choice-send="true" disabled=""/);
   const busy = render([week], { kind: 'waiting', draft: typed, busy: true });
   assert.equal(count(busy, /<button[^>]*disabled=""/g), 4, 'three options and Send');

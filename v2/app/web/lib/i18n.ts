@@ -6,8 +6,15 @@ export type Catalog = Readonly<Record<string, string>>;
 export type Values = Readonly<Record<string, string | number>>;
 export type Translate = (key: string, values?: Values) => string;
 
-export function format(template: string, values: Values = {}): string {
-  return template.replace(/\{([a-z_]+)\}/g, (_, name: string) => String(values[name] ?? ''));
+// A number is said as the catalog's language says it ("12 345", "12,345",
+// "86,5"); a string is the caller's own text, left as it is. The catalog
+// names its language in its `locale` key (the shell's); one without it, the
+// server's sign-in page and a test's, writes the number as it comes.
+export function format(template: string, values: Values = {}, locale?: string): string {
+  return template.replace(/\{([a-z_]+)\}/g, (_, name: string) => {
+    const value = values[name];
+    return typeof value === 'number' && locale ? new Intl.NumberFormat(locale).format(value) : String(value ?? '');
+  });
 }
 
 // A key missing from the catalog is drawn marked (⟦key⟧), never thrown:
@@ -28,6 +35,6 @@ export function translator(catalog: Catalog, onMissing?: (key: string) => void):
       onMissing?.(key);
       return marked(key);
     }
-    return format(template, values);
+    return format(template, values, catalog['locale']);
   };
 }

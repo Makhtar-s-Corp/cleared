@@ -161,7 +161,7 @@ function TrainBody({ train, t }: { readonly train: TrainState; readonly t: Trans
             <span className="stop-body">
               <span className="stop-top">
                 <span className="stop-name">{stop.service}</span>
-                {stop.pr ? (isWebLink(stop.pr.url) ? <a className="stop-pr" href={stop.pr.url} rel="noopener noreferrer">{t('pr_link', { n: stop.pr.number })}</a> : <span className="stop-pr">{t('pr_link', { n: stop.pr.number })}</span>)
+                {stop.pr ? (isWebLink(stop.pr.url) ? <a className="stop-pr" href={stop.pr.url} rel="noopener noreferrer">{t('pr_link', { n: String(stop.pr.number) })}</a> : <span className="stop-pr">{t('pr_link', { n: String(stop.pr.number) })}</span>)
                   : <span className="stop-pr none">{t('train_no_pr')}</span>}
               </span>
               <span className="stop-line"><span className="stop-state">{stopState(stop, train, t)}</span>{stop.at ? <><span className="sep" aria-hidden="true">·</span><time className="stop-time" dateTime={stop.at}>{clock(stop.at)}</time></> : null}</span>
@@ -224,7 +224,7 @@ function Changes({ item, t }: { readonly item: ReleaseItem; readonly t: Translat
 
 function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; readonly view: InboxView; readonly t: Translate; readonly onFrame?: (frame: InboxView['frame']) => void }) {
   const open = releaseSession(view, item.ticket);
-  const pr = t('pr_link', { n: item.pr.number });
+  const pr = t('pr_link', { n: String(item.pr.number) });
   const { train } = item;
   // A train with no picture of its screens shows none; a release of one
   // service keeps milestone 1's frames, empty or not.
@@ -583,7 +583,7 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
         return <><p className="d-done">{t('blocked_done')}</p><div className="d-buttons">{act('close', t('close'), false, busy)}{act('send_back', t('send_back'), false, busy)}<Button asChild variant="ink" className="btn primary ask-lead"><a href="/lead">{t('ask_lead')}</a></Button></div>{status}</>;
       }
       if (item.train && !approvable(item)) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
-      const versions = item.heads.map((h) => t('version', { pr: h.pr, head: h.head })).join(', ');
+      const versions = item.heads.map((h) => t('version', { pr: String(h.pr), head: h.head })).join(', ');
       const first = item.heads[0];
       // A train's approval names its number of pull requests, on one line.
       const label = item.heads.length > 1 ? <span>{t('approve_count', { n: item.heads.length })}</span>

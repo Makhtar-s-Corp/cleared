@@ -84,16 +84,17 @@ const DYNAMIC: readonly Exception[] = [
   { file: 'shell/NotifyButton.tsx', text: 'failed', why: "toggleNotify() returns a notify_* key or nothing" },
 ];
 
-// A French sentence equal to the English one: the same word in both languages, or a name.
-const SAME_IN_BOTH: ReadonlySet<string> = new Set([
-  'shell.app_name', 'shell.title_session', 'shell.nav_sessions', 'shell.title_lead', 'shell.nav_plans', 'shell.notify_label', 'shell.palette_sessions',
-  'shell.time_minutes', 'shell.key_cap_ctrl', 'shell.language_en', 'shell.language_fr',
-  'tower.need_question', 'tower.need_plan', 'tower.need_lead', 'tower.role_lead', 'tower.lead_title', 'tower.plans_title', 'tower.services_title', 'tower.kind_question', 'tower.kind_plan',
-  'session.ticket_label', 'session.verb_think', 'session.role_lead', 'session.index_title', 'session.tabs_plan', 'session.tabs_terminal', 'session.open_editor_vscode', 'session.open_editor_cursor', 'session.terminal_switch_shell', 'session.ticket_step_service',
-  'inbox.kind_question', 'inbox.eyebrow_question', 'inbox.facts_sessions', 'inbox.facts_session', 'inbox.session_lead_plain', 'inbox.kind_plan', 'inbox.list_plan_one', 'inbox.list_plan_other', 'inbox.lead_label', 'inbox.lead_line', 'inbox.facts_tickets', 'inbox.tickets_one', 'inbox.tickets_other', 'inbox.train_ticket', 'inbox.services_label', 'inbox.plan_step_service',
-  'lead.lead_heading', 'lead.services_label', 'lead.plan_step_service',
-  'consumption.consumption_harness_claude-code', 'consumption.consumption_harness_codex', 'consumption.consumption_maker_claude-code', 'consumption.consumption_maker_codex', 'consumption.consumption_usage_unit',
-]);
+// A French sentence equal to the English one, by the reason it is.
+const SAME_IN_BOTH: ReadonlyMap<string, string> = new Map(Object.entries({
+  // A name: the product's, a harness's or a maker's, said as it is in both languages.
+  names: 'shell.app_name shell.language_en shell.language_fr session.open_editor_vscode session.open_editor_cursor consumption.consumption_harness_claude-code consumption.consumption_harness_codex consumption.consumption_maker_claude-code consumption.consumption_maker_codex',
+  // The owner\'s word of 2026-10-23, 08:40: "Lead" stays "Lead" in French.
+  lead: 'tower.need_lead tower.role_lead tower.lead_title session.role_lead inbox.lead_label inbox.lead_line inbox.session_lead_plain lead.lead_heading',
+  // A word French spells as English does (Session, Plan, Question, Ticket, Terminal, Service, Notifications, Shell, Tokens).
+  shared_word: 'shell.title_session shell.nav_sessions shell.title_lead shell.nav_plans shell.notify_label shell.palette_sessions tower.plans_title tower.services_title tower.kind_question tower.kind_plan session.ticket_label session.verb_think session.index_title session.tabs_plan session.tabs_terminal session.terminal_switch_shell session.ticket_step_service inbox.kind_question inbox.eyebrow_question inbox.facts_sessions inbox.facts_session inbox.kind_plan inbox.facts_tickets inbox.services_label inbox.plan_step_service lead.services_label lead.plan_step_service consumption.consumption_usage_unit',
+  // A template whose only words are shared ones, or a unit or a key cap both languages write alike.
+  shared_template: 'shell.time_minutes shell.key_cap_ctrl tower.need_question tower.need_plan inbox.list_plan_one inbox.list_plan_other inbox.tickets_one inbox.tickets_other inbox.train_ticket',
+}).flatMap(([why, ids]) => ids.split(' ').map((id) => [id, why] as const)));
 
 // ---- the catalogs a file draws with ------------------------------------------------
 
@@ -245,7 +246,7 @@ test('a French sentence is not the English one, but for the words and names both
     }
   }
   assert.deepEqual(same, []);
-  for (const id of SAME_IN_BOTH) {
+  for (const id of SAME_IN_BOTH.keys()) {
     const [screen, ...rest] = id.split('.');
     assert.equal(RAW.fr[screen as Screen][rest.join('.')], RAW.en[screen as Screen][rest.join('.')], `${id} differs now, drop it from the list`);
   }
