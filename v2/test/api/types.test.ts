@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { API_ROUTES, ASK_ROUTES, CONSUMPTION_ROUTES, REASON_CODES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, VARIANT_ROUTES, TERMINAL_INPUT_MAX_BYTES, TERMINAL_ROUTES, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type PermissionItem, type ReasonCode, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace, type Ask, type ContractItem, type FileWrite, type FileWriteRefusal, type HumanEdit, type KnowledgeItem, type NextInboxItem, type Recipe, type Schedule, type SessionPlanItem, type TerminalChunk, type TicketStep } from '../../src/api/types.ts';
+import { API_ROUTES, ASK_ROUTES, BATCH_ROUTES, CONSUMPTION_ROUTES, REASON_CODES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, VARIANT_ROUTES, TERMINAL_INPUT_MAX_BYTES, TERMINAL_ROUTES, leadFrame, sseFrame, type ApiRoutes, type InboxItem, type LeadMessage, type LeadState, type NotificationStatus, type PermissionItem, type ReasonCode, type Plan, type ReleaseItem, type SessionDetail, type SessionSummary, type TrainState, type Workspace, type Ask, type ContractItem, type FileWrite, type FileWriteRefusal, type HumanEdit, type KnowledgeItem, type NextInboxItem, type Recipe, type Schedule, type SessionPlanItem, type TerminalChunk, type TicketStep } from '../../src/api/types.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import type { SessionEvent } from '../../src/session/events.ts';
 
@@ -20,6 +20,8 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/tickets/:id/close',
     // Issue #271: a ticket's variants and the owner's choice.
     'GET /api/tickets/:id/variants', 'POST /api/variants/:id/choose',
+    // Requirement C6: a batch of tickets, started within the lanes and the quota stop.
+    'GET /api/batches', 'GET /api/batches/:id', 'POST /api/batches',
     // Milestone 2, section 7.1.
     'GET /api/lead',
     'GET /api/lead/memory',
@@ -76,8 +78,8 @@ test('the API lists every route the app lanes build against, once', () => {
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 60);
-  const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...VARIANT_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES, ...CONSUMPTION_ROUTES];
+  assert.equal(keys.length, 63);
+  const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...VARIANT_ROUTES, ...BATCH_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES, ...CONSUMPTION_ROUTES];
   assert.deepEqual(ahead.filter((route) => !API_ROUTES.includes(route)), []);
   assert.equal(new Set(ahead).size, ahead.length, 'each route of a later lane is in one list');
   assert.ok(ahead.every((route) => !MILESTONE_2_ROUTES.includes(route)));

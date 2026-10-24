@@ -41,7 +41,7 @@
 // is in memory, so each tick also reads the tickets themselves: an item
 // running whose ticket is back in Todo, and not run by the flow, is a put
 // back that was missed.
-import { latestQuota } from '../../consumption/quota.ts';
+import { quotaStop } from '../../consumption/quota.ts';
 import type { Plan, PlanItemState } from '../../api/types.ts';
 import { FlowError, QUICK_LABEL } from '../../flow/engine.ts';
 import type { FlowEvent, FlowListener, Origin } from '../../flow/events.ts';
@@ -583,11 +583,8 @@ export class PlanRunner {
     const db = this.#deps.store.db;
     const project = this.#deps.project;
     const limit = this.#deps.config.weekStopPercent;
-    for (const window of ['seven_day', 'five_hour'] as const) {
-      const quota = latestQuota(db, { project, window, now: this.#now(), harness: 'claude-code' });
-      if (quota && quota.usedPercent >= limit)
-        return { kind: 'week', text: `The ${window === 'seven_day' ? 'seven-day' : 'five-hour'} window of the subscription is at ${quota.usedPercent} %: the plans start nothing new until it falls below ${limit} %.` };
-    }
+    const quota = quotaStop(db, { project, now: this.#now(), limit });
+    if (quota) return { kind: 'week', text: `The ${quota.window === 'seven_day' ? 'seven-day' : 'five-hour'} window of the subscription is at ${quota.usedPercent} %: the plans start nothing new until it falls below ${limit} %.` };
     const budget = this.#deps.config.dayBudgetUsd;
     if (budget === undefined) return undefined;
     const midnight = new Date(this.#now());

@@ -4957,3 +4957,33 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Resources.** No Docker object, no network (a fake `gh` on PATH), no tunnel, no secret. `npm ci` in `v2/` only. The first piloted project untouched.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-close-ticket-pr`.
+
+## 2026-10-24: Batches of tickets (the author's choices, lane `j3-batch-sessions`, requirement C6)
+
+**The need.** Requirement C6, "Multiple sessions in batches" (milestone 3, line `later` until now): several tickets launched at once, each its own session, without going past the lanes the Consumption screen allows or the week stop of the subscription. Matrix lines C6 (filled) and P140 to P144, checked free on `origin/v2` (P120 to P125 are #316's and P130 to P135 #315's, both merged).
+
+**Decision.**
+1. **A batch is a list of new tickets, not a plan.** `POST /api/batches` takes 2 to 20 titles (with an optional body and labels), creates the tickets in Todo in order, labelled `batch:<id>`, by the person who sent it, and starts them for that person. No lead, no estimate, no approval step: the person who sends a batch approves it by sending it, as with a ticket from the bar. A plan stays the lead's way to order dependent work.
+2. **The lanes are the Consumption screen's `maxLanes`, 3 when unset**, the variants' default (issue #271). They count every ticket of the project In Progress or In Review, whoever started it, and the tickets being started, rather than the batch's own, because the limit protects the machine and the subscription, not one batch. Needs Approval frees a lane, as in the plans (a night fills the inbox without blocking). A lever lowered stops nothing that runs.
+3. **The stop is the plans' stop, shared.** `quotaStop` in `consumption/quota.ts` (from the plan runner, which now calls it) returns the seven-day or the five-hour window of Claude Code's subscription at or above `CLEARED_V2_WEEK_STOP_PERCENT`. The batch's `hold` says the quota before the lanes, so the person sees the reason that lasts. The plans' day budget is not applied to batches: it is the lead's setting, and its message speaks of the plans.
+4. **What starts a pass.** Every event of the project's flow (a lane may have freed), a 30-second timer (a falling figure says nothing on the bus) and the batch's creation. Passes run one at a time; an item is `started` before the flow is asked, so overlapping passes start a ticket once. `FlowEngine.launch` is `start` in the background, waited for by `settled()` like `begin`, but its failure is handed back so the item can say why.
+5. **A ticket fails alone, once.** A ticket that cannot start is `failed` with the flow's message (the flow puts it back itself) and its lane goes to the next. A queued ticket that a person moved out of Todo is `failed` and not started. A batch starts each of its tickets once: a ticket the flow puts back later (review rounds spent, a release refused) is the person's to start again, as any ticket. Retrying is the plans' job, with their notes and their attempts.
+6. **Kept in the ledger.** `batches` and `batch_items` are the flow module's tables, so a runner built after a restart finishes the queue. The restart recovery puts the running tickets back in Todo; their items stay `started`, as the item says what the batch did, and the ticket's status (read live) says where it is.
+7. **The Tower.** A "Batch" chip ("Lot") beside Run a recipe opens a form of one ticket per line, checked in the page (2 to 20 lines, 200 characters each) before the call. The side card shows the three newest batches, with how many started, what holds the rest and each ticket's state. The form sends the workspace's id (`GET /api/workspace`), the project the service names, not the header's name (`me.project`, a label: "Guestbook" in the tests). The bar's New ticket still sends the header's name; that is outside this lane and is left for its own fix.
+8. **The fixtures** run the service's own `BatchRunner` over the consumption fixture's ledger, so the batch reads the same lanes and windows as the Consumption screen; their flow only moves a ticket to In Progress. `lanes(n)` and `quota(p)` drive the browser test.
+
+**A test written first was corrected.** `test/flow/modules.test.ts` listed `POST /api/batches` after the terminal routes, in a list the test sorts; it is now in its sorted place. Nothing else of the tests of `0b009a9` changed.
+
+**Tests first.** The tests were committed alone in `0b009a9`, before any code: there, `test/flow/batch.test.ts`, `test/flow/batch-routes.test.ts` and `app/web/test/tower-batch.test.tsx` do not load (`flow/batch.ts` and the model's exports do not exist), the route counts of `test/api/types.test.ts`, `test/flow/api.test.ts` and `test/flow/modules.test.ts` fail, and the browser test calls `lanes` and `quota`, which the fixtures did not have.
+
+**Checks** (after merging `origin/v2` at `cb4badc`, pull requests 316, 318, 319, 320 and 322). `npm run typecheck` and `npm run build` pass. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1874 tests, 1870 pass, 2 skipped, 2 fail. All 278 Vitest tests pass. The batch browser test passes in French and in English.
+- `app/test/notify/browser.test.ts` ("a headless browser registers the worker...") fails the same way on `origin/v2` in this environment, checked in a temporary worktree.
+- `app/test/foundation/budget-browser.test.ts` ("twenty switches") measured a p95 of 110.7 ms against its 100 ms budget in the full run, where the test files run in parallel. Its request and document assertions pass. Run alone three times, its median p95 is 35.8 to 38.7 ms on this branch, against 31.6 to 33.8 ms on `origin/v2` in a temporary worktree: the Tower's extra `/batches` read costs about 4 ms, far under the budget. In the earlier runs of this lane, under heavy load (load average 32 on 12 cores), it, `first-paint-browser`, `editor-browser` and `test/mcp/followups.test.ts` also failed once each, and each passed when run alone.
+
+`npm run guard -- --base origin/v2`: nothing refused.
+
+**Not in CI.** `app/test/tower-batch-browser.test.ts` is not in the list of the CI job "browser" (`.github/workflows/v2.yml`), like the four files the `j3-matrix-sync` entry names: it is green when run by hand with `CLEARED_V2_PLAYWRIGHT`. Adding it is the follow-up that entry proposes for the others.
+
+**Resources.** No Docker object, no network, no tunnel, no secret; the tests listen on port 0 on loopback.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-batch-sessions`, after the tests and a checkpoint of Sonnet 5.5 (claude-sonnet-5-5) before the Orca restart.

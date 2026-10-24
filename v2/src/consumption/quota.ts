@@ -195,6 +195,17 @@ export function latestQuota(db: DatabaseSync, input: { readonly project: string;
   return !newest.resetsAt || Date.parse(newest.resetsAt) > input.now.getTime() ? newest : undefined;
 }
 
+// The window of the subscription (Claude Code's) at or above `limit` percent,
+// the seven-day one first, from its newest figure: what the plans' stop and
+// the batches' read, so that no lane starts above the stop.
+export function quotaStop(db: DatabaseSync, input: { readonly project: string; readonly now: Date; readonly limit: number }): LatestQuota | undefined {
+  for (const window of QUOTA_WINDOWS) {
+    const quota = latestQuota(db, { project: input.project, window, now: input.now, harness: 'claude-code' });
+    if (quota && quota.usedPercent >= input.limit) return quota;
+  }
+  return undefined;
+}
+
 // The ledger of a caller that never created the reading's tables (a test, the app) reads the sessions only.
 function hasReadings(db: DatabaseSync): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quota_readings'").get() !== undefined;

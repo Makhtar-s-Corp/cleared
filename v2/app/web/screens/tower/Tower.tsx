@@ -10,7 +10,8 @@
 // Lane 35 (docs/v2/ui-overhaul-plan.md, 2.2.4 and 2.2.7): what needs the
 // person and the live sessions are rows (a kind, a title, one line), which
 // J and K walk ([data-row]); an empty part says so in one sentence, with
-// the one thing to do about it.
+// the one thing to do about it. Requirement C6: "Batch" in the bar opens a
+// form of one ticket per line, and the batches under way are a side card.
 import { Check, HandGrabbing, ListChecks, Package, TerminalWindow, X } from '@phosphor-icons/react';
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Recipe } from '../../../../src/api/types.ts';
@@ -26,9 +27,10 @@ import { ApiError } from '@/lib/screen.ts';
 import { sessionStatus, ticketState } from '@/lib/status.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
+  BATCH_LINES_MAX, BATCH_LINES_MIN, batchFailure, batchLine, batchLines, batchProblem, holdLine, startBatch,
   DRAFT_MAX, VARIANT_CHOICES, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, liveOrder, loadTower, needId, needSentence, needTitle, pickedFor, planProgress, recipeKey,
   recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, towerModel, towerSummary,
-  type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
+  type BatchRow, type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
 import './tower.css';
 
@@ -42,13 +44,14 @@ function Facts({ text }: { readonly text: string }) {
 // "Ask about the code" asks the title (and the description) as a question
 // to the code; "Run a recipe" opens the recipes' form, once the service has some.
 // On a workspace of one service, the number of authors: one, or 2 to 4
-// variants compared in the inbox (issue #271).
-export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, busy = false, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onSubmit }: {
+// variants compared in the inbox (issue #271). "Batch" opens the form of
+// several tickets at once (requirement C6).
+export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, busy = false, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onSubmit }: {
   readonly t: Translate; readonly title: string; readonly body: string;
   readonly services?: readonly string[]; readonly picked?: readonly string[]; readonly variants?: number; readonly onVariants?: (n: number) => void;
-  readonly recipes?: readonly Recipe[]; readonly recipeOpen?: boolean; readonly busy?: boolean;
+  readonly recipes?: readonly Recipe[]; readonly recipeOpen?: boolean; readonly batchOpen?: boolean; readonly busy?: boolean;
   readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void; readonly onPick?: (service: string) => void;
-  readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onBatch?: () => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <form className="ask" id="ask" autoComplete="off" onSubmit={onSubmit}>
@@ -58,6 +61,7 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
         <Button variant="chip" className="chip-button" data-lead="lead" onClick={() => onLead?.('lead')}>{t('bar_ask_lead')}</Button>
         <Button variant="chip" className="chip-button" data-bar="ask" disabled={busy} title={t('bar_ask_code_note')} onClick={onAsk}>{t('bar_ask_code')}</Button>
         {recipes.length > 0 ? <Button variant="chip" className="chip-button" data-bar="recipe" aria-expanded={recipeOpen} aria-controls="recipe-form" onClick={onRecipe}>{t('bar_recipe')}</Button> : null}
+        <Button variant="chip" className="chip-button" data-bar="batch" aria-expanded={batchOpen} aria-controls="batch-form" onClick={onBatch}>{t('bar_batch')}</Button>
         <Button variant="ink" className="chip-button primary" type="submit">{t('bar_new_ticket')}</Button>
       </div>
       <Textarea id="ask-body" name="body" maxLength={20000} rows={5} placeholder={t('bar_body_placeholder')} aria-label={t('bar_body_label')} value={body} onChange={(event) => onBody?.(event.target.value)} />
@@ -133,6 +137,60 @@ export function RecipeForm({ t, recipes, picked, values, note, link = null, busy
         </>
       ) : <p className="recipe-pick">{t('recipe_pick')}</p>}
     </form>
+  );
+}
+
+// A batch (requirement C6): one ticket per line, 2 to 20, each its own
+// session. A form of too few, too many or too long lines is refused here,
+// before any call; the service starts them within the lanes and the stop.
+export function BatchForm({ t, text, note, busy = false, onText, onRun, onClose }: {
+  readonly t: Translate; readonly text: string; readonly note: string; readonly busy?: boolean;
+  readonly onText?: (value: string) => void; readonly onRun?: (event: FormEvent<HTMLFormElement>) => void; readonly onClose?: () => void;
+}) {
+  return (
+    <form className="recipe-form batch-form" id="batch-form" autoComplete="off" noValidate aria-labelledby="batch-form-title" onSubmit={onRun}>
+      <div className="recipe-head">
+        <h2 id="batch-form-title">{t('batch_form_title')}</h2>
+        <Button variant="ghost" className="icon recipe-close" aria-label={t('batch_close')} onClick={onClose}><X size={16} aria-hidden="true" /></Button>
+      </div>
+      <p className="recipe-kind">{t('batch_hint', { min: BATCH_LINES_MIN, max: BATCH_LINES_MAX })}</p>
+      <Textarea id="batch-lines" name="lines" aria-label={t('batch_lines_label')} rows={6} placeholder={t('batch_lines_placeholder')} disabled={busy} value={text}
+        onChange={(event) => onText?.(event.target.value)} />
+      <div className="recipe-bar">
+        <p className="recipe-note" id="batch-note" role="status">{note}</p>
+        {batchLines(text).problem === null
+          ? <Button variant="ink" className="chip-button primary" type="submit" data-act="batch_run" disabled={busy}>{t('batch_run')}</Button>
+          : <Button variant="chip" className="chip-button" type="submit" data-act="batch_run" disabled={busy}>{t('batch_run')}</Button>}
+      </div>
+    </form>
+  );
+}
+
+// The batches under way, the three newest: how many started, what holds the
+// rest (a lane to wait for, or the quota stop), and each ticket's state.
+export function BatchCards({ t, rows }: { readonly t: Translate; readonly rows: readonly BatchRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="side-card" aria-labelledby="batches-title">
+      <h2 id="batches-title">{t('batches_title')}</h2>
+      <ul className="batches">
+        {rows.map((row) => (
+          <li key={row.id} className="batch" data-batch={row.id}>
+            <p className="batch-head"><span className="id">{row.id}</span><span className="batch-line">{batchLine(row, t)}</span></p>
+            {row.hold ? <p className="batch-hold">{holdLine(row.hold, t)}</p> : null}
+            <ol className="batch-items">
+              {row.items.map((item) => (
+                <li key={item.position} className="batch-item" data-item-state={item.state}>
+                  <span className="batch-item-title">{item.title}</span>
+                  <span className="batch-item-state">{item.state === 'queued' ? t('batch_item_queued') : item.state === 'failed' ? t('batch_item_error', { note: item.note ?? '' }) : ticketState(item.status, t)}</span>
+                  <span className="id">{item.ticket}</span>
+                </li>
+              ))}
+            </ol>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -269,6 +327,7 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
       </div>
       <aside className="tower-side">
         <LeadSide lead={model.lead} t={t} draft={leadDraft} onDraft={onLeadDraft} />
+        <BatchCards t={t} rows={model.batches} />
         <section className="side-card" aria-labelledby="plans-title">
           <h2 id="plans-title">{t('plans_title')}</h2>
           {model.plans.length === 0 ? <Empty icon={ListChecks} id="plans-empty" text={t('plans_empty')} action={{ label: t('bar_new_goal'), onClick: () => go(leadHref('goal', '')) }} />
@@ -306,6 +365,10 @@ export default function Tower() {
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [recipeNote, setRecipeNote] = useState<{ readonly text: string; readonly link: string | null }>({ text: '', link: null });
   const [running, setRunning] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchText, setBatchText] = useState('');
+  const [batchNote, setBatchNote] = useState('');
+  const [batching, setBatching] = useState(false);
   const thread = useRef<LeadThread>({ after: 0, line: null });
 
   const refresh = useCallback(async (live: () => boolean = () => true) => {
@@ -397,17 +460,44 @@ export default function Tower() {
     }
   };
 
+  // A batch: the lines checked here first, then one call for them all.
+  const batch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const { titles, problem } = batchLines(batchText);
+    if (problem) {
+      setBatchNote(batchProblem(problem, t));
+      document.getElementById('batch-lines')?.focus();
+      return;
+    }
+    setBatching(true);
+    try {
+      // The workspace's id, as the service names its project; the header's name is a label.
+      const made = await startBatch(context.api, model?.project ?? context.me.project, titles);
+      setBatchNote(t('batch_created', { id: made.id, n: made.items.length }));
+      setBatchText('');
+      void refresh();
+    } catch (error) {
+      setBatchNote(t(batchFailure(error)));
+    } finally {
+      setBatching(false);
+    }
+  };
+
   return (
     <div className="tower-screen">
-      <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} variants={variants} onVariants={setVariants} recipes={model?.recipes ?? []} recipeOpen={recipeOpen} busy={asking}
+      <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} variants={variants} onVariants={setVariants} recipes={model?.recipes ?? []} recipeOpen={recipeOpen} batchOpen={batchOpen} busy={asking}
         onTitle={(value) => { setTitle(value); if (!value.trim()) { setPicked([]); setVariants(1); } }} onBody={setBody} onSubmit={(event) => void submit(event)}
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
-        onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)} />
+        onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)}
+        onBatch={() => setBatchOpen((open) => !open)} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       {recipeOpen && model && model.recipes.length > 0 ? (
         <RecipeForm t={t} recipes={model.recipes} picked={recipe} values={values} note={recipeNote.text} link={recipeNote.link} busy={running}
           onPick={(key) => { setRecipe((current) => (current === key ? null : key)); setValues({}); setRecipeNote({ text: '', link: null }); }}
           onValue={(name, value) => setValues((current) => ({ ...current, [name]: value }))} onRun={(event) => void run(event)} onClose={() => setRecipeOpen(false)} />
+      ) : null}
+      {batchOpen ? (
+        <BatchForm t={t} text={batchText} note={batchNote} busy={batching} onText={setBatchText} onRun={(event) => void batch(event)} onClose={() => setBatchOpen(false)} />
       ) : null}
       <div id="tower-body" aria-busy={model === null && failed === null ? 'true' : undefined}>
         {failed !== null ? <div className="empty error tower-failed"><p>{failed}</p><Button variant="chip" className="chip-button" id="tower-retry" onClick={() => void refresh()}>{t('boundary_retry')}</Button></div>

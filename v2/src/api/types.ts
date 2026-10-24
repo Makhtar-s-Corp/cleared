@@ -610,6 +610,40 @@ export type AnswerBody = { readonly decision: Decision };
 // `variants`: 2 to 4 authors at once on a one-service ticket (issue #271); absent or 1, one author.
 export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string; readonly services?: readonly string[]; readonly variants?: number };
 export type ChooseVariantBody = { readonly variant: number };   // the position of the variant to review
+
+// A batch of tickets (requirement C6, flow/batch.ts): 2 to 20 new tickets
+// launched at once, each its own session. At most the Consumption screen's
+// lanes run at once (3 when it sets none), counting every ticket in progress
+// or in review, and nothing starts at the stop of a subscription window
+// (85 % by default); the others wait in line, in the order of the batch.
+// `hold` says what holds the line, the quota before the lanes; none when no
+// ticket waits. `status` is the ticket's state in the tracker, read when the
+// batch is; `note` says why an item did not start.
+export const BATCH_MIN = 2;
+export const BATCH_MAX = 20;
+export type BatchItemState = 'queued' | 'started' | 'failed';
+export type BatchHold =
+  | { readonly reason: 'lanes'; readonly running: number; readonly lanes: number }
+  | { readonly reason: 'quota'; readonly window: 'seven_day' | 'five_hour'; readonly percent: number; readonly stop: number };
+export type BatchItem = {
+  readonly position: number;                                // 1-based, the order the tickets start in
+  readonly ticket: TicketId;
+  readonly title: string;
+  readonly state: BatchItemState;
+  readonly status: string;
+  readonly note: string | null;
+};
+export type Batch = {
+  readonly id: string;
+  readonly project: string;
+  readonly by: UserId;
+  readonly at: string;
+  readonly lanes: number;                                   // the most tickets in progress or in review at once
+  readonly running: number;                                 // the tickets in progress or in review now, whoever started them
+  readonly hold: BatchHold | null;
+  readonly items: readonly BatchItem[];
+};
+export type CreateBatchBody = { readonly project: string; readonly tickets: readonly { readonly title: string; readonly body?: string; readonly labels?: readonly string[] }[] };
 export type MoveTicketBody = { readonly status: string };
 export type ApproveBody = { readonly requestedAt: string; readonly heads: readonly { readonly pr: number; readonly head: string }[] };
 export type LeadMessageBody = { readonly text: string; readonly goal?: true };   // goal: the text is a goal
@@ -682,6 +716,10 @@ export type ApiRoutes = {
   // owner's choice, named by the variants item's inbox id.
   'GET /api/tickets/:id/variants': { readonly body: null; readonly response: TicketVariant[] };
   'POST /api/variants/:id/choose': { readonly body: ChooseVariantBody; readonly response: { readonly accepted: true; readonly released: number } };
+  // Requirement C6: a batch of tickets, newest first in the list.
+  'POST /api/batches': { readonly body: CreateBatchBody; readonly response: Batch };
+  'GET /api/batches': { readonly body: null; readonly response: Batch[] };
+  'GET /api/batches/:id': { readonly body: null; readonly response: Batch };
   'POST /api/knowledge/:id/approve': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/knowledge/:id/reject': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/services/:name/skill': { readonly body: null; readonly response: { readonly accepted: true; readonly ticket: TicketId | null } };   // null: nothing was queued
@@ -737,6 +775,9 @@ const routes = {
   'POST /api/tickets/:id/set-aside': true,
   'POST /api/tickets/:id/close': true,
   'POST /api/tickets/:id/approve': true,
+  'POST /api/batches': true,
+  'GET /api/batches': true,
+  'GET /api/batches/:id': true,
   'GET /api/inbox': true,
   'GET /api/workspace': true,
   'GET /api/sessions/:id/preview/*': true,
@@ -801,6 +842,7 @@ export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/
 // The routes of waves 9 to 11 written ahead of their servers (lane 17).
 export const STEP_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/steps', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback'];   // lane 23, flow/
 export const VARIANT_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/variants', 'POST /api/variants/:id/choose'];   // issue #271, flow/variants.ts
+export const BATCH_ROUTES: readonly ApiRoute[] = ['POST /api/batches', 'GET /api/batches', 'GET /api/batches/:id'];   // requirement C6, flow/batch.ts
 export const KNOWLEDGE_ROUTES: readonly ApiRoute[] = ['POST /api/knowledge/:id/approve', 'POST /api/knowledge/:id/reject', 'POST /api/services/:name/skill'];   // lane 24, knowledge/
 export const ASK_ROUTES: readonly ApiRoute[] = ['POST /api/asks', 'GET /api/asks/:id', 'POST /api/asks/:id/follow'];   // lane 25, reader/
 export const RECIPE_ROUTES: readonly ApiRoute[] = ['GET /api/recipes', 'POST /api/recipes/:name/run', 'GET /api/schedules', 'POST /api/schedules', 'DELETE /api/schedules/:id'];   // lane 26, recipes/ and schedules/

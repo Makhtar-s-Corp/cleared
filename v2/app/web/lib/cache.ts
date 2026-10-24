@@ -52,6 +52,8 @@ const NAMED: readonly (readonly [RegExp, (id: string) => Key])[] = [
   [/^\/plans\/([^/]+)$/, (id) => ['plan', id]],
   [/^\/recipes$/, () => ['recipes']],
   [/^\/schedules$/, () => ['schedules']],
+  [/^\/batches$/, () => ['batches']],
+  [/^\/batches\/([^/]+)$/, (id) => ['batch', id]],
 ];
 
 // The resources the change stream speaks for (the service's api/events.ts).
@@ -95,6 +97,8 @@ export function touchedBy(path: string): Key[] {
     case 'contracts': case 'knowledge': return [['inbox']];
     case 'lead': return [['lead'], ['lead-messages'], ['plans']];
     case 'recipes': return [['plans'], ['lead-messages']];
+    // A batch's tickets are created and some start (requirement C6).
+    case 'batches': return [['batches'], ['tickets'], ['sessions']];
     default: return [];
   }
 }
