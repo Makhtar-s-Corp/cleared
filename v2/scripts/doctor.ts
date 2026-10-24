@@ -1,7 +1,7 @@
 // Checks this server can run v2 sessions, with real objects, labelled
 // cleared.dev=v2 only. One section per lane that needs a real run
 // (milestone 1 plan, section 10); `cleared doctor` will run it in milestone 5.
-//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [pool] [--no-build] [--model <id>]
+//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [pool] [cursor] [--no-build] [--model <id>]
 //
 // docker (lane 2): builds the two images, starts a session with a postgres:16
 // service, proves from inside the session container what it can and cannot
@@ -18,6 +18,11 @@
 // host-tools (milestone 2, lane 4): the lead's host tools, the context
 // measure, the hooks by role, the commit identity and the login's failing
 // half, with real sessions; run only when named, as claude-code.
+//
+// cursor (milestone 3): is Cursor usable here? Read only: `--version` and
+// `status` of the Cursor program, never `login`, no account, no spend. Says
+// "not installed" or "not signed in" as plainly as "ready"; none is a failed
+// check, since a machine may rightly have no Cursor. Run only when named.
 //
 // lead (milestone 2, lane 5): the checks of scripts/doctor-lead.ts, run
 // only when named.
@@ -56,6 +61,7 @@ import { parseWorkspace } from '../src/workspace/config.ts';
 import { contractPort, readContract } from '../images/fake/fake.ts';
 import { createHealthServer } from '../src/server.ts';
 import { claudeCodeRuntime, createClaudeCodeAdapter } from '../src/session/adapters/claude-code.ts';
+import { describeProbe, probeCursor } from '../src/session/adapters/cursor/probe.ts';
 import { createCleaner } from '../src/session/clean.ts';
 import type { Answer, HostTool, SessionHandle, StartInput } from '../src/session/contract.ts';
 import { readToolOutput, type SessionEvent } from '../src/session/events.ts';
@@ -1154,11 +1160,19 @@ async function poolSection(): Promise<void> {
   check('after the release, nothing has the session label and the free subnets are back', (await docker.networks(session)).length === 0 && after.usage.free === before.usage.free && after.labelled.length === before.labelled.length, `${after.usage.free} free, ${after.labelled.length} labelled networks`);
 }
 
+async function cursorSection(): Promise<void> {
+  say('== cursor (milestone 3)');
+  const probe = await probeCursor();
+  say(`cursor: ${probe.state}`);
+  say(`    ${describeProbe(probe)}`);
+  if (probe.state !== 'ready') say('NOT RUN a Cursor session: the program is not usable here, which is not a failure of Cleared');
+}
+
 const args = process.argv.slice(2);
 const modelAt = args.indexOf('--model');
 const model = modelAt >= 0 ? args[modelAt + 1] ?? '' : 'claude-haiku-5-5';
 const sections = args.filter((arg, index) => !arg.startsWith('--') && (modelAt < 0 || index !== modelAt + 1));
-const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace', 'pool'];
+const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace', 'pool', 'cursor'];
 const unknown = sections.filter((section) => !known.includes(section));
 if (unknown.length > 0) {
   console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build] [--model <id>]; unknown: ${unknown.join(', ')}`);
@@ -1170,5 +1184,6 @@ if (sections.includes('host-tools')) await hostToolsSection(!args.includes('--no
 if (sections.includes('lead')) await leadSection(!args.includes('--no-build'), model);
 if (sections.includes('workspace')) await workspaceSection(!args.includes('--no-build'));
 if (sections.length === 0 || sections.includes('pool')) await poolSection();
+if (sections.includes('cursor')) await cursorSection();
 say(failures === 0 ? 'doctor: all checks passed' : `doctor: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

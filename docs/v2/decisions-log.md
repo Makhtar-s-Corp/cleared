@@ -4169,6 +4169,47 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - When the service cannot release a stopped session's networks (« the stopped sessions' containers and networks could not be released »), they are still removed by hand on a written decision, as here.
 - Recorded by: Opus 5.5 (claude-opus-5-5), ops session, branch `v2-j2-ops-48h-resume`. Nothing was pushed to any main.
 
+## 2026-10-23: Cursor harness on the session adapter contract (lane j3-cursor-harness)
+
+**Decision.** The author of the lane added a Cursor adapter beside Claude Code (matrix B5.1c, O6, B6.3 for its Cursor part, P42). These are the author's choices, not the owner's decisions; the owner's real trial is open.
+
+- **Driving.** `agent -p --output-format stream-json`, one process per message in the session's container, resumed on the chat id Cursor names in its first line. No SDK exists for it.
+- **Guard.** Print mode has no way to hold a call for a person, so the adapter fails closed in two layers: the policy compiled into Cursor's permissions file (deny first, never `--force`), and the unchanged policy evaluated on every reported call, which ends the turn on a deny and on an ask. A tripwire, not a prevention; stated in `docs/adapters.md`.
+- **Usage.** Cursor's documented stream has no tokens and no cost: the run reports the model and a null cost, and nothing is estimated.
+- **Take over.** The running turn ends, the terminal runs `agent --resume <chat> --model <model>` through a launcher that reads the key file inside the container, messages wait for Give back, and the next turn resumes the chat.
+- **Login.** A Cursor API key file only. The host's browser login (owner note of 2026-10-22) is not used: where it lives is unverified.
+- **Not done.** `images/session/Dockerfile` has no Cursor program (no pinned install source). Codex has no v2 adapter. Hand over, cross-harness review and two sessions on one ticket are not delivered.
+- **Resources.** No Docker object was created, no port opened, no Cursor account used. The proof run, its state folder and its service were not touched.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-cursor-harness`.
+
+## 2026-10-24: a ticket's author and reviewer settle a review in their own channel, three rounds by default (the author's choices, lane `j3-review-channel`, issue #291)
+
+**The need.** Before this lane, the review loop already reopened the author with the report. But each round after the first started a new reviewer, with no memory of its own report and without the author's answer. Neither the exchange nor the author's side of it was shown anywhere: the flow's messages are hidden from the session screen. Two requests for change sent the ticket back to Todo (`CLEARED_V2_REVIEW_ROUNDS`, 2 by default). Issue #291 asks for a channel per ticket between the author and the reviewer, a bounded number of rounds before any return to Todo, every exchange in the ledger and on the screen, in French and in English.
+
+**Decision.**
+1. **The channel is the review loop, not a second mechanism beside it.**
+   - A request for change goes to the author's session, resumed, as before; if it cannot be resumed, a new author gets the report.
+   - When the author's turn ends, its last message goes back to **the same reviewer's session**, resumed under its own id. The message asks the reviewer to read the new commits, check each defect it listed, and give its full report again with its Verdict line. Both sides' messages are framed as reference data, not instructions.
+   - The resumed reviewer's verdict is read from its new turn only. A turn with no Verdict line is "no verdict", never the earlier report read again.
+   - If the reviewer cannot be resumed, a new reviewer gets the review prompt followed by the channel so far.
+   - The code is in `v2/src/flow/channel.ts` and in the review path of `v2/src/flow/engine.ts` (`#reviewDone`, `#reopenAuthor`, `#authorDone`, `#answerReviewer`, `#startReview`).
+2. **A round is a verdict, and one setting bounds the rounds.**
+   - Rounds are counted from the `cleared.review_verdict` rows of the current flow's reviewers, since a resumed reviewer gives several verdicts in one session. A ticket put back and started again still begins at round 1.
+   - `CLEARED_V2_REVIEW_ROUNDS` keeps its meaning, the verdicts a flow allows, and its default goes from 2 to 3: two exchanges in the channel, then the third verdict.
+   - Not chosen: a second setting counting exchanges beside the rounds. Two limits on one loop would contradict each other.
+3. **The bounce is unchanged.** A request for change at the last round puts the ticket back in Todo through the same `#putBack`, with reason `too_many_rounds` and the last report as the note. Lane `j3-autonomy` (issue #290) handles the third attempt after two put backs from what the flow says, so this lane does not touch the retry logic, the plan runner or the put back's reason and note.
+4. **The ledger and the screen.**
+   - Each message is a `cleared.review_channel` event: its round, the limit, the side it comes from, and its text through the service's cleaner. It is journaled on the sender's session and on the receiver's, so each is a row of `session_events` in ledger.db. No new table and no migration.
+   - The session screen shows it as a row that opens to the text, for example "Reviewer to author: changes asked, round 1 of 3", or "De l'auteur au relecteur : réponse, tour 1 sur 3 · répondu en 12 min". The wait is a duration of `app/web/lib/time.ts`.
+   - The whole ticket shows each message once, on the session it reached. The Author and Reviewer filters show what that role sent and received.
+5. **The proofs follow.** The proof report counts a ticket's review rounds by its verdicts; for a reviewer that gave none, by its sessions as before. The j1 proof's review step follows the latest reviewer session, which can be the same one from round to round, up to `PROOF_REVIEW_ROUNDS` (3 by default).
+
+**Consequences.**
+- On a real Claude Code session the second round costs a resumed reviewer's turn, with its first report in context, instead of a whole new review.
+- The one-service fixture (`v2/test/flow/fixtures/one-service-events.json`) was written again. It now has one reviewer session, not two, with the channel rows and the resumed review step. Nothing else in it changed.
+- The rehearsal adapter (`v2/src/session/adapters/index.ts`) resumes every session with the author's reopen steps. Its scripted reviewers pass at the first round, so no rehearsal resumes a reviewer; a rehearsal that scripts a request for change will need a reviewer's resume script.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-review-channel`.
+
 ## 2026-10-24: Owner decision: the endurance proof shortened to 24 hours, then stopped early at step 07
 
 **Decision.** On 2026-10-23 at 23:06 (Europe/Paris), at the owner's request, the endurance proof launched at 19:52 (the plan-2 entry above) was shortened from 48 hours to 24 hours.
@@ -4198,7 +4239,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **Consequences.**
 - The proof's deploy containers are kept: `cleared-guestbook`, `cleared-filter-api` and `cleared-guestbook-db`.
-- LOCAL-42's session had kept its 3 containers running while it waited on its question. That is the case the idle watchdog of the lane `j3-autonomy` stops (P66).
+- LOCAL-42's session had kept its 3 containers running while it waited on its question. That is the case the idle watchdog of the lane `j3-autonomy` stops (P67).
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`, at the orchestrator's request.
 
@@ -4211,7 +4252,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **Decision.**
 
-1. **One automatic third attempt, then the lead, in its thread** (`lead/plans/runner.ts`, `lead/plans/retry.ts`, P65).
+1. **One automatic third attempt, then the lead, in its thread** (`lead/plans/runner.ts`, `lead/plans/retry.ts`, P66).
    - A ticket put back a second time is started a third time by the runner, as the first put back already was (`AUTOMATIC_ATTEMPTS` = 3).
    - Its author's prompt says it is the third and last automatic attempt. Beside the last note, it gets:
      - the report its reviewer wrote last (the last report with a Verdict line, `lastReport`);
@@ -4245,7 +4286,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
      - The inbox's question says when the Lead decides and what then applies ("No answer in 25 min: the Lead decides, else “Newest first” applies."), in French and in English, through the shell's duration formatter.
      - A parked item reads « Mis de côté » (Parked) in the plan panel. The tower counts it with the held ones.
 
-3. **An idle watchdog independent of the flow** (`session/watchdog.ts`, `modules/flow.ts`, P66).
+3. **An idle watchdog independent of the flow** (`session/watchdog.ts`, `modules/flow.ts`, P67).
    - **Its own clock.** A timer of its own, once a minute, started with the engine. What it reads is the ledger: each live author, reviewer or reader session of the project, and the time of its last event or of its row's last change.
    - **Its threshold.** It reuses `CLEARED_V2_IDLE_MINUTES` (15) rather than adding a second setting.
    - **A session the engine runs** is stopped by the engine (`FlowEngine.idleStop`):

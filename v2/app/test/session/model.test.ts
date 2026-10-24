@@ -145,6 +145,21 @@ test('an interrupt, an error and a verdict are rows; reasoning and unknown event
   assert.deepEqual(timeline(model).map((row) => row.kind), ['interrupted', 'error', 'verdict']);
 });
 
+test('a message of the review channel is a row with its side, its round and its limit; an answer says how long the request waited', () => {
+  const model = emptyModel();
+  const at = (minute: number) => new Date(2026, 9, 21, 9, minute).toISOString();
+  applyAll(model, [
+    { seq: 1, at: at(0), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 1, limit: 3, from: 'reviewer', text: 'Defects: a.ts:3' } } },
+    { seq: 2, at: at(72), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 1, limit: 3, from: 'author', text: 'Fixed.' } } },
+    { seq: 3, at: at(80), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 2, limit: 3, from: 'author', text: 'Again.' } } },
+  ]);
+  assert.deepEqual(timeline(model), [
+    { kind: 'channel', at: at(0), from: 'reviewer', round: 1, limit: 3, text: 'Defects: a.ts:3' },
+    { kind: 'channel', at: at(72), from: 'author', round: 1, limit: 3, text: 'Fixed.', afterMs: 72 * 60_000 },
+    { kind: 'channel', at: at(80), from: 'author', round: 2, limit: 3, text: 'Again.' },
+  ], 'an answer whose request this session did not log has no wait');
+});
+
 test('a command result reads as the capture shows it, and never as markup', () => {
   const out = (output: string, isError = false) => resultSummary({ kind: 'execute', output, cut: 0, isError });
   assert.deepEqual(out('# tests 18\n# pass 18\n# fail 0\n'), { tone: 'ok', key: 'passed', n: 18 });

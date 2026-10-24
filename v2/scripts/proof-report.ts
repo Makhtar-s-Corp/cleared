@@ -229,6 +229,9 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
   let live = 0;
   let maxLive = 0;
   for (const mark of marks) maxLive = Math.max(maxLive, (live += mark.d));
+  // A resumed reviewer gives several verdicts in one session (the review
+  // channel, issue 291); a reviewer that gave none still had its round.
+  const verdicts: Record<string, number> = {};
   for (const row of events("'RUN_FINISHED', 'CUSTOM'")) {
     const of = role.get(String(row.session_id));
     if (!of) continue;
@@ -240,7 +243,9 @@ export function ledgerFacts(db: DatabaseSync, since: string): LedgerFacts {
     } else if (of.role === 'lead' && event.name === 'cleared.context_usage' && typeof event.value?.percent === 'number') {
       lead.highestPercent = Math.max(lead.highestPercent ?? 0, event.value.percent);
     } else if (of.role === 'lead' && event.name === 'cleared.compacted') lead.compactions++;
+    else if (of.role === 'reviewer' && event.name === 'cleared.review_verdict') verdicts[of.ticket] = (verdicts[of.ticket] ?? 0) + 1;
   }
+  for (const [ticket, n] of Object.entries(verdicts)) if (tickets[ticket]) (tickets[ticket] as { reviewRounds: number }).reviewRounds = Math.max(tickets[ticket].reviewRounds, n);
   lead.costUsd = cents(lead.costUsd);
   for (const t of Object.values(tickets)) t.costUsd = cents(t.costUsd);
   // Each login cut: from the first "waiting for a new login" to the session's next turn.

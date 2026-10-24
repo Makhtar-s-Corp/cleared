@@ -90,7 +90,7 @@ const timeline: Record<string, string> = {};
 // the session screen as the owner would, each one listed: "Allow once" for
 // work in the checkout, "Deny" for anything else (proof-inbox.ts).
 const otherRequests: { command: string; answer: 'allow_once' | 'reject_once'; at: string }[] = [];
-const REVIEW_ROUNDS = Number(env.PROOF_REVIEW_ROUNDS ?? 2);
+const REVIEW_ROUNDS = Number(env.PROOF_REVIEW_ROUNDS ?? 3);
 let ticketId = env.PROOF_TICKET ?? '';
 let authorUrl = env.PROOF_AUTHOR_URL ?? '';
 let reviewerUrl = '';
@@ -348,26 +348,27 @@ if (sent) {
 let reviewed = false;
 if (answered) {
   reviewed = await step(7, 'review', async () => {
-    // A review that asks for changes reopens the author, then a new review
-    // follows: the run waits for a pass, up to the flow's number of rounds.
-    const judged = new Set<string>();
-    for (;;) {
+    // A review that asks for changes reopens the author, whose answer goes
+    // back to the same reviewer (the review channel, issue 291), or to a new
+    // one when it cannot be resumed: the run waits for a pass, up to the
+    // flow's number of rounds.
+    for (let round = 1; ; round++) {
       // The author's address shows the ticket's view (lane 36): a reviewer
-      // that starts joins it below a handover row, which names its session.
+      // that starts joins it below a handover row, which names its session;
+      // the latest is this round's.
       await page.goto(authorUrl);
       const handovers = page.locator('#timeline [data-row="handover"][data-role="reviewer"]');
       let reviewer = '';
       await waitAnswering(async () => {
         const ids = await handovers.evaluateAll((nodes: { getAttribute(name: string): string | null }[]) => nodes.map((n) => n.getAttribute('data-session') ?? ''));
-        reviewer = (ids as string[]).find((id) => id !== '' && !judged.has(id)) ?? '';
+        reviewer = (ids as string[]).filter((id) => id !== '').at(-1) ?? '';
         return reviewer !== '';
       }, left());
       Object.assign(appDurations, Object.fromEntries(Object.entries(await readSteps()).map(([k, v]) => [`author: ${k}`, v])));
-      await capture(7, `author-before-review-${judged.size + 1}`);
+      await capture(7, `author-before-review-${round}`);
       await page.goto(`${APP}/sessions/${reviewer}`);
       reviewerUrl = page.url();
       // The view holds every round of the ticket: this round's verdict is the one with its number.
-      const round = judged.size + 1;
       const verdict = page.locator('#timeline').getByText(said('session', ['verdict_ok', 'verdict_changes'], { round })).first();
       // The reviewer's own requests are answered the same way.
       await waitAnswering(async () => await verdict.count() > 0, left());
@@ -375,9 +376,8 @@ if (answered) {
       rounds.push(text);
       save();
       if (said('session', 'verdict_ok', { round }).test(text)) return text;
-      judged.add(reviewer);
-      await capture(7, `review-round-${judged.size}`);
-      if (judged.size >= REVIEW_ROUNDS) throw new Error(`no pass after ${judged.size} rounds: ${rounds.join('; ')}`);
+      await capture(7, `review-round-${round}`);
+      if (round >= REVIEW_ROUNDS) throw new Error(`no pass after ${round} rounds: ${rounds.join('; ')}`);
     }
   });
 }

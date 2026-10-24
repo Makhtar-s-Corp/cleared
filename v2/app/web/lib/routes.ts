@@ -4,7 +4,7 @@
 // over, and the stack of the sessions kept mounted. No React here, so the
 // node tests read it.
 
-export type ScreenName = 'tower' | 'inbox' | 'session' | 'lead' | 'ask';
+export type ScreenName = 'tower' | 'inbox' | 'session' | 'lead' | 'ask' | 'consumption';
 
 export type Place = {
   readonly screen: ScreenName;
@@ -18,6 +18,7 @@ const PLACES: readonly (readonly [RegExp, ScreenName])[] = [
   [/^\/inbox$/, 'inbox'],
   [new RegExp(`^/sessions(?:/${ID})?$`), 'session'],
   [new RegExp(`^/(?:lead|plans/${ID})$`), 'lead'],
+  [/^\/consumption$/, 'consumption'],
   [new RegExp(`^/ask/${ID}$`), 'ask'],
 ];
 

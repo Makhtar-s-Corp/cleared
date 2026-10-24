@@ -2,6 +2,7 @@
 // and recorders of the registry, a fake adapter that plays one script per
 // role, and effects that record their calls instead of running git, gh,
 // Docker or the broker.
+import type { LeverReader } from '../../src/consumption/levers.ts';
 import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import type { FlowConfig } from '../../src/flow/config.ts';
 import { parseServices } from '../../src/container/services.ts';
@@ -45,15 +46,20 @@ export type Scripts = {
   readonly authors?: readonly (readonly FakeStep[])[];       // one per author session started, then `author`
   readonly reviewers?: readonly (readonly FakeStep[])[];     // one per review round
   readonly reopen?: readonly FakeStep[] | 'throw' | 'send_fails';
+  // A reviewer resumed through the review channel (issue 291) waits for the
+  // author's answer, then plays the next script of `reviewers`; 'throw': it
+  // cannot be resumed.
+  readonly reviewerResume?: 'throw';
   readonly stops?: SessionId[];                                // filled with the ids of resumed handles that were stopped
 };
 
 export type Started = { readonly input: StartInput; readonly id: SessionId };
 
 // An adapter that plays the script of the session's role. A reviewer round
-// takes the next script of the list. resume reopens an author under its own
-// id, as the real adapter does, or throws.
-// `now`: the clock the fake stamps its events with (the real one by default).
+// takes the next script of the list, whether the reviewer is started or
+// resumed. resume reopens a session under its own id, as the real adapter
+// does, or throws. `now`: the clock the fake stamps its events with (the
+// real one by default).
 export function scriptedAdapter(store: Store, scripts: Scripts, started_: Started[], now?: () => Date): SessionAdapter {
   const authors = [...(scripts.authors ?? [])];
   const reviewers = [...(scripts.reviewers ?? [reviewerScript(REPORT_PASS)])];
@@ -70,6 +76,10 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
     },
     async resume(id): Promise<SessionHandle> {
       const input = inputs.get(id);
+      if (input?.role === 'reviewer') {
+        if (scripts.reviewerResume === 'throw') throw new Error(`cannot resume ${id}`);
+        return createFakeAdapter({ log: store.events, script: [{ awaitMessage: true }, ...(reviewers.shift() ?? reviewerScript(REPORT_PASS))], newId: () => id, ...(now ? { now } : {}) }).start(input);
+      }
       if (!input || scripts.reopen === 'throw') throw new Error(`cannot resume ${id}`);
       const handle = await createFakeAdapter({ log: store.events, script: scripts.reopen === 'send_fails' || scripts.reopen === undefined ? reopenScript : scripts.reopen, newId: () => id, ...(now ? { now } : {}) }).start(input);
       if (scripts.reopen !== 'send_fails') return handle;
@@ -110,6 +120,7 @@ export type SetupOptions = {
   ledger?: boolean;                       // the v1 events table the lock and the release watch write; true by default
   locks?: (service: ServiceConfig) => ServiceLock;   // the lock of each service of a workspace of several
   clean?: (text: string) => string;                  // the service's cleaner; the identity by default
+  levers?: LeverReader;                              // the Consumption screen's levers; none by default
   eventClock?: boolean;                              // the fake stamps its events with the simulated clock, as the watchdog reads them
 };
 
@@ -132,7 +143,7 @@ export async function setup(options: SetupOptions = {}) {
   };
   const deps = {
     store, inbox, registry, config: { ...CONFIG, ...options.config }, effects: fakeEffects(calls, options.effects),
-    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}), ...(options.clean ? { clean: options.clean } : {}),
+    now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}), ...(options.clean ? { clean: options.clean } : {}), ...(options.levers ? { levers: options.levers } : {}),
   };
   const engine = new FlowEngine(deps);
   const flowEvents: FlowEvent[] = [];
