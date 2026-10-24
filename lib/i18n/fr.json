@@ -441,6 +441,7 @@
   "notify_health_quota_75": "une fenêtre d’usage de l’abonnement est à 75 %",
   "notify_health_quota_85": "une fenêtre d’usage de l’abonnement est à 85 %",
   "notify_health_quota_read_failed": "le relevé horaire du quota a échoué",
+  "notify_health_schedule_failed": "une exécution planifiée a échoué",
   "notify_health_other": "un problème de santé a été détecté",
   "notify_blocked_title": "Une équipe est bloquée",
   "notify_blocked_body": "{subject} est bloqué depuis {minutes} min.",
