@@ -41,7 +41,7 @@ export const QUOTA_TABLES: readonly string[] = [
     source TEXT NOT NULL,
     at TEXT NOT NULL,
     ok INTEGER NOT NULL,
-    window TEXT,
+    "window" TEXT,
     used_percent REAL,
     resets_at TEXT,
     error TEXT
@@ -50,12 +50,12 @@ export const QUOTA_TABLES: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS quota_alerts (
     project TEXT NOT NULL,
     harness TEXT NOT NULL,
-    window TEXT NOT NULL,
+    "window" TEXT NOT NULL,
     resets_at TEXT NOT NULL,
     percent INTEGER NOT NULL,
     used_percent REAL NOT NULL,
     at TEXT NOT NULL,
-    PRIMARY KEY (project, harness, window, resets_at, percent)
+    PRIMARY KEY (project, harness, "window", resets_at, percent)
   )`,
 ];
 
@@ -165,18 +165,26 @@ export type LatestQuota = {
   readonly source: string;                       // a reading's source, or `session` for a session's own report
 };
 
-// The newest figure of a window, from the readings that worked and the
-// sessions' reports, of one harness or of all; none once its reset passed
-// (a null reset is a window that runs).
+// The newest figure of a window of one harness, Claude Code's when the
+// caller names none, from the readings that worked and the sessions'
+// reports; none once its reset passed (a null reset is a window that runs).
+// A report is Claude Code's unless its session is another harness's, as the
+// stop read it before (a report whose session has no row counts); another
+// harness's is its session's only. So a Codex window never stops the plans
+// or the schedules, which read the subscription's.
 export function latestQuota(db: DatabaseSync, input: { readonly project: string; readonly window: QuotaWindow; readonly now: Date; readonly harness?: Harness }): LatestQuota | undefined {
-  const { project, window, harness } = input;
+  const { project, window } = input;
+  const harness = input.harness ?? 'claude-code';
+  const own = harness === 'claude-code'
+    ? "NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = e.session_id AND s.harness <> 'claude-code')"
+    : 'EXISTS (SELECT 1 FROM sessions s WHERE s.id = e.session_id AND s.harness = ?)';
   const reported = db.prepare(`SELECT e.at AS at, json_extract(e.event, '$.value.usedPercent') AS used, json_extract(e.event, '$.value.resetsAt') AS resets
-    FROM session_events e ${harness ? 'JOIN sessions s ON s.id = e.session_id' : ''}
-    WHERE e.project = ? ${harness ? 'AND s.harness = ?' : ''} AND e.type = 'CUSTOM' AND json_extract(e.event, '$.name') = 'cleared.rate_limit' AND json_extract(e.event, '$.value.window') = ?
-    ORDER BY e.at DESC, e.rowid DESC LIMIT 1`).get(...(harness ? [project, harness, window] : [project, window])) as { at: string; used: number | null; resets: string | null } | undefined;
+    FROM session_events e
+    WHERE e.project = ? AND e.type = 'CUSTOM' AND json_extract(e.event, '$.name') = 'cleared.rate_limit' AND json_extract(e.event, '$.value.window') = ? AND ${own}
+    ORDER BY e.at DESC, e.rowid DESC LIMIT 1`).get(...(harness === 'claude-code' ? [project, window] : [project, window, harness])) as { at: string; used: number | null; resets: string | null } | undefined;
   const read = hasReadings(db)
     ? db.prepare(`SELECT at, used_percent AS used, resets_at AS resets, source FROM quota_readings
-      WHERE project = ? ${harness ? 'AND harness = ?' : ''} AND ok = 1 AND window = ? ORDER BY at DESC, id DESC LIMIT 1`).get(...(harness ? [project, harness, window] : [project, window])) as { at: string; used: number | null; resets: string | null; source: string } | undefined
+      WHERE project = ? AND harness = ? AND ok = 1 AND "window" = ? ORDER BY at DESC, id DESC LIMIT 1`).get(project, harness, window) as { at: string; used: number | null; resets: string | null; source: string } | undefined
     : undefined;
   const candidates = [
     ...(reported && typeof reported.used === 'number' ? [{ window, usedPercent: reported.used, resetsAt: reported.resets, observedAt: reported.at, source: 'session' }] : []),
@@ -283,7 +291,7 @@ export class QuotaReader {
       return [{ type: 'quota_read_failed', harness: source.harness, at, error: message, notified }];
     }
     const at = this.#now().toISOString();
-    const insert = db.prepare('INSERT INTO quota_readings (project, harness, source, at, ok, window, used_percent, resets_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO quota_readings (project, harness, source, at, ok, "window", used_percent, resets_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)');
     for (const w of windows) insert.run(project, source.harness, source.source, at, w.window, w.usedPercent, w.resetsAt);
     const out: QuotaEvent[] = [{ type: 'quota_read', harness: source.harness, at, windows }];
     for (const w of windows) out.push(...this.#alerts(source.harness, w, at));
@@ -297,7 +305,7 @@ export class QuotaReader {
     const out: QuotaEvent[] = [];
     for (const percent of ALERT_PERCENTS) {
       if (w.usedPercent < percent) continue;
-      const added = this.#deps.db.prepare('INSERT OR IGNORE INTO quota_alerts (project, harness, window, resets_at, percent, used_percent, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      const added = this.#deps.db.prepare('INSERT OR IGNORE INTO quota_alerts (project, harness, "window", resets_at, percent, used_percent, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(this.#deps.project, harness, w.window, w.resetsAt, percent, w.usedPercent, at);
       if (Number(added.changes) === 0) continue;
       const code = `quota_${percent}`;

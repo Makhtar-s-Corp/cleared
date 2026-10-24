@@ -575,7 +575,8 @@ export class PlanRunner {
   // first, from its newest figure while it runs (consumption/quota.ts: the
   // hourly reading, or a session's report, since the mapper reports a change
   // only, and nothing runs to report the reset of a window that stopped the
-  // plans); or, when the day budget is set, the cost of the project's
+  // plans; Claude Code's: another harness's window is its own, as in
+  // weekShare); or, when the day budget is set, the cost of the project's
   // sessions since midnight (the server's time) past it. The five-hour window
   // stops them too (issue #270: no lane starts above the stop).
   #stop(): Stop | undefined {
@@ -583,7 +584,7 @@ export class PlanRunner {
     const project = this.#deps.project;
     const limit = this.#deps.config.weekStopPercent;
     for (const window of ['seven_day', 'five_hour'] as const) {
-      const quota = latestQuota(db, { project, window, now: this.#now() });
+      const quota = latestQuota(db, { project, window, now: this.#now(), harness: 'claude-code' });
       if (quota && quota.usedPercent >= limit)
         return { kind: 'week', text: `The ${window === 'seven_day' ? 'seven-day' : 'five-hour'} window of the subscription is at ${quota.usedPercent} %: the plans start nothing new until it falls below ${limit} %.` };
     }

@@ -47,7 +47,7 @@ export function consumptionFixture(project: string, now: () => Date) {
   });
   limit('fx-codex', 'seven_day', 62, 3.5 * DAY);
   // Claude Code's from the hourly reading (issue #270), at the same time.
-  store.db.prepare("INSERT INTO quota_readings (project, harness, source, at, ok, window, used_percent, resets_at) VALUES (?, 'claude-code', 'claude-code /api/oauth/usage', ?, 1, 'seven_day', 41, ?)")
+  store.db.prepare("INSERT INTO quota_readings (project, harness, source, at, ok, \"window\", used_percent, resets_at) VALUES (?, 'claude-code', 'claude-code /api/oauth/usage', ?, 1, 'seven_day', 41, ?)")
     .run(project, new Date(start.getTime() - 20 * 60_000).toISOString(), new Date(start.getTime() + 3.5 * DAY).toISOString());
   const levers = new LeverStore(store.db, project);
   return {

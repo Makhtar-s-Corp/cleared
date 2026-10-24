@@ -55,7 +55,7 @@ test('the factories put the fake adapter under the claude-code name, from the sc
   assert.deepEqual(Object.keys(factories), ['claude-code']);
   const adapter = factories['claude-code']!({ log: store.events, cleaner: () => ({ clean: (event: AgUiEvent) => [event] }) as never });
   assert.equal(adapter.harness, 'claude-code');
-  assert.deepEqual(Object.keys(factoriesFor({})), ['claude-code', 'cursor']);
+  assert.deepEqual(Object.keys(factoriesFor({})), ['claude-code', 'cursor', 'codex']);
   rmSync(state, { recursive: true, force: true });
 });
 

@@ -14,7 +14,7 @@ import { NOTIFY_TABLES } from '../../src/notify/queue.ts';
 import { parseRecipe, type RecipeFile } from '../../src/recipes/recipe.ts';
 import { Recipes } from '../../src/recipes/service.ts';
 import { budgetedFlow } from '../../src/schedules/budget.ts';
-import { Scheduler, type ScheduleEvent } from '../../src/schedules/scheduler.ts';
+import { Scheduler, weekShare, type ScheduleEvent } from '../../src/schedules/scheduler.ts';
 import { SCHEDULE_TABLES } from '../../src/schedules/store.ts';
 import { ScheduleError } from '../../src/schedules/when.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
@@ -155,6 +155,32 @@ test('the schedule\'s own cap skips a run below the week stop; under it, the run
   await t.at(OCT_22_0300 + 24 * 60 * MINUTE + 30_000);
   assert.equal(t.plans.list().length, 1);
   await t.settle();
+});
+
+test('the week share is Claude Code\'s: a later seven-day window of a Codex session is its own (milestone 3)', async () => {
+  const t = await scheduler();
+  t.week(86);
+  const at = iso(t.clock.now + 1000);
+  t.store.sessions.put({ id: 'codex-1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'codex', model: 'gpt-6-luna', status: 'working', createdAt: at, updatedAt: at });
+  t.store.events.append({ at, sessionId: 'codex-1', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 5, resetsAt: null } } });
+  assert.equal(weekShare(t.store.db, 'guestbook', new Date(t.clock.now + 2000)), 86);
+  t.store.sessions.put({ id: 'claude-1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', status: 'working', createdAt: at, updatedAt: at });
+  t.store.events.append({ at: iso(t.clock.now + 1500), sessionId: 'claude-1', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 30, resetsAt: null } } });
+  assert.equal(weekShare(t.store.db, 'guestbook', new Date(t.clock.now + 2000)), 30, 'a Claude Code session\'s window still counts');
+});
+
+// Review r2 of PR 302: the week share, read through the quota's newest
+// figure (issue #270), stays Claude Code's: a Codex session's seven-day
+// window above the stop skips no run.
+test('a Codex session\'s seven-day window above the stop is no week share, and the run is not skipped', async () => {
+  const t = await scheduler();
+  await t.schedules.create({ recipe: 'bump-dependency', parameters: { package: 'pg' }, every: 'day 03:00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');
+  const at = iso(t.clock.now);
+  t.store.sessions.put({ id: 'codex-1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'codex', model: 'gpt-6-luna', status: 'working', createdAt: at, updatedAt: at });
+  t.store.events.append({ at, sessionId: 'codex-1', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 95, resetsAt: null } } });
+  assert.equal(weekShare(t.store.db, 'guestbook', new Date(t.clock.now)), undefined);
+  await t.at(Date.parse('2026-10-22T03:00:30.000Z'));
+  assert.deepEqual(t.events.map((e) => e.type), ['schedule_ran']);
 });
 
 test('a disabled schedule never runs', async () => {

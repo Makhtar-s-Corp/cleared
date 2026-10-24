@@ -108,7 +108,7 @@ function ledger(): Store {
 }
 
 const week = (usedPercent: number, resetsAt: string | null = iso(NOW + 4 * 24 * HOUR)): WindowReading => ({ window: 'seven_day', usedPercent, resetsAt });
-const rows = (store: Store) => store.db.prepare('SELECT harness, source, at, ok, window, used_percent AS used, resets_at AS resets, error FROM quota_readings ORDER BY id').all().map((row) => ({ ...row }));
+const rows = (store: Store) => store.db.prepare('SELECT harness, source, at, ok, "window", used_percent AS used, resets_at AS resets, error FROM quota_readings ORDER BY id').all().map((row) => ({ ...row }));
 const health = (store: Store) => (store.db.prepare("SELECT json_extract(facts, '$.code') AS code FROM v2_notify_queue WHERE kind = 'health' ORDER BY first_at, key").all() as { code: string }[]).map((r) => r.code);
 
 test('each reading is a row with its time, its source and its resets; a failure is a row with its reason, and the next source is still read', async () => {

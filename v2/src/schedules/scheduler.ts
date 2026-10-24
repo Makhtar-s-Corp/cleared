@@ -65,8 +65,10 @@ const errorName = (error: unknown) => (error instanceof Error ? error.name : typ
 
 // The seven-day window's share, as the plan runner reads it: the newest
 // figure of a reading or of a session's report (consumption/quota.ts).
+// The week is Claude Code's subscription: a window another harness reports
+// (Codex's, milestone 3) is its own, never this one.
 export function weekShare(db: DatabaseSync, project: string, now: Date): number | undefined {
-  return latestQuota(db, { project, window: 'seven_day', now })?.usedPercent;
+  return latestQuota(db, { project, window: 'seven_day', now, harness: 'claude-code' })?.usedPercent;
 }
 
 export class Scheduler {
