@@ -13,10 +13,12 @@ import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import type { Translate } from '@/lib/i18n.ts';
+import { quantity } from '@/lib/time.ts';
 import { ENDED, clock, parseCriteria, phaseOf, takenOverOf, type SessionView } from './model.ts';
 import {
   CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planView, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
 } from './tabs.ts';
+import { Counts } from './Counts.tsx';
 
 const ICONS: Readonly<Record<Tab, Icon>> = { plan: ListChecks, terminal: TerminalWindow, editor: Code, browser: Browser };
 
@@ -192,10 +194,6 @@ export function TakeoverNotice({ view, t, web = false, why }: { readonly view: S
   );
 }
 
-function Counts({ added, removed }: { readonly added: number; readonly removed: number }) {
-  return <><span className="add">+{added}</span>{removed > 0 ? <>{' '}<span className="del">−{removed}</span></> : null}</>;
-}
-
 const SIGN: Readonly<Record<DiffLine['kind'], string>> = { same: ' ', add: '+', del: '−' };
 
 export type EditorShown = { readonly file: SessionFile | null; readonly base: SessionFile | null; readonly error?: string };
@@ -239,7 +237,7 @@ export function EditorTab({ t, files, selected, shown, mode, failed = false, edi
           <div className="mode scope" role="group" aria-label={t('editor_scope')}>
             {(['all', 'last'] as const).map((value) => (
               <button key={value} type="button" data-scope={value} aria-pressed={scope.value === value} disabled={held || (value === 'last' && scope.last === 0)} onClick={() => scope.onScope?.(value)}>
-                {t(`editor_scope_${value}`)} <span className="scope-n">{value === 'all' ? scope.all : scope.last}</span>
+                {t(`editor_scope_${value}`)} <span className="scope-n">{quantity(value === 'all' ? scope.all : scope.last, t)}</span>
               </button>
             ))}
           </div>
@@ -249,7 +247,7 @@ export function EditorTab({ t, files, selected, shown, mode, failed = false, edi
             {files.map((file) => (
               <li key={file.path}>
                 <button type="button" className="file-pick" data-file={file.path} disabled={held} aria-current={file.path === selected ? 'true' : undefined} onClick={() => onSelect?.(file.path)}>
-                  <span className="path">{file.path}</span><span className="counts"><Counts added={file.added} removed={file.removed} /></span>
+                  <span className="path">{file.path}</span><span className="counts"><Counts added={file.added} removed={file.removed} t={t} /></span>
                 </button>
               </li>
             ))}

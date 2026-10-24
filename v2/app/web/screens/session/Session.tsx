@@ -62,6 +62,7 @@ import {
 } from './ticket.ts';
 import { askHref } from '@/screens/ask/model.ts';
 import './session.css';
+import { Counts } from './Counts.tsx';
 
 // The timeline's marks, Phosphor's regular weight.
 const GLYPH: Readonly<Record<string, Icon>> = { read: Eye, edit: PencilSimple, execute: Play, other: DotOutline, search: MagnifyingGlass, fetch: ArrowUpRight, delete: X, move: ArrowRight };
@@ -108,10 +109,6 @@ export function CommandLines({ command }: { readonly command: string }) {
       <span key={index} className="command-line">{part.op ? <span className="op">{part.op} </span> : null}{part.text}{'\n'}</span>
     ))}</code></pre>
   );
-}
-
-function Counts({ added, removed }: { readonly added: number; readonly removed: number }) {
-  return <><span className="add">+{added}</span>{removed > 0 ? <>{' '}<span className="del">−{removed}</span></> : null}</>;
 }
 
 // The last lines a command printed: enough to see how it ended.
@@ -165,7 +162,7 @@ function ToolLine({ row, view, t, onAnswer, onFile, resume }: { readonly row: To
   const kind = verb(input);
   const summary = resultSummary(row.output);
   const subs: ReactNode[] = [];
-  if (input?.kind === 'edit') subs.push(<Counts key="counts" added={input.added} removed={input.removed} />);
+  if (input?.kind === 'edit') subs.push(<Counts key="counts" added={input.added} removed={input.removed} t={t} />);
   // A command that went well says nothing more; a count or a failure does.
   if (summary && summary.key !== 'done') {
     const text = summary.key === 'passed' || summary.key === 'failed' ? t(summary.key === 'passed' ? 'result_count_ok' : 'result_failed', { n: summary.n ?? 0 }) : t(`result_${summary.key}`);
@@ -204,7 +201,7 @@ function FileDetail({ path, added, removed, count, t, onFile }: { readonly path:
   return (
     <p className="file-detail">
       <span className="path">{path}</span>
-      <span className="counts"><Counts added={added} removed={removed} />{count > 1 ? ` · ${t('edits_count', { n: count })}` : null}</span>
+      <span className="counts"><Counts added={added} removed={removed} t={t} />{count > 1 ? ` · ${t('edits_count', { n: count })}` : null}</span>
       {onFile ? <button type="button" className="link-button" data-act="open_diff" onClick={() => onFile(path, 'diff')}>{t('step_show_diff')}</button> : null}
     </p>
   );
@@ -213,7 +210,7 @@ function FileDetail({ path, added, removed, count, t, onFile }: { readonly path:
 function EditsLine({ row, t, onFile, resume }: { readonly row: EditsRow; readonly t: Translate; readonly onFile?: OpenFile | undefined; readonly resume?: ReactNode }) {
   return (
     <Step kind="edit" at={row.at} icon={PencilSimple} resume={resume}
-      line={<><div>{t('verb_edit')} <Code text={row.path} /></div><div className="sub"><Counts added={row.added} removed={row.removed} />{` · ${t('edits_count', { n: row.count })}`}</div></>}
+      line={<><div>{t('verb_edit')} <Code text={row.path} /></div><div className="sub"><Counts added={row.added} removed={row.removed} t={t} />{` · ${t('edits_count', { n: row.count })}`}</div></>}
       detail={<FileDetail path={row.path} added={row.added} removed={row.removed} count={row.count} t={t} onFile={onFile} />} />
   );
 }
@@ -488,7 +485,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
           : <ul className="changes">{files.map((f) => (
             <li key={f.path}>
               {onFile ? <button type="button" className="link-button path" data-act="open_change" onClick={() => onFile(f.path, 'diff')}>{f.path}</button> : <span className="path">{f.path}</span>}
-              <span><Counts added={f.added} removed={f.removed} /></span>
+              <span><Counts added={f.added} removed={f.removed} t={t} /></span>
             </li>
           ))}</ul>}
       </section>
