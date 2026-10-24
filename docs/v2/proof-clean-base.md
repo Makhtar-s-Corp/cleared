@@ -87,6 +87,7 @@ Do this on the machine that runs the proof, with the owner's agreement. Every na
    | `PROOF_BASE_BRANCH` | `proof-base` by default |
    | `PROOF_RUN_BRANCH` | `proof-run` by default; always `proof-<something>` |
    | `PROOF_DEPLOY_MINUTES` | how long the watchers have to deploy the base, 10 by default |
+   | `PROOF_REVIEW_ROUNDS` | how many reviews a ticket may go through before the proof gives up, 3 by default (2 before the review channel of issue #291). The service has its own limit, `CLEARED_V2_REVIEW_ROUNDS`, 3 by default as well, and the proof does not read it: set both to the same value, because the lower one ends the review first. The same reviewer session gives its verdicts round after round, so the proof follows the latest reviewer session and each round is a verdict, not a session |
 
    Without `PROOF_REPOS`, a real run stops before it signs in.
 
