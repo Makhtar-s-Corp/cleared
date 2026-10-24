@@ -46,7 +46,8 @@ export function checkoutFolder(workdir: string, root: string): string {
   return real;
 }
 
-const encode = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
+// encodeURIComponent leaves an apostrophe as it is; the screen refuses one in a link (tabs.ts editorOffer), so it is encoded too.
+const encode = (path: string): string => path.split('/').map((part) => encodeURIComponent(part).replace(/'/g, '%27')).join('/');
 
 // Local: <editor>://file/<path>. Over SSH: <editor>://vscode-remote/ssh-remote+<host>/<path>.
 export function editorLinks(folder: string, host?: string): EditorLinks {

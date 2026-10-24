@@ -30,8 +30,8 @@ let session = '';
 let workdir = '';
 let host: string | undefined;
 
-// A work folder whose name would break a link built by pasting: a space, a hash, a question mark and a percent sign.
-const FOLDER = 'cleared editor #1 ?50%';
+// A work folder whose name would break a link built by pasting: a space, a hash, a question mark, a percent sign and an apostrophe.
+const FOLDER = 'cleared editor #1 ?50% o\'k';
 
 before(async () => {
   root = mkdtempSync(join(tmpdir(), 'cleared-editor-'));
@@ -75,7 +75,7 @@ async function get(path: string, headers: Record<string, string> = { [SERVICE_PR
   return { status: response.status, json: body ? JSON.parse(body) : undefined };
 }
 
-const encoded = (path: string) => path.split('/').map(encodeURIComponent).join('/');
+const encoded = (path: string) => path.split('/').map((part) => encodeURIComponent(part).replace(/'/g, '%27')).join('/');
 
 test('the route asks for the proof and a person the service knows, and an unknown session is 404', async () => {
   const path = `/api/sessions/${session}/editor`;
@@ -99,7 +99,7 @@ test('with no host configured the links open the checkout on this machine, each 
       { editor: 'cursor', url: `cursor://file${encoded(path)}` },
     ],
   });
-  assert.match(String(answer.json.links[0]?.url), /\/cleared%20editor%20%231%20%3F50%25\//, 'a space, a hash, a question mark and a percent sign cannot change the link');
+  assert.match(String(answer.json.links[0]?.url), /\/cleared%20editor%20%231%20%3F50%25%20o%27k\//, 'a space, a hash, a question mark, a percent sign and an apostrophe cannot change the link');
 });
 
 test('with an SSH host configured the links are the remote ones, and the same checkout', async () => {
@@ -148,9 +148,9 @@ test('checkoutFolder: only a real folder strictly inside the work folder, with a
 });
 
 test('editorLinks: the folder is encoded, and a host that could change the link is refused', () => {
-  assert.deepEqual(editorLinks('/work/T 1/a#b?c%d'), {
+  assert.deepEqual(editorLinks("/work/T 1/a#b?c%d'e"), {
     mode: 'local',
-    links: [{ editor: 'vscode', url: 'vscode://file/work/T%201/a%23b%3Fc%25d' }, { editor: 'cursor', url: 'cursor://file/work/T%201/a%23b%3Fc%25d' }],
+    links: [{ editor: 'vscode', url: 'vscode://file/work/T%201/a%23b%3Fc%25d%27e' }, { editor: 'cursor', url: 'cursor://file/work/T%201/a%23b%3Fc%25d%27e' }],
   });
   assert.equal(editorLinks('/work/T-1', 'me@dev.example.invalid').links[0]?.url, 'vscode://vscode-remote/ssh-remote+me@dev.example.invalid/work/T-1');
   for (const bad of ['evil/x', 'x#y', 'x?y', 'a b', '-oProxyCommand=x', 'x@', '@x', 'x:22', 'x\ny', 'a@b@c', '%41']) {
