@@ -7,9 +7,9 @@ process.env.TZ = 'UTC';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WINDOW_MS, consumption, dayOf, lastDays, leverChoices, projectQuota, zoneOf } from '../../src/consumption/usage.ts';
-import { NO_LEVERS } from '../../src/consumption/levers.ts';
+import { LEVERS_TABLE, LeverError, LeverStore, NO_LEVERS } from '../../src/consumption/levers.ts';
 import type { Harness } from '../../src/session/contract.ts';
-import { openStore, type Store } from '../../src/store/db.ts';
+import { applyTables, openStore, type Store } from '../../src/store/db.ts';
 
 const NOW = new Date('2026-10-23T12:00:00.000Z');
 const HOUR = 3_600_000;
@@ -145,12 +145,23 @@ test('the levers are returned with the model the owner may choose: never the rev
   store.close();
 });
 
-test('the model options keep the configured author and a model stored earlier', () => {
+test('every model option offered is accepted by set, and what is not offered is refused', () => {
   const config = { authorModel: 'claude-future-9', reviewerModel: 'claude-sonnet-5-5' };
-  const configured = leverChoices({ model: null, maxLanes: null, paused: false }, config).model;
+  const store = openStore(':memory:');
+  applyTables(store.db, [LEVERS_TABLE]);
+  const levers = new LeverStore(store.db, 'guestbook');
+  const AT = '2026-10-23T12:00:00.000Z';
+  const configured = leverChoices(levers.read(), config).model;
   assert.equal(configured.current, 'claude-future-9');
-  assert.ok(configured.options.includes('claude-future-9'), 'the default has a toggle to show pressed');
   assert.ok(!configured.options.includes('claude-sonnet-5-5'), "the reviewer's model is never an option");
-  const stored = leverChoices({ model: 'claude-old-1', maxLanes: null, paused: false }, config).model;
+  for (const option of configured.options) {
+    assert.equal(levers.set({ model: option }, 'owner', AT, config.reviewerModel, config.authorModel).model, option);
+  }
+  // A model stored earlier that left the list stays offered, and accepted again after another choice.
+  store.db.prepare("INSERT INTO consumption_levers (project, lever, value, by_user, at) VALUES ('guestbook', 'model', 'claude-old-1', 'owner', ?) ON CONFLICT (project, lever) DO UPDATE SET value = excluded.value").run(AT);
+  const stored = leverChoices(levers.read(), config).model;
   assert.ok(stored.options.includes('claude-old-1'));
+  levers.set({ model: 'claude-haiku-5-5' }, 'owner', AT, config.reviewerModel, config.authorModel);
+  assert.ok(!leverChoices(levers.read(), config).model.options.includes('claude-old-1'));
+  assert.throws(() => levers.set({ model: 'claude-old-1' }, 'owner', AT, config.reviewerModel, config.authorModel), LeverError);
 });
