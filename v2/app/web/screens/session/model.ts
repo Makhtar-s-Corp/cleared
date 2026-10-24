@@ -68,6 +68,13 @@ export type EditsRow = {
   readonly count: number; readonly ids: readonly string[];
   readonly each: readonly { readonly at: string; readonly added: number; readonly removed: number }[];   // every edit, for the Editor's last turn
 };
+// A message of the ticket's review channel (issue 291): the reviewer's
+// request or the author's answer, with how long the request waited for it
+// when this session logged both.
+export type ChannelRow = {
+  readonly kind: 'channel'; readonly at: string; readonly from: 'reviewer' | 'author'; readonly round: number; readonly limit: number; readonly text: string;
+  readonly afterMs?: number;
+};
 export type Row =
   | ToolRow
   | ReadRow
@@ -78,6 +85,7 @@ export type Row =
   | { readonly kind: 'interrupted'; readonly at: string }
   | { readonly kind: 'error'; readonly at: string; readonly message: string }
   | { readonly kind: 'verdict'; readonly at: string; readonly verdict: 'pass' | 'changes_requested'; readonly round: number }
+  | ChannelRow
   | { readonly kind: 'plan'; readonly at: string; readonly confidence: SessionPlan['confidence']; readonly go: SessionPlan['go'] };
 
 export type Step = { name: SessionState['steps'][number]['name']; startedAt: string; finishedAt: string | null };
@@ -269,6 +277,12 @@ function custom(model: SessionModel, at: string, event: Extract<AgUiEvent, { typ
     case 'cleared.review_verdict':
       model.rows.push({ kind: 'verdict', at, verdict: event.value.verdict, round: event.value.round });
       break;
+    case 'cleared.review_channel': {
+      const { from, round, limit, text } = event.value;
+      const asked = from === 'author' ? [...model.rows].reverse().find((row): row is ChannelRow => row.kind === 'channel' && row.from === 'reviewer' && row.round === round) : undefined;
+      model.rows.push({ kind: 'channel', at, from, round, limit, text, ...(asked ? { afterMs: Math.max(0, Date.parse(at) - Date.parse(asked.at)) } : {}) });
+      break;
+    }
     case 'cleared.session_plan':
       model.plan = event.value;
       model.rows.push({ kind: 'plan', at, confidence: event.value.confidence, go: event.value.go });

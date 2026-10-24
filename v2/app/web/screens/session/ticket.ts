@@ -64,6 +64,8 @@ const sorted = (parts: readonly TicketPart[]) => [...parts].sort((a, b) => bySta
 
 // One thread of the ticket: each session's rows, a handover row before each
 // session after the first; a filter keeps one role's rows, and no handover.
+// A message of the review channel is logged on both sides (issue 291): the
+// whole ticket shows it once, on the session it reached.
 export function ticketThread(parts: readonly TicketPart[], filter: Filter): ThreadEntry[] {
   const out: ThreadEntry[] = [];
   let before: ThreadRole | undefined;
@@ -72,7 +74,10 @@ export function ticketThread(parts: readonly TicketPart[], filter: Filter): Thre
     if (filter === 'all' && before !== undefined && threadRole(summary)) out.push({ kind: 'handover', session: summary.id, at: summary.startedAt, role: summary.role, model: family(summary.model), after: before });
     before = threadRole(summary) ? summary.role : undefined;
     if (filter !== 'all' && filter !== role) continue;
-    for (const row of thread?.rows ?? []) out.push({ kind: 'row', session: summary.id, role, row });
+    for (const row of thread?.rows ?? []) {
+      if (filter === 'all' && row.kind === 'channel' && row.from === role) continue;
+      out.push({ kind: 'row', session: summary.id, role, row });
+    }
   }
   return out;
 }
