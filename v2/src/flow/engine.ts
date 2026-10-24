@@ -468,6 +468,7 @@ export class FlowEngine {
       if (item.timeout?.answers) await this.#applyDeclared(live, item, item.timeout.answers, minutes);
       else await this.#park(live, item, minutes);
     }
+    for (const { live, item, minutes } of this.#duePermissions(now)) await this.#parkPermission(live, item, minutes);
     const tickets = this.registry.ticketStore;
     for (const release of this.inbox.waitingReleases()) {
       const ticket = await tickets.get(release.ticket);
@@ -2707,6 +2708,28 @@ export class FlowEngine {
       else if (now >= Date.parse(timeout.leadAt) + lead) due.push({ live, item, minutes });
     }
     return due;
+  }
+
+  // A permission request has no answer to declare and the lead does not
+  // decide it: past the questions' delay (issue #299) the ticket is parked,
+  // the request neither allowed nor rejected for the owner. Without this a
+  // session suspended on a permission kept its slot of the plan for ever.
+  #duePermissions(now: number): { live: Live; item: PermissionItem; minutes: number }[] {
+    const due: { live: Live; item: PermissionItem; minutes: number }[] = [];
+    for (const item of this.inbox.waitingPermissions(this.config.project)) {
+      const live = this.#live.get(item.sessionId) ?? this.#dormant.get(item.sessionId);
+      if (!live || this.#paused.has(live.id)) continue;
+      const wait = live.settings.questionTimeoutMinutes !== undefined ? live.settings.questionTimeoutMinutes * 60_000 : this.config.questionTimeoutMs ?? QUESTION_TIMEOUT_MINUTES * 60_000;
+      if (now >= Date.parse(item.since) + wait) due.push({ live, item, minutes: Math.round((now - Date.parse(item.since)) / 60_000) });
+    }
+    return due;
+  }
+
+  async #parkPermission(live: Live, item: PermissionItem, minutes: number): Promise<void> {
+    const waited = `The permission to use ${item.tool} waited ${duration(minutes)} with no answer from the owner`;
+    ledgerEvent(this.#store.db, { at: this.#at(), kind: 'permission_parked', ticket: item.ticket, source: 'flow', detail: { session: item.sessionId, requestId: item.requestId, item: item.id, tool: item.tool, minutes } });
+    await this.#stopTicket(live, 'parked', `${waited}: the session was stopped and its ticket parked.`,
+      `${waited}: the ticket is parked, its session stopped with what a resume needs. The rest of the plan goes on; start it again once the permission is settled.`, 'stopped', 'parked');
   }
 
   #questionTimedOut(item: QuestionItem, stage: 'lead' | 'default' | 'parked', minutes: number, answers: Readonly<Record<string, string>> | null): void {

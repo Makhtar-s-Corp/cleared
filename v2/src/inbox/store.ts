@@ -105,6 +105,14 @@ export class InboxStore {
       .map((row) => this.#item(row) as QuestionItem);
   }
 
+  // The permission requests of a project's teams that wait, oldest first
+  // (issue #299): their delay is the questions' (flow/engine.ts), and the
+  // lead's own session is not counted.
+  waitingPermissions(project: string): PermissionItem[] {
+    return (this.#db.prepare("SELECT * FROM flow_inbox WHERE kind = 'permission' AND state = 'waiting' AND project = ? AND ticket != ? ORDER BY since, id").all(project, LEAD_TICKET) as Row[])
+      .map((row) => this.#item(row) as PermissionItem);
+  }
+
   // The lead was asked at `at` to decide a team's question that waited past
   // its delay, until `until`: a tick that came late moves the lead's window with it.
   questionToLead(id: string, at: string, until: string): void {
