@@ -6,7 +6,7 @@
 // plan, then the releases whose checks are green.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FREE_ANSWER, answerFor, chooseAnswers, declaredChecks, inboxAction, insideCheckout, leftForOwner, morningAction, permissionAnswer, type InboxEntry } from '../../scripts/proof-inbox.ts';
+import { FREE_ANSWER, answerFor, answerInInbox, chooseAnswers, declaredChecks, inboxAction, inboxGestures, insideCheckout, leftForOwner, morningAction, permissionAnswer, type InboxEntry, type InboxPage } from '../../scripts/proof-inbox.ts';
 
 const target = 'rm -r /tmp/cleared-proof-scratch';
 
@@ -123,6 +123,50 @@ test('a session\'s question: the option marked recommended, else the first; one 
   assert.equal(chooseAnswers([{ question: 'q', options: [{ label: 'A' }, { label: 'B (Recommended)' }] }])[0]?.answer, 'B (Recommended)');
   assert.deepEqual(chooseAnswers([]), []);
   assert.deepEqual(chooseAnswers([{ question: 'q', options: [] }])[0]?.how, 'free');
+});
+
+// Issue #269: a team's question in the inbox, answered by the proofs.
+test('the milestone 2 morning answers a team\'s question after the permissions when told to, never the lead\'s', () => {
+  const question: InboxEntry = { id: 'question:s1:q1', kind: 'question', ticket: 'LOCAL-3' };
+  const lead: InboxEntry = { id: 'question:lead-1:lq', kind: 'question', ticket: 'lead' };
+  const permission: InboxEntry = { id: 'permission:s1:r1', kind: 'permission', ticket: 'LOCAL-3', command: 'ls' };
+  assert.deepEqual(morningAction([question], { releases: true, plan: true, questions: true }), { kind: 'question', id: 'question:s1:q1' });
+  assert.equal(morningAction([question, permission], { releases: true, plan: true, questions: true }).kind, 'permission', 'a permission first');
+  assert.deepEqual(morningAction([lead], { releases: true, plan: true, questions: true }), { kind: 'wait', left: ['question:lead-1:lq (a question, for the owner)'] });
+  assert.deepEqual(morningAction([question], { releases: true, plan: true }), { kind: 'wait', left: ['question:s1:q1 (a question, for the owner)'] }, 'the owner\'s unless told');
+});
+
+test('the inbox\'s gestures: one click on the only choice of one question, else each pick or free answer, then Send', () => {
+  const one = [{ question: 'Which database?', options: [{ label: 'Postgres (Recommended)' }, { label: 'SQLite' }] }];
+  assert.deepEqual(inboxGestures(one, chooseAnswers(one)), { gestures: [{ kind: 'option', index: 0, label: 'Postgres (Recommended)' }], send: false });
+  const multi = [{ question: 'Which checks?', multiSelect: true, options: [{ label: 'test' }, { label: 'lint' }] }];
+  assert.deepEqual(inboxGestures(multi, chooseAnswers(multi)), { gestures: [{ kind: 'option', index: 0, label: 'test' }], send: true });
+  const free = [{ question: 'What should the empty page say?' }];
+  assert.deepEqual(inboxGestures(free, chooseAnswers(free)), { gestures: [{ kind: 'free', index: 0, text: FREE_ANSWER }], send: true });
+  const two = [...one, ...free];
+  assert.deepEqual(inboxGestures(two, chooseAnswers(two)).send, true);
+});
+
+test('answerInInbox clicks the option by its data-answer read back, and Send only when a click does not answer', async () => {
+  const done: string[] = [];
+  const page = (labels: string[]): InboxPage => ({
+    locator: (selector) => {
+      const at = (nth?: number) => ({
+        fill: async (text: string) => { done.push(`fill ${selector} ${text}`); },
+        click: async () => { done.push(`click ${selector}${nth === undefined ? '' : ` #${nth}`}`); },
+        nth: (index: number) => at(index),
+        evaluateAll: async <T>(run: (nodes: { getAttribute(name: string): string | null }[]) => T) => run(labels.map((label) => ({ getAttribute: () => label }))),
+      });
+      return at();
+    },
+  });
+  const one = [{ question: 'Which database?', options: [{ label: 'SQLite' }, { label: 'Postgres (Recommended)' }] }];
+  assert.deepEqual((await answerInInbox(page(['SQLite', 'Postgres (Recommended)']), one)).map((c) => c.answer), ['Postgres (Recommended)']);
+  assert.deepEqual(done, ['click #detail [data-q="0"][data-answer] #1']);
+  done.length = 0;
+  await answerInInbox(page([]), [{ question: 'What should the empty page say?' }]);
+  assert.deepEqual(done, [`fill #detail [data-free="0"] ${FREE_ANSWER}`, 'click #detail [data-act="answer"]']);
+  await assert.rejects(answerInInbox(page(['Other']), one), /shows no option "Postgres \(Recommended\)"/);
 });
 
 // Run 5 of the multi-service proof, step 10: the reviewer's requests to run

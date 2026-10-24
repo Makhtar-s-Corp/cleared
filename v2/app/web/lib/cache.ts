@@ -11,7 +11,7 @@
 // - While the change stream is open (lib/events.tsx), the resources it
 //   covers (COVERED) are fresh until an event names them; the others, and
 //   every resource while the stream is down, are stale after POLL_MS, the
-//   polling interval of the screens before. The poller refetches what a
+//   polling interval of the screens before (the inbox after INBOX_POLL_MS). The poller refetches what a
 //   mounted screen or the shell reads and is stale: with the stream open,
 //   only the uncovered resources; with it down, all of them.
 // - An event refetches the resources it names that the cache holds, and
@@ -32,6 +32,9 @@ export type Read = (path: string) => Promise<unknown>;
 export type Write = (path: string, init: { readonly method?: 'GET' | 'POST'; readonly body?: unknown }) => Promise<unknown>;
 
 export const POLL_MS = 10_000;
+// The inbox, while the stream is down, sooner: an agent's question is on
+// screen within 5 s of being asked (issue #269), a tick and a read included.
+export const INBOX_POLL_MS = 3000;
 const TICK_MS = 1000;
 
 const NAMED: readonly (readonly [RegExp, (id: string) => Key])[] = [
@@ -159,7 +162,8 @@ export class Cache {
     const state = this.client.getQueryState(key);
     if (!state || state.data === undefined || state.isInvalidated) return true;
     if (this.#live && COVERED.has(key[0])) return false;
-    return this.#now() - (this.#at.get(hashOf(key)) ?? -Infinity) >= this.#pollMs;
+    const every = key[0] === 'inbox' ? Math.min(this.#pollMs, INBOX_POLL_MS) : this.#pollMs;
+    return this.#now() - (this.#at.get(hashOf(key)) ?? -Infinity) >= every;
   }
 
   async read<T>(path: string): Promise<T> {

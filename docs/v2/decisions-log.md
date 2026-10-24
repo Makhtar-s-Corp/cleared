@@ -4507,3 +4507,26 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Resources.** No Docker object, no network, no tunnel. Only the fake-adapter rehearsal ran, on free loopback ports. The proof's service, its state folder and the example repositories were not touched.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-driver-resume`.
+
+## 2026-10-24: an agent's question with choices in the inbox, the project's own delay and default (the author's choices, lane `j3-agent-questions`, issue #269)
+
+**The need.** Issue #269 (validated by the owner on 2026-10-23 at 11:51) asks that an agent's question with choices reach the inbox within 5 s, with its choices as buttons, that a click send the answer to the session, that the delay and the default answer be set per project, that the proof script answer it, with service and browser tests. Lane `j3-autonomy` (pull request 297, issue #290) had already given each team question a delay, the lead's 10-minute window, the declared answer and the park (P54). This lane reuses that mechanism and adds what was left (matrix P72). These are the author's choices, not the owner's decisions.
+
+**Decision.**
+1. **The project's own delay and default, on the existing item.** Two keys of `[session]` in a service's `.cleared/agents.conf`, read at the base branch with the others (`projectSettings`):
+   - `question_timeout_minutes`, a positive number: the delay of its questions. Unset, the service's `CLEARED_V2_QUESTION_TIMEOUT_MINUTES` applies, then 30 minutes.
+   - `question_default`: `recommended` (unset means this: the session's declared answer, each question's "(Recommended)" option, as before), `first` (that option, else each question's first, one even for a multiple choice) or `park` (nothing is applied: the ticket is parked).
+   - A wrong value is an error of the project's settings, as for `plan_go_minutes`.
+   - Both are read for the asking session's service, so in a workspace of several services a question follows its own service's file.
+   - They are written into the item's `timeout` when the question is asked (`#questionTimeout`, with `rule` when it is not `recommended`). `#dueQuestions`, `#applyDeclared` and `#park` are unchanged: they already read each item's own `at` and `answers`. The lead's 10-minute window stays a fixed constant.
+   - The ticket's comment, the resumed session's message and the park's note say "the project's default" when the rule is `first` or `park`, not "the answer the session declared".
+   - A question with no option still has no default under `first`: the ticket is parked.
+2. **Within 5 s, the stream down included.** The way existed: the inbox store's write says `inbox` on the change stream, and the page's cache refetches it at once. While the stream is down, the cache polled every 10 s. The inbox is now polled every 3 s then (`INBOX_POLL_MS`), so with the 1-second tick a question is on screen within about 4 s. Every other resource keeps 10 s.
+3. **One click answers.** In the inbox the choices were toggles and the bar's Send answered: two clicks. The only choice of one question is now a button that answers at once (`answersOnClick`, the session's and the lead's rule). Several questions, a multiple choice and a free answer keep the toggles and the bar's Send. A wrong click cannot be undone; the session's screen already behaved this way.
+4. **One way for the proofs to answer.** `answerInInbox` in `scripts/proof-inbox.ts` gives the gestures (one click, or each pick then Send) from the labels the API gives. `proof-j2-multi.ts` uses it in place of its own code. `proof-j2.ts` now answers a team's question in its morning, after the permissions, unless `PROOF_OWNER_APPROVES=1`. It keeps the answers in `result.json` under `questions`. The lead's own question is still the owner's.
+
+**Consequences.**
+- No new interface string: the inbox's line already says when the Lead decides and what then applies, from the item's `answers`.
+- The guestbook's `agents.conf` names the two keys in its comment on `[session]` and sets neither: the defaults apply.
+- Resources: no Docker object, no network, no tunnel. The tests listen on ports the system gives, on 127.0.0.1. The browser tests use the Chromium Playwright installed on this machine.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-agent-questions`.

@@ -83,7 +83,22 @@ export type ProjectSettings = {
   // (issue #268). Not declared, `npm test` when package.json has a test
   // script, else none: the reviewer then runs no code.
   readonly testCommand?: readonly string[];
+  // A team's question of this project (issue #269): [session]
+  // question_timeout_minutes, when set, its delay (the service's
+  // CLEARED_V2_QUESTION_TIMEOUT_MINUTES otherwise), and [session]
+  // question_default, when set, the answer its delay's end applies
+  // (QUESTION_DEFAULTS; 'recommended' otherwise).
+  readonly questionTimeoutMinutes?: number;
+  readonly questionDefault?: QuestionDefault;
 };
+
+// What a question's delay ends on when neither the owner nor the lead
+// answered (flow/questions.ts, defaultAnswers): `recommended`, each
+// question's "(Recommended)" option, the session's declared answer;
+// `first`, that option, else each question's first; `park`, nothing, the
+// ticket parked.
+export const QUESTION_DEFAULTS = ['recommended', 'first', 'park'] as const;
+export type QuestionDefault = (typeof QUESTION_DEFAULTS)[number];
 
 const list = (value: string | undefined): string[] => (value ?? '').split(',').map((word) => word.trim()).filter(Boolean);
 
@@ -103,13 +118,24 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
   const serviceUrls = urlVariables(sections.session?.service_urls);
   const guardedPaths = list(sections.merge?.guarded_paths);
   const testCommand = testCommandOf(sections.session?.test_command, scripts);
+  const questionTimeoutMinutes = positive(sections.session?.question_timeout_minutes, '[session] question_timeout_minutes', false);
+  const questionDefault = questionDefaultOf(sections.session?.question_default);
   return {
     verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts,
     ...(planGoMinutes === undefined ? {} : { planGoMinutes }),
     ...(serviceUrls === undefined ? {} : { serviceUrls }),
     ...(guardedPaths.length === 0 ? {} : { guardedPaths }),
     ...(testCommand === undefined ? {} : { testCommand }),
+    ...(questionTimeoutMinutes === undefined ? {} : { questionTimeoutMinutes }),
+    ...(questionDefault === undefined ? {} : { questionDefault }),
   };
+}
+
+function questionDefaultOf(value: string | undefined): QuestionDefault | undefined {
+  const word = value?.trim();
+  if (word === undefined || word === '') return undefined;
+  if (!(QUESTION_DEFAULTS as readonly string[]).includes(word)) throw new FlowConfigError(`[session] question_default must be one of ${QUESTION_DEFAULTS.join(', ')}, not "${word}"`);
+  return word as QuestionDefault;
 }
 
 // One simple command, read as the policy reads a session's: no list, pipe,
