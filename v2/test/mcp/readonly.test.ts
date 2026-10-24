@@ -5,7 +5,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { HistoryError, LedgerHistory, openLedgerReadOnly } from '../../src/mcp/history.ts';
+import { LedgerHistory, openLedgerReadOnly } from '../../src/mcp/history.ts';
+import { StoreError } from '../../src/store/db.ts';
 import { createRedactor } from '../../src/mcp/redact.ts';
 import { createLedgerServer } from '../../src/mcp/server.ts';
 import { ENV, SESSIONS, makeLedger } from './support.ts';
@@ -63,7 +64,7 @@ test('a ledger that does not exist is not created, and one without the tables an
   const dir = mkdtempSync(join(tmpdir(), 'cleared-v2-mcp-none-'));
   try {
     const missing = join(dir, 'state', 'ledger.db');
-    assert.throws(() => openLedgerReadOnly(missing), HistoryError);
+    assert.throws(() => openLedgerReadOnly(missing), StoreError);
     assert.equal(existsSync(join(dir, 'state')), false, 'no folder made');
     assert.equal(existsSync(missing), false);
     const empty = join(dir, 'empty.db');

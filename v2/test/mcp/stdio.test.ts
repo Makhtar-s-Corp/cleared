@@ -5,29 +5,29 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { SECRETS, SESSIONS, makeLedger } from './support.ts';
+import { ENV_NAME, SECRETS, SESSIONS, makeLedger } from './support.ts';
 
 const cli = new URL('../../src/cli/ledger-mcp.ts', import.meta.url).pathname;
 
-const env = (extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
-  const out: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME, ...extra };
-  return out;
-};
+// The child's whole environment: none of the test's own.
+const env = (extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({ PATH: process.env.PATH, HOME: process.env.HOME, ...extra });
 
 test('over stdio: one JSON-RPC message per line on stdout and nothing else, until stdin closes', async () => {
   const fixture = makeLedger();
+  let child: ReturnType<typeof spawn> | undefined;
   try {
-    const child = spawn(process.execPath, [cli], { env: env({ CLEARED_STATE_DIR: fixture.dir, CLEARED_V2_APP_LANGUAGE: 'en' }), stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawn(process.execPath, [cli], { env: env({ CLEARED_STATE_DIR: fixture.dir, CLEARED_V2_APP_LANGUAGE: 'en', [ENV_NAME]: SECRETS.envValue }), stdio: ['pipe', 'pipe', 'pipe'] });
     let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-    const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-    const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+    const { stdin, stdout } = child as { stdin: NodeJS.WritableStream; stdout: NodeJS.ReadableStream };
+    const lines = createInterface({ input: stdout })[Symbol.asyncIterator]();
+    const send = (message: unknown) => stdin.write(`${JSON.stringify(message)}\n`);
     const next = async () => JSON.parse(String((await lines.next()).value)) as { id: number; result?: Record<string, unknown>; error?: { code: number } };
 
     send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } } });
     assert.equal((await next()).result?.protocolVersion, '2025-06-18');
     send({ jsonrpc: '2.0', method: 'notifications/initialized' });
-    child.stdin.write('this is not json\n');
+    stdin.write('this is not json\n');
     const bad = await next();
     assert.equal(bad.error?.code, -32700);
     send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_session_timeline', arguments: { session_id: SESSIONS.S1 } } });
@@ -35,12 +35,14 @@ test('over stdio: one JSON-RPC message per line on stdout and nothing else, unti
     assert.equal(timeline.id, 2);
     const text = JSON.stringify(timeline);
     assert.match(text, /The basket total now rounds to the cent/);
-    for (const secret of Object.values(SECRETS)) assert.ok(!text.includes(secret));
-    child.stdin.end();
-    const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+    for (const [name, secret] of Object.entries(SECRETS)) assert.ok(!text.includes(secret), name);
+    const closed = new Promise<number | null>((resolve) => child?.on('close', resolve));
+    stdin.end();
+    const code = await closed;
     assert.equal(code, 0, stderr);
     assert.equal((await lines.next()).done, true, 'no other line on stdout');
   } finally {
+    if (child?.exitCode === null) child.kill();
     fixture.close();
   }
 });

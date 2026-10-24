@@ -8,6 +8,8 @@ A local release broker checks tracker approval and the reviewed PR before mergin
 
 `cleared status` shows the last wake, service reachability and stalled work without starting a model. An optional push heartbeat lets an external service alert you when Cleared stops waking or gets stuck. See [Heartbeat and status](docs/heartbeat.md).
 
+To let an agent search the v2 session history read only, with secrets removed, paste it this line: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts` (see [the ledger's MCP server](v2/README.md#the-ledgers-mcp-server)).
+
 When something waits for the human (a release to agree to, a team's question) or goes wrong (a rollback, a health problem, a team blocked), the wake tells him on his phone: through the app installed on the Home Screen (Web Push, no outside account), or ntfy, Telegram or e-mail. See [Notifications](docs/notifications.md).
 
 ```mermaid
