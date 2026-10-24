@@ -3,7 +3,7 @@
 // the service's own consumption() and its levers, so the screen in the
 // fixtures app draws what the service would answer. No name, no path, no
 // figure of a real account.
-import { LEVERS_TABLE, LeverError, LeverStore, type LeversChange } from '../../src/consumption/levers.ts';
+import { LEVERS_TABLE, LeverError, LeverStore, type LeverReader, type LeversChange } from '../../src/consumption/levers.ts';
 import { QUOTA_TABLES } from '../../src/consumption/quota.ts';
 import { consumption, leverChoices, type Consumption, type LeverChoices } from '../../src/consumption/usage.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
@@ -51,6 +51,16 @@ export function consumptionFixture(project: string, now: () => Date) {
     .run(project, new Date(start.getTime() - 20 * 60_000).toISOString(), new Date(start.getTime() + 3.5 * DAY).toISOString());
   const levers = new LeverStore(store.db, project);
   return {
+    // The ledger and the levers the fixtures' batches read (requirement C6): the same lanes and windows as the screen.
+    db: store.db,
+    levers: levers as LeverReader,
+    // A window of Claude Code's subscription reported now, as a session reports it.
+    report(window: 'seven_day' | 'five_hour', usedPercent: number): void {
+      store.events.append({
+        at: now().toISOString(), sessionId: 'fx-claude-code', ticket: 'LOCAL-1', project,
+        event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window, usedPercent, resetsAt: null } } as never,
+      });
+    },
     read(zone: string | undefined): Consumption {
       return consumption(store.db, { project, now: now(), ...(zone ? { timeZone: zone } : {}), levers: levers.read(), config: CONFIG });
     },

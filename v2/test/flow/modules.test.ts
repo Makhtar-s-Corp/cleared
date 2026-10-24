@@ -39,10 +39,10 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
   // flow/replay.ts) are the flow module's.
   assert.deepEqual(routeKeys(flow), [
     'GET /api/batches', 'GET /api/batches/:id', 'GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'GET /api/sessions/:id/terminal/stream', 'GET /api/tickets', 'GET /api/tickets/:id', 'GET /api/tickets/:id/steps',
-    'GET /api/tickets/:id/variants', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback',
+    'GET /api/tickets/:id/variants', 'POST /api/batches', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback',
     'POST /api/sessions/:id/giveback', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/replay', 'POST /api/sessions/:id/takeover',
     'POST /api/sessions/:id/terminal/close', 'POST /api/sessions/:id/terminal/input', 'POST /api/sessions/:id/terminal/open', 'POST /api/sessions/:id/terminal/resize',
-    'POST /api/batches', 'POST /api/tickets', 'POST /api/tickets/:id/close', 'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/variants/:id/choose', 'PUT /api/sessions/:id/files/*',
+    'POST /api/tickets', 'POST /api/tickets/:id/close', 'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/variants/:id/choose', 'PUT /api/sessions/:id/files/*',
   ]);
   assert.ok(BATCH_TABLES.every((table) => flow.tables.includes(table)), 'the batches\' tables are the flow module\'s');
   assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
