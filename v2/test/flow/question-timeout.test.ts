@@ -16,7 +16,7 @@ import type { QuestionItem } from '../../src/api/types.ts';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
 import type { CustomValue, Question } from '../../src/session/events.ts';
-import { fakeEffects, finished, setup, started, text, until, type SetupOptions } from './support.ts';
+import { fakeEffects, finished, permission, setup, started, text, until, type SetupOptions } from './support.ts';
 
 const MIN = 60_000;
 const RECOMMENDED: CustomValue['cleared.question'] = {
@@ -205,4 +205,52 @@ test('the default answers by rule: recommended is the declared answer, first fal
   assert.equal(defaultAnswers([...CHOICE.questions, ...FREE.questions], 'first'), null);
   assert.equal(defaultAnswers(RECOMMENDED.questions, 'park'), null);
   assert.equal(defaultAnswers([], 'first'), null);
+});
+
+// A permission request has no declared answer and the lead does not decide
+// it: past the same delay the ticket is parked (issue #299), whether the
+// session is awake or was suspended by the idle watchdog at 15 minutes.
+async function requesting() {
+  const t = await setup({ scripts: { author: [started, ...text('a1', 'I will touch a file.'), permission, ...text('a2', 'Done.'), finished(0.3)] } });
+  await t.engine.start(t.ticket.id, 'u1');
+  const id = t.startedSessions[0]!.id;
+  await until(() => t.inbox.waitingFor(id) === 1, 'the permission in the inbox');
+  await t.engine.settled();
+  const asked = t.clock.now;
+  const at = async (minutes: number) => {
+    t.clock.now = asked + minutes * MIN;
+    await t.engine.tick();
+    await t.engine.settled();
+  };
+  const parked = () => t.store.db.prepare("SELECT detail FROM events WHERE kind = 'permission_parked'").all() as { detail: string }[];
+  return { ...t, id, at, parked };
+}
+
+test('a permission request that waits past the delay parks its ticket: the session stops, the ticket is in Todo put back as parked, the request is not allowed, said in the ledger', async () => {
+  const t = await requesting();
+  await t.at(29 + 59 / 60);
+  assert.equal(t.parked().length, 0);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'In Progress');
+  await t.at(30);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
+  assert.equal(t.store.sessions.get(t.id)?.status, 'stopped');
+  const back = t.flowEvents.find((e): e is Extract<FlowEvent, { type: 'ticket_put_back' }> => e.type === 'ticket_put_back');
+  assert.equal(back?.reason, 'parked');
+  assert.match(back?.note ?? '', /permission to use Bash waited 30 min/);
+  assert.equal(t.inbox.waitingFor(t.id), 0, 'nothing of the session waits any more');
+  assert.equal(t.store.events.after(t.id).some(({ event }) => event.type === 'CUSTOM' && event.name === 'cleared.permission_answered' && event.value.decision !== 'cancelled'), false, 'never allowed');
+  assert.deepEqual(t.parked().map((row) => (JSON.parse(row.detail) as { tool: string; minutes: number }).minutes), [30]);
+});
+
+test('a session the watchdog suspended on a permission request keeps no slot either: its ticket is parked at the delay', async () => {
+  const t = await requesting();
+  await t.at(16);
+  assert.equal(await t.engine.idleStop(t.id), 'stopped');
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'In Progress', 'suspended, the request still waits');
+  await t.at(29);
+  assert.equal(t.parked().length, 0);
+  await t.at(30);
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
+  assert.equal(t.inbox.waitingFor(t.id), 0);
+  assert.equal(t.parked().length, 1);
 });

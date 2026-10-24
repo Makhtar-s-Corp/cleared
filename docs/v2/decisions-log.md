@@ -4609,3 +4609,22 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - Known limit: an approval clicked while the checks are red, and still in its undo window when the repair starts, is not cancelled by the repair. The lock still refuses to merge a red head.
 - Resources: no Docker object, no network, no tunnel, no port. The tests run in memory.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ci-repair`.
+
+## 2026-10-24: follow-ups of the plans' autonomy (the author's choices, lane `j3-autonomy-followups`, issue #299)
+
+**Context.** Issue #299 lists seven follow-ups of PR #297. Three are done here (P78 to P80). Four are left, with why.
+
+**Decisions.**
+1. **A permission request waits as long as a question and then parks the ticket** (`FlowEngine.#duePermissions`). It is never allowed on the owner's behalf: a permission has no answer the session declared, and allowing a tool by a delay would turn the owner's check into a timer. Rejecting it would make the session guess what to do next. Parking frees the plan's slot and keeps the volume, as an unanswered question with no default does. The delay is the question's (the project's `question_timeout_minutes`, else the service's), counted from when the request was raised; there is no lead window, since the lead has nothing to decide on a permission. No new bus event and no new inbox field: the ledger row `permission_parked` and the ticket's comment say it, and the inbox item leaves with the session. The inbox does not show the delay on a permission yet.
+2. **`isTestCommand` reads the program, not a word.** After the leading `cd dir &&` and variable assignments, the line must start with a known runner. A runner missing from the list is not read as a test run; the third attempt then lacks its output, which is the safe side.
+3. **A module may declare `stop`.** Added to `Module` and `App` (`registry.ts`) and awaited by `main.ts` before `store.close()`, because `process.exit(0)` followed a close that did not wait for a watchdog pass in progress. Reverse order, a failing stop said and skipped. Only the flow module uses it, for the watchdog. The human side's terminal timer is left as it was: it holds no pass.
+
+**Not done, and why.**
+- *Follow-up 2* (a `parked` item blocks the items that depend on it until the lead starts it again): the issue itself asks to watch it at the next endurance proof. A rule chosen without that run would be a guess.
+- *Follow-up 5* (a suspended session's ticket is put back `restart` after the service restarts, instead of resumed): a suspended session lives in `#dormant`, in memory, with its start input; the adapter keeps no start input to rebuild it from the ledger (see `recover`). Resuming it needs that input stored, which is a change of what the ledger keeps and of its tests, not a follow-up.
+- *Follow-up 6* (the watchdog proved on real containers): it belongs to the endurance run, which has the Docker daemon and the labels `cleared.dev=v2`. No container is made by this lane.
+- *Follow-up 7* (B3.11 and P54 to done): after that run. Their rows stay as they are.
+
+**Consequences.**
+- No Docker object, no network, no tunnel, no port, no secret. The tests run in memory.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-autonomy-followups`.
