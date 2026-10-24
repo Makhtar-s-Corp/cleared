@@ -4677,3 +4677,20 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Consequences.**
 - No Docker object, no network, no tunnel, no port, no secret. The tests run in memory.
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-autonomy-followups`.
+
+## 2026-10-24: follow-ups of the review channel (the author's choices, lane `j3-review-channel-followups`, issue #296)
+
+**Context.** Issue #296 lists five follow-ups of the review channel (#295). Four are done here (P90 to P92), one is left, with why.
+
+**Decisions.**
+1. **A message of the channel is journaled once on the side it reaches.** When the session resumed took the message and its `send` failed, the fallback session (a new reviewer, a new author) is given the message in its prompt and does not journal it again. Not chosen: journaling after a successful `send`. A scripted or fast turn ends inside `send`, so the row would come after the verdict it answers. The cost of the rule: the fallback session's screen does not show the message it was given; the session that took it does, and the ticket's `all` view shows it once. This is also the fix for the author's side (the request journaled on the resumed author and again on the new one), which the issue did not name.
+2. **The fake adapter gets `reviewerResume: 'send_fails'`**, a reviewer resumed whose send throws, and it spends no round of the reviewers' scripts.
+3. **Two tests that guard, not fix.** An author that cannot be resumed (follow-up 3) and a Claude Code reviewer resumed keeping its read-only policy (follow-up 4) already worked; they are pinned. The second was checked to bite: setting the role of a resume to `author` in the runner's start line, or the policy's role to `author` at a permission request, makes it fail.
+4. **The runbook** (`proof-clean-base.md`) now lists `PROOF_REVIEW_ROUNDS` and `CLEARED_V2_REVIEW_ROUNDS` (3 by default, 2 before).
+
+**Not done, and why.**
+- *Follow-up 1* (the channel kept only in memory, to rebuild from the ledger after a restart): no state of the old code goes wrong. A restart ends every live author and reviewer session (`recover`), puts the ticket back in Todo with reason `restart`, and the adapter keeps no start input to resume a session from (`#inputs` is in memory too). A person who starts the ticket again begins a new flow at round 1, by design. No author's turn can end into a lost channel, so there is no test that fails on the old code, and a rebuild would be code for a case that cannot happen. It becomes real if sessions are made resumable after a restart (lane `j3-autonomy-followups`, follow-up 5): the open channel is then the last `reviewer` message of the flow with no `author` message after it, on the session that carries it.
+
+**Consequences.**
+- No Docker object, no network, no tunnel, no port, no secret. The tests run in memory.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-review-channel-followups`.

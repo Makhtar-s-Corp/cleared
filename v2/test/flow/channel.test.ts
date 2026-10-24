@@ -125,6 +125,45 @@ test('a reviewer that cannot be resumed is started again with the review prompt 
   assert.equal(t.recorder.records[0]?.round, 2);
 });
 
+// Follow-ups of #295 (issue 296). A message is journaled on the session that
+// sends it and on the one it reaches, once each, whatever fails on the way.
+const rowsOf = (t: Setup, from: Message['from'], round: number) =>
+  t.store.sessions.list({ ticket: t.ticket.id }).flatMap((row) => channel(t.store.events.after(row.id)).filter((m) => m.from === from && m.round === round).map(() => row.role)).sort();
+
+test('a reviewer resumed whose send fails: the author\'s answer is journaled once on the reviewer side, and the new reviewer is given it in its prompt', async () => {
+  const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), reviewerScript(REPORT_PASS)], reviewerResume: 'send_fails' }, config: { maxReviewRounds: 3 } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => kinds(t).includes('release:waiting'), 'the release item', 5000);
+  assert.deepEqual(t.startedSessions.map((s) => s.input.role), ['author', 'reviewer', 'reviewer']);
+  assert.match(t.startedSessions[2]!.input.prompt, /Fixed\.|Done\./, 'the answer reaches the new reviewer through its prompt');
+  assert.deepEqual(rowsOf(t, 'author', 1), ['author', 'reviewer'], 'sent by the author, received once');
+  assert.deepEqual(rowsOf(t, 'reviewer', 1), ['author', 'reviewer'], 'the request, on both sides');
+  assert.equal(t.recorder.records[0]?.round, 2);
+});
+
+test('an author resumed whose send fails: the request is journaled once on the author side, and the new author is given it in its prompt', async () => {
+  const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), reviewerScript(REPORT_PASS)], reopen: 'send_fails' }, config: { maxReviewRounds: 3 } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => kinds(t).includes('release:waiting'), 'the release item', 5000);
+  assert.deepEqual(t.startedSessions.map((s) => s.input.role), ['author', 'reviewer', 'author']);
+  assert.match(t.startedSessions[2]!.input.prompt, /sorts the wrong way/);
+  assert.deepEqual(rowsOf(t, 'reviewer', 1), ['author', 'reviewer']);
+  assert.deepEqual(rowsOf(t, 'author', 1), ['author', 'reviewer']);
+});
+
+test('an author that cannot be resumed is started again, and its answer reaches the same reviewer', async () => {
+  const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), reviewerScript(REPORT_PASS)], reopen: 'throw' }, config: { maxReviewRounds: 3 } });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => kinds(t).includes('release:waiting'), 'the release item', 5000);
+  assert.deepEqual(t.startedSessions.map((s) => s.input.role), ['author', 'reviewer', 'author'], 'a new author, and the reviewer is resumed, not started again');
+  assert.match(t.startedSessions[2]!.input.prompt, /sorts the wrong way/, 'the new author is given the request');
+  const reviewer = t.store.events.after(idOf(t, 'reviewer'));
+  assert.match(userTexts(reviewer).join('\n'), /Done\./, 'the new author\'s last message reaches the first reviewer');
+  assert.deepEqual(channel(reviewer).map((m) => `${m.from}:${m.round}`), ['reviewer:1', 'author:1']);
+  assert.deepEqual(verdicts(reviewer), ['changes_requested:1', 'pass:2']);
+  assert.equal(t.recorder.records[0]?.round, 2);
+});
+
 test('a resumed reviewer\'s verdict is read from its new turn only: an answer with no Verdict line is no verdict', async () => {
   const t = await setup({ scripts: { author: quickAuthor, reviewers: [reviewerScript(REPORT_FIX), [started, ...text('r2', 'I looked again.'), finished(0.1)]] }, config: { maxReviewRounds: 3 } });
   await t.engine.start(t.ticket.id, 'u1');

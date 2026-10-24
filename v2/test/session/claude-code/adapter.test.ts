@@ -213,6 +213,45 @@ test('a reviewer\'s chained reads and checks are allowed by the policy, with no 
   } finally { t.cleanup(); }
 });
 
+// Issue 296 (the review channel resumes the reviewer for each round): a
+// resume starts the runner again under the same input, so the role and the
+// read-only policy of the reviewer are those of its first start.
+test('a reviewer resumed keeps its role and its read-only policy: no edit, no commit, and the declared tests and reads still allowed', async () => {
+  const t = await setup();
+  try {
+    const author = input(t.workdir);
+    const handle = await t.adapter.start({ ...author, role: 'reviewer', policy: { ...author.policy, role: 'reviewer', testCommand: ['npm', 'test'] } });
+    const first = t.runners[0] as FakeRunner;
+    const stopping = handle.stop();
+    await first.waitFor((l) => l.type === 'stop');
+    first.say({ type: 'exit', code: 0 });
+    first.exit(0);
+    await stopping;
+
+    await t.adapter.resume(SESSION);
+    const second = t.runners[1] as FakeRunner;
+    assert.deepEqual(await second.waitFor((l) => l.type === 'start'), { type: 'start', sessionId: SESSION, model: 'claude-haiku-5-5', resume: true, role: 'reviewer', maxBudgetUsd: 1 });
+    const ask = (requestId: string, toolName: string, input: Record<string, unknown>) => second.say({ type: 'permission_request', requestId, toolName, toolUseId: `toolu_${requestId}`, input });
+    ask('r-write', 'Write', { file_path: '/workspace/src/entries.ts', content: 'x' });
+    ask('r-commit', 'Bash', { command: 'git commit -am fix' });
+    ask('r-tests', 'Bash', { command: 'npm test' });
+    ask('r-read', 'Read', { file_path: '/workspace/src/entries.ts' });
+    const decision = async (requestId: string) => (await second.waitFor((l) => l.requestId === requestId)).decision;
+    assert.equal(((await decision('r-write')) as { kind: string }).kind, 'reject_once');
+    assert.equal(((await decision('r-commit')) as { kind: string }).kind, 'reject_once');
+    assert.deepEqual(await decision('r-tests'), { kind: 'allow_once' });
+    assert.deepEqual(await decision('r-read'), { kind: 'allow_once' });
+    await settle();
+    const answered = custom(t.log, 'cleared.permission_answered') as { requestId: string; rule: string }[];
+    assert.deepEqual(answered.map((a) => `${a.requestId}:${a.rule}`), ['r-write:reviewer.edit', 'r-commit:reviewer.edit', 'r-tests:reviewer.tests', 'r-read:read.workdir']);
+    assert.equal(custom(t.log, 'cleared.permission_request').length, 0, 'nothing reaches the inbox');
+    const stoppingAgain = (await t.adapter.resume(SESSION)).stop();
+    await second.waitFor((l) => l.type === 'stop');
+    second.exit(0);
+    await stoppingAgain;
+  } finally { t.cleanup(); }
+});
+
 test('a question goes to the inbox and its answer goes back with the answers', async () => {
   const t = await setup();
   try {
