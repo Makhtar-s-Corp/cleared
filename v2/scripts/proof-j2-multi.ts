@@ -32,7 +32,10 @@
 // frozen branch, and the watchers' deploys of it awaited. Nothing is ever
 // pushed to main. A real run without PROOF_REPOS, or whose workspace merges
 // into main or master, stops before it starts; PROOF_REPOS=none skips the
-// reset in the rehearsal only.
+// reset in the rehearsal only. So does a run on a workspace where a plan is
+// approved and not paused (issue 285, proof-plan.ts): the plan's tickets
+// would run beside the proof's, on the same run branch. This proof has no
+// plan of its own to take over: the plan is paused first.
 // The times come from the app's routes, as the screens read them, and from
 // the ledger, read only, when it is given.
 //
@@ -63,7 +66,7 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { NextInboxItem, QuestionItem, ReleaseItem, SessionDetail, SessionSummary, TicketStep, Workspace } from '../src/api/types.ts';
+import type { NextInboxItem, Plan, QuestionItem, ReleaseItem, SessionDetail, SessionSummary, TicketStep, Workspace } from '../src/api/types.ts';
 import { Docker, commandRunner } from '../src/container/docker.ts';
 import { RELAY } from '../src/container/preview.ts';
 import { DEFAULT_FAKE_PORT } from '../src/container/services.ts';
@@ -71,6 +74,7 @@ import { sessionNames, siblingAddress } from '../src/container/session-runtime.t
 import type { Ticket } from '../src/tickets/contract.ts';
 import { BaseError, StartRefusal, baseModeOf, checksRunOn, closeStale, frozenCommits, readWatchers, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, watcherRefusal, workflowsAt, type BaseMode, type BaseSettings } from './proof-base.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
+import { startCheck } from './proof-plan.ts';
 import { answerInInbox, declaredChecks, permissionAnswer } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
 import { PERMISSION_COMMAND_LIMIT, humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type AnsweredPermission, type AnsweredQuestion, type BaseReport, type MultiResult, type Step } from './proof-report.ts';
@@ -415,6 +419,21 @@ async function prepareBase(settings: BaseSettings): Promise<string> {
   }
   times.base_ready_at = now();
   return `${repos.map((r) => `${r.service} at ${r.commit.slice(0, 12)}`).join(', ')}; ${setAside.length} earlier ticket(s) set aside`;
+}
+
+// A plan approved and not paused stops the run before its base (issue 285).
+// A service with no lead answers 503 on the plans: it has no plan.
+if (signedIn) {
+  const plans = await api<Plan[]>('/plans').catch((error: Error) => (/ answered 503\b/.test(error.message) ? [] : error));
+  const decision = plans instanceof Error ? { kind: 'refuse' as const, reason: `the plans could not be read: ${plans.message.split('\n')[0]}` } : startCheck(plans, undefined, { resumable: false });
+  if (decision.kind === 'refuse') {
+    baseError = decision.reason;
+    log(`start: refused: ${decision.reason}`);
+    save();
+    await browser.close();
+    if (world) await world.stop();
+    process.exit(64);
+  }
 }
 
 if (signedIn && baseSettings) {

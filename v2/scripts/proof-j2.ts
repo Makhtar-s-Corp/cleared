@@ -47,6 +47,17 @@
 //                          notification to the Mac, so it runs on the inbox only and records
 //                          the step as skipped, not failed) or counted (the rehearsal's
 //                          default: its e-mail stand-in)
+//   PROOF_RESUME_PLAN      the id of a plan already approved (or paused) to take over
+//                          instead of sending a new goal (issue 285): steps 1 to 3 are
+//                          skipped, step 4 gives a paused plan the owner's Resume on the lead
+//                          screen and plants the two commitments, and every measure runs from
+//                          then. Without it, a run stops before its first gesture (exit 64)
+//                          when a plan is approved and not paused: two plans would run at once
+//   PROOF_STUCK_MINUTES    how long step 7 waits on a blocked plan before it fails (default 90):
+//                          nothing running, nothing to approve, every item left held, parked,
+//                          ready but not started, or after one of those (proof-plan.ts). Above
+//                          the service's own delays (a question's 30 min, then the lead's 10,
+//                          the idle watchdog's 15), so the lead has its start_ticket turn first
 //   PROOF_NIGHT_MINUTES    the rehearsal's night (default 4)
 //   PROOF_TIMEOUT_MINUTES  the rehearsal's whole run at most (default 30)
 // No trace and no video are recorded: a trace keeps what is typed, the password included.
@@ -56,8 +67,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { LeadMemory, LeadMessage, LeadState, NextInboxItem, Plan, SessionSummary } from '../src/api/types.ts';
 import { answerInInbox, leftForOwner, morningAction, type InboxEntry, type QuestionChoice } from './proof-inbox.ts';
+import { blockageLine, planBlockage, startCheck, type StartDecision } from './proof-plan.ts';
 import {
-  NOTIFICATIONS_SKIPPED_NOTE, PLANTED, changes, commitmentOutcomes, highestShare, notificationCount, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, sessionPlanFacts, track,
+  NOTIFICATIONS_SKIPPED_NOTE, PLANTED, changes, commitmentOutcomes, duration, highestShare, notificationCount, ledgerFacts, morningSummary, newTimeline, orderCheck, renderDurations, sessionPlanFacts, track,
   type LedgerFacts, type Morning, type Outcome, type ProofResult, type ReleaseCard, type Snapshot, type Step,
 } from './proof-report.ts';
 import { REHEARSAL_GOAL, startRehearsal, type World } from './proof-rehearsal.ts';
@@ -93,6 +105,10 @@ const NOTIFICATIONS = env.PROOF_NOTIFICATIONS ?? (REHEARSAL ? 'counted' : 'skipp
 if (NOTIFICATIONS !== 'counted' && NOTIFICATIONS !== 'skipped') { console.error('proof: PROOF_NOTIFICATIONS is counted or skipped'); process.exit(64); }
 const NOTIFICATIONS_SKIPPED = NOTIFICATIONS === 'skipped' ? NOTIFICATIONS_SKIPPED_NOTE : null;
 const OUT = env.PROOF_OUT ?? `/tmp/cleared-captures/j2/${REHEARSAL ? 'rehearsal' : 'proof'}`;
+const RESUME = env.PROOF_RESUME_PLAN?.trim() || undefined;
+// The rehearsal starts a service of its own, with no plan to take over.
+if (RESUME && REHEARSAL) { console.error('proof: PROOF_RESUME_PLAN is for a real run: the rehearsal\'s service has no plan'); process.exit(64); }
+const STUCK_MS = minutes('PROOF_STUCK_MINUTES', 90) * 60_000;
 
 const log = (line: string) => console.log(`proof: ${line}`);
 mkdirSync(OUT, { recursive: true });
@@ -108,7 +124,7 @@ const APP = (world?.appUrl ?? env.PROOF_APP_URL ?? 'http://127.0.0.1:8792').repl
 const OWNER = world?.owner ?? env.PROOF_OWNER ?? 'owner';
 const PASSWORD_FILE = (world?.passwordFile ?? env.PROOF_PASSWORD_FILE) as string;
 const LEDGER = world?.ledger ?? env.PROOF_LEDGER;
-const END_AFTER_GOAL_MS = minutes('PROOF_HOURS', 48) * 3_600_000;
+const END_AFTER_GOAL_MS = minutes('PROOF_HOURS', 48) * 3_600_000;  // after the goal, or after the take-over
 
 const require = createRequire(join(env.PROOF_PLAYWRIGHT, 'package.json'));
 const { chromium } = require('playwright-core') as { chromium: any };
@@ -131,6 +147,12 @@ const timeline = newTimeline();
 const planted: Record<string, string[]> = {};
 let planId = '';
 let plan: Plan | undefined;
+let resumed: { planId: string; at: string; items: Record<number, string> } | null = null;
+let startRefusal: string | null = null;
+// The blockage seen now (proof-plan.ts), and the last one, for the report.
+type Blocked = { signature: string; since: string; line: string; failed: boolean };
+let blocked: Blocked | null = null;
+let lastBlocked: Blocked | null = null;
 let morning: Morning | null = null;
 const cards: ReleaseCard[] = [];
 let left = { knowledge: 0, contract: 0 };
@@ -152,7 +174,7 @@ async function capture(name: string, target: any = page): Promise<string> {
 
 function save(): void {
   const file = join(OUT, 'result.json');
-  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', planId, planted, steps, times, answers, questions, gestures, timeline, morning, watch: watchLog }, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify({ app: APP, mode: REHEARSAL ? 'rehearsal' : 'real', planId, resumed, startRefusal, blocked: lastBlocked, planted, steps, times, answers, questions, gestures, timeline, morning, watch: watchLog }, null, 2)}\n`);
   chmodSync(file, 0o644);
 }
 
@@ -197,14 +219,16 @@ function ledger<T>(read: (db: DatabaseSync) => T): T | undefined {
   const db = new DatabaseSync(LEDGER, { readOnly: true });
   try { return read(db); } finally { db.close(); }
 }
-const facts = (): LedgerFacts | undefined => ledger((db) => ledgerFacts(db, times.goal_sent_at ?? startedAt.toISOString()));
+// Where the measures start: the goal, or the take-over of a plan (issue 285).
+const since = (): string => times.resumed_at ?? times.goal_sent_at ?? startedAt.toISOString();
+const facts = (): LedgerFacts | undefined => ledger((db) => ledgerFacts(db, since()));
 
 const LIVE = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
 async function readState(): Promise<Snapshot> {
   const [lead, plans, inbox, sessions] = await Promise.all([api<LeadState>('/lead'), api<Plan[]>('/plans'), api<NextInboxItem[]>('/inbox'), api<SessionSummary[]>('/sessions')]);
   plan = plans.find((p) => p.id === planId) ?? plan;
   // Only the count each reading: the whole ledger is read at the end (review 1, F2).
-  const sent = ledger((db) => notificationCount(db, times.goal_sent_at ?? startedAt.toISOString()));
+  const sent = ledger((db) => notificationCount(db, since()));
   return {
     at: now(),
     lead: { generation: lead.generation, phase: lead.phase, percent: lead.context?.percent ?? null, highestPercent: lead.highestPercent, refreshCount: lead.refreshCount, openCommitments: lead.openCommitments },
@@ -233,6 +257,30 @@ async function watch(label: string): Promise<Snapshot> {
   return snap;
 }
 
+// Whether the plan is blocked (proof-plan.ts), said once when it starts or
+// changes and once when it ends. Answers how long the same blockage has
+// lasted, 0 when there is none.
+function checkBlocked(label: string): number {
+  const found = plan ? planBlockage(plan) : null;
+  if (!found) {
+    if (blocked) log(`${label}: the plan moves again after ${duration(blocked.since, now())} blocked`);
+    blocked = null;
+    return 0;
+  }
+  if (blocked?.signature !== found.signature) {
+    blocked = { signature: found.signature, since: now(), line: blockageLine(found), failed: false };
+    lastBlocked = blocked;
+    log(`${label}: blocked: ${blocked.line}${label === 'morning' ? `; step 7 stops if this lasts ${STUCK_MS / 60_000} min` : ''}`);
+    save();
+  }
+  return Date.now() - Date.parse(blocked.since);
+}
+
+// The last blockage, as the report keeps it.
+function reportBlocked(): ProofResult['blocked'] {
+  return lastBlocked && { since: lastBlocked.since, line: lastBlocked.line, failed: lastBlocked.failed };
+}
+
 // The lead's thread, as the lead screen reads it.
 const thread = () => api<LeadMessage[]>('/lead/messages');
 
@@ -257,9 +305,50 @@ const signedIn = await step(0, 'sign-in', async () => {
   return `signed in as ${OWNER}`;
 });
 
+// ---- the plans already there (issue 285) -----------------------------------------
+// A run sends a new goal only when no plan is approved, else it takes over
+// the one PROOF_RESUME_PLAN names, else it stops before its first gesture.
+let decision: StartDecision = { kind: 'new' };
+// The plans before the goal: steps 2 and 3 take only a plan proposed after it.
+let earlier = new Set<string>();
+if (signedIn) {
+  try {
+    const plans = await api<Plan[]>('/plans');
+    earlier = new Set(plans.map((p) => p.id));
+    decision = startCheck(plans, RESUME);
+  } catch (error) {
+    decision = { kind: 'refuse', reason: `the plans could not be read: ${(error as Error).message.split('\n')[0]}` };
+  }
+  if (decision.kind === 'refuse') {
+    startRefusal = decision.reason;
+    log(`start: refused: ${decision.reason}`);
+    save();
+    await browser.close();
+    if (world) await world.stop();
+    process.exit(64);
+  }
+}
+const takeOver = decision.kind === 'resume' ? decision.plan : undefined;
+
+// The two planted commitments, as the owner writes them in the thread.
+async function plant(): Promise<void> {
+  await page.goto(`${APP}/lead`);
+  await page.locator('#thread').waitFor();
+  for (const message of PLANTED) {
+    const before = (await thread()).length;
+    const known = new Set((await api<LeadMemory>('/lead/memory')).commitments.map((c) => c.id));
+    await page.locator('#reply-text').fill(message.text);
+    await page.locator('#reply-send').click();
+    gesture(`told the lead: ${message.text}`);
+    await until('the lead\'s reply', async () => (await thread()).slice(before).some((m) => m.by === 'lead'), 10 * 60_000, 2_000);
+    planted[message.key] = (await api<LeadMemory>('/lead/memory')).commitments.filter((c) => !known.has(c.id)).map((c) => c.id);
+    log(`planted ${message.key}: ${planted[message.key]?.join(', ') || 'no commitment recorded'}`);
+  }
+}
+
 // ---- 1. The goal -----------------------------------------------------------------
 let goalSent = false;
-if (signedIn) {
+if (signedIn && !takeOver) {
   goalSent = await step(1, 'goal', async () => {
     await page.goto(`${APP}/lead`);
     // The lead starts on the first request to its routes: wait until it is up.
@@ -287,7 +376,7 @@ if (goalSent) {
         const state = await api<LeadState>('/lead');
         if (state.pendingQuestion) return 'question' as const;
         const plans = await api<Plan[]>('/plans');
-        return plans.some((p) => p.state === 'proposed') ? 'plan' as const : undefined;
+        return plans.some((p) => p.state === 'proposed' && !earlier.has(p.id)) ? 'plan' as const : undefined;
       }, 20 * 60_000);
       if (next === 'plan') break;
       asked++;
@@ -318,7 +407,7 @@ if (goalSent) {
   });
   // ---- 3. The plan -------------------------------------------------------------
   planned = await step(3, 'plan', async () => {
-    const proposed = await until('the plan', async () => (await api<Plan[]>('/plans')).find((p) => p.state === 'proposed'), 20 * 60_000);
+    const proposed = await until('the plan', async () => (await api<Plan[]>('/plans')).find((p) => p.state === 'proposed' && !earlier.has(p.id)), 20 * 60_000);
     planId = proposed.id;
     plan = proposed;
     times.plan_proposed_at = proposed.proposedAt;
@@ -352,20 +441,42 @@ if (planned) {
     }, 10 * 60_000);
     times.first_start_at = now();
     const running = first.items.filter((i) => i.state === 'running').length;
-    // The two planted commitments, as the owner writes them in the thread.
-    for (const message of PLANTED) {
-      const before = (await thread()).length;
-      const known = new Set((await api<LeadMemory>('/lead/memory')).commitments.map((c) => c.id));
-      await page.locator('#reply-text').fill(message.text);
-      await page.locator('#reply-send').click();
-      gesture(`told the lead: ${message.text}`);
-      await until('the lead\'s reply', async () => (await thread()).slice(before).some((m) => m.by === 'lead'), 10 * 60_000, 2_000);
-      planted[message.key] = (await api<LeadMemory>('/lead/memory')).commitments.filter((c) => !known.has(c.id)).map((c) => c.id);
-      log(`planted ${message.key}: ${planted[message.key]?.join(', ') || 'no commitment recorded'}`);
-    }
+    await plant();
     await watch('evening');
     const memory = await api<LeadMemory>('/lead/memory');
     return `approved; first start ${running} running (at most ${plan?.maxParallel ?? 2}); ${memory.commitments.filter((c) => c.state === 'open').length} open commitments`;
+  });
+}
+
+// ---- 1 to 4, a plan taken over (issue 285) -----------------------------------------
+// No goal, no question, no new plan: the owner gives a paused plan its
+// Resume on the lead screen, as the gesture of step 4, and tells the lead
+// the two things as after an approval. The runner starts the items put back
+// at its next tick; a held or parked item waits for the lead's start_ticket.
+if (takeOver) {
+  for (const [n, name] of [[1, 'goal'], [2, 'questions'], [3, 'plan']] as const) skip(n, name, `took over plan ${takeOver.id}`);
+  approved = await step(4, 'resume', async () => {
+    planId = takeOver.id;
+    let current = await api<Plan>(`/plans/${encodeURIComponent(planId)}`);
+    const was = current.state;
+    const items = Object.fromEntries(current.items.map((i) => [i.position, i.state]));
+    await page.goto(`${APP}/plans/${encodeURIComponent(planId)}`);
+    const panel = `#plan-side [data-plan="${planId}"]`;
+    await page.locator(panel).waitFor();
+    times.resumed_at = now();
+    resumed = { planId, at: times.resumed_at, items };
+    if (was === 'paused') {
+      await page.locator(`${panel} [data-plan-action="resume"]`).click();
+      gesture(`resumed plan ${planId} on the lead screen`);
+      await page.locator(`${panel}[data-state="approved"]`).waitFor({ timeout: 120_000 });
+      current = await api<Plan>(`/plans/${encodeURIComponent(planId)}`);
+    }
+    if (current.state !== 'approved') throw new Error(`plan ${planId} is ${current.state} after the take-over`);
+    plan = current;
+    await plant();
+    await watch('evening');
+    const memory = await api<LeadMemory>('/lead/memory');
+    return `took over plan ${planId} (${was}${was === 'paused' ? ', resumed' : ''}); items then ${Object.entries(items).map(([n, state]) => `${n}:${state}`).join(' ')}; ${memory.commitments.filter((c) => c.state === 'open').length} open commitments`;
   });
 }
 
@@ -375,6 +486,8 @@ if (approved) {
     log(`the night until ${MORNING.toISOString()}, a reading every ${WATCH_MS / 1000} s`);
     while (Date.now() < MORNING.getTime() && Date.now() < DEADLINE) {
       await watch('night');
+      // Said, never failed: the morning's gestures may unblock it.
+      checkBlocked('night');
       await sleep(Math.min(WATCH_MS, Math.max(1_000, MORNING.getTime() - Date.now())));
     }
     const f = facts();
@@ -389,7 +502,7 @@ if (approved) {
 if (approved) {
   await step(6, 'morning', async () => {
     const snap = await watch('morning');
-    morning = morningSummary(snap, await thread(), times.approved_at ?? startedAt.toISOString());
+    morning = morningSummary(snap, await thread(), times.approved_at ?? since());
     times.morning_at = snap.at;
     for (const screen of ['', 'inbox']) {
       await page.goto(`${APP}/${screen}`);
@@ -422,8 +535,9 @@ async function openItem(id: string): Promise<void> {
 let planDoneAt: string | null = null;
 if (approved) {
   await step(7, 'releases', async () => {
-    const end = Math.min(DEADLINE, (Date.parse(times.goal_sent_at ?? now()) || Date.now()) + END_AFTER_GOAL_MS);
+    const end = Math.min(DEADLINE, Date.parse(since()) + END_AFTER_GOAL_MS);
     let lastLeft = '';
+    let lastSaid = Date.now();
     // A release approved here waits out its grace (60 s) before it leaves the
     // inbox: it is not approved again meanwhile.
     const approvedAt = new Map<string, number>();
@@ -436,11 +550,23 @@ if (approved) {
       const action = morningAction(fresh.map(toEntry), { releases: !OWNER_APPROVES, plan: !OWNER_APPROVES, questions: !OWNER_APPROVES });
       if (action.kind === 'wait') {
         const left = action.left.join(', ');
-        if (left !== lastLeft) log(`morning: nothing to do now${left ? `; waiting: ${left}` : ''}`);
+        // A line when what waits changes, and every 30 minutes while it does not (issue 285).
+        if (left !== lastLeft || Date.now() - lastSaid >= 30 * 60_000) {
+          log(`morning: nothing to do now${left !== lastLeft ? '' : `, as for ${duration(new Date(lastSaid).toISOString(), now())}`}${left ? `; waiting: ${left}` : ''}`);
+          lastSaid = Date.now();
+        }
         lastLeft = left;
+        // A plan that cannot go on without someone else fails the step past
+        // PROOF_STUCK_MINUTES, counted from when the blockage was first seen, the night included.
+        const lasted = checkBlocked('morning');
+        if (blocked && lasted >= STUCK_MS) {
+          blocked.failed = true;
+          throw new Error(`the plan is blocked since ${blocked.since}: ${blocked.line}`);
+        }
         await sleep(REHEARSAL ? 5_000 : 60_000);
         continue;
       }
+      blocked = null;
       await openItem(action.id);
       if (action.kind === 'permission') {
         await page.locator(`#detail [data-act="${action.decision}"]`).click();
@@ -496,7 +622,8 @@ if (approved) {
   await step(8, 'lead-memory', async () => {
     // The real proof reads it 48 hours after the goal; the rehearsal once the
     // reminder had its time and the plan is done (or the run's time is up).
-    const at = REHEARSAL ? Math.max(MORNING.getTime() + 30_000, Date.now()) : (Date.parse(times.goal_sent_at ?? now()) || Date.now()) + END_AFTER_GOAL_MS;
+    // A plan that step 7 found blocked is read at once: waiting out the hours left is the same idle loop (issue 285).
+    const at = blocked?.failed ? Date.now() : REHEARSAL ? Math.max(MORNING.getTime() + 30_000, Date.now()) : Date.parse(since()) + END_AFTER_GOAL_MS;
     while (Date.now() < Math.min(at, DEADLINE)) {
       await watch('day');
       await sleep(Math.min(WATCH_MS, Math.max(1_000, at - Date.now())));
@@ -508,7 +635,7 @@ if (approved) {
     await page.locator('#lead-remember').click();
     await page.locator('#lead-memory > *').first().waitFor();
     const outcomes = commitmentOutcomes(memory.commitments, planted);
-    return `${leadState.refreshCount} refreshes, highest share ${leadState.highestPercent ?? '?'} %; ${outcomes.map((o) => `${o.key} ${o.state}`).join(', ')}`;
+    return `${blocked?.failed ? 'read at once, the plan being blocked; ' : ''}${leadState.refreshCount} refreshes, highest share ${leadState.highestPercent ?? '?'} %; ${outcomes.map((o) => `${o.key} ${o.state}`).join(', ')}`;
   });
 } else {
   skip(8, 'lead-memory', 'no approved plan');
@@ -517,7 +644,7 @@ if (approved) {
 // ---- the report ---------------------------------------------------------------------
 // Every "after" of the plan kept, "3 after 2" among them.
 function orders(): Outcome {
-  const checks = (plan?.items ?? []).flatMap((item) => item.after.map((after) => ({ item: item.position, after, outcome: orderCheck(timeline, item.position, after) })));
+  const checks = (plan?.items ?? []).flatMap((item) => item.after.map((after) => ({ item: item.position, after, outcome: orderCheck(timeline, item.position, after, resumed?.items) })));
   if (checks.length === 0) return { state: 'open', note: 'the plan has no "after"' };
   const state = checks.some((c) => c.outcome.state === 'broken') ? 'broken' : checks.every((c) => c.outcome.state === 'done') ? 'done' : 'open';
   return { state, note: checks.map((c) => `${c.item} after ${c.after}: ${c.outcome.state} (${c.outcome.note})`).join('; ') };
@@ -551,7 +678,8 @@ const result: ProofResult = {
   commitments: commitmentOutcomes(memory?.commitments ?? [], planted), order: orders(), notifications: f?.notifications ?? null, tickets: f?.tickets ?? {},
   gestures, planDoneAt, stand_ins: world?.standIns ?? [],
   notificationsSkipped: NOTIFICATIONS_SKIPPED, loginCuts: f?.loginCuts ?? null,
-  sessionPlans: ledger((db) => sessionPlanFacts(db, times.goal_sent_at ?? startedAt.toISOString())) ?? [], cards, leftForOwner: left,
+  sessionPlans: ledger((db) => sessionPlanFacts(db, since())) ?? [], cards, leftForOwner: left,
+  resumed, blocked: reportBlocked(),
 };
 const durations = join(OUT, 'durations.md');
 writeFileSync(durations, renderDurations(result));
