@@ -4507,3 +4507,48 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Resources.** No Docker object, no network, no tunnel. Only the fake-adapter rehearsal ran, on free loopback ports. The proof's service, its state folder and the example repositories were not touched.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-driver-resume`.
+
+## 2026-10-24: Resume from here, a ticket started again from a step of its author's thread (the author's choices, lane `j3-replay`)
+
+**The need.** Issue #272, approved by the owner on 2026-10-23 at 11:51 (P57, Devin's item 14). A session that went the wrong way had to start again from the beginning. The criteria: each step of the thread offers "Reprendre d'ici", the branch goes back to the step's commit, the old continuation stays readable, a service test and a browser test.
+
+**Decision.** Matrix line P76, checked free on `origin/v2` (it ends at P74; open pull request 304 takes P72). P57 and C14 point to it.
+
+1. **A step is a row of the author's worklog** (a command, an edit, reads, a message of the review channel), the rows `Session.tsx` already draws as steps that open their detail. A ticket's `ticket_steps` are not used: a one-service ticket has only one.
+2. **The step's commit is journaled, never guessed** (`cleared.checkpoint`, `flow/replay.ts`).
+   - The flow reads the tip of the author's branch from the checkout's files, without git: `.git/HEAD`, the loose ref, else `packed-refs` (`readTip`, `workspace/checkout.ts`). It holds to the rule of that file: the host runs no git in a session's checkout.
+   - The tip is read before the session starts, then after each tool result and at the end of each turn. It is journaled only when it moved.
+   - The button means "from the branch as it was just before this step". A step's commit is the last checkpoint before the row's first event, else the session's first. The service (`stepCommit`) and the page apply the same rule, and a test runs both on the same events. So the owner redoes the step that went wrong with a corrected instruction.
+   - The page sends the step's first event (`seq`), never a commit. The service finds the commit in its own ledger.
+3. **The route** (`POST /api/sessions/:id/replay {seq, message}`).
+   - It is the owner account's alone, as Take over is. The instruction is at most 2,000 characters and goes through the cleaner.
+   - It stops the ticket's live and dormant sessions (`RUN_ERROR` code `replayed`), settles what of the ticket waits in the inbox, and halts its train. This is Set aside's code, now shared (`#stopAll`).
+   - The effect (`replay`, `flow/effects.ts`):
+     - fetches the old branch out of the checkout into the service's own checkout, as a step's branch is read, under `refs/cleared/replay/<ticket>/<n>/previous`;
+     - checks that the commit is in that history;
+     - renames the checkout aside to `<workdirs>/.<ticket>.before-r<n>`, never deleting it;
+     - makes a new checkout on `cleared/<ticket>.r<n>` that fetches only the step's commit (`ticketCheckout`'s new `start`). Its base for the hooks stays the service's base.
+   - A new author starts there, through the same path as a start (`#startAuthor`). Its prompt is the ticket's, then where its checkout stands, then the owner's corrected instruction. The ticket keeps its plan item, its budget and its one step.
+   - `ticket_replays` keeps the branch. The reviewer, the publish and a start after a restart use the newest resume branch (`#branchOf`).
+   - Both sessions get `cleared.replay`: the session left says where the ticket went on, the new one where it came from, with the instruction folded.
+4. **Nothing is rewritten or forced.** A ticket id has no dot, so `cleared/<ticket>.r<n>` can be no ticket's own branch, and it does not sit under `cleared/<ticket>/`, which git could not hold beside `cleared/<ticket>`. The old branch stays as it was in three places: the checkout set aside, the service's ref, and the forge if it was pushed.
+5. **The old continuation stays readable.** The old session keeps every event. In the ticket's view it is folded under its author, as any earlier session is, and opens to every row.
+6. **The page** (`Session.tsx`, `session.css`).
+   - "Reprendre d'ici" (Phosphor's counter-clockwise arrow) sits under the step's detail, not in its summary, where a click folds the row.
+   - It opens the instruction (shadcn's Textarea and Buttons), which names the commit the branch goes back to. A refusal by the owner rule is said apart.
+   - Every string is in `session.{fr,en}.json`. The view follows the new author without a navigation.
+
+**Limits.**
+- A ticket of a workspace of several services is refused (409). Its checkouts, its steps and its contract would each need their own resume point.
+- The new author starts a fresh conversation. The old session's conversation is not forked: what it knew is lost, except what the ticket, the corrected instruction and the committed code carry.
+- Only what was committed comes back. Edits the author had not committed at that step are not in the new branch.
+- The new branch opens its own pull request. One the old branch opened stays open on the forge: closing it is the owner's, an outward-facing act this service does not take.
+- The checkpoint after a tool call is read when the flow handles its result. A commit made in the next few milliseconds by the next call would land on the next step. A tool call takes longer than that.
+- A session started before this change has no checkpoint, so it offers no Resume from here.
+- The browser test runs on the session fixture, whose route stands in for the service's: the flow and the real git are proven by `test/flow/replay.test.ts`.
+
+**Checks.** On this server: `npm run typecheck`; `npm test` (1648 node tests pass, 36 skipped, 0 fail; 248 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run. The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
+
+**Resources.** No Docker object, no network, no tunnel, no port but the tests' loopback ones the system picks. The git tests run in temporary folders.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-replay`.
