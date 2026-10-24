@@ -95,3 +95,23 @@ test('in French every word is the catalog\'s, the percent keeps its no-break spa
   assert.doesNotMatch(markup, /\sstyle=/);
   assert.ok(!markup.includes(String.fromCharCode(0x2014)), 'no em dash');
 });
+
+// Issue #270: each quota says where its figure comes from and when it was
+// read; a failed reading is said, with its reason, beside the last figure.
+test('the quota says its source and its time, and a failed reading is said in both languages', () => {
+  const markup = render(en, 'en');
+  assert.match(visibleText(markup).join('\n'), /Read [A-Z][a-z]{2}, [A-Z][a-z]{2} \d+, \d\d:\d\d\s[AP]M, from the agent's usage page\./);
+  assert.match(visibleText(markup).join('\n'), /Read .*, from a session's report\./);
+  assert.doesNotMatch(markup, /data-reading="failed"/);
+  const value = data();
+  const failed = { ...value, harnesses: value.harnesses.map((h) => (h.harness === 'claude-code' ? { ...h, lastReading: { at: new Date(FIXTURE_NOW.getTime() - 5 * 60_000).toISOString(), source: 'claude-code /api/oauth/usage', ok: false, error: 'the endpoint answered HTTP 503' } } : h)) };
+  for (const [t, language, said] of [[en, 'en', /The last quota reading failed \(.+\): the endpoint answered HTTP 503\./], [fr, 'fr', /Le dernier relevé de quota a échoué \(.+\)\s: the endpoint answered HTTP 503\./]] as const) {
+    const page = render(t, language, failed);
+    assert.match(page, /data-quota="claude-code" data-verdict="ok"[\s\S]*data-reading="failed"/, 'the figure stays, the failure beside it');
+    assert.match(visibleText(page).join('\n'), said);
+    assert.doesNotMatch(visibleText(page).join('\n'), /\d{4}-\d{2}-\d{2}T/);
+  }
+  // No figure at all, and the reading failed: still said.
+  const none = { ...failed, harnesses: failed.harnesses.map((h) => (h.harness === 'claude-code' ? { ...h, quotas: [] } : h)) };
+  assert.match(render(en, 'en', none), /No quota measured yet[\s\S]*data-reading="failed"/);
+});

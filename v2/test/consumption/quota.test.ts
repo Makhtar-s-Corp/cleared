@@ -24,7 +24,7 @@ import { weekShare } from '../../src/schedules/scheduler.ts';
 import { applyTables, openStore, type Store } from '../../src/store/db.ts';
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
-const TOKEN = 'sk-ant-oat01-' + 'FAKE-TOKEN-FOR-TESTS';
+const LOGIN = ['test', 'login', 'FAKE-LOGIN', '0001'].join('-');
 const NOW = Date.parse('2026-10-24T12:00:00.000Z');
 const HOUR = 3_600_000;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -45,8 +45,8 @@ test('the answer of /api/oauth/usage: the two windows in percent with their rese
 });
 
 test('the login file: a token, or a credentials file\'s access token', () => {
-  assert.equal(loginToken(`${TOKEN}\n`), TOKEN);
-  assert.equal(loginToken(JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, refreshToken: 'r' } })), TOKEN);
+  assert.equal(loginToken(`${LOGIN}\n`), LOGIN);
+  assert.equal(loginToken(JSON.stringify({ claudeAiOauth: { accessToken: LOGIN, refreshToken: 'r' } })), LOGIN);
   assert.equal(loginToken('{"claudeAiOauth":{}}'), undefined);
   assert.equal(loginToken(''), undefined);
   assert.equal(loginToken(undefined), undefined);
@@ -61,19 +61,19 @@ const signal = () => AbortSignal.timeout(1000);
 
 test('the Claude Code source asks the endpoint with the login, and says each failure in words that never carry the token', async () => {
   const calls: Call[] = [];
-  const source = claudeCodeQuotaSource({ loginFile: '/state/claude.token', readFile: () => TOKEN, fetch: answering(200, fixture('usage-ok.json'), calls) });
+  const source = claudeCodeQuotaSource({ loginFile: '/state/claude.token', readFile: () => LOGIN, fetch: answering(200, fixture('usage-ok.json'), calls) });
   assert.equal(source.harness, 'claude-code');
   assert.equal((await source.read(signal())).length, 2);
   assert.equal(calls[0]?.url, USAGE_URL);
-  assert.equal(calls[0]?.headers.authorization, `Bearer ${TOKEN}`);
+  assert.equal(calls[0]?.headers.authorization, `Bearer ${LOGIN}`);
   assert.equal(calls[0]?.headers['anthropic-beta'], 'oauth-2025-04-20');
 
   const failures: [UsageFetch | undefined, string | undefined, RegExp][] = [
-    [answering(403, fixture('usage-error.json')), TOKEN, /refused the login \(HTTP 403\)/],
-    [answering(500, {}), TOKEN, /answered HTTP 500/],
-    [async () => { throw new TypeError(`fetch failed for ${TOKEN}`); }, TOKEN, /could not be reached \(TypeError\)/],
-    [async () => ({ status: 200, json: async () => { throw new SyntaxError(TOKEN); } }), TOKEN, /not JSON/],
-    [answering(200, fixture('usage-changed.json')), TOKEN, /not read as a utilization/],
+    [answering(403, fixture('usage-error.json')), LOGIN, /refused the login \(HTTP 403\)/],
+    [answering(500, {}), LOGIN, /answered HTTP 500/],
+    [async () => { throw new TypeError(`fetch failed for ${LOGIN}`); }, LOGIN, /could not be reached \(TypeError\)/],
+    [async () => ({ status: 200, json: async () => { throw new SyntaxError(LOGIN); } }), LOGIN, /not JSON/],
+    [answering(200, fixture('usage-changed.json')), LOGIN, /not read as a utilization/],
     [undefined, undefined, /no token in the login file/],
   ];
   for (const [get, token, expected] of failures) {
@@ -82,7 +82,7 @@ test('the Claude Code source asks the endpoint with the login, and says each fai
     await assert.rejects(failing.read(signal()), (error: Error) => {
       assert.ok(error instanceof QuotaReadError, error.name);
       assert.match(error.message, expected);
-      assert.doesNotMatch(error.message, /FAKE-TOKEN/);
+      assert.doesNotMatch(error.message, /FAKE-LOGIN/);
       return true;
     });
     assert.equal(used, false, 'no login, no request');

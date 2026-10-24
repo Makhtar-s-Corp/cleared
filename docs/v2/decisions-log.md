@@ -4333,3 +4333,86 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - `app/web/test/inbox/deadline.test.tsx`: the inbox's line in both languages, before and after the lead is asked, with and without a declared answer, and the parked item's label.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`.
+
+## 2026-10-24: the reviewer runs the service's declared test command, and the quota is read every hour and kept (the author's choices, lane `j3-review-tests-quota`, issues #268 and #270)
+
+**The proposals** (validated by the owner on 2026-10-23 at 11:51). Issue #268: a reviewer reads the code but cannot prove it works. Issue #270: the quota is read through a terminal opened by hand, which breaks at the smallest change of its display.
+
+**Decision.**
+
+1. **One declared test command per service** (`flow/config.ts`, P69).
+   - The key is `[session] test_command` in the service's `.cleared/agents.conf`, read at the base branch like the other keys. Its value is one simple command, read with the policy's own parser: a list, a pipe, a redirection or an expansion stops the configuration.
+   - When the key is absent: `npm test` if `package.json` at the base has a `test` script, else no command. Until now the reviewer could already run `npm test`, so a service that declares nothing keeps that.
+   - The guestbook and the filter API examples declare `test_command = npm test`.
+   - Not chosen: v1's `[fast_lane] tests_command`. It belongs to another section and it takes the changed files as `{files}`.
+
+2. **The reviewer's policy allows that command and nothing else that runs code or writes** (`session/policy.ts`, P69).
+   - Allowed: the declared command, word for word, under the rule `reviewer.tests`. It is also allowed in a pipe or a list of reads, such as `npm test 2>&1 | tail -20`.
+   - The reads stay as they were: milestone 1's reads (`run.safe`) and the reviewer's own reads (`reviewer.read`).
+   - Refused, wherever they stand in a command:
+     - Under `reviewer.edit`, programs that write files: `rm`, `mv`, `cp`, `touch`, `mkdir`, `tee`, an in-place `sed` or `perl`, and the like.
+     - Under `reviewer.edit`, git's commands that change the checkout, its refs or a remote: `add`, `checkout`, `reset`, `stash`, `branch -D`, and the like.
+     - Under `reviewer.run`, any program that runs code other than the declared command: `npm run typecheck`, `npm ci`, `npm test -- -u`, `CI=1 npm test`, `node --test`, `npx`, `make`, `bash -c`.
+     - The refusal names the declared command, so the session can run it as declared.
+   - These no longer apply to the reviewer:
+     - the test runners of the default safe commands;
+     - the project's own safe commands (the guestbook's include `npm ci`);
+     - `npm run <script>`.
+   - The author's and the reader's policies are unchanged.
+   - Not chosen: asking the inbox for the other checks. The issue says the policy allows the declared command "and nothing else", and a request that asks is a person's decision, not the policy's.
+   - The consequence for the proofs: a reviewer's `npm run typecheck` is now refused by the policy. Before, it went to the inbox and the proof's driver allowed it once (P52's driver part). The driver's rule stays for the author.
+
+3. **The run goes into the verdict and the ticket's thread, read from the ledger** (`flow/review-tests.ts`, `flow/engine.ts`, P69).
+   - The run is read from the reviewer's turn in the ledger, never from its report: the last call of the declared command, paired with its result.
+     - `passed` or `failed`: it ran alone, and its result says whether it was an error.
+     - `unclear`: it ran in a pipe or a list, where the exit status is the last program's.
+     - `not_run`: no such call.
+   - The run, with the last 15 lines of its output passed through the service's cleaner, is stored in four places:
+     - on the verdict row: `cleared.review_verdict` gains an optional `tests` field, so the rows written before still read;
+     - as a comment on the ticket at every verdict ("Review round N. Tests: `npm test` failed in the reviewer's session.");
+     - as a line of the request for change the author receives;
+     - on a pass, as a line of the report the pull request and the release's announcement carry.
+   - The review prompt names the command and asks for it to run alone, not in a pipe, and for a `Tests:` line in the report.
+   - Not chosen: refusing a pass whose tests failed. The verdict stays the reviewer's. The failure is in its row, in the thread and in the announcement, where the owner sees it before approving. It may also be an old failure the change does not touch.
+
+4. **The quota's source answers in data** (`consumption/quota.ts`, P70).
+   - For Claude Code, the source is `GET https://api.anthropic.com/api/oauth/usage`, called with the service's login: a setup-token token, or the access token of a credentials file, read as the session runner reads it.
+   - It is the endpoint the CLI's `/usage` reads. In the installed CLI 2.1.310, `fetchUtilization` calls it, and its schema gives each window a `utilization` in percent and a `resets_at` ISO text, both nullable. It is not a model call: nothing is spent.
+   - The answer is read strictly. A window absent or null is skipped. A window whose figures are not numbers or dates is a failed reading, and so is an answer with neither window: if the shape changes, a wrong figure would be worse than none.
+   - Every failure is said in words that never carry the token or the answer's body:
+     - no token;
+     - the endpoint unreachable, or not answering in time (30 s);
+     - an HTTP 401 or 403;
+     - another HTTP status;
+     - an answer that is not JSON;
+     - an answer of another shape.
+   - Codex has no source: it has no adapter yet.
+   - Not chosen:
+     - a probe turn of the harness, which spends tokens every hour;
+     - reading the status line's `rate_limits`, which exists only inside a running session, where `cleared.rate_limit` already reads the same windows.
+
+5. **Every hour, every attempt is kept, a failure without blocking** (`QuotaReader`, `modules/lead.ts`, P70).
+   - **The timer.** The lead module's start runs a first reading, then one every `CLEARED_V2_QUOTA_MINUTES` minutes (60 by default). The timer never keeps the process alive, and 0 turns the reading off.
+   - **The ledger.** `quota_readings` gets one row per window read, with its time, its source and its reset time. A failed reading is one row with `ok` set to 0 and its reason. Nothing is deleted.
+   - **A failure** is a health notification `quota_read_failed`, once for a run of failures: the first one after a reading that worked. Nothing waits for the reading. The plans and the schedules go on with the newest figure they have.
+   - **The alerts.** A window at 75 and then at 85 percent raises a health notification `quota_75` or `quota_85`, once per window cycle, keyed by its reset time. The alerts are kept in `quota_alerts`, so a restart does not alert again. The next cycle alerts again.
+   - A notification that cannot be queued is written to the service's log and never stops a reading.
+
+6. **One newest figure, read by the stop, the schedules and the screen** (`latestQuota`, P70).
+   - The newest figure is the newest of the readings that worked and the sessions' own `cleared.rate_limit` reports. It is none once its reset time has passed.
+   - It replaces three copies of the same query: the plan runner's stop, the scheduler's `weekShare` and the Consumption screen's `quotaOf`.
+   - So no lane starts at or above `CLEARED_V2_WEEK_STOP_PERCENT` (85 by default), even when no session has reported since the window filled.
+   - The stop now reads the five-hour window too, with its own sentence in the lead's thread. The issue says no lane starts above 85 percent, and a five-hour window at 90 percent stops a session as surely as the week does.
+   - The scheduler still reads the seven-day window only, against a schedule's own cap. The plan runner stops whatever the scheduler lets through.
+
+7. **The Consumption screen says where each figure comes from** (`app/web/screens/consumption`, P70).
+   - Under each quota, a line says when the figure was read and where: from the agent's usage page, or from a session's report.
+   - When the harness's last reading failed, a line in the danger colour says when, with the reason as the service gives it, which is English. The figure read before it stays.
+   - The line is shown in French and in English, and dates go through Intl.
+
+**Limits.**
+- The endpoint's answer is read from the shape the CLI's code expects. The fixtures under `test/consumption/fixtures/` are written to that shape with invented figures. No account was read: the lane runs on fakes only.
+- If a setup-token token lacks the scope the endpoint needs, every reading fails visibly with "the endpoint refused the login (HTTP 403)". The plans then keep the sessions' own reports, as before.
+- The health notifications' text comes from lib's catalog, which has no line for `quota_75`, `quota_85` or `quota_read_failed`. Their code says which one it is. The text is the generic health line, as P34 noted for `schedule_failed`.
+- A ticket of several services reviews in the first service's checkout. Its test command is that service's.
+- The test command runs in the author's checkout, which the reviewer shares. A runner that writes a cache or a coverage file there is not refused: the policy reads the command, not what the program does.
