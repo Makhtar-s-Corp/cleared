@@ -135,5 +135,10 @@
   "kind_session_plan": "Session plan",
   "kind_contract": "Contract",
   "kind_knowledge": "Knowledge",
-  "all_sessions": "All sessions"
+  "all_sessions": "All sessions",
+  "bar_variants": "Authors",
+  "bar_variants_label": "How many authors work this ticket at once",
+  "bar_variants_one": "One author",
+  "bar_variants_other": "{n} variants, compared in the inbox",
+  "ticket_created_variants": "{id} created, in {status}, with {n} variants."
 }

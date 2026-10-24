@@ -26,7 +26,7 @@ import { ApiError } from '@/lib/screen.ts';
 import { sessionStatus, ticketState } from '@/lib/status.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
-  DRAFT_MAX, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, liveOrder, loadTower, needId, needSentence, needTitle, pickedFor, planProgress, recipeKey,
+  DRAFT_MAX, VARIANT_CHOICES, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, liveOrder, loadTower, needId, needSentence, needTitle, pickedFor, planProgress, recipeKey,
   recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, towerModel, towerSummary,
   type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
@@ -41,9 +41,11 @@ function Facts({ text }: { readonly text: string }) {
 // several, shown with the description once a title is typed.
 // "Ask about the code" asks the title (and the description) as a question
 // to the code; "Run a recipe" opens the recipes' form, once the service has some.
-export function Bar({ t, title, body, services = [], picked = [], recipes = [], recipeOpen = false, busy = false, onTitle, onBody, onPick, onLead, onAsk, onRecipe, onSubmit }: {
+// On a workspace of one service, the number of authors: one, or 2 to 4
+// variants compared in the inbox (issue #271).
+export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, busy = false, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onSubmit }: {
   readonly t: Translate; readonly title: string; readonly body: string;
-  readonly services?: readonly string[]; readonly picked?: readonly string[];
+  readonly services?: readonly string[]; readonly picked?: readonly string[]; readonly variants?: number; readonly onVariants?: (n: number) => void;
   readonly recipes?: readonly Recipe[]; readonly recipeOpen?: boolean; readonly busy?: boolean;
   readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void; readonly onPick?: (service: string) => void;
   readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
@@ -67,7 +69,16 @@ export function Bar({ t, title, body, services = [], picked = [], recipes = [], 
             </Toggle>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <div className="ask-variants" role="group" aria-label={t('bar_variants_label')}>
+          <span className="ask-variants-label" aria-hidden="true">{t('bar_variants')}</span>
+          {VARIANT_CHOICES.map((n) => (
+            <Toggle key={n} className="svc-toggle" pressed={variants === n} onPressedChange={() => onVariants?.(n)} data-variants={n} aria-label={t(n === 1 ? 'bar_variants_one' : 'bar_variants_other', { n })}>
+              {variants === n ? <Check size={12} aria-hidden="true" /> : null}{n}
+            </Toggle>
+          ))}
+        </div>
+      )}
     </form>
   );
 }
@@ -288,6 +299,7 @@ export default function Tower() {
   const [failed, setFailed] = useState<string | null>(null);
   const [leadDraft, setLeadDraft] = useState('');
   const [picked, setPicked] = useState<readonly string[]>([]);
+  const [variants, setVariants] = useState(1);
   const [asking, setAsking] = useState(false);
   const [recipeOpen, setRecipeOpen] = useState(false);
   const [recipe, setRecipe] = useState<string | null>(null);
@@ -327,11 +339,15 @@ export default function Tower() {
     }
     try {
       const services = model?.serviceNames.filter((name) => pickedFor(title, picked).includes(name)) ?? [];
-      const ticket = await createTicket(context.api, { title: typed, body, project: context.me.project, services });
+      const several = (model?.serviceNames.length ?? 0) >= 2;
+      const count = several ? 1 : variants;
+      const ticket = await createTicket(context.api, { title: typed, body, project: context.me.project, services, variants: count });
       setTitle('');
       setBody('');
       setPicked([]);
-      setNote({ text: t('ticket_created', { id: ticket.id, status: ticketState(ticket.status, t) }), kind: 'ok' });
+      setVariants(1);
+      const status = ticketState(ticket.status, t);
+      setNote({ text: count > 1 ? t('ticket_created_variants', { id: ticket.id, status, n: count }) : t('ticket_created', { id: ticket.id, status }), kind: 'ok' });
       void refresh();
     } catch {
       setNote({ text: t('ticket_failed'), kind: 'error' });
@@ -383,8 +399,8 @@ export default function Tower() {
 
   return (
     <div className="tower-screen">
-      <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} recipes={model?.recipes ?? []} recipeOpen={recipeOpen} busy={asking}
-        onTitle={(value) => { setTitle(value); if (!value.trim()) setPicked([]); }} onBody={setBody} onSubmit={(event) => void submit(event)}
+      <Bar t={t} title={title} body={body} services={model?.serviceNames ?? []} picked={picked} variants={variants} onVariants={setVariants} recipes={model?.recipes ?? []} recipeOpen={recipeOpen} busy={asking}
+        onTitle={(value) => { setTitle(value); if (!value.trim()) { setPicked([]); setVariants(1); } }} onBody={setBody} onSubmit={(event) => void submit(event)}
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
         onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>

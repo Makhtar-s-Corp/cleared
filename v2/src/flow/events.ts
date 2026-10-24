@@ -40,6 +40,7 @@ export type PutBackReason =
   | 'rolled_back'           // the release watch reverted the merge
   | 'train_halted'          // a release train could not land its next service (lane 16)
   | 'step_failed'           // a step of the ticket failed; its done steps are kept (lane 23)
+  | 'variants_failed'       // every variant of the ticket failed (issue #271)
   | 'restart'               // the service restarted while the ticket ran
   | 'set_aside'             // the owner set the ticket aside (FlowEngine.setAside)
   | 'parked';               // its question waited past its delay and the lead's, with no declared answer (issue #290)

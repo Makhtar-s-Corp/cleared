@@ -187,3 +187,8 @@
 @media (pointer: coarse) {
   .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: -14px; }
 }
+/* The number of authors of a new ticket (issue #271), on a workspace of one service. */
+.ask-variants { display: none; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
+.ask:has(#ask-input:not(:placeholder-shown)) .ask-variants { display: flex; }
+.ask textarea + .ask-variants { border-top: 0; padding-top: 2px; }
+.ask-variants-label { color: var(--text-muted); font-size: var(--text-sm); margin-right: var(--space-1); }

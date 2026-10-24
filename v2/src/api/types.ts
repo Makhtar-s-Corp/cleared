@@ -280,11 +280,44 @@ export type KnowledgeItem = InboxBase & {
   readonly outcome: { readonly decision: 'approve' | 'reject'; readonly by: UserId; readonly at: string } | null;
 };
 
+// The variants of one ticket (issue #271): 2 to 4 authors work the same
+// ticket at once, each in its own checkout of the ticket branch, and the
+// owner compares what each one changed and picks the one to review; the
+// others are stopped and their containers released. `diff` is the
+// variant's committed change against the base, cut at VARIANT_DIFF_MAX
+// (`cut` says so); `note` says why a variant failed or was dropped.
+export type VariantState = 'waiting' | 'running' | 'done' | 'failed' | 'chosen' | 'dropped';
+export type TicketVariant = {
+  readonly position: number;                                // 1-based
+  readonly state: VariantState;
+  readonly session: SessionId | null;
+  readonly files: readonly string[];
+  readonly added: number;
+  readonly removed: number;
+  readonly diff: string;
+  readonly cut: boolean;
+  readonly costUsd: number | null;
+  readonly minutes: number | null;                          // how long its session ran
+  readonly note: string | null;
+};
+export const VARIANTS_MIN = 2;
+export const VARIANTS_MAX = 4;
+export const VARIANT_DIFF_MAX = 64 * 1024;
+
+// The variants waiting for the owner's choice: added once one is done,
+// updated as the others end. `outcome` says which one the owner chose.
+export type VariantsItem = InboxBase & {
+  readonly kind: 'variants';
+  readonly round: number;                                   // the ticket's run of variants, from 1
+  readonly variants: readonly TicketVariant[];
+  readonly outcome: { readonly chosen: number; readonly by: UserId; readonly at: string } | null;
+};
+
 export type InboxItem = PermissionItem | QuestionItem | ReleaseItem | PlanItemInbox;
 // The kinds of the replanned milestone 2, which the inbox store keeps and
 // GET /api/inbox answers; each joins InboxItem with the inbox screen that
 // renders it (lanes 21 and 27), since the screen's model maps every kind.
-export type NextInboxItem = InboxItem | SessionPlanItem | ContractItem | KnowledgeItem;
+export type NextInboxItem = InboxItem | SessionPlanItem | ContractItem | KnowledgeItem | VariantsItem;
 
 // ---------------------------------------------------------------- the replanned milestone 2: waves 9 to 11 (lane 17)
 
@@ -568,7 +601,9 @@ export type NotificationRoutes = {
 export type SendMessageBody = { readonly text: string };
 export type AnswerBody = { readonly decision: Decision };
 // services: the names of the workspace's services the ticket touches (lane 14).
-export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string; readonly services?: readonly string[] };
+// `variants`: 2 to 4 authors at once on a one-service ticket (issue #271); absent or 1, one author.
+export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string; readonly services?: readonly string[]; readonly variants?: number };
+export type ChooseVariantBody = { readonly variant: number };   // the position of the variant to review
 export type MoveTicketBody = { readonly status: string };
 export type ApproveBody = { readonly requestedAt: string; readonly heads: readonly { readonly pr: number; readonly head: string }[] };
 export type LeadMessageBody = { readonly text: string; readonly goal?: true };   // goal: the text is a goal
@@ -622,6 +657,10 @@ export type ApiRoutes = {
   'GET /api/tickets/:id/steps': { readonly body: null; readonly response: TicketStep[] };
   'POST /api/contracts/:id/approve': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/contracts/:id/sendback': { readonly body: { readonly message: string }; readonly response: { readonly accepted: true } };
+  // The variants of a ticket (issue #271): its last run of them, and the
+  // owner's choice, named by the variants item's inbox id.
+  'GET /api/tickets/:id/variants': { readonly body: null; readonly response: TicketVariant[] };
+  'POST /api/variants/:id/choose': { readonly body: ChooseVariantBody; readonly response: { readonly accepted: true; readonly released: number } };
   'POST /api/knowledge/:id/approve': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/knowledge/:id/reject': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/services/:name/skill': { readonly body: null; readonly response: { readonly accepted: true; readonly ticket: TicketId | null } };   // null: nothing was queued
@@ -688,6 +727,8 @@ const routes = {
   'GET /api/tickets/:id/steps': true,
   'POST /api/contracts/:id/approve': true,
   'POST /api/contracts/:id/sendback': true,
+  'GET /api/tickets/:id/variants': true,
+  'POST /api/variants/:id/choose': true,
   'POST /api/knowledge/:id/approve': true,
   'POST /api/knowledge/:id/reject': true,
   'POST /api/services/:name/skill': true,
@@ -735,6 +776,7 @@ export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/
 
 // The routes of waves 9 to 11 written ahead of their servers (lane 17).
 export const STEP_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/steps', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback'];   // lane 23, flow/
+export const VARIANT_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/variants', 'POST /api/variants/:id/choose'];   // issue #271, flow/variants.ts
 export const KNOWLEDGE_ROUTES: readonly ApiRoute[] = ['POST /api/knowledge/:id/approve', 'POST /api/knowledge/:id/reject', 'POST /api/services/:name/skill'];   // lane 24, knowledge/
 export const ASK_ROUTES: readonly ApiRoute[] = ['POST /api/asks', 'GET /api/asks/:id', 'POST /api/asks/:id/follow'];   // lane 25, reader/
 export const RECIPE_ROUTES: readonly ApiRoute[] = ['GET /api/recipes', 'POST /api/recipes/:name/run', 'GET /api/schedules', 'POST /api/schedules', 'DELETE /api/schedules/:id'];   // lane 26, recipes/ and schedules/
