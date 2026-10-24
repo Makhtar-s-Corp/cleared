@@ -179,12 +179,79 @@ test('the fix a Claude reviewer asks of a Codex author reopens the Codex session
   }
 });
 
+test('a stuck session the watchdog stopped is handed over: nothing to interrupt, its note from the journal, what it waited for settled', async () => {
+  const r = await rig({ scripts: { author: edits } });
+  try {
+    r.codex.authors.push([started, ...text('c1', 'I carry on.'), { awaitMessage: true }, finished(0.2)]);
+    const id = await stuckAuthor(r);
+    assert.equal(await r.engine.idleStop(id), 'stopped', 'the watchdog parks the session that waits for a person');
+    assert.equal(detail(r, id).dormant, true);
+    assert.equal(detail(r, id).phase, 'stopped');
+    assert.equal(r.inbox.waitingFor(id), 1, 'its permission still waits for an answer');
+
+    const response = await handOver(r, id, { harness: 'codex' });
+    assert.equal(response.status, 200, JSON.stringify(response.json));
+    const target = r.codex.started[0]!;
+    assert.match(target.input.prompt, /The sort is half done\./);
+    assert.match(target.input.prompt, /src\/entries\.ts/);
+    assert.equal(target.input.workdir, r.startedSessions[0]!.input.workdir);
+    assert.equal(r.inbox.waitingFor(id), 0, 'what it waited for is settled');
+    assert.equal(detail(r, id).phase, 'stopped');
+    assert.equal(detail(r, id).dormant ?? false, false, 'no longer one the answer resumes');
+    assert.equal(handedOverEvents(r, id).length, 1);
+    assert.equal(handedOverEvents(r, target.id).length, 1);
+    assert.equal(detail(r, target.id).phase, 'working');
+    assert.deepEqual(r.claudeResumed, [], 'the Claude session was not resumed to be handed over');
+    assert.ok(!r.flowEvents.some((e) => e.type === 'ticket_put_back'));
+  } finally {
+    await r.close();
+  }
+});
+
+test('a dormant session whose target cannot start stays dormant, the answer still resumes it', async () => {
+  const r = await rig({ scripts: { author: stuck } });
+  try {
+    const id = await stuckAuthor(r);
+    await r.engine.idleStop(id);
+    r.codex.failStart = true;
+    assert.equal((await handOver(r, id, { harness: 'codex' })).status, 503);
+    assert.equal(detail(r, id).dormant, true);
+    assert.equal(r.inbox.waitingFor(id), 1);
+    assert.equal(handedOverEvents(r, id).length, 0);
+  } finally {
+    await r.close();
+  }
+});
+
+test('with the author tools on: a session whose plan had its Go is handed over, Codex finishes without a gate, Claude reviews', async () => {
+  const r = await rig({
+    scripts: { author: [started, proposal, finished(0.1), { awaitMessage: true }, started, ...text('a2', 'Working on it.'), { awaitMessage: true }, finished(0.2)] },
+    config: { authorTools: true },
+  });
+  try {
+    await r.engine.start(r.ticket.id, 'u1');
+    await until(() => r.startedSessions.length > 0 && detail(r, r.startedSessions[0]!.id).state.plan !== undefined, 'the plan');
+    await r.engine.settled();
+    const id = r.startedSessions[0]!.id;
+    await until(() => r.inbox.sessionPlan(id) !== undefined, 'the plan waiting for its Go');
+    await r.engine.planGo(id, 'u1');
+    await until(() => detail(r, id).state.plan?.go != null, 'the Go');
+    const response = await handOver(r, id, { harness: 'codex' });
+    assert.equal(response.status, 200, JSON.stringify(response.json));
+    assert.equal(r.codex.started[0]!.input.tools, undefined, 'a Codex author is given no host tools');
+    await until(() => r.startedSessions.some((s) => s.input.role === 'reviewer'), 'the Claude review');
+    assert.equal(r.startedSessions.find((s) => s.input.role === 'reviewer')!.input.harness, 'claude-code');
+  } finally {
+    await r.close();
+  }
+});
+
 test('Cursor is out of the flows; so are the same harness, an unknown one and a missing body; nothing is touched by a refusal', async () => {
   const r = await rig({ scripts: { author: stuck } });
   try {
     const id = await stuckAuthor(r);
     const before = r.store.events.after(id).length;
-    for (const body of [{ harness: 'cursor' }, { harness: 'claude-code' }, { harness: 'gemini' }, {}, undefined, { harness: 'codex', model: '' }, { harness: 'codex', model: 42 }]) {
+    for (const body of [{ harness: 'cursor' }, { harness: 'claude-code' }, { harness: 'gemini' }, {}, undefined, { harness: 'codex', model: '' }, { harness: 'codex', model: 42 }, { harness: 'codex', model: 'gpt-6 --dangerously-bypass' }, { harness: 'codex', model: '-x' }, { harness: 'codex', model: 'm'.repeat(101) }]) {
       const refused = await handOver(r, id, body);
       assert.equal(refused.status, 400, `${JSON.stringify(body)} is refused`);
     }

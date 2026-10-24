@@ -34,7 +34,7 @@
 // waits for its Go is told nothing by the engine, and nothing here either:
 // the Go tells it, and the reviewer's prompt names the files.
 import type { IncomingMessage } from 'node:http';
-import { HANDOVER_MODEL_MAX, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../api/types.ts';
+import { HANDOVER_MODEL, HANDOVER_MODEL_MAX, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../api/types.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
 import type { Harness, UserId } from '../session/contract.ts';
@@ -154,8 +154,8 @@ export function takeoverRoutes(deps: TakeoverDeps): Route[] {
         const { harness, model } = await readBody(context.request);
         if (typeof harness !== 'string') throw new HttpError(400, `harness must be ${HANDOVER_HARNESSES.join(' or ')}`);
         if (!(HANDOVER_HARNESSES as readonly string[]).includes(harness)) throw new HttpError(400, `work is not handed to ${harness.slice(0, 40)}: only ${HANDOVER_HARNESSES.join(' and ')}`);
-        if (model !== undefined && (typeof model !== 'string' || model.trim() === '' || model.length > HANDOVER_MODEL_MAX)) throw new HttpError(400, `model must be a name of 1 to ${HANDOVER_MODEL_MAX} characters`);
-        const handed = await engine.handOver(id, user, { harness: harness as Harness, ...(typeof model === 'string' ? { model: model.trim() } : {}) });
+        if (model !== undefined && (typeof model !== 'string' || model.length > HANDOVER_MODEL_MAX || !HANDOVER_MODEL.test(model))) throw new HttpError(400, `model must be a name of 1 to ${HANDOVER_MODEL_MAX} letters, digits and . _ : / -`);
+        const handed = await engine.handOver(id, user, { harness: harness as Harness, ...(typeof model === 'string' ? { model } : {}) });
         answer(context, 200, { accepted: true, ...handed });
       }),
     },

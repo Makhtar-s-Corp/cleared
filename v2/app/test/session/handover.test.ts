@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { handoverOf } from '../../web/screens/session/tabs.ts';
+import { handoverFor, handoverOf } from '../../web/screens/session/tabs.ts';
 
 const free = { kind: 'free', can: true } as const;
 const base = { takeover: free, role: 'author', harness: 'claude-code', ended: false } as const;
@@ -35,4 +35,13 @@ test('the words exist in English and in French, with the same keys', () => {
   }
   assert.equal(en.handover_to_codex, 'Hand over to Codex');
   assert.equal(fr.handover_to_codex, 'Confier à Codex');
+});
+
+test('a session the watchdog stopped while it waited is not ended: it is offered the hand over; a really ended one is not', () => {
+  const stopped = { takenOver: null, me: 'u1', role: 'author', harness: 'claude-code', ended: true, dormant: true, planWaits: false } as const;
+  assert.deepEqual(handoverFor(stopped), { kind: 'offer', to: 'codex' });
+  assert.deepEqual(handoverFor({ ...stopped, dormant: false }), { kind: 'none' });
+  assert.deepEqual(handoverFor({ ...stopped, role: 'reviewer' }), { kind: 'none' });
+  assert.deepEqual(handoverFor({ ...stopped, ended: false, dormant: false, planWaits: true }), { kind: 'none' }, 'the Go or Change of the plan comes first');
+  assert.deepEqual(handoverFor({ ...stopped, takenOver: { by: 'u1', at: '2026-10-24T10:00:00.000Z' } }), { kind: 'none' });
 });

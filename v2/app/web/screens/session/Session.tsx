@@ -55,7 +55,7 @@ import {
 } from './model.ts';
 import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
-import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverOf, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
+import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
   actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
@@ -525,7 +525,7 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
   const role = view.summary.role === 'reviewer' ? 'reviewer' : 'author';
   // Hand over (flow/takeover.ts, B6.3): the other harness named on the button; where none is offered, the button says why it is off.
   const ended = ENDED.has(phaseOf(view));
-  const offer = handoverOf({ takeover: takeoverOf({ takenOver: takenOverOf(view), me: view.me, role: view.summary.role, ended }), role: view.summary.role, harness: view.summary.harness, ended });
+  const offer = handoverFor({ takenOver: takenOverOf(view), me: view.me, role: view.summary.role, harness: view.summary.harness, ended, dormant: view.summary.dormant === true, planWaits: view.thread.plan?.go === null });
   const placeholder = takenOverOf(view) !== null && !ENDED.has(phaseOf(view)) ? t('composer_taken_over') : t(`composer_${role}`);
   return (
     <>
@@ -851,7 +851,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   }, [context, id, ended]);
   const takeover = takeoverOf({ takenOver: actingTaken, me: view.me, role: acting.role, ended });
   const terminal = terminalChoice({ offered: context.me.terminal, takeover });
-  const handover = handoverOf({ takeover, role: acting.role, harness: acting.harness, ended });
+  const handover = handoverFor({ takenOver: actingTaken, me: view.me, role: acting.role, harness: acting.harness, ended, dormant: acting.dormant === true, planWaits: view.thread.plan?.go === null });
   // An author's live session, not another account's: the service checks the rest at the save.
   const sessionOpen = acting.role === 'author' && !ended && takeover.kind !== 'other';
 

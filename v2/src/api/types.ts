@@ -52,6 +52,7 @@ export type SessionSummary = {
   readonly lastSeq: number;                                 // the seq of its last stored event
   readonly service?: string;                                // the workspace service it works on; absent before lane 15 starts sessions per service
   readonly takenOver?: TakenOver | null;                    // who took it over (decision 30, lane 20); absent or null otherwise
+  readonly dormant?: true;                                  // stopped by the watchdog while it waited for a person: the answer resumes it, and it can be handed over (B6.3)
 };
 
 // The session plan an author proposes before writing code (decision 22,
@@ -615,6 +616,7 @@ export type LeadMessageBody = { readonly text: string; readonly goal?: true };  
 export type RejectPlanBody = { readonly message: string };
 export type ChangeSessionPlanBody = { readonly message: string };   // what the author is to change in its plan
 export const HANDOVER_MODEL_MAX = 100;
+export const HANDOVER_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;   // a model name, never a word of a command
 export type HandoverBody = { readonly harness: Harness; readonly model?: string };   // the harness to hand the author's work to; its model, else the default
 
 // The Editor tab (decision 30, lane 20): the files the session changed, and

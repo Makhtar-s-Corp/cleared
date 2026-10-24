@@ -95,7 +95,7 @@ import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
 import { HostToolRefused, type Answer, type Briefing, type Decision, type Harness, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
-import { refuseTarget } from '../session/handover.ts';
+import { handoverNote, refuseTarget } from '../session/handover.ts';
 import { readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
@@ -827,6 +827,7 @@ export class FlowEngine {
       phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0,
       state: { ...state, ...(plan ? { plan } : {}), ...(takenOver ? { takenOver } : {}) },
       ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}), ...(takenOver ? { takenOver } : {}),
+      ...(this.#dormant.has(id) ? { dormant: true as const } : {}),
     };
   }
 
@@ -3105,8 +3106,15 @@ export class FlowEngine {
   // target that cannot start gives the source back. A step's or a variant's
   // session, one whose plan waits for its Go, and one taken over are not
   // handed over in this version.
+  //
+  // A session the watchdog stopped while it waited for a person (dormant:
+  // its containers are gone, its volume and its journal are not) is handed
+  // over too, and it is the stuck session the proof means: there is nothing
+  // to interrupt, its note is read from the journal, what it waited for is
+  // settled, and a target that does not start leaves it dormant.
   async handOver(id: SessionId, by: UserId, to: { readonly harness: Harness; readonly model?: string }): Promise<HandedOver> {
-    const live = this.#liveSession(id);
+    const dormant = this.#dormant.get(id);
+    const live = dormant ?? this.#liveSession(id);
     if (live.input.role !== 'author') throw new FlowError('conflict', `session ${id} is the ${live.input.role}'s: only an author's session is handed over`);
     if (this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is taken over: give it back first`);
     if (this.#stepOf.has(id) || this.#variantOf.has(id)) throw new FlowError('conflict', `session ${id} works on a step or a variant of its ticket: it is not handed over in this version`);
@@ -3122,14 +3130,14 @@ export class FlowEngine {
     if (!next) throw new FlowError('unavailable', `no adapter for ${target.harness} is registered`);
     const kept = this.#inputs.get(id);
     if (!kept) throw new FlowError('conflict', `session ${id} belongs to another process: it is not handed over`);
-    await this.takeOver(id, by);
+    if (!dormant) await this.takeOver(id, by);
     const back = async (reason: string): Promise<never> => {
-      await this.giveBack(id).catch(() => undefined);
+      if (!dormant) await this.giveBack(id).catch(() => undefined);
       throw new FlowError('unavailable', reason);
     };
     let note: string;
     try {
-      note = this.#clean((await live.handle.handover(target)).note);
+      note = this.#clean(dormant ? handoverNote(this.#store.events.after(id)) : (await live.handle.handover(target)).note);
     } catch (error) {
       return back(`session ${id} could not give up its work: ${name(error)}`);
     }
@@ -3154,7 +3162,10 @@ export class FlowEngine {
     this.#step({ id: fresh.id, ticket: ticket.id, project: fresh.input.project }, 'STEP_STARTED', 'author', began);
     this.#snapshot(fresh.id, ticket.id);
     this.#supervise(fresh, 0);
-    await this.#close(live, 'stopped', `Handed over to ${target.harness} (${fresh.id}).`);
+    if (dormant) {
+      this.#told.delete(id);
+      this.#endDormant(dormant, 'stopped');
+    } else await this.#close(live, 'stopped', `Handed over to ${target.harness} (${fresh.id}).`);
     return { session: fresh.id, harness: target.harness, model: target.model };
   }
 }
