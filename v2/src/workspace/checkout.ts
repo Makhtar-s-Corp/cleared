@@ -55,6 +55,15 @@ export function ticketBranch(ticket: string): string {
   return `cleared/${ticket}`;
 }
 
+// The branch a ticket resumed from a step works on (issue #272):
+// cleared/<ticket id>.r<n>. A ticket id has no dot, so no ticket's own
+// branch is ever one of these, and none is under cleared/<ticket id>/,
+// which git could not hold beside cleared/<ticket id>.
+export function replayBranch(ticket: string, n: number): string {
+  if (!Number.isInteger(n) || n < 1) throw new CheckoutError(`${n} is not the number of a resume`);
+  return `${ticketBranch(ticket)}.r${n}`;
+}
+
 export async function checkBranchName(name: string, what: string): Promise<void> {
   if (!name || name.startsWith('-')) throw new CheckoutError(`the ${what} "${name}" is not a branch name`);
   try { await run('git', ['check-ref-format', '--branch', name]); }
@@ -107,6 +116,9 @@ export type TicketCheckoutInput = {
   readonly base: string;
   readonly branch: string;              // ticketBranch(ticket)
   readonly path?: string;               // a folder of a monorepo: the service's folder in the repository
+  // A ref of the project checkout the new branch starts at, in place of the
+  // base: the step a ticket resumes from (issue #272). Only a new checkout reads it.
+  readonly start?: string;
 };
 
 export type TicketCheckout = {
@@ -164,6 +176,31 @@ function readHead(workdir: string): string | undefined {
   return /^ref: refs\/heads\/(.+)\n?$/.exec(head)?.[1];
 }
 
+const COMMIT = /^[0-9a-f]{40}$/;
+
+// The branch the checkout is on and the commit it points at, read from the
+// .git folder's files without git (issue #272): the loose ref, else the
+// line of packed-refs. Undefined when the checkout is on no branch or the
+// branch has no commit; a ref that is not a commit id is not read.
+export function readTip(workdir: string): { readonly branch: string; readonly commit: string } | undefined {
+  const branch = readHead(workdir);
+  if (!branch || branch.split('/').some((part) => part === '' || part === '.' || part === '..')) return undefined;
+  // A loose ref whose folders git removed (pack-refs) is looked for in packed-refs.
+  const parts = ['refs', 'heads', ...branch.split('/')];
+  const loose = parts.slice(0, -1).every((_, i) => existsSync(join(workdir, '.git', ...parts.slice(0, i + 1)))) ? gitPath(workdir, parts, 'file') : undefined;
+  if (loose && existsSync(loose)) {
+    const commit = readFileSync(loose, 'utf8').trim();
+    return COMMIT.test(commit) ? { branch, commit } : undefined;
+  }
+  const packed = gitPath(workdir, ['packed-refs'], 'file');
+  if (!existsSync(packed)) return undefined;
+  for (const line of readFileSync(packed, 'utf8').split('\n')) {
+    const [commit, ref] = line.trim().split(' ');
+    if (ref === `refs/heads/${branch}` && commit && COMMIT.test(commit)) return { branch, commit };
+  }
+  return undefined;
+}
+
 // /CLAUDE.md and /HANDOVER.md in .git/info/exclude, appended to what is
 // there, never through a link.
 export function ensureExcluded(workdir: string): void {
@@ -214,7 +251,12 @@ export async function ticketCheckout(input: TicketCheckoutInput): Promise<Ticket
     // base is what the project checkout last fetched from the forge.
     await git(partial, ['fetch', '--quiet', '--no-tags', input.project, `+${base}:${base}`]);
     await git(partial, ['update-ref', BASE_REF, base]);
-    await git(partial, ['checkout', '--quiet', '--no-track', '-b', input.branch, base]);
+    // A resumed ticket's branch starts at its step: that ref alone is
+    // fetched, so the clone holds its history and none of what came after.
+    const from = input.start === undefined ? base : 'refs/cleared/start';
+    if (input.start !== undefined) await git(partial, ['fetch', '--quiet', '--no-tags', input.project, `+${input.start}:${from}`]);
+    await git(partial, ['checkout', '--quiet', '--no-track', '-b', input.branch, from]);
+    if (input.start !== undefined) await git(partial, ['update-ref', '-d', from]);
     await git(partial, ['remote', 'set-url', 'origin', url]);
     ensureExcluded(partial);
     renameSync(partial, input.workdir);
