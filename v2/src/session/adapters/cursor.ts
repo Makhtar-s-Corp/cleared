@@ -37,7 +37,7 @@ import type { Cleaner } from '../clean.ts';
 import { NotImplemented, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../events.ts';
 import { evaluate, type Policy } from '../policy.ts';
-import { END_TURN, EXIT_NO_LOGIN, EXIT_NO_PROGRAM, INTERACTIVE_NAME, interactiveCommand, isChatId, turnCommand } from './cursor/interactive.ts';
+import { END_TURN, EXIT_NO_LOGIN, EXIT_NO_PERMISSIONS, EXIT_NO_PROGRAM, INTERACTIVE_NAME, interactiveCommand, isChatId, turnCommand } from './cursor/interactive.ts';
 import { cursorCall, createCursorMapper, type CursorMapper } from './cursor/map.ts';
 import { cursorPermissions } from './cursor/permissions.ts';
 
@@ -121,6 +121,7 @@ type Session = {
   chat: string | undefined;                       // Cursor's chat id
   turn: Turn | undefined;                         // the running turn
   closed: boolean;
+  closing: boolean;                               // stop() is ending the running turn
   handedOver: boolean;                            // a human has the chat (Take over)
   turnDone: Promise<void>;
   handle: SessionHandle | undefined;
@@ -192,6 +193,7 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
 
   function failure(code: number | null, stderr: string): { message: string; code: string } {
     if (code === EXIT_NO_LOGIN) return { message: 'Cursor has no login in the session\'s container.', code: 'cursor_login' };
+    if (code === EXIT_NO_PERMISSIONS) return { message: 'The Cursor permissions file could not be written in the checkout, so the program did not start.', code: 'cursor_permissions' };
     if (code === EXIT_NO_PROGRAM) return { message: 'Cursor is not installed in the session\'s image.', code: 'cursor_not_installed' };
     if (SIGNED_OUT.test(stderr)) return { message: 'Cursor refused the login: sign in again or renew the key.', code: 'cursor_login' };
     return { message: 'The Cursor program ended without an answer.', code: 'cursor_exit' };
@@ -225,8 +227,7 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
     await new Promise<void>((done) => {
       child.on('close', (code: number | null) => {
         if (session.turn === turn) session.turn = undefined;
-        if (turn.ending === 'interrupt') emit(session, session.mapper.cancelled('waiting_human', 'Waiting for a message'));
-        else if (turn.ending === undefined) {
+        if (turn.ending === 'interrupt') { if (!session.closing) emit(session, session.mapper.cancelled('waiting_human', 'Waiting for a message')); } else if (turn.ending === undefined) {
           const { message, code: reason } = failure(code, stderr);
           emit(session, session.mapper.turnFailed(message, reason));
         }
@@ -298,6 +299,7 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       },
       async stop() {
         session.queue.length = 0;
+        session.closing = true;
         if (session.turn) {
           await endRunningTurn(session);
           await Promise.race([session.turnDone, new Promise<void>((resolve) => setTimeout(resolve, runtime.stopTimeoutMs ?? 15_000).unref())]);
@@ -321,7 +323,7 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       const id = newId();
       const session: Session = {
         id, input, cleaner: options.cleaner(), mapper: createCursorMapper({ sessionId: id }), wake: new Set(), queue: [],
-        chat: undefined, turn: undefined, closed: true, handedOver: false, turnDone: Promise.resolve(), handle: undefined,
+        chat: undefined, turn: undefined, closed: true, closing: false, handedOver: false, turnDone: Promise.resolve(), handle: undefined,
       };
       sessions.set(id, session);
       await launcher.start(id, input);
@@ -338,6 +340,7 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       if (session.closed) {
         await launcher.start(id, session.input);
         session.closed = false;
+        session.closing = false;
         session.handle = handle(session);
       }
       // Given back after a human had the chat: the next turn resumes it as the human left it.
@@ -351,8 +354,13 @@ export function createCursorAdapter(options: CursorOptions): SessionAdapter {
       if (session.turn) {
         // One writer at a time: the running turn ends, then the human has the chat.
         session.queue.length = 0;
+        session.handedOver = true;                  // before the wait: no message starts a turn beside the human
         await endRunningTurn(session);
         await Promise.race([session.turnDone, new Promise<void>((resolve) => setTimeout(resolve, runtime.interruptTimeoutMs ?? 15_000).unref())]);
+        if (session.turn) {
+          session.handedOver = false;
+          return { supported: false, reason: 'The session\'s running turn did not end in time: try again, or open the Shell instead.' };
+        }
       }
       session.handedOver = true;
       return { supported: true, name: INTERACTIVE_NAME, command: interactiveCommand(permissionsOf(session), session.input.model, session.chat) };

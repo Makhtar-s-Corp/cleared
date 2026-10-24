@@ -28,13 +28,14 @@ export const CURSOR_CONFIG_DIR = `${CONFIG_MOUNT}/cursor`;
 // Exit codes the adapter reads: no login in the container, no Cursor program.
 export const EXIT_NO_LOGIN = 3;
 export const EXIT_NO_PROGRAM = 127;
+export const EXIT_NO_PERMISSIONS = 4;
 
 // Where a turn writes its process id (exec keeps it), so that the host can
 // end the program itself: ending the docker client would leave it running.
 export const TURN_PID_FILE = '/tmp/.cleared-cursor-turn.pid';
 export const END_TURN: readonly string[] = [
   'sh', '-c',
-  `p=$(cat ${TURN_PID_FILE} 2>/dev/null); case "$p" in ''|*[!0-9]*) exit 0;; esac; kill -TERM "$p" 2>/dev/null; i=0; while [ $i -lt 30 ] && [ -e /proc/$p ]; do sleep 0.1; i=$((i+1)); done; kill -KILL "$p" 2>/dev/null; rm -f ${TURN_PID_FILE}; exit 0`,
+  `p=$(cat ${TURN_PID_FILE} 2>/dev/null); case "$p" in ''|*[!0-9]*) exit 0;; esac; grep -aq stream-json /proc/$p/cmdline 2>/dev/null || { rm -f ${TURN_PID_FILE}; exit 0; }; kill -TERM "$p" 2>/dev/null; i=0; while [ $i -lt 30 ] && [ -e /proc/$p ]; do sleep 0.1; i=$((i+1)); done; kill -KILL "$p" 2>/dev/null; rm -f ${TURN_PID_FILE}; exit 0`,
 ];
 
 const identity = Object.entries(GIT_IDENTITY).map(([name, value]) => `${name}='${value}'`).join(' ');
@@ -47,8 +48,10 @@ const COMMON = [
   'CURSOR_API_KEY=$k; export CURSOR_API_KEY; unset k ANTHROPIC_API_KEY',
   `CURSOR_CONFIG_DIR='${CURSOR_CONFIG_DIR}'; export CURSOR_CONFIG_DIR`,
   `export ${identity}`,
-  'mkdir -p "$CURSOR_CONFIG_DIR" .cursor 2>/dev/null',
-  'printf \'%s\' "$2" > .cursor/cli.json',
+  'mkdir -p "$CURSOR_CONFIG_DIR" 2>/dev/null',
+  // Mandatory: without the permissions file the first guard layer is absent
+  // (a reviewer's or reader's checkout is read only), so the program never starts.
+  `if ! { mkdir -p .cursor && printf '%s' "$2" > .cursor/cli.json; } 2>/dev/null; then echo "Cleared: the Cursor permissions file could not be written in the checkout: the harness does not start without it." >&2; exit ${EXIT_NO_PERMISSIONS}; fi`,
 ];
 
 // sh, with $1 the login file, $2 the permissions' JSON, $3 the model, $4 the

@@ -12,14 +12,14 @@ import { PassThrough } from 'node:stream';
 import { Docker, LABEL } from '../../../src/container/docker.ts';
 import { LOGIN_FILE_MOUNT, sessionNames } from '../../../src/container/session-runtime.ts';
 import { dockerLauncher } from '../../../src/session/adapters/cursor.ts';
-import { CURSOR_CONFIG_DIR, END_TURN, EXIT_NO_LOGIN, EXIT_NO_PROGRAM, INTERACTIVE_LAUNCH, TURN_LAUNCH, interactiveCommand, isChatId, turnCommand } from '../../../src/session/adapters/cursor/interactive.ts';
+import { CURSOR_CONFIG_DIR, END_TURN, EXIT_NO_LOGIN, EXIT_NO_PERMISSIONS, EXIT_NO_PROGRAM, INTERACTIVE_LAUNCH, TURN_LAUNCH, interactiveCommand, isChatId, turnCommand } from '../../../src/session/adapters/cursor/interactive.ts';
 import { FakeDocker } from '../../container/fake-docker.ts';
 
 const key = ['crsr', 'T3stK3yN3v3rR34l', 'Zq', 'Xw'].join('_');
 const PERMISSIONS = '{"permissions":{"allow":["Read(/workspace/**)"],"deny":["Read(**/.env)"]}}';
 const CHAT = 'b1c2d3e4-1111-4222-8333-444455556666';
 
-function run(command: readonly string[], options: { login?: string; program?: 'agent' | 'cursor-agent' | 'none'; stdin?: string } = {}) {
+function run(command: readonly string[], options: { login?: string; program?: 'agent' | 'cursor-agent' | 'none'; stdin?: string; readOnly?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cleared-cursor-launch-'));
   try {
     const bin = join(dir, 'bin');
@@ -32,6 +32,7 @@ function run(command: readonly string[], options: { login?: string; program?: 'a
       writeFileSync(join(bin, program), '#!/bin/sh\nprintf "args:"; printf "%s|" "$@"; echo\nif [ "$CURSOR_API_KEY" = "$EXPECTED" ]; then echo key:ok; else echo key:bad; fi\necho "config:$CURSOR_CONFIG_DIR"\n');
       chmodSync(join(bin, program), 0o755);
     }
+    if (options.readOnly) chmodSync(workspace, 0o555);
     const file = join(dir, 'cursor.key');
     if (options.login !== undefined) writeFileSync(file, options.login);
     const words = command.map((word) => (word === LOGIN_FILE_MOUNT ? file : word.replace(CURSOR_CONFIG_DIR, config)));
@@ -40,6 +41,7 @@ function run(command: readonly string[], options: { login?: string; program?: 'a
     const result = spawnSync(shell as string, ['-c', script, ...args.slice(2)], { cwd: workspace, input: options.stdin ?? '', encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin:${dirname(process.execPath)}`, EXPECTED: key } });
     return { ...result, written: existsSync(join(workspace, '.cursor', 'cli.json')) ? readFileSync(join(workspace, '.cursor', 'cli.json'), 'utf8') : undefined };
   } finally {
+    try { chmodSync(join(dir, 'workspace'), 0o755); } catch { /* removed already */ }
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -103,4 +105,14 @@ test('the docker launcher runs a turn as `docker exec` on the session\'s own lab
   assert.ok(LABEL.length > 0);
   await assert.rejects(dockerWith.execStream(session, name, { user: '1000; id', workdir: '/workspace', command: ['x'] }), /invalid user/);
   await assert.rejects(dockerWith.execStream('9a8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d', name, { user: '1000:1000', workdir: '/workspace', command: ['x'] }), /no container named/);
+});
+
+test('the permissions file is mandatory: a checkout it cannot be written in (a reviewer\'s, read only) never reaches the program', { skip: process.getuid?.() === 0 ? 'root writes anywhere' : false }, () => {
+  for (const command of [turnCommand(PERMISSIONS, 'm1', undefined), interactiveCommand(PERMISSIONS, 'm1', CHAT)]) {
+    const blocked = run(command, { login: key, stdin: 'x', readOnly: true });
+    assert.equal(blocked.status, EXIT_NO_PERMISSIONS);
+    assert.match(blocked.stderr, /permissions file could not be written/);
+    assert.ok(!blocked.stdout.includes('args:'), 'the agent was not executed');
+    assert.ok(!blocked.stdout.includes(key) && !blocked.stderr.includes(key));
+  }
 });

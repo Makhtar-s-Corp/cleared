@@ -706,10 +706,10 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 
 **Guard.** Print mode gives no way to hold a call until a person answers, so an inbox "ask" cannot work mid-turn. The adapter:
 
-1. Compiles the session's policy into `.cursor/cli.json` before each turn (`cursor/permissions.ts`): deny first (the credential file, `.env*`, `*.pem`, `/proc/*/environ`, writes to `.git`, `.claude`, `.cursor` and `CLAUDE.md`, `printenv`, `env`, `sudo`, `curl`, `ssh`, `docker`), then a narrow allow (reads in the checkout; writes there for an author whose plan is approved; the policy's safe commands and package scripts word by word). `--force` is never passed. The file is kept out of git (`.cursor/` is in the checkout's exclude list) and the policy denies the session's own writes to `.cursor`.
+1. Compiles the session's policy into `.cursor/cli.json` before each turn (`cursor/permissions.ts`): deny first (the credential file, `.env*`, `*.pem`, `/proc/*/environ`, writes to `.git`, `.claude`, `.cursor` and `CLAUDE.md`, `printenv`, `env`, `sudo`, `curl`, `ssh`, `docker`), then a narrow allow (reads in the checkout; writes there for an author whose plan is approved; the policy's safe commands and package scripts word by word). `--force` is never passed. The write is mandatory: if the file cannot be written (a reviewer's or reader's checkout is read only) the launcher exits 4 and the program never starts (`cursor_permissions`). The file is kept out of git (`.cursor/` is in the checkout's exclude list) and the policy denies the session's own writes to `.cursor`.
 2. Evaluates every `tool_call` Cursor reports with the unchanged policy (`policy.ts`). Only an allow lets the turn go on. A deny, **and an ask**, end the turn: the program is killed in the container, the thread shows the refusal (`cleared.permission_answered`, rule from the policy) and an error with the code `policy_stop`, and the session waits for the next message. This layer sees a call when it starts, so it is a tripwire, not a prevention; layer 1 is what refuses.
 
-**Failures** are classified by exit code and a stderr pattern into fixed sentences (`cursor_login`, `cursor_not_installed`, `cursor_exit`, `cursor_launch`). The program's own words are never journaled.
+**Failures** are classified by exit code and a stderr pattern into fixed sentences (`cursor_login`, `cursor_not_installed`, `cursor_permissions`, `cursor_exit`, `cursor_launch`). The program's own words are never journaled.
 
 **Reachability.** The adapter is registered as `cursor` and the terminal route picks the adapter by the session's own harness, so a Take over of a Cursor session reaches it. But the flow and the lead start every session as `claude-code` (`HARNESS` in `flow/engine.ts` and `lead/engine.ts`), so no ticket can name `cursor` yet: choosing a harness per project or ticket is a later lane. Until then a trial starts a session through the adapter directly (`createCursorAdapter(...).start({ harness: 'cursor', ... })`).
 
@@ -735,7 +735,10 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 7. Whether the CLI runs hooks: if it does, a `beforeShellExecution` hook would give a true ask and make layer 2 a real gate.
 8. `dockerLauncher.start` has no test (it needs a Docker fake for `startSession`): it runs `sleep infinity` as the container's command, which assumes the image has no runner entrypoint, and Cursor must honour the egress proxy variables the container sets.
 9. Known side effects on the other harness: the policy now denies a Claude Code author's edits under any `.cursor/` folder, and the Cursor launcher overwrites a tracked `.cursor/cli.json` in the checkout.
-10. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
+10. A project that tracks its own `.cursor/cli.json` or `.cursor/rules`: git's exclude list does not hide a change to a tracked file, so an author's commit could carry Cleared's permissions file, and a Claude Code author cannot edit those paths. Not restored at the end of a turn.
+11. `doctor cursor` runs whatever `agent` is first on the PATH (`--version`, `status`); the name is generic. Its output is never printed.
+12. Layer 2 sees a call only on `tool_call/started`; check a real stream does not send a call only as `completed`.
+13. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
 
 ## v1 adapter contract
 

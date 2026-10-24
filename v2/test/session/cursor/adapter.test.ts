@@ -176,7 +176,7 @@ test('a process that ends without a result: the reason is a code, never the prog
 });
 
 test('exit codes of the launcher: no program installed, no login', async () => {
-  for (const [code, expected] of [[127, 'cursor_not_installed'], [3, 'cursor_login'], [2, 'cursor_exit']] as const) {
+  for (const [code, expected] of [[127, 'cursor_not_installed'], [3, 'cursor_login'], [4, 'cursor_permissions'], [2, 'cursor_exit']] as const) {
     const t = await setup();
     try {
       await t.adapter.start(input(t.workdir));
@@ -263,4 +263,43 @@ test('a malformed chat id is not written to the state folder', async () => {
     assert.ok(!existsSync(join(t.runtime.stateDir, 'cursor-chats', `${handle.id}.chat`)), 'a malformed id is not kept');
     writeFileSync(join(t.dir, 'unused'), '');
   } finally { t.done(); }
+});
+
+test('stop on a running turn leaves one terminal event, not two', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const turn = await t.launcher.nextTurn(0);
+    turn.say(init(), says('working'));
+    await handle.stop();
+    const ends = t.log.all.filter((e) => e.event.type === 'RUN_FINISHED');
+    assert.equal(ends.length, 1);
+  } finally { t.done(); }
+});
+
+test('Take over: a message sent while the turn ends does not start a turn beside the human; a turn that will not end refuses the hand over', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const first = await t.launcher.nextTurn(0);
+    first.say(init(), says('hi'));
+    await until(() => t.log.all.some((e) => e.event.type === 'TEXT_MESSAGE_START' && e.event.role === 'assistant'));
+    const pending = interactiveResume(t.adapter, handle.id);
+    await new Promise((r) => setTimeout(r, 0));
+    await assert.rejects(handle.send({ text: 'late', by: 'user-1' }), /taken over/);
+    assert.ok((await pending).supported);
+    assert.equal(t.launcher.turns.length, 1);
+  } finally { t.done(); }
+  const stuck = await setup();
+  try {
+    stuck.launcher.endTurn = async () => undefined;           // the program does not end
+    const handle = await stuck.adapter.start(input(stuck.workdir));
+    const turn = await stuck.launcher.nextTurn(0);
+    turn.process.kill = (() => true) as never;
+    turn.say(init(), says('hi'));
+    await until(() => stuck.log.all.some((e) => e.event.type === 'TEXT_MESSAGE_START' && e.event.role === 'assistant'));
+    const answer = await interactiveResume(stuck.adapter, handle.id);
+    assert.equal(answer.supported, false);
+    await handle.send({ text: 'still mine', by: 'user-1' });
+  } finally { stuck.done(); }
 });

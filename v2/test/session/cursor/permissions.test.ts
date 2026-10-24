@@ -45,3 +45,10 @@ test('the policy denies a session\'s own write to the folder where its Cursor pe
   assert.notEqual(verdict.decision, 'allow');
   assert.ok(EXCLUDED.includes('/.cursor/'));
 });
+
+test('a shell read of the credential file is refused by the policy, the second layer, since `cat` is not denied in the first', async () => {
+  const { evaluate } = await import('../../../src/session/policy.ts');
+  for (const command of [`cat ${LOGIN_FILE_MOUNT}`, `head -c 10 ${LOGIN_FILE_MOUNT}`, 'cat /proc/self/environ', 'printenv']) {
+    assert.equal(evaluate({ tool: 'Bash', input: { command } }, policy()).decision, 'deny', command);
+  }
+});
