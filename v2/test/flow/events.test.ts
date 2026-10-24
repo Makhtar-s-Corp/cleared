@@ -2,9 +2,9 @@
 // FlowEvent is fired by a test of this file, after the write it reports.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import type { QuestionItem } from '../../src/api/types.ts';
+import type { QuestionItem, ReleaseItem } from '../../src/api/types.ts';
 import { FLOW_EVENT_TYPES, type FlowEvent } from '../../src/flow/events.ts';
-import { REPORT_PASS, approved, finished, ledgerRow, quickAuthor, releaseRow, reviewerScript, setup, started, text, until, type Setup } from './support.ts';
+import { REPORT_PASS, approved, finished, ledgerRow, quickAuthor, releaseRow, reviewerScript, setup, started, text, simulatedCi, until, type Setup } from './support.ts';
 
 const fired = new Set<FlowEvent['type']>();
 const record = (t: Setup) => { for (const e of t.flowEvents) fired.add(e.type); };
@@ -243,4 +243,30 @@ test('a team\'s question past its delay says question_timed_out, after the inbox
     stage: 'lead', minutes: 30, leadMinutes: 10, questions: ['Which order?'], answers: { 'Which order?': 'Newest first (Recommended)' },
   });
   assert.equal(leadAt, new Date(t.clock.now).toISOString(), 'said after the write');
+});
+
+test('a repair of failed checks says ci_repair at each step, after the card says it (issue #273)', async () => {
+  const ci = simulatedCi(['failed', 'passed']);
+  const t = await setup({ scripts: { author: quickAuthor }, effects: ci.effects });
+  const card = () => t.inbox.list().filter((i): i is ReleaseItem => i.kind === 'release').sort((a, b) => Date.parse(b.since) - Date.parse(a.since) || b.requestedAt.localeCompare(a.requestedAt))[0];
+  const said: (string | undefined)[] = [];
+  t.engine.subscribe((event) => { if (event.type === 'ci_repair') said.push(card()?.repair?.state); });
+  await t.engine.start(t.ticket.id, 'u1');
+  await until(() => waiting(t), 'the release card', 5000);
+  await t.engine.settled();
+  t.clock.now += 61_000;
+  await t.engine.tick();
+  await until(() => t.inbox.list().filter((i) => i.kind === 'release').length === 2 && waiting(t), 'the repair\'s card', 5000);
+  await t.engine.settled();
+  t.clock.now += 61_000;
+  await t.engine.tick();
+  record(t);
+  const events = of(t, 'ci_repair');
+  assert.deepEqual(events.map((e) => ({ ...e, at: undefined })), [
+    { type: 'ci_repair', at: undefined, project: 'guestbook', ticket: t.ticket.id, pr: 7, attempt: 1, limit: 2, state: 'started', checks: ['test'] },
+    { type: 'ci_repair', at: undefined, project: 'guestbook', ticket: t.ticket.id, pr: 7, attempt: 1, limit: 2, state: 'pushed', checks: ['test'] },
+    { type: 'ci_repair', at: undefined, project: 'guestbook', ticket: t.ticket.id, pr: 7, attempt: 1, limit: 2, state: 'repaired', checks: ['test'] },
+  ]);
+  assert.deepEqual(said, ['started', 'pushed', 'repaired'], 'said after the card has it');
+  await t.engine.close();
 });

@@ -4581,3 +4581,31 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - A ticket from a plan never runs in variants: the plans name no number yet.
 - Resources: no Docker command, network, port, account or model call.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-variants`.
+
+## 2026-10-24: automatic repair of a pull request's failed checks (the author's choices, lane `j3-ci-repair`, issue #273)
+
+**The need.** Issue #273 (validated by the owner on 2026-10-23 at 11:51, matrix P58, delivered as P77) asks that a failed CI on a pull request Cleared opened start a repair session on its own, which pushes a commit and reports the result in the inbox. At most 2 attempts, never on main, tested with a simulated CI. These are the author's choices, not the owner's decisions.
+
+**Decision.**
+1. **The trigger is the release card.** A pull request Cleared opened is the one a release card in the inbox shows: the flow already reads its checks once a minute while the ticket waits for approval. A failed reading starts the repair (`#checksFailed`, `v2/src/flow/engine.ts`).
+   - The failure must be read on the card's own head. The host reads `gh pr view --json headRefOid,statusCheckRollup` (`ciFailures`, `v2/src/flow/effects.ts`). Right after a push the forge can still report the head before it; that reading starts nothing, and the next minute reads again. A reading that fails waits the same way.
+   - The repair runs beside the tick, which goes on: resuming an author starts its container. The ticket is marked before the first wait, so two readings never start two repairs.
+   - A train (a ticket of several services) is not repaired: its checks are per service and its card lands per service. That is more than this issue's effort.
+2. **The repair is the existing path, not a new one.**
+   - The card is handled first, so the red head can no longer be approved.
+   - The ticket's last author is reopened on the ticket branch: resumed, else a new author given the ticket's prompt. It is told the attempt, the failed checks and the last 60 lines of each GitHub Actions job's failed log (`gh run view --job <id> --log-failed`, the first 5 checks), all through the service's cleaner and marked as data. It is told to fix the cause, not to skip, delete or weaken the check, and to leave the CI's configuration alone.
+   - Its commit goes through the review again. The card says "Reviewed by" and the approval is bound to the head it shows, so an unreviewed commit would make both false. The repair is a new flow of the ticket: its review counts from round 1, so a ticket that used its rounds before still gets one.
+   - Then the publish, as for any change: the ticket branch only, pushed without force, the open pull request reused, the base branch refused (`v2/src/workspace/publish.ts`, steps 1 and 3). A new card follows, checks pending, carrying the attempt.
+3. **At most 2 attempts** (`CI_REPAIR_ATTEMPTS`, `v2/src/flow/ci-repair.ts`). The attempt is kept in the card's payload (`ReleaseItem.repair`: attempt, limit, state, the failed checks' names) and the next card inherits it. It holds across a restart without a new table. A person who sends the ticket back starts a fresh flow, whose card has no repair: the count starts again.
+   - Red again after the second attempt: the card stays, says `gave_up`, and the owner decides. Nothing more is tried.
+   - Green: the card says `repaired`. A card that gave up turns `repaired` too when the owner runs a job again and its head passes.
+4. **Never on main.** Besides the publish's own refusal, a ticket branch that is the service's base or `main` (or `master`) is never repaired: the card says `refused`, once.
+5. **The result in the inbox.** The card's detail has a fact, "Repair of the checks", for each state: started (on the handled card), published, repaired, still failing, refused. The list's line says when the attempts are spent. Both are in the inbox's catalog in French and English. Each step is also a comment on the ticket and a `ci_repair` event on the bus, which the lead reads as a line.
+
+**Consequences.**
+- No new table, no new setting, no new session event name.
+- `#reopenAuthor` lost its resume-else-new part to `#reopenWith`, which the repair shares. The review channel's behaviour is unchanged, and its tests pass as before.
+- The simulated CI (`simulatedCi`, `v2/test/flow/support.ts`) is keyed by head: each publish pushes a new head and its checks are scripted. Nothing reaches GitHub. `ciFailures` itself never ran against GitHub. Its parsers are tested on objects written to gh's documented JSON fields, not recorded from an account.
+- Known limit: an approval clicked while the checks are red, and still in its undo window when the repair starts, is not cancelled by the repair. The lock still refuses to merge a red head.
+- Resources: no Docker object, no network, no tunnel, no port. The tests run in memory.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-ci-repair`.

@@ -3,7 +3,7 @@
 // are the API's (api/types.ts); this file stores them, it does not decide
 // what is asked: the flow does.
 import type { DatabaseSync } from 'node:sqlite';
-import type { ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TicketVariant, TrainState, VariantsItem } from '../api/types.ts';
+import type { CiRepair, ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TicketVariant, TrainState, VariantsItem } from '../api/types.ts';
 import { LEAD_TICKET } from '../lead/contract.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 
@@ -115,11 +115,12 @@ export class InboxStore {
   // a release has no other use for, so that it is not a request of any session.
   // A ticket of several services carries its train (lane 16); the groups and
   // the flags are kept when there are any (release/flags.ts).
-  addRelease(input: Base & Pick<ReleaseItem, 'title' | 'announcement' | 'pr' | 'heads' | 'requestedAt' | 'captures' | 'sessions'> & Partial<Pick<ReleaseItem, 'train' | 'groups' | 'flags'>>, session: SessionId = ''): ReleaseItem {
+  addRelease(input: Base & Pick<ReleaseItem, 'title' | 'announcement' | 'pr' | 'heads' | 'requestedAt' | 'captures' | 'sessions'> & Partial<Pick<ReleaseItem, 'train' | 'groups' | 'flags' | 'repair'>>, session: SessionId = ''): ReleaseItem {
     const id = `release:${input.ticket}:${input.pr.number}:${input.requestedAt}`;
     this.#insert(id, 'release', input, '', session, this.#now().toISOString(), {
       title: input.title, announcement: input.announcement, pr: input.pr, heads: input.heads, requestedAt: input.requestedAt, captures: input.captures, sessions: input.sessions,
       ...(input.train ? { train: input.train } : {}), ...(input.groups?.length ? { groups: input.groups } : {}), ...(input.flags?.length ? { flags: input.flags } : {}),
+      ...(input.repair ? { repair: input.repair } : {}),
     });
     return this.#get(id) as ReleaseItem;
   }
@@ -283,6 +284,12 @@ export class InboxStore {
   // handled release keeps what the person saw (issue 157).
   setReleaseChecks(id: string, checks: ReleaseItem['pr']['checks']): void {
     this.#changed(this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.pr.checks', ?) WHERE id = ? AND kind = 'release' AND state = 'waiting'").run(checks, id));
+  }
+
+  // Where the repair of a release's failed checks stands (issue #273), on
+  // a waiting card or one the repair handled, which then says it started.
+  setReleaseRepair(id: string, repair: CiRepair): void {
+    this.#changed(this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.repair', json(?)) WHERE id = ? AND kind = 'release'").run(JSON.stringify(repair), id));
   }
 
   waitingReleases(): ReleaseItem[] {

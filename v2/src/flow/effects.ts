@@ -14,6 +14,7 @@ import { captureHandover } from '../workspace/handover.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
 import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
+import { failedChecks, jobOf, logTail } from './ci-repair.ts';
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
@@ -200,6 +201,25 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
           (error, out) => (error && (error as { code?: unknown }).code !== 8 ? reject(error) : resolve(out)));
       });
       return checksOf(JSON.parse(stdout) as { bucket: string }[]);
+    },
+
+    // The head and the failed checks of a pull request (issue #273), each
+    // GitHub Actions job's failed steps' log cut to its end; a log that
+    // cannot be read is left out, the check's name stays.
+    async ciFailures({ pr, service }) {
+      const { gh } = await forge(service);
+      const { dir, repo } = of(service);
+      const read = (args: readonly string[]) => new Promise<string>((resolve, reject) => {
+        execFile('gh', [...args, '--repo', repo], { cwd: dir, env: gh, timeout: 30_000, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }, (error, out) => (error ? reject(error) : resolve(out)));
+      });
+      const failures = failedChecks(JSON.parse(await read(['pr', 'view', String(pr), '--json', 'headRefOid,statusCheckRollup'])));
+      const checks = [];
+      for (const check of failures.checks.slice(0, 5)) {
+        const job = jobOf(check.url);
+        const log = job ? await read(['run', 'view', '--job', job, '--log-failed']).then((out) => logTail(out), () => null) : null;
+        checks.push({ ...check, log });
+      }
+      return { head: failures.head, checks: [...checks, ...failures.checks.slice(5)] };
     },
 
     // What the published head changes against the base, read in the
