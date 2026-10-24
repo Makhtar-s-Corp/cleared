@@ -303,3 +303,21 @@ test('Take over: a message sent while the turn ends does not start a turn beside
     await handle.send({ text: 'still mine', by: 'user-1' });
   } finally { stuck.done(); }
 });
+
+test('layer 2 stops a turn on any shell read of the credential file or an environment file, not only on `cat` (issue #294, follow-up 4)', async () => {
+  for (const command of [
+    `cat ${LOGIN_FILE_MOUNT}`, `less ${LOGIN_FILE_MOUNT}`, `tail -n 3 ${LOGIN_FILE_MOUNT}`, `sed -n p ${LOGIN_FILE_MOUNT}`, `grep . ${LOGIN_FILE_MOUNT}`,
+    `base64 ${LOGIN_FILE_MOUNT}`, `cat < ${LOGIN_FILE_MOUNT}`, `cp ${LOGIN_FILE_MOUNT} /workspace/copy`, 'cat .env', 'cat /workspace/.env.local',
+  ]) {
+    const t = await setup();
+    try {
+      await t.adapter.start(input(t.workdir));
+      const turn = await t.launcher.nextTurn(0);
+      turn.say(init(), shellStarted('c1', command));
+      await until(() => turn.killed);
+      const error = t.log.all.find((e) => e.event.type === 'RUN_ERROR');
+      assert.ok(error && error.event.type === 'RUN_ERROR' && error.event.code === 'policy_stop', command);
+      assert.ok(!t.log.all.some((e) => e.event.type === 'TOOL_CALL_END'), `${command}: the call is not reported as run`);
+    } finally { t.done(); }
+  }
+});
