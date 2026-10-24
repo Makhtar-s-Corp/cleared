@@ -89,7 +89,7 @@ export function stepSiblings(planned: readonly SiblingSpec[], step: StepSiblings
     if (sibling.name === step.own) { out.push(sibling); continue; }
     const contract = step.validated.get(sibling.name) ?? sibling.contract;
     if (step.kind === 'service') {
-      if (contract !== undefined) out.push({ name: sibling.name, port: sibling.port, contract });
+      if (contract !== undefined) out.push({ name: sibling.name, port: sibling.port, contract, ...(sibling.contractFormat ? { contractFormat: sibling.contractFormat } : {}) });
       continue;
     }
     out.push(contract === undefined ? sibling : { ...sibling, contract });

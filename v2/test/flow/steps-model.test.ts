@@ -75,6 +75,19 @@ test('the integration step: every sibling real from the ticket branch, a contrac
   ]);
 });
 
+test('a fake of a protobuf contract keeps its format through the service and the integration steps (M11)', () => {
+  const proto: SiblingSpec[] = [
+    planned('guestbook')[0] as SiblingSpec,
+    { name: 'royalties', port: 8080, contract: '/state/siblings/royalties/c3/api/royalties.proto', contractFormat: 'protobuf' },
+  ];
+  const validated = new Map([['royalties', '/work/LOCAL-2/.validated/step-1/royalties.proto']]);
+  assert.deepEqual(stepSiblings(proto, { kind: 'service', own: 'guestbook', validated })[1],
+    { name: 'royalties', port: 8080, contract: '/work/LOCAL-2/.validated/step-1/royalties.proto', contractFormat: 'protobuf' });
+  assert.deepEqual(stepSiblings(proto, { kind: 'integration', own: 'guestbook', validated })[1],
+    { name: 'royalties', port: 8080, contract: '/work/LOCAL-2/.validated/step-1/royalties.proto', contractFormat: 'protobuf' });
+  assert.equal(stepSiblings(proto, { kind: 'service', own: 'guestbook', validated: new Map() })[1]?.contractFormat, 'protobuf', 'the planned contract too, before any is validated');
+});
+
 test('the consumer\'s own sibling is given the address of each service it names in [session] service_urls', () => {
   const siblings = stepSiblings(planned('guestbook'), { kind: 'service', own: 'guestbook', validated: VALIDATED, urls: { 'filter-api': 'FILTER_URL' } });
   assert.deepEqual(siblings[0]?.env, { FILTER_URL: 'http://filter-api:8795' });

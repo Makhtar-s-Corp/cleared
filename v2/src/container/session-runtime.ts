@@ -340,7 +340,10 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
         await container({
           ...common, role: 'fake', image: image.image, readOnly: true, limits: FAKE_LIMITS,
           mounts: [{ type: 'bind', source: dirname(contract), target: FAKE_CONTRACT_MOUNT, readonly: true }],
-          env: { FAKE_CONTRACT: `${FAKE_CONTRACT_MOUNT}/${basename(contract)}`, FAKE_PORT: String(sibling.port) },
+          env: {
+            FAKE_CONTRACT: `${FAKE_CONTRACT_MOUNT}/${basename(contract)}`, FAKE_PORT: String(sibling.port),
+            ...(sibling.contractFormat ? { FAKE_FORMAT: sibling.contractFormat } : {}),
+          },
         });
       } else {
         await container({ ...common, role: 'sibling', image: image.image, limits: SERVICE_LIMITS, env: { ...servicesEnv, ...sibling.env } });
