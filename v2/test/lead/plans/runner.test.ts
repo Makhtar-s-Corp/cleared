@@ -1,7 +1,7 @@
 // The plan runner (docs/v2/milestone-2-plan.md, section 5.3) over the real
 // flow engine on the fake adapter: tickets created at the approval, started
 // in position order, at most two at a time, a dependent after its
-// dependency landed, a put back started once more then held, pause and
+// dependency landed, a put back started twice more then held, pause and
 // resume, the week stop and the day budget.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -154,8 +154,8 @@ test('a fast item\'s author is Haiku; a full item\'s is the configured author', 
   await t.settle();
 });
 
-test('a ticket put back is started once more with the note and the base hint, then held with an event to the lead', async () => {
-  const t = await plans({ scripts: { authors: [failing, failing] } });
+test('a ticket put back is started once more with the note and the base hint, then a third time, then held and said in the lead\'s thread', async () => {
+  const t = await plans({ scripts: { authors: [failing, failing, failing] } });
   const { plan } = await t.runner.propose({ ...NIGHT, items: [item('Entries as JSON', [])] });
   await t.runner.approve(plan, 'u1');
   await t.settle();
@@ -167,16 +167,22 @@ test('a ticket put back is started once more with the note and the base hint, th
   assert.equal(authors.length, 2, 'started once more');
   assert.match(authors[1]!.input.prompt, /the runner died/);
   assert.match(authors[1]!.input.prompt, /integrate the base branch first/);
+  await t.settle();
+  assert.equal(t.itemsOf(plan)[0]!.state, 'put_back');
+  assert.equal(t.itemsOf(plan)[0]!.putBacks, 2);
 
+  await t.tick();
+  const third = t.startedSessions.filter((s) => s.input.role === 'author');
+  assert.equal(third.length, 3, 'the automatic third attempt');
+  assert.match(third[2]!.input.prompt, /third and last automatic attempt/);
   await t.settle();
   assert.equal(t.itemsOf(plan)[0]!.state, 'held');
-  assert.equal(t.itemsOf(plan)[0]!.putBacks, 2);
+  assert.equal(t.itemsOf(plan)[0]!.putBacks, 3);
   await t.tick();
-  assert.equal(t.startedSessions.filter((s) => s.input.role === 'author').length, 2, 'a held item is not started by the runner');
-  const held = t.lead.events.filter((e) => /held/.test(e.text));
+  assert.equal(t.startedSessions.filter((s) => s.input.role === 'author').length, 3, 'a held item is not started by the runner');
+  const held = t.lead.lines.filter((line) => /held/.test(line));
   assert.equal(held.length, 1);
-  assert.ok(held[0]!.urgent);
-  assert.match(held[0]!.text, /start_ticket/);
+  assert.match(held[0]!, /start_ticket/);
 });
 
 test('a ticket put back by a restart of the service is started again without counting toward the hold', async () => {

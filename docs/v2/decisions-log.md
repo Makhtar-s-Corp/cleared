@@ -4209,3 +4209,127 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The one-service fixture (`v2/test/flow/fixtures/one-service-events.json`) was written again. It now has one reviewer session, not two, with the channel rows and the resumed review step. Nothing else in it changed.
 - The rehearsal adapter (`v2/src/session/adapters/index.ts`) resumes every session with the author's reopen steps. Its scripted reviewers pass at the first round, so no rehearsal resumes a reviewer; a rehearsal that scripts a request for change will need a reviewer's resume script.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-review-channel`.
+
+## 2026-10-24: Owner decision: the endurance proof shortened to 24 hours, then stopped early at step 07
+
+**Decision.** On 2026-10-23 at 23:06 (Europe/Paris), at the owner's request, the endurance proof launched at 19:52 (the plan-2 entry above) was shortened from 48 hours to 24 hours.
+
+**Outcome.**
+- On 2026-10-24 at 15:45 the proof was stopped early: it had been stuck at step 07 since 08:47.
+- What held it:
+  - LOCAL-39, LOCAL-40 and LOCAL-41 were held after two bounces to Todo, and only the lead or the owner could start them again.
+  - LOCAL-42 was waiting on a question to the owner.
+- Result: 7 of 9 steps passed. Steps 07 and 08 were not reached.
+- The fix is the lane `j3-autonomy` (issue #290): its entry below.
+
+- Recorded by: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`.
+
+## 2026-10-24: Orchestrator decision of 16:25: the end of the proof, and the cleanup
+
+**Decision.** On 2026-10-24 at 16:25 (Europe/Paris), the orchestrator, not the owner, recorded the end of the endurance proof and its cleanup.
+
+**What was done:**
+- The proof service on 8791 and the app on 8792 were stopped with SIGTERM.
+- Two sessions were stopped through Cleared's `stopSession()`, which filters on `cleared.dev=v2`:
+  - `33602332`, plan-2's lead: 2 containers and 2 networks.
+  - `23652120`, LOCAL-42's session: 3 containers and 2 networks.
+- The proof's release broker and its watchers were stopped.
+- The first piloted project's production was checked and is unchanged.
+- No secret was printed or written.
+
+**Consequences.**
+- The proof's deploy containers are kept: `cleared-guestbook`, `cleared-filter-api` and `cleared-guestbook-db`.
+
+- Recorded by: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`, at the orchestrator's request.
+
+## 2026-10-24: a plan no longer freezes on a bounced ticket, an unanswered question or an idle session (the author's choices, lane `j3-autonomy`)
+
+**The defect** (issue #290, the endurance proof above). Three rules each left a plan waiting for a person with no end:
+- **Bounces.** A ticket put back twice held its item, and only start_ticket or the owner started it again. LOCAL-39, 40 and 41 waited there from 08:47.
+- **Questions.** A team's question waited for the owner with no delay. LOCAL-42 waited about 7 hours, and its item, still `running`, kept its slot in the plan.
+- **Idle sessions.** The flow's idle stop skips a session that waits for a person, so LOCAL-42's session and its containers ran for 7 hours. The orchestrator's cleanup of 16:25 found its 3 containers still there.
+
+**Decision.**
+
+1. **One automatic third attempt, then the lead, in its thread** (`lead/plans/runner.ts`, `lead/plans/retry.ts`, P66).
+   - A ticket put back a second time is started a third time by the runner, as the first put back already was (`AUTOMATIC_ATTEMPTS` = 3).
+   - Its author's prompt says it is the third and last automatic attempt. Beside the last note, it gets:
+     - the report its reviewer wrote last (the last report with a Verdict line, `lastReport`);
+     - the command and the output of the last test run that failed in one of its author sessions: an `execute` result marked as an error, whose command names test, check, typecheck, lint or a test runner.
+   - Each is cut to 4,000 characters (the end of a test run is kept, where a runner says what failed) and cleaned again by the service's cleaner.
+   - A third put back holds the item. The escalation is a line of the lead's thread (`serviceLine`), which the owner reads and which gives the lead a turn. Before, the hold was only an event of the lead's next turn (`enqueue`).
+   - A held item takes no slot, so the next items start. The rest of the plan goes on, except the items that wait for the held one.
+   - A put back by a restart still does not count.
+   - Not chosen: more attempts, or another model on the third. Three attempts cost at most three author sessions per item before a person decides.
+
+2. **Each question has its own delay, then the lead, then the declared answer or the park** (`flow/engine.ts`, `flow/questions.ts`, P54).
+   - **The delay.** It counts from when the question was asked: `CLEARED_V2_QUESTION_TIMEOUT_MINUTES`, 30 by default. A wrong value stops the service, as the other settings do. The inbox item carries `timeout`: `at`, `leadUntil` and the declared `answers`.
+   - **The lead.** Past the delay, the flow says `question_timed_out` (stage `lead`). The lead engine writes the question in its thread and gives the lead a turn at once: decide with answer_question, and what applies without an answer. The owner may still answer.
+   - **The lead's window.** It is `QUESTION_LEAD_MINUTES`, 10 minutes, counted from when the lead was asked. It is a constant, not a setting: the brief asks for the question's delay alone to be configurable.
+   - **The declared answer.** It is each question's first option whose label ends with "(Recommended)". That is Claude Code's AskUserQuestion convention, which the lead's prompt, the inbox and the proof's answer (P60) already read.
+     - A request with one question that has none has no declared answer. So does a free question.
+     - The author's prompt now asks for that label on the option it would take.
+     - Not chosen: the first option, which nobody declared.
+   - **The answer applied.** Past the window, it is given as a policy's answer under the rule `question_default`. It is logged:
+     - in the session (`cleared.permission_answered`, `by: policy`);
+     - on the ticket, as a comment;
+     - in the ledger's `events` table (`question_default`, source `flow`);
+     - on the bus (stage `default`).
+   - **The park.** With no declared answer, the ticket is parked:
+     - its sessions stop, their volumes kept;
+     - it goes back to Todo with the new reason `parked`, in the ledger as `question_parked`;
+     - its plan item takes the new state `parked`: not counted as a failure, its slot free, left alone by the runner, started again by the lead's start_ticket with the answer in its reason;
+     - the runner says it in the lead's thread.
+   - **Excluded.** The lead's own questions to the owner, which the lead engine keeps, and a session the owner took over.
+   - **On the screens.**
+     - The inbox's question says when the Lead decides and what then applies ("No answer in 25 min: the Lead decides, else “Newest first” applies."), in French and in English, through the shell's duration formatter.
+     - A parked item reads « Mis de côté » (Parked) in the plan panel. The tower counts it with the held ones.
+
+3. **An idle watchdog independent of the flow** (`session/watchdog.ts`, `modules/flow.ts`, P67).
+   - **Its own clock.** A timer of its own, once a minute, started with the engine. What it reads is the ledger: each live author, reviewer or reader session of the project, and the time of its last event or of its row's last change.
+   - **Its threshold.** It reuses `CLEARED_V2_IDLE_MINUTES` (15) rather than adding a second setting.
+   - **A session the engine runs** is stopped by the engine (`FlowEngine.idleStop`):
+     - One that waits for a person (a question, a permission, its session plan) is suspended. Its containers stop through the adapter's stop, its volume (the harness's transcript) stays, what it waits for stays in the inbox, and its ticket stays In Progress. Nothing is put back.
+     - Its question's delay goes on. The answer, from the owner, the lead or the declared default, resumes it in a new container from its volume with the harness's resume, and is said to it as its next message. A message or a session plan's Go resumes it too.
+     - One that waits for nothing is stopped by the existing idle rule, its ticket put back.
+   - **A session nobody runs** gets its row stopped and a RUN_ERROR `idle`.
+   - **Every stop:**
+     - its containers and networks, labelled `cleared.dev=v2` and named after the session, are removed by name (`Docker.releaseStopped`);
+     - its volume and its images are never removed;
+     - a `session_idle_stopped` row goes to the ledger's `events` table (source `watchdog`) with what was removed and the volume kept.
+   - **Left alone:**
+     - the permanent lead, which waits between events by design and whose generations the lead engine ends;
+     - a session the owner took over, which the terminal's own 15-minute rule closes.
+   - **Limits, left for later:**
+     - A suspended session that waits only for a permission has no delay. It keeps its plan slot until the owner answers.
+     - An "allow once" given to a suspended session is said to it, and the resumed harness asks again when it runs the command.
+     - After a restart, a suspended session's ticket is put back by the recovery (`restart`, not counted).
+
+**Tests**, all on a simulated clock:
+- `test/lead/plans/autonomy.test.ts`:
+  - the third attempt's prompt: the note, the reviewer's report, the failing `npm test` and its output;
+  - the hold after it, said once in the thread, and the next item starting in the freed slot with `maxParallel` 1;
+  - the retry context cut and cleaned;
+  - a ticket parked by a real unanswered question: the item parked, not counted, the next item started, and start_ticket starting it again.
+  - On the old code, the first and the last fail: the item is held after the second put back, and no ticket is ever parked.
+- `test/lead/plans/runner.test.ts`: the old two-put-backs case, now three.
+- `test/flow/question-timeout.test.ts`:
+  - 29:59 waits and 30:00 asks the lead, once, in the ledger;
+  - the lead's answer in its window;
+  - the declared answer at 40:00 in the session, on the ticket, in the ledger and on the bus, the ticket going on to its release;
+  - the park of a free question;
+  - the setting and its errors;
+  - the lead's own question untouched;
+  - the declared answers' rule.
+- `test/session/watchdog.test.ts`:
+  - a session nobody runs, 16 minutes idle while waiting: the labelled lists, the removals by name, no `volume rm`, the ledger's row; the busy, the 14:59, the done and the lead's left alone;
+  - the engine's stop and a taken-over session skipped;
+  - no events table;
+  - the engine's suspension at 15:00 with its question kept and nothing put back, resumed by the owner's answer, by the declared answer at 40:00, and parked at 40:00 without one.
+  - On the old code, the suspension tests fail: the session waits on and its containers run.
+- `test/session/watchdog.test.ts` also runs the lead's own answer_question tool on a session the watchdog stopped: asked at 30:00, its answer resumes the session, and nothing is applied after it.
+- `test/lead/engine.test.ts`: the lead's thread line and its turn, without the 60-second batch.
+- `test/flow/events.test.ts`: `question_timed_out`, said after its write.
+- `app/web/test/inbox/deadline.test.tsx`: the inbox's line in both languages, before and after the lead is asked, with and without a declared answer, and the parked item's label.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`.

@@ -112,10 +112,24 @@ export function describeFlowEvent(event: FlowEvent): string | undefined {
     case 'question_raised': return `${at}: the team asked a question (session ${event.session}, request ${event.requestId}).`;
     case 'request_answered': return event.item.startsWith('question:') ? `${at}: the team's question ${event.requestId} was answered by ${event.by}.` : undefined;
     case 'session_stopped': return `${at}: the ${event.role} session ${event.session} ${event.phase}: ${event.reason || 'no reason given'}`;
+    case 'question_timed_out':
+      return event.stage === 'default' ? `${at}: the team's question ${event.requestId} waited ${event.minutes} min: its declared answer was applied.`
+        : event.stage === 'parked' ? `${at}: the team's question ${event.requestId} waited ${event.minutes} min with no declared answer: the ticket is parked.`
+        : undefined;
     case 'permission_raised':
     case 'release_merged':
       return undefined;
   }
+}
+
+// A team's question that waited past its delay (issue #290): the lead's
+// line in its thread, and its turn, to decide it now.
+export function questionToLead(event: Extract<FlowEvent, { type: 'question_timed_out' }>): string {
+  const asked = event.questions.map((q) => `"${q}"`).join(' and ');
+  const then = event.answers
+    ? `the answer the session declared applies: ${Object.values(event.answers).join(', ')}`
+    : 'the session declared no answer, so the ticket is parked and the rest of the plan goes on';
+  return `${event.ticket}'s question ${asked} waited ${event.minutes} min for the owner. Decide it now with answer_question (session ${event.session}, request ${event.requestId}) if an approved decision, the ticket or the plan settles it. In ${event.leadMinutes} min without an answer, ${then}.`;
 }
 
 export function commitmentDue(id: string, text: string, due: string): string {

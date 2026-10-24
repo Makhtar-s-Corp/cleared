@@ -9,7 +9,8 @@
 // are flow/steps.ts's. The web terminal of a session taken over and the
 // editor's save (lane 31) are terminal/routes.ts's and flow/files.ts's,
 // with one human side per process (terminal/human.ts), made with the
-// engine and the store this module receives.
+// engine and the store this module receives. The idle watchdog (issue #290,
+// session/watchdog.ts) starts with the engine, on its own timer.
 import { Docker } from '../container/docker.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
@@ -19,12 +20,14 @@ import { takeoverRoutes } from '../flow/takeover.ts';
 import { TRAIN_TABLE } from '../release/store.ts';
 import type { Store } from '../store/db.ts';
 import { dockerContainer } from '../terminal/container.ts';
+import { IdleWatchdog } from '../session/watchdog.ts';
 import { HumanSide } from '../terminal/human.ts';
 import { terminalRoutes } from '../terminal/routes.ts';
 import type { Module, Registry } from './registry.ts';
 
 let store: Store | undefined;
 let human: HumanSide | undefined;
+let watchdog: IdleWatchdog | undefined;
 function humanOf(registry: Registry): HumanSide | undefined {
   if (human || !store) return human;
   const engine = runtime.engine(registry);
@@ -50,8 +53,19 @@ const flow: Module = {
   },
   // The engine is built at start, not at the first request: its restart
   // recovery stops what the last process left, puts its tickets back, and
-  // releases the stopped sessions' containers and networks.
-  start: (registry) => { runtime.engine(registry); },
+  // releases the stopped sessions' containers and networks. The watchdog
+  // starts with it, once a minute.
+  start: (registry) => {
+    const engine = runtime.engine(registry);
+    if (!engine || !store || watchdog) return;
+    const docker = new Docker();
+    watchdog = new IdleWatchdog({
+      store, project: engine.config.project, idleMs: engine.config.idleMs,
+      owner: (session) => engine.idleStop(session),
+      release: (session) => docker.releaseStopped([session]),
+    });
+    watchdog.startTimer();
+  },
 };
 
 export default flow;

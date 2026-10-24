@@ -207,7 +207,7 @@ function proposal(item: PlanItemInbox): Record<string, string> {
 
 const UNDER_WAY: ReadonlySet<Plan['state']> = new Set(['approved', 'paused']);
 const SEGMENT: Readonly<Record<PlanItemState, Segment | null>> = {
-  landed: 'landed', running: 'running', needs_approval: 'approval', held: 'held', put_back: 'waiting', ready: 'waiting', waiting: 'waiting', cancelled: null,
+  landed: 'landed', running: 'running', needs_approval: 'approval', held: 'held', parked: 'held', put_back: 'waiting', ready: 'waiting', waiting: 'waiting', cancelled: null,
 };
 
 function planRow(plan: Plan): PlanRow {

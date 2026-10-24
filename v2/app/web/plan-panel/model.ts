@@ -13,7 +13,7 @@ export const PLAN_PANEL_KEYS = [
   'plan_state_proposed', 'plan_state_approved', 'plan_state_paused', 'plan_state_done', 'plan_state_superseded', 'plan_state_rejected',
   'plan_progress', 'plan_items_label', 'plan_after', 'plan_and',
   'plan_lane_full', 'plan_lane_fast',
-  'plan_item_waiting', 'plan_item_ready', 'plan_item_running', 'plan_item_needs_approval', 'plan_item_landed', 'plan_item_put_back', 'plan_item_held', 'plan_item_cancelled',
+  'plan_item_waiting', 'plan_item_ready', 'plan_item_running', 'plan_item_needs_approval', 'plan_item_landed', 'plan_item_put_back', 'plan_item_held', 'plan_item_parked', 'plan_item_cancelled',
   'plan_estimate', 'plan_week_share', 'plan_cost',
   'plan_work', 'plan_week_total', 'plan_cost_total', 'plan_parallel', 'plan_parallel_one', 'plan_samples', 'plan_defaults',
   'plan_change', 'plan_approve', 'plan_pause', 'plan_resume',
@@ -42,7 +42,7 @@ export const STATE_KEYS: Readonly<Record<PlanState, string>> = {
 };
 export const ITEM_KEYS: Readonly<Record<PlanItem['state'], string>> = {
   waiting: 'plan_item_waiting', ready: 'plan_item_ready', running: 'plan_item_running', needs_approval: 'plan_item_needs_approval',
-  landed: 'plan_item_landed', put_back: 'plan_item_put_back', held: 'plan_item_held', cancelled: 'plan_item_cancelled',
+  landed: 'plan_item_landed', put_back: 'plan_item_put_back', held: 'plan_item_held', parked: 'plan_item_parked', cancelled: 'plan_item_cancelled',
 };
 export const LANE_KEYS: Readonly<Record<PlanItem['lane'], string>> = { full: 'plan_lane_full', fast: 'plan_lane_fast' };
 export const ACTION_KEYS: Readonly<Record<PlanAction, string>> = { change: 'plan_change', approve: 'plan_approve', pause: 'plan_pause', resume: 'plan_resume' };

@@ -70,6 +70,7 @@
   "plan_item_landed": "Landed",
   "plan_item_put_back": "Put back",
   "plan_item_held": "Held",
+  "plan_item_parked": "Parked",
   "plan_item_cancelled": "Cancelled",
   "plan_estimate": "{time} · {share}",
   "plan_week_share": "{n}%",
