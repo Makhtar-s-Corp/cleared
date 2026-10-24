@@ -59,6 +59,15 @@ const code = (command: string) => `\`${command.replace(/`/g, "'").replace(/\s+/g
 const dollars = (usd: number, language: Language) =>
   new Intl.NumberFormat(language, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: usd < 1 ? 4 : 2 }).format(usd);
 
+// The catalog's sentence for a run's outcome.
+function outcomeKey(outcome: ReceiptTest['outcome']): string {
+  switch (outcome) {
+    case 'passed': return 'receipt_run_green';
+    case 'failed': return 'receipt_run_red';
+    case 'unclear': return 'receipt_run_unclear';
+    case 'not_run': return 'receipt_run_missing';
+  }
+}
 const PART_KEYS: Record<CaptureMissing['part'], string> = { before: 'receipt_before', after: 'receipt_after', video: 'receipt_video_part' };
 
 function captureLine(capture: ReceiptCapture, data: ReceiptData, t: Translate): string {
@@ -87,7 +96,7 @@ export function renderReceipt(data: ReceiptData, language: Language): string {
   else if (data.tests.length === 0) lines.push(`- ${t('receipt_tests_no_round')}`);
   else {
     lines.push(`- ${t('receipt_tests')}`);
-    for (const run of data.tests) lines.push(`  - ${t(`receipt_test_${run.outcome}`, { round: run.round, command: code(run.command) })}`);
+    for (const run of data.tests) lines.push(`  - ${t(outcomeKey(run.outcome), { round: run.round, command: code(run.command) })}`);
   }
   const cost = data.tokens === null ? t('receipt_cost_unreported') : t('receipt_cost', { count: quantity(data.tokens, t) });
   lines.push(`- ${data.costUsd === null ? cost : `${cost}, ${t('receipt_usd', { usd: dollars(data.costUsd, language) })}`}`);
