@@ -13,10 +13,16 @@
 //      maxParallel running (In Progress or In Review); Needs Approval does
 //      not hold a slot, so a night fills the inbox without blocking.
 //   2. A ticket the flow puts back is started once more, with the note and
-//      "integrate the base branch first" in the author's prompt; a second
-//      put back holds the item and tells the lead, which decides with
-//      start_ticket or asks the owner. A put back by a service restart does
-//      not count (decision 12: the runner simply starts it again).
+//      "integrate the base branch first" in the author's prompt; put back a
+//      second time, it gets a third and last automatic attempt, also told
+//      what its reviewer asked last and the output of its last failing test
+//      run (retry.ts, issue #290); a third put back holds the item and says
+//      so in the lead's thread, which decides with start_ticket or asks the
+//      owner, while the rest of the plan goes on. A put back by a service
+//      restart does not count (decision 12: the runner simply starts it
+//      again). A ticket parked on an unanswered question (the flow's
+//      `parked`) does not count either: its item is parked, its slot free,
+//      and the lead starts it again with the answer.
 //   3. A release that landed (merged and healthy) lands its item; a rollback
 //      is a put back; a release live but not healthy holds its item.
 //   4. Paused, a plan starts nothing; its running tickets go on.
@@ -47,6 +53,7 @@ import type { TicketId, TicketStore } from '../../tickets/contract.ts';
 import { LeadConfigError } from '../config.ts';
 import type { LeadToolOutput } from '../contract.ts';
 import { duration, estimateFor, historyOf, itemOfSteps, planTotals, stepHistoryOf } from './estimates.ts';
+import { retryContext } from './retry.ts';
 import { FINAL_ITEM_STATES, PlanStore, itemServices, publicPlan, type StoredItem, type StoredPlan } from './store.ts';
 import { validatePlan } from './tools.ts';
 
@@ -122,6 +129,8 @@ type Stop = { readonly kind: 'week' | 'budget'; readonly text: string };
 const ACTIVE: readonly Plan['state'][] = ['approved', 'paused'];
 const SHOWN: readonly Plan['state'][] = ['proposed', 'approved', 'paused'];
 const BASE_HINT = 'The base branch may have moved since: integrate the base branch first.';
+// The attempts a plan's ticket gets before the lead decides (issue #290).
+export const AUTOMATIC_ATTEMPTS = 3;
 
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 const tickets = (n: number) => (n === 1 ? '1 ticket' : `${n} tickets`);
@@ -246,11 +255,11 @@ export class PlanRunner {
   // The lead starts again an item the runner put back or holds.
   async startTicket(id: TicketId, reason: string): Promise<LeadToolOutput['start_ticket']> {
     const found = this.store.itemOf(id);
-    if (!found) throw new HostToolRefused(`${id} is not a ticket of a plan: start_ticket starts only a plan's ticket that was put back or is held.`);
+    if (!found) throw new HostToolRefused(`${id} is not a ticket of a plan: start_ticket starts only a plan's ticket that was put back, is held or is parked.`);
     const { plan, item } = found;
     if (plan.state === 'paused') throw new HostToolRefused(`Plan ${plan.id} is paused: the owner resumes it.`);
     if (plan.state !== 'approved') throw new HostToolRefused(`Plan ${plan.id} is ${plan.state}: only an approved plan starts tickets.`);
-    if (item.state !== 'put_back' && item.state !== 'held') throw new HostToolRefused(`Item ${item.position} of plan ${plan.id} (${id}) is ${item.state}: start_ticket starts an item that was put back or is held.`);
+    if (item.state !== 'put_back' && item.state !== 'held' && item.state !== 'parked') throw new HostToolRefused(`Item ${item.position} of plan ${plan.id} (${id}) is ${item.state}: start_ticket starts an item that was put back, is held or is parked.`);
     const stop = this.#stop();
     if (stop) throw new HostToolRefused(stop.text);
     const running = plan.items.filter((i) => i.state === 'running').length;
@@ -329,7 +338,8 @@ export class PlanRunner {
           `Item ${item.position} of plan ${plan.id} (${event.ticket}) is live but not healthy: ${event.note} It is held, so the items after it wait. Tell the owner, who decides.`);
         return;
       case 'ticket_put_back':
-        this.#putBack(plan, item, event.note, event.reason !== 'restart', event.reason === 'rolled_back');
+        if (event.reason === 'parked') this.#park(plan, item, event.note);
+        else this.#putBack(plan, item, event.note, event.reason !== 'restart', event.reason === 'rolled_back');
         return;
       default:
         return;
@@ -342,16 +352,27 @@ export class PlanRunner {
     this.#publish(plan.id);
   }
 
-  #hold(plan: StoredPlan, item: StoredItem, note: string, told: string, putBack = false): void {
+  // `said`: told in the lead's thread, where the owner reads it too, rather
+  // than in the lead's next event turn alone.
+  #hold(plan: StoredPlan, item: StoredItem, note: string, told: string, putBack = false, said = false): void {
     if (item.state === 'held') return;
     this.#set(plan, item, 'held', { note, putBack });
-    this.#deps.lead.enqueue(told, true);
+    if (said) this.#deps.lead.serviceLine(told);
+    else this.#deps.lead.enqueue(told, true);
+  }
+
+  // Parked by the flow: its question waited past its delay and the lead's,
+  // with no answer the session declared. Not a failure, so not counted.
+  #park(plan: StoredPlan, item: StoredItem, note: string): void {
+    if (FINAL_ITEM_STATES.has(item.state) || item.state === 'parked' || item.state === 'held') return;
+    this.#set(plan, item, 'parked', { note });
+    this.#deps.lead.serviceLine(`Item ${item.position} of plan ${plan.id} (${item.ticket}) is parked: ${note} The rest of the plan goes on. Once the question is settled, start it again with start_ticket, the answer in the reason.`);
   }
 
   // A put back counts toward the hold unless the service's restart caused it.
   // Only a rollback puts back an item that landed.
   #putBack(plan: StoredPlan, item: StoredItem, note: string, counts: boolean, rollback = false): void {
-    if (item.state === 'cancelled' || item.state === 'held') return;
+    if (item.state === 'cancelled' || item.state === 'held' || item.state === 'parked') return;
     if (item.state === 'landed' && !rollback) return;
     // The tick may read the ticket in Todo before the flow says why: the
     // flow's word then only replaces the note.
@@ -359,9 +380,9 @@ export class PlanRunner {
       this.#set(plan, item, 'put_back', { note });
       return;
     }
-    if (counts && item.putBacks + 1 >= 2) {
+    if (counts && item.putBacks + 1 >= AUTOMATIC_ATTEMPTS) {
       this.#hold(plan, item, note,
-        `Item ${item.position} of plan ${plan.id} (${item.ticket}) went back to Todo a second time and is held: ${note} Decide: start it again with start_ticket, or ask the owner.`, true);
+        `Item ${item.position} of plan ${plan.id} (${item.ticket}) went back to Todo a third time, after its automatic third attempt, and is held: ${note} The rest of the plan goes on. Decide: start it again with start_ticket, or ask the owner.`, true, true);
       return;
     }
     this.#set(plan, item, 'put_back', { note, putBack: counts });
@@ -397,7 +418,7 @@ export class PlanRunner {
       if (plan.state !== 'approved') continue;
       const startable = this.#startable(plan);
       if (stop) blocked ||= startable.length > 0;
-      else for (const item of startable) await this.#launch(plan, item, item.state === 'put_back' ? `Cleared: this ticket went back to Todo before: ${item.note ?? 'no note was written'}\n${BASE_HINT}` : undefined, false);
+      else for (const item of startable) await this.#launch(plan, item, item.state === 'put_back' ? this.#againNote(item) : undefined, false);
     }
     if (!stop) this.#told = undefined;
     else if (blocked && this.#told !== stop.kind) {
@@ -409,6 +430,22 @@ export class PlanRunner {
         console.error(`cleared-v2: the week stop could not be notified (${errorName(error)})`);
       }
     }
+  }
+
+  // What the author of an item put back is told: the last note; on its
+  // third and last automatic attempt, also what the reviewer asked last and
+  // its last failing test run.
+  #againNote(item: StoredItem): string {
+    const note = item.note ?? 'no note was written';
+    if (item.putBacks < AUTOMATIC_ATTEMPTS - 1) return `Cleared: this ticket went back to Todo before: ${note}\n${BASE_HINT}`;
+    const context = retryContext(this.#deps.store, item.ticket as TicketId, this.#clean);
+    return [
+      `Cleared: this ticket went back to Todo ${item.putBacks} times. This is its third and last automatic attempt: if it goes back again, the lead decides.`,
+      `The last note: ${note}`,
+      ...(context.review ? [`What the reviewer asked last:\n${context.review}`] : []),
+      ...(context.tests ? [`The last failing test run (\`${context.tests.command}\`):\n${context.tests.output}`] : []),
+      BASE_HINT,
+    ].join('\n\n');
   }
 
   // The tickets of an approved plan that do not exist yet, in position
@@ -457,8 +494,8 @@ export class PlanRunner {
       } else if (ticket.status === states.progress || ticket.status === states.review) {
         if (item.state !== 'running') this.#set(fresh, item, 'running');
       } else if (ticket.status === states.validate || ticket.status === states.go) {
-        if (item.state !== 'held') this.#set(fresh, item, 'needs_approval');
-      } else if (ticket.status === states.done && item.state !== 'held') {
+        if (item.state !== 'held' && item.state !== 'parked') this.#set(fresh, item, 'needs_approval');
+      } else if (ticket.status === states.done && item.state !== 'held' && item.state !== 'parked') {
         await this.#doneTicket(fresh, item, ticket.id);
       }
     }

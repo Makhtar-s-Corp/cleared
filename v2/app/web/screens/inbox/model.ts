@@ -158,7 +158,7 @@ export function detailKey(v: InboxView): string {
 // ------------------------------------------------------------------ plans
 
 const PLAN_STATES: readonly Plan['state'][] = ['proposed', 'superseded', 'rejected', 'approved', 'paused', 'done'];
-const ITEM_STATES: readonly PlanItem['state'][] = ['waiting', 'ready', 'running', 'needs_approval', 'landed', 'put_back', 'held', 'cancelled'];
+const ITEM_STATES: readonly PlanItem['state'][] = ['waiting', 'ready', 'running', 'needs_approval', 'landed', 'put_back', 'held', 'parked', 'cancelled'];
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isText = (value: unknown): value is string => typeof value === 'string';
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -479,6 +479,20 @@ export function inboxKey(
 
 // Esc leaves the item shown, but not from a field: a reason or a message being typed stays.
 export const closesOnEscape = (focus: Focus): boolean => focus === 'none' || focus === 'control';
+
+// When a team's question stops waiting for the owner, and what then
+// applies (issue #290): before its delay, "No answer in 25 min: the Lead
+// decides, else “Newest first” applies"; once the Lead is asked, its own
+// window. The lead's questions, and a handled one, have none.
+export function deadlineLine(item: QuestionItem, now: Date, t: Translate): string | undefined {
+  const timeout = item.timeout;
+  if (!timeout || item.state !== 'waiting' || isLead(item)) return undefined;
+  const lead = timeout.leadAt !== undefined || now.getTime() >= Date.parse(timeout.at);
+  const until = Date.parse(lead ? timeout.leadUntil : timeout.at);
+  const time = duration(Math.max(1, Math.ceil((until - now.getTime()) / 60_000)), t);
+  const label = timeout.answers ? Object.values(timeout.answers).map((answer) => answer.replace(RECOMMENDED, '')).join(', ') : undefined;
+  return label === undefined ? t(lead ? 'deadline_lead_park' : 'deadline_park', { time }) : t(lead ? 'deadline_lead_default' : 'deadline_default', { time, label });
+}
 
 export function recommendation(item: QuestionItem): string | undefined {
   for (const question of item.questions) for (const option of question.options ?? []) if (RECOMMENDED.test(option.label)) return option.label.replace(RECOMMENDED, '');

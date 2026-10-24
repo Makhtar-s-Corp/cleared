@@ -58,7 +58,7 @@ test('a sensitivity this screen does not know is shown as it is written, never a
 test('a plan or an item state the panel does not know reads as written instead of blanking the panel (issue 177, item 2)', () => {
   const odd = { ...plan, state: 'archived' } as unknown as Plan;
   assert.equal(planStateLine(odd, t), 'archived');
-  assert.equal(itemStateText('parked' as PlanItem['state'], t), 'parked');
+  assert.equal(itemStateText('frozen' as PlanItem['state'], t), 'frozen');
   assert.equal(itemStateText('landed', t), t(ITEM_KEYS.landed));
 });
 

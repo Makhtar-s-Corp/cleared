@@ -442,3 +442,23 @@ test('lane 1\'s scripted lead plays its goal turn through the engine: the questi
   assert.equal(t.lead.state().highestPercent, 45);
   assert.match(sentTo(t.store.events, t.generations[0]?.id as string).at(-1) ?? '', /handover/, 'past the handover point, the next turn asks for it');
 });
+
+test('a team\'s question past its delay is said in the thread and given to the lead at once, with what applies at the end of its window (issue #290)', async () => {
+  const t = await leadSetup({ lead: [[...opening(), ...turn('e1', say('x', 'I will decide it.'))]] });
+  await t.lead.settled();
+  const gen1 = t.generations[0]?.id as string;
+  t.emitFlow(flowEvent({
+    type: 'question_timed_out', ticket: 'LOCAL-42', session: 's-author', requestId: 'q1', item: 'question:s-author:q1', stage: 'lead',
+    minutes: 30, leadMinutes: 10, questions: ['Which order?'], answers: { 'Which order?': 'Newest first (Recommended)' },
+  }));
+  const line = t.lead.messages().find((m) => m.by === 'system' && /LOCAL-42/.test(m.text));
+  assert.ok(line, 'a line of the thread, which the owner reads too');
+  assert.match(line.text, /"Which order\?" waited 30 min/);
+  assert.match(line.text, /answer_question \(session s-author, request q1\)/);
+  assert.match(line.text, /In 10 min without an answer, the answer the session declared applies: Newest first \(Recommended\)/);
+  await until(() => sentTo(t.store.events, gen1).some((text) => /LOCAL-42/.test(text)), 'the lead\'s turn, without the 60 s batch');
+
+  t.emitFlow(flowEvent({ type: 'question_timed_out', ticket: 'LOCAL-43', session: 's-b', requestId: 'q2', item: 'question:s-b:q2', stage: 'lead', minutes: 30, leadMinutes: 10, questions: ['What should it say?'], answers: null }));
+  assert.match(t.lead.messages().find((m) => /LOCAL-43/.test(m.text))?.text ?? '', /no answer, so the ticket is parked and the rest of the plan goes on/);
+  await t.lead.settled();
+});

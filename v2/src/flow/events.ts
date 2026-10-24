@@ -40,7 +40,8 @@ export type PutBackReason =
   | 'train_halted'          // a release train could not land its next service (lane 16)
   | 'step_failed'           // a step of the ticket failed; its done steps are kept (lane 23)
   | 'restart'               // the service restarted while the ticket ran
-  | 'set_aside';            // the owner set the ticket aside (FlowEngine.setAside)
+  | 'set_aside'             // the owner set the ticket aside (FlowEngine.setAside)
+  | 'parked';               // its question waited past its delay and the lead's, with no declared answer (issue #290)
 
 type Base = { readonly at: string; readonly project: string; readonly ticket: TicketId };
 // A ticket of a workspace of several services lands as a train (lane 16):
@@ -65,13 +66,23 @@ export type FlowEvent =
   | Base & { readonly type: 'question_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string }
   | Base & { readonly type: 'permission_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly tool: string }
   | Base & { readonly type: 'request_answered'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly by: UserId | 'policy' | 'system' }
-  | Base & { readonly type: 'session_stopped'; readonly session: SessionId; readonly role: Role; readonly phase: 'stopped' | 'failed'; readonly reason: string };
+  | Base & { readonly type: 'session_stopped'; readonly session: SessionId; readonly role: Role; readonly phase: 'stopped' | 'failed'; readonly reason: string }
+  // A team's question past its delay (issue #290): `lead`, the lead is asked
+  // to decide; `default`, the session's declared answer was applied;
+  // `parked`, there was none and the ticket is parked. `minutes`: how long it
+  // had waited; `leadMinutes`: the lead's window.
+  | Base & {
+    readonly type: 'question_timed_out'; readonly session: SessionId; readonly requestId: string; readonly item: string;
+    readonly stage: 'lead' | 'default' | 'parked'; readonly minutes: number; readonly leadMinutes: number; readonly questions: readonly string[];
+    readonly answers: Readonly<Record<string, string>> | null;
+  };
 
 export type FlowEventType = FlowEvent['type'];
 
 export const FLOW_EVENT_TYPES: readonly FlowEventType[] = [
   'ticket_started', 'author_done', 'review_verdict', 'release_requested', 'release_approved', 'release_merged', 'release_landed',
   'release_unhealthy', 'rolled_back', 'ticket_put_back', 'question_raised', 'permission_raised', 'request_answered', 'session_stopped',
+  'question_timed_out',
 ];
 
 // A listener is called in the flow's own turn, after the write: it must

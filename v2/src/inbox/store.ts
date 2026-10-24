@@ -3,7 +3,7 @@
 // are the API's (api/types.ts); this file stores them, it does not decide
 // what is asked: the flow does.
 import type { DatabaseSync } from 'node:sqlite';
-import type { ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlan, SessionPlanItem, TrainState } from '../api/types.ts';
+import type { ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TrainState } from '../api/types.ts';
 import { LEAD_TICKET } from '../lead/contract.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 
@@ -88,11 +88,26 @@ export class InboxStore {
     return this.#get(id) as PermissionItem;
   }
 
-  addQuestion(input: Base & Pick<QuestionItem, 'questions'> & { readonly sessionId: SessionId; readonly requestId: string }): QuestionItem {
+  // A team's question carries its delay (issue #290); the lead's has none.
+  addQuestion(input: Base & Pick<QuestionItem, 'questions'> & { readonly sessionId: SessionId; readonly requestId: string; readonly timeout?: (since: Date) => QuestionTimeout }): QuestionItem {
     const id = `question:${input.sessionId}:${input.requestId}`;
-    this.#insert(id, 'question', input, input.sessionId, input.requestId, this.#now().toISOString(),
-      { sessionId: input.sessionId, requestId: input.requestId, questions: input.questions });
+    const since = this.#now();
+    this.#insert(id, 'question', input, input.sessionId, input.requestId, since.toISOString(),
+      { sessionId: input.sessionId, requestId: input.requestId, questions: input.questions, ...(input.timeout ? { timeout: input.timeout(since) } : {}) });
     return this.#get(id) as QuestionItem;
+  }
+
+  // The questions of a project's teams that wait, oldest first: the lead's
+  // own wait for the owner on the lead's screen (lead/engine.ts).
+  waitingQuestions(project: string): QuestionItem[] {
+    return (this.#db.prepare("SELECT * FROM flow_inbox WHERE kind = 'question' AND state = 'waiting' AND project = ? AND ticket != ? ORDER BY since, id").all(project, LEAD_TICKET) as Row[])
+      .map((row) => this.#item(row) as QuestionItem);
+  }
+
+  // The lead was asked at `at` to decide a team's question that waited past
+  // its delay, until `until`: a tick that came late moves the lead's window with it.
+  questionToLead(id: string, at: string, until: string): void {
+    this.#changed(this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.timeout.leadAt', ?, '$.timeout.leadUntil', ?) WHERE id = ? AND kind = 'question' AND state = 'waiting' AND json_extract(payload, '$.timeout') IS NOT NULL").run(at, until, id));
   }
 
   // `session` is the one the approval step runs on: kept in request_id, which
