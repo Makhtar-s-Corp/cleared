@@ -4333,3 +4333,18 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - `app/web/test/inbox/deadline.test.tsx`: the inbox's line in both languages, before and after the lead is asked, with and without a declared answer, and the parked item's label.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`.
+
+## 2026-10-24: the ledger's session history, read only, for agents through MCP (lane j3-ledger-mcp, issue 292)
+
+**Decision.** The author of the lane added a read-only MCP server over stdio that lets an agent search the sessions and their events in `ledger.db` (matrix P68). These are the author's choices, not the owner's decisions.
+
+- **Protocol by hand.** `src/mcp/server.ts` speaks newline-delimited JSON-RPC 2.0 itself (initialize, ping, tools/list, tools/call), without `@modelcontextprotocol/sdk`: the service has no runtime dependency. Versions 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05 are answered as asked; another gets the newest.
+- **Read only.** The ledger is opened with SQLite's read-only flag and `PRAGMA query_only`, never through `openStore`, which writes: it makes the folder, sets the journal, creates the tables, migrates and copies. A missing ledger is not created (exit 66). Only SQLite's own `-shm` and `-wal` files may appear beside a ledger in WAL mode, as with any reader.
+- **Cleaned at read.** Events are cleaned before they are stored, but an old row or another writer may hold more. Every string goes through `cleanText` with the server's environment and the ledger's folder, then the token forms the guard does not name (GitHub, Slack, Linear, AWS, Google, Stripe, npm, JSON web tokens, bearer tokens), the value of a `NAME=value` whose name says key, token, secret or password, and secrets in an address's query. It is cut after cleaning: at 1000 characters in a search's answer, at 4096 (`COMMAND_OUTPUT_LIMIT`) in a timeline. `GUARD_PATTERNS` is unchanged; `GENERATED_ID` and `ID_KEYS` are now exported from `session/clean.ts`. A session's preview key is never given.
+- **No oracle.** A search matches the whole cleaned text, before the cut (review of the lane: a term past the shown part was missed). A LIKE on the stored text only narrows the rows: by the term when it is plain ASCII, else by its runs of three ASCII characters or more, which JSON stores as they are; a term with no such run reads every row its other filters leave. A term that cleaning would change is refused; a piece of a secret finds nothing.
+- **Pages.** 20 by default, 100 at most, beyond which a page is cut to 100. Keyset cursors: (created_at, id) for sessions, (at, session, seq) for events, seq for the timeline.
+- **Words.** The tools' descriptions and errors are in their own catalog pair, `src/mcp/messages/ledger.en.json` and `.fr.json`, not in `app/messages/`, whose files must each be a screen. The language is the app's setting. A session's duration goes through `app/web/lib/time.ts` with the shell's units.
+- **Install.** One line, in `README.md`, `docs/concepts.md` and `v2/README.md`: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts`. Not through `npm run`, whose banner would reach stdout.
+- **Not done.** v1's `runs` and `events` tables, the inbox and the lead's tables are not served. No HTTP transport. The real ledger was never read: the tests use a ledger made in a temporary folder.
+- **Resources.** No Docker object, no port, no tunnel. The proof run, its state folder and its service were not touched.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-ledger-mcp`.

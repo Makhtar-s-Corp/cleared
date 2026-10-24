@@ -22,6 +22,8 @@ The SQLite database lives under `~/.local/state/cleared/<project>/ledger.db` by 
 CLEARED_REPO=/path/to/project node lib/ledger.mjs sql 'select model, count(*), sum(cost_eur) from runs group by model'
 ```
 
+Agents can search the v2 sessions and their events through a read-only MCP server that removes secrets from every answer; give an agent this line to install it: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts` ([details](../v2/README.md#the-ledgers-mcp-server)).
+
 CLI-reported cost is used when available. Otherwise `[prices]` and `[currency]` estimate it; if no price is known, the value stays empty. API list prices allow comparison between models, but they are not a claim about what a subscription charged. The dashboard is a static page built from this ledger and current host readings.
 
 ## Limits and queues
