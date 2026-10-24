@@ -25,6 +25,8 @@ export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: fals
     'Work on the checkout you are in: it is on the ticket branch. Change what the ticket asks and nothing else, write or update tests, run them, and commit your work with git.',
     'Never push, and never open a pull request: Cleared publishes the branch from the host once the change is reviewed.',
     'Commit messages carry no email address and no Co-Authored-By trailer: the guard that runs before the branch leaves refuses an address.',
+    // Issue #290: a question unanswered past its delay takes this option, or parks the ticket.
+    'If you must ask the owner a question, give options and end the label of the one you would take with "(Recommended)". Unanswered past its delay, the lead decides, then that option applies; a question without one parks the ticket until someone answers.',
     ...(asks.report ? ['When your work is committed, call report_changes with the files you changed, grouped by intent, each file in one group.'] : []),
     'When you stop, write HANDOVER.md at the root of the checkout (the end-of-session notice gives the headings). Never commit it.',
   ].join('\n');

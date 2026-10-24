@@ -53,7 +53,8 @@ export type Started = { readonly input: StartInput; readonly id: SessionId };
 // An adapter that plays the script of the session's role. A reviewer round
 // takes the next script of the list. resume reopens an author under its own
 // id, as the real adapter does, or throws.
-export function scriptedAdapter(store: Store, scripts: Scripts, started_: Started[]): SessionAdapter {
+// `now`: the clock the fake stamps its events with (the real one by default).
+export function scriptedAdapter(store: Store, scripts: Scripts, started_: Started[], now?: () => Date): SessionAdapter {
   const authors = [...(scripts.authors ?? [])];
   const reviewers = [...(scripts.reviewers ?? [reviewerScript(REPORT_PASS)])];
   const inputs = new Map<SessionId, StartInput>();
@@ -61,8 +62,8 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
     harness: 'claude-code',
     async start(input) {
       const handle = input.role === 'reviewer'
-        ? await createFakeAdapter({ log: store.events, script: reviewers.shift() ?? reviewerScript(REPORT_PASS) }).start(input)
-        : await createFakeAdapter({ log: store.events, script: authors.shift() ?? scripts.author ?? authorScript }).start(input);
+        ? await createFakeAdapter({ log: store.events, script: reviewers.shift() ?? reviewerScript(REPORT_PASS), ...(now ? { now } : {}) }).start(input)
+        : await createFakeAdapter({ log: store.events, script: authors.shift() ?? scripts.author ?? authorScript, ...(now ? { now } : {}) }).start(input);
       inputs.set(handle.id, input);
       started_.push({ input, id: handle.id });
       return handle;
@@ -70,7 +71,7 @@ export function scriptedAdapter(store: Store, scripts: Scripts, started_: Starte
     async resume(id): Promise<SessionHandle> {
       const input = inputs.get(id);
       if (!input || scripts.reopen === 'throw') throw new Error(`cannot resume ${id}`);
-      const handle = await createFakeAdapter({ log: store.events, script: scripts.reopen === 'send_fails' || scripts.reopen === undefined ? reopenScript : scripts.reopen, newId: () => id }).start(input);
+      const handle = await createFakeAdapter({ log: store.events, script: scripts.reopen === 'send_fails' || scripts.reopen === undefined ? reopenScript : scripts.reopen, newId: () => id, ...(now ? { now } : {}) }).start(input);
       if (scripts.reopen !== 'send_fails') return handle;
       return { ...handle, send: async () => { throw new Error('the container is gone'); }, stop: async () => { scripts.stops?.push(id); await handle.stop(); } };
     },
@@ -109,6 +110,7 @@ export type SetupOptions = {
   ledger?: boolean;                       // the v1 events table the lock and the release watch write; true by default
   locks?: (service: ServiceConfig) => ServiceLock;   // the lock of each service of a workspace of several
   clean?: (text: string) => string;                  // the service's cleaner; the identity by default
+  eventClock?: boolean;                              // the fake stamps its events with the simulated clock, as the watchdog reads them
 };
 
 export async function setup(options: SetupOptions = {}) {
@@ -125,7 +127,7 @@ export async function setup(options: SetupOptions = {}) {
   const startedSessions: Started[] = [];
   const inbox = new InboxStore(store.db, () => new Date(clock.now));
   const registry = {
-    sessionAdapters: options.adapterless ? {} : { 'claude-code': scriptedAdapter(store, options.scripts ?? {}, startedSessions) },
+    sessionAdapters: options.adapterless ? {} : { 'claude-code': scriptedAdapter(store, options.scripts ?? {}, startedSessions, options.eventClock ? () => new Date(clock.now) : undefined) },
     ticketStore: tickets, reviewRecorder: recorder, approvalWriter: approvals, users,
   };
   const deps = {

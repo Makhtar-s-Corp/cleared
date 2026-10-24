@@ -123,7 +123,7 @@ test('a ledger without the events table still stops the session; the stop is sai
 });
 
 async function engineWatched() {
-  const t = await setup({ scripts: { author: asks, reopen: resumed } });
+  const t = await setup({ scripts: { author: asks, reopen: resumed }, eventClock: true });
   const fake = new FakeDocker();
   const engine = t.engine as FlowEngine;
   await engine.start(t.ticket.id, 'u1');
@@ -180,7 +180,7 @@ test('the declared default reaches a session the watchdog stopped: at 40 min it 
 });
 
 test('a stopped session whose question has no default is parked at 40 min: its ticket in Todo, put back as parked', async () => {
-  const t = await setup({ scripts: { author: [started, { question: { requestId: 'q1', questions: [{ question: 'What should the empty page say?' }] } }], reopen: resumed } });
+  const t = await setup({ scripts: { author: [started, { question: { requestId: 'q1', questions: [{ question: 'What should the empty page say?' }] } }], reopen: resumed }, eventClock: true });
   const fake = new FakeDocker();
   await t.engine.start(t.ticket.id, 'u1');
   const id = t.startedSessions[0]!.id;

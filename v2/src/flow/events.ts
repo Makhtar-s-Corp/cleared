@@ -69,10 +69,11 @@ export type FlowEvent =
   | Base & { readonly type: 'session_stopped'; readonly session: SessionId; readonly role: Role; readonly phase: 'stopped' | 'failed'; readonly reason: string }
   // A team's question past its delay (issue #290): `lead`, the lead is asked
   // to decide; `default`, the session's declared answer was applied;
-  // `parked`, there was none and the ticket is parked. `minutes`: how long it had waited.
+  // `parked`, there was none and the ticket is parked. `minutes`: how long it
+  // had waited; `leadMinutes`: the lead's window.
   | Base & {
     readonly type: 'question_timed_out'; readonly session: SessionId; readonly requestId: string; readonly item: string;
-    readonly stage: 'lead' | 'default' | 'parked'; readonly minutes: number; readonly questions: readonly string[];
+    readonly stage: 'lead' | 'default' | 'parked'; readonly minutes: number; readonly leadMinutes: number; readonly questions: readonly string[];
     readonly answers: Readonly<Record<string, string>> | null;
   };
 

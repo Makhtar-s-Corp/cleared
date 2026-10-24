@@ -13,7 +13,7 @@ import { NOTIFY_TABLES } from '../../../src/notify/queue.ts';
 import type { FakeStep } from '../../../src/session/adapters/fake.ts';
 import { toolArgs, toolResult } from '../../../src/session/events.ts';
 import { applyTables } from '../../../src/store/db.ts';
-import { REPORT_FIX, quickAuthor, reviewerScript, setup, started, type SetupOptions } from '../../flow/support.ts';
+import { REPORT_FIX, quickAuthor, reviewerScript, setup, started, until, type SetupOptions } from '../../flow/support.ts';
 import { recordingLead } from './support.ts';
 
 const criteria = '\n\nAcceptance criteria\n- [ ] a test';
@@ -64,6 +64,8 @@ test('put back twice, a ticket gets a third attempt told the reviewer\'s last re
   });
   const { plan } = await t.runner.propose(TWO);
   await t.runner.approve(plan, 'u1');
+  // The two rounds reopen the author in the background.
+  await until(() => t.itemsOf(plan)[0]!.state === 'put_back', 'the first put back');
   await t.settle();
   const first = t.itemsOf(plan)[0]!;
   assert.equal(first.state, 'put_back');
@@ -72,6 +74,7 @@ test('put back twice, a ticket gets a third attempt told the reviewer\'s last re
 
   await t.tick();
   assert.equal(t.authors().length, 2, 'started once more');
+  await until(() => t.itemsOf(plan)[0]!.putBacks === 2, 'the second put back');
   assert.equal(t.itemsOf(plan)[0]!.state, 'put_back', 'a second put back is not the hold any more');
   assert.equal(t.itemsOf(plan)[0]!.putBacks, 2);
   assert.equal(t.itemsOf(plan)[1]!.state, 'ready', 'the item put back keeps its slot over the next one');
@@ -87,8 +90,8 @@ test('put back twice, a ticket gets a third attempt told the reviewer\'s last re
   assert.match(third.input.prompt, /expected 2 entries, got 3/, 'its output');
   assert.match(third.input.prompt, /integrate the base branch first/);
 
+  await until(() => t.itemsOf(plan)[0]!.state === 'held', 'the hold');
   await t.settle();
-  assert.equal(t.itemsOf(plan)[0]!.state, 'held');
   assert.equal(t.itemsOf(plan)[0]!.putBacks, 3);
   const said = t.lead.lines.filter((line) => line.includes(first.ticket!));
   assert.equal(said.length, 1, 'the escalation is a line of the lead\'s thread');
@@ -150,14 +153,18 @@ test('the retry context: the reviewer\'s last report and the last failing test r
 });
 
 test('a ticket parked on an unanswered question frees its slot: the item is parked, not counted, said in the thread, and the next item starts; the lead may start it again', async () => {
-  const t = await plans({ plan: { maxParallel: 1 } });
+  // Item 1's author asks a question with no declared answer; nobody answers it.
+  const asks: readonly FakeStep[] = [started, { question: { requestId: 'q1', questions: [{ question: 'Which order?' }] } }];
+  const t = await plans({ plan: { maxParallel: 1 }, scripts: { authors: [asks] } });
   const { plan } = await t.runner.propose(TWO);
   await t.runner.approve(plan, 'u1');
   await t.settle();
   const ticket = t.itemsOf(plan)[0]!.ticket!;
-  // As the flow says it when a question waited past its delay and the lead's (engine.test: question-timeout).
-  t.store.db.prepare("UPDATE plan_items SET state = 'running' WHERE position = 1").run();
-  t.runner.onFlowEvent({ type: 'ticket_put_back', at: new Date(t.clock.now).toISOString(), project: 'guestbook', ticket, reason: 'parked', note: 'The question "Which order?" waited 40 min with no answer.' });
+  const second = t.itemsOf(plan)[1]!.ticket!;
+  await t.tick(30 * 60_000);
+  assert.equal(t.itemsOf(plan)[0]!.state, 'running', 'at 30 min the lead is asked; the item still runs');
+  assert.ok(!t.authors().some((s) => s.input.ticket === second), 'the next item waits for the slot');
+  await t.tick(10 * 60_000);
   assert.equal(t.itemsOf(plan)[0]!.state, 'parked');
   assert.equal(t.itemsOf(plan)[0]!.putBacks, 0, 'a parked ticket did not fail');
   const said = t.lead.lines.filter((line) => line.includes(ticket));
@@ -167,14 +174,13 @@ test('a ticket parked on an unanswered question frees its slot: the item is park
   assert.match(said[0]!, /start_ticket/);
 
   await t.tick();
-  const second = t.itemsOf(plan)[1]!.ticket!;
   assert.ok(t.authors().some((s) => s.input.ticket === second), 'the next item starts');
   assert.equal(t.itemsOf(plan)[0]!.state, 'parked', 'a tick leaves a parked item alone');
   assert.equal(t.authors().filter((s) => s.input.ticket === ticket).length, 1);
   assert.match(t.runner.stateLines(), /#1 parked/);
 
+  await until(() => t.itemsOf(plan)[1]!.state === 'needs_approval', 'item 2 waits for its approval');
   await t.settle();
-  while (t.itemsOf(plan)[1]!.state === 'running') await t.tick();
   const started_ = await t.runner.startTicket(ticket, 'The owner answered: newest first.');
   assert.deepEqual(started_, { started: ticket });
   await t.settle();

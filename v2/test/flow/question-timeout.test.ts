@@ -82,7 +82,7 @@ test('without the owner or the lead, the declared default is applied at 40 min a
   const answered = t.store.events.after(t.id).map((e) => e.event).find((e) => e.type === 'CUSTOM' && e.name === 'cleared.permission_answered');
   assert.ok(answered && answered.type === 'CUSTOM' && answered.name === 'cleared.permission_answered');
   assert.deepEqual(answered.value, { requestId: 'q1', decision: 'answer', by: 'policy', rule: 'question_default' });
-  const comment = (await t.tickets.comments(t.ticket.id)).at(-1)?.body ?? '';
+  const comment = (await t.tickets.comments(t.ticket.id)).find((c) => /the answer the session declared applies/.test(c.body))?.body ?? '';
   assert.match(comment, /Which order\?/);
   assert.match(comment, /Newest first \(Recommended\)/);
   assert.match(comment, /40 min/);

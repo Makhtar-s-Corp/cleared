@@ -2085,7 +2085,7 @@ export class FlowEngine {
     ledgerEvent(this.#store.db, { at, kind, ticket: item.ticket, source: 'flow', detail: { session: item.sessionId, requestId: item.requestId, item: item.id, minutes, ...(stage === 'default' ? { answers } : {}) } });
     this.#emit({
       type: 'question_timed_out', at, project: item.project, ticket: item.ticket, session: item.sessionId, requestId: item.requestId, item: item.id,
-      stage, minutes, questions: item.questions.map((q) => q.question), answers,
+      stage, minutes, leadMinutes: Math.round((this.config.questionLeadMs ?? QUESTION_LEAD_MINUTES * 60_000) / 60_000), questions: item.questions.map((q) => q.question), answers,
     });
   }
 
@@ -2105,7 +2105,7 @@ export class FlowEngine {
     const dormant = this.#dormant.get(live.id);
     if (dormant) {
       if (!this.#settleStopped(dormant, item, answer.decision, 'policy')) return;
-      await this.#wake(dormant, `${waited}, so the answer you recommended applies:\n${answerLines(answers)}\nCarry on with it.`);
+      await this.#wake(dormant, `${waited}, so the default you declared, the option you recommended, applies:\n${answerLines(answers)}\nCarry on with it.`);
       return;
     }
     try {
