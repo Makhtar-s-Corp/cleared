@@ -71,8 +71,8 @@ test('a ledger that does not exist is not created, and one without the tables an
     new DatabaseSync(empty).close();
     const db = openLedgerReadOnly(empty);
     const history = new LedgerHistory(db, createRedactor({ env: {}, paths: [] }));
-    assert.deepEqual(history.searchSessions({}), { items: [], next: null });
-    assert.deepEqual(history.searchEvents({ text: 'x' }), { items: [], next: null });
+    assert.deepEqual(history.searchSessions({}), { items: [], next: null, partial: false });
+    assert.deepEqual(history.searchEvents({ text: 'x' }), { items: [], next: null, partial: false });
     assert.equal(history.timeline(SESSIONS.S1, {}), undefined);
     db.close();
   } finally {

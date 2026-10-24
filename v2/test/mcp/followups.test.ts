@@ -53,10 +53,10 @@ test('a search with no usable term stops at the scan limit and says where to go 
   const db = openLedgerReadOnly(fixture.path);
   try {
     const history = new LedgerHistory(db, createRedactor({ env: ENV, paths: [] }), { scanLimit: 5 });
-    // "être" has no run of three ASCII characters: nothing narrows the rows.
+    // "«" has no run of three ASCII characters: nothing narrows the rows.
     // Its only event is the 31st from the newest, so the first calls read
     // five rows each, find nothing and still say they are not the end.
-    const first = history.searchEvents({ text: 'être', limit: 1 });
+    const first = history.searchEvents({ text: '«', limit: 1 });
     assert.equal(first.partial, true);
     assert.ok(first.next, 'a next value, though nothing was found');
     assert.deepEqual(first.items, []);
@@ -64,7 +64,7 @@ test('a search with no usable term stops at the scan limit and says where to go 
     let cursor: string | undefined;
     let calls = 0;
     do {
-      const page = history.searchEvents({ text: 'être', limit: 1, cursor });
+      const page = history.searchEvents({ text: '«', limit: 1, cursor });
       seen.push(...page.items.map((e) => `${e.sessionId}:${e.seq}`));
       cursor = page.next ?? undefined;
       calls++;
@@ -73,7 +73,7 @@ test('a search with no usable term stops at the scan limit and says where to go 
     assert.deepEqual(seen, [`${SESSIONS.S2}:2`], 'every match once');
     assert.ok(calls > 1);
     const whole = new LedgerHistory(db, createRedactor({ env: ENV, paths: [] }));
-    assert.equal(whole.searchEvents({ text: 'être' }).partial, false);
+    assert.equal(whole.searchEvents({ text: '«' }).partial, false);
     assert.equal(history.searchEvents({ ticket: 'LOCAL-9', limit: 2 }).partial, false, 'a page that fills before the limit is not partial');
   } finally {
     db.close();
@@ -88,7 +88,7 @@ test('the server says a page is partial, in both languages', async () => {
     const history = new LedgerHistory(db, createRedactor({ env: ENV, paths: [] }), { scanLimit: 5 });
     for (const language of ['en', 'fr'] as const) {
       const server = createLedgerServer({ history, language });
-      const answer = await server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_events', arguments: { text: 'être', limit: 1 } } }) as { result: { structuredContent: { partial: boolean; next: string | null; events: unknown[] } } };
+      const answer = await server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_events', arguments: { text: '«', limit: 1 } } }) as { result: { structuredContent: { partial: boolean; next: string | null; events: unknown[] } } };
       assert.equal(answer.result.structuredContent.partial, true, language);
       assert.deepEqual(answer.result.structuredContent.events, [], language);
       assert.ok(answer.result.structuredContent.next, language);

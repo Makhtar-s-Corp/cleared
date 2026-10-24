@@ -34,5 +34,10 @@ try {
 
 const language = process.env.CLEARED_V2_APP_LANGUAGE === 'en' ? 'en' : 'fr';
 const history = new LedgerHistory(db, createRedactor({ env: process.env, paths: [dirname(path)] }));
-await serveStdio(process.stdin, process.stdout, createLedgerServer({ history, language, log: (line) => console.error(line) }));
+try {
+  await serveStdio(process.stdin, process.stdout, createLedgerServer({ history, language, log: (line) => console.error(line) }));
+} catch (error) {
+  db.close();
+  fail(`cannot write to the client: ${error instanceof Error ? error.message : String(error)}`, 74);
+}
 db.close();

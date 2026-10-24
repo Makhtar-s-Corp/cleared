@@ -13,15 +13,22 @@
 // that cleaning changes (shaped like a secret) is refused; a piece of a
 // secret finds nothing, since the cleaned text no longer holds it. The whole
 // cleaned text is read, not the part an answer shows. A LIKE on the stored
-// text first narrows the rows, by the term or by its runs of ASCII.
+// text first narrows the rows, by the term or by its runs of ASCII, without
+// the words of a marker ("[removed: GitHub token]"), which the stored text
+// does not hold: a term made of them narrows nothing. A call reads at most
+// SCAN_LIMIT rows: a search that reaches it answers what it found, says it
+// is partial and gives the value to go on from the last row read.
 import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 import { StoreError } from '../store/db.ts';
-import { TEXT_LIMIT, TIMELINE_TEXT_LIMIT, cutStrings, type Redactor } from './redact.ts';
+import { MARKER_TEXTS, TEXT_LIMIT, TIMELINE_TEXT_LIMIT, cutStrings, type Redactor } from './redact.ts';
 import type { Values } from '../../app/web/lib/i18n.ts';
 
 export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 100;
+// Rows a call reads and cleans, found or not: cleaning is the cost.
+export const SCAN_LIMIT = 2000;
 
 // A search the server refuses: the key of its message in the catalog.
 export class HistoryError extends Error {
@@ -35,17 +42,32 @@ export class HistoryError extends Error {
   }
 }
 
-export function openLedgerReadOnly(path: string): DatabaseSync {
-  if (!existsSync(path)) throw new StoreError(`no ledger at ${path}: start the service once, or set CLEARED_STATE_DIR (or ORCH_LEDGER) to the folder of an existing one`);
+function openReadOnly(target: string): DatabaseSync {
   let db: DatabaseSync | undefined;
   try {
-    db = new DatabaseSync(path, { readOnly: true });
+    db = new DatabaseSync(target, { readOnly: true });
     db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA query_only = ON');
     db.prepare('SELECT 1 FROM sqlite_master LIMIT 1').get();
     return db;
   } catch (error) {
     db?.close();
+    throw error;
+  }
+}
+
+// A ledger in WAL mode is read through its -shm file, which a read only
+// connection in a folder it cannot write to cannot make. When the service is
+// stopped (it leaves no -wal) the file is read as it is, `immutable`: a
+// ledger with a -wal may be written to, so it is never read that way.
+export function openLedgerReadOnly(path: string): DatabaseSync {
+  if (!existsSync(path)) throw new StoreError(`no ledger at ${path}: start the service once, or set CLEARED_STATE_DIR (or ORCH_LEDGER) to the folder of an existing one`);
+  try {
+    return openReadOnly(path);
+  } catch (error) {
+    try {
+      if (!existsSync(`${path}-wal`)) return openReadOnly(`${pathToFileURL(path).href}?immutable=1`);
+    } catch { /* the first error is the one said */ }
     throw new StoreError(`cannot open the ledger at ${path} to read it: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -77,7 +99,9 @@ export type EventView = {
   readonly event: unknown;
 };
 
-export type Page<T> = { readonly items: T[]; readonly next: string | null };
+// `partial`: the search stopped at the scan limit, so `next` is there though
+// the page may hold less than the limit, or nothing.
+export type Page<T> = { readonly items: T[]; readonly next: string | null; readonly partial: boolean };
 
 type Common = { readonly text?: string; readonly ticket?: string; readonly project?: string; readonly from?: string; readonly to?: string; readonly limit?: number; readonly cursor?: string };
 export type SessionQuery = Common & { readonly role?: string; readonly status?: string };
@@ -119,13 +143,15 @@ function range(query: Common): { from?: string; until?: string } {
   return { from, until };
 }
 
-// A cursor names the last item of a page: its kind and its sort key.
-const encode = (key: readonly (string | number)[]): string => Buffer.from(JSON.stringify(key)).toString('base64url');
-function decode(cursor: string | undefined, kind: 's' | 'e'): (string | number)[] | undefined {
+// A cursor names the last row read: its kind, its time and its rowid, as
+// they are stored (never an id, which a cleaning may change or hide, and
+// which two rows can share once cleaned).
+const encode = (key: readonly [string, string, number]): string => Buffer.from(JSON.stringify(key)).toString('base64url');
+function decode(cursor: string | undefined, kind: 's' | 'e'): [string, number] | undefined {
   if (cursor === undefined) return undefined;
   try {
     const key = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
-    if (Array.isArray(key) && key[0] === kind && key.length === (kind === 's' ? 3 : 4)) return key.slice(1) as (string | number)[];
+    if (Array.isArray(key) && key.length === 3 && key[0] === kind && typeof key[1] === 'string' && Number.isInteger(key[2])) return [key[1], key[2] as number];
   } catch { /* refused below */ }
   throw new HistoryError('error_cursor');
 }
@@ -136,9 +162,18 @@ const escapeLike = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`);
 // JSON escapes, else its runs of three such characters or more. JSON keeps
 // other characters as they are, and LIKE ignores the case of ASCII letters
 // only, so a run is found in the stored text whatever its case.
-function narrowing(term: string): string[] {
+function runs(term: string): string[] {
   if (/^[\x20-\x7e]*$/.test(term) && !/["\\]/.test(term)) return [term];
   return term.split(/[^\x20-\x7e]|["\\]/).filter((run) => run.length >= 3);
+}
+
+// A cleaning writes "[removed: <what>]" where a secret was, and nothing else
+// holds a bracket: a term is cut at its brackets, and a piece that is a part
+// of a marker's words is left out, since it may be found in a marker the
+// stored text does not hold. What is left is outside every marker.
+const MARKER_WORDS = MARKER_TEXTS.map((text) => text.toLowerCase());
+function narrowing(term: string): string[] {
+  return term.split(/[[\]]/).filter((piece) => piece !== '' && !MARKER_WORDS.some((words) => words.includes(piece.toLowerCase()))).flatMap(runs);
 }
 
 export class LedgerHistory {
@@ -148,10 +183,12 @@ export class LedgerHistory {
   readonly #events: boolean;
   readonly #sessionService: boolean;
   readonly #eventService: boolean;
+  readonly #scanLimit: number;
 
-  constructor(db: DatabaseSync, redactor: Redactor) {
+  constructor(db: DatabaseSync, redactor: Redactor, options: { readonly scanLimit?: number } = {}) {
     this.#db = db;
     this.#redactor = redactor;
+    this.#scanLimit = options.scanLimit ?? SCAN_LIMIT;
     const columns = (table: string) => (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
     const sessions = columns('sessions');
     const events = columns('session_events');
@@ -213,19 +250,27 @@ export class LedgerHistory {
   }
 
   // Reads rows in order and keeps those whose cleaned text holds the term,
-  // until one more than the page: that one says there is a next page.
-  #page<T, R>(sql: string, params: (string | number | null)[], term: string | undefined, view: (row: Row) => { item: T; haystack: string }, limit: number, key: (item: T) => R): { items: T[]; last: R | undefined; more: boolean } {
-    const items: T[] = [];
+  // until one more than the page: that one says there is a next page. At
+  // the scan limit it stops with what it has, however little, and the cursor
+  // is the last row read, found or not: the next call goes on after it.
+  #page<T>(sql: string, params: (string | number | null)[], term: string | undefined, view: (row: Row) => { item: T; haystack: string }, limit: number, kind: 's' | 'e', timeOf: (row: Row) => string): Page<T> {
+    const kept: { item: T; row: Row }[] = [];
     const needle = term?.toLowerCase();
+    let scanned = 0;
+    let read: Row | undefined;
+    let capped = false;
     for (const row of this.#db.prepare(sql).iterate(...params) as Iterable<Row>) {
+      if (scanned >= this.#scanLimit) { capped = true; break; }
+      scanned++;
+      read = row;
       const { item, haystack } = view(row);
       if (needle !== undefined && !haystack.toLowerCase().includes(needle)) continue;
-      items.push(item);
-      if (items.length > limit) break;
+      kept.push({ item, row });
+      if (kept.length > limit) break;
     }
-    const more = items.length > limit;
-    const page = items.slice(0, limit);
-    return { items: page, last: more ? key(page[page.length - 1] as T) : undefined, more };
+    const cursor = (row: Row | undefined) => (row ? encode([kind, timeOf(row), Number(row.rid)]) : null);
+    if (kept.length > limit) return { items: kept.slice(0, limit).map((k) => k.item), next: cursor(kept[limit - 1]?.row), partial: false };
+    return { items: kept.map((k) => k.item), next: capped ? cursor(read) : null, partial: capped };
   }
 
   searchSessions(query: SessionQuery): Page<SessionView> {
@@ -233,7 +278,7 @@ export class LedgerHistory {
     const { from, until } = range(query);
     const after = decode(query.cursor, 's');
     const term = this.#term(query.text);
-    if (!this.#sessions) return { items: [], next: null };
+    if (!this.#sessions) return { items: [], next: null, partial: false };
     const where: string[] = [];
     const params: (string | number | null)[] = [];
     const equal = (column: string, value: string | undefined) => { if (value !== undefined) { where.push(`${column} = ?`); params.push(value); } };
@@ -243,17 +288,16 @@ export class LedgerHistory {
     equal('s.status', query.status);
     if (from !== undefined) { where.push('s.updated_at >= ?'); params.push(from); }
     if (until !== undefined) { where.push('s.created_at < ?'); params.push(until); }
-    if (after) { where.push('(s.created_at, s.id) < (?, ?)'); params.push(...after); }
+    if (after) { where.push('(s.created_at, s.rowid) < (?, ?)'); params.push(...after); }
     const service = this.#sessionService ? "COALESCE(s.service, '')" : "''";
     for (const part of term === undefined ? [] : narrowing(term)) {
       where.push(`(s.id || ' ' || s.project || ' ' || s.ticket || ' ' || s.role || ' ' || s.harness || ' ' || s.model || ' ' || s.status || ' ' || ${service}) LIKE ? ESCAPE '\\'`);
       params.push(`%${escapeLike(part)}%`);
     }
     const count = this.#events ? '(SELECT COUNT(*) FROM session_events e WHERE e.session_id = s.id)' : '0';
-    const sql = `SELECT s.id, s.project, s.ticket, s.role, s.harness, s.model, s.status, s.created_at, s.updated_at, ${this.#sessionService ? 's.service' : 'NULL'} AS service, ${count} AS events ` +
-      `FROM sessions s ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY s.created_at DESC, s.id DESC`;
-    const page = this.#page(sql, params, term, (row) => this.#sessionShown(row), limit, (s) => ['s', s.createdAt, s.id]);
-    return { items: page.items, next: page.last ? encode(page.last) : null };
+    const sql = `SELECT s.rowid AS rid, s.id, s.project, s.ticket, s.role, s.harness, s.model, s.status, s.created_at, s.updated_at, ${this.#sessionService ? 's.service' : 'NULL'} AS service, ${count} AS events ` +
+      `FROM sessions s ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY s.created_at DESC, s.rowid DESC`;
+    return this.#page(sql, params, term, (row) => this.#sessionShown(row), limit, 's', (row) => str(row.created_at));
   }
 
   searchEvents(query: EventQuery): Page<EventView> {
@@ -261,7 +305,7 @@ export class LedgerHistory {
     const { from, until } = range(query);
     const after = decode(query.cursor, 'e');
     const term = this.#term(query.text);
-    if (!this.#events) return { items: [], next: null };
+    if (!this.#events) return { items: [], next: null, partial: false };
     const where: string[] = [];
     const params: (string | number | null)[] = [];
     const equal = (column: string, value: string | undefined) => { if (value !== undefined) { where.push(`${column} = ?`); params.push(value); } };
@@ -272,12 +316,11 @@ export class LedgerHistory {
     else equal('type', query.type);
     if (from !== undefined) { where.push('at >= ?'); params.push(from); }
     if (until !== undefined) { where.push('at < ?'); params.push(until); }
-    if (after) { where.push('(at, session_id, seq) < (?, ?, ?)'); params.push(...after); }
+    if (after) { where.push('(at, rowid) < (?, ?)'); params.push(...after); }
     for (const part of term === undefined ? [] : narrowing(term)) { where.push("event LIKE ? ESCAPE '\\'"); params.push(`%${escapeLike(part)}%`); }
-    const sql = `SELECT session_id, seq, at, ticket, project, type, event, ${this.#eventService ? 'service' : 'NULL AS service'} FROM session_events ` +
-      `${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY at DESC, session_id DESC, seq DESC`;
-    const page = this.#page(sql, params, term, (row) => this.#event(row, TEXT_LIMIT), limit, (e) => ['e', e.at, e.sessionId, e.seq]);
-    return { items: page.items, next: page.last ? encode(page.last) : null };
+    const sql = `SELECT rowid AS rid, session_id, seq, at, ticket, project, type, event, ${this.#eventService ? 'service' : 'NULL AS service'} FROM session_events ` +
+      `${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY at DESC, rowid DESC`;
+    return this.#page(sql, params, term, (row) => this.#event(row, TEXT_LIMIT), limit, 'e', (row) => str(row.at));
   }
 
   timeline(id: string, query: TimelineQuery): Timeline | undefined {
