@@ -4855,6 +4855,34 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-contract-formats`.
 
+## 2026-10-24: the matrix catches up with the merged lines of milestone 3 (the author's choices, lane `j3-matrix-sync`)
+
+**The need.** Rule 1 of `requirements-matrix.md` says the lines are filled at every merge; many milestone 3 lines still read `in progress` with a lane name or an issue number, though their pull request is merged in `v2`. Documentation only: no code, no test changed.
+
+**What was checked, line by line.** `gh pr view <n> --json state,mergeCommit` for 20 pull requests (288, 295, 297, 298, 300, 302 to 316): all `MERGED` into `v2`, each merge commit an ancestor of `origin/v2` at `78139de`. Every test file named in the "Proven by" column of the edited lines exists. With `npm ci` and `npm run build` in `v2/`: 635 tests of the named `node --test` files pass, 0 fail; the 13 browser tests they hold (consumption, close, questions, editor, replay) were skipped without `CLEARED_V2_PLAYWRIGHT` and pass with it and the installed Chromium (13 of 13); the 10 named Vitest files pass (55 tests). The body of each pull request names the ids it delivers (checked).
+
+**Decision.**
+1. **Pull request numbers, not issue numbers.** The column held issue numbers for five lanes: 249 is pull request 314, 274 is 313, 294 is 310, 296 is 311, 301 is 312. The cells now read `314 (lane j3-reject-close, issue #249)` and so on. A lane named without a number got its number (297, 298, 302 to 309, 315).
+2. **Done:** P54, P57, P58, P65 to P68, P70, P72 to P80, P82, P86, P87, P90 to P92, P95 to P105, P110 to P113, P120 to P125, P130 to P135, P53, C14, C19, M11, B3.11. P58's proof, "P77's", now names P77's test files. P92's proof is a document: `proof-clean-base.md` names `PROOF_REVIEW_ROUNDS` and `CLEARED_V2_REVIEW_ROUNDS`, 3 by default, and says a round is a verdict of the same reviewer session.
+3. **Judgement calls.**
+   - C14 is `done`: the criteria the owner approved on issue #272 (a "Resume from here" on each step, the branch back to the step's commit, the old continuation readable, a service and a browser test) are the ones P76 meets. The note that the thread "is not played again" and the one-service limit stay in the cell. If the owner meant a playback of the old session by "Replay", C14 goes back to `partial`.
+   - P53 is `done`: P114 (closing the pull request on the forge) is not among the criteria the owner approved and stays `open`.
+   - O11: only its second half moves, to `done (the other formats, M11, 315)`; the OpenAPI half still waits on M2, which is `partial` (the real run).
+   - M4 stays `partial`: only "once merged" became "delivered, 295"; the notes between the sessions of a ticket's steps are still later.
+4. **Left as they were, and why.**
+   - P71 stays `in progress`: its code and tests are merged (302) and green, but the usage endpoint's shape was read from the CLI's code, never from a real account; no lane runs on it, and its first real read is still to be made.
+   - P69, B5.1c, D13, O6, B6.3, O15: the real Codex and Cursor trials are the owner's.
+   - P114 is `open`, the owner's question.
+   - C6 and P140 to P144 belong to pull request 317, still open.
+
+**To follow up (not done here, the task is documentation only).** The CI job "browser" in `.github/workflows/v2.yml` lists 12 files and does not list `consumption-browser`, `close-browser`, `questions-browser` and `editor-browser`: those four are green only when run by hand with `CLEARED_V2_PLAYWRIGHT`, and CI never runs them. A lane should add them to the list.
+
+**Checks.** `npm run typecheck`; `npm test`; `npm run guard -- --base origin/v2`; the results are in the pull request.
+
+**Resources.** No Docker object, no image, no network call beyond `npm ci` and `gh`, no port opened but the browser tests' loopback ones, no tunnel, no secret, no real Codex or Cursor account.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-matrix-sync`.
+
 ## 2026-10-24: Hand over to Codex, and back, and the cross-harness review (the author's choices, lane `j3-handover-codex`, matrix B6.3, P150 to P155)
 
 `handover()` rejected with `NotImplemented` on every adapter and the composer's "Hand over to Codex" button was off with "comes in milestone 3". The flow started every session on `claude-code` (`HARNESS`, pinned by P87), although the Codex adapter exists since P69. This lane makes a live author's work move to the other harness of the contract and back, and the review come from the other harness.
