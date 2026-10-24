@@ -5,8 +5,11 @@
 //            in + out + cache read + cache write, the way lib/session-usage.mjs
 //            totals a session, by day in the person's time zone, over the
 //            last seven days, per the harness of the session
-//   quota    the newest `cleared.rate_limit` of each window of a harness, read
-//            as weekShare reads it (scheduler.ts): none once its reset passed
+//   quota    the newest figure of each window of a harness, from the hourly
+//            reading or a session's `cleared.rate_limit` (quota.ts
+//            latestQuota, which the plans' stop reads too): none once its
+//            reset passed; with its source, and the harness's last reading,
+//            a failed one with its reason (issue #270)
 //   cost     the sum of the turns' `total_cost_usd` as the flow sums them
 //            (engine.ts #stepCost), only for the turns that report one: a
 //            figure the harness gives, never an estimate. null when no turn
@@ -17,6 +20,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Harness } from '../session/contract.ts';
 import { AUTHOR_MODELS, type Levers } from './levers.ts';
+import { lastReading, latestQuota, type LastReading } from './quota.ts';
 
 export const DAYS = 7;
 const HOUR_MS = 3_600_000;
@@ -41,6 +45,7 @@ export type Quota = {
   readonly usedPercent: number;
   readonly resetsAt: string;
   readonly observedAt: string;
+  readonly source: string;                         // a reading's source, or `session` for a session's report
   readonly projection: Projection;
 };
 
@@ -52,6 +57,7 @@ export type HarnessConsumption = {
   readonly tokens: number;
   readonly perDay: readonly DayTokens[];
   readonly quotas: readonly Quota[];               // the seven-day window first
+  readonly lastReading: LastReading | null;        // the harness's last quota reading, failed or not; null before the first
   // API-equivalent dollars the harness reported, null when none did.
   readonly costUsd: number | null;
   readonly costTurns: { readonly reported: number; readonly turns: number };
@@ -128,15 +134,13 @@ function turnTokens(turn: Turn): number {
   return total;
 }
 
-// The newest measure of a window for a harness, none once the window's reset has passed.
+// The newest measure of a window for a harness, none once the window's reset
+// has passed or when it has no reset time to project to.
 function quotaOf(db: DatabaseSync, project: string, harness: Harness, window: WindowName, now: Date): Quota | undefined {
-  const row = db.prepare(`SELECT e.at AS at, json_extract(e.event, '$.value.usedPercent') AS used, json_extract(e.event, '$.value.resetsAt') AS resets
-    FROM session_events e JOIN sessions s ON s.id = e.session_id
-    WHERE e.project = ? AND s.harness = ? AND e.type = 'CUSTOM' AND json_extract(e.event, '$.name') = 'cleared.rate_limit' AND json_extract(e.event, '$.value.window') = ?
-    ORDER BY e.at DESC, e.rowid DESC LIMIT 1`).get(project, harness, window) as { at: string; used: number | null; resets: string | null } | undefined;
-  if (!row || typeof row.used !== 'number' || !row.resets || !(Date.parse(row.resets) > now.getTime())) return undefined;
-  const base = { window, usedPercent: row.used, resetsAt: row.resets, observedAt: row.at };
-  return { ...base, projection: projectQuota(base) };
+  const latest = latestQuota(db, { project, window, now, harness });
+  if (!latest?.resetsAt) return undefined;
+  const base = { window, usedPercent: latest.usedPercent, resetsAt: latest.resetsAt, observedAt: latest.observedAt };
+  return { ...base, source: latest.source, projection: projectQuota(base) };
 }
 
 export function leverChoices(current: Levers, config: { readonly authorModel: string; readonly reviewerModel: string }): LeverChoices {
@@ -185,6 +189,7 @@ export function consumption(db: DatabaseSync, input: {
       harness, sessions: sessions.size, tokens,
       perDay: days.map((day) => ({ day, tokens: perDay.get(day) ?? 0 })),
       quotas,
+      lastReading: lastReading(db, input.project, harness) ?? null,
       costUsd: reported === 0 ? null : Math.round(cost * 100) / 100,
       costTurns: { reported, turns },
     };

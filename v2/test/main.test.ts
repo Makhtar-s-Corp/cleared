@@ -16,10 +16,11 @@ const main = new URL('../src/main.ts', import.meta.url).pathname;
 const state = mkdtempSync(join(tmpdir(), 'cleared-v2-main-'));
 after(() => rmSync(state, { recursive: true, force: true }));
 // The service builds its flow and its lead at start: a workspace the shell
-// names would start real sessions, so these runs name none.
+// names would start real sessions, so these runs name none; nor would they
+// read a real quota (issue #270): no login is named and no reading runs.
 function isolated(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state, CLEARED_V2_LEAD_ENABLED: 'off' };
-  for (const key of ['ORCH_LEDGER', 'CLEARED_V2_PROJECT', 'CLEARED_V2_WORKSPACE', 'CLEARED_V2_STATE_DIR', 'CLEARED_V2_ADAPTER']) delete out[key];
+  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state, CLEARED_V2_LEAD_ENABLED: 'off', CLEARED_V2_QUOTA_MINUTES: '0' };
+  for (const key of ['ORCH_LEDGER', 'CLEARED_V2_PROJECT', 'CLEARED_V2_WORKSPACE', 'CLEARED_V2_STATE_DIR', 'CLEARED_V2_ADAPTER', 'CLEARED_CLAUDE_CREDENTIALS']) delete out[key];
   return out;
 }
 

@@ -4,6 +4,7 @@
 // fixtures app draws what the service would answer. No name, no path, no
 // figure of a real account.
 import { LEVERS_TABLE, LeverError, LeverStore, type LeversChange } from '../../src/consumption/levers.ts';
+import { QUOTA_TABLES } from '../../src/consumption/quota.ts';
 import { consumption, leverChoices, type Consumption, type LeverChoices } from '../../src/consumption/usage.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 
@@ -18,7 +19,7 @@ const WEEK: Readonly<Record<'claude-code' | 'codex', readonly number[]>> = {
 
 export function consumptionFixture(project: string, now: () => Date) {
   const store = openStore(':memory:');
-  applyTables(store.db, [LEVERS_TABLE]);
+  applyTables(store.db, [LEVERS_TABLE, ...QUOTA_TABLES]);
   const start = now();
   const at = (daysBack: number, hour: number) => new Date(Date.parse(`${start.toISOString().slice(0, 10)}T00:00:00Z`) - daysBack * DAY + hour * 3_600_000).toISOString();
   let n = 0;
@@ -44,8 +45,10 @@ export function consumptionFixture(project: string, now: () => Date) {
     at: new Date(start.getTime() - 20 * 60_000).toISOString(), sessionId: session, ticket: 'LOCAL-1', project,
     event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window, usedPercent, resetsAt: new Date(start.getTime() + resetsInMs).toISOString() } } as never,
   });
-  limit('fx-claude-code', 'seven_day', 41, 3.5 * DAY);
   limit('fx-codex', 'seven_day', 62, 3.5 * DAY);
+  // Claude Code's from the hourly reading (issue #270), at the same time.
+  store.db.prepare("INSERT INTO quota_readings (project, harness, source, at, ok, \"window\", used_percent, resets_at) VALUES (?, 'claude-code', 'claude-code /api/oauth/usage', ?, 1, 'seven_day', 41, ?)")
+    .run(project, new Date(start.getTime() - 20 * 60_000).toISOString(), new Date(start.getTime() + 3.5 * DAY).toISOString());
   const levers = new LeverStore(store.db, project);
   return {
     read(zone: string | undefined): Consumption {

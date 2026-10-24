@@ -9,8 +9,9 @@
 //      a schedule `at` a time is disabled once taken.
 //   2. A run is skipped when the seven-day window is at the week stop
 //      (CLEARED_V2_WEEK_STOP_PERCENT, the plan runner's) or at the
-//      schedule's own cap, read as the runner reads it: the newest
-//      `cleared.rate_limit` of the window, unless its reset has passed.
+//      schedule's own cap, read as the runner reads it: the newest figure
+//      of the window, a quota reading's or a session's `cleared.rate_limit`
+//      (consumption/quota.ts), unless its reset has passed.
 //   3. A recipe runs as recipes/service.ts runs it, approved by the creator,
 //      each ticket's budget the schedule's (the runner's start carries it
 //      on the Origin: budget.ts). A goal is an owner turn to the lead, as
@@ -28,6 +29,7 @@
 // plan's service line and notifies nothing.
 import type { DatabaseSync } from 'node:sqlite';
 import type { LeverReader } from '../consumption/levers.ts';
+import { latestQuota } from '../consumption/quota.ts';
 import type { CreateScheduleBody, Schedule } from '../api/types.ts';
 import type { PlanLead, PlanRunner } from '../lead/plans/runner.ts';
 import { NotifyQueue } from '../notify/queue.ts';
@@ -61,17 +63,12 @@ const MAX_GOAL = 20_000;        // the lead's owner message's
 const usd = (amount: number) => `$${Number(amount.toFixed(2))}`;
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 
-// The seven-day window's share, as the plan runner reads it (lead/plans/runner.ts #stop).
+// The seven-day window's share, as the plan runner reads it: the newest
+// figure of a reading or of a session's report (consumption/quota.ts).
 // The week is Claude Code's subscription: a window another harness reports
 // (Codex's, milestone 3) is its own, never this one.
 export function weekShare(db: DatabaseSync, project: string, now: Date): number | undefined {
-  const week = db.prepare(`SELECT json_extract(event, '$.value.usedPercent') AS used, json_extract(event, '$.value.resetsAt') AS resets FROM session_events
-    WHERE project = ? AND type = 'CUSTOM' AND json_extract(event, '$.name') = 'cleared.rate_limit' AND json_extract(event, '$.value.window') = 'seven_day'
-      AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_events.session_id AND s.harness <> 'claude-code')
-    ORDER BY at DESC, rowid DESC LIMIT 1`).get(project) as { used: number | null; resets: string | null } | undefined;
-  if (!week || typeof week.used !== 'number') return undefined;
-  const running = !week.resets || Date.parse(week.resets) > now.getTime();
-  return running ? week.used : undefined;
+  return latestQuota(db, { project, window: 'seven_day', now, harness: 'claude-code' })?.usedPercent;
 }
 
 export class Scheduler {

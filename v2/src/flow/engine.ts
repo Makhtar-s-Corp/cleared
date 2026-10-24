@@ -102,6 +102,7 @@ import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, typ
 import type { LeverReader } from '../consumption/levers.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
+import { testComment, testLine, testRunOf } from './review-tests.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
@@ -1320,6 +1321,7 @@ export class FlowEngine {
       role, base: this.config.base, workdir: WORKDIR_MOUNT, scripts: settings.scripts, credentialFile: LOGIN_FILE_MOUNT,
       safeCommands: [...DEFAULT_SAFE_COMMANDS, ...settings.safeCommands], allowedHosts: settings.hosts, forbiddenHosts: [],
       ticketFiles: [], learned: [...this.#store.policyRules.learned(this.config.project), ...toolRules(tools)],
+      ...(role === 'reviewer' && settings.testCommand ? { testCommand: settings.testCommand } : {}),
     };
   }
 
@@ -1721,7 +1723,7 @@ export class FlowEngine {
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
       // The reviewer's git commands name its own service's base.
       const base = this.#several ? (this.#servicesOf(ticket)[0] as ServiceConfig).base : this.config.base;
-      const prompt = reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)) });
+      const prompt = reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)), ...(settings.testCommand ? { testCommand: settings.testCommand } : {}) });
       const live = await this.#launch(adapter, ticket, 'reviewer', this.#reviewerModel(ticket), prepared.workdir || workdir, prepared.briefing, settings,
         channel ? `${prompt}\n\n${channelPrompt(channel)}` : prompt);
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
@@ -1789,15 +1791,19 @@ export class FlowEngine {
     }
     // A round is a verdict: a resumed reviewer gives several in one session.
     const round = this.#rounds(id) + 1;
-    this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: reviewer.id, verdict: parsed.verdict, round } });
+    // The declared tests as the session ran them in this turn (issue #268).
+    const run = testRunOf(this.#store.events.after(reviewer.id, reviewer.turnFrom ?? 0), reviewer.settings.testCommand);
+    const tests = run && { ...run, ...(run.tail === undefined ? {} : { tail: this.#clean(run.tail) }) };
+    this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: reviewer.id, verdict: parsed.verdict, round, ...(tests ? { tests } : {}) } });
     this.#emit({ type: 'review_verdict', at: this.#at(), project, ticket: id, session: reviewer.id, verdict: parsed.verdict, round });
-    if (parsed.verdict === 'pass') return this.#publishAndAsk(reviewer, report, round);
+    if (tests) await this.registry.ticketStore.comment(id, testComment(tests, round), SERVICE).catch(() => undefined);
+    if (parsed.verdict === 'pass') return this.#publishAndAsk(reviewer, tests ? `${report}\n\n${testLine(tests)}` : report, round);
     const limit = this.config.maxReviewRounds;
     if (round >= limit) {
       await this.#putBack(id, `The review still asked for changes after ${round} review round${round === 1 ? '' : 's'}, so the ticket goes back to Todo. The last report:\n\n${report}`, 'too_many_rounds');
       return;
     }
-    const request: ChannelMessage = { round, limit, from: 'reviewer', text: this.#clean(report) };
+    const request: ChannelMessage = { round, limit, from: 'reviewer', text: this.#clean(tests ? `${report}\n\n${testLine(tests)}` : report) };
     this.#journal(session, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
     await this.#reopenAuthor(reviewer, report, request);
   }
@@ -1939,6 +1945,8 @@ export class FlowEngine {
       '',
       `Pull request: ${published.url}`,
       `Reviewed by ${model} in ${round} round${round === 1 ? '' : 's'}: ${report.split('\n').filter((line) => /verdict\s*:/i.test(line)).at(-1)?.trim() ?? 'passed'}`,
+      // The engine's line of the declared tests, the report's last (issue #268).
+      ...report.split('\n').filter((line) => line.startsWith('Tests: ')).slice(-1),
     ].join('\n');
     let requestedAt: string;
     try {
@@ -2036,6 +2044,8 @@ export class FlowEngine {
       '',
       ...published.map((p) => `Pull request on ${p.service.name}: ${p.pr.url}`),
       `Reviewed by ${model} in ${round} round${round === 1 ? '' : 's'}: ${report.split('\n').filter((line) => /verdict\s*:/i.test(line)).at(-1)?.trim() ?? 'passed'}`,
+      // The engine's line of the declared tests, the report's last (issue #268).
+      ...report.split('\n').filter((line) => line.startsWith('Tests: ')).slice(-1),
     ].join('\n');
     const compat = this.#compatibility(published);
     const stops: Stop[] = [];

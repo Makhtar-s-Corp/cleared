@@ -35,7 +35,7 @@ function world() {
 test('each service is read at its own base branch, from its own checkout', async () => {
   const { flow, guestbook, filter } = world();
   assert.deepEqual(await flow.settings(guestbook), { verdict: 'no blocking issues', safeCommands: [], hosts: ['registry.npmjs.org'], services: [], scripts: [] });
-  assert.deepEqual(await flow.settings(filter), { verdict: 'ship it', safeCommands: [], hosts: ['example.invalid'], services: [], scripts: ['test'] });
+  assert.deepEqual(await flow.settings(filter), { verdict: 'ship it', safeCommands: [], hosts: ['example.invalid'], services: [], scripts: ['test'], testCommand: ['npm', 'test'] });
   assert.match(readFileSync(join(filter.dir, 'contract', 'openapi.yaml'), 'utf8'), /openapi/);
 });
 
