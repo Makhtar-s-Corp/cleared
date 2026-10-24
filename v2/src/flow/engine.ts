@@ -1410,7 +1410,7 @@ export class FlowEngine {
       }
     }
     if (failed.length > 0)
-      await this.registry.ticketStore.comment(id, `The ticket is closed, but the pull request ${failed.join(', ')} was not closed on GitHub: close it by hand if it should be. The branch was not touched.`, SERVICE).catch(() => undefined);
+      await this.registry.ticketStore.comment(id, this.#clean(`The ticket is closed, but the pull request ${failed.join(', ')} was not closed on GitHub: close it by hand if it should be. The branch was not touched.`), SERVICE).catch(() => undefined);
   }
 
   async #takeOut(id: TicketId, by: UserId, how: {
