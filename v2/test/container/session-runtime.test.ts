@@ -335,6 +335,18 @@ test('a real sibling is built in two layers: the base from the landed branch wit
   assert.deepEqual(started.siblings, [{ name: 'guestbook', container: sessionNames(SESSION).sibling('guestbook'), kind: 'ticket', ready: true }]);
 });
 
+test('a fake is told the format of its contract, and OpenAPI is told nothing (M11)', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const proto = { name: 'royalties', port: 8801, contract: join(files.contract, '..', 'royalties.proto'), contractFormat: 'protobuf' as const };
+  await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.filter, proto] }));
+  const names = sessionNames(SESSION);
+  const protoArgs = byName(fake.containers, names.sibling('royalties')).args ?? [];
+  assert.ok(hasPair(protoArgs, '--env', 'FAKE_CONTRACT=/etc/cleared/fake/royalties.proto') && hasPair(protoArgs, '--env', 'FAKE_FORMAT=protobuf'), protoArgs.join(' '));
+  const openapiArgs = byName(fake.containers, names.sibling('filter-api')).args ?? [];
+  assert.ok(!openapiArgs.some((arg) => arg.startsWith('FAKE_FORMAT=')));
+});
+
 test('a sibling runs labelled on the session network under its name, without privilege, with the test services\' variables', async () => {
   const files = workspaceFiles();
   const fake = new FakeDocker();

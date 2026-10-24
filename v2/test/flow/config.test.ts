@@ -180,6 +180,12 @@ function withWorkspaceFile(text: string, run: (env: NodeJS.ProcessEnv) => void):
   }
 }
 
+test('a contract is OpenAPI 3, JSON Schema, protobuf or events, by the prefix of its path (M11)', () => {
+  for (const format of ['openapi', 'jsonschema', 'protobuf', 'events'] as const)
+    withWorkspaceFile(TWO.replace('contract = openapi:contract/openapi.yaml', `contract = ${format}:contract/filter.file`), (env) =>
+      assert.deepEqual(workspaceOf(loadFlowConfig(env)!).services[1]?.contract, { format, path: 'contract/filter.file' }));
+});
+
 test('a two-service workspace file parses with its kinds, consumes, run, contract and sensitivity', () => {
   withWorkspaceFile(TWO, (env) => {
     const config = loadFlowConfig(env);
@@ -228,7 +234,9 @@ test('the workspace file refuses an unknown kind, a service that consumes itself
   refused(TWO.replace('sensitivity = reviewer:claude-sonnet-5-5', 'sensitivity = strict'), /sensitivity/);
   refused(TWO.replace('consumes = filter-api', 'consumes = payments'), /consumes payments, which is not a service/);
   refused(`${TWO}\n[service payments]\nrepository = example-org/payments\nurl = https://example.invalid/p.git\nconsumes = guestbook\n`.replace('consumes = filter-api', 'consumes = payments'), /cycle/);
-  refused(TWO.replace('contract = openapi:contract/openapi.yaml', 'contract = protobuf:filter.proto'), /OpenAPI/);
+  // Milestone 3 (M11): the other contract formats are read; anything else is refused with the list.
+  refused(TWO.replace('contract = openapi:contract/openapi.yaml', 'contract = swagger:filter.json'), /openapi, jsonschema, protobuf, events/);
+  refused(TWO.replace('contract = openapi:contract/openapi.yaml', 'contract = protobuf:../filter.proto'), /inside the repository/);
   refused(TWO.replace('run = Dockerfile:3000', 'run = Dockerfile'), /run/);
   refused(TWO.replace('path = filter-api', 'path = ../filter-api'), /path/);
   refused(TWO.replace('path = filter-api\n', ''), /folder.*path/);

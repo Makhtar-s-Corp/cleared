@@ -21,7 +21,7 @@
 //   sensitivity = normal                 full, reviewer:<model>, human:<user>
 //   consumes = other-service, ...
 //   run = Dockerfile:3000                the Dockerfile that runs it, and its port
-//   contract = openapi:contract/openapi.yaml
+//   contract = openapi:contract/openapi.yaml    openapi, jsonschema, protobuf or events, then the path
 //   broker_socket = /...                 its release broker (decision 21)
 //   broker_state = /...
 //
@@ -29,7 +29,7 @@
 // base branch, as before.
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type { Service, Workspace } from '../api/types.ts';
+import type { ContractFormat, Service, Workspace } from '../api/types.ts';
 
 export class WorkspaceError extends Error {
   override name = 'WorkspaceError';
@@ -172,10 +172,10 @@ function serviceOf(name: string, keys: Record<string, string>, options: Workspac
   }
   let contract: Service['contract'] = null;
   if (keys.contract !== undefined) {
-    const match = /^openapi:(.+)$/.exec(keys.contract);
-    if (!match) throw new WorkspaceError(`${where} contract: milestone 2 reads OpenAPI 3 only (openapi:<path>), not "${keys.contract}"`);
-    if (!inside(match[1] as string)) throw new WorkspaceError(`${where} contract path must be inside the repository`);
-    contract = { format: 'openapi', path: match[1] as string };
+    const match = /^(openapi|jsonschema|protobuf|events):(.+)$/.exec(keys.contract);
+    if (!match) throw new WorkspaceError(`${where} contract: the format is one of openapi, jsonschema, protobuf, events (<format>:<path>), not "${keys.contract}"`);
+    if (!inside(match[2] as string)) throw new WorkspaceError(`${where} contract path must be inside the repository`);
+    contract = { format: match[1] as ContractFormat, path: match[2] as string };
   }
   const absolute = (key: 'broker_socket' | 'broker_state'): string | null => {
     const value = keys[key];

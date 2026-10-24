@@ -7,6 +7,9 @@
 FROM node:24-slim
 WORKDIR /opt/cleared/fake
 COPY yaml.ts ./yaml.ts
+COPY schema.ts ./schema.ts
+COPY proto.ts ./proto.ts
+COPY events.ts ./events.ts
 COPY fake.ts ./fake.ts
 USER node
 CMD ["node", "fake.ts"]

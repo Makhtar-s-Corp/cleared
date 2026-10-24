@@ -135,3 +135,23 @@ test('a fake listens on its run port, else on its contract\'s server port, else 
   });
   assert.deepEqual(siblings, [{ name: 'filter-api', port: 8795, contract: '/state/filter-api/contract/openapi.yaml' }]);
 });
+
+test('a fake of a contract in another format carries the format, and its port is asked of the contract with it (M11)', async () => {
+  const asked: string[] = [];
+  const siblings = await planSiblings({
+    services: [
+      { name: 'royalties', kind: 'repository', path: null, run: null, contract: { format: 'protobuf', path: 'api/royalties.proto' } },
+      { name: 'catalogue', kind: 'repository', path: null, run: null, contract: { format: 'jsonschema', path: 'schema/isrc.json' } },
+      { name: 'filter-api', kind: 'repository', path: null, run: null, contract: { format: 'openapi', path: 'contract/openapi.yaml' } },
+    ],
+    own: 'guestbook', ownCheckout: '/work/T-1', checkoutOf: () => undefined,
+    baseOf: async (name) => ({ dir: `/state/${name}`, commit: 'abcdefbeefcafe00' }),
+    contractPort: (file, format) => { asked.push(`${format}:${file}`); return undefined; },
+  });
+  assert.deepEqual(siblings, [
+    { name: 'royalties', port: 8080, contract: '/state/royalties/api/royalties.proto', contractFormat: 'protobuf' },
+    { name: 'catalogue', port: 8080, contract: '/state/catalogue/schema/isrc.json', contractFormat: 'jsonschema' },
+    { name: 'filter-api', port: 8080, contract: '/state/filter-api/contract/openapi.yaml' },
+  ], 'OpenAPI, the default, carries no format');
+  assert.deepEqual(asked, ['protobuf:/state/royalties/api/royalties.proto', 'jsonschema:/state/catalogue/schema/isrc.json', 'openapi:/state/filter-api/contract/openapi.yaml']);
+});
