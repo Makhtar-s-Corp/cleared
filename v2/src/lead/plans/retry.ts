@@ -9,8 +9,19 @@ import type { Store } from '../../store/db.ts';
 
 export const RETRY_TEXT_LIMIT = 4000;
 
-// A command that runs a project's tests or checks.
-const TEST_COMMAND = /\b(test|tests|vitest|jest|mocha|pytest|check|typecheck|lint)\b/;
+// A command that runs a project's tests or checks: the program and its
+// first argument decide, not a word anywhere in the line (`cat test/x`
+// reads a file). A leading `cd dir &&` and variable assignments are skipped.
+const RUNNER = /^(?:(?:npm|pnpm|yarn|bun)\s+(?:run(?:-script)?\s+)?(?:test|tests|check|typecheck|lint)(?::[\w:-]+)?|npx\s+(?:--no-install\s+)?(?:vitest|jest|mocha|tsc)|(?:vitest|jest|mocha|pytest|tsc)|python3?\s+-m\s+pytest|node\s+--test|make\s+(?:test|check|lint)|cargo\s+(?:test|check|clippy)|go\s+(?:test|vet)|bundle\s+exec\s+rspec)(?=\s|$)/;
+export function isTestCommand(command: string): boolean {
+  let rest = command.trim();
+  for (;;) {
+    const step = /^(?:cd\s+\S+\s*&&\s*|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)/.exec(rest);
+    if (!step) break;
+    rest = rest.slice(step[0].length);
+  }
+  return RUNNER.test(rest);
+}
 
 export type RetryContext = {
   readonly review: string | undefined;
@@ -36,7 +47,7 @@ export function retryContext(store: Pick<Store, 'events' | 'sessions'>, ticket: 
       } else if (event.type === 'TOOL_CALL_RESULT') {
         const command = commands.get(event.toolCallId);
         const output = readToolOutput(event);
-        if (command && TEST_COMMAND.test(command) && output.kind === 'execute' && output.isError) tests = { command, output: output.output };
+        if (command && isTestCommand(command) && output.kind === 'execute' && output.isError) tests = { command, output: output.output };
       }
     }
   }

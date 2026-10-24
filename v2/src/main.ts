@@ -60,8 +60,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     if (closing) return;
     closing = true;
     server.close(() => {
-      store.close();
-      process.exit(0);
+      void (app.stop?.() ?? Promise.resolve()).finally(() => {
+        store.close();
+        process.exit(0);
+      });
     });
     server.closeAllConnections();
   });

@@ -227,7 +227,8 @@ test('time spent waiting for the human is not idle time: a pending permission is
   await t.engine.start(t.ticket.id, 'u1');
   const id = t.startedSessions[0]!.id;
   await until(() => t.inbox.waitingFor(id) === 1);
-  t.clock.now += 3 * 3600_000;
+  // Past the idle stop, before the questions' delay a permission has too (issue #299, test/flow/question-timeout.test.ts).
+  t.clock.now += 20 * 60_000;
   await t.engine.tick();
   assert.equal(t.store.sessions.get(id)?.status, 'waiting_human');
   // Answered: the idle clock starts from the answer, not from the old event.
