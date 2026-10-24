@@ -156,7 +156,11 @@ test('a one-service workspace briefs its session as milestone 1 did, byte for by
   const { config, flow } = await effects({ '.cleared/agents.conf': CONF, 'package.json': PACKAGE, ...MEMORY_FILES });
   const prepared = await flow.prepareWorkdir({ ticket: MEMORY_TICKET, role: 'author' });
   const expected = readFileSync(new URL('../workspace/fixtures/briefing-m1.md', import.meta.url), 'utf8');
-  assert.equal(readFileSync(join(prepared.workdir, 'CLAUDE.md'), 'utf8'), expected);
+  // Milestone 1's text is unchanged; the generated project page of the
+  // service (issue #274, P104) follows it, as the one section added.
+  const claude = readFileSync(join(prepared.workdir, 'CLAUDE.md'), 'utf8');
+  assert.equal(claude.slice(0, expected.length), expected);
+  assert.match(claude.slice(expected.length), /^\n## Generated page of the service guestbook\n--- BEGIN MEMORY DATA ---\n/);
   assert.equal(existsSync(join(config.workdirRoot, '..', 'state', 'services')), false, 'no service level read over the workspace\'s own checkout');
 });
 

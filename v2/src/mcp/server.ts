@@ -111,11 +111,11 @@ export function createLedgerServer(options: ServerOptions): LedgerServer {
     const { history } = options;
     if (tool.name === 'search_sessions') {
       const page = history.searchSessions({ text: s('text'), ticket: s('ticket'), project: s('project'), role: s('role'), status: s('status'), from: s('from'), to: s('to'), limit: n('limit'), cursor: s('cursor') });
-      return answer({ sessions: page.items.map(said), next: page.next });
+      return answer({ sessions: page.items.map(said), next: page.next, partial: page.partial });
     }
     if (tool.name === 'search_events') {
       const page = history.searchEvents({ text: s('text'), ticket: s('ticket'), project: s('project'), sessionId: s('session_id'), type: s('type'), from: s('from'), to: s('to'), limit: n('limit'), cursor: s('cursor') });
-      return answer({ events: page.items, next: page.next });
+      return answer({ events: page.items, next: page.next, partial: page.partial });
     }
     const timeline = history.timeline(s('session_id') as string, { afterSeq: n('after_seq'), limit: n('limit') });
     if (!timeline) return refused('error_no_session');
@@ -160,9 +160,20 @@ export function createLedgerServer(options: ServerOptions): LedgerServer {
 }
 
 // Serves one client: a message per line in, an answer per line out, until
-// the input closes. Nothing else is written to the output.
+// the input closes. Nothing else is written to the output. A client that
+// closed its end of the output (EPIPE) is gone: the input is let go and the
+// call ends as if the input had closed; any other failure of the output is
+// thrown once the reading has stopped.
 export async function serveStdio(input: Readable, output: Writable, server: LedgerServer): Promise<void> {
-  for await (const line of createInterface({ input, crlfDelay: Infinity })) {
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let failure: NodeJS.ErrnoException | undefined;
+  output.on('error', (error: NodeJS.ErrnoException) => {
+    failure ??= error;
+    lines.close();
+    input.destroy();
+  });
+  for await (const line of lines) {
+    if (failure) break;
     if (!line.trim()) continue;
     let message: unknown;
     let parsed = true;
@@ -170,4 +181,5 @@ export async function serveStdio(input: Readable, output: Writable, server: Ledg
     const response = parsed ? server.handle(message) : server.unparsable();
     if (response) output.write(`${JSON.stringify(response)}\n`);
   }
+  if (failure && failure.code !== 'EPIPE') throw failure;
 }

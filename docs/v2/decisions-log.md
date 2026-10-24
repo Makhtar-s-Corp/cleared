@@ -4693,6 +4693,29 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - No Docker object, no network, no tunnel, no port, no secret. The tests run in memory.
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-autonomy-followups`.
 
+## 2026-10-24: follow-ups of the ledger's MCP server (the author's choices, lane `j3-ledger-mcp-followups`, issue #301)
+
+**Context.** Issue #301 lists six follow-ups of PR #298. All six are handled here (P95 to P100). One point the issue did not ask for is noted below.
+
+**Decisions.**
+1. **A marker is searched by its words, not by the stored text.** The LIKE that narrows the rows reads the stored text, which holds no `[removed: ...]`, so a search for a marker found nothing. The term is cut at its brackets (nothing else holds one) and a piece that is a part of a marker's words narrows nothing; the filter on the cleaned text decides. A short common word of a marker ("token", "key") therefore reads without narrowing, which the scan limit bounds. `MARKER_TEXTS` is the one list of the markers, and a test checks that every marker the cleaner writes on the fixture is in it, so a new category cannot bring the defect back unseen.
+2. **A call reads at most 2000 rows.** The cost of a search is the cleaning of each row it reads, found or not. At the limit it answers `partial: true` with what it found and a `next` after the last row read, found or not, so an empty page can still go on and the cursors reach every match once. The limit is a constructor option for the tests.
+3. **The cursor is the stored time and rowid, not an id.** Built on the cleaned id, two sessions whose ids read the same once cleaned were skipped, and building it on the raw id would have put a stored string, perhaps secret-shaped, in a value any client decodes (it is base64 of JSON). The order of rows at one moment is now the order they were written. A cursor of the old shape is refused as `error_cursor`. A session keeps its rowid when it is updated (`ON CONFLICT(id) DO UPDATE`, not a replace), and events are only appended, so a row cannot move between two pages.
+4. **Key names are cleaned; a name is a secret's unless it holds an innocent word.** `whole` cleans each key and decides the id keys and `rawEvent` on the stored name; keys cleaned to the same text are numbered, so no value is lost. For `NAME=value`, a rule on the name's shape (the word between underscores) would have missed `PGPASSWORD`, `SSHPASS`, `APIKEY` and `GITHUBTOKEN`, which cannot be told from `BYPASS` by their letters. So the broad match stays and a short list of words that only hold the letters (`BYPASS`, `AUTHOR`, `KEYBOARD`, `MONKEY`, `COMPASS`...) is removed from the name before it is judged. A word missing from the list costs a hidden value, never a shown secret.
+5. **EPIPE ends the server as a closed input would.** The client being gone is not an error: the input is let go (it stayed open and kept the process alive) and the command exits with 0. Any other failure of stdout is thrown and the command exits with 74 and says it on stderr.
+6. **A stopped service's ledger in a read-only folder is read `immutable`.** The WAL mode reads through a `-shm` file that a read-only connection in such a folder cannot make; the open failed. When it fails, the folder cannot be written to (the service cannot run in it) and the ledger has no `-wal`, it is opened again as `file:...?immutable=1`, a snapshot. With a `-wal`, or in a folder that can be written to, it never is: the ledger may be written to and `immutable` would hide committed rows. The concurrent read in WAL is pinned by a test; it passed on the old code, and opening every ledger `immutable` makes it fail.
+
+**Limits.**
+- At the scan limit, `partial` and `next` are decided by the rows that passed the LIKE on the stored text. For a term that cleaning leaves unchanged, the answer tells whether at least 2001 stored rows hold it and where the 2000th is. The text of a secret is never shown, and a term shaped like a secret is refused or finds nothing; the position of a row is not a secret.
+
+**Not done, and why.**
+- `createdAt`, `updatedAt` and an event's `at` are shown as stored, not cleaned, as before this lane. They are timestamps the service writes; a writer that put something else there is outside what this lane was asked.
+
+**Consequences.**
+- No Docker object, no network, no tunnel, no port, no secret: the tests build their secret-shaped values at run time and run on temporary folders. The read-only folder test is skipped for root.
+- The answers of `search_sessions` and `search_events` gain `partial`; the sort of rows at one moment changes.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-ledger-mcp-followups`.
+
 ## 2026-10-24: follow-ups of the review channel (the author's choices, lane `j3-review-channel-followups`, issue #296)
 
 **Context.** Issue #296 lists five follow-ups of the review channel (#295). Four are done here (P90 to P92), one is left, with why.
@@ -4731,6 +4754,32 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Resources.** No Docker object, no network, no tunnel, no port. Fakes only.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-cursor-followups`.
+
+## 2026-10-24: a project page per service, kept up to date (the author's choices, lane `j3-project-page`, issue #274)
+
+**The need.** Issue #274, validated by the owner on 23 October: the context of a repository is rebuilt in every session. A page per service, made at its first connection, made again after each merge, and read by the sessions at their start. Matrix lines P101 to P105, checked free on `origin/v2` (ends at P87) and in the open pull requests: 311 holds P90 to P92, and 312 (the review follow-ups of the ledger's MCP server, issue #301) holds P95 to P100, so this lane starts at P101, not P100.
+
+**Decision.**
+1. **Where it lives: the state folder, not the repository.** `<state>/pages/<service>.md`. `lib/memory`'s `project` entry is the committed `docs/project.md`; writing there would be a commit and a push to the project. The page is Cleared's own, written beside itself then renamed, mode 0600. Not under `<state>/services/<name>/`, which only a memory level makes: two tests of milestone 1 pin that no such folder exists for the workspace's own checkout.
+2. **What it holds, read from the base branch only** (`git ls-tree` and `git show` on `refs/remotes/origin/<base>`): the package name, the README's first paragraph, the layout to two levels (60 entries), the `package.json` scripts, the safe commands of `.cleared/agents.conf`, and the last 15 first-parent subjects as the recent decisions. An untracked file of the checkout cannot reach it (test).
+3. **No secret (P102).** Files that can hold one are left out by name, even from the layout (`.env*`, keys and certificates, credentials, secrets, password and token files, `.npmrc`, `.netrc`); the text is then cleaned with `session/clean.ts` (the service's secret values, the guard's patterns) and a list of token shapes the guard does not name (the common forge, chat, cloud, registry and payment tokens, and JWTs) and a secret's name followed by its value. Each field (script, safe command, subject, README line) is cleaned on its own before it is formatted, since the guard's patterns for an assigned secret start at a line's beginning, which a field in the page no longer is; `.envrc` is denied too. The test commits an `.env`, an `.envrc`, a `config/.env.production`, a `.pem`, a README with a planted token, a commit subject with one, a script and a subject that set a secret of no known shape, and runs on the tracked files of `examples/guestbook`; it looks for them in the page and in the whole state folder.
+4. **First connection = the first fetch of the service's checkout** (`refresh` in `flow/effects.ts`, which every first use of a service goes through). The page is made if absent, and a later fetch makes it again only if the base moved (the page carries the base's sha; an unmoved base leaves the file untouched). So a merge made on the forge itself, or by a train, is in the page at the next fetch even if no hook ran. A page that cannot be made is logged and never stops the fetch or the briefing.
+5. **After a merge (P103).** `FlowEffects.updateProjectPages` (optional, so no fake changes), asked from the engine's `#emit` on `release_merged`, which the one-service merge and each merge of a train both emit; tracked by `settled()`, its failure logged and swallowed. It fetches each service's base and writes the page again only if the base moved (the page carries the base's sha). A queued or refused merge asks nothing.
+6. **Read at the start (P104).** `CLAUDE.md` gets `## Generated page of the service <name>`, quoted line by line as memory data like every other memory block, for the author and the reviewer. The contract's `projectPage` carries it only when the project commits no page of its own: the committed `docs/project.md` stays the contract's page. `renderBriefing` with no option is unchanged.
+7. **Size (P105).** At most 8 KiB.
+
+**A test of milestone 1 changed.** "a one-service workspace briefs its session as milestone 1 did, byte for byte" compared the whole `CLAUDE.md` with the fixture. It now compares the fixture's length as a prefix (milestone 1's text, unchanged) and checks that the one section added is the generated page. The fixture is untouched; the other test's `services` assertion needed no change because of decision 1.
+
+**Not done, and why.**
+- The lead's briefing (`lead/briefing.ts`) is not given the page: it builds a list of service lines of its own from `lib/memory`, and a second format for it is a decision of its own. The issue asks for the sessions' briefing.
+- No wiki, no editing, no screen (out of scope). The page is not yet shown in the app.
+- Commit subjects stand for decisions. A project that keeps a decisions folder gets it through `lib/memory` as before; the page does not read it.
+
+**Checks.** Tests written first and committed alone (`971d145`, rewritten before the pull request: its first version held a literal key marker the repository guard refused): 10 of 11 failed on the old code (the 11th, "a queued merge asks for no page", guards the old behaviour); the review round added 3 tests and a train test, and 12 of the 13 tests of the two files fail on `origin/v2`. `npm run typecheck`; `npm test` (1744 node tests: 1706 pass, 38 skipped, 0 fail; 260 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no network, no tunnel, no port. Sample repositories are local bare repositories in temporary folders; nothing is pushed.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-project-page`.
 
 ## 2026-10-24: Close a release card or a ticket (the author's choices, lane `j3-reject-close`, issue #249)
 
