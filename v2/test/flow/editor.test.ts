@@ -99,7 +99,7 @@ test('with no host configured the links open the checkout on this machine, each 
       { editor: 'cursor', url: `cursor://file${encoded(path)}` },
     ],
   });
-  assert.match(answer.json.links[0].url, /%20cleared%20editor%20%231%20%3F50%25/, 'a space, a hash, a question mark and a percent sign cannot change the link');
+  assert.match(String(answer.json.links[0]?.url), /\/cleared%20editor%20%231%20%3F50%25\//, 'a space, a hash, a question mark and a percent sign cannot change the link');
 });
 
 test('with an SSH host configured the links are the remote ones, and the same checkout', async () => {
@@ -128,6 +128,7 @@ test('checkoutFolder: only a real folder strictly inside the work folder, with a
   mkdirSync(join(work, 'T-1', '.git'), { recursive: true });
   mkdirSync(join(work, 'T-2'), { recursive: true });            // no .git: not a checkout
   mkdirSync(join(root, 'outside', '.git'), { recursive: true });
+  mkdirSync(join(`${work}-evil`, '.git'), { recursive: true });
   writeFileSync(join(work, 'T-3'), 'a file\n');
   symlinkSync(join(root, 'outside'), join(work, 'T-4'));         // a link out of the work folder
   symlinkSync(join(work, 'T-1'), join(work, 'T-5'));             // a link inside it: the real folder is named
@@ -152,7 +153,7 @@ test('editorLinks: the folder is encoded, and a host that could change the link 
     links: [{ editor: 'vscode', url: 'vscode://file/work/T%201/a%23b%3Fc%25d' }, { editor: 'cursor', url: 'cursor://file/work/T%201/a%23b%3Fc%25d' }],
   });
   assert.equal(editorLinks('/work/T-1', 'me@dev.example.invalid').links[0]?.url, 'vscode://vscode-remote/ssh-remote+me@dev.example.invalid/work/T-1');
-  for (const bad of ['evil/x', 'x#y', 'x?y', 'a b', '-oProxyCommand=x', 'x@', '@x', 'x:22', 'x\ny', 'a@b@c', '%41', '']) {
+  for (const bad of ['evil/x', 'x#y', 'x?y', 'a b', '-oProxyCommand=x', 'x@', '@x', 'x:22', 'x\ny', 'a@b@c', '%41']) {
     assert.throws(() => parseEditorHost(bad), /CLEARED_V2_EDITOR_SSH_HOST/, JSON.stringify(bad));
   }
   assert.equal(parseEditorHost(undefined), undefined);

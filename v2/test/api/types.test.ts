@@ -40,6 +40,8 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/sessions/:id/plan/change',
     'GET /api/sessions/:id/files',
     'GET /api/sessions/:id/files/*',
+    // Open in an editor (flow/editor.ts, lane j3-open-editor): the links to the checkout.
+    'GET /api/sessions/:id/editor',
     'POST /api/sessions/:id/takeover',
     'POST /api/sessions/:id/giveback',
     // Lane 17, for waves 9 to 11: the ticket's steps and the contract item (lane 23), the knowledge
@@ -73,7 +75,7 @@ test('the API lists every route the app lanes build against, once', () => {
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 57);
+  assert.equal(keys.length, 58);
   const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...VARIANT_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES, ...CONSUMPTION_ROUTES];
   assert.deepEqual(ahead.filter((route) => !API_ROUTES.includes(route)), []);
   assert.equal(new Set(ahead).size, ahead.length, 'each route of a later lane is in one list');

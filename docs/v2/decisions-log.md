@@ -4780,3 +4780,29 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Resources.** No Docker object, no network, no tunnel, no port. Sample repositories are local bare repositories in temporary folders; nothing is pushed.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-project-page`.
+
+## 2026-10-24: open the session's checkout in VS Code or Cursor (the author's choices, lane `j3-open-editor`, item 19 of the Devin complement, matrix C19)
+
+**The need.** Milestone 3, item 19 of [complement-devin.md](complement-devin.md): from the session screen, a button that opens the session's worktree in VS Code or Cursor. Matrix lines P120 to P125, checked free on `origin/v2` (it ends at P105; `j3-reject-close` holds P110 and above, as the owner said, and this lane starts at P120).
+
+**Decision.**
+1. **A link, not a launch.** The service never starts an editor and runs nothing. `GET /api/sessions/:id/editor` answers `{ mode, links: [{ editor, url }] }` and the person's own browser hands the address to their own editor. Without SSH (`mode: local`) the links are `vscode://file/<path>` and `cursor://file/<path>`, for a browser on the machine the checkout is on; with `CLEARED_V2_EDITOR_SSH_HOST` set (`mode: ssh`) they are `vscode://vscode-remote/ssh-remote+<host>/<path>` and the `cursor://` twin, for an editor that reaches the server over SSH. The host is the name in the person's ssh config. Not a tunnel, not a port, not a proxy: Cleared opens nothing.
+2. **The folder comes from the service, never from the request.** `engine.sessionWorkdir(id)`, the checkout the service itself prepared; a `?path=` or a header is not read (test). Then `realpath`, and the result must be a directory with a `.git`, strictly inside the work folder (`CLEARED_V2_WORKDIRS`): the folder itself, a link that leaves it, `..`, a sibling sharing its prefix, a relative path and control characters are refused (403); a checkout that is gone is 409. The link carries the real path.
+3. **Who.** Any signed-in person the service knows (the proof, a known user, never the lead nor the flow, as the terminal and the editor's save ask). Not the owner account alone: the link reads nothing of the checkout and writes nothing, unlike a save. The route is not limited to a live session, so the checkout of an ended one can be opened while it still exists.
+4. **Encoding and the host.** Each path segment goes through `encodeURIComponent`, so a folder named `cleared editor #1 ?50%` (the test's) cannot cut or change the link. The SSH host is checked when the service starts (`FlowConfigError`): an optional `user@` and a name that starts with a letter or digit, never a dash (ssh would read an option), no slash, hash, question mark, percent sign, colon or space.
+5. **The screen.** "Open in an editor" in the thread's header beside Take over; it reveals the two links as plain anchors (no `target`, no script). The screen asks the route when the session changes or ends, hides the button for any non-200, and keeps only an address of the editor it names (`vscode://` for VS Code, `cursor://` for Cursor, nothing with a space, quote or angle bracket), so a wrong answer never reaches an `href`. fr and en.
+6. **The path leaves by this route alone.** The events and the files shown keep cleaning the host's paths (the cleaner strips the work folder and the home folder); this route gives the path to a signed-in person, is not logged, and a refusal names none. The tests and this entry use temporary folders and `example.invalid` hosts only.
+
+**Edits made in the editor bypass the app's guard.** A save through the app's Editor tab passes `session/policy.ts` and is journaled as `cleared.human_edit`. A change made in VS Code or Cursor on the folder does neither. A taken-over session finds it at Give back (the git state, flow/takeover.ts); a live session sees the files change under it. The owner did not ask for a gate, so there is none; the button's note says that the person's own editor does the opening.
+
+**Not done, and why.**
+- No `code --folder-uri` or `cursor` command on the server, and no `docker` object: the owner asked for a link.
+- No per-file link (`vscode://file/<path>:<line>`): the issue is the worktree.
+- The remote link uses the SSH host as written; the user name, key and port are the person's ssh config's. A tailnet name is the owner's to put in `CLEARED_V2_EDITOR_SSH_HOST` and is never in the repository.
+- A `devcontainer`/container-attach link (`attached-container`) for the session's Docker container: not asked, and the container is a Docker object.
+
+**Checks.** Tests first and committed alone (`2a1b250`): on `origin/v2` the service test does not load (no `flow/editor.ts`: 0 of its 8 tests run), the 6 Vitest tests fail, and the browser test (skipped without `CLEARED_V2_PLAYWRIGHT`) fails at that commit in Chrome: it times out waiting for `#open-editor`. The test's assertions were then adjusted in the implementation commit (the encoded-folder pattern, a sibling folder that exists, the blank host read as unset), with no change to what each test checks. The browser test ran in Chrome through `playwright-core` from a folder outside the repository: 1 test, pass. The route lists and counts that three older tests pin (`test/api/types.test.ts`, `test/flow/modules.test.ts`, `test/flow/api.test.ts`) now include the new route. `npm run typecheck`; `npm test` (1767 node tests: 1728 pass, 39 skipped, 0 fail; 266 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no network, no tunnel, no port; the browser test listened on a loopback port chosen by the system, outside the reserved ones. Nothing installed globally (`npm ci` in `v2/` only). GetSeetu untouched.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-open-editor`.

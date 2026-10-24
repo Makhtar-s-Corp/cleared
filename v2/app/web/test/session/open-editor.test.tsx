@@ -15,6 +15,7 @@ import { html, visibleText } from '../render.tsx';
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
 const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 
+const title = (t: typeof en) => t('open_editor_note');
 const LOCAL = { mode: 'local', links: [{ editor: 'vscode', url: 'vscode://file/work/T-1' }, { editor: 'cursor', url: 'cursor://file/work/T-1' }] } as const;
 const REMOTE = {
   mode: 'ssh',
@@ -38,7 +39,7 @@ test('the button, open: a link per editor, the address as given, to be followed 
   assert.match(anchors[0] as string, /data-editor="vscode"/);
   assert.match(anchors[1] as string, /href="cursor:\/\/file\/work\/T-1"/);
   assert.match(anchors[1] as string, /data-editor="cursor"/);
-  assert.deepEqual(anchors.map((a) => visibleText(a)), ['VS Code', 'Cursor']);
+  assert.deepEqual(anchors.flatMap((a) => visibleText(a)), ['VS Code', 'Cursor']);
   assert.doesNotMatch(markup, /target=/, 'an editor\'s address opens no tab');
   assert.doesNotMatch(markup, /through SSH/i, 'no SSH note for this machine');
   assert.doesNotMatch(markup, /\sstyle=|<style/);
@@ -48,16 +49,16 @@ test('over SSH the screen says so, and the links are the remote ones', () => {
   const markup = html(<OpenInEditor t={en} offer={REMOTE} expanded />);
   assert.match(markup, /href="vscode:\/\/vscode-remote\/ssh-remote\+dev\.example\.invalid\/work\/T-1"/);
   assert.match(markup, /href="cursor:\/\/vscode-remote\/ssh-remote\+dev\.example\.invalid\/work\/T-1"/);
-  assert.ok(visibleText(markup).includes('through SSH'));
+  assert.ok(visibleText(markup).includes('Opens the folder on the server through SSH.'));
 });
 
-test('in French: the button, the editors and the SSH note, with a no-break space before the colon', () => {
+test('in French: the button, the editors and the SSH note', () => {
   const closed = html(<OpenInEditor t={fr} offer={LOCAL} />);
   assert.ok(visibleText(closed).includes('Ouvrir dans un éditeur'));
   const markup = html(<OpenInEditor t={fr} offer={REMOTE} expanded />);
   assert.ok(visibleText(markup).includes('VS Code') && visibleText(markup).includes('Cursor'));
-  assert.ok(visibleText(markup).includes('par SSH'));
-  assert.doesNotMatch(visibleText(markup), /[a-zé] [:;?!»]/, 'no ordinary space before a French mark');
+  assert.ok(visibleText(markup).includes('Ouvre le dossier du serveur par SSH.'));
+  assert.doesNotMatch(visibleText(html(<OpenInEditor t={fr} offer={LOCAL} />)).join(' ') + title(fr), /[a-zé] [:;?!»]/, 'no ordinary space before a French mark');
 });
 
 test('without a link there is nothing to show', () => {

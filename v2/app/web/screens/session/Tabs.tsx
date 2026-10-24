@@ -8,7 +8,7 @@ import { Browser, Check, Circle, Code, ListChecks, TerminalWindow, type Icon } f
 import type { FormEvent, KeyboardEvent } from 'react';
 import { Editing, type EditorHandlers } from '@/components/editor/Editor.tsx';
 import { isDirty, type EditorState, type ReadOnlyWhy, type Scope } from '@/components/editor/model.ts';
-import type { SessionFile, SessionFiles, SessionPlan } from '../../../../src/api/types.ts';
+import type { EditorLinks, SessionFile, SessionFiles, SessionPlan } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Empty } from '@/shell/Empty.tsx';
@@ -49,6 +49,26 @@ export function TakeoverButton({ t, takeover, busy = false, onTakeover, onGiveba
   if (takeover.kind === 'free' && takeover.can) return <Button className="btn takeover-button" id="takeover" title={t('takeover_note')} disabled={busy} onClick={onTakeover}>{t('takeover')}</Button>;
   if (takeover.kind === 'mine') return <Button variant="ink" className="btn primary takeover-button" id="giveback" title={t('giveback_note')} disabled={busy} onClick={onGiveback}>{t('giveback')}</Button>;
   return null;
+}
+
+// Open in an editor (flow/editor.ts): one button that reveals a link per
+// editor. The links are plain anchors: the person's own browser hands the
+// address to their own editor, and the page runs nothing.
+export function OpenInEditor({ t, offer, expanded = false, onToggle }: {
+  readonly t: Translate; readonly offer: EditorLinks | null; readonly expanded?: boolean; readonly onToggle?: () => void;
+}) {
+  if (!offer) return null;
+  return (
+    <div className="open-editor">
+      <Button className="btn open-editor-button" id="open-editor" title={t('open_editor_note')} aria-expanded={expanded} aria-controls="open-editor-links" onClick={onToggle}>{t('open_editor')}</Button>
+      {expanded ? (
+        <div className="open-editor-links" id="open-editor-links" role="group" aria-label={t('open_editor')}>
+          {offer.links.map((link) => <a key={link.editor} className="btn" data-editor={link.editor} href={link.url}>{t(`open_editor_${link.editor}`)}</a>)}
+          {offer.mode === 'ssh' ? <span className="faint small">{t('open_editor_ssh')}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function Criteria({ view, t }: { readonly view: SessionView; readonly t: Translate }) {

@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
 import { parseCommand } from '../session/policy.ts';
+import { parseEditorHost } from './editor-link.ts';
 import { WorkspaceError, loadWorkspace, parseConf, serviceNameOf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
 
 // The format of agents.conf is read by workspace/config.ts, which reads the
@@ -31,6 +32,10 @@ export type FlowConfig = {
   readonly idleMs: number;                  // a session with no activity for this long is stopped
   readonly maxReviewRounds: number;         // the verdicts of a ticket's review channel before it goes back (issue 291)
   readonly budgetUsd: number | undefined;   // the ticket's budget; none when unset
+  // CLEARED_V2_EDITOR_SSH_HOST: the host an editor reaches this server by
+  // over SSH, as the person's ssh config names it; none: the editor is on
+  // this machine (flow/editor.ts).
+  readonly editorHost?: string | undefined;
   readonly mergeRetryMs: number;            // a merge the lock queued is asked again after this long
   // The workspace and its services. loadFlowConfig always sets it; a
   // configuration written without it reads as its one-service workspace
@@ -169,6 +174,10 @@ function positive(value: string | undefined, name: string, integer: boolean): nu
   return number;
 }
 
+function editorHost(value: string | undefined): string | undefined {
+  try { return parseEditorHost(value); } catch (error) { throw new FlowConfigError((error as Error).message); }
+}
+
 // The flow's configuration, or undefined when the service is not set up to
 // run tickets (neither CLEARED_V2_WORKSPACE nor CLEARED_V2_PROJECT): the
 // service then still serves its health route and answers the API with "not
@@ -190,6 +199,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
   const workdirRoot = env.CLEARED_V2_WORKDIRS || join(state, 'work');
   if (!isAbsolute(workdirRoot)) throw new FlowConfigError('CLEARED_V2_WORKDIRS must be an absolute path');
   const minutes = positive(env.CLEARED_V2_IDLE_MINUTES, 'CLEARED_V2_IDLE_MINUTES', false) ?? 15;
+  const editor = editorHost(env.CLEARED_V2_EDITOR_SSH_HOST);
   const question = positive(env.CLEARED_V2_QUESTION_TIMEOUT_MINUTES, 'CLEARED_V2_QUESTION_TIMEOUT_MINUTES', false) ?? QUESTION_TIMEOUT_MINUTES;
   return {
     project: workspace.id, projectDir: first.dir, repoUrl: first.url, repo: first.repo,
@@ -199,6 +209,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     idleMs: minutes * 60_000,
     maxReviewRounds: positive(env.CLEARED_V2_REVIEW_ROUNDS, 'CLEARED_V2_REVIEW_ROUNDS', true) ?? 3,
     budgetUsd: positive(env.CLEARED_V2_BUDGET_USD, 'CLEARED_V2_BUDGET_USD', false),
+    ...(editor ? { editorHost: editor } : {}),
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
     questionTimeoutMs: question * 60_000,
     questionLeadMs: QUESTION_LEAD_MINUTES * 60_000,
