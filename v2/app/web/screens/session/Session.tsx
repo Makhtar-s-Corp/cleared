@@ -55,7 +55,7 @@ import {
 } from './model.ts';
 import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
-import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
+import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverOf, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
   actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
@@ -515,25 +515,30 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
   );
 }
 
-export function Composer({ view, t, text = '', sending = false, interrupting = false, note = '', input, onText, onSend, onInterrupt, onHandover }: {
-  readonly view: SessionView; readonly t: Translate; readonly text?: string; readonly sending?: boolean; readonly interrupting?: boolean; readonly note?: string;
+export function Composer({ view, t, text = '', sending = false, interrupting = false, handing = false, note = '', input, onText, onSend, onInterrupt, onHandover }: {
+  readonly view: SessionView; readonly t: Translate; readonly text?: string; readonly sending?: boolean; readonly interrupting?: boolean; readonly handing?: boolean; readonly note?: string;
   readonly input?: Ref<HTMLInputElement>;
   readonly onText?: (value: string) => void; readonly onSend?: (event: FormEvent<HTMLFormElement>) => void; readonly onInterrupt?: () => void; readonly onHandover?: () => void;
 }) {
   // A session taken over is written to by nobody until it is given back.
   const off = ENDED.has(phaseOf(view)) || takenOverOf(view) !== null;
   const role = view.summary.role === 'reviewer' ? 'reviewer' : 'author';
+  // Hand over (flow/takeover.ts, B6.3): the other harness named on the button; where none is offered, the button says why it is off.
+  const ended = ENDED.has(phaseOf(view));
+  const offer = handoverOf({ takeover: takeoverOf({ takenOver: takenOverOf(view), me: view.me, role: view.summary.role, ended }), role: view.summary.role, harness: view.summary.harness, ended });
   const placeholder = takenOverOf(view) !== null && !ENDED.has(phaseOf(view)) ? t('composer_taken_over') : t(`composer_${role}`);
   return (
     <>
       <form className="composer" id="composer" autoComplete="off" onSubmit={onSend}>
         <Input id="message" name="text" ref={input} placeholder={placeholder} aria-label={placeholder} disabled={off} value={text} onChange={(event) => onText?.(event.target.value)} />
-        <Button className="btn" id="handover" aria-disabled="true" aria-describedby="handover-note" title={t('handover_note')} onClick={onHandover}>{t('handover')}</Button>
+        {offer.kind === 'offer'
+          ? <Button className="btn" id="handover" data-to={offer.to} aria-describedby="handover-note" title={t('handover_note')} disabled={handing} onClick={onHandover}>{t(offer.to === 'codex' ? 'handover_to_codex' : 'handover_to_claude_code')}</Button>
+          : <Button className="btn" id="handover" aria-disabled="true" aria-describedby="handover-note" title={t('handover_none')}>{t('handover_to_codex')}</Button>}
         <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}><Stop size={16} aria-hidden="true" /><span className="btn-label">{t('interrupt')}</span></Button>
         {/* Send waits for a message (lane 38, the critique): one ink button at a time, the screen's own gesture first. */}
         <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending || text.trim() === ''}>{t('send')}</Button>
       </form>
-      <span className="sr-only" id="handover-note">{t('handover_note')}</span>
+      <span className="sr-only" id="handover-note">{t(offer.kind === 'offer' ? 'handover_note' : 'handover_none')}</span>
       <p className="composer-note" id="composer-note" role="status">{note}</p>
     </>
   );
@@ -846,6 +851,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   }, [context, id, ended]);
   const takeover = takeoverOf({ takenOver: actingTaken, me: view.me, role: acting.role, ended });
   const terminal = terminalChoice({ offered: context.me.terminal, takeover });
+  const handover = handoverOf({ takeover, role: acting.role, harness: acting.harness, ended });
   // An author's live session, not another account's: the service checks the rest at the save.
   const sessionOpen = acting.role === 'author' && !ended && takeover.kind !== 'other';
 
@@ -1036,6 +1042,16 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     }
     setGesture(false);
   };
+  // Hand over (flow/takeover.ts): the new session joins the ticket's view, which follows it.
+  const handOver = async () => {
+    if (handover.kind !== 'offer') return;
+    setGesture(true);
+    if (await post(id, '/handover', { harness: handover.to }, 'handover_failed')) {
+      setNote(t('handover_done', { harness: harnessName(handover.to) }));
+      context.inboxChanged();
+    }
+    setGesture(false);
+  };
   const giveBack = async () => {
     setGesture(true);
     if (await post(id, '/giveback', null, 'giveback_failed')) setTaken({ id, by: null });
@@ -1116,8 +1132,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
               </>
             )}
             <div className="panel-foot">
-              <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} input={message} onText={setText}
-                onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => setNote(t('handover_note'))} />
+              <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} input={message} onText={setText} handing={gesture}
+                onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => void handOver()} />
             </div>
           </div>
           <div className="tab-panel scroll" {...panel('plan')}>

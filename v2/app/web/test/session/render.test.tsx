@@ -52,12 +52,15 @@ test('the request has its three buttons, and nothing else on the page answers it
   assert.equal(count(html, /data-row="request"/g), 1);
 });
 
-test('the composer has Send and Interrupt, and the hand over is disabled with its note', () => {
+test('the composer has Send and Interrupt; the hand over is offered on a live author, and off, with its reason, on a reviewer (B6.3)', () => {
   const html = renderSession(viewOf(), en);
   assert.match(html, /<button[^>]*id="send"[^>]*type="submit"|<button[^>]*type="submit"[^>]*id="send"/);
   assert.match(html, /<button[^>]*id="interrupt"/);
-  assert.match(html, /<button[^>]*id="handover"[^>]*aria-disabled="true"/);
-  assert.ok(visibleText(html).includes('Handing a session over to another harness comes in milestone 3.'));
+  assert.match(html, /<button[^>]*id="handover"[^>]*data-to="codex"/);
+  assert.doesNotMatch(html, /<button[^>]*id="handover"[^>]*aria-disabled/);
+  const reviewer = renderSession(viewOf({ summary: { ...(viewOf().summary), role: 'reviewer' } }), en);
+  assert.match(reviewer, /<button[^>]*id="handover"[^>]*aria-disabled="true"/);
+  assert.ok(visibleText(reviewer).includes('Only a live author\'s session is handed over, when nobody has taken it over.'));
   assert.match(html, /placeholder="Message the author…"/);
 });
 

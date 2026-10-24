@@ -8,18 +8,12 @@
 // the author's. Cursor stays out of every flow (P87). Codex is a fake here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, type SessionDetail } from '../../src/api/types.ts';
 import { CODEX_MODEL } from '../../src/flow/engine.ts';
-import { takeoverRoutes } from '../../src/flow/takeover.ts';
-import { dispatch, type App } from '../../src/modules/registry.ts';
-import { handle } from '../../src/server.ts';
-import { createFakeAdapter, type FakeStep } from '../../src/session/adapters/fake.ts';
-import type { SessionAdapter, SessionId } from '../../src/session/contract.ts';
-import { finished, permission, quickAuthor, REPORT_FIX, REPORT_PASS, reopenScript, reviewerScript, setup, started, text, until, type Setup, type SetupOptions, type Started } from './support.ts';
-
-const PROOF = 'e'.repeat(64);
+import type { FakeStep } from '../../src/session/adapters/fake.ts';
+import type { SessionId } from '../../src/session/contract.ts';
+import { PROOF, post, rig, type Rig } from './handover-support.ts';
+import { finished, permission, quickAuthor, REPORT_FIX, REPORT_PASS, reviewerScript, started, text, until } from './support.ts';
 
 // The Claude author is stuck on a permission nobody answers.
 const stuck: readonly FakeStep[] = [started, ...text('a1', 'I will sort the entries.'), permission, { awaitMessage: true }, finished(0.4)];
@@ -28,70 +22,9 @@ const edits: readonly FakeStep[] = [
   started, ...text('a1', 'The sort is half done.'),
   { emit: { type: 'TOOL_CALL_START', toolCallId: 'e1', toolCallName: 'Edit' } },
   { emit: { type: 'TOOL_CALL_ARGS', toolCallId: 'e1', delta: JSON.stringify({ kind: 'edit', path: '/workspace/src/entries.ts', locations: [] }) } },
+  { emit: { type: 'TOOL_CALL_RESULT', messageId: 'e1-r', toolCallId: 'e1', content: JSON.stringify({ kind: 'edit', ok: true }), role: 'tool' } },
   permission, { awaitMessage: true }, finished(0.4),
 ];
-
-type Rig = Setup & {
-  readonly base: string; readonly server: Server;
-  readonly codex: { readonly started: Started[]; readonly resumed: SessionId[]; readonly authors: (readonly FakeStep[])[]; readonly reviewers: (readonly FakeStep[])[]; failStart: boolean };
-  readonly claudeResumed: SessionId[];
-  close(): Promise<void>;
-};
-
-// The Codex adapter is the fake with harness 'codex': it plays one script
-// per session it starts and reopens a session under its own id.
-function codexAdapter(t: Setup, codex: Rig['codex']): SessionAdapter {
-  const inputs = new Map<SessionId, Started['input']>();
-  return {
-    harness: 'codex',
-    async start(input) {
-      if (codex.failStart) throw new Error('codex is not logged in');
-      const script = input.role === 'reviewer' ? codex.reviewers.shift() ?? reviewerScript(REPORT_PASS) : codex.authors.shift() ?? quickAuthor;
-      const handle = await createFakeAdapter({ harness: 'codex', log: t.store.events, script }).start(input);
-      inputs.set(handle.id, input);
-      codex.started.push({ input, id: handle.id });
-      return handle;
-    },
-    async resume(id) {
-      codex.resumed.push(id);
-      const input = inputs.get(id);
-      if (!input) throw new Error(`cannot resume ${id}`);
-      return createFakeAdapter({ harness: 'codex', log: t.store.events, script: reopenScript, newId: () => id }).start(input);
-    },
-  };
-}
-
-async function rig(options: SetupOptions & { codex?: boolean } = {}): Promise<Rig> {
-  const t = await setup(options);
-  t.users.users.set('u2', { id: 'u2', name: 'Second' });
-  const codex: Rig['codex'] = { started: [], resumed: [], authors: [], reviewers: [], failStart: false };
-  const adapters = t.registry.sessionAdapters as Record<string, SessionAdapter>;
-  if (options.codex !== false) adapters.codex = codexAdapter(t, codex);
-  const claudeResumed: SessionId[] = [];
-  const claude = adapters['claude-code'] as SessionAdapter;
-  const resume = claude.resume.bind(claude);
-  claude.resume = async (id) => { claudeResumed.push(id); return resume(id); };
-  const app: App = { registry: t.engine.registry, tables: [], routes: takeoverRoutes({ engine: () => t.engine, proof: () => PROOF }) };
-  const server = createServer((request, response) => dispatch(app, request, response, handle));
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return {
-    ...t, base, server, codex, claudeResumed,
-    async close() {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await t.engine.close();
-    },
-  };
-}
-
-const as = (user: string) => ({ [SERVICE_PROOF_HEADER]: PROOF, [SERVICE_USER_HEADER]: user, 'content-type': 'application/json' });
-
-async function post(r: Rig, path: string, user = 'u1', body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-  const response = await fetch(`${r.base}${path}`, { method: 'POST', headers: as(user), ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const raw = await response.text();
-  return { status: response.status, json: raw ? JSON.parse(raw) : {} };
-}
 
 const handOver = (r: Rig, id: SessionId, body: unknown, user = 'u1') => post(r, `/api/sessions/${id}/handover`, user, body);
 const detail = (r: Rig, id: SessionId) => r.engine.sessionDetail(id) as SessionDetail;
@@ -109,6 +42,7 @@ async function stuckAuthor(r: Rig): Promise<SessionId> {
 test('a stuck Claude author is handed over to Codex: a new author in the same checkout, told what was done, the source stopped without a review', async () => {
   const r = await rig({ scripts: { author: edits } });
   try {
+    r.codex.authors.push([started, ...text('c1', 'I carry on.'), { awaitMessage: true }, finished(0.2)]);
     const id = await stuckAuthor(r);
     const checkout = r.startedSessions[0]!.input.workdir;
     const response = await handOver(r, id, { harness: 'codex' });
@@ -179,7 +113,7 @@ test('handed over and back: the Claude author that returns is reviewed by Codex,
     await until(() => r.inbox.waitingFor(codexId) > 0, 'the Codex session stuck in its turn');
     const back = await handOver(r, codexId, { harness: 'claude-code' });
     assert.equal(back.status, 200, JSON.stringify(back.json));
-    await until(() => r.startedSessions.some((s) => s.input.role === 'reviewer'), 'the review');
+    await until(() => r.codex.started.some((s) => s.input.role === 'reviewer'), 'the review');
     await r.engine.settled();
 
     const returned = r.startedSessions.filter((s) => s.input.role === 'author');
@@ -239,7 +173,7 @@ test('the fix a Claude reviewer asks of a Codex author reopens the Codex session
     const id = await stuckAuthor(r);
     const codexId = (await handOver(r, id, { harness: 'codex' })).json.session as SessionId;
     await until(() => r.codex.resumed.includes(codexId), 'the Codex author reopened for the fix');
-    assert.deepEqual(r.claudeResumed, [], 'not through the Claude adapter');
+    assert.ok(!r.claudeResumed.includes(codexId), 'the Codex author is not resumed through the Claude adapter (its Claude reviewer is)');
   } finally {
     await r.close();
   }

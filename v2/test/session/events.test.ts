@@ -38,6 +38,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.review_channel',
     // Milestone 3: the author's branch at each step, and a resume from a step (issue #272).
     'cleared.checkpoint', 'cleared.replay',
+    // Milestone 3: an author handed over to the other harness (B6.3).
+    'cleared.handed_over',
   ]);
 });
 

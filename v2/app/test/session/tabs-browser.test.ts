@@ -141,12 +141,12 @@ test('Hand over to Codex calls its route, the screen follows the Codex author, a
     await page.locator('#handover').click();
     await page.locator('#handover[data-to="claude-code"]').waitFor();
     assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand back to Claude Code');
-    assert.match(await page.locator('#status').innerText(), /Codex/);
+    assert.match(await page.locator('#status').innerText(), /gpt-6-luna/, 'the screen follows the Codex author');
     await page.locator('#handover').click();
     await page.locator('#handover[data-to="codex"]').waitFor();
   });
   assert.deepEqual(source.calls.filter((c) => c.path.endsWith('/handover')).map((c) => [c.method, c.body]), [['POST', { harness: 'codex' }], ['POST', { harness: 'claude-code' }]]);
-  assert.deepEqual(fixture.sessions.filter((s) => s.role === 'author').map((s) => [s.harness, s.phase]), [['claude-code', 'stopped'], ['codex', 'stopped'], ['claude-code', 'waiting_human']]);
+  assert.deepEqual(fixture.sessions.filter((s) => s.role === 'author').map((s) => [s.harness, s.phase]), [['claude-code', 'stopped'], ['codex', 'stopped'], ['claude-code', 'working']]);
   assert.deepEqual(seen, { errors: [], away: [] });
 });
 

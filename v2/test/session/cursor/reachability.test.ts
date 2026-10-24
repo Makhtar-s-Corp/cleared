@@ -22,5 +22,5 @@ test('the flow hands over to claude-code and codex only: Cursor is out of the ta
   assert.match(source, /^export const HANDOVER_HARNESSES = \['claude-code', 'codex'\] as const;$/m);
   assert.ok(!/harness:\s*'cursor'/.test(source));
   const engine = readFileSync(new URL('../../../src/flow/engine.ts', import.meta.url), 'utf8');
-  assert.match(engine, /HANDOVER_HARNESSES/);
+  assert.match(engine, /refuseTarget\(live\.input\.harness, target\)/);
 });

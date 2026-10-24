@@ -66,8 +66,8 @@
 .panel-head .open-editor-button { min-height: 30px; padding: 0 12px; }
 .open-editor-links { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; width: max-content; max-width: min(320px, 80vw); background: var(--surface, var(--bg)); border: 1px solid var(--hairline); border-radius: var(--radius, 8px); }
 .open-editor-links a.btn { text-decoration: none; min-height: 30px; padding: 0 12px; display: inline-flex; align-items: center; }
-/* The hand over that is not there yet leaves a narrow thread its composer's row. */
-@container panel (max-width: 640px) { .composer #handover { display: none; } .composer { flex-wrap: nowrap; } .composer input { flex: 1 1 0; } }
+/* A narrow thread gives the message its own row, and the hand over, Interrupt and Send the next. */
+@container panel (max-width: 640px) { .composer { flex-wrap: wrap; } .composer input { flex: 1 1 100%; } }
 .panel-head .dot.waiting { background: var(--awaiting); } .panel-head .dot.progress { background: var(--stage-progress); }
 .panel-head .dot.review { background: var(--stage-review); } .panel-head .dot.ended { background: var(--placeholder); }
 .phrase-title { font-size: var(--text-md); font-weight: var(--weight-strong); }
@@ -400,7 +400,9 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .composer #interrupt svg { display: block; }
   .composer #interrupt .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .composer input { height: 44px; flex: 1 1 0; }
-  .composer #handover { display: none; }
+  .composer { flex-wrap: wrap; }
+  .composer input { flex-basis: 100%; }
+  .composer #handover { flex: 1 1 auto; }
   #send { margin-left: 0; }
   .request-actions .btn { flex: 1 1 100%; }
   .panel-tabs { padding: 8px 12px; }

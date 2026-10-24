@@ -15,7 +15,7 @@
 // The browser may only `import type` from v2/src, so the container's name
 // is copied here and a test keeps it equal to session-runtime.ts's.
 import type { EditorLinks, SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
-import type { Role } from '../../../../src/session/contract.ts';
+import type { Harness, Role } from '../../../../src/session/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { fixed } from '../../lib/time.ts';
 import { clock, who } from './model.ts';
@@ -80,6 +80,23 @@ export function takeoverOf(options: { readonly takenOver: TakenOver | null | und
   if (options.ended) return { kind: 'free', can: false };
   if (options.takenOver) return options.takenOver.by === options.me ? { kind: 'mine', at: options.takenOver.at } : { kind: 'other', at: options.takenOver.at };
   return { kind: 'free', can: options.role === 'author' || options.role === 'reviewer' };
+}
+
+// ---------------------------------------------------------------- handover
+
+export type HandoverView =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'offer'; readonly to: 'claude-code' | 'codex' };
+
+// Hand over (flow/takeover.ts, B6.3) is offered on a live author's session
+// nobody has taken over, to the other harness of the contract. Cursor's
+// session, a reviewer's, the lead's and an ended one get none; the service
+// checks the rest.
+export function handoverOf(options: { readonly takeover: TakeoverView; readonly role: Role; readonly harness: Harness; readonly ended: boolean }): HandoverView {
+  if (options.ended || options.role !== 'author' || options.takeover.kind !== 'free' || !options.takeover.can) return { kind: 'none' };
+  if (options.harness === 'claude-code') return { kind: 'offer', to: 'codex' };
+  if (options.harness === 'codex') return { kind: 'offer', to: 'claude-code' };
+  return { kind: 'none' };
 }
 
 // ----------------------------------------------------------------- editor

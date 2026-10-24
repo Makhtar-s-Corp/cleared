@@ -42,7 +42,8 @@ import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
 import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
-import { NotImplemented, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { handoverOf } from '../handover.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../events.ts';
 import { evaluate, type Policy } from '../policy.ts';
 import { END_TURN, EXIT_NO_LOGIN, EXIT_NO_PROGRAM, INTERACTIVE_NAME, RATE_LIMITS, interactiveCommand, isThreadId, sandboxOf, turnCommand } from './codex/interactive.ts';
@@ -345,8 +346,9 @@ export function createCodexAdapter(options: CodexOptions): SessionAdapter {
           close(session);
         }
       },
-      async handover() {
-        throw new NotImplemented('handing a session over to another harness comes in milestone 3');
+      async handover(to) {
+        open();
+        return handoverOf(log, session.id, 'codex', to);
       },
     };
   }
