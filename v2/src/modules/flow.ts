@@ -14,6 +14,7 @@
 // engine and the store this module receives. The idle watchdog (issue #290,
 // session/watchdog.ts) starts with the engine, on its own timer.
 import { Docker } from '../container/docker.ts';
+import { editorRoutes } from '../flow/editor.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
 import { REPLAYS_TABLE, replayRoutes } from '../flow/replay.ts';
@@ -48,6 +49,7 @@ const flow: Module = {
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...takeoverRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof(), human: humanOf }),
     ...filesRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof(), human: humanOf }),
+    ...editorRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...terminalRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof(), human: humanOf }),
     ...stepRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...variantRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),

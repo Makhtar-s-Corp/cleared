@@ -835,6 +835,11 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       const found = version === 'base' ? fixtureFile(path, 'base') : human.file(path);
       return found ? sendJson(response, 200, found) : sendJson(response, 404, { error: 'no such file in the checkout' });
     }
+    // Open in an editor (flow/editor.ts): the links of the session's checkout, on this machine.
+    if (method === 'GET' && sub === 'editor' && parts.length === 3) {
+      const path = `/srv/example/work/${encodeURIComponent(fixture.ticket.id)}`;
+      return sendJson(response, 200, { mode: 'local', links: [{ editor: 'vscode', url: `vscode://file${path}` }, { editor: 'cursor', url: `cursor://file${path}` }] });
+    }
     if (method === 'GET' && sub === 'events') {
       const from = Number(url.searchParams.get('after') ?? request.headers['last-event-id'] ?? 0);
       response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });

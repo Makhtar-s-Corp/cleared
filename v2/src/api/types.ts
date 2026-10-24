@@ -621,6 +621,14 @@ export type ChangeSessionPlanBody = { readonly message: string };   // what the 
 export type SessionFiles = { readonly files: readonly { readonly path: string; readonly added: number; readonly removed: number }[] };
 export type SessionFile = { readonly path: string; readonly text: string; readonly lines: number; readonly cut: boolean; readonly hash: string };
 
+// Open in an editor (docs/v2/complement-devin.md item 19, flow/editor.ts):
+// the links that open the session's checkout in VS Code or in Cursor, which
+// the person's own browser follows. `local`: the editor is on the machine
+// the checkout is on; `ssh`: it reaches it over SSH (CLEARED_V2_EDITOR_SSH_HOST).
+export const EDITORS = ['vscode', 'cursor'] as const;
+export type EditorName = (typeof EDITORS)[number];
+export type EditorLinks = { readonly mode: 'local' | 'ssh'; readonly links: readonly { readonly editor: EditorName; readonly url: string }[] };
+
 // Every route: its body (null for none) and its answer. `events` answers
 // with a stream of sseFrame() frames, from the seq after `?after=`; the
 // browser's Last-Event-ID carries the same number on a reconnect.
@@ -652,6 +660,7 @@ export type ApiRoutes = {
   'POST /api/sessions/:id/plan/change': { readonly body: ChangeSessionPlanBody; readonly response: { readonly accepted: true } };
   'GET /api/sessions/:id/files': { readonly body: null; readonly response: SessionFiles };
   'GET /api/sessions/:id/files/*': { readonly body: null; readonly response: SessionFile };
+  'GET /api/sessions/:id/editor': { readonly body: null; readonly response: EditorLinks };
   'POST /api/sessions/:id/takeover': { readonly body: null; readonly response: { readonly accepted: true; readonly by: UserId } };
   'POST /api/sessions/:id/giveback': { readonly body: null; readonly response: { readonly accepted: true } };
   // Waves 9 to 11, written by lane 17: the ticket's steps and the contract
@@ -729,6 +738,7 @@ const routes = {
   'POST /api/sessions/:id/plan/change': true,
   'GET /api/sessions/:id/files': true,
   'GET /api/sessions/:id/files/*': true,
+  'GET /api/sessions/:id/editor': true,
   'POST /api/sessions/:id/takeover': true,
   'POST /api/sessions/:id/giveback': true,
   'GET /api/tickets/:id/steps': true,
