@@ -220,7 +220,7 @@ test('every service of several is told the decisions headings and where each is 
   assert.match(own, /`## Decisions for the contract` \(filed in the memory of the contract of filter-api\)/);
   const shared = readFileSync(join((await flow.prepareWorkdir({ ticket: ticketOn('guestbook'), role: 'author', service: guestbook })).workdir, 'CLAUDE.md'), 'utf8');
   assert.match(shared, /`## Decisions for the service` \(filed in the workspace's memory, which is this service's\)/);
-  assert.ok(!shared.includes('`## Decisions for the contract`'), 'a service with no contract is not offered the heading');
+  assert.match(shared, /`## Decisions for the contract` \(filed in the memory of the contract of filter-api\)/, 'the consumer files its contract decisions in the contract it calls');
 });
 
 test('the handover of a session on a service files its lessons in that service\'s memory and in its contract\'s', async () => {

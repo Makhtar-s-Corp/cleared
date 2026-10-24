@@ -19,7 +19,7 @@
 import type { Role } from '../session/contract.ts';
 import { LESSON_HEADINGS, ensureLevel, runMemory, type MemoryContext, type MemoryLevel } from './briefing.ts';
 
-export { LESSON_HEADINGS } from './briefing.ts';
+export { DECISION_HEADINGS, LESSON_HEADINGS } from './briefing.ts';
 
 export class HandoverError extends Error {
   override name = 'HandoverError';
