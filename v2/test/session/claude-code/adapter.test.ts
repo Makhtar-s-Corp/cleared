@@ -17,7 +17,7 @@ import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../.
 import { CONFIG_PROGRAM, INTERACTIVE_LAUNCH, LOGIN_TOKEN_PROGRAM } from '../../../src/session/adapters/claude-code/interactive.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
-import { HostToolRefused, NotImplemented, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
+import { HandoverRefused, HostToolRefused, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../../src/session/policy.ts';
 import { FakeDocker } from '../../container/fake-docker.ts';
@@ -356,12 +356,16 @@ test('a runner that dies is a RUN_ERROR and the session is closed; stop still cl
   } finally { t.cleanup(); }
 });
 
-test('handover is milestone 3; another harness is refused; the adapter is registered', async () => {
+test('handover gives up a note to codex and refuses Cursor; another harness is refused at start; the adapter is registered', async () => {
   const t = await setup();
   try {
     await assert.rejects(t.adapter.start({ ...input(t.workdir), harness: 'codex' }), /claude-code/);
     const handle: SessionHandle = await t.adapter.start(input(t.workdir));
-    await assert.rejects(handle.handover({ harness: 'codex', model: 'gpt' }), NotImplemented);
+    const out = await handle.handover({ harness: 'codex', model: 'gpt' });
+    assert.deepEqual({ session: out.session, from: out.from, to: out.to }, { session: handle.id, from: 'claude-code', to: { harness: 'codex', model: 'gpt' } });
+    assert.equal(typeof out.note, 'string');
+    await assert.rejects(handle.handover({ harness: 'cursor', model: 'm' }), HandoverRefused);
+    await assert.rejects(handle.handover({ harness: 'claude-code', model: 'm' }), HandoverRefused);
     await handle.stop();
     assert.equal(typeof adapterFactories['claude-code'], 'function');
     assert.equal(adapterFactories['claude-code']?.({ log: memoryLog(), cleaner: () => createCleaner() }).harness, 'claude-code');

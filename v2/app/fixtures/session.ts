@@ -30,6 +30,7 @@ import { GIVEN_BACK } from '../../src/flow/takeover.ts';
 import { createCleaner } from '../../src/session/clean.ts';
 import type { AgUiEvent, Question, SessionEvent, SessionState } from '../../src/session/events.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
+import type { Harness } from '../../src/session/contract.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import { ENDED, REPLAY_MAX, emptyModel, applyAll, stepCommit } from '../web/screens/session/model.ts';
 import type { PreviewAnswer, PreviewUpstream } from '../src/preview.ts';
@@ -958,6 +959,49 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       changed('session', resumed);
       changed('ticket', TICKET_ID);
       return sendJson(response, 200, { accepted: true, session: resumed, branch, commit: from.commit });
+    }
+    // Hand over (flow/takeover.ts, B6.3): the author's turn interrupted, what
+    // waited cancelled, the session stopped, and a new author on the other
+    // harness in the same checkout.
+    if (sub === 'handover' && parts.length === 3) {
+      const asked = (body as { harness?: unknown } | undefined)?.harness;
+      if (asked !== 'claude-code' && asked !== 'codex') return sendJson(response, 400, { error: 'work is handed to claude-code or codex only' });
+      if (detail.role !== 'author') return sendJson(response, 409, { error: `session ${id} is the ${detail.role}'s: only an author's session is handed over` });
+      if (ENDED.has(detail.phase)) return sendJson(response, 409, { error: `session ${id} is stopped: it is not running any more` });
+      if (fixture.takenOver.has(id as string)) return sendJson(response, 409, { error: `session ${id} is taken over: give it back first` });
+      const harness: Harness = asked;
+      if (detail.harness === harness) return sendJson(response, 400, { error: `the session already runs on ${harness}` });
+      const waiting = fixture.inbox.filter((i) => (i.kind === 'question' || i.kind === 'permission') && i.sessionId === id && i.state === 'waiting');
+      for (const item of waiting) fixture.inbox.splice(fixture.inbox.indexOf(item), 1, { ...item, state: 'handled' });
+      const n = fixture.sessions.filter((s) => s.id.startsWith(`${AUTHOR_ID}-h`)).length + 1;
+      const next = `${AUTHOR_ID}-h${n}`;
+      const model = harness === 'codex' ? 'gpt-6-luna' : 'claude-opus-5-5';
+      const value = {
+        from: { session: id as string, harness: detail.harness, model: detail.model },
+        to: { session: next, harness, model }, by: user,
+      };
+      player(id as string).play(stamp,
+        ...waiting.map((item): AgUiEvent => ({ type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: (item as { requestId: string }).requestId, decision: 'cancelled', by: 'policy', rule: 'takeover' } })),
+        { type: 'CUSTOM', name: 'cleared.handed_over', value },
+        { type: 'RUN_FINISHED', threadId: id as string, runId: 'handed-over', outcome: { type: 'cancelled' }, usage: [], result: { stopReason: 'cancelled', total_cost_usd: null } },
+        delta({ phase: 'stopped', status: 'Stopped' }),
+      );
+      const index = fixture.sessions.findIndex((s) => s.id === id);
+      const last = fixture.store.events.after(id as string).at(-1);
+      fixture.sessions[index] = { ...(fixture.sessions[index] as SessionSummary), phase: 'stopped', status: 'Stopped', updatedAt: stamp.toISOString(), ...(last ? { lastSeq: last.seq } : {}) };
+      const stored = player(next).play(stamp,
+        { type: 'STEP_STARTED', stepName: 'author' }, { type: 'RUN_STARTED', threadId: next, runId: 'turn-1' },
+        { type: 'STATE_SNAPSHOT', snapshot: { status: 'Working', phase: 'working', steps: [{ name: 'author', startedAt: stamp.toISOString(), finishedAt: null }], files: [], checks: [], usage: {} } },
+        { type: 'CUSTOM', name: 'cleared.handed_over', value },
+      );
+      fixture.sessions.push({
+        id: next, project: fixture.project, ticket: TICKET_ID, role: 'author', harness, model, phase: 'working', status: 'Working',
+        startedAt: stamp.toISOString(), updatedAt: stamp.toISOString(), lastSeq: (stored.at(-1) as SessionEvent).seq,
+      });
+      changed('session', next);
+      changed('session', id as string);
+      changed('ticket', TICKET_ID);
+      return sendJson(response, 200, { accepted: true, session: next, harness, model });
     }
     if (sub === 'interrupt' && parts.length === 3) {
       const waiting = fixture.inbox.filter((i) => (i.kind === 'question' || i.kind === 'permission') && i.sessionId === id && i.state === 'waiting');

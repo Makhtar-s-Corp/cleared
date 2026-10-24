@@ -52,6 +52,7 @@ export type SessionSummary = {
   readonly lastSeq: number;                                 // the seq of its last stored event
   readonly service?: string;                                // the workspace service it works on; absent before lane 15 starts sessions per service
   readonly takenOver?: TakenOver | null;                    // who took it over (decision 30, lane 20); absent or null otherwise
+  readonly dormant?: true;                                  // stopped by the watchdog while it waited for a person: the answer resumes it, and it can be handed over (B6.3)
 };
 
 // The session plan an author proposes before writing code (decision 22,
@@ -648,6 +649,9 @@ export type ApproveBody = { readonly requestedAt: string; readonly heads: readon
 export type LeadMessageBody = { readonly text: string; readonly goal?: true };   // goal: the text is a goal
 export type RejectPlanBody = { readonly message: string };
 export type ChangeSessionPlanBody = { readonly message: string };   // what the author is to change in its plan
+export const HANDOVER_MODEL_MAX = 100;
+export const HANDOVER_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;   // a model name, never a word of a command
+export type HandoverBody = { readonly harness: Harness; readonly model?: string };   // the harness to hand the author's work to; its model, else the default
 
 // The Editor tab (decision 30, lane 20): the files the session changed, and
 // one file of its checkout, cut at 400 lines (`cut` says so), with the hash
@@ -697,6 +701,8 @@ export type ApiRoutes = {
   'GET /api/sessions/:id/editor': { readonly body: null; readonly response: EditorLinks };
   'POST /api/sessions/:id/takeover': { readonly body: null; readonly response: { readonly accepted: true; readonly by: UserId } };
   'POST /api/sessions/:id/giveback': { readonly body: null; readonly response: { readonly accepted: true } };
+  // Milestone 3 (B6.3): an author's work handed to the other harness of the contract (flow/takeover.ts).
+  'POST /api/sessions/:id/handover': { readonly body: HandoverBody; readonly response: { readonly accepted: true; readonly session: SessionId; readonly harness: Harness; readonly model: string } };
   // Waves 9 to 11, written by lane 17: the ticket's steps and the contract
   // item's Approve and Send back (lane 23), the knowledge items' Approve and
   // Reject and "Update the skill now" (lane 24), the questions to the code
@@ -782,6 +788,7 @@ const routes = {
   'GET /api/sessions/:id/editor': true,
   'POST /api/sessions/:id/takeover': true,
   'POST /api/sessions/:id/giveback': true,
+  'POST /api/sessions/:id/handover': true,
   'GET /api/tickets/:id/steps': true,
   'POST /api/contracts/:id/approve': true,
   'POST /api/contracts/:id/sendback': true,
@@ -830,7 +837,7 @@ export const SESSION_PREVIEW_ROUTE: ApiRoute = 'GET /api/sessions/:id/preview/*'
 // the flow module), the files, takeover and giveback lane 20's
 // (flow/files.ts, flow/takeover.ts).
 export const SESSION_PLAN_ROUTES: readonly ApiRoute[] = ['POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/plan/change'];
-export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'POST /api/sessions/:id/takeover', 'POST /api/sessions/:id/giveback'];
+export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'POST /api/sessions/:id/takeover', 'POST /api/sessions/:id/giveback', 'POST /api/sessions/:id/handover'];
 
 // The routes of waves 9 to 11 written ahead of their servers (lane 17).
 export const STEP_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/steps', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback'];   // lane 23, flow/

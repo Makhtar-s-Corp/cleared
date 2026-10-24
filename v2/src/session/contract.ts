@@ -125,8 +125,22 @@ export interface SessionHandle {
   answer(requestId: string, answer: Answer): Promise<void>; // ACP: the response to session/request_permission
   interrupt(): Promise<void>;                              // ACP: session/cancel
   stop(): Promise<void>;                                   // ACP: session/close; here: stop and remove the container
-  handover(to: { readonly harness: Harness; readonly model: string }): Promise<never>; // milestone 3: rejects with NotImplemented
+  // Milestone 3 (B6.3): the session gives up its work to another harness.
+  // It writes nothing and stops nothing: it answers the note of the work so
+  // far, read from its own journal, and the flow starts the target on the
+  // same checkout, then stops this session. Rejects with HandoverRefused for
+  // a target the contract does not allow (session/handover.ts).
+  handover(to: HandoverTarget): Promise<Handover>;
 }
+
+export type HandoverTarget = { readonly harness: Harness; readonly model: string };
+
+export type Handover = {
+  readonly session: SessionId;
+  readonly from: Harness;
+  readonly to: HandoverTarget;
+  readonly note: string;                                   // what was said and done so far, for the target's first message
+};
 
 // ACP ToolKind and ToolCallStatus values, used to classify every tool call
 // whatever the harness calls the tool.
@@ -151,6 +165,12 @@ export async function interactiveResume(adapter: SessionAdapter | undefined, id:
 // What a later milestone brings, asked for too early.
 export class NotImplemented extends Error {
   override name = 'NotImplemented';
+}
+
+// A handover to a harness the contract does not hand work to (Cursor), to the
+// one the session already runs, or with no model.
+export class HandoverRefused extends Error {
+  override name = 'HandoverRefused';
 }
 
 // A host tool's refusal: what the lead may not do, said to the model.

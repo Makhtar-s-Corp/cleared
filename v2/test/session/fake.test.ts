@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeAdapter, exampleScript, type FakeStep } from '../../src/session/adapters/fake.ts';
 import { adapterFactories } from '../../src/session/adapters/index.ts';
-import { HostToolRefused, NotImplemented, type HostTool, type SessionHandle, type StartInput } from '../../src/session/contract.ts';
+import { HandoverRefused, HostToolRefused, type HostTool, type SessionHandle, type StartInput } from '../../src/session/contract.ts';
 import { toolArgs, toolResult, type AgUiEvent, type CustomValue, type SessionEvent } from '../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
@@ -122,10 +122,11 @@ test('interrupt ends the turn as cancelled and skips to the next message', withS
   assert.equal(store.events.after('s').at(-1)?.event.type, 'RUN_STARTED');
 }));
 
-test('handover is not implemented in milestone 1; resume replays a known session', withStore(async (store) => {
+test('handover gives up a note; resume replays a known session', withStore(async (store) => {
   const adapter = createFakeAdapter({ log: store.events, script: exampleScript, newId: () => 'demo' });
   const handle = await adapter.start(input);
-  await assert.rejects(handle.handover({ harness: 'codex', model: 'gpt' }), NotImplemented);
+  assert.equal((await handle.handover({ harness: 'codex', model: 'gpt' })).to.harness, 'codex');
+  await assert.rejects(handle.handover({ harness: 'cursor', model: 'gpt' }), HandoverRefused);
   const resumed = await adapter.resume('demo');
   assert.equal(resumed.id, 'demo');
   await assert.rejects(adapter.resume('nobody'), /unknown session nobody/);

@@ -38,7 +38,8 @@ import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
 import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
-import { HostToolRefused, NotImplemented, type Answer, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { HostToolRefused, type Answer, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { handoverOf } from '../handover.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../events.ts';
 import { evaluate, type Policy, type PolicyContext } from '../policy.ts';
 import { INTERACTIVE_NAME, interactiveCommand } from './claude-code/interactive.ts';
@@ -341,8 +342,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
           close(session);
         }
       },
-      async handover() {
-        throw new NotImplemented('handing a session over to another harness comes in milestone 3');
+      async handover(to) {
+        open();
+        return handoverOf(log, session.id, 'claude-code', to);
       },
     };
     return value;
