@@ -18,6 +18,8 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/tickets',
     'POST /api/tickets/:id/approve',
     'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/tickets/:id/close',
+    // Issue #326 (P210): the proof receipt's captures, served to the app.
+    'GET /api/tickets/:id/proof/:service/:file',
     // Issue #271: a ticket's variants and the owner's choice.
     'GET /api/tickets/:id/variants', 'POST /api/variants/:id/choose',
     // Requirement C6: a batch of tickets, started within the lanes and the quota stop.
