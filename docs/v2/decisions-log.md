@@ -4901,9 +4901,9 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** The tests were committed alone in `0b009a9`, before any code: there, `test/flow/batch.test.ts`, `test/flow/batch-routes.test.ts` and `app/web/test/tower-batch.test.tsx` do not load (`flow/batch.ts` and the model's exports do not exist), the route counts of `test/api/types.test.ts`, `test/flow/api.test.ts` and `test/flow/modules.test.ts` fail, and the browser test calls `lanes` and `quota`, which the fixtures did not have.
 
-**Checks** (after merging `origin/v2` at `54b80e5`). `npm run typecheck`. With `CLEARED_V2_PLAYWRIGHT` set, the node tests run: 1809 tests, 1805 pass, 2 skipped, 2 fail. The 270 Vitest tests pass (run alone, since a failure stops `npm test` before them). The batch browser test passes in French and in English. The two failures:
-- `app/test/notify/browser.test.ts` ("a headless browser registers the worker...", a 30-second timeout) fails the same way on `origin/v2` in this environment, checked in a temporary worktree, as the `j3-reject-close` entry said.
-- `app/test/foundation/budget-browser.test.ts` ("twenty switches among the five screens") had a p95 of 112 ms against its 100 ms budget during the full parallel run. Run alone, it passes twice out of two. The Tower now reads `/batches` too, once per load, from the cache.
+**Checks** (after merging `origin/v2` at `23f8cc8`, pull requests 316 and 318). `npm run typecheck`; `npm run build`. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1818 tests, 1815 pass, 2 skipped, 1 fails. The 270 Vitest tests pass (276 with the merged lanes'). The batch browser test passes in French and in English.
+- The one failure is `app/test/notify/browser.test.ts` ("a headless browser registers the worker...", a 30-second timeout). It fails the same way on `origin/v2` in this environment, checked in a temporary worktree, as the `j3-reject-close` entry said.
+- `app/test/foundation/budget-browser.test.ts` ("twenty switches") passes in this run. An earlier full run, with all files at once, measured 112 ms at p95 against its 100 ms budget.
 
 `npm run guard -- --base origin/v2`: nothing refused.
 
