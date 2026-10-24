@@ -30,7 +30,7 @@ test('a waiting release card offers Close beside Send back and Approve', () => {
 
 test('Close asked once opens the reason\'s field with the rule, and nothing to approve', () => {
   const en = shown(release, 'en', { kind: 'close' });
-  assert.match(en, /Why is it closed\?/);
+  assert.match(en, /Why close this ticket\?/);
   assert.match(en, /Close the ticket/);
   assert.doesNotMatch(en, /Approve/);
   assert.match(shown(release, 'fr', { kind: 'close' }), /Fermer le ticket/);

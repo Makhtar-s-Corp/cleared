@@ -254,7 +254,7 @@
   "replay_resumed": "Resumed by {who} from a step of the earlier session, on {branch} from {commit}.",
   "replay_instruction": "Corrected instruction",
   "close": "Close",
-  "close_field": "Why is it closed?",
+  "close_field": "Why close this ticket?",
   "close_rule": "A closed ticket is not merged or deployed. The card stays in the history with your reason.",
   "close_send": "Close the ticket",
   "close_keep": "Keep it",

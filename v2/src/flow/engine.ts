@@ -1340,7 +1340,7 @@ export class FlowEngine {
     const given = reason.trim();
     if (given === '') throw new FlowError('invalid', 'a Close says why');
     if (given.length > CLOSE_REASON_MAX) throw new FlowError('invalid', `a Close’s reason is at most ${CLOSE_REASON_MAX} characters`);
-    const note = `The owner closed this ticket: ${given}\nIts sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.`;
+    const note = `The owner closed this ticket (${by}): ${given}\nIts sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.`;
     return this.#takeOut(id, by, { message: 'The owner closed the ticket: this session was stopped.', code: 'closed', reason: 'closed', note, refusal: 'it is not closed', closed: given, refuseDone: true });
   }
 

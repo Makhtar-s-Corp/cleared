@@ -337,7 +337,7 @@
   "repair_checks_unnamed": "the checks",
   "release_repair_gave_up": "{ticket} · Checks still failing after {n} repair attempts",
   "close": "Close",
-  "close_field": "Why is it closed?",
+  "close_field": "Why close this ticket?",
   "close_rule": "A closed ticket is not merged or deployed. The card stays in the history with your reason.",
   "close_send": "Close the ticket",
   "close_keep": "Keep it",
