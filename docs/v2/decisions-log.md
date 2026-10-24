@@ -4610,6 +4610,21 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - Resources: no Docker object, no network, no tunnel, no port. The tests run in memory.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ci-repair`.
 
+## 2026-10-24: the Consumption screen's review follow-ups (the author's choices, lane `j3-consumption-followups`, issue #293)
+
+**Decision.** Five of the six follow-ups of #289 are done; the sixth stays open (item 6).
+1. The French partial-cost line is "partiel : {reported} sur {turns} tours", with no plural to agree.
+2. The screen keeps showing one window per harness, the seven-day one (the server returns both, seven-day first); the footer now says so rather than showing both, which the matrix wording does not ask.
+3. A pause longer than `GOAL_PLAN_HOURS` (6) leaves the plan of a waiting goal run unapproved by the scheduler; it waits in the inbox for the owner. Documented in the scheduler's header, behaviour unchanged.
+4. The levers' note is rendered only when there is a message.
+5. `AUTHOR_MODELS` stays the list of choices, but `modelChoices` (consumption/levers.ts) adds the configured author model and a model stored earlier, never the reviewers'. That one set is both the options `leverChoices` offers and the validation of `LeverStore.set` (which takes the configured author model as a fifth argument, the route passing it), so no offered toggle is refused. A stored model that was left for another choice drops out. Not read from the configuration alone: the configuration names one model, not the choices.
+6. Left open: the matrix status stays partial until a real Claude Code session reports its windows, and the dollars await the owner.
+
+**Consequences.**
+- No new table, setting or event. `set` now accepts the configured author model and the stored one, as the options do. The engine's fallback for a model that is the reviewer's is unchanged.
+- Resources: no Docker object, no network, no tunnel, no port.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-consumption-followups`.
+
 ## 2026-10-24: Resume from here, a ticket started again from a step of its author's thread (the author's choices, lane `j3-replay`)
 
 **The need.** Issue #272, approved by the owner on 2026-10-23 at 11:51 (P57, Devin's item 14). A session that went the wrong way had to start again from the beginning. The criteria: each step of the thread offers "Reprendre d'ici", the branch goes back to the step's commit, the old continuation stays readable, a service test and a browser test.
@@ -4658,6 +4673,25 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Resources.** No Docker object, no network, no tunnel, no port but the tests' loopback ones the system picks. The git tests run in temporary folders.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-replay`.
+
+## 2026-10-24: follow-ups of the plans' autonomy (the author's choices, lane `j3-autonomy-followups`, issue #299)
+
+**Context.** Issue #299 lists seven follow-ups of PR #297. Three are done here (P78 to P80). Four are left, with why.
+
+**Decisions.**
+1. **A permission request waits as long as a question and then parks the ticket** (`FlowEngine.#duePermissions`). It is never allowed on the owner's behalf: a permission has no answer the session declared, and allowing a tool by a delay would turn the owner's check into a timer. Rejecting it would make the session guess what to do next. Parking frees the plan's slot and keeps the volume, as an unanswered question with no default does. The delay is the question's (the project's `question_timeout_minutes`, else the service's), counted from when the request was raised; there is no lead window, since the lead has nothing to decide on a permission. No new bus event and no new inbox field: the ledger row `permission_parked` and the ticket's comment say it, and the inbox item leaves with the session. The inbox does not show the delay on a permission yet.
+2. **`isTestCommand` reads the program, not a word.** After the leading `cd dir &&` and variable assignments, the line must start with a known runner. A runner missing from the list is not read as a test run; the third attempt then lacks its output, which is the safe side.
+3. **A module may declare `stop`.** Added to `Module` and `App` (`registry.ts`) and awaited by `main.ts` before `store.close()`, because `process.exit(0)` followed a close that did not wait for a watchdog pass in progress. Reverse order, a failing stop said and skipped. Only the flow module uses it, for the watchdog. The human side's terminal timer is left as it was: it holds no pass.
+
+**Not done, and why.**
+- *Follow-up 2* (a `parked` item blocks the items that depend on it until the lead starts it again): the issue itself asks to watch it at the next endurance proof. A rule chosen without that run would be a guess.
+- *Follow-up 5* (a suspended session's ticket is put back `restart` after the service restarts, instead of resumed): a suspended session lives in `#dormant`, in memory, with its start input; the adapter keeps no start input to rebuild it from the ledger (see `recover`). Resuming it needs that input stored, which is a change of what the ledger keeps and of its tests, not a follow-up.
+- *Follow-up 6* (the watchdog proved on real containers): it belongs to the endurance run, which has the Docker daemon and the labels `cleared.dev=v2`. No container is made by this lane.
+- *Follow-up 7* (B3.11 and P54 to done): after that run. Their rows stay as they are.
+
+**Consequences.**
+- No Docker object, no network, no tunnel, no port, no secret. The tests run in memory.
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-autonomy-followups`.
 
 ## 2026-10-24: follow-ups of the Cursor harness (the author's choices, lane `j3-cursor-followups`, issue #294)
 

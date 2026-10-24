@@ -171,7 +171,7 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
             <ul className="lever-list">
               {levers.map((lever) => <Lever key={lever.id} lever={lever} busy={busy} onLever={(change) => onLever?.(change)} />)}
             </ul>
-            <p className="levers-note" role="alert">{note}</p>
+            {note ? <p className="levers-note" role="alert">{note}</p> : null}
           </section>
         </aside>
       </div>

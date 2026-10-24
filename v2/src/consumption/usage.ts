@@ -19,7 +19,7 @@
 // the share used divided by the time since the window opened.
 import type { DatabaseSync } from 'node:sqlite';
 import type { Harness } from '../session/contract.ts';
-import { AUTHOR_MODELS, type Levers } from './levers.ts';
+import { modelChoices, type Levers } from './levers.ts';
 import { lastReading, latestQuota, type LastReading } from './quota.ts';
 
 export const DAYS = 7;
@@ -147,7 +147,7 @@ export function leverChoices(current: Levers, config: { readonly authorModel: st
   return {
     model: {
       current: current.model ?? config.authorModel, choice: current.model, reviewer: config.reviewerModel,
-      options: AUTHOR_MODELS.filter((model) => model !== config.reviewerModel),
+      options: modelChoices(config, current.model),
     },
     maxLanes: { choice: current.maxLanes, options: [1, 2, 3] },
     paused: current.paused,

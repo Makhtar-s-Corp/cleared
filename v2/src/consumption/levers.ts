@@ -24,6 +24,14 @@ export const LEVERS_TABLE = `CREATE TABLE IF NOT EXISTS consumption_levers (
 export const AUTHOR_MODELS: readonly string[] = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 export const MAX_LANES = 8;
 
+// The author models the owner may choose, in one place for the options the
+// screen draws and the validation of a change: the list, the configured
+// author (the default in force) and the model stored earlier, which stay
+// choices when the list drifts from the configuration; never the reviewers'.
+export function modelChoices(config: { readonly authorModel: string; readonly reviewerModel: string }, stored: string | null): string[] {
+  return [...new Set([...AUTHOR_MODELS, config.authorModel, ...(stored ? [stored] : [])])].filter((model) => model !== config.reviewerModel);
+}
+
 export type Levers = {
   readonly model: string | null;        // null: the configuration's author model
   readonly maxLanes: number | null;     // null: the plan's own limit
@@ -68,15 +76,17 @@ export class LeverStore implements LeverReader {
   }
 
   // Applies a change, refused whole when a part is not valid. `reviewerModel`
-  // is the model the reviewers use: the author's may not be the same.
-  set(change: LeversChange, by: string, at: string, reviewerModel: string): Levers {
+  // is the model the reviewers use: the author's may not be the same;
+  // `authorModel` is the configured one, a choice as the screen offers it.
+  set(change: LeversChange, by: string, at: string, reviewerModel: string, authorModel: string = AUTHOR_MODELS[0] as string): Levers {
     const known = new Set(['model', 'maxLanes', 'paused']);
     const unknown = Object.keys(change).filter((key) => !known.has(key));
     if (unknown.length > 0) throw new LeverError(`unknown lever: ${unknown.join(', ')}`);
     if (Object.keys(change).length === 0) throw new LeverError('name a lever to change: model, maxLanes or paused');
     if (change.model !== undefined && change.model !== null) {
-      if (!AUTHOR_MODELS.includes(change.model)) throw new LeverError(`model must be one of ${AUTHOR_MODELS.join(', ')}, or null for the configured one`);
       if (change.model === reviewerModel) throw new LeverError(`the author's model cannot be the reviewers' (${reviewerModel}): another model reviews the work`);
+      const choices = modelChoices({ authorModel, reviewerModel }, this.read().model);
+      if (!choices.includes(change.model)) throw new LeverError(`model must be one of ${choices.join(', ')}, or null for the configured one`);
     }
     if (change.maxLanes !== undefined && change.maxLanes !== null && (!Number.isInteger(change.maxLanes) || change.maxLanes < 1 || change.maxLanes > MAX_LANES)) {
       throw new LeverError(`maxLanes is a whole number from 1 to ${MAX_LANES}, or null for the plan's own limit`);

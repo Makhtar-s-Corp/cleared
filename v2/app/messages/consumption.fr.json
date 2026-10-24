@@ -42,7 +42,7 @@
   "consumption_cost_period": "7 derniers jours",
   "consumption_cost_total": "Au total",
   "consumption_cost_source": "Indiqué par l'agent à la fin de chaque tour, pas estimé ici. Un abonnement ne facture pas ce montant.",
-  "consumption_cost_partial": "partiel : {reported} tours sur {turns} l'indiquent",
+  "consumption_cost_partial": "partiel : {reported} sur {turns} tours",
   "consumption_levers_title": "Ajuster le rythme",
   "consumption_levers_label": "Un clic chacun. Le changement s'applique à ce qui démarre ensuite.",
   "consumption_lever_model": "Changer le modèle des prochains départs",
@@ -67,5 +67,5 @@
   "consumption_lever_failed": "Le changement n'a pas abouti. Réessayez.",
   "consumption_read_failed": "Le service ne répond pas pour l'instant. Cette page réessaie d'elle-même.",
   "consumption_down": "La consommation n'est pas disponible : le service n'a pas de projet.",
-  "consumption_footer_data": "Les chiffres viennent des sessions de ce projet, lues dans son registre."
+  "consumption_footer_data": "Les chiffres viennent des sessions de ce projet, lues dans son registre. Quand un harnais indique les deux fenêtres, celle de 7 jours est affichée."
 }
