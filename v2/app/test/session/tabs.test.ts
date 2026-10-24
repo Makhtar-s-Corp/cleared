@@ -111,7 +111,7 @@ test('the Editor tab: a line diff of the base and the file, with the counts the 
     assert.deepEqual(diffCounts(lineDiff(versions.base ?? undefined, versions.current)), { added: file.added, removed: file.removed }, file.path);
   }
 
-  assert.equal(cutNote({ path: 'long.txt', text: '', lines: 1000, cut: true, hash: '' }, en), 'Only the first 400 of its 1000 lines are shown.');
+  assert.equal(cutNote({ path: 'long.txt', text: '', lines: 1000, cut: true, hash: '' }, en), 'Only the first 400 of its 1,000 lines are shown.');
   assert.equal(cutNote({ path: 'short.txt', text: '', lines: 10, cut: false, hash: '' }, en), undefined);
 });
 
