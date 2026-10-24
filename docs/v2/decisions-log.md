@@ -4930,3 +4930,21 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Resources.** No Docker object, no image, no network call beyond `npm ci` and `gh`, no port opened, no tunnel, no secret.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-contract-notes`.
+
+## 2026-10-24: the matrix synced to pull requests 319 and 320, C13 and O11 read (the author's choices, lane `j3-matrix-sync2`)
+
+**The need.** Rule 1 of the matrix: a merged lane's lines carry the pull request number and their status. Pull requests 319 (P150 to P155) and 320 (P160 to P163, M4) were merged into `v2` and their lines still said `in progress`. C13 (Fix the CI) said `later` while P77 (pull request 307) had delivered issue #273. O11's OpenAPI half said `planned`. Documentation only, no code.
+
+**Decision.**
+1. **P150 to P155 and P160 to P163: `done`, with 319 and 320.** `gh pr view` shows both `MERGED` into `v2` (2026-10-24 21:36 and 21:52 UTC) and green `verify` and `browser` checks. Every test file the lines name exists and passes with `node --test` (the handover, the steps, the engine, the effects, the events, the knowledge, the proof-handover and the app files); the web files pass with `vitest run`. `app/test/session/tabs-browser.test.ts` skips its four Chrome tests unless `CLEARED_V2_PLAYWRIGHT` is set; they ran green in the `browser` job of both pull requests, which is what P153's Chrome click rests on.
+2. **M4: `done`** (295 for the review channel, 320 for the rest). Its five test files pass, `test/flow/channel.test.ts` included. The session screen still shows no notes: a lane of its own, said in the line.
+3. **C13: `done`, covered by P77 (307).** Issue #273's five criteria (a failed CI of a pull request Cleared opened, at most 2 attempts, the result in the inbox, never on `main`, a test with a simulated CI) are P77's, proved by `test/flow/ci-repair.test.ts` and `app/web/test/inbox/repair.test.tsx`, both green. P58 already said so. What C13 does not reach is written in the line: P77 repairs the one-service release card; a train and a pull request Cleared did not open are not repaired.
+4. **O11: `partial`, not `planned`.** The other formats are `done` (M11, 315). OpenAPI 3 is delivered since milestone 2 (lanes 15, 23, 28) and its tests are green (listed in the line), but O11 rests on M2, which is `partial` until the real run of proof j2-multi; O11 follows it.
+
+**Left as it was, and why.** C6 and P140 to P144 (pull request 317, still open); P114 and P170 and after (lane `j3-close-ticket-pr`); the owner's lines: B6.3 and B6.3p (the real Codex and Cursor runs), P69, P71, O15. B6.3 still names `lane j3-handover-codex` for its delivered part: the owner's line, the number follows with its real run.
+
+**Checks.** The named tests above; `npm run guard -- --base origin/v2`.
+
+**Resources.** No Docker object, no network call beyond `npm ci` and `gh`, no port opened, no tunnel, no secret.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-matrix-sync2`.
