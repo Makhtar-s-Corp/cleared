@@ -110,7 +110,7 @@ test('the Editor tab: the changed files, a file\'s diff against the base, read o
   assert.doesNotMatch(whole, /class="line del"/);
 
   const cut = html(<EditorTab t={en} files={files} selected={path} shown={{ file: { ...shown.file, cut: true, lines: 1000 }, base: shown.base }} mode="file" />);
-  assert.ok(visibleText(cut).some((line) => line.includes('first 400 of its 1000 lines')));
+  assert.ok(visibleText(cut).some((line) => line.includes('first 400 of its 1,000 lines')));
   const refused = visibleText(html(<EditorTab t={en} files={files} selected={path} shown={{ file: null, base: null, error: 'secrets, keys and credential files are never read in a session' }} mode="diff" />));
   assert.ok(refused.some((line) => line.includes('secrets, keys and credential files')));
   assert.ok(visibleText(html(<EditorTab t={en} files={[]} mode="diff" />)).includes('No file changed yet.'));
