@@ -1370,11 +1370,12 @@ The choices the lane makes:
    - The person's words, answers and gestures go through the app's routes, as before. `run()` refuses.
    - Not used: CopilotKit's chat components (their look and Lucide) and `useHumanInTheLoop`, since the harness's questions are not front-end tool calls.
    - Risk: local agents go through `agents__unsafe_dev_only`, CopilotKit's only path without a runtime, and a later version may change it. `app/web/test/copilot.test.tsx` holds the behaviour.
+   - Risk (added on 2026-10-24, issue 185, item 1): the agent chunk also carries CopilotKit's trajectory collector (`@copilotkit/learning` and the `phoenix` client), which joins a Phoenix channel over a WebSocket once a runtime or a `learning` option is set. Neither is set here, so it is dead weight in the bundle; the test watches `WebSocket` across several connects and detaches.
 7. **Every opt-out**, and what checks it:
    - `v2/.npmrc` runs no install script, and `scarfSettings.enabled = false` turns off `@scarf/scarf`, which CopilotKit pulls in.
    - The CI job sets `SCARF_ANALYTICS=false`, `DO_NOT_TRACK=1` and `COPILOTKIT_TELEMETRY_DISABLED=true`. Vite defines the same, and `NODE_ENV=production`, so the inspector never mounts.
    - `@copilotkit/web-inspector` is replaced by an empty module at build time.
-   - Telemetry lives in CopilotKit's runtime package, which is not installed. The built page names `telemetry.copilotkit.ai` only in a list of addresses CopilotKit's capture ignores.
+   - Telemetry lives in CopilotKit's runtime package, which is not installed. The built page names `telemetry.copilotkit.ai` and `cdn.copilotkit.ai`, twice each, only in the lists of addresses CopilotKit's capture ignores, never as a request. (Corrected on 2026-10-24, issue 185, item 1: this line named only the first.)
    - The test runs the core with both agents while `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon` are watched, and requires no request at all. A planted request makes it fail.
    - In Chromium, every capture logged its requests: none left the app's origin.
 8. **zod** is one copy (an `overrides` entry), set to `jitless` before any schema is built. Otherwise zod probes `new Function`, which the CSP reports, since it allows no eval.

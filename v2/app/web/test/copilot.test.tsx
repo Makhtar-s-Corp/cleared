@@ -7,7 +7,7 @@
 // or anywhere else. The page's Content-Security-Policy (default-src 'self')
 // would refuse such a request in a browser anyway; static.test.ts checks it.
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, test } from 'vitest';
+import { afterEach, beforeEach, test, vi } from 'vitest';
 import type { LeadMessage, LeadState } from '../../../src/api/types.ts';
 import { sseFrame } from '../../../src/api/types.ts';
 import { AUTHOR_ID, detailOf, sessionFixture } from '../../fixtures/session.ts';
@@ -119,4 +119,35 @@ test('the agents are written through the app, never run by CopilotKit', async ()
   const agent = new LeadAgent({ api: async () => { throw new Error('none'); }, open: replay([]).open, later: () => {} });
   await assert.rejects(agent.runAgent(), /written through the app/);
   assert.deepEqual(sent, []);
+});
+
+// Issue 185: the local agents go through CopilotKit's agents__unsafe_dev_only
+// (@copilotkit/core 1.77.2, CopilotKitCore's constructor hands them to
+// AgentRegistry.initialize, with no check of NODE_ENV): agents held in the
+// page, and no runtime. Without a runtime address the core never connects,
+// and its learning bridge, which joins a Phoenix channel over a WebSocket,
+// starts only with a runtime or a learning option. So no request of its own,
+// not even after several connects, detaches and ten minutes of its timers.
+test('the core has no runtime: no address, never connecting, and connects, detaches and timers send nothing', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  try {
+    const fixture = await leadFixture(FIXTURE_NOW);
+    const api = async <T,>(path: string): Promise<T> => (path === '/lead' ? fixture.state : path === '/lead/messages' ? fixture.messages : fixture.plans) as T;
+    const stream = replay([{ name: 'state', data: JSON.stringify(fixture.state satisfies LeadState) }]);
+    const agent = new LeadAgent({ api, open: stream.open, later: () => {} });
+    const { copilotkit } = makeCopilot({ [LEAD_AGENT]: agent as unknown as ThreadAgent<object> });
+    assert.equal(copilotkit.runtimeUrl, undefined, 'no runtime address');
+    for (let round = 1; round <= 3; round++) {
+      void copilotkit.connectAgent({ agent });
+      await vi.advanceTimersByTimeAsync(200 * 1000);
+      assert.ok(isLeadThread(agent.state), `round ${round}: the thread is in`);
+      await agent.detachActiveRun();
+      await vi.advanceTimersByTimeAsync(10 * 1000);
+    }
+    assert.equal(stream.urls.length, 3, 'the app\'s own stream, once a connect');
+    assert.equal(copilotkit.runtimeConnectionStatus, 'disconnected', 'never connecting to a runtime');
+    assert.deepEqual(sent, [], 'no request of CopilotKit\'s own, WebSocket included');
+  } finally {
+    vi.useRealTimers();
+  }
 });
