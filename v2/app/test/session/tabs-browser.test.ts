@@ -131,6 +131,25 @@ test('the Editor shows a file\'s changes against the base; Take over attaches th
   assert.deepEqual(seen, { errors: [], away: [] });
 });
 
+test('Hand over to Codex calls its route, the screen follows the Codex author, and Hand back returns to Claude Code', { skip }, async () => {
+  const fixture = sessionFixture(FIXTURE_NOW);
+  const source = sessionSource(fixture);
+  const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+    await page.locator('#timeline [data-row]').first().waitFor();
+    assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand over to Codex');
+    assert.equal(await page.locator('#handover').getAttribute('data-to'), 'codex');
+    await page.locator('#handover').click();
+    await page.locator('#handover[data-to="claude-code"]').waitFor();
+    assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand back to Claude Code');
+    assert.match(await page.locator('#status').innerText(), /Codex/);
+    await page.locator('#handover').click();
+    await page.locator('#handover[data-to="codex"]').waitFor();
+  });
+  assert.deepEqual(source.calls.filter((c) => c.path.endsWith('/handover')).map((c) => [c.method, c.body]), [['POST', { harness: 'codex' }], ['POST', { harness: 'claude-code' }]]);
+  assert.deepEqual(fixture.sessions.filter((s) => s.role === 'author').map((s) => [s.harness, s.phase]), [['claude-code', 'stopped'], ['codex', 'stopped'], ['claude-code', 'waiting_human']]);
+  assert.deepEqual(seen, { errors: [], away: [] });
+});
+
 // A page a session could write: it tries to approve the ticket and to read
 // the session through the app, and says what it got.
 const probe = (appOrigin: string) => `<!doctype html><meta charset="utf-8"><title>probe</title><pre id="out">running</pre>
