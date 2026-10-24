@@ -7,10 +7,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { stepCommit as serviceCommit } from '../../../src/flow/replay.ts';
+import { MAX_REPLAY, stepCommit as serviceCommit } from '../../../src/flow/replay.ts';
 import { AUTHOR_COMMIT, AUTHOR_ID, BASE_COMMIT, sessionFixture, sessionSource } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { applyAll, emptyModel, stepCommit, threadOf, type Row } from '../../web/screens/session/model.ts';
+import { REPLAY_MAX, applyAll, emptyModel, stepCommit, threadOf, type Row } from '../../web/screens/session/model.ts';
 
 test('each row keeps its first event, and its step begins from the commit the service resumes from', () => {
   const fixture = sessionFixture(FIXTURE_NOW, { review: 'later' });
@@ -34,6 +34,7 @@ test('each row keeps its first event, and its step begins from the commit the se
   const read = thread.rows.find((row) => row.kind === 'read');
   assert.equal(read?.seq, start('read-1'));
   assert.equal(stepCommit([], 3), undefined, 'no checkpoint, no commit');
+  assert.equal(REPLAY_MAX, MAX_REPLAY, 'the page\'s copy of the longest instruction is the service\'s');
 });
 
 test('a resume is a row on the session left and on the new one, each knowing its side', async () => {

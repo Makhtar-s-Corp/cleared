@@ -364,9 +364,12 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile, onResume }: {
   if (entries.length === 0) return <Empty block icon={ChatText} text={t('timeline_empty')} />;
   const row = (entry: Extract<ThreadEntry, { kind: 'row' }>, index: number) => {
     const key = 'id' in entry.row ? `${entry.session}:${entry.row.kind}:${entry.row.id}` : `${entry.session}:${entry.row.kind}:${entry.row.at}:${index}`;
-    // Each step of an author's thread resumes from the commit it began from, once the flow journaled its branch.
+    // Each step of an author's thread resumes from the commit it began from,
+    // once the flow journaled its branch; not a step of the continuation a
+    // resume left, which the ticket's branch no longer holds.
     const own = views.get(entry.session) ?? view;
-    const commit = own.summary.role === 'author' && entry.row.seq !== undefined ? stepCommit(own.thread.checkpoints ?? [], entry.row.seq) : undefined;
+    const left = own.thread.rows.reduce((first, r) => (r.kind === 'replay' && r.side === 'left' ? Math.min(first, r.step) : first), Infinity);
+    const commit = own.summary.role === 'author' && entry.row.seq !== undefined && entry.row.seq < left ? stepCommit(own.thread.checkpoints ?? [], entry.row.seq) : undefined;
     const resume = commit && entry.row.seq !== undefined ? <ResumeFrom session={entry.session} seq={entry.row.seq} commit={commit.commit} t={t} onResume={onResume} /> : undefined;
     return <RowView key={key} row={entry.row} view={own} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} resume={resume} />;
   };

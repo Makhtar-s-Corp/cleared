@@ -4522,6 +4522,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - The page sends the step's first event (`seq`), never a commit. The service finds the commit in its own ledger.
 3. **The route** (`POST /api/sessions/:id/replay {seq, message}`).
    - It is the owner account's alone, as Take over is. The instruction is at most 2,000 characters and goes through the cleaner.
+   - Before anything stops, the effect checks that the ticket's branch holds the step's commit (`replayCheck`). It reads the branch out of the checkout as publish does, which is safe while the session runs. A step of a continuation that an earlier resume left is refused this way (409), and the new author goes on.
    - It stops the ticket's live and dormant sessions (`RUN_ERROR` code `replayed`), settles what of the ticket waits in the inbox, and halts its train. This is Set aside's code, now shared (`#stopAll`).
    - The effect (`replay`, `flow/effects.ts`):
      - fetches the old branch out of the checkout into the service's own checkout, as a step's branch is read, under `refs/cleared/replay/<ticket>/<n>/previous`;
@@ -4532,7 +4533,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - `ticket_replays` keeps the branch. The reviewer, the publish and a start after a restart use the newest resume branch (`#branchOf`).
    - Both sessions get `cleared.replay`: the session left says where the ticket went on, the new one where it came from, with the instruction folded.
 4. **Nothing is rewritten or forced.** A ticket id has no dot, so `cleared/<ticket>.r<n>` can be no ticket's own branch, and it does not sit under `cleared/<ticket>/`, which git could not hold beside `cleared/<ticket>`. The old branch stays as it was in three places: the checkout set aside, the service's ref, and the forge if it was pushed.
-5. **The old continuation stays readable.** The old session keeps every event. In the ticket's view it is folded under its author, as any earlier session is, and opens to every row.
+5. **The old continuation stays readable.** The old session keeps every event. In the ticket's view it is folded under its author, as any earlier session is, and opens to every row. Its steps from the one resumed from onwards no longer offer Resume from here, since the branch does not hold them. Its earlier steps still do.
 6. **The page** (`Session.tsx`, `session.css`).
    - "Reprendre d'ici" (Phosphor's counter-clockwise arrow) sits under the step's detail, not in its summary, where a click folds the row.
    - It opens the instruction (shadcn's Textarea and Buttons), which names the commit the branch goes back to. A refusal by the owner rule is said apart.
@@ -4545,9 +4546,11 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The new branch opens its own pull request. One the old branch opened stays open on the forge: closing it is the owner's, an outward-facing act this service does not take.
 - The checkpoint after a tool call is read when the flow handles its result. A commit made in the next few milliseconds by the next call would land on the next step. A tool call takes longer than that.
 - A session started before this change has no checkpoint, so it offers no Resume from here.
+- The checkout set aside, `<workdirs>/.<ticket>.before-r<n>`, is never removed by the service. Removing it is left to the owner.
+- The old session's Editor reads the ticket's checkout path, which is now the new one. Its own files are in the checkout set aside and in its branch.
 - The browser test runs on the session fixture, whose route stands in for the service's: the flow and the real git are proven by `test/flow/replay.test.ts`.
 
-**Checks.** On this server: `npm run typecheck`; `npm test` (1648 node tests pass, 36 skipped, 0 fail; 248 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run. The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
+**Checks.** On this server: `npm run typecheck`; `npm test` (1649 node tests pass, 36 skipped, 0 fail; 248 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run, and after the last change the three session files passed again (7 of 7). The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
 
 **Resources.** No Docker object, no network, no tunnel, no port but the tests' loopback ones the system picks. The git tests run in temporary folders.
 

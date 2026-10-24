@@ -58,8 +58,12 @@ type Harness = Setup & {
   close(): Promise<void>;
 };
 
-async function harness(options: SetupOptions & { readonly replayFails?: boolean; readonly noHead?: boolean } = {}): Promise<Harness> {
+// `replayFails`: the check before the stop fails, or the resume after it.
+async function harness(options: SetupOptions & { readonly replayFails?: 'check' | 'apply'; readonly noHead?: boolean } = {}): Promise<Harness> {
   const tip = { branch: 'cleared/LOCAL-1', commit: BASE };
+  // Each branch's history, as the service's checkout would read it.
+  const history: Record<string, string[]> = { 'cleared/LOCAL-1': [BASE, C1, C2] };
+  const outside = (commit: string, previous: string) => new Error(`the commit ${commit.slice(0, 12)} is not in the history of ${previous}`);
   const replays: Harness['replays'] = [];
   const branches: Harness['branches'] = [];
   const published: string[] = [];
@@ -70,9 +74,14 @@ async function harness(options: SetupOptions & { readonly replayFails?: boolean;
     },
     async publish(input) { published.push(input.branch); return { url: 'https://example.invalid/pull/7', number: 7, head: C1, created: true }; },
     ...(options.noHead ? {} : { async head() { return { ...tip }; } }),
+    async replayCheck({ commit, previous }) {
+      if (options.replayFails === 'check' || !history[previous]?.includes(commit)) throw outside(commit, previous);
+    },
     async replay(input) {
       replays.push(input);
-      if (options.replayFails) throw new Error(`the commit ${input.commit.slice(0, 12)} is not in the history of ${input.previous}`);
+      if (options.replayFails === 'apply') throw outside(input.commit, input.previous);
+      const before = history[input.previous] ?? [];
+      history[input.branch] = before.slice(0, before.indexOf(input.commit) + 1);
       // The new checkout is on the new branch, at the step's commit.
       tip.branch = input.branch;
       tip.commit = input.commit;
@@ -271,7 +280,7 @@ test('a reviewer\'s session, a session taken over, a done ticket and a workspace
   }
 });
 
-test('without the branch\'s checkpoints no step is resumed from, and a failed resume puts the ticket back on its own branch', async () => {
+test('without the branch\'s checkpoints no step is resumed from, and a step the branch does not hold stops nothing', async () => {
   const blind = await harness({ noHead: true });
   try {
     await blind.engine.start(blind.ticket.id, 'u1');
@@ -282,19 +291,57 @@ test('without the branch\'s checkpoints no step is resumed from, and a failed re
   } finally {
     await blind.close();
   }
-  const h = await harness({ replayFails: true });
+  const h = await harness({ replayFails: 'check' });
   try {
     const author = await wandered(h);
-    const failed = await post(h, `/api/sessions/${author}/replay`, as('u1'), { seq: startOf(h, author, 'edit-1'), message: 'Stable order.' });
-    assert.equal(failed.status, 409);
-    assert.match(String(failed.json.error), /could not be resumed from that step: the commit bbbbbbbbbbbb is not in the history of cleared\/LOCAL-1/);
-    assert.equal((await h.tickets.get('LOCAL-1'))?.status, h.tickets.states.todo);
-    assert.equal(new ReplayStore(h.store.db).latest('LOCAL-1'), undefined, 'no resume is kept');
-    h.branches.length = 0;
-    await h.engine.start('LOCAL-1', 'u1');
-    assert.deepEqual(h.branches, [{ role: 'author', branch: 'cleared/LOCAL-1' }], 'the ticket starts again on its own branch');
+    const before = eventsOf(h, author).length;
+    const refused = await post(h, `/api/sessions/${author}/replay`, as('u1'), { seq: startOf(h, author, 'edit-1'), message: 'Stable order.' });
+    assert.equal(refused.status, 409);
+    assert.match(String(refused.json.error), /cannot be resumed from that step: the commit bbbbbbbbbbbb is not in the history of cleared\/LOCAL-1/);
+    assert.equal(h.store.sessions.get(author)?.status, 'working', 'the author still works');
+    assert.equal(eventsOf(h, author).length, before, 'nothing journaled');
+    assert.equal((await h.tickets.get('LOCAL-1'))?.status, h.tickets.states.progress);
+    assert.equal(h.replays.length, 0);
   } finally {
     await h.close();
+  }
+});
+
+test('a step of a continuation a resume left is refused while the new author works; a resume that fails after the stop puts the ticket back on its own branch', async () => {
+  const waits: readonly FakeStep[] = [started, { awaitMessage: true }, finished(0.2)];
+  const h = await harness({ scripts: { authors: [wandering, waits] } });
+  try {
+    const author = await wandered(h);
+    assert.equal((await post(h, `/api/sessions/${author}/replay`, as('u1'), { seq: startOf(h, author, 'edit-1'), message: 'Stable order.' })).status, 200);
+    await until(() => h.startedSessions.length === 2, 'the new author');
+    const resumed = h.startedSessions[1]!.id;
+    // The old session's last event came after C2, which the new branch, made at C1, does not hold.
+    const last = eventsOf(h, author).at(-1)!.seq;
+    const refused = await post(h, `/api/sessions/${author}/replay`, as('u1'), { seq: last, message: 'Again.' });
+    assert.equal(refused.status, 409);
+    assert.match(String(refused.json.error), /the commit cccccccccccc is not in the history of cleared\/LOCAL-1\.r1/);
+    assert.equal(h.store.sessions.get(resumed)?.status, 'working', 'the new author still works');
+    // A step before the resumed one is still in its history.
+    const earlier = await post(h, `/api/sessions/${author}/replay`, as('u1'), { seq: startOf(h, author, 'run-1'), message: 'From the start.' });
+    assert.equal(earlier.status, 200);
+    assert.deepEqual(h.replays.map((r) => `${r.previous} -> ${r.branch} at ${r.commit.slice(0, 1)}`), ['cleared/LOCAL-1 -> cleared/LOCAL-1.r1 at b', 'cleared/LOCAL-1.r1 -> cleared/LOCAL-1.r2 at a']);
+    assert.equal(h.store.sessions.get(resumed)?.status, 'stopped');
+  } finally {
+    await h.close();
+  }
+  const failing = await harness({ replayFails: 'apply' });
+  try {
+    const author = await wandered(failing);
+    const failed = await post(failing, `/api/sessions/${author}/replay`, as('u1'), { seq: startOf(failing, author, 'edit-1'), message: 'Stable order.' });
+    assert.equal(failed.status, 409);
+    assert.match(String(failed.json.error), /could not be resumed from that step: the commit bbbbbbbbbbbb is not in the history of cleared\/LOCAL-1/);
+    assert.equal((await failing.tickets.get('LOCAL-1'))?.status, failing.tickets.states.todo);
+    assert.equal(new ReplayStore(failing.store.db).latest('LOCAL-1'), undefined, 'no resume is kept');
+    failing.branches.length = 0;
+    await failing.engine.start('LOCAL-1', 'u1');
+    assert.deepEqual(failing.branches, [{ role: 'author', branch: 'cleared/LOCAL-1' }], 'the ticket starts again on its own branch');
+  } finally {
+    await failing.close();
   }
 });
 
@@ -350,6 +397,8 @@ test('the tip is read from the checkout\'s files, loose or packed, and the resum
   // A commit that is not in the branch's history is refused, and the checkout stays.
   const stranger = commit(made!.aside, { 'NOTES.md': 'aside\n' }, 'Not on the new branch');
   gitIn(made!.aside, ['reset', '-q', '--hard', c2]);
+  await assert.rejects(flow.replayCheck!({ ticket: 'LOCAL-1', commit: stranger, previous: 'cleared/LOCAL-1.r1' }), /is not in the history of cleared\/LOCAL-1\.r1/);
+  await flow.replayCheck!({ ticket: 'LOCAL-1', commit: c1, previous: 'cleared/LOCAL-1.r1' });
   await assert.rejects(flow.replay!({ ticket: 'LOCAL-1', n: 2, commit: stranger, branch: 'cleared/LOCAL-1.r2', previous: 'cleared/LOCAL-1.r1' }), /is not in the history of cleared\/LOCAL-1\.r1/);
   assert.deepEqual(readTip(workdir), { branch: 'cleared/LOCAL-1.r1', commit: c1 });
   assert.equal(existsSync(join(config.workdirRoot, '.LOCAL-1.before-r2')), false);

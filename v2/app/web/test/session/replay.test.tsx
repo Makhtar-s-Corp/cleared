@@ -64,7 +64,11 @@ test('the button and the resume rows are the catalog\'s, in fr and en', () => {
   const resumed: SessionSummary = { ...(fixture.sessions[0] as SessionSummary), id: replay.to, phase: 'working', status: 'Working', startedAt: FIXTURE_NOW.toISOString() };
   fixture.store.events.append({ at: FIXTURE_NOW.toISOString(), sessionId: replay.to, ticket: 'LOCAL-161', project: fixture.project, event: { type: 'CUSTOM', name: 'cleared.replay', value: replay } });
   fixture.sessions.push(resumed);
-  const fr = visibleText(html(<Timeline view={view(fixture)} t={catalog('fr')} />)).join(' ');
+  const markup = html(<Timeline view={view(fixture)} t={catalog('fr')} />);
+  const fr = visibleText(markup).join(' ');
+  // The continuation the resume left offers it no more: only the steps before the one resumed from.
+  const seqs = [...markup.matchAll(/data-act="resume_open" data-seq="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.ok(seqs.length > 0 && seqs.every((seq) => seq < replay.seq), JSON.stringify(seqs));
   assert.ok(fr.includes('Repris depuis une étape ci-dessus par vous : une nouvelle session continue plus bas, sur cleared/LOCAL-161.r1 depuis 3f1c9a0d2b7e.'));
   assert.ok(fr.includes('Repris par vous depuis une étape de la session précédente, sur cleared/LOCAL-161.r1 depuis 3f1c9a0d2b7e.'));
   assert.ok(fr.includes('Consigne corrigée'));

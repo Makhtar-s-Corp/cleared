@@ -158,6 +158,9 @@ export type FlowEffects = {
   // `branch` at `commit`, which must be in that branch's history. Absent:
   // no ticket is resumed from a step.
   replay?(input: { readonly ticket: TicketId; readonly n: number; readonly commit: string; readonly branch: string; readonly previous: string }): Promise<{ readonly previousHead: string; readonly aside: string }>;
+  // Before anything stops: the ticket has a checkout whose branch `previous`
+  // holds `commit` in its history, read as replay reads it; throws otherwise.
+  replayCheck?(input: { readonly ticket: TicketId; readonly commit: string; readonly previous: string }): Promise<void>;
 };
 
 export type StepChanges = {
@@ -887,7 +890,7 @@ export class FlowEngine {
     if (this.#replaying.has(ticket.id)) throw new FlowError('conflict', `${ticket.id} is already being resumed`);
     const adapter = this.registry.sessionAdapters[HARNESS];
     if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
-    if (!this.#effects.replay) throw new FlowError('unavailable', 'this service cannot make a resume branch');
+    if (!this.#effects.replay || !this.#effects.replayCheck) throw new FlowError('unavailable', 'this service cannot make a resume branch');
     const step = stepCommit(this.#store.events.after(id), seq);
     if (!step) throw new FlowError('invalid', `no commit of session ${id} is known at its event ${seq}: a step is resumed from once the flow journaled its branch`);
     const text = this.#clean(message.trim());
@@ -895,6 +898,14 @@ export class FlowEngine {
     this.#replaying.add(ticket.id);
     const began = this.#now();
     try {
+      // Checked while the ticket's sessions still run: a step whose commit
+      // the branch no longer holds (one of a continuation a resume left)
+      // stops nothing.
+      try {
+        await this.#effects.replayCheck({ ticket: ticket.id, commit: step.commit, previous: this.#branchOf(ticket.id) });
+      } catch (error) {
+        throw new FlowError('conflict', this.#clean(`the ticket cannot be resumed from that step: ${name(error)}`));
+      }
       await this.#stopAll(ticket.id, by, 'The owner resumed the ticket from an earlier step: this session was stopped.', 'replayed', `The owner resumed the ticket from a step of ${id}.`);
       this.#channels.delete(ticket.id);
       this.#finishing.delete(ticket.id);

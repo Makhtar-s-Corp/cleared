@@ -76,8 +76,9 @@ export type ChannelRow = {
   readonly afterMs?: number;
 };
 // A ticket resumed from a step (issue #272): on the session left, where
-// the ticket went on; on the new session, where it came from.
-export type ReplayRow = { readonly kind: 'replay'; readonly at: string; readonly side: 'left' | 'resumed' } & CustomValue['cleared.replay'];
+// the ticket went on; on the new session, where it came from. `step`: the
+// first event of the step resumed from.
+export type ReplayRow = { readonly kind: 'replay'; readonly at: string; readonly side: 'left' | 'resumed'; readonly step: number } & Omit<CustomValue['cleared.replay'], 'seq'>;
 // `seq`: the stored event that began the row, which Resume from here names.
 export type Row = (
   | ToolRow
@@ -306,9 +307,11 @@ function custom(model: SessionModel, stored: SessionEvent, at: string, event: Ex
     case 'cleared.checkpoint':
       model.checkpoints.push({ ...event.value, seq: stored.seq });
       break;
-    case 'cleared.replay':
-      model.rows.push({ kind: 'replay', at, side: stored.sessionId === event.value.from ? 'left' : 'resumed', ...event.value });
+    case 'cleared.replay': {
+      const { seq: step, ...value } = event.value;
+      model.rows.push({ kind: 'replay', at, side: stored.sessionId === value.from ? 'left' : 'resumed', step, ...value });
       break;
+    }
     default:
       break;
   }

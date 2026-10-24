@@ -104,6 +104,20 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', gitDir, `+refs/heads/${branch}:${ref}`]);
     return { dir, ref, range: `refs/remotes/origin/${base}...${ref}` };
   };
+  // A one-service ticket's branch `previous`, fetched into `ref` of the
+  // service's checkout (fetchBranch), and `commit` checked to be in its
+  // history (issue #272).
+  const inHistory = async (ticket: string, commit: string, previous: string, ref: string) => {
+    if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('not a commit');
+    const service = workspace.services[0] as ServiceConfig;
+    const workdir = join(config.workdirRoot, ticket);
+    if (!lstatSync(workdir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the ticket has no checkout at ${workdir}`);
+    const { dir } = await fetchBranch(ticket, service, workdir, previous, ref);
+    const head = (await git(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim();
+    try { await git(dir, ['merge-base', '--is-ancestor', commit, head]); }
+    catch { throw new Error(`the commit ${commit.slice(0, 12)} is not in the history of ${previous}`); }
+    return { dir, head, service, workdir };
+  };
   const DIFF_ARGS = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
 
   // Runs the lock's client with `args`, `input` on its stdin; its exit code
@@ -175,25 +189,22 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return readTip(workdir);
     },
 
-    // A one-service ticket resumed from a step (issue #272): its branch
-    // `previous` fetched out of its checkout as a step's branch is
-    // (fetchBranch) and kept in the service's checkout under
-    // refs/cleared/replay/<ticket>/<n>/previous; the step's commit checked to
-    // be in that history; the checkout renamed aside, never deleted; then a
+    // Before the ticket's sessions stop: the step's commit is in the branch's
+    // history (inHistory), the branch read into refs/cleared/replay/<ticket>/check.
+    // Then, once they stopped, the resume: the branch kept in the service's
+    // checkout under refs/cleared/replay/<ticket>/<n>/previous, the commit
+    // checked again; the checkout renamed aside, never deleted; then a
     // new checkout on `branch`, from that commit alone, which the author's
     // prepareWorkdir reuses. The base the new branch reads against stays
     // the service's base.
+    async replayCheck({ ticket, commit, previous }) {
+      await inHistory(ticket, commit, previous, `refs/cleared/replay/${ticket}/check`);
+    },
+
     async replay({ ticket, n, commit, branch, previous }) {
-      if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('not a commit');
       await checkBranchName(branch, 'resume branch');
-      const service = workspace.services[0] as ServiceConfig;
-      const workdir = join(config.workdirRoot, ticket);
-      if (!lstatSync(workdir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the ticket has no checkout at ${workdir}`);
       const kept = `refs/cleared/replay/${ticket}/${n}`;
-      const { dir } = await fetchBranch(ticket, service, workdir, previous, `${kept}/previous`);
-      const previousHead = (await git(dir, ['rev-parse', '--verify', '--quiet', `${kept}/previous^{commit}`])).trim();
-      try { await git(dir, ['merge-base', '--is-ancestor', commit, previousHead]); }
-      catch { throw new Error(`the commit ${commit.slice(0, 12)} is not in the history of ${previous}`); }
+      const { dir, head: previousHead, service, workdir } = await inHistory(ticket, commit, previous, `${kept}/previous`);
       await git(dir, ['update-ref', `${kept}/start`, commit]);
       const aside = join(dirname(workdir), `.${ticket}.before-r${n}`);
       if (existsSync(aside)) throw new Error(`${aside} already exists`);
