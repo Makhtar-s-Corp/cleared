@@ -5025,3 +5025,22 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Resources.** No Docker object, no network, no tunnel, no secret, no real account; `restart.test.ts` starts the service as a process on a free loopback port, the lead on the rehearsal's fake adapter, every folder in the temporary directory.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-plan-schedules`.
+
+## 2026-10-25: Two gaps of milestone 2 closed: the decisions headings in every briefing, the skill ticket's one file under .claude/ (the author's choices, lane `j2-knowledge`, C2, O12)
+
+**The need.** C2 was `partial`: a handover's `## Decisions for ...` sections are read (`knowledge/proposals.ts`) but no briefing told the author the headings, only the lessons headings, and only on a workspace of several services. O12 was `partial`: the daily skill ticket writes `.claude/skills/cleared-<service>/SKILL.md`, and the policy locks `.claude/`, so each such ticket asked the owner.
+
+**Decision.**
+1. **C2.** The paragraph that names the lessons headings now names the decisions headings with the same filing: the workspace's memory, the service's (or the workspace's when its checkout is the workspace's), the contract's when one would take it. `DECISION_HEADINGS` moved to `workspace/briefing.ts` beside `LESSON_HEADINGS` (no import cycle: `proposals.ts` imports from `handover.ts`, which imports the briefing); `knowledge/proposals.ts` still exports it. A workspace of one service gets no such paragraph, as before, so the milestone 1 text is the same byte for byte (a test pins it). The choice made: "every service" is every service of a workspace of several, since the paragraph's condition (the filing targets) is not changed here.
+2. **O12.** `Policy.skillFile` (a path relative to the workdir). `policyFor` sets it for an author on a ticket that has a row in `knowledge_skill_tickets` (the knowledge module writes that row when it makes the ticket, so a person cannot make a ticket a skill ticket by its text). `allowedEdit` allows an Edit, Write or MultiEdit whose path, resolved against the workdir, is exactly that file, with the rule `edit.skill`; the check comes before the `.claude/` lock and replaces nothing in it. The rows read the table directly (`skillTicketService`), and a store without the knowledge tables answers "no skill ticket", so no module order is needed.
+3. **Not allowed, tested.** Any other path under `.claude/` (settings, hooks, commands, agents, another service's skill, another file of the same folder, a path through `..`, a nested `.claude/`), a notebook edit, a shell write of the skill file (stays `ask`), a reviewer, a reader and a plan awaiting its Go. An ordinary ticket has no `skillFile`.
+4. **Left alone.** `settingSources` (B5.5b waits for a decision). A symlink in the checkout named like the skill file is not seen by the policy, as for every `edit.workdir` row; the ticket's review and the lock read the diff.
+5. **Lines.** P200 (C2), P201 (O12); C2 and O12 are `done`.
+
+**Tests first.** `914d388` was committed before any code. On the old code: the briefing test and the effects test failed (no decisions heading), `test/session/skill-policy.test.ts` ("writes its skill file without asking") and `test/flow/skill-policy.test.ts` failed (`ask`, rule `default`, not `allow`, `edit.skill`). The tests of the limits (nothing else under `.claude/`) pass on the old code too, as they guard what the change must not open.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no network beyond `npm ci` of the lock file, no tunnel, no secret.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-knowledge`.
