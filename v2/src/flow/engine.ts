@@ -154,6 +154,10 @@ export type FlowEffects = {
   ciFailures?(input: { readonly pr: number; readonly service?: ServiceConfig }): Promise<CiFailures>;
   // The lock's merge (`request_release` without --ask), after the human's approval.
   mergeRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
+  // After a merge: the project pages of the workspace's services are made
+  // again from their new base (issue #274). Absent: none. A failure is
+  // logged and never stops the flow.
+  updateProjectPages?(input: { readonly ticket: TicketId; readonly pr: number }): Promise<void>;
   // What a published head changes against the base: its files, and the diff
   // the release card's flags are read from (release/flags.ts). Absent: none.
   changes?(input: { readonly ticket: TicketId; readonly head: string; readonly service?: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
@@ -761,6 +765,8 @@ export class FlowEngine {
   }
 
   #emit(event: FlowEvent): void {
+    // A merge, one-service or of a train, makes the project pages again (issue #274).
+    if (event.type === 'release_merged') this.#pagesAfter(event.ticket, event.pr);
     const failed = (error: unknown) => console.error(`cleared-v2: a flow listener failed on ${event.type} (${error instanceof Error ? error.name : typeof error})`);
     for (const listener of [...this.#listeners]) {
       try {
@@ -770,6 +776,13 @@ export class FlowEngine {
         failed(error);
       }
     }
+  }
+
+  #pagesAfter(ticket: TicketId, pr: number): void {
+    const pages = this.#effects.updateProjectPages;
+    if (!pages) return;
+    void this.#track(Promise.resolve().then(() => pages.call(this.#effects, { ticket, pr }))
+      .catch((error) => { console.error(`cleared-v2: the project pages were not made again after pull request #${pr} (${name(error)})`); }));
   }
 
   #at(): string {

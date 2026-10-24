@@ -11,6 +11,7 @@ import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type Me
 import { checkBranchName, git, projectCheckout, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { variantFolder } from './variants.ts';
 import { captureHandover } from '../workspace/handover.ts';
+import { ensureProjectPage, readProjectPage, updateProjectPage } from '../workspace/project-page.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
 import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
@@ -51,7 +52,17 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   const forge = (service?: ServiceConfig) => forgeEnvironments(of(service).dir, env);
   const refresh = async (service?: ServiceConfig) => {
     const { dir, url, base } = of(service);
-    return projectCheckout({ url, dir, base, env: (await forge(service)).git });
+    const checkout = await projectCheckout({ url, dir, base, env: (await forge(service)).git });
+    // The service's first connection makes its project page (issue #274), and
+    // a fetch that finds the base moved makes it again, so a merge made on the
+    // forge itself is in it too; a page that cannot be made never stops the fetch.
+    await pageOf(service, 'update').catch((error) => console.error(`cleared-v2: the project page could not be made (${error instanceof Error ? error.name : typeof error})`));
+    return checkout;
+  };
+  const pageOf = async (service: ServiceConfig | undefined, how: 'ensure' | 'update') => {
+    const { dir, base } = of(service);
+    const source = { dir, base, name: sessionService(service).name, env };
+    return how === 'ensure' ? ensureProjectPage(source) : updateProjectPage(source);
   };
 
   // The memory levels (decision 25). The workspace's memory is milestone 1's,
@@ -165,6 +176,22 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       await refresh(service);
     },
 
+    // After a merge: each service's base is fetched and its page made again
+    // when the base moved (issue #274). One service failing leaves the others.
+    async updateProjectPages() {
+      for (const service of workspace.services) {
+        if (!existsSync(service.dir)) continue;
+        const target = workspace.services.length === 1 && resolve(service.dir) === resolve(config.projectDir) ? undefined : service;
+        try {
+          const { dir, url, base } = of(target);
+          await projectCheckout({ url, dir, base, env: (await forge(target)).git });
+          await pageOf(target, 'update');
+        } catch (error) {
+          console.error(`cleared-v2: the project page of ${service.name} was not made again (${error instanceof Error ? error.name : typeof error})`);
+        }
+      }
+    },
+
     // The author's first call clones or fetches the project; the reviewer
     // works in the checkout that exists. A service of a workspace of several
     // has its checkout under <workdirs>/<ticket>/<service>, on the same branch
@@ -184,10 +211,15 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       // session on another service may be the first to need.
       if (role === 'author' && resolve(own.dir) !== resolve(config.projectDir)) await refresh().catch(() => undefined);
       if (role === 'author') for (const provider of providers(own, ticket)) if (provider.dir !== own.dir) await refresh(provider).catch(() => undefined);
+      let page = readProjectPage(env, own.name);
+      if (page === null) page = await pageOf(service, 'ensure').then(() => readProjectPage(env, own.name), () => null);
       const read = await readLeveledBriefing({ ...memory, role, ticket: { id: ticket.id, title: ticket.title, body: ticket.body }, levels: levelsOf(own, ticket) });
       const lessons = workspace.services.length > 1 ? { service: ownLevel(own) ? own.name : null, contract: lessonContract(own)?.name ?? null } : undefined;
-      await writeBriefing({ project: dir, base, workdir }, read.workspace, { levels: read.levels, ...(lessons ? { lessons } : {}) });
-      return { workdir, briefing: flatBriefing(read) };
+      await writeBriefing({ project: dir, base, workdir }, read.workspace, { levels: read.levels, ...(lessons ? { lessons } : {}), ...(page ? { page: { service: own.name, text: page } } : {}) });
+      // The project's own committed page is the contract's page; the
+      // generated one stands in when it has none.
+      const flat = flatBriefing(read);
+      return { workdir, briefing: page && !flat.projectPage.trim() ? { ...flat, projectPage: page } : flat };
     },
 
     // The tip of the checkout, from its files (issue #272).

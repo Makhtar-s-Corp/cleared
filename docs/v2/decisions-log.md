@@ -4754,3 +4754,29 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **Resources.** No Docker object, no network, no tunnel, no port. Fakes only.
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-cursor-followups`.
+
+## 2026-10-24: a project page per service, kept up to date (the author's choices, lane `j3-project-page`, issue #274)
+
+**The need.** Issue #274, validated by the owner on 23 October: the context of a repository is rebuilt in every session. A page per service, made at its first connection, made again after each merge, and read by the sessions at their start. Matrix lines P101 to P105, checked free on `origin/v2` (ends at P87) and in the open pull requests: 311 holds P90 to P92, and 312 (the review follow-ups of the ledger's MCP server, issue #301) holds P95 to P100, so this lane starts at P101, not P100.
+
+**Decision.**
+1. **Where it lives: the state folder, not the repository.** `<state>/pages/<service>.md`. `lib/memory`'s `project` entry is the committed `docs/project.md`; writing there would be a commit and a push to the project. The page is Cleared's own, written beside itself then renamed, mode 0600. Not under `<state>/services/<name>/`, which only a memory level makes: two tests of milestone 1 pin that no such folder exists for the workspace's own checkout.
+2. **What it holds, read from the base branch only** (`git ls-tree` and `git show` on `refs/remotes/origin/<base>`): the package name, the README's first paragraph, the layout to two levels (60 entries), the `package.json` scripts, the safe commands of `.cleared/agents.conf`, and the last 15 first-parent subjects as the recent decisions. An untracked file of the checkout cannot reach it (test).
+3. **No secret (P102).** Files that can hold one are left out by name, even from the layout (`.env*`, keys and certificates, credentials, secrets, password and token files, `.npmrc`, `.netrc`); the text is then cleaned with `session/clean.ts` (the service's secret values, the guard's patterns) and a list of token shapes the guard does not name (the common forge, chat, cloud, registry and payment tokens, and JWTs) and a secret's name followed by its value. Each field (script, safe command, subject, README line) is cleaned on its own before it is formatted, since the guard's patterns for an assigned secret start at a line's beginning, which a field in the page no longer is; `.envrc` is denied too. The test commits an `.env`, an `.envrc`, a `config/.env.production`, a `.pem`, a README with a planted token, a commit subject with one, a script and a subject that set a secret of no known shape, and runs on the tracked files of `examples/guestbook`; it looks for them in the page and in the whole state folder.
+4. **First connection = the first fetch of the service's checkout** (`refresh` in `flow/effects.ts`, which every first use of a service goes through). The page is made if absent, and a later fetch makes it again only if the base moved (the page carries the base's sha; an unmoved base leaves the file untouched). So a merge made on the forge itself, or by a train, is in the page at the next fetch even if no hook ran. A page that cannot be made is logged and never stops the fetch or the briefing.
+5. **After a merge (P103).** `FlowEffects.updateProjectPages` (optional, so no fake changes), asked from the engine's `#emit` on `release_merged`, which the one-service merge and each merge of a train both emit; tracked by `settled()`, its failure logged and swallowed. It fetches each service's base and writes the page again only if the base moved (the page carries the base's sha). A queued or refused merge asks nothing.
+6. **Read at the start (P104).** `CLAUDE.md` gets `## Generated page of the service <name>`, quoted line by line as memory data like every other memory block, for the author and the reviewer. The contract's `projectPage` carries it only when the project commits no page of its own: the committed `docs/project.md` stays the contract's page. `renderBriefing` with no option is unchanged.
+7. **Size (P105).** At most 8 KiB.
+
+**A test of milestone 1 changed.** "a one-service workspace briefs its session as milestone 1 did, byte for byte" compared the whole `CLAUDE.md` with the fixture. It now compares the fixture's length as a prefix (milestone 1's text, unchanged) and checks that the one section added is the generated page. The fixture is untouched; the other test's `services` assertion needed no change because of decision 1.
+
+**Not done, and why.**
+- The lead's briefing (`lead/briefing.ts`) is not given the page: it builds a list of service lines of its own from `lib/memory`, and a second format for it is a decision of its own. The issue asks for the sessions' briefing.
+- No wiki, no editing, no screen (out of scope). The page is not yet shown in the app.
+- Commit subjects stand for decisions. A project that keeps a decisions folder gets it through `lib/memory` as before; the page does not read it.
+
+**Checks.** Tests written first and committed alone (`971d145`, rewritten before the pull request: its first version held a literal key marker the repository guard refused): 10 of 11 failed on the old code (the 11th, "a queued merge asks for no page", guards the old behaviour); the review round added 3 tests and a train test, and 12 of the 13 tests of the two files fail on `origin/v2`. `npm run typecheck`; `npm test` (1744 node tests: 1706 pass, 38 skipped, 0 fail; 260 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no network, no tunnel, no port. Sample repositories are local bare repositories in temporary folders; nothing is pushed.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-project-page`.
