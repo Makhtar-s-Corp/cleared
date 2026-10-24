@@ -62,6 +62,10 @@ export const CUSTOM_NAMES = [
   // resumed from a step, journaled on the session left and on the new one.
   'cleared.checkpoint',
   'cleared.replay',
+  // Milestone 3 (M4, lane j3-contract-notes): a note a step's session left
+  // for the ticket's other steps, and the notes a session was handed.
+  'cleared.step_note',
+  'cleared.step_notes_read',
   // Milestone 3 (B6.3, P152): an author's work handed to the other harness,
   // journaled by the flow on the session left and on the new one.
   'cleared.handed_over',
@@ -179,6 +183,13 @@ export type CustomValue = {
   // left (`from`) and the step (`seq`, the first event of the step's row),
   // the commit the new branch starts at, the new session (`to`), who asked
   // and the corrected instruction, cleaned. The same value on both sessions.
+  // A note a step's session left for the other steps of its ticket
+  // (flow/notes.ts), cleaned: `id` is `<session>:<n>`, `step` the position
+  // and `service` the service of the step that left it.
+  'cleared.step_note': { readonly id: string; readonly step: number; readonly service: string; readonly text: string };
+  // The notes a step's session was handed, by id: at its start or when it
+  // was reopened, so a note reaches a session once.
+  'cleared.step_notes_read': { readonly ids: readonly string[] };
   'cleared.replay': {
     readonly from: SessionId; readonly to: SessionId; readonly seq: number; readonly commit: string; readonly branch: string; readonly previous: string;
     readonly by: UserId; readonly message: string;

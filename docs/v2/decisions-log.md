@@ -4911,6 +4911,26 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-handover-codex`.
 
+## 2026-10-24: notes between the steps, the contract step reopened, the handover filed in the right contract (the author's choices, lane `j3-contract-notes`, M4, P160 to P163)
+
+**The need.** M4 of the multi-repository complement (item 4) was `partial`: the author-reviewer channel existed (P65), and three things were left: notes between the sessions of a ticket's steps, a contract change that reopens the contract step with the human's approval, and a handover that feeds the contract's memory. Tests were written first; each defect test fails on `23f8cc8` (checked on a copy of that tree with the new tests laid over it).
+
+**Decision.**
+1. **A changed contract reopens the contract step (P160), and this replaces a rule of lane 23.** Lane 23 put the ticket back (`step_failed`) when a service step ended with the validated contract changed, and `test/flow/steps.test.ts` pinned it. That test is rewritten, not doubled. The change is now a new `contract` item on the contract step (the step goes back to `validating` with the new file and blob), so Approve and Send back work unchanged and a Send back resumes the contract step's own session. The changing step waits, the ticket stays In Progress, a comment says what happened. The snapshot round is counted over the contract step's items, so a reopened contract never overwrites an earlier validated folder.
+2. **What ran on the old contract runs again (P162).** On reopening, the ticket's other running sessions are stopped and their steps wait (they were built against a contract nobody approved any more). On Approve, the `done` steps that come after the contract step, directly or through others, wait again. The first approval has no such step, so it is unchanged.
+3. **Notes (P161): a host tool, handed over at the next turn that exists.** `leave_note` is offered to the step sessions of a ticket on several services, whatever `authorTools` says, and not on a one-service ticket (its sessions get no tool, as before). A note is cleaned, journaled on the sender's session, and said to the lead as a flow event (`step_note`, a line of its thread). It is handed to a session when that session starts for another step (its prompt) or is reopened (the message that reopens it), as reference data, once per session. A running session is not interrupted: its container has no channel for a message mid-turn, and the review channel (P65) has the same limit. The seen notes are journaled on the receiver (`cleared.step_notes_read`) rather than kept in memory, so a restart does not hand them twice.
+4. **The contract a handover is filed in (P163).** Lane 19 filed `## Lessons for the contract` in the session's own contract, else the first one it consumes. For a consumer of two providers whose ticket changes the second, the lesson went to the first. The engine now tells `captureHandover` which contract the step's prompt names; the lesson and the knowledge module's `## Decisions for the contract` follow it. With no contract named (the integration step, a one-service ticket) the rule is the old one, pinned by a test that passes on both.
+
+**Left as it was, and why.** The contract memory level itself (lane 19) is unchanged. A note is not a lesson: it lives with the ticket and is not filed in any memory; the lessons and decisions sections of the handover are the path to memory, as before. A service step that changes the contract and another file is allowed as before (the contract step's "contract file only" rule stays for the contract step).
+
+**To follow up (not done here).** The session screen does not yet show the notes (they are in the ledger as `cleared.step_note`, the lead sees them); a screen with its French and English words is a lane of its own. The two other callers of `captureHandover` (a variant's author and the author reopened after a review) still file contract lessons with the first-contract rule on a ticket of several services; they name no step.
+
+**Checks.** `npm run typecheck`; `npm test`; `npm run guard -- --base origin/v2`; the results are in the pull request.
+
+**Resources.** No Docker object, no image, no network call beyond `npm ci` and `gh`, no port opened, no tunnel, no secret.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j3-contract-notes`.
+
 ## 2026-10-24: Batches of tickets (the author's choices, lane `j3-batch-sessions`, requirement C6)
 
 **The need.** Requirement C6, "Multiple sessions in batches" (milestone 3, line `later` until now): several tickets launched at once, each its own session, without going past the lanes the Consumption screen allows or the week stop of the subscription. Matrix lines C6 (filled) and P140 to P144, checked free on `origin/v2` (P120 to P125 are #316's and P130 to P135 #315's, both merged).
@@ -4929,7 +4949,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** The tests were committed alone in `0b009a9`, before any code: there, `test/flow/batch.test.ts`, `test/flow/batch-routes.test.ts` and `app/web/test/tower-batch.test.tsx` do not load (`flow/batch.ts` and the model's exports do not exist), the route counts of `test/api/types.test.ts`, `test/flow/api.test.ts` and `test/flow/modules.test.ts` fail, and the browser test calls `lanes` and `quota`, which the fixtures did not have.
 
-**Checks** (after merging `origin/v2` at `5002ee5`, pull requests 316, 318 and 319). `npm run typecheck`; `npm run build`. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1848 tests, 1845 pass, 2 skipped, 1 fails. The 278 Vitest tests pass. The batch browser test passes in French and in English.
+**Checks** (after merging `origin/v2` at `3d5122d`, pull requests 316, 318, 319 and 320). `npm run typecheck`; `npm run build`. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1848 tests, 1845 pass, 2 skipped, 1 fails. The 278 Vitest tests pass. The batch browser test passes in French and in English.
 - The one failure is `app/test/notify/browser.test.ts` ("a headless browser registers the worker...", a 30-second timeout). It fails the same way on `origin/v2` in this environment, checked in a temporary worktree, as the `j3-reject-close` entry said.
 - `app/test/foundation/budget-browser.test.ts` ("twenty switches") passes in this run. An earlier full run, with all files at once, measured 112 ms at p95 against its 100 ms budget.
 

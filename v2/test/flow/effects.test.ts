@@ -169,7 +169,7 @@ const HANDOVER = ['## Done', 'The severity.', '## Tried and failed, and why', 'N
 
 // The proof's workspace: the guestbook first, consuming the filter API,
 // which provides the contract.
-function twoServices() {
+function twoServices(withRules = false) {
   const root = tempDir('flow-levels');
   const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
   delete env.ORCH_LEDGER;
@@ -177,14 +177,15 @@ function twoServices() {
     name, kind: 'repository', repo: `example-org/${name}`, url: remote(files), base: 'main', path: null, dir: join(root, 'services', name, 'checkout'),
     healthUrl: null, sensitivity: 'normal', consumes: [], run: null, contract: null, brokerSocket: null, brokerState: null, ...more,
   });
-  const guestbook = service('guestbook', { '.cleared/agents.conf': CONF, ...MEMORY_FILES }, { consumes: ['filter-api'] });
+  const guestbook = service('guestbook', { '.cleared/agents.conf': CONF, ...MEMORY_FILES }, { consumes: withRules ? ['filter-api', 'rules-api'] : ['filter-api'] });
   const filter = service('filter-api', {
     '.cleared/agents.conf': CONF, 'docs/project.md': '# Filter API\nIt checks the words of an entry.\n',
     'contract/openapi.yaml': 'openapi: 3.0.3\n', 'contract/openapi.md': '# The check contract\nPOST /check answers a severity.\n',
   }, { contract: { format: 'openapi', path: 'contract/openapi.yaml' } });
-  const workspace: WorkspaceConfig = { id: 'guestbook', name: 'Guestbook and filter API', services: [guestbook, filter], file: join(root, 'workspace.conf') };
+  const rules = service('rules-api', { '.cleared/agents.conf': CONF, 'contract/rules.yaml': 'openapi: 3.0.3\n' }, { contract: { format: 'openapi', path: 'contract/rules.yaml' } });
+  const workspace: WorkspaceConfig = { id: 'guestbook', name: 'Guestbook and filter API', services: withRules ? [guestbook, filter, rules] : [guestbook, filter], file: join(root, 'workspace.conf') };
   const config = { ...CONFIG, projectDir: guestbook.dir, repoUrl: guestbook.url, workdirRoot: join(root, 'work'), workspace };
-  return { root, env, guestbook, filter, flow: realEffects(config, { env }) };
+  return { root, env, guestbook, filter, rules, flow: realEffects(config, { env }) };
 }
 
 const ticketOn = (...names: string[]): Ticket => ({ ...MEMORY_TICKET, id: 'LOCAL-2', services: names.map((name) => ({ name, branch: 'cleared/LOCAL-2', pr: null, state: 'open' as const })) });
@@ -238,4 +239,32 @@ test('a session on the service whose checkout is the workspace\'s files its serv
   db.close();
   assert.deepEqual(filed, ['The guestbook renders on the server.']);
   assert.equal(existsSync(join(env.CLEARED_STATE_DIR as string, 'services', 'guestbook')), false);
+});
+
+// Lane j3-contract-notes (P163): a service that consumes two providers files its
+// lessons for the contract in the one its step builds against, not the first.
+test('a step\'s handover files its contract lessons in the memory of the contract the step names, not the first the service consumes', async () => {
+  const { env, flow, guestbook } = twoServices(true);
+  const { workdir } = await flow.prepareWorkdir({ ticket: ticketOn('guestbook'), role: 'author', service: guestbook });
+  writeFileSync(join(workdir, 'HANDOVER.md'), `${HANDOVER}${LESSON_HEADINGS.contract}\nA rule is a word and a severity.\n`);
+  await flow.captureHandover({ workdir, role: 'author', model: 'claude-opus-5-5', ticket: 'LOCAL-2', sessionId: '3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b', contract: 'rules-api' });
+  const lessons = (file: string) => {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try { return db.prepare("SELECT content FROM memory_entries WHERE type = 'lesson' AND source_who LIKE 'agent:%'").all().map((row) => row.content); }
+    finally { db.close(); }
+  };
+  const state = env.CLEARED_STATE_DIR as string;
+  assert.deepEqual(lessons(join(state, 'contracts', 'rules-api', 'memory', 'ledger.db')), ['A rule is a word and a severity.']);
+  assert.equal(existsSync(join(state, 'contracts', 'filter-api', 'memory', 'ledger.db')) && lessons(join(state, 'contracts', 'filter-api', 'memory', 'ledger.db')).length > 0, false, 'not the first provider\'s');
+});
+
+test('a handover that names no contract keeps the first contract the service has or consumes', async () => {
+  const { env, flow, guestbook } = twoServices(true);
+  const { workdir } = await flow.prepareWorkdir({ ticket: ticketOn('guestbook'), role: 'author', service: guestbook });
+  writeFileSync(join(workdir, 'HANDOVER.md'), `${HANDOVER}${LESSON_HEADINGS.contract}\nA severity is low or high.\n`);
+  await flow.captureHandover({ workdir, role: 'author', model: 'claude-opus-5-5', ticket: 'LOCAL-2', sessionId: '4f5a6b7c-8d9e-4f0a-9b2c-3d4e5f6a7b8c' });
+  const db = new DatabaseSync(join(env.CLEARED_STATE_DIR as string, 'contracts', 'filter-api', 'memory', 'ledger.db'), { readOnly: true });
+  const filed = db.prepare("SELECT content FROM memory_entries WHERE type = 'lesson' AND source_who LIKE 'agent:%'").all().map((row) => row.content);
+  db.close();
+  assert.deepEqual(filed, ['A severity is low or high.']);
 });

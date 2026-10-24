@@ -110,6 +110,7 @@ import { TrainStore, view, type Stop } from '../release/store.ts';
 import { TrainRunner } from '../release/train.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import { AUTHOR_TOOLS, bindAuthorTools, readChangesReport, readSessionPlan } from './author-tools.ts';
+import { STEP_NOTE_TOOL, notesLeft, notesRead, notesText, readStepNote, type StepNote } from './notes.ts';
 import { PLAN_GO_MINUTES, QUESTION_LEAD_MINUTES, QUESTION_TIMEOUT_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
 import { answerLines, asked, defaultAnswers } from './questions.ts';
 import { duration } from '../lead/plans/estimates.ts';
@@ -144,7 +145,8 @@ export type FlowEffects = {
   // or <workdirs>/<ticket>.variant-<round>-<position> for a variant (flow/variants.ts variantFolder).
   // `branch`: the branch of a ticket resumed from a step (issue #272); ticketBranch's by default.
   prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig; readonly variant?: VariantKey; readonly branch?: string }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
-  captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
+  // `contract`: the service whose contract a step builds against, when its session has one: its lessons for the contract are filed there.
+  captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId; readonly contract?: string }): Promise<string | null>;
   publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string; readonly service?: ServiceConfig }): Promise<Published>;
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
@@ -1165,15 +1167,18 @@ export class FlowEngine {
     const contract = this.#stepContract(step, steps);
     const tools = this.config.authorTools === true;
     const note = this.#origins.get(id)?.note;
+    const handed = this.#notesFor(step, new Set());
     const prompt = [
       authorPrompt(ticket, { plan: tools, report: tools }),
       stepPrompt({ kind: step.kind, service: step.service, position: step.position, count, ...(contract ? { contract } : {}), ...(step.note ? { note: step.note } : {}) }),
+      ...(handed.length > 0 ? [notesText(handed, (n) => this.#noteSource(id, n))] : []),
       ...(note ? [note] : []),
     ].join('\n\n');
     const planned = this.#effects.siblings ? await this.#effects.siblings({ ticket: id, service, workdir: prepared.workdir }) : undefined;
     const siblings = planned ? stepSiblings(planned, { kind: step.kind, own: service.name, validated, ...(settings.serviceUrls ? { urls: settings.serviceUrls } : {}) }) : undefined;
     const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined,
-      { service: service.name, ...(siblings ? { siblings } : {}) });
+      { service: service.name, ...(siblings ? { siblings } : {}), ...(this.#several ? { note: this.#noteTool(ticket.id, step) } : {}) });
+    if (handed.length > 0) this.#journal({ id: live.id, ticket: id, project: this.config.project }, { type: 'CUSTOM', name: 'cleared.step_notes_read', value: { ids: handed.map((n) => n.id) } });
     this.#steps.update(step.id, { state: 'running', session: live.id });
     this.#stepOf.set(live.id, step.id);
     const session = { id: live.id, ticket: id, project: this.config.project };
@@ -1183,6 +1188,39 @@ export class FlowEngine {
     this.#snapshot(live.id, id);
     if (by) this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: id, by, origin: this.#origins.get(id) ?? null, session: live.id });
     return live;
+  }
+
+  // ---- notes between the steps' sessions (M4) -----------------------------------
+
+  // The tool a step's session leaves a note with: journaled, cleaned, on
+  // the session, and said to the lead.
+  #noteTool(ticket: TicketId, step: Step): HostTool {
+    return {
+      ...STEP_NOTE_TOOL, inputSchema: STEP_NOTE_TOOL.inputSchema,
+      handle: async (input, context) => {
+        const text = this.#clean(readStepNote(input));
+        const n = notesLeft(this.#store.events.after(context.sessionId)).length + 1;
+        const note: StepNote = { id: `${context.sessionId}:${n}`, step: step.position, service: step.service, text };
+        this.#journal({ id: context.sessionId, ticket, project: this.config.project }, { type: 'CUSTOM', name: 'cleared.step_note', value: note });
+        this.#emit({ type: 'step_note', at: this.#at(), project: this.config.project, ticket, session: context.sessionId, step: step.position, service: step.service, text });
+        return 'Your note is kept: the sessions of the ticket\'s other steps are handed it at their next turn.';
+      },
+    };
+  }
+
+  // The notes the sessions of the ticket's other steps left, in step order,
+  // that `seen` does not hold.
+  #notesFor(step: Step, seen: ReadonlySet<string>): StepNote[] {
+    return this.#steps.list(step.ticket)
+      .filter((other) => other.id !== step.id)
+      .flatMap((other) => other.sessions.flatMap((session) => notesLeft(this.#store.events.after(session))))
+      .filter((note) => !seen.has(note.id));
+  }
+
+  // How a note's step is said: "step 1 of 4 (the contract step of filter-api)".
+  #noteSource(ticket: TicketId, note: StepNote): string {
+    const steps = this.#steps.list(ticket);
+    return stepName({ position: note.step, kind: steps.find((s) => s.position === note.step)?.kind ?? 'service', service: note.service }, steps.length);
   }
 
   // The contract a step's prompt names: its own for the contract step and
@@ -1212,7 +1250,9 @@ export class FlowEngine {
     this.#stepOf.delete(live.id);
     this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: live.id });
     try {
-      await this.#effects.captureHandover({ workdir: live.input.workdir, role: 'author', model: live.input.model, ticket: id, sessionId: live.id });
+      // The contract its step builds against (M4): its lessons for the contract are filed in that one's memory.
+      const builds = this.#several ? this.#stepContract(step, this.#steps.list(id))?.service : undefined;
+      await this.#effects.captureHandover({ workdir: live.input.workdir, role: 'author', model: live.input.model, ticket: id, sessionId: live.id, ...(builds ? { contract: builds } : {}) });
     } catch (error) {
       await this.registry.ticketStore.comment(id, this.#clean(`The author's handover could not be stored: ${name(error)}`), SERVICE).catch(() => undefined);
     }
@@ -1222,12 +1262,14 @@ export class FlowEngine {
     let read: StepChanges | undefined;
     if (step.kind === 'contract' || validated !== null) {
       if (!this.#effects.stepChanges) return this.#failStep(step, 'what it changed cannot be read: the flow has no reader of a step\'s branch');
+      // The round counts the contract step's items, whichever step proposes the next (a service step may reopen it).
+      const owner = step.kind === 'contract' ? step : steps.find((s) => s.kind === 'contract' && s.service === step.service) as Step;
       const proposed = [...this.inbox.contracts({ ticket: id }), ...this.inbox.contracts({ ticket: id, state: 'handled' })];
-      const round = proposed.filter((item) => item.step === step.id).length + 1;
+      const round = proposed.filter((item) => item.step === owner.id).length + 1;
       try {
         read = await this.#effects.stepChanges({
           ticket: id, service: this.#service(step.service), workdir: live.input.workdir,
-          ...(step.kind === 'contract' ? { snapshot: posix.join(this.config.workdirRoot, id, '.validated', `step-${step.position}-${round}`) } : {}),
+          snapshot: posix.join(this.config.workdirRoot, id, '.validated', `step-${owner.position}-${round}`),
         });
       } catch (error) {
         return this.#failStep(step, `what it changed could not be read: ${name(error)}`);
@@ -1249,11 +1291,32 @@ export class FlowEngine {
         return;
       }
     } else {
-      if (validated !== null && read?.contract && read.contract.blob !== validated)
-        return this.#failStep(step, `it changed the validated contract ${read.contract.path} of ${step.service}. A change to the contract goes through the contract step: take it off the ticket branch before the ticket starts again.`);
+      if (validated !== null && read?.contract && read.contract.blob !== validated) return this.#reopenContract(live, step, steps, read.contract, cost, minutes);
       this.#steps.update(step.id, { state: 'done', cost, minutes });
     }
     await this.#runSteps(id);
+  }
+
+  // A service step changed the contract that was validated (M4): the change
+  // goes through the contract step again, with the owner's approval, as a
+  // new contract item on that step. The ticket is not put back: the other
+  // sessions ran on the old contract, so they are stopped and wait; the step
+  // that asked waits as the contract step does, and every step that ran on
+  // the old contract runs again once the new one is approved
+  // (approveContract).
+  async #reopenContract(live: Live, step: Step, steps: readonly Step[], contract: NonNullable<StepChanges['contract']>, cost: number | null, minutes: number): Promise<void> {
+    const { ticket: id, project } = live.input;
+    const owner = steps.find((s) => s.kind === 'contract' && s.service === step.service) as Step;
+    const note = this.#clean(`${this.#stepNote(step, 'it changed the validated contract')} ${contract.path} of ${step.service}. The change goes through the contract step again, and waits for the owner's approval.`);
+    for (const other of [...this.#live.values()].filter((l) => l.input.ticket === id && l.id !== live.id)) await this.#close(other, 'stopped', note);
+    this.#steps.hold(id);
+    this.#steps.update(owner.id, { state: 'validating', contract: contract.snapshot, blob: contract.blob });
+    this.#steps.update(step.id, {
+      state: 'waiting', cost, minutes,
+      note: `You changed the contract ${contract.path} of ${step.service}. The change was sent to the owner as a new proposal of the contract step: when it is validated, build against the contract as validated.`,
+    });
+    this.inbox.addContract({ ticket: id, project, sessionId: live.id, step: owner.id, service: owner.service, path: contract.path, diff: this.#clean(contract.diff) });
+    await this.registry.ticketStore.comment(id, note, SERVICE).catch(() => undefined);
   }
 
   // Every step is done: the ticket goes to review, once.
@@ -1330,6 +1393,8 @@ export class FlowEngine {
     const step = this.#contractItem(id);
     if (!this.inbox.handleContract(id, by, { decision: 'approve' })) throw new FlowError('conflict', `contract item ${id} is already answered`);
     this.#steps.update(step.id, { state: 'done' });
+    // A contract reopened after steps ran on the old one (#reopenContract): those steps run again against the new.
+    this.#steps.rerun(step.ticket, step.position);
     this.#background(this.#runSteps(step.ticket), step.ticket);
   }
 
@@ -1450,8 +1515,11 @@ export class FlowEngine {
     this.#step({ id: live.id, ticket: step.ticket, project: live.input.project }, 'STEP_STARTED', 'author');
     this.#snapshot(live.id, step.ticket);
     this.#supervise(live, lastSeq);
+    // The notes of the other steps this session has not read (M4).
+    const handed = this.#notesFor(step, notesRead(this.#store.events.after(step.session)));
     try {
-      await handle.send({ text, by });
+      await handle.send({ text: handed.length > 0 ? `${text}\n\n${notesText(handed, (n) => this.#noteSource(step.ticket, n))}` : text, by });
+      if (handed.length > 0) this.#journal({ id: step.session, ticket: step.ticket, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.step_notes_read', value: { ids: handed.map((n) => n.id) } });
       return true;
     } catch {
       live.closed = true;
@@ -1820,10 +1888,11 @@ export class FlowEngine {
   // `author`: the author's host tools, with its session plan to propose
   // first (`plan`), or not again after a review (`report`, lane 17).
   // `step`: the service and the siblings of a step's session (lane 23).
-  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report', step?: { readonly service: string; readonly siblings?: readonly SiblingSpec[] }, harness: Harness = HARNESS): Promise<Live> {
+  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report', step?: { readonly service: string; readonly siblings?: readonly SiblingSpec[]; readonly note?: HostTool }, harness: Harness = HARNESS): Promise<Live> {
     // A train ticket's session works on the first service the ticket names (decision 20, lane 15's runtime), a step's on its own.
     const service = step?.service ?? (this.#several ? this.#servicesOf(ticket)[0]?.name : undefined);
-    const tools = author ? this.#authorTools(ticket, author === 'plan') : undefined;
+    const given = [...(author ? this.#authorTools(ticket, author === 'plan') : []), ...(step?.note ? [step.note] : [])];
+    const tools = given.length > 0 ? given : undefined;
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness, model, workdir, briefing,
       policy: this.#policy(role, settings, tools), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
