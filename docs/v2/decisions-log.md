@@ -4582,11 +4582,39 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - Resources: no Docker command, network, port, account or model call.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-variants`.
 
+## 2026-10-24: automatic repair of a pull request's failed checks (the author's choices, lane `j3-ci-repair`, issue #273)
+
+**The need.** Issue #273 (validated by the owner on 2026-10-23 at 11:51, matrix P58, delivered as P77) asks that a failed CI on a pull request Cleared opened start a repair session on its own, which pushes a commit and reports the result in the inbox. At most 2 attempts, never on main, tested with a simulated CI. These are the author's choices, not the owner's decisions.
+
+**Decision.**
+1. **The trigger is the release card.** A pull request Cleared opened is the one a release card in the inbox shows: the flow already reads its checks once a minute while the ticket waits for approval. A failed reading starts the repair (`#checksFailed`, `v2/src/flow/engine.ts`).
+   - The failure must be read on the card's own head. The host reads `gh pr view --json headRefOid,statusCheckRollup` (`ciFailures`, `v2/src/flow/effects.ts`). Right after a push the forge can still report the head before it; that reading starts nothing, and the next minute reads again. A reading that fails waits the same way.
+   - The repair runs beside the tick, which goes on: resuming an author starts its container. The ticket is marked before the first wait, so two readings never start two repairs.
+   - A train (a ticket of several services) is not repaired: its checks are per service and its card lands per service. That is more than this issue's effort.
+2. **The repair is the existing path, not a new one.**
+   - The card is handled first, so the red head can no longer be approved.
+   - The ticket's last author is reopened on the ticket branch: resumed, else a new author given the ticket's prompt. It is told the attempt, the failed checks and the last 60 lines of each GitHub Actions job's failed log (`gh run view --job <id> --log-failed`, the first 5 checks), all through the service's cleaner and marked as data. It is told to fix the cause, not to skip, delete or weaken the check, and to leave the CI's configuration alone.
+   - Its commit goes through the review again. The card says "Reviewed by" and the approval is bound to the head it shows, so an unreviewed commit would make both false. The repair is a new flow of the ticket: its review counts from round 1, so a ticket that used its rounds before still gets one.
+   - Then the publish, as for any change: the ticket branch only, pushed without force, the open pull request reused, the base branch refused (`v2/src/workspace/publish.ts`, steps 1 and 3). A new card follows, checks pending, carrying the attempt.
+3. **At most 2 attempts** (`CI_REPAIR_ATTEMPTS`, `v2/src/flow/ci-repair.ts`). The attempt is kept in the card's payload (`ReleaseItem.repair`: attempt, limit, state, the failed checks' names) and the next card inherits it. It holds across a restart without a new table. A person who sends the ticket back starts a fresh flow, whose card has no repair: the count starts again.
+   - Red again after the second attempt: the card stays, says `gave_up`, and the owner decides. Nothing more is tried.
+   - Green: the card says `repaired`. A card that gave up turns `repaired` too when the owner runs a job again and its head passes.
+4. **Never on main.** Besides the publish's own refusal, a ticket branch that is the service's base or `main` (or `master`) is never repaired: the card says `refused`, once.
+5. **The result in the inbox.** The card's detail has a fact, "Repair of the checks", for each state: started (on the handled card), published, repaired, still failing, refused. The list's line says when the attempts are spent. Both are in the inbox's catalog in French and English. Each step is also a comment on the ticket and a `ci_repair` event on the bus, which the lead reads as a line.
+
+**Consequences.**
+- No new table, no new setting, no new session event name.
+- `#reopenAuthor` lost its resume-else-new part to `#reopenWith`, which the repair shares. The review channel's behaviour is unchanged, and its tests pass as before.
+- The simulated CI (`simulatedCi`, `v2/test/flow/support.ts`) is keyed by head: each publish pushes a new head and its checks are scripted. Nothing reaches GitHub. `ciFailures` itself never ran against GitHub. Its parsers are tested on objects written to gh's documented JSON fields, not recorded from an account.
+- Known limit: an approval clicked while the checks are red, and still in its undo window when the repair starts, is not cancelled by the repair. The lock still refuses to merge a red head.
+- Resources: no Docker object, no network, no tunnel, no port. The tests run in memory.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-ci-repair`.
+
 ## 2026-10-24: Resume from here, a ticket started again from a step of its author's thread (the author's choices, lane `j3-replay`)
 
 **The need.** Issue #272, approved by the owner on 2026-10-23 at 11:51 (P57, Devin's item 14). A session that went the wrong way had to start again from the beginning. The criteria: each step of the thread offers "Reprendre d'ici", the branch goes back to the step's commit, the old continuation stays readable, a service test and a browser test.
 
-**Decision.** Matrix line P76, checked free on `origin/v2` (it ends at P75 since pull request 305 merged; pull request 304 took P72). P57 and C14 point to it.
+**Decision.** Matrix line P76, checked free on `origin/v2` (after pull requests 305 and 307 it holds P75 and P77, and P76 is still free; pull request 304 took P72). P57 and C14 point to it.
 
 1. **A step is a row of the author's worklog** (a command, an edit, reads, a message of the review channel), the rows `Session.tsx` already draws as steps that open their detail. A ticket's `ticket_steps` are not used: a one-service ticket has only one.
 2. **The step's commit is journaled, never guessed** (`cleared.checkpoint`, `flow/replay.ts`).
@@ -4604,7 +4632,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
      - renames the checkout aside to `<workdirs>/.<ticket>.before-r<n>`, never deleting it;
      - makes a new checkout on `cleared/<ticket>.r<n>` that fetches only the step's commit (`ticketCheckout`'s new `start`). Its base for the hooks stays the service's base.
    - A new author starts there, through the same path as a start (`#startAuthor`). Its prompt is the ticket's, then where its checkout stands, then the owner's corrected instruction. The ticket keeps its plan item, its budget and its one step.
-   - `ticket_replays` keeps the branch. The reviewer, the publish and a start after a restart use the newest resume branch (`#branchOf`).
+   - `ticket_replays` keeps the branch. The reviewer, the publish and a start after a restart use the newest resume branch (`#branchOf`). So does the automatic repair of failed checks (P77, pull request 307): its base-branch check and the branch it names to the author. That use has no test of its own: the repair's tests run on a ticket's own branch.
    - Both sessions get `cleared.replay`: the session left says where the ticket went on, the new one where it came from, with the instruction folded.
 4. **Nothing is rewritten or forced.** A ticket id has no dot, so `cleared/<ticket>.r<n>` can be no ticket's own branch, and it does not sit under `cleared/<ticket>/`, which git could not hold beside `cleared/<ticket>`. The old branch stays as it was in three places: the checkout set aside, the service's ref, and the forge if it was pushed.
 5. **The old continuation stays readable.** The old session keeps every event. In the ticket's view it is folded under its author, as any earlier session is, and opens to every row. Its steps from the one resumed from onwards no longer offer Resume from here, since the branch does not hold them. Its earlier steps still do.
@@ -4625,7 +4653,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The old session's Editor reads the ticket's checkout path, which is now the new one. Its own files are in the checkout set aside and in its branch.
 - The browser test runs on the session fixture, whose route stands in for the service's: the flow and the real git are proven by `test/flow/replay.test.ts`.
 
-**Checks.** On this server: `npm run typecheck`; `npm test` after the merge of origin/v2 (pull request 305) (1668 node tests pass, 38 skipped, 0 fail; 256 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run, and after the last change the three session files passed again (7 of 7). The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
+**Checks.** On this server: `npm run typecheck`; `npm test` after the merge of origin/v2 (pull requests 305 and 307) (1679 node tests pass, 38 skipped, 0 fail; 260 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run, and after the last change the three session files passed again (7 of 7). The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
 
 **Resources.** No Docker object, no network, no tunnel, no port but the tests' loopback ones the system picks. The git tests run in temporary folders.
 

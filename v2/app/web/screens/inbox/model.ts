@@ -148,7 +148,7 @@ export function chosen(view: InboxView): Item | undefined {
 // contract's or a knowledge item's, what the owner did with it; variants', each one's state.
 export function detailKey(v: InboxView): string {
   const item = chosen(v);
-  const checks = item?.kind === 'release' ? item.pr.checks : undefined;
+  const checks = item?.kind === 'release' ? [item.pr.checks, item.repair?.state ?? null, item.repair?.attempt ?? null] : undefined;
   const plan = item?.kind === 'plan' ? planOf(v, item) : undefined;
   const moved = plan ? [plan.state, plan.items.map((i) => [i.state, i.ticket])] : undefined;
   const train = item?.kind === 'release' && item.train ? [item.train.state, item.train.services.map((s) => [s.state, s.at, s.note ?? null])] : undefined;
@@ -565,6 +565,7 @@ export function itemLine(item: Item, view: InboxView, t: Translate): string {
       // The ticket first, as the other kinds: two releases can share a title;
       // a train names its number of services after it.
       const ticket = item.train ? t('train_ticket', { ticket: item.ticket, n: item.train.services.length }) : item.ticket;
+      if (item.repair?.state === 'gave_up') return t('release_repair_gave_up', { ticket, n: item.repair.attempt });
       return reviewer ? t(`release_reviewed_${checks}`, { ticket, model: family(reviewer.model) }) : t(`release_unreviewed_${checks}`, { ticket });
     }
     case 'permission': {
@@ -666,6 +667,15 @@ export function sessionsLine(item: ReleaseItem, t: Translate): string {
     if (s.rounds === undefined) return t('reviewed', values);
     return s.rounds === 1 ? t('reviewed_rounds_one', values) : t('reviewed_rounds_other', { ...values, n: s.rounds });
   }).join(' · ');
+}
+
+// Where the repair of the release's failed checks stands (issue #273);
+// nothing before a check failed.
+export function repairLine(item: ReleaseItem, t: Translate): string | undefined {
+  const { repair } = item;
+  if (!repair) return undefined;
+  const checks = repair.checks.length > 0 ? repair.checks.join(', ') : t('repair_checks_unnamed');
+  return t(`repair_${repair.state}`, { n: repair.attempt, limit: repair.limit, checks });
 }
 
 // Who asks, and for how long its session has been paused; a handled request pauses nothing.

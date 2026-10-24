@@ -2,6 +2,7 @@
 // rules, which head every generation's briefing, and the texts of the
 // turns the service sends it. Adapted from prompts/talk.md and the rules of
 // prompts/release-live.md that still apply, with the plans' rules (lane 7).
+import { repairComment } from '../flow/ci-repair.ts';
 import type { FlowEvent } from '../flow/events.ts';
 import type { Question } from '../session/events.ts';
 
@@ -109,6 +110,7 @@ export function describeFlowEvent(event: FlowEvent): string | undefined {
     case 'release_unhealthy': return `${at}: pull request #${event.pr} is live but not healthy: ${event.note}`;
     case 'rolled_back': return `${at}: pull request #${event.pr} was rolled back: ${event.note}`;
     case 'ticket_put_back': return `${at}: back in Todo (${event.reason}): ${event.note}`;
+    case 'ci_repair': return `${at}: ${repairComment(event, event.pr)}`;
     case 'question_raised': return `${at}: the team asked a question (session ${event.session}, request ${event.requestId}).`;
     case 'request_answered': return event.item.startsWith('question:') ? `${at}: the team's question ${event.requestId} was answered by ${event.by}.` : undefined;
     case 'session_stopped': return `${at}: the ${event.role} session ${event.session} ${event.phase}: ${event.reason || 'no reason given'}`;

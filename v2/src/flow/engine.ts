@@ -78,8 +78,17 @@
 // the inbox compares them; the owner's choice stops the others, releases
 // their containers and networks at once, and the review runs on the chosen
 // one's checkout, which is the ticket's from then on.
+//
+// A release whose checks fail is repaired (issue #273, flow/ci-repair.ts):
+// a failure read on the card's own head, while a one-service ticket waits
+// for the owner's approval, handles the card and reopens the ticket's
+// author on the ticket branch with what failed, as a new flow;
+// its commit goes through the review and the publish as any change, and
+// the new card carries the attempt. At most CI_REPAIR_ATTEMPTS attempts;
+// then the card says the checks still fail and the owner decides. A train
+// is not repaired.
 import { posix } from 'node:path';
-import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type InboxItem, type PermissionItem, type QuestionItem, type QuestionTimeout, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
+import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type QuestionItem, type QuestionTimeout, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -111,6 +120,7 @@ import type { LeverReader } from '../consumption/levers.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
+import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { ReplayStore, replayPrompt, stepCommit, type Checkpoint, type Replay } from './replay.ts';
@@ -138,6 +148,10 @@ export type FlowEffects = {
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
   prChecks(pr: number, service?: ServiceConfig): Promise<ReleaseItem['pr']['checks']>;   // the pull request's checks on the forge now
+  // The head the pull request's checks ran on and the ones that failed,
+  // with their logs' last lines when the forge gives them (issue #273).
+  // Absent: a repair starts on the checks' state alone, told nothing of them.
+  ciFailures?(input: { readonly pr: number; readonly service?: ServiceConfig }): Promise<CiFailures>;
   // The lock's merge (`request_release` without --ask), after the human's approval.
   mergeRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
   // What a published head changes against the base: its files, and the diff
@@ -327,6 +341,8 @@ export class FlowEngine {
   // inbox, and the answers given since are told to them when they resume.
   #dormant = new Map<SessionId, Live>();
   #told = new Map<SessionId, string[]>();
+  #repairing = new Set<TicketId>();                                 // tickets whose failed checks are being read or a repair started
+  #repairs = new Map<TicketId, CiRepair>();                         // the repair a ticket's flow runs for, until its card is published
   #replays: ReplayStore;                                            // the tickets resumed from a step (issue #272)
   #replaying = new Set<TicketId>();                                 // tickets whose resume is under way
   #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
@@ -463,6 +479,10 @@ export class FlowEngine {
         this.#checked.set(release.id, now);
         const checks = await this.#checksOf(release);
         if (checks && checks !== release.pr.checks) this.inbox.setReleaseChecks(release.id, checks);
+        // A repair resumes or starts a container: it runs beside the tick, which goes on.
+        if (checks === 'failed') void this.#track(this.#checksFailed(release, ticket).catch((error: unknown) => console.error(`cleared-v2: the repair of ${ticket.id}'s checks failed (${error instanceof Error ? error.name : typeof error})`)));
+        // Green after a repair, or after the owner ran a job again once the attempts were spent.
+        else if (checks === 'passed' && (release.repair?.state === 'pushed' || release.repair?.state === 'gave_up')) await this.#repairSaid(release, { ...release.repair, state: 'repaired', at: this.#at() });
         continue;
       }
       this.#checked.delete(release.id);
@@ -510,6 +530,72 @@ export class FlowEngine {
     this.#step({ id: sessionId, ticket, project }, 'STEP_FINISHED', 'approval');
     this.#snapshot(sessionId, ticket);
     return true;
+  }
+
+  // ---- the repair of failed checks (issue #273) ----------------------------
+
+  // The checks of a waiting release failed. Read again once a minute, so
+  // each step below happens once (#repairing is set before the first await):
+  // a failure on another head than the card's (the push's checks not
+  // reported yet) waits for the next reading.
+  async #checksFailed(release: ReleaseItem, ticket: Ticket): Promise<void> {
+    const id = ticket.id;
+    const last = release.repair;
+    if (release.train || last?.state === 'gave_up' || last?.state === 'refused' || this.#repairing.has(id) || this.#active.has(id)) return;
+    this.#repairing.add(id);
+    try {
+      let failures: CiFailures | undefined;
+      if (this.#effects.ciFailures) {
+        try {
+          failures = await this.#effects.ciFailures({ pr: release.pr.number });
+        } catch (error) {
+          console.error(`cleared-v2: the failed checks of pull request #${release.pr.number} could not be read (${error instanceof Error ? error.name : typeof error})`);
+          return;
+        }
+        if (failures.head !== release.heads[0]?.head || failures.checks.length === 0) return;
+        failures = { head: failures.head, checks: failures.checks.map((check) => ({ name: this.#clean(check.name), url: check.url, log: check.log === null ? null : this.#clean(check.log) })) };
+      }
+      const checks = failures?.checks.map((check) => check.name) ?? [];
+      const at = this.#at();
+      if (onBase(this.#branchOf(id), this.config.base))
+        return await this.#repairSaid(release, { attempt: last?.attempt ?? 0, limit: CI_REPAIR_ATTEMPTS, state: 'refused', checks, at });
+      if ((last?.attempt ?? 0) >= CI_REPAIR_ATTEMPTS)
+        return await this.#repairSaid(release, { attempt: last?.attempt ?? 0, limit: CI_REPAIR_ATTEMPTS, state: 'gave_up', checks, at });
+      await this.#repair(release, ticket, { attempt: (last?.attempt ?? 0) + 1, limit: CI_REPAIR_ATTEMPTS, state: 'started', checks, at }, failures);
+    } finally {
+      this.#repairing.delete(id);
+    }
+  }
+
+  // The card is handled, so the red head can no longer be approved, and the
+  // ticket's last author is reopened with what failed, as a new flow: its
+  // review counts its rounds from 1. #publishAndAsk gives the next card the attempt.
+  async #repair(release: ReleaseItem, ticket: Ticket, repair: CiRepair, failures: CiFailures | undefined): Promise<void> {
+    const id = ticket.id;
+    const tickets = this.registry.ticketStore;
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    if (!adapter) return;
+    this.#settleRelease(release.id, id, release.project, 'system');
+    this.#checked.delete(release.id);
+    await this.#repairSaid(release, repair);
+    const authorRow = this.#store.sessions.list({ ticket: id }).filter((row) => row.role === 'author').at(-1);
+    this.#active.add(id);
+    this.#flows.set(id, new Set(authorRow ? [authorRow.id] : []));
+    this.#channels.delete(id);
+    this.#repairs.set(id, repair);
+    try {
+      await tickets.move(id, tickets.states.progress, SERVICE);
+      await this.#reopenWith(ticket, adapter, authorRow, repairMessage({ repair, pr: release.pr.number, branch: this.#branchOf(id), ...(failures ? { failures } : {}) }));
+    } catch (error) {
+      await this.#putBack(id, `The repair of the failed checks could not start: ${name(error)}`, 'reopen_failed');
+    }
+  }
+
+  // A step of a repair, said on the card, on the ticket and on the bus.
+  async #repairSaid(release: Pick<ReleaseItem, 'id' | 'ticket' | 'project' | 'pr'>, repair: CiRepair): Promise<void> {
+    this.inbox.setReleaseRepair(release.id, repair);
+    await this.registry.ticketStore.comment(release.ticket, repairComment(repair, release.pr.number), SERVICE).catch(() => undefined);
+    this.#emit({ type: 'ci_repair', at: repair.at, project: release.project, ticket: release.ticket, pr: release.pr.number, attempt: repair.attempt, limit: repair.limit, state: repair.state, checks: repair.checks });
   }
 
   // ---- the landing ---------------------------------------------------------
@@ -2080,6 +2166,7 @@ export class FlowEngine {
     this.#active.delete(ticket);
     this.#origins.delete(ticket);
     this.#channels.delete(ticket);
+    this.#repairs.delete(ticket);
     this.#steps.hold(ticket);
     this.#dropVariants(ticket, note);
     await tickets.comment(ticket, this.#clean(note), SERVICE)
@@ -2243,7 +2330,6 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
     const authorRow = this.#lastSession(id, 'author');
-    const kept = authorRow ? this.#inputs.get(authorRow.id) : undefined;
     const adapter = this.registry.sessionAdapters[HARNESS];
     if (!ticket || !adapter) {
       await this.#putBack(id, 'The author could not be reopened: the ticket or the adapter is gone.', 'reopen_failed');
@@ -2253,12 +2339,22 @@ export class FlowEngine {
     // Set before the author can answer: a scripted turn ends inside send().
     this.#channels.set(id, { reviewer: reviewer.id, round });
     const message = reviewRequestMessage(report, round, request.limit);
+    try {
+      await this.#reopenWith(ticket, adapter, authorRow, message, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
+    } catch (error) {
+      await this.#putBack(id, `The author could not be reopened after the review: ${name(error)}`, 'reopen_failed');
+    }
+  }
+
+  // Reopening is resume, then `message` as the next message. Either
+  // failing (another process started the session, its container is gone)
+  // falls back to a new author, told the ticket and `message`; what that
+  // start throws is the caller's. `journal`: written on the author's session.
+  async #reopenWith(ticket: Ticket, adapter: SessionAdapter, authorRow: { readonly id: SessionId } | undefined, message: string, journal?: AgUiEvent): Promise<void> {
+    const id = ticket.id;
+    const kept = authorRow ? this.#inputs.get(authorRow.id) : undefined;
     const began = this.#now();
     const lastSeq = authorRow ? (this.#store.events.after(authorRow.id).at(-1)?.seq ?? 0) : 0;
-    // Reopening is resume, then the request as the next message. Either
-    // failing (another process started the session, its container is gone)
-    // falls back to a new author below.
-    let reopened = false;
     if (authorRow && kept) {
       let handle: SessionHandle | undefined;
       try { handle = await this.#resume(adapter, authorRow.id); } catch { handle = undefined; }
@@ -2267,11 +2363,11 @@ export class FlowEngine {
         this.#live.set(live.id, live);
         this.#setPhase(live, 'working');
         this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
-        this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
+        if (journal) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
         this.#supervise(live, lastSeq);
         try {
           await handle.send({ text: message, by: FLOW_USER });
-          reopened = true;
+          return;
         } catch {
           live.closed = true;
           this.#live.delete(live.id);
@@ -2280,20 +2376,15 @@ export class FlowEngine {
         }
       }
     }
-    if (reopened) return;
-    try {
-      const settings = kept?.settings ?? (await this.#settings(ticket));
-      const prepared = await this.#prepare(ticket, 'author');
-      const tools = this.config.authorTools === true;
-      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings,
-        `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined);
-      this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
-      this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: request });
-      this.#snapshot(live.id, id);
-      this.#supervise(live, 0);
-    } catch (error) {
-      await this.#putBack(id, `The author could not be reopened after the review: ${name(error)}`, 'reopen_failed');
-    }
+    const settings = kept?.settings ?? (await this.#settings(ticket));
+    const prepared = await this.#prepare(ticket, 'author');
+    const tools = this.config.authorTools === true;
+    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings,
+      `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined);
+    this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
+    if (journal) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
+    this.#snapshot(live.id, id);
+    this.#supervise(live, 0);
   }
 
   // The author's answer goes back through the channel: to the reviewer
@@ -2386,13 +2477,18 @@ export class FlowEngine {
     for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
     const changed = await this.#changes(id, published.head);
     const card = flags({ diff: changed?.diff ?? '', ...this.#report(id), ...this.#guarded(ticket, [reviewer.settings]) });
+    // A repair's commit: the new card carries its attempt (issue #273).
+    const started = this.#repairs.get(id);
+    this.#repairs.delete(id);
+    const repair: CiRepair | undefined = started && { ...started, state: 'pushed', at: this.#at() };
     const item = this.inbox.addRelease({
       ticket: id, project, title: ticket.title, announcement, requestedAt,
       pr: { number: published.number, url: published.url, checks: 'pending' },
       heads: [{ pr: published.number, head: published.head }],
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
-      sessions: this.#releaseSessions(id, round), groups: card.groups, flags: card.flags,
+      sessions: this.#releaseSessions(id, round), groups: card.groups, flags: card.flags, ...(repair ? { repair } : {}),
     }, reviewer.id);
+    if (repair) await this.#repairSaid(item, repair);
     // The lock has the request: the flow is over. What follows is the human's, and a person
     // may send the ticket back from the inbox, which starts a new flow.
     this.#active.delete(id);
