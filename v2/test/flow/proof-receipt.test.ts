@@ -86,9 +86,10 @@ test('the author\'s captures are taken before its session closes, and the publis
   assert.doesNotMatch(JSON.stringify(receipt), /# pass 1/);
 });
 
-test('every review round\'s test run is listed; a reviewer with no reported cost leaves the dollars out', async () => {
+test('every review round\'s test run is listed; a reviewer that never reports a cost leaves the dollars out', async () => {
+  // The second round resumes the first reviewer's session: it is one session whose turns report no total.
   const { receipts } = await run({
-    reviewers: [reviewer(REPORT_FIX, call('t1', 'npm test', 'not ok 1', true)), reviewer(REPORT_PASS, call('t2', 'npm test', 'ok 1', false), null)],
+    reviewers: [reviewer(REPORT_FIX, call('t1', 'npm test', 'not ok 1', true), null), reviewer(REPORT_PASS, call('t2', 'npm test', 'ok 1', false), null)],
     rounds: 3,
   });
   const receipt = receipts.at(-1)!;
@@ -102,7 +103,7 @@ test('a capture that throws is journaled as failed, by its code only, and the pu
   assert.equal(receipts.length, 1);
   assert.deepEqual(receipts[0]?.captures, [{ service: 'guestbook', missing: [{ part: 'before', reason: 'failed' }, { part: 'after', reason: 'failed' }, { part: 'video', reason: 'failed' }] }]);
   assert.ok(t.inbox.list().some((i) => i.kind === 'release'));
-  assert.doesNotMatch(JSON.stringify(receipts[0]), /token|crashed/);
+  assert.doesNotMatch(JSON.stringify(receipts[0]), /token=|crashed|127\.0\.0\.1/);
 });
 
 test('a flow with no capture effect publishes a receipt with no captures', async () => {

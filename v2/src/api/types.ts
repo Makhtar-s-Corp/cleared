@@ -685,6 +685,8 @@ export type ApiRoutes = {
   'POST /api/tickets/:id/set-aside': { readonly body: null; readonly response: { readonly sessions: number; readonly items: number } };
   'POST /api/tickets/:id/close': { readonly body: { readonly reason: string }; readonly response: { readonly sessions: number; readonly items: number } };
   'POST /api/tickets/:id/approve': { readonly body: ApproveBody; readonly response: { readonly accepted: true; readonly by: UserId } };
+  // A capture of the ticket's proof receipt (P210, flow/proof-routes.ts): before.png, after.png or flow.webm.
+  'GET /api/tickets/:id/proof/:service/:file': { readonly body: null; readonly response: 'image/png' | 'video/webm' };
   'GET /api/inbox': { readonly body: null; readonly response: NextInboxItem[] };   // the replanned kinds included (inbox/store.ts list)
   // The replanned milestone 2: the workspace (lane 14), and the trial
   // environment of a session (decision 20), served by lane 15 from its
@@ -775,6 +777,7 @@ const routes = {
   'POST /api/tickets/:id/set-aside': true,
   'POST /api/tickets/:id/close': true,
   'POST /api/tickets/:id/approve': true,
+  'GET /api/tickets/:id/proof/:service/:file': true,
   'POST /api/batches': true,
   'GET /api/batches': true,
   'GET /api/batches/:id': true,

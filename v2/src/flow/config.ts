@@ -37,6 +37,10 @@ export type FlowConfig = {
   // this machine (flow/editor.ts).
   readonly editorHost?: string | undefined;
   readonly mergeRetryMs: number;            // a merge the lock queued is asked again after this long
+  // CLEARED_NOTIFY_LINK_BASE: the app's address as people open it, which
+  // the notifications link to; the proof receipt links its captures there
+  // (P210). None: the receipt says the captures are kept by Cleared.
+  readonly linkBase?: string | undefined;
   // The workspace and its services. loadFlowConfig always sets it; a
   // configuration written without it reads as its one-service workspace
   // (workspaceOf).
@@ -210,6 +214,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     maxReviewRounds: positive(env.CLEARED_V2_REVIEW_ROUNDS, 'CLEARED_V2_REVIEW_ROUNDS', true) ?? 3,
     budgetUsd: positive(env.CLEARED_V2_BUDGET_USD, 'CLEARED_V2_BUDGET_USD', false),
     ...(editor ? { editorHost: editor } : {}),
+    ...(env.CLEARED_NOTIFY_LINK_BASE ? { linkBase: env.CLEARED_NOTIFY_LINK_BASE } : {}),
     mergeRetryMs: (positive(env.CLEARED_V2_MERGE_RETRY_SECONDS, 'CLEARED_V2_MERGE_RETRY_SECONDS', true) ?? 60) * 1000,
     questionTimeoutMs: question * 60_000,
     questionLeadMs: QUESTION_LEAD_MINUTES * 60_000,

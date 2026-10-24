@@ -66,7 +66,7 @@ test('no dollar amount without a real figure for every session; the tokens and t
     assert.match(body, language === 'en' ? /1,234,567 tokens/ : /jetons/);
   }
   // No token count either: said as not reported, never as zero.
-  assert.match(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /tokens: not reported by the harness/);
+  assert.match(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /Cost: tokens not reported by the harness/);
   assert.doesNotMatch(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /\b0 tokens/);
 });
 

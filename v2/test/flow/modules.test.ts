@@ -36,9 +36,9 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
   // steps and the contract item (lane 23, flow/steps.ts), the web terminal
   // and the editor's save (lane 31), a ticket's variants and their choice
   // (issue #271, flow/variants.ts), and Resume from here (issue #272,
-  // flow/replay.ts) are the flow module's.
+  // flow/replay.ts), and a proof receipt's captures (P210, flow/proof-routes.ts) are the flow module's.
   assert.deepEqual(routeKeys(flow), [
-    'GET /api/batches', 'GET /api/batches/:id', 'GET /api/sessions/:id/editor', 'GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'GET /api/sessions/:id/terminal/stream', 'GET /api/tickets', 'GET /api/tickets/:id', 'GET /api/tickets/:id/steps',
+    'GET /api/batches', 'GET /api/batches/:id', 'GET /api/sessions/:id/editor', 'GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'GET /api/sessions/:id/terminal/stream', 'GET /api/tickets', 'GET /api/tickets/:id', 'GET /api/tickets/:id/proof/:service/:file', 'GET /api/tickets/:id/steps',
     'GET /api/tickets/:id/variants', 'POST /api/batches', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback',
     'POST /api/sessions/:id/giveback', 'POST /api/sessions/:id/handover', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/replay', 'POST /api/sessions/:id/takeover',
     'POST /api/sessions/:id/terminal/close', 'POST /api/sessions/:id/terminal/input', 'POST /api/sessions/:id/terminal/open', 'POST /api/sessions/:id/terminal/resize',
@@ -55,7 +55,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
-  assert.equal(routeKeys(app).length, 36);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6)
+  assert.equal(routeKeys(app).length, 37);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6), and the proof receipt's captures (P210)
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor', 'codex']);
   assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
 });
