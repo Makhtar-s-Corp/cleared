@@ -11,6 +11,8 @@ import assert from 'node:assert/strict';
 import { Docker } from '../../src/container/docker.ts';
 import { sessionNames } from '../../src/container/session-runtime.ts';
 import { FlowEngine } from '../../src/flow/engine.ts';
+import { flowPort } from '../../src/lead/engine.ts';
+import { leadHandlers, type LeadToolHost } from '../../src/lead/tools.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
 import type { Role } from '../../src/session/contract.ts';
@@ -166,6 +168,23 @@ test('the owner\'s answer to the stopped session\'s question resumes it with the
   const messages = t.store.events.after(t.id).flatMap((e) => (e.event.type === 'TEXT_MESSAGE_CONTENT' ? [e.event.delta] : []));
   assert.ok(messages.some((m) => /Which order\?/.test(m) && /Newest first/.test(m)), 'the answer is said to the resumed session');
   assert.equal(t.inbox.list().find((i) => i.kind === 'question')?.state, 'handled');
+});
+
+test('the lead decides a stopped session\'s question with its own tool: at 30 min it is asked, its answer_question resumes the session, and the ticket goes on', async () => {
+  const t = await engineWatched();
+  await t.at(15);
+  assert.equal(t.store.sessions.get(t.id)?.status, 'stopped');
+  await t.at(30);
+  assert.deepEqual(t.flowEvents.filter((e) => e.type === 'question_timed_out').map((e) => e.type === 'question_timed_out' && e.stage), ['lead']);
+  // The lead's tool as its session calls it, over the engine's port (lead/tools.ts).
+  const host = { flow: flowPort(t.engine), inbox: t.inbox, clean: (text: string) => text } as unknown as LeadToolHost;
+  const answered = await leadHandlers(host).answer_question({ session: t.id, requestId: 'q1', answers: [{ question: 'Which order?', answer: 'Oldest first' }] });
+  assert.deepEqual(answered, { answered: `question:${t.id}:q1` });
+  await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release');
+  const messages = t.store.events.after(t.id).flatMap((e) => (e.event.type === 'TEXT_MESSAGE_CONTENT' ? [e.event.delta] : []));
+  assert.ok(messages.some((m) => /the lead answered your question/.test(m) && /Oldest first/.test(m)));
+  await t.at(41);
+  assert.deepEqual(t.flowEvents.filter((e) => e.type === 'question_timed_out').map((e) => e.type === 'question_timed_out' && e.stage), ['lead'], 'nothing is applied after the lead decided');
 });
 
 test('the declared default reaches a session the watchdog stopped: at 40 min it is resumed with it, and the ticket goes on', async () => {

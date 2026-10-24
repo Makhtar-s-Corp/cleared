@@ -4239,7 +4239,6 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **Consequences.**
 - The proof's deploy containers are kept: `cleared-guestbook`, `cleared-filter-api` and `cleared-guestbook-db`.
-- LOCAL-42's session had kept its 3 containers running while it waited on its question. That is the case the idle watchdog of the lane `j3-autonomy` stops (P67).
 
 - Recorded by: Opus 5.5 (claude-opus-5-5), lane `j3-autonomy`, at the orchestrator's request.
 
@@ -4248,7 +4247,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 **The defect** (issue #290, the endurance proof above). Three rules each left a plan waiting for a person with no end:
 - **Bounces.** A ticket put back twice held its item, and only start_ticket or the owner started it again. LOCAL-39, 40 and 41 waited there from 08:47.
 - **Questions.** A team's question waited for the owner with no delay. LOCAL-42 waited about 7 hours, and its item, still `running`, kept its slot in the plan.
-- **Idle sessions.** The flow's idle stop skips a session that waits for a person, so LOCAL-42's session and its containers ran for 7 hours.
+- **Idle sessions.** The flow's idle stop skips a session that waits for a person, so LOCAL-42's session and its containers ran for 7 hours. The orchestrator's cleanup of 16:25 found its 3 containers still there.
 
 **Decision.**
 
@@ -4328,6 +4327,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
   - no events table;
   - the engine's suspension at 15:00 with its question kept and nothing put back, resumed by the owner's answer, by the declared answer at 40:00, and parked at 40:00 without one.
   - On the old code, the suspension tests fail: the session waits on and its containers run.
+- `test/session/watchdog.test.ts` also runs the lead's own answer_question tool on a session the watchdog stopped: asked at 30:00, its answer resumes the session, and nothing is applied after it.
 - `test/lead/engine.test.ts`: the lead's thread line and its turn, without the 60-second batch.
 - `test/flow/events.test.ts`: `question_timed_out`, said after its write.
 - `app/web/test/inbox/deadline.test.tsx`: the inbox's line in both languages, before and after the lead is asked, with and without a declared answer, and the parked item's label.
