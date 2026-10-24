@@ -93,7 +93,7 @@ import { TrainRunner } from '../release/train.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import { AUTHOR_TOOLS, bindAuthorTools, readChangesReport, readSessionPlan } from './author-tools.ts';
 import { PLAN_GO_MINUTES, QUESTION_LEAD_MINUTES, QUESTION_TIMEOUT_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
-import { answerLines, asked, declaredAnswers } from './questions.ts';
+import { answerLines, asked, defaultAnswers } from './questions.ts';
 import { duration } from '../lead/plans/estimates.ts';
 import { ledgerEvent } from '../store/ledger-events.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
@@ -1519,7 +1519,7 @@ export class FlowEngine {
         }
         case 'cleared.question': {
           const questions = event.value.questions;
-          const item = this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions, timeout: (since) => this.#questionTimeout(since, questions) });
+          const item = this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions, timeout: (since) => this.#questionTimeout(since, questions, live.settings) });
           this.#waitStarts(live);
           this.#emit({ type: 'question_raised', at: this.#at(), project: session.project, ticket: session.ticket, session: live.id, requestId: event.value.requestId, item: item.id });
           return;
@@ -2150,11 +2150,18 @@ export class FlowEngine {
 
   // ---- a plan that does not freeze on a person (issue #290) -----------------
 
-  // A team's question's delay, from when it was asked, and what its end applies.
-  #questionTimeout(since: Date, questions: readonly Question[]): QuestionTimeout {
-    const wait = this.config.questionTimeoutMs ?? QUESTION_TIMEOUT_MINUTES * 60_000;
+  // A team's question's delay, from when it was asked, and what its end
+  // applies: the asking session's project's own (issue #269, its service's
+  // [session] question_timeout_minutes and question_default), else the
+  // service's.
+  #questionTimeout(since: Date, questions: readonly Question[], settings: ProjectSettings): QuestionTimeout {
+    const wait = settings.questionTimeoutMinutes !== undefined ? settings.questionTimeoutMinutes * 60_000 : this.config.questionTimeoutMs ?? QUESTION_TIMEOUT_MINUTES * 60_000;
     const lead = this.config.questionLeadMs ?? QUESTION_LEAD_MINUTES * 60_000;
-    return { at: new Date(since.getTime() + wait).toISOString(), leadUntil: new Date(since.getTime() + wait + lead).toISOString(), answers: declaredAnswers(questions) };
+    const rule = settings.questionDefault ?? 'recommended';
+    return {
+      at: new Date(since.getTime() + wait).toISOString(), leadUntil: new Date(since.getTime() + wait + lead).toISOString(), answers: defaultAnswers(questions, rule),
+      ...(rule === 'recommended' ? {} : { rule }),
+    };
   }
 
   // Each waiting question of a session this engine runs, awake or stopped by
@@ -2195,14 +2202,15 @@ export class FlowEngine {
   // QUESTION_DEFAULT and said on the ticket, in the ledger and on the bus.
   async #applyDeclared(live: Live, item: QuestionItem, answers: Readonly<Record<string, string>>, minutes: number): Promise<void> {
     const waited = `${asked(item.questions)} waited ${duration(minutes)} with no answer from the owner or the lead`;
-    await this.registry.ticketStore.comment(item.ticket, this.#clean(`${waited}: the answer the session declared applies.\n${answerLines(answers)}`), SERVICE)
+    const first = item.timeout?.rule === 'first';
+    await this.registry.ticketStore.comment(item.ticket, this.#clean(`${waited}: ${first ? 'the project\'s default answer applies (the recommended option, else the first)' : 'the answer the session declared applies'}.\n${answerLines(answers)}`), SERVICE)
       .catch((error: unknown) => console.error(`cleared-v2: the declared answer of ${item.id} could not be said on ${item.ticket} (${error instanceof Error ? error.name : typeof error})`));
     this.#questionTimedOut(item, 'default', minutes, answers);
     const answer: Answer = { decision: { kind: 'answer', answers }, by: 'policy', rule: QUESTION_DEFAULT };
     const dormant = this.#dormant.get(live.id);
     if (dormant) {
       if (!this.#settleStopped(dormant, item, answer.decision, 'policy')) return;
-      await this.#wake(dormant, `${waited}, so the default you declared, the option you recommended, applies:\n${answerLines(answers)}\nCarry on with it.`);
+      await this.#wake(dormant, `${waited}, so ${first ? 'the project\'s default, the option you recommended else the first one,' : 'the default you declared, the option you recommended,'} applies:\n${answerLines(answers)}\nCarry on with it.`);
       return;
     }
     try {
@@ -2223,7 +2231,7 @@ export class FlowEngine {
     const waited = `${asked(item.questions)} waited ${duration(minutes)} with no answer from the owner or the lead`;
     this.#questionTimedOut(item, 'parked', minutes, null);
     await this.#stopTicket(live, 'parked', `${waited}: the session was stopped and its ticket parked.`,
-      `${waited}, and the session declared no answer: the ticket is parked, its session stopped with what a resume needs. The rest of the plan goes on; start it again with the answer.`, 'stopped', 'parked');
+      `${waited}, and ${item.timeout?.rule === 'park' ? 'the project\'s default is to park' : 'the session declared no answer'}: the ticket is parked, its session stopped with what a resume needs. The rest of the plan goes on; start it again with the answer.`, 'stopped', 'parked');
   }
 
   // The watchdog's question (session/watchdog.ts): this engine stops a

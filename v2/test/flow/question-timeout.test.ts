@@ -3,17 +3,20 @@
 // asked (CLEARED_V2_QUESTION_TIMEOUT_MINUTES, 30 by default). Past it the
 // lead is asked to decide, with QUESTION_LEAD_MINUTES to do so; then the
 // answer the session declared (its "(Recommended)" option) is applied and
-// logged, or, with none, the ticket is parked so the plan goes on.
+// logged, or, with none, the ticket is parked so the plan goes on. The
+// delay and the default are the project's own when its agents.conf sets
+// them (issue #269).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FlowConfigError, QUESTION_LEAD_MINUTES, QUESTION_TIMEOUT_MINUTES, loadFlowConfig } from '../../src/flow/config.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
-import { declaredAnswers } from '../../src/flow/questions.ts';
+import type { ProjectSettings } from '../../src/flow/config.ts';
+import { declaredAnswers, defaultAnswers } from '../../src/flow/questions.ts';
 import type { QuestionItem } from '../../src/api/types.ts';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
-import type { CustomValue } from '../../src/session/events.ts';
-import { finished, setup, started, text, until, type SetupOptions } from './support.ts';
+import type { CustomValue, Question } from '../../src/session/events.ts';
+import { fakeEffects, finished, setup, started, text, until, type SetupOptions } from './support.ts';
 
 const MIN = 60_000;
 const RECOMMENDED: CustomValue['cleared.question'] = {
@@ -141,4 +144,65 @@ test('the declared answers: each question\'s "(Recommended)" option, else none f
   assert.equal(declaredAnswers([...RECOMMENDED.questions, { question: 'Which colour?', options: [{ label: 'Red' }, { label: 'Blue' }] }]), null, 'one question without a default leaves the request to a person');
   assert.deepEqual(declaredAnswers([{ question: 'Which?', options: [{ label: 'a (recommended) ' }, { label: 'b (Recommended)' }] }]), { 'Which?': 'a (recommended) ' }, 'the first recommended option');
   assert.equal(declaredAnswers([]), null);
+});
+
+// ---- the project's own delay and default (issue #269) -------------------------
+
+const CHOICE: CustomValue['cleared.question'] = {
+  requestId: 'q1', questions: [{ question: 'Which database?', options: [{ label: 'Postgres' }, { label: 'SQLite' }] }],
+};
+const project = async (settings: Partial<ProjectSettings>): Promise<SetupOptions> => {
+  const base = await fakeEffects([]).settings();
+  return { effects: { settings: async () => ({ ...base, ...settings }) } };
+};
+
+test('the project\'s [session] question_timeout_minutes is its questions\' delay, over the service\'s', async () => {
+  const t = await asking(RECOMMENDED, { ...(await project({ questionTimeoutMinutes: 5 })), config: { questionTimeoutMs: 30 * MIN } });
+  assert.equal(t.question().timeout?.at, new Date(t.asked + 5 * MIN).toISOString());
+  assert.equal(t.question().timeout?.rule, undefined, 'the default rule is not written');
+  await t.at(4 + 59 / 60);
+  assert.equal(t.timedOut().length, 0);
+  await t.at(5);
+  assert.deepEqual(t.timedOut().map((e) => e.stage), ['lead']);
+  await t.at(5 + QUESTION_LEAD_MINUTES);
+  assert.deepEqual(t.timedOut().map((e) => e.stage), ['lead', 'default']);
+  assert.equal(t.question().state, 'handled');
+});
+
+test('question_default = first: a choice with no recommended option takes its first, applied and said as the project\'s default', async () => {
+  const t = await asking(CHOICE, await project({ questionDefault: 'first' }));
+  assert.deepEqual(t.question().timeout?.answers, { 'Which database?': 'Postgres' });
+  assert.equal(t.question().timeout?.rule, 'first');
+  await t.at(30);
+  await t.at(40);
+  assert.equal(t.question().state, 'handled');
+  assert.deepEqual(JSON.parse(t.ledger('question_default')[0]!.detail).answers, { 'Which database?': 'Postgres' });
+  const comment = (await t.tickets.comments(t.ticket.id)).find((c) => /default answer applies/.test(c.body))?.body ?? '';
+  assert.match(comment, /the project's default answer applies/);
+  assert.match(comment, /Which database\?: Postgres/);
+  await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release');
+});
+
+test('question_default = park: even a recommended option is not applied, the ticket is parked and says why', async () => {
+  const t = await asking(RECOMMENDED, await project({ questionDefault: 'park' }));
+  assert.equal(t.question().timeout?.answers, null);
+  assert.equal(t.question().timeout?.rule, 'park');
+  await t.at(30);
+  await t.at(40);
+  const back = t.flowEvents.find((e): e is Extract<FlowEvent, { type: 'ticket_put_back' }> => e.type === 'ticket_put_back');
+  assert.equal(back?.reason, 'parked');
+  assert.match(back?.note ?? '', /the project's default is to park/);
+  assert.equal(t.ledger('question_default').length, 0);
+});
+
+test('the default answers by rule: recommended is the declared answer, first falls back to each first option (one for a multiple choice), park and a free question give none', () => {
+  const multi: Question = { question: 'Which checks?', multiSelect: true, options: [{ label: 'test' }, { label: 'lint' }] };
+  assert.deepEqual(defaultAnswers(CHOICE.questions), null);
+  assert.deepEqual(defaultAnswers(RECOMMENDED.questions, 'recommended'), declaredAnswers(RECOMMENDED.questions));
+  assert.deepEqual(defaultAnswers([...RECOMMENDED.questions, ...CHOICE.questions, multi], 'first'), {
+    'Which order?': 'Newest first (Recommended)', 'Which database?': 'Postgres', 'Which checks?': 'test',
+  });
+  assert.equal(defaultAnswers([...CHOICE.questions, ...FREE.questions], 'first'), null);
+  assert.equal(defaultAnswers(RECOMMENDED.questions, 'park'), null);
+  assert.equal(defaultAnswers([], 'first'), null);
 });

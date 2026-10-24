@@ -4,8 +4,10 @@
 //
 // Two ways to answer. `inline` (the session and the lead): a click on the
 // only choice of one question answers at once; otherwise the clicks toggle
-// and Send below answers. `bar` (the inbox): the clicks only pick, and the
-// screen's own bar sends. Every option carries `data-answer` with its label
+// and Send below answers. `bar` (the inbox): a click on the only choice of
+// one question answers at once too when the screen takes it (onAnswer,
+// issue #269); otherwise the clicks only pick, and the screen's own bar
+// sends. Every option carries `data-answer` with its label
 // as written, the selector the proof scripts read.
 //
 // Controlled: the screen holds the draft (the inbox keeps it with its other
@@ -96,7 +98,7 @@ export function Choices({ questions, status, t, requestId, free = true, send = '
   if (status.kind !== 'waiting') return <Settled questions={questions} status={status} t={t} requestId={requestId} />;
   const draft = status.draft ?? emptyDraft(questions);
   const busy = status.busy === true;
-  const clicks = send === 'inline' && answersOnClick(questions);
+  const clicks = (send === 'inline' || onAnswer !== undefined) && answersOnClick(questions);
   const result = answersFor(questions, draft);
   // Send is there when a click does not answer, or when a free answer can be typed.
   const sendable = send === 'inline' && (free || !clicks);

@@ -5,7 +5,7 @@
 // their own, and the optimistic gestures of the inbox.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Cache, POLL_MS, hashOf, keysOf, optimistic, resourceOf, touchedBy, type Key } from '../../web/lib/cache.ts';
+import { Cache, INBOX_POLL_MS, POLL_MS, hashOf, keysOf, optimistic, resourceOf, touchedBy, type Key } from '../../web/lib/cache.ts';
 
 type Item = { id: string; kind: string; state: string; sessionId?: string; requestId?: string; planId?: string };
 
@@ -110,10 +110,17 @@ test('a dropped stream falls back to polling every resource read; the reconnect 
   await cache.read('/tickets');
   s.asked.length = 0;
   cache.setLive(false);
-  now = POLL_MS - 1;
+  now = INBOX_POLL_MS - 1;
   cache.poll();
   await settle();
   assert.deepEqual(s.asked, [], 'fresh until the interval');
+  // The inbox sooner, so that a question is on screen within 5 s (issue #269).
+  now = INBOX_POLL_MS;
+  cache.poll();
+  await settle();
+  assert.deepEqual(s.asked, ['/inbox']);
+  assert.ok(INBOX_POLL_MS + 1000 < 5000, 'a tick after the interval is still within 5 s');
+  s.asked.length = 0;
   now = POLL_MS;
   cache.poll();
   await settle();
