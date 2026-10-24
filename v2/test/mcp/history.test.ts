@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { after } from 'node:test';
 import { DEFAULT_LIMIT, HistoryError, LedgerHistory, MAX_LIMIT, openLedgerReadOnly } from '../../src/mcp/history.ts';
-import { createRedactor } from '../../src/mcp/redact.ts';
+import { TEXT_LIMIT, TIMELINE_TEXT_LIMIT, createRedactor } from '../../src/mcp/redact.ts';
 import { ENV, SECRETS, SESSIONS, makeLedger } from './support.ts';
 
 const fixture = makeLedger();
@@ -86,7 +86,8 @@ test('get_session_timeline: the session and its events in order, cleaned, paged 
   assert.match(text, /\[removed: GitHub token\]/);
   assert.match(text, /\[removed: bearer token\]/);
   const long = timeline.events[4]?.event as { delta: string };
-  assert.ok(long.delta.length < 1200, 'a long text is cut');
+  assert.ok(long.delta.length > TIMELINE_TEXT_LIMIT && long.delta.length < TIMELINE_TEXT_LIMIT + 40, 'a long text is cut at the timeline\'s limit');
+  assert.match(long.delta, /\[cut: \d+ characters\]$/);
   const page = history.timeline(SESSIONS.S3, { limit: 25 });
   assert.equal(page?.events.length, 25);
   assert.equal(page?.next, 25);
@@ -101,6 +102,19 @@ test('a search never tells whether a secret is in the ledger: a term shaped like
     assert.deepEqual(history.searchEvents({ text: piece }).items, [], `a piece finds its event: ${piece.slice(0, 4)}`);
   assert.deepEqual(history.searchEvents({ text: SECRETS.previewKey.slice(0, 20) }).items, []);
   assert.deepEqual(history.searchSessions({ text: SECRETS.previewKey.slice(0, 20) }).items, [], 'the preview key is not searched');
+});
+
+test('a search reads the whole cleaned text, not the part an answer shows', () => {
+  const [hit] = history.searchEvents({ text: 'coupon must not stack' }).items;
+  assert.deepEqual([hit?.sessionId, hit?.seq], [SESSIONS.S1, 5], 'a term past the shown part of a long message');
+  const shown = (hit?.event as { delta: string }).delta;
+  assert.ok(shown.length < TEXT_LIMIT + 40, 'a search answer shows a shorter part than the timeline');
+});
+
+test('a term with accents is found, narrowed by its ASCII runs', () => {
+  assert.deepEqual(history.searchEvents({ text: 'doit être arrondi' }).items.map((e) => e.sessionId), [SESSIONS.S2]);
+  assert.deepEqual(history.searchEvents({ text: 'DOIT ÊTRE' }).items.map((e) => e.sessionId), [SESSIONS.S2], 'without case, accents included');
+  assert.deepEqual(history.searchEvents({ text: 'être absent' }).items, []);
 });
 
 test('a LIKE wildcard in the text is a character, not a wildcard', () => {

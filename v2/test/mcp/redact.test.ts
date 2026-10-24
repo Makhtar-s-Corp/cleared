@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TEXT_LIMIT, createRedactor } from '../../src/mcp/redact.ts';
+import { TEXT_LIMIT, createRedactor, cutStrings } from '../../src/mcp/redact.ts';
 import { ENV, ENV_NAME, SECRETS } from './support.ts';
 
 const redactor = createRedactor({ env: ENV, paths: ['/srv/state/shop'] });
@@ -61,12 +61,26 @@ test('a deep value is cleaned string by string, an id of the generated shape kep
 });
 
 test('a long string is cut after it is cleaned, so a secret cut in half is never shown', () => {
-  const long = 'a'.repeat(TEXT_LIMIT - 10) + SECRETS.github + 'b'.repeat(500);
+  const long = 'a'.repeat(TEXT_LIMIT - 10) + ' ' + SECRETS.github + ' ' + 'b'.repeat(500);
   const out = redactor.text(long);
-  assert.ok(!out.includes(SECRETS.github.slice(0, 12)), 'no half of the secret');
+  assert.ok(!out.includes(SECRETS.github.slice(0, 6)), 'no part of the secret');
+  assert.ok(out.includes(' [removed'), 'the marker, cut, where the secret was');
   assert.ok(Array.from(out).length <= TEXT_LIMIT + 40);
   assert.match(out, /\[cut: \d+ characters\]$/);
   assert.equal(redactor.text('short'), 'short');
+  const whole = redactor.whole({ delta: long }) as { delta: string };
+  assert.equal(whole.delta.length, long.length - SECRETS.github.length + '[removed: GitHub token]'.length, 'whole cleans and does not cut: what a search reads');
+  assert.match((cutStrings(whole, 50) as { delta: string }).delta, /^a{50} \[cut: \d+ characters\]$/);
+});
+
+test('a token glued to other letters is still a token; a word that only looks like a key\'s start is kept', () => {
+  for (const [secret, what] of [[SECRETS.github, 'GitHub token'], [SECRETS.slack, 'Slack token'], [SECRETS.linear, 'Linear key'], [SECRETS.aws, 'AWS key'], [SECRETS.jwt, 'JSON web token']] as const) {
+    const out = redactor.text(`prefix${secret}suffix`);
+    assert.ok(!out.includes(secret.slice(4, 16)), what);
+    assert.match(out, new RegExp(`\\[removed: ${what}\\]`), what);
+  }
+  const words = 'task-management-system-overview and the risk-assessment-for-the-quarter';
+  assert.equal(redactor.text(words), words);
 });
 
 test('changes says whether cleaning would change a text: a search term shaped like a secret', () => {

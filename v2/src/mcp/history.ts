@@ -11,12 +11,13 @@
 // A search term is matched on the cleaned text, never on the stored one:
 // otherwise the answer would tell whether a secret is in the ledger. A term
 // that cleaning changes (shaped like a secret) is refused; a piece of a
-// secret finds nothing, since the cleaned text no longer holds it. A LIKE on
-// the stored text first narrows the rows when the term is plain ASCII.
+// secret finds nothing, since the cleaned text no longer holds it. The whole
+// cleaned text is read, not the part an answer shows. A LIKE on the stored
+// text first narrows the rows, by the term or by its runs of ASCII.
 import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from '../store/db.ts';
-import type { Redactor } from './redact.ts';
+import { TEXT_LIMIT, TIMELINE_TEXT_LIMIT, cutStrings, type Redactor } from './redact.ts';
 import type { Values } from '../../app/web/lib/i18n.ts';
 
 export const DEFAULT_LIMIT = 20;
@@ -130,9 +131,15 @@ function decode(cursor: string | undefined, kind: 's' | 'e'): (string | number)[
 }
 
 const escapeLike = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`);
-// A term the stored JSON holds as it is: printable ASCII with no character
-// JSON escapes (LIKE ignores the case of ASCII letters only).
-const narrowable = (term: string) => /^[\x20-\x7e]*$/.test(term) && !/["\\]/.test(term);
+// The parts of a term the stored JSON holds as they are, for LIKE to narrow
+// the rows: the term itself when it is printable ASCII with no character
+// JSON escapes, else its runs of three such characters or more. JSON keeps
+// other characters as they are, and LIKE ignores the case of ASCII letters
+// only, so a run is found in the stored text whatever its case.
+function narrowing(term: string): string[] {
+  if (/^[\x20-\x7e]*$/.test(term) && !/["\\]/.test(term)) return [term];
+  return term.split(/[^\x20-\x7e]|["\\]/).filter((run) => run.length >= 3);
+}
 
 export class LedgerHistory {
   readonly #db: DatabaseSync;
@@ -163,39 +170,56 @@ export class LedgerHistory {
   }
 
   #session(row: Row): SessionView {
+    return this.#sessionShown(row).item;
+  }
+
+  // A session as shown, and the text a search reads in it.
+  #sessionShown(row: Row): { item: SessionView; haystack: string } {
     const created = str(row.created_at);
     const updated = str(row.updated_at);
     const lasted = Date.parse(updated) - Date.parse(created);
     const r = this.#redactor;
+    const fields = r.whole({ id: str(row.id), project: str(row.project), ticket: str(row.ticket), role: str(row.role), harness: str(row.harness), model: str(row.model), status: str(row.status), service: str(row.service) }) as Record<string, string>;
+    const whole = { ...fields, id: r.whole(str(row.id), 'sessionId') as string };
+    const shown = cutStrings(whole) as Record<string, string>;
     return {
-      id: r.value(str(row.id), 'sessionId') as string,
-      project: r.text(str(row.project)), ticket: r.text(str(row.ticket)), role: r.text(str(row.role)), harness: r.text(str(row.harness)),
-      model: r.text(str(row.model)), status: r.text(str(row.status)), service: row.service === null || row.service === undefined ? null : r.text(str(row.service)),
-      createdAt: created, updatedAt: updated, events: Number(row.events ?? 0), durationMs: Number.isNaN(lasted) ? null : Math.max(0, lasted),
+      item: {
+        id: shown.id as string, project: shown.project as string, ticket: shown.ticket as string, role: shown.role as string, harness: shown.harness as string,
+        model: shown.model as string, status: shown.status as string, service: row.service === null || row.service === undefined ? null : shown.service as string,
+        createdAt: created, updatedAt: updated, events: Number(row.events ?? 0), durationMs: Number.isNaN(lasted) ? null : Math.max(0, lasted),
+      },
+      haystack: Object.values(whole).join('\n'),
     };
   }
 
-  #event(row: Row): EventView {
+  // An event as shown, its strings cut to the limit, and the text a search
+  // reads in it: its whole cleaned strings, then its cleaned JSON, so that a
+  // term with a key ("verdict") is found too.
+  #event(row: Row, limit: number): { item: EventView; haystack: string } {
     const r = this.#redactor;
     let parsed: unknown;
     try { parsed = JSON.parse(str(row.event)); } catch { parsed = str(row.event); }
-    const event = r.value(parsed);
+    const whole = r.whole(parsed);
+    const event = cutStrings(whole, limit);
     const name = typeof event === 'object' && event !== null && typeof (event as Row).name === 'string' && str(row.type) === 'CUSTOM' ? str((event as Row).name) : undefined;
     return {
-      sessionId: r.value(str(row.session_id), 'sessionId') as string, seq: Number(row.seq), at: str(row.at),
-      ticket: r.text(str(row.ticket)), project: r.text(str(row.project)), service: row.service === null || row.service === undefined ? null : r.text(str(row.service)),
-      type: r.text(str(row.type)), ...(name === undefined ? {} : { name }), event,
+      item: {
+        sessionId: r.value(str(row.session_id), 'sessionId') as string, seq: Number(row.seq), at: str(row.at),
+        ticket: r.text(str(row.ticket)), project: r.text(str(row.project)), service: row.service === null || row.service === undefined ? null : r.text(str(row.service)),
+        type: r.text(str(row.type)), ...(name === undefined ? {} : { name }), event,
+      },
+      haystack: haystackOf(whole),
     };
   }
 
   // Reads rows in order and keeps those whose cleaned text holds the term,
   // until one more than the page: that one says there is a next page.
-  #page<T, R>(sql: string, params: (string | number | null)[], term: string | undefined, view: (row: Row) => T, haystack: (item: T) => string, limit: number, key: (item: T) => R): { items: T[]; last: R | undefined; more: boolean } {
+  #page<T, R>(sql: string, params: (string | number | null)[], term: string | undefined, view: (row: Row) => { item: T; haystack: string }, limit: number, key: (item: T) => R): { items: T[]; last: R | undefined; more: boolean } {
     const items: T[] = [];
     const needle = term?.toLowerCase();
     for (const row of this.#db.prepare(sql).iterate(...params) as Iterable<Row>) {
-      const item = view(row);
-      if (needle !== undefined && !haystack(item).toLowerCase().includes(needle)) continue;
+      const { item, haystack } = view(row);
+      if (needle !== undefined && !haystack.toLowerCase().includes(needle)) continue;
       items.push(item);
       if (items.length > limit) break;
     }
@@ -221,15 +245,14 @@ export class LedgerHistory {
     if (until !== undefined) { where.push('s.created_at < ?'); params.push(until); }
     if (after) { where.push('(s.created_at, s.id) < (?, ?)'); params.push(...after); }
     const service = this.#sessionService ? "COALESCE(s.service, '')" : "''";
-    if (term !== undefined && narrowable(term)) {
+    for (const part of term === undefined ? [] : narrowing(term)) {
       where.push(`(s.id || ' ' || s.project || ' ' || s.ticket || ' ' || s.role || ' ' || s.harness || ' ' || s.model || ' ' || s.status || ' ' || ${service}) LIKE ? ESCAPE '\\'`);
-      params.push(`%${escapeLike(term)}%`);
+      params.push(`%${escapeLike(part)}%`);
     }
     const count = this.#events ? '(SELECT COUNT(*) FROM session_events e WHERE e.session_id = s.id)' : '0';
     const sql = `SELECT s.id, s.project, s.ticket, s.role, s.harness, s.model, s.status, s.created_at, s.updated_at, ${this.#sessionService ? 's.service' : 'NULL'} AS service, ${count} AS events ` +
       `FROM sessions s ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY s.created_at DESC, s.id DESC`;
-    const page = this.#page(sql, params, term, (row) => this.#session(row),
-      (s) => [s.id, s.project, s.ticket, s.role, s.harness, s.model, s.status, s.service ?? ''].join('\n'), limit, (s) => ['s', s.createdAt, s.id]);
+    const page = this.#page(sql, params, term, (row) => this.#sessionShown(row), limit, (s) => ['s', s.createdAt, s.id]);
     return { items: page.items, next: page.last ? encode(page.last) : null };
   }
 
@@ -250,10 +273,10 @@ export class LedgerHistory {
     if (from !== undefined) { where.push('at >= ?'); params.push(from); }
     if (until !== undefined) { where.push('at < ?'); params.push(until); }
     if (after) { where.push('(at, session_id, seq) < (?, ?, ?)'); params.push(...after); }
-    if (term !== undefined && narrowable(term)) { where.push("event LIKE ? ESCAPE '\\'"); params.push(`%${escapeLike(term)}%`); }
+    for (const part of term === undefined ? [] : narrowing(term)) { where.push("event LIKE ? ESCAPE '\\'"); params.push(`%${escapeLike(part)}%`); }
     const sql = `SELECT session_id, seq, at, ticket, project, type, event, ${this.#eventService ? 'service' : 'NULL AS service'} FROM session_events ` +
       `${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY at DESC, session_id DESC, seq DESC`;
-    const page = this.#page(sql, params, term, (row) => this.#event(row), haystackOf, limit, (e) => ['e', e.at, e.sessionId, e.seq]);
+    const page = this.#page(sql, params, term, (row) => this.#event(row, TEXT_LIMIT), limit, (e) => ['e', e.at, e.sessionId, e.seq]);
     return { items: page.items, next: page.last ? encode(page.last) : null };
   }
 
@@ -267,7 +290,7 @@ export class LedgerHistory {
     if (!this.#events) return { session, events: [], next: null };
     const rows = this.#db.prepare(`SELECT session_id, seq, at, ticket, project, type, event, ${this.#eventService ? 'service' : 'NULL AS service'} FROM session_events WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`)
       .all(id, afterSeq, limit + 1) as Row[];
-    const events = rows.slice(0, limit).map((row) => this.#event(row));
+    const events = rows.slice(0, limit).map((row) => this.#event(row, TIMELINE_TEXT_LIMIT).item);
     return { session, events, next: rows.length > limit ? (events[events.length - 1]?.seq ?? null) : null };
   }
 
@@ -278,15 +301,13 @@ export class LedgerHistory {
   }
 }
 
-// The text a search reads in an event: its cleaned strings, then its
-// cleaned JSON, so that a term with a key ("verdict") is found too.
-function haystackOf(event: EventView): string {
+function haystackOf(event: unknown): string {
   const strings: string[] = [];
   const walk = (value: unknown): void => {
     if (typeof value === 'string') strings.push(value);
     else if (Array.isArray(value)) value.forEach(walk);
     else if (typeof value === 'object' && value !== null) Object.values(value).forEach(walk);
   };
-  walk(event.event);
-  return `${strings.join('\n')}\n${JSON.stringify(event.event)}`;
+  walk(event);
+  return `${strings.join('\n')}\n${JSON.stringify(event)}`;
 }

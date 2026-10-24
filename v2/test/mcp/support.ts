@@ -51,7 +51,7 @@ export function makeLedger(): Fixture {
     `anthropic ${SECRETS.anthropic}`, `github ${SECRETS.github}`, `fine ${SECRETS.githubFine}`, `slack ${SECRETS.slack}`, `linear ${SECRETS.linear}`,
     `aws ${SECRETS.aws}`, `jwt ${SECRETS.jwt}`, `export ${['GITHUB', 'TOKEN'].join('_')}=${SECRETS.envToken}`, `env ${SECRETS.envValue}`, SECRETS.privateKey,
   ].join('\n'), cut: 0, isError: false }) });
-  add(S1, 'LOCAL-7', 'shop', '2026-10-20T10:29:00.000Z', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_01DDDDDDDDDD', delta: 'Long text: ' + 'x'.repeat(5000) });
+  add(S1, 'LOCAL-7', 'shop', '2026-10-20T10:29:00.000Z', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_01DDDDDDDDDD', delta: 'Long text: ' + 'x'.repeat(5000) + ' the coupon must not stack' });
   add(S2, 'LOCAL-7', 'shop', '2026-10-21T14:00:30.000Z', { type: 'CUSTOM', name: 'cleared.review_verdict', value: { session: S2, verdict: 'changes_requested', round: 1 } });
   add(S2, 'LOCAL-7', 'shop', '2026-10-21T14:00:31.000Z', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_01EEEEEEEEEE', delta: 'Le total du panier doit être arrondi « au centime ».' });
   for (let i = 0; i < 30; i++)
