@@ -14,3 +14,13 @@ for (const file of ['src/flow/engine.ts', 'src/lead/engine.ts', 'src/reader/serv
     assert.ok(!/harness:\s*'cursor'/.test(source));
   });
 }
+
+// B6.3 (P150): the flow may now start a Codex session, by a handover, but the
+// targets it names are the contract's two and Cursor is not one.
+test('the flow hands over to claude-code and codex only: Cursor is out of the targets', () => {
+  const source = readFileSync(new URL('../../../src/session/handover.ts', import.meta.url), 'utf8');
+  assert.match(source, /^export const HANDOVER_HARNESSES = \['claude-code', 'codex'\] as const;$/m);
+  assert.ok(!/harness:\s*'cursor'/.test(source));
+  const engine = readFileSync(new URL('../../../src/flow/engine.ts', import.meta.url), 'utf8');
+  assert.match(engine, /refuseTarget\(live\.input\.harness, target\)/);
+});

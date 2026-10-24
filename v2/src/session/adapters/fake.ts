@@ -13,7 +13,8 @@
 // relays a model's call; a context step reports a context share, as the
 // runner does after a turn or a tool call.
 import { randomUUID } from 'node:crypto';
-import { HostToolRefused, NotImplemented, type Answer, type Harness, type HostTool, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { HostToolRefused, type Answer, type Harness, type HostTool, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { handoverOf } from '../handover.ts';
 import { createCleaner, type Cleaner } from '../clean.ts';
 import { toolArgs, toolResult, type AgUiEvent, type CustomValue, type EventLog, type SessionEvent } from '../events.ts';
 
@@ -206,8 +207,9 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
       async stop() {
         close(session);
       },
-      async handover() {
-        throw new NotImplemented('handing a session over to another harness comes in milestone 3');
+      async handover(to) {
+        open();
+        return handoverOf(log, session.id, options.harness ?? 'claude-code', to);
       },
     };
   }

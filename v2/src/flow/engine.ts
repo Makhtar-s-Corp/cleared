@@ -94,7 +94,8 @@ import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
-import { HostToolRefused, type Answer, type Briefing, type Decision, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
+import { HostToolRefused, type Answer, type Briefing, type Decision, type Harness, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
+import { handoverNote, refuseTarget } from '../session/handover.ts';
 import { readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
@@ -121,7 +122,7 @@ import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
-import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
+import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
 import { ReplayStore, replayPrompt, stepCommit, type Checkpoint, type Replay } from './replay.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
@@ -225,6 +226,9 @@ export type FlowDeps = {
 
 export type FlowErrorKind = 'not_found' | 'conflict' | 'invalid' | 'unavailable';
 
+// What a handover answers: the session that carries on (B6.3).
+export type HandedOver = { readonly session: SessionId; readonly harness: Harness; readonly model: string };
+
 export class FlowError extends Error {
   override name = 'FlowError';
   readonly kind: FlowErrorKind;
@@ -235,6 +239,8 @@ export class FlowError extends Error {
 }
 
 const HARNESS = 'claude-code' as const;
+// B6.3 (P150): the model a session handed over to Codex runs on, unless the owner names one (adapters.md: the account's default).
+export const CODEX_MODEL = 'gpt-6-luna';
 // Decision 15 of milestone 2: a plan item the lead puts in the fast lane is
 // a ticket with this label, and its author is Haiku (unless Haiku reviews).
 export const QUICK_LABEL = 'Quick';
@@ -580,12 +586,12 @@ export class FlowEngine {
   async #repair(release: ReleaseItem, ticket: Ticket, repair: CiRepair, failures: CiFailures | undefined): Promise<void> {
     const id = ticket.id;
     const tickets = this.registry.ticketStore;
-    const adapter = this.registry.sessionAdapters[HARNESS];
+    const authorRow = this.#store.sessions.list({ ticket: id }).filter((row) => row.role === 'author').at(-1);
+    const adapter = this.registry.sessionAdapters[authorRow ? this.#harnessOf(authorRow.id) : HARNESS];
     if (!adapter) return;
     this.#settleRelease(release.id, id, release.project, 'system');
     this.#checked.delete(release.id);
     await this.#repairSaid(release, repair);
-    const authorRow = this.#store.sessions.list({ ticket: id }).filter((row) => row.role === 'author').at(-1);
     this.#active.add(id);
     this.#flows.set(id, new Set(authorRow ? [authorRow.id] : []));
     this.#channels.delete(id);
@@ -821,6 +827,7 @@ export class FlowEngine {
       phase, status: state.status, startedAt: row.createdAt, updatedAt: row.updatedAt, lastSeq: events.at(-1)?.seq ?? 0,
       state: { ...state, ...(plan ? { plan } : {}), ...(takenOver ? { takenOver } : {}) },
       ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}), ...(takenOver ? { takenOver } : {}),
+      ...(this.#dormant.has(id) ? { dormant: true as const } : {}),
     };
   }
 
@@ -891,9 +898,11 @@ export class FlowEngine {
 
   // The sessions of the ticket's current flow: a ticket put back and started
   // again by a person begins again at round 1, with nothing of the old flow.
+  // In the order the flow started them: two sessions started in the same
+  // millisecond (a handover) are not told apart by the table's order.
   #flowRows(ticket: TicketId) {
-    const mine = this.#flowOf(ticket);
-    return this.#store.sessions.list({ ticket }).filter((row) => mine.has(row.id));
+    const rows = new Map(this.#store.sessions.list({ ticket }).map((row) => [row.id, row]));
+    return [...this.#flowOf(ticket)].flatMap((id) => rows.get(id) ?? []);
   }
 
   #lastSession(ticket: TicketId, role: Role): { id: SessionId; ticket: string; project: string } | undefined {
@@ -1753,6 +1762,20 @@ export class FlowEngine {
     if (stopped.length > 0) await this.#releaseStopped(stopped);
   }
 
+  // The harness a session runs on, from its row: a session handed over to Codex is resumed by Codex's adapter, not Claude's (B6.3).
+  #harnessOf(id: SessionId): Harness {
+    return this.#store.sessions.get(id)?.harness ?? HARNESS;
+  }
+
+  // The reviewer of a ticket that changed harness is the other harness than
+  // its last author's, so that no harness judges its own work (B6.3, P154);
+  // a ticket that never changed harness keeps Claude Code's reviewer.
+  #reviewerHarness(ticket: TicketId): Harness {
+    const authors = this.#flowRows(ticket).filter((row) => row.role === 'author');
+    if (!authors.some((row) => row.harness !== HARNESS)) return HARNESS;
+    return authors.at(-1)?.harness === 'codex' ? HARNESS : 'codex';
+  }
+
   // A resume starts a container under the session's own names while its
   // row may still say done or stopped: the release leaves it alone.
   async #resume(adapter: SessionAdapter, id: SessionId): Promise<SessionHandle> {
@@ -1790,12 +1813,12 @@ export class FlowEngine {
   // `author`: the author's host tools, with its session plan to propose
   // first (`plan`), or not again after a review (`report`, lane 17).
   // `step`: the service and the siblings of a step's session (lane 23).
-  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report', step?: { readonly service: string; readonly siblings?: readonly SiblingSpec[] }): Promise<Live> {
+  async #launch(adapter: SessionAdapter, ticket: Ticket, role: Role, model: string, workdir: string, briefing: Briefing, settings: ProjectSettings, prompt: string, author?: 'plan' | 'report', step?: { readonly service: string; readonly siblings?: readonly SiblingSpec[] }, harness: Harness = HARNESS): Promise<Live> {
     // A train ticket's session works on the first service the ticket names (decision 20, lane 15's runtime), a step's on its own.
     const service = step?.service ?? (this.#several ? this.#servicesOf(ticket)[0]?.name : undefined);
     const tools = author ? this.#authorTools(ticket, author === 'plan') : undefined;
     const input: StartInput = {
-      project: this.config.project, ticket: ticket.id, role, harness: HARNESS, model, workdir, briefing,
+      project: this.config.project, ticket: ticket.id, role, harness, model, workdir, briefing,
       policy: this.#policy(role, settings, tools), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
       ...(step?.siblings ? { siblings: step.siblings } : {}),
     };
@@ -1803,7 +1826,7 @@ export class FlowEngine {
     // The fake adapter plays a first turn's host calls inside start(): the gate may exist already.
     if (author === 'plan' && !this.#gates.has(handle.id)) this.#gates.set(handle.id, { phase: 'planning', stepOpen: false });
     const at = this.#now().toISOString();
-    this.#store.sessions.put({ id: handle.id, project: input.project, ticket: ticket.id, role, harness: HARNESS, model, status: role === 'reviewer' ? 'reviewing' : 'working', createdAt: at, updatedAt: at });
+    this.#store.sessions.put({ id: handle.id, project: input.project, ticket: ticket.id, role, harness, model, status: role === 'reviewer' ? 'reviewing' : 'working', createdAt: at, updatedAt: at });
     const live: Live = { id: handle.id, input, settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
     this.#live.set(live.id, live);
     this.#inputs.set(live.id, { input, settings });
@@ -2091,7 +2114,8 @@ export class FlowEngine {
       return;
     }
     if (event.outcome.type === 'cancelled') {
-      this.#setPhase(live, 'waiting_human');
+      // The end of a turn interrupted by a handover can be read after the session was stopped: it stays stopped.
+      if (!live.closed) this.#setPhase(live, 'waiting_human');
       return;
     }
     if (event.result.stopReason !== 'end_turn') {
@@ -2258,10 +2282,11 @@ export class FlowEngine {
   // author's answer, is journaled on it, unless `journaled`: a reviewer
   // resumed took it before its send failed.
   async #startReview(ticket: Ticket, workdir: string, channel?: readonly ChannelMessage[], journaled = false): Promise<void> {
-    const adapter = this.registry.sessionAdapters[HARNESS];
+    const harness = this.#reviewerHarness(ticket.id);
+    const adapter = this.registry.sessionAdapters[harness];
     const began = this.#now();
     try {
-      if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
+      if (!adapter) throw new FlowError('unavailable', `no adapter for ${harness} is registered`);
       const settings = await this.#settings(ticket);
       const prepared = this.#several
         ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
@@ -2271,8 +2296,8 @@ export class FlowEngine {
       // The reviewer's git commands name its own service's base.
       const base = this.#several ? (this.#servicesOf(ticket)[0] as ServiceConfig).base : this.config.base;
       const prompt = reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)), ...(settings.testCommand ? { testCommand: settings.testCommand } : {}) });
-      const live = await this.#launch(adapter, ticket, 'reviewer', this.#reviewerModel(ticket), prepared.workdir || workdir, prepared.briefing, settings,
-        channel ? `${prompt}\n\n${channelPrompt(channel)}` : prompt);
+      const live = await this.#launch(adapter, ticket, 'reviewer', harness === HARNESS ? this.#reviewerModel(ticket) : CODEX_MODEL, prepared.workdir || workdir, prepared.briefing, settings,
+        channel ? `${prompt}\n\n${channelPrompt(channel)}` : prompt, undefined, undefined, harness);
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
       const answer = channel?.at(-1);
       if (answer && !journaled) this.#journal({ id: live.id, ticket: ticket.id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
@@ -2369,7 +2394,7 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
     const authorRow = this.#lastSession(id, 'author');
-    const adapter = this.registry.sessionAdapters[HARNESS];
+    const adapter = this.registry.sessionAdapters[authorRow ? this.#harnessOf(authorRow.id) : HARNESS];
     if (!ticket || !adapter) {
       await this.#putBack(id, 'The author could not be reopened: the ticket or the adapter is gone.', 'reopen_failed');
       return;
@@ -2421,9 +2446,11 @@ export class FlowEngine {
     }
     const settings = kept?.settings ?? (await this.#settings(ticket));
     const prepared = await this.#prepare(ticket, 'author');
-    const tools = this.config.authorTools === true;
-    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings,
-      `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined);
+    // A Codex author has no host tools: it is started again on Codex, with none (B6.3).
+    const harness = authorRow ? this.#harnessOf(authorRow.id) : HARNESS;
+    const tools = this.config.authorTools === true && harness === HARNESS;
+    const live = await this.#launch(adapter, ticket, 'author', harness === HARNESS ? this.#authorModel(ticket) : CODEX_MODEL, prepared.workdir, prepared.briefing, settings,
+      `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined, undefined, harness);
     this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
     if (journal && !journaled) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
     this.#snapshot(live.id, id);
@@ -2438,7 +2465,7 @@ export class FlowEngine {
     const limit = this.config.maxReviewRounds;
     const answer: ChannelMessage = { round: open.round, limit, from: 'author', text: this.#clean(lastSaid(this.#store.events.after(author.id, author.turnFrom ?? 0)) ?? NO_ANSWER) };
     this.#journal({ id: author.id, ticket: id, project: author.input.project }, { type: 'CUSTOM', name: 'cleared.review_channel', value: answer });
-    const adapter = this.registry.sessionAdapters[HARNESS];
+    const adapter = this.registry.sessionAdapters[this.#harnessOf(open.reviewer)];
     const kept = this.#inputs.get(open.reviewer);
     const began = this.#now();
     let journaled = false;
@@ -2926,7 +2953,7 @@ export class FlowEngine {
       ...left.map((q) => `Your question ${asked(q.questions)} was not answered while your session was stopped: ask it again if you still need it.`),
     ].join('\n\n');
     const lastSeq = this.#store.events.after(dormant.id).at(-1)?.seq ?? 0;
-    const adapter = this.registry.sessionAdapters[HARNESS];
+    const adapter = this.registry.sessionAdapters[this.#harnessOf(dormant.id)];
     let handle: SessionHandle;
     try {
       if (!adapter) throw new Error('no session adapter is configured');
@@ -3036,7 +3063,7 @@ export class FlowEngine {
   async giveBack(id: SessionId): Promise<void> {
     const live = this.#liveSession(id);
     if (!this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is not taken over`);
-    const adapter = this.registry.sessionAdapters[HARNESS];
+    const adapter = this.registry.sessionAdapters[this.#harnessOf(id)];
     if (!adapter) throw new FlowError('unavailable', 'no session adapter is configured');
     let handle: SessionHandle;
     try {
@@ -3065,5 +3092,80 @@ export class FlowEngine {
     } catch (error) {
       await this.#stopTicket(current, 'error', `The session could not be told it was given back: ${name(error)}`, `The session was given back, but it could not be resumed: ${name(error)}`, 'failed', 'failed');
     }
+  }
+
+  // ---- hand over to the other harness (B6.3, P150 to P154) -----------------
+
+  // The owner hands a live author's work to the other harness of the
+  // contract (claude-code or codex; Cursor stays out of the flows, P87): the
+  // session is taken over first, so that the end of its interrupted turn is
+  // not taken for the end of the work (no review, no put back), then it
+  // gives up a note of its work, the target starts as a new author in the
+  // same checkout (its uncommitted changes kept) and is told that note, both
+  // sessions journal `cleared.handed_over`, and the source is stopped. A
+  // target that cannot start gives the source back. A step's or a variant's
+  // session, one whose plan waits for its Go, and one taken over are not
+  // handed over in this version.
+  //
+  // A session the watchdog stopped while it waited for a person (dormant:
+  // its containers are gone, its volume and its journal are not) is handed
+  // over too, and it is the stuck session the proof means: there is nothing
+  // to interrupt, its note is read from the journal, what it waited for is
+  // settled, and a target that does not start leaves it dormant.
+  async handOver(id: SessionId, by: UserId, to: { readonly harness: Harness; readonly model?: string }): Promise<HandedOver> {
+    const dormant = this.#dormant.get(id);
+    const live = dormant ?? this.#liveSession(id);
+    if (live.input.role !== 'author') throw new FlowError('conflict', `session ${id} is the ${live.input.role}'s: only an author's session is handed over`);
+    if (this.#paused.has(id)) throw new FlowError('conflict', `session ${id} is taken over: give it back first`);
+    if (this.#stepOf.has(id) || this.#variantOf.has(id)) throw new FlowError('conflict', `session ${id} works on a step or a variant of its ticket: it is not handed over in this version`);
+    if (this.#holds(id)) throw new FlowError('conflict', `the plan of session ${id} waits for its Go: give it a Go or a Change first`);
+    const ticket = await this.#ticketOf(live.input.ticket);
+    const target = { harness: to.harness, model: to.model ?? (to.harness === HARNESS ? this.#authorModel(ticket) : CODEX_MODEL) };
+    try {
+      refuseTarget(live.input.harness, target);
+    } catch (error) {
+      throw new FlowError('invalid', name(error));
+    }
+    const next = this.registry.sessionAdapters[target.harness];
+    if (!next) throw new FlowError('unavailable', `no adapter for ${target.harness} is registered`);
+    const kept = this.#inputs.get(id);
+    if (!kept) throw new FlowError('conflict', `session ${id} belongs to another process: it is not handed over`);
+    if (!dormant) await this.takeOver(id, by);
+    const back = async (reason: string): Promise<never> => {
+      if (!dormant) await this.giveBack(id).catch(() => undefined);
+      throw new FlowError('unavailable', reason);
+    };
+    let note: string;
+    try {
+      note = this.#clean(dormant ? handoverNote(this.#store.events.after(id)) : (await live.handle.handover(target)).note);
+    } catch (error) {
+      return back(`session ${id} could not give up its work: ${name(error)}`);
+    }
+    const began = this.#now();
+    let fresh: Live;
+    try {
+      // A Codex author has no host tools (its adapter takes none): the report of changes is Claude's.
+      const tools = this.config.authorTools === true && target.harness === HARNESS;
+      fresh = await this.#launch(next, ticket, 'author', target.model, kept.input.workdir, kept.input.briefing, kept.settings,
+        `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${handoverMessage({ from: live.input.harness, fromModel: live.input.model, to: target.harness, note })}`,
+        tools ? 'report' : undefined, undefined, target.harness);
+    } catch (error) {
+      return back(`the ${target.harness} session could not be started: ${name(error)}`);
+    }
+    const value = {
+      from: { session: id, harness: live.input.harness, model: live.input.model },
+      to: { session: fresh.id, harness: target.harness, model: target.model },
+      by,
+    };
+    this.#journal({ id, ticket: ticket.id, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.handed_over', value });
+    this.#journal({ id: fresh.id, ticket: ticket.id, project: fresh.input.project }, { type: 'CUSTOM', name: 'cleared.handed_over', value });
+    this.#step({ id: fresh.id, ticket: ticket.id, project: fresh.input.project }, 'STEP_STARTED', 'author', began);
+    this.#snapshot(fresh.id, ticket.id);
+    this.#supervise(fresh, 0);
+    if (dormant) {
+      this.#told.delete(id);
+      this.#endDormant(dormant, 'stopped');
+    } else await this.#close(live, 'stopped', `Handed over to ${target.harness} (${fresh.id}).`);
+    return { session: fresh.id, harness: target.harness, model: target.model };
   }
 }
