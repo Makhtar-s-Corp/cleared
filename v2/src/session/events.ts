@@ -123,7 +123,13 @@ export type CustomValue = {
   'cleared.permission_answered': { readonly requestId: string; readonly decision: Decision['kind']; readonly by: UserId | 'policy'; readonly rule?: string };
   'cleared.question': { readonly requestId: string; readonly questions: readonly Question[] };
   'cleared.answered': { readonly requestId: string; readonly by: UserId };
-  'cleared.review_verdict': { readonly session: SessionId; readonly verdict: 'pass' | 'changes_requested'; readonly round: number };
+  // `tests`: the reviewer's run of the service's declared test command
+  // (issue #268, flow/review-tests.ts), read from its session's events; none
+  // when the service declares no test command.
+  'cleared.review_verdict': {
+    readonly session: SessionId; readonly verdict: 'pass' | 'changes_requested'; readonly round: number;
+    readonly tests?: { readonly command: string; readonly outcome: 'passed' | 'failed' | 'unclear' | 'not_run'; readonly tail?: string };
+  };
   'cleared.handover_captured': { readonly path: string };
   // A call of a host tool (session/contract.ts, HostTool), its input cleaned.
   // `message` is the refusal said to the model, or a generic line for a failure.
