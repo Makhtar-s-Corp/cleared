@@ -4,6 +4,9 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { QuestionItem, ReleaseItem } from '../../src/api/types.ts';
 import { FLOW_EVENT_TYPES, type FlowEvent } from '../../src/flow/events.ts';
+import type { ContractItem } from '../../src/api/types.ts';
+import { contractRead, stepped } from './steps-harness.ts';
+import type { FakeStep } from '../../src/session/adapters/fake.ts';
 import { REPORT_PASS, approved, finished, ledgerRow, quickAuthor, releaseRow, reviewerScript, setup, started, text, simulatedCi, until, type Setup } from './support.ts';
 
 const fired = new Set<FlowEvent['type']>();
@@ -268,5 +271,27 @@ test('a repair of failed checks says ci_repair at each step, after the card says
     { type: 'ci_repair', at: undefined, project: 'guestbook', ticket: t.ticket.id, pr: 7, attempt: 1, limit: 2, state: 'repaired', checks: ['test'] },
   ]);
   assert.deepEqual(said, ['started', 'pushed', 'repaired'], 'said after the card has it');
+  await t.engine.close();
+});
+
+// M4 (lane j3-contract-notes): a step's session leaves a note for the other steps, and the lead hears of it after the journal has it.
+test('a note a step\'s session leaves says step_note, after the note is journaled on the session', async () => {
+  const note: FakeStep = { hostCall: { toolCallId: 'n1', name: 'leave_note', input: { text: 'The check answers a severity as a string.' } } };
+  const { t, ticket, contract } = await stepped({ authors: [[started, note, ...text('a1', 'Done.'), finished(0.3)], quickAuthor, quickAuthor, quickAuthor], reads: { 'filter-api': [contractRead(1), contractRead(1), contractRead(1)] } });
+  let journaled = false;
+  t.engine.subscribe((event) => {
+    if (event.type === 'step_note') journaled = t.store.events.after(event.session).some(({ event: e }) => e.type === 'CUSTOM' && e.name === 'cleared.step_note');
+  });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item');
+  await t.engine.approveContract((contract() as ContractItem).id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.ticket === ticket.id), 'the release item', 5000);
+  await t.engine.settled();
+  const [event] = of(t, 'step_note');
+  assert.deepEqual({ ...event, at: undefined }, {
+    type: 'step_note', at: undefined, project: 'guestbook', ticket: ticket.id, session: t.startedSessions[0]!.id, step: 1, service: 'filter-api', text: 'The check answers a severity as a string.',
+  });
+  assert.equal(journaled, true, 'said after the write');
+  record(t);
   await t.engine.close();
 });

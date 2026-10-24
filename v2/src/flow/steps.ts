@@ -185,6 +185,21 @@ export class StepStore {
     this.#db.prepare("UPDATE ticket_steps SET state = 'waiting', updated_at = ? WHERE ticket = ? AND state = 'running'").run(this.#now().toISOString(), ticket);
   }
 
+  // A contract step's new proposal approved: the done steps that come after
+  // it, directly or through others, ran on the contract it replaces, so they
+  // wait again. The first approval has none done, and changes nothing.
+  rerun(ticket: TicketId, contract: number): void {
+    const steps = this.list(ticket);
+    const after = new Set<number>([contract]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const step of steps) if (!after.has(step.position) && step.after.some((position) => after.has(position))) { after.add(step.position); grew = true; }
+    }
+    const at = this.#now().toISOString();
+    for (const step of steps) if (step.state === 'done' && step.position !== contract && after.has(step.position))
+      this.#db.prepare("UPDATE ticket_steps SET state = 'waiting', updated_at = ? WHERE id = ?").run(at, step.id);
+  }
+
   // A ticket started again: what failed or was running waits again; what is
   // done stays done, and a contract waiting for its validation still waits.
   // A ticket whose steps were all done (its review, its release or the owner

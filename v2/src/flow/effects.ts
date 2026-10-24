@@ -260,8 +260,11 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     async captureHandover(input) {
       const own = serviceOfWorkdir(input.workdir, input.ticket);
       const level = ownLevel(own);
-      const contract = lessonContract(own);
-      return captureHandover({ ...memory, ...input, ...(level ? { service: level } : {}), ...(contract ? { contract: contractLevel(contract) } : {}) });
+      // The contract the session's step builds against (M4), else the first one it has or consumes.
+      const { contract: hint, ...rest } = input;
+      const named_ = hint ? named(hint) : undefined;
+      const contract = named_?.contract ? named_ : lessonContract(own);
+      return captureHandover({ ...memory, ...rest, ...(level ? { service: level } : {}), ...(contract ? { contract: contractLevel(contract) } : {}) });
     },
 
     async publish(input) {
