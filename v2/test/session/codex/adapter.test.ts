@@ -166,6 +166,35 @@ test('the reviewer stays read only: a file change it reports stops its turn, as 
   } finally { t.done(); }
 });
 
+test('each turn is a new process whose items start at item_0 again: an id seen in an earlier turn is checked again (review r2 of pull request 300)', async () => {
+  for (const role of ['reviewer', 'author'] as const) {
+    const t = await setup();
+    try {
+      const handle = await t.adapter.start(input(t.workdir, {}, role));
+      const first = await t.launcher.nextTurn(0);
+      first.say(threadStarted(), commandStarted('item_1', "bash -lc 'git log -1'"), commandDone('item_1', "bash -lc 'git log -1'", 'abc'), turnCompleted());
+      first.exit(0);
+      await until(() => t.log.all.some((e) => e.event.type === 'RUN_FINISHED'));
+      assert.equal(first.killed, false, `${role}: a read goes on`);
+      await handle.send({ text: 'Go on.', by: 'user-1' });
+      const second = await t.launcher.nextTurn(1);
+      second.say(threadStarted(), commandStarted('item_1', "bash -lc 'cat .env'"));
+      await until(() => second.killed);
+      const error = t.log.all.find((e) => e.event.type === 'RUN_ERROR')?.event;
+      assert.ok(error?.type === 'RUN_ERROR' && error.code === 'policy_stop', role);
+      const answered = events(t.log.all).filter((event) => event.type === 'CUSTOM' && event.name === 'cleared.permission_answered');
+      assert.equal(answered.length, 1, role);
+      // A blocked call is not shown as a call (as for Cursor): the refusal names
+      // the second turn's item, never the first turn's call of the same id.
+      const starts = events(t.log.all).flatMap((event) => (event.type === 'TOOL_CALL_START' ? [event.toolCallId] : []));
+      assert.equal(starts.length, 1, `${role}: ${JSON.stringify(starts)}`);
+      const refused = answered[0];
+      assert.ok(refused?.type === 'CUSTOM' && refused.name === 'cleared.permission_answered');
+      assert.notEqual(refused.value.requestId, starts[0], 'the refusal is not the first turn\'s call');
+    } finally { t.done(); }
+  }
+});
+
 test('the guard fails closed: a denied read stops the turn, and so does a call that would need an approval', async () => {
   const t = await setup();
   try {

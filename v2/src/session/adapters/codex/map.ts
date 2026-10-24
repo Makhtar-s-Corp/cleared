@@ -162,8 +162,8 @@ export type CodexMapper = {
   line(line: Record<string, unknown>): AgUiEvent[];
   // The windows read after a turn, said only when they changed.
   rateLimits(line: Record<string, unknown>): AgUiEvent[];
-  // The guard stopped the turn on this call (policy.ts verdict, or no channel to ask on).
-  blocked(callId: string, verdict: Verdict, message: string): AgUiEvent[];
+  // The guard stopped the turn on this item (policy.ts verdict, or no channel to ask on).
+  blocked(item: string, verdict: Verdict, message: string): AgUiEvent[];
   // The process ended without turn.completed.
   turnFailed(message: string, code: string): AgUiEvent[];
   // The turn ended because it was interrupted or the session stopped.
@@ -177,7 +177,10 @@ export function createCodexMapper(options: { readonly sessionId: string }): Code
   let model = '';
   let run: string | undefined;
   let runs = 0;
-  const calls = new Map<string, ToolInput>();             // the tool calls shown, by item id
+  const calls = new Map<string, ToolInput>();             // the running turn's tool calls shown, by item id
+  // Codex numbers its items from item_0 again in each process, so a call's
+  // id in the thread is the item's within its turn.
+  const callId = (item: string) => `${sessionId}-${runs}-${item}`;
   const rates = new Map<string, string>();                // the last rate limit said per window
   let state: SessionState = { status: 'Starting', phase: 'starting', steps: [], files: [], checks: [], usage: {} };
 
@@ -215,10 +218,11 @@ export function createCodexMapper(options: { readonly sessionId: string }): Code
     if (!call || calls.has(call.callId)) return [];
     const input = inputOf(call.request);
     calls.set(call.callId, input);
+    const id = callId(call.callId);
     return [
-      { type: 'TOOL_CALL_START', toolCallId: call.callId, toolCallName: call.request.tool },
-      toolArgs(call.callId, input),
-      { type: 'TOOL_CALL_END', toolCallId: call.callId },
+      { type: 'TOOL_CALL_START', toolCallId: id, toolCallName: call.request.tool },
+      toolArgs(id, input),
+      { type: 'TOOL_CALL_END', toolCallId: id },
       change({ status: statusOf(input, call.request.tool) }),
     ];
   }
@@ -246,7 +250,7 @@ export function createCodexMapper(options: { readonly sessionId: string }): Code
       const kind = input.kind === 'read' ? 'other' : input.kind;
       output = failed ? { kind, ok: false, error: str(record(item.error)?.message) ?? 'failed' } : { kind, ok: true };
     }
-    events.push(toolResult(messageId, call.callId, output));
+    events.push(toolResult(messageId, callId(call.callId), output));
     if (item.type === 'file_change' && !failed) {
       let files = state.files;
       for (const each of codexCalls(item)) {
@@ -269,6 +273,7 @@ export function createCodexMapper(options: { readonly sessionId: string }): Code
       return [{ type: 'TEXT_MESSAGE_START', messageId, role: 'user', name: by }, { type: 'TEXT_MESSAGE_CONTENT', messageId, delta: text }, { type: 'TEXT_MESSAGE_END', messageId }];
     },
     beginTurn() {
+      calls.clear();                                      // a new process: its items are new
       if (run !== undefined) return [];
       runs++;
       run = `${sessionId}-run-${runs}`;
@@ -297,10 +302,10 @@ export function createCodexMapper(options: { readonly sessionId: string }): Code
         return [{ type: 'CUSTOM', name: 'cleared.rate_limit', value }];
       });
     },
-    blocked(callId, verdict, message) {
+    blocked(item, verdict, message) {
       const rule = verdict.rule;
       return end([
-        { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: callId, decision: 'reject_once', by: 'policy', rule } },
+        { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: callId(item), decision: 'reject_once', by: 'policy', rule } },
         { type: 'RUN_ERROR', message, code: 'policy_stop' },
       ], 'waiting_human', 'Stopped by the guard');
     },

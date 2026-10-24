@@ -132,7 +132,7 @@ type Session = {
   readonly mapper: CodexMapper;
   readonly wake: Set<() => void>;
   readonly queue: string[];
-  readonly checked: Set<string>;                  // the items the guard has seen
+  readonly checked: Set<string>;                  // the items the guard has seen in the running turn's process
   thread: string | undefined;                     // Codex's thread id
   turn: Turn | undefined;                         // the running turn
   closed: boolean;
@@ -229,6 +229,9 @@ export function createCodexAdapter(options: CodexOptions): SessionAdapter {
   }
 
   async function runTurn(session: Session, text: string): Promise<void> {
+    // Codex numbers its items from item_0 again in each process (docs/adapters.md,
+    // proofs 7 and 8): an id seen in an earlier turn is a new item here.
+    session.checked.clear();
     emit(session, session.mapper.beginTurn());
     let child: ChildProcessWithoutNullStreams;
     try {

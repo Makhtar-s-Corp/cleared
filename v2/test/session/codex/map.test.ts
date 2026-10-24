@@ -54,6 +54,24 @@ test('a command: shown when it starts, its output and exit code when it ends; a 
   assert.deepEqual(JSON.parse(result.content), { kind: 'execute', output: 'fail 1', cut: 0, isError: true });
 });
 
+test('the same item id in two turns is two calls, each shown with its own id and input (review r2 of pull request 300)', () => {
+  const mapper = createCodexMapper({ sessionId: 's1' });
+  mapper.start('m');
+  mapper.beginTurn();
+  const first = mapper.line(commandStarted('item_1', "bash -lc 'git log -1'"));
+  mapper.line(turnCompleted());
+  mapper.beginTurn();
+  const second = mapper.line(commandStarted('item_1', "bash -lc 'npm test'"));
+  assert.deepEqual(kinds(second), ['TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END', 'STATE_DELTA'], 'shown again: a new process, a new item');
+  const id = (events: AgUiEvent[]) => events.find((event) => event.type === 'TOOL_CALL_START')?.type === 'TOOL_CALL_START' ? (events[0] as { toolCallId: string }).toolCallId : '';
+  assert.notEqual(id(first), id(second));
+  assert.equal(mapper.state().status, 'Running npm test');
+  const done = mapper.line(commandDone('item_1', "bash -lc 'npm test'", 'ok'));
+  const result = done.find((event) => event.type === 'TOOL_CALL_RESULT');
+  assert.ok(result?.type === 'TOOL_CALL_RESULT' && result.toolCallId === id(second), 'the result belongs to the second turn\'s call');
+  assert.equal(JSON.parse(result.content).kind, 'execute');
+});
+
 test('a file change made: the call and the changed files; a delete is not a changed file', () => {
   const mapper = createCodexMapper({ sessionId: 's1' });
   mapper.start('m');
