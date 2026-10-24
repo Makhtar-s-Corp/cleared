@@ -7,7 +7,7 @@
 // a train (TrainBody).
 import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CaretRight, CheckCircle, Circle, CircleNotch, LockSimple, Tray, WarningCircle } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TrainState, TrainStop } from '../../../../src/api/types.ts';
+import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TicketVariant, TrainState, TrainStop, VariantsItem } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices } from '@/components/choices/Choices.tsx';
 import { FREE_MAX, emptyDraft, type ChoiceDraft } from '@/components/choices/model.ts';
@@ -27,9 +27,9 @@ import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
-  changeMessage, chosen, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
+  changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
-  sessionLink, sessionOf, sessionsLine, shareLine, short,
+  sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
@@ -344,8 +344,9 @@ const ANSWER_KEY: Readonly<Record<Answer, string>> = { allow_once: 'A', allow_al
 // the detail with its other fields and sent from the bar.
 type Answers = ChoiceDraft;
 
-function QuestionBody({ item, view, t, answers, onDraft }: {
+function QuestionBody({ item, view, t, answers, onDraft, onAnswer }: {
   readonly item: QuestionItem; readonly view: InboxView; readonly t: Translate; readonly answers: Answers; readonly onDraft?: (draft: Answers) => void;
+  readonly onAnswer?: (draft: Answers) => void;
 }) {
   // The lead's question is read here and answered on the lead's screen.
   const lead = isLead(item);
@@ -360,8 +361,10 @@ function QuestionBody({ item, view, t, answers, onDraft }: {
       <h2 className="sr-only">{t('kind_question')}</h2>
       {/* The question first, on the colour of what waits; the ticket under it (DESIGN.md, 4). */}
       <div className={`questions${item.state === 'waiting' ? ' waits' : ''}${lead ? ' read' : ''}`}>
+        {/* A click on the only choice of one question answers it, as the bar's Send would (issue #269). */}
         <Choices questions={item.questions} t={t} requestId={item.requestId} send="bar" free={waiting}
-          status={waiting ? { kind: 'waiting', draft: answers, busy } : { kind: 'read' }} onDraft={onDraft} />
+          status={waiting ? { kind: 'waiting', draft: answers, busy } : { kind: 'read' }} onDraft={onDraft}
+          onAnswer={onAnswer ? (_answers, chosen) => onAnswer({ picks: [chosen], free: [''] }) : undefined} />
       </div>
       {title ? <p className="d-ticket for-question">{title}</p> : null}
       {deadline ? <p className="d-deadline">{deadline}</p> : null}
@@ -431,10 +434,64 @@ function ContractBody({ item, view, t }: { readonly item: ContractItem; readonly
       <p className="d-ticket"><code>{item.path}</code>{title ? <><span className="sep" aria-hidden="true">·</span>{title}</> : null}</p>
       {item.state === 'waiting' ? <p className="decide-rule">{t('contract_rule')}</p> : null}
       <h3 className="d-sub">{t('contract_diff')}</h3>
-      <pre className="diff"><code>{item.diff.split('\n').map((line, index) => (
-        <span key={index} className={line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : undefined}>{line}{'\n'}</span>
-      ))}</code></pre>
+      <Diff diff={item.diff} />
     </>
+  );
+}
+
+// A diff, its added and removed lines coloured.
+function Diff({ diff, label }: { readonly diff: string; readonly label?: string }) {
+  return (
+    <pre className="diff" {...(label ? { 'aria-label': label, tabIndex: 0 } : {})}><code>{diff.split('\n').map((line, index) => (
+      <span key={index} className={line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : undefined}>{line}{'\n'}</span>
+    ))}</code></pre>
+  );
+}
+
+// The variants of one ticket side by side (issue #271): each one's state,
+// files, lines, cost and time, and its diff; a variant that is done is
+// chosen for the review from its own column, and the others stop.
+function VariantsBody({ item, view, t, busy, onAct }: { readonly item: VariantsItem; readonly view: InboxView; readonly t: Translate; readonly busy: boolean; readonly onAct?: Act }) {
+  const title = ticketTitle(view, item.ticket);
+  const waits = item.state === 'waiting' && view.local.get(item.id)?.kind !== 'chosen';
+  return (
+    <>
+      <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_variants' : 'kind_variants')} open={undefined} openKey="open_session" t={t} />
+      <h2 className="d-title">{title ?? item.ticket}</h2>
+      <p className="d-ticket">{t('variants_of', { n: item.variants.length })}</p>
+      {waits ? <p className="decide-rule">{t('variants_rule')}</p> : null}
+      <div className="variants" data-count={item.variants.length}>
+        {item.variants.map((variant) => <VariantColumn key={variant.position} variant={variant} view={view} t={t} choosable={waits && variant.state === 'done'} busy={busy} onAct={onAct} />)}
+      </div>
+    </>
+  );
+}
+
+function VariantColumn({ variant, view, t, choosable, busy, onAct }: { readonly variant: TicketVariant; readonly view: InboxView; readonly t: Translate; readonly choosable: boolean; readonly busy: boolean; readonly onAct?: Act | undefined }) {
+  const name = t('variant_name', { n: variant.position });
+  const id = `variant-${variant.position}`;
+  return (
+    <section className="variant" data-state={variant.state} aria-labelledby={id}>
+      <header className="variant-head">
+        <h3 className="d-sub" id={id}>{name}</h3>
+        <span className={`variant-state ${variant.state}`}>{variant.state === 'running' ? <CircleNotch size={12} aria-hidden="true" /> : variant.state === 'failed' ? <WarningCircle size={12} aria-hidden="true" /> : variant.state === 'chosen' ? <CheckCircle size={12} aria-hidden="true" /> : null}{t(`variant_${variant.state}`)}</span>
+      </header>
+      {variant.session ? <a className="d-link" href={sessionLink(variant.session)}>{t('open_session')}</a> : null}
+      {variant.state === 'done' || variant.state === 'chosen' || (variant.state === 'dropped' && variant.diff !== '') ? (
+        <>
+          <p className="variant-facts">{variantFacts(variant, view, t).join(' · ')}</p>
+          {variant.files.length > 0 ? <ul className="variant-files">{variant.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul> : null}
+          {variant.diff !== '' ? <Diff diff={variant.diff} label={t('variant_diff_label', { n: variant.position })} /> : <p className="variant-note">{t('variant_no_diff')}</p>}
+          {variant.cut ? <p className="variant-note">{t('variant_cut')}</p> : null}
+        </>
+      ) : null}
+      {variant.note && variant.state !== 'dropped' ? <p className="variant-note">{variant.note}</p> : null}
+      {choosable ? (
+        <Button variant="ink" className="btn primary" data-act={`variant_choose_${variant.position}`} disabled={busy} onClick={() => onAct?.(`variant_choose_${variant.position}`)}>
+          {t('variant_choose', { n: variant.position })}
+        </Button>
+      ) : null}
+    </section>
   );
 }
 
@@ -476,9 +533,11 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
   if (local?.kind === 'plan_go') return done(t('plan_go_done', { time: clock(local.at) }));
   if (local?.kind === 'plan_changed') return done(t('plan_changed_done', { time: clock(local.at) }));
   if (local?.kind === 'decided' && (item.kind === 'contract' || item.kind === 'knowledge')) return done(decidedLine(local, item, t));
+  if (local?.kind === 'chosen') return done(t('variant_chosen_done', { n: local.position, time: clock(local.at) }));
   if (item.state === 'handled') {
     if (item.kind === 'release' && item.train) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
     if (item.kind === 'contract' || item.kind === 'knowledge') return done(outcomeLine(item, view, t));
+    if (item.kind === 'variants') return done(chosenLine(item, view, t));
     return done(item.kind === 'session_plan' && item.plan.go ? goLine(item.plan.go, view, t) : t('handled_note'));
   }
   if (item.kind === 'question' && isLead(item)) {
@@ -553,6 +612,9 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
       return <>{signed}<div className="d-buttons">{act('contract_send_back', t('send_back'), false, busy)}{act('contract_approve', t('contract_approve'), true, busy)}</div>{status}</>;
     case 'knowledge':
       return <>{signed}<div className="d-buttons">{act('knowledge_reject', t('knowledge_reject'), false, busy)}{act('knowledge_approve', t('knowledge_approve'), true, busy)}</div>{status}</>;
+    // Each done variant is chosen from its own column.
+    case 'variants':
+      return <>{signed}<p className="d-done">{item.variants.some((v) => v.state === 'done') ? t('variants_choose_one') : t('variants_none_done')}</p>{status}</>;
   }
 }
 
@@ -583,7 +645,9 @@ export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMes
           : item.kind === 'session_plan' ? <SessionPlanBody item={item} view={view} t={t} />
           : item.kind === 'contract' ? <ContractBody item={item} view={view} t={t} />
           : item.kind === 'knowledge' ? <KnowledgeBody item={item} t={t} />
-          : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers} />}
+          : item.kind === 'variants' ? <VariantsBody item={item} view={view} t={t} busy={view.local.get(item.id)?.kind === 'busy'} onAct={(act) => onAct?.(act, { reason, answers, message })} />
+          : <QuestionBody item={item} view={view} t={t} answers={answers} onDraft={setAnswers}
+              onAnswer={onAct ? (draft) => { setAnswers(draft); onAct('answer', { reason, answers: draft, message }); } : undefined} />}
       </div>
       <div className="d-actions" id="d-actions">
         <Actions item={item} view={view} t={t} note={note} reason={reason} ready={ready} message={message} onReason={setReason} onMessage={onMessage}
@@ -896,6 +960,9 @@ export default function Inbox() {
       }
       case 'knowledge_approve': case 'knowledge_reject':
         if (item.kind === 'knowledge') void act(item, name as 'knowledge_approve' | 'knowledge_reject', () => (name === 'knowledge_approve' ? approveKnowledge : rejectKnowledge)(api, item, context.now()));
+        return;
+      case 'variant_choose_1': case 'variant_choose_2': case 'variant_choose_3': case 'variant_choose_4':
+        if (item.kind === 'variants') void act(item, 'variant_choose', () => chooseVariant(api, item, Number(name.slice('variant_choose_'.length)), context.now()));
         return;
       case 'allow_once': case 'allow_always': case 'reject_once':
         if (item.kind === 'permission') void act(item, 'answer', () => answerRequest(api, item, decisionFor(name, given.reason, t)));

@@ -23,7 +23,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
-import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
@@ -64,7 +64,9 @@ function ticketBody(value: unknown, project: string): CreateTicketBody | undefin
   return { title: title.trim(), ...(typeof body === 'string' ? { body } : {}), project };
 }
 
-export type FixtureSource = DataSource & { changed(kind: ChangeKind, id: string | null): void };
+// `ask`: a session's question that arrives while the page is open, said on
+// the change stream as the service's inbox says it (issue #269's browser test).
+export type FixtureSource = DataSource & { changed(kind: ChangeKind, id: string | null): void; ask(item: QuestionItem): void };
 
 export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
@@ -84,6 +86,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const requests = requestItems(now(), { reviewer: asker((s) => s.role === 'reviewer'), author: asker((s) => s.ticket === 'LOCAL-160') });
   // The requests answered from the screens, kept in memory: each is handled once (lane 37's art director).
   const answered = new Set<string>();
+  const asking: QuestionItem[] = [];
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
   const consumption = consumptionFixture(project, now);
   const asks = new Map<string, Ask>([[askFixture(now()).id, askFixture(now())]]);
@@ -140,11 +143,11 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     });
     if (method === 'GET' && collection === 'sessions' && parts.length === 1) return sendJson(response, 200, sessions.map((s) => (takenOver.has(s.id) ? { ...s, takenOver: takenOver.get(s.id) } : s)));
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(project));
-    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...requests.filter((item) => item.state === 'waiting'), ...decided, ...lead.inbox, ...requests.filter((item) => item.state === 'handled')].map(asked));
+    if (method === 'GET' && collection === 'inbox' && parts.length === 1) return sendJson(response, 200, [...fixture.inbox.filter((item) => item.kind !== 'plan'), ...requests.filter((item) => item.state === 'waiting'), ...asking, ...decided, ...lead.inbox, ...requests.filter((item) => item.state === 'handled')].map(asked));
     // A session's request answered: the item is handled, a second answer is a 409 (the service's answer route).
     if (method === 'POST' && collection === 'sessions' && id && sub === 'requests' && parts[4] === 'answer' && parts.length === 5) {
       const key = `${decodeURIComponent(id)}\n${decodeURIComponent(parts[3] ?? '')}`;
-      const item = [...fixture.inbox, ...requests].find((i) => (i.kind === 'permission' || i.kind === 'question') && `${i.sessionId}\n${i.requestId}` === key && i.state === 'waiting');
+      const item = [...fixture.inbox, ...requests, ...asking].find((i) => (i.kind === 'permission' || i.kind === 'question') && `${i.sessionId}\n${i.requestId}` === key && i.state === 'waiting');
       if (!item) return sendJson(response, 404, { error: 'no request waits' });
       if (answered.has(key)) return sendJson(response, 409, { error: 'answered already' });
       answered.add(key);
@@ -288,6 +291,10 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   return {
     kind: 'fixtures',
     changed,
+    ask(item) {
+      asking.push(item);
+      changed('inbox', null);
+    },
     forward(request, response, forward) {
       handle(request, response, forward.method, new URL(forward.path, 'http://fixtures'), forward.user.id).catch(() => {
         if (!response.headersSent) sendJson(response, 500, { error: 'internal error' });

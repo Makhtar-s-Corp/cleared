@@ -75,7 +75,7 @@ import type { Ticket } from '../src/tickets/contract.ts';
 import { BaseError, StartRefusal, baseModeOf, checksRunOn, closeStale, frozenCommits, readWatchers, reader as fileAt, recreate, refusal, runCommand, ticketChangesIn, watcherRefusal, workflowsAt, type BaseMode, type BaseSettings } from './proof-base.ts';
 import { GUESTBOOK_HEADING } from './proof-guestbook-heading.ts';
 import { startCheck } from './proof-plan.ts';
-import { chooseAnswers, declaredChecks, permissionAnswer } from './proof-inbox.ts';
+import { answerInInbox, declaredChecks, permissionAnswer } from './proof-inbox.ts';
 import { SHELL_LINES, atPrompt, lineOutcome } from './proof-terminal.ts';
 import { PERMISSION_COMMAND_LIMIT, humanFacts, renderMultiDurations, sessionPlanFacts, trainFacts, type AnsweredPermission, type AnsweredQuestion, type BaseReport, type MultiResult, type Step } from './proof-report.ts';
 import { MULTI_TICKETS, startMultiRehearsal, type MultiWorld } from './proof-rehearsal-multi.ts';
@@ -244,24 +244,12 @@ async function tend(): Promise<void> {
   }
 }
 
-// The inbox shows a session's question with a toggle per option and a free
-// field per question; the bar's Send answers them all. Each option is found
-// by its data-answer read back, never by its label written into a selector.
+// The inbox shows a session's question with its options and a free field
+// per question: one click on the only choice of one question answers it,
+// else the bar's Send answers them all (proof-inbox.ts, answerInInbox).
 async function answerQuestion(item: QuestionItem): Promise<void> {
-  const chosen = chooseAnswers(item.questions);
   await openItem(item.id);
-  for (const [index, choice] of chosen.entries()) {
-    if (choice.how === 'free') {
-      await page.locator(`#detail [data-free="${index}"]`).fill(choice.answer);
-      continue;
-    }
-    const options = page.locator(`#detail [data-q="${index}"][data-answer]`);
-    const labels = await options.evaluateAll((nodes: { getAttribute(name: string): string | null }[]) => nodes.map((n) => n.getAttribute('data-answer')));
-    const at = labels.indexOf(choice.answer);
-    if (at < 0) throw new Error(`the question "${choice.question}" shows no option "${choice.answer}"`);
-    await options.nth(at).click();
-  }
-  await page.locator('#detail [data-act="answer"]').click();
+  const chosen = await answerInInbox(page, item.questions);
   const at = now();
   for (const choice of chosen) questions.push({ at, ticket: item.ticket, session: item.sessionId, ...choice });
   gesture(`answered the question of ${item.ticket} (${chosen.map((c) => `${c.how}: ${c.answer}`).join('; ')})`);

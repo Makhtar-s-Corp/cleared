@@ -179,12 +179,17 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
           throw new HttpError(400, 'labels is a list of short texts');
         if (project !== engine.config.project) throw new HttpError(400, `this service runs project ${engine.config.project}, not ${project}`);
         const services = serviceNames(body.services, engine);
+        // 2 to 4 authors at once (issue #271), refused before the ticket exists.
+        const variants = body.variants;
+        if (variants !== undefined && (typeof variants !== 'number' || !Number.isInteger(variants))) throw new HttpError(400, 'variants is a whole number');
+        const refused = variants === undefined || variants === 1 ? undefined : engine.variantsRefusal(variants);
+        if (refused) throw new HttpError(400, refused);
         const input: CreateTicketBody = {
           title, project, ...(bodyText === undefined ? {} : { body: bodyText }), ...(labels === undefined ? {} : { labels: labels as string[] }),
           ...(services === undefined ? {} : { services }),
         };
         const ticket = await engine.registry.ticketStore.create(input, { kind: 'human', id: user as UserId });
-        void engine.begin(ticket.id, user as UserId);
+        void engine.begin(ticket.id, user as UserId, undefined, variants as number | undefined);
         send(c.response, 200, ticket);
       }),
     },

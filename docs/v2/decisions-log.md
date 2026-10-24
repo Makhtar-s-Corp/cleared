@@ -4508,11 +4508,85 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-driver-resume`.
 
+## 2026-10-24: an agent's question with choices in the inbox, the project's own delay and default (the author's choices, lane `j3-agent-questions`, issue #269)
+
+**The need.** Issue #269 (validated by the owner on 2026-10-23 at 11:51) asks that an agent's question with choices reach the inbox within 5 s, with its choices as buttons, that a click send the answer to the session, that the delay and the default answer be set per project, that the proof script answer it, with service and browser tests. Lane `j3-autonomy` (pull request 297, issue #290) had already given each team question a delay, the lead's 10-minute window, the declared answer and the park (P54). This lane reuses that mechanism and adds what was left (matrix P72). These are the author's choices, not the owner's decisions.
+
+**Decision.**
+1. **The project's own delay and default, on the existing item.** Two keys of `[session]` in a service's `.cleared/agents.conf`, read at the base branch with the others (`projectSettings`):
+   - `question_timeout_minutes`, a positive number: the delay of its questions. Unset, the service's `CLEARED_V2_QUESTION_TIMEOUT_MINUTES` applies, then 30 minutes.
+   - `question_default`: `recommended` (unset means this: the session's declared answer, each question's "(Recommended)" option, as before), `first` (that option, else each question's first, one even for a multiple choice) or `park` (nothing is applied: the ticket is parked).
+   - A wrong value is an error of the project's settings, as for `plan_go_minutes`.
+   - Both are read for the asking session's service, so in a workspace of several services a question follows its own service's file.
+   - They are written into the item's `timeout` when the question is asked (`#questionTimeout`, with `rule` when it is not `recommended`). `#dueQuestions`, `#applyDeclared` and `#park` are unchanged: they already read each item's own `at` and `answers`. The lead's 10-minute window stays a fixed constant.
+   - The ticket's comment, the resumed session's message and the park's note say "the project's default" when the rule is `first` or `park`, not "the answer the session declared".
+   - A question with no option still has no default under `first`: the ticket is parked.
+2. **Within 5 s, the stream down included.** The way existed: the inbox store's write says `inbox` on the change stream, and the page's cache refetches it at once. While the stream is down, the cache polled every 10 s. The inbox is now polled every 3 s then (`INBOX_POLL_MS`), so with the 1-second tick a question is on screen within about 4 s. Every other resource keeps 10 s.
+3. **One click answers.** In the inbox the choices were toggles and the bar's Send answered: two clicks. The only choice of one question is now a button that answers at once (`answersOnClick`, the session's and the lead's rule). Several questions, a multiple choice and a free answer keep the toggles and the bar's Send. A wrong click cannot be undone; the session's screen already behaved this way.
+4. **One way for the proofs to answer.** `answerInInbox` in `scripts/proof-inbox.ts` gives the gestures (one click, or each pick then Send) from the labels the API gives. `proof-j2-multi.ts` uses it in place of its own code. `proof-j2.ts` now answers a team's question in its morning, after the permissions, unless `PROOF_OWNER_APPROVES=1`. It keeps the answers in `result.json` under `questions`. The lead's own question is still the owner's.
+
+**Consequences.**
+- No new interface string: the inbox's line already says when the Lead decides and what then applies, from the item's `answers`.
+- The guestbook's `agents.conf` names the two keys in its comment on `[session]` and sets neither: the defaults apply.
+- Resources: no Docker object, no network, no tunnel. The tests listen on ports the system gives, on 127.0.0.1. The browser tests use the Chromium Playwright installed on this machine.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-agent-questions`.
+
+## 2026-10-24: parallel variants of one ticket (the author's choices, lane `j3-variants`, issue #271)
+
+**The proposal** (validated by the owner on 2026-10-23 at 11:51). On an uncertain ticket, one attempt gives nothing to compare. Several authors work the same ticket; the owner picks the variant to review, and the others are closed.
+
+**Decision.**
+
+1. **The number is chosen at the start, 2 to 4** (`POST /api/tickets`, `FlowEngine.start`, P75).
+   - `variants` in the ticket's body. Absent or 1, one author, as before. Out of 2 to 4, or on a workspace of several services, the route answers 400 before the ticket exists; `start` refuses it too.
+   - The Tower's bar asks for it on a workspace of one service only: one author, 2, 3 or 4, shown once a title is typed.
+   - Not chosen: variants on a ticket of several services. Its checkouts are `<ticket>/<service>`, its steps already run in parallel, and a variant of a train would need a checkout per service and per variant. It stays refused until a ticket needs it.
+
+2. **Each variant is its own clone of the ticket branch** (`flow/variants.ts`, `flow/effects.ts`).
+   - The folder is `<workdirs>/<ticket>.variant-<round>-<position>`: a ticket id has no dot, so no other ticket's checkout is ever named so. A new run of variants of the same ticket is a new round, with fresh clones.
+   - Every variant's branch keeps the ticket branch's name, `cleared/<ticket>`. Each clone has its own `.git`, nothing is pushed before the review, and only the chosen one is published. So `ticketBranch`, `publish`, the lock and the guard are unchanged.
+   - Not chosen: a branch name per variant (`cleared/<ticket>/variant-1`). Git cannot hold `cleared/<ticket>` and `cleared/<ticket>/...` in one repository, and the publish and the lock read the ticket's one branch.
+   - Not chosen: a folder under `<workdirs>/<ticket>/`. That folder is the ticket's own checkout, and a later plain start would find it is not one.
+   - What a variant changes is read as a step's branch is, out of its checkout into a ref of its own, `refs/cleared/variant/<service>/<folder>`: two variants that end at once never read each other's change. Only what is committed counts, as for publish.
+   - A variant's session counts only its own checkout's files for the deletion rule, not its siblings'.
+
+3. **At most the lanes at once** (`#runVariants`).
+   - The limit is the Consumption screen's lanes (`maxLanes`), 3 when it sets none: the issue's 3 lanes in parallel. A fourth variant waits, and starts when a lane is free.
+   - Not chosen: refusing 4 variants under 3 lanes. The issue asks for 2 to 4 within the limit, and waiting keeps both.
+
+4. **A variant that fails fails alone** (`#stopTicket`, `#failVariant`).
+   - Its run error, its idle stop, a stop before the end of its turn, a dead stream or a start that fails mark that variant failed, with its reason on the ticket. The others go on.
+   - A spent budget stops them all: the money is the ticket's.
+   - Every variant failed puts the ticket back in Todo (`variants_failed`), with each one's reason.
+
+5. **The inbox compares them** (`variants` item, `app/web/screens/inbox`).
+   - Once a variant is done, the item is added; it follows the others as they end.
+   - One column per variant, side by side: its state, its files, its lines added and removed, its cost, its time (Intl), and its diff, cut at 64 KB with a line saying so.
+   - Each variant that is done has its own button, "Review variant N". A failed, running or waiting variant has none.
+   - Every text is in the inbox's and the tower's catalogs, in French and in English.
+
+6. **The choice stops the others and releases their containers at once** (`POST /api/variants/:id/choose`, `FlowEngine.chooseVariant`).
+   - The owner can choose as soon as one variant is done. The others stop whatever their state: a running one ends with `variant_dropped`, a waiting one never starts.
+   - Their containers and networks, labelled `cleared.dev=v2` and named by session, are released by the same call (`Docker.releaseStopped`), not at the next tick. The answer counts them. The volumes stay, as for every stopped session.
+   - The chosen variant hands over, the ticket moves to review, and the reviewer, the publish and a reopened author work in the chosen checkout. The sessions not chosen leave the ticket's flow, so the rounds, the human edits and the release card count the chosen one only.
+   - A second choice, a variant that is not done or a ticket that no longer runs is refused with a 409.
+   - A variant dropped while its checkout or its session was still starting is read again once its session exists: that session stops at once with `variant_dropped`, and its containers are released (review r2 of pull request 305).
+   - Not chosen: keeping the handovers of the variants not chosen. They describe work that is not merged.
+
+7. **A ticket that leaves the flow drops its open variants.** A put back, a set aside or a restart marks the variants still open as dropped and settles the item without a choice. A later plain start works in the chosen variant's checkout, if one was chosen, as a ticket keeps its own.
+
+**Limits.**
+- Tested on fakes only: the scripted adapter, recording effects, a temporary git repository and a fake docker CLI. No real session ran with variants.
+- The checkouts of the variants not chosen stay on disk, as a put back ticket's does.
+- A ticket from a plan never runs in variants: the plans name no number yet.
+- Resources: no Docker command, network, port, account or model call.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-variants`.
+
 ## 2026-10-24: Resume from here, a ticket started again from a step of its author's thread (the author's choices, lane `j3-replay`)
 
 **The need.** Issue #272, approved by the owner on 2026-10-23 at 11:51 (P57, Devin's item 14). A session that went the wrong way had to start again from the beginning. The criteria: each step of the thread offers "Reprendre d'ici", the branch goes back to the step's commit, the old continuation stays readable, a service test and a browser test.
 
-**Decision.** Matrix line P76, checked free on `origin/v2` (it ends at P74; open pull request 304 takes P72). P57 and C14 point to it.
+**Decision.** Matrix line P76, checked free on `origin/v2` (it ends at P75 since pull request 305 merged; pull request 304 took P72). P57 and C14 point to it.
 
 1. **A step is a row of the author's worklog** (a command, an edit, reads, a message of the review channel), the rows `Session.tsx` already draws as steps that open their detail. A ticket's `ticket_steps` are not used: a one-service ticket has only one.
 2. **The step's commit is journaled, never guessed** (`cleared.checkpoint`, `flow/replay.ts`).
@@ -4541,6 +4615,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **Limits.**
 - A ticket of a workspace of several services is refused (409). Its checkouts, its steps and its contract would each need their own resume point.
+- A ticket that ran variants (P75, pull request 305) is refused too (409): it works in its chosen variant's checkout, `<workdirs>/<ticket>.variant-<round>-<position>`, which the resume does not move aside.
 - The new author starts a fresh conversation. The old session's conversation is not forked: what it knew is lost, except what the ticket, the corrected instruction and the committed code carry.
 - Only what was committed comes back. Edits the author had not committed at that step are not in the new branch.
 - The new branch opens its own pull request. One the old branch opened stays open on the forge: closing it is the owner's, an outward-facing act this service does not take.
@@ -4550,7 +4625,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - The old session's Editor reads the ticket's checkout path, which is now the new one. Its own files are in the checkout set aside and in its branch.
 - The browser test runs on the session fixture, whose route stands in for the service's: the flow and the real git are proven by `test/flow/replay.test.ts`.
 
-**Checks.** On this server: `npm run typecheck`; `npm test` (1649 node tests pass, 36 skipped, 0 fail; 248 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run, and after the last change the three session files passed again (7 of 7). The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
+**Checks.** On this server: `npm run typecheck`; `npm test` after the merge of origin/v2 (pull request 305) (1668 node tests pass, 38 skipped, 0 fail; 256 Vitest tests pass); the CI job's twelve browser files with `CLEARED_V2_PLAYWRIGHT` and Chromium, the new `app/test/session/replay-browser.test.ts` among them: 29 of 30 tests passed in one run, and after the last change the three session files passed again (7 of 7). The tab-switch budget measured 145 ms at p95 there, run beside the others on a loaded machine; alone it passed twice, at 29 ms.
 
 **Resources.** No Docker object, no network, no tunnel, no port but the tests' loopback ones the system picks. The git tests run in temporary folders.
 

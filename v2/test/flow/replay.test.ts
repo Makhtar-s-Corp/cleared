@@ -16,6 +16,7 @@ import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../../src/api/types.t
 import { realEffects } from '../../src/flow/effects.ts';
 import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import { MAX_REPLAY, ReplayStore, replayRoutes, stepCommit } from '../../src/flow/replay.ts';
+import { VariantStore } from '../../src/flow/variants.ts';
 import { dispatch, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
@@ -277,6 +278,21 @@ test('a reviewer\'s session, a session taken over, a done ticket and a workspace
     assert.match(String(refused.json.error), /only a ticket of one service is resumed from a step/);
   } finally {
     await several.close();
+  }
+});
+
+test('a ticket that ran variants is refused: it works in its chosen variant\'s checkout', async () => {
+  const h = await harness();
+  try {
+    const author = await wandered(h);
+    new VariantStore(h.store.db).create('LOCAL-1', 'guestbook', 2);
+    const refused = await post(h, `/api/sessions/${author}/replay`, as('u1'), { seq: startOf(h, author, 'edit-1'), message: 'Stable order.' });
+    assert.equal(refused.status, 409);
+    assert.match(String(refused.json.error), /ran variants \(issue #271\)/);
+    assert.equal(h.store.sessions.get(author)?.status, 'working');
+    assert.equal(h.replays.length, 0);
+  } finally {
+    await h.close();
   }
 });
 
