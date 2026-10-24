@@ -655,7 +655,8 @@ export function renderDurations(r: ProofResult): string {
       // An item already past a state when the run took the plan over: that state's time is before the take-over.
       const was = r.resumed?.items[Number(n)];
       const seen = (state: string) => (was === state ? `${state} before the take-over` : i.states[state] ?? '');
-      return row(n, i.title, i.ticket ?? '', seen('running'), seen('needs_approval'), seen('landed'), i.states.put_back ?? i.states.held ?? i.states.parked ?? '');
+      const back = was === 'put_back' || was === 'held' || was === 'parked' ? `${was} before the take-over` : i.states.put_back ?? i.states.held ?? i.states.parked ?? '';
+      return row(n, i.title, i.ticket ?? '', seen('running'), seen('needs_approval'), seen('landed'), back);
     }),
     '',
     '## The lead',

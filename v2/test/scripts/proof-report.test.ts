@@ -427,7 +427,7 @@ test('the durations of a run that took a plan over: the take-over, the blockage 
     'Blocked since 2026-10-24T19:00:00.000Z: plan p1 has nothing running and nothing to approve: 3 (LOCAL-35) parked. Step 7 stopped on it.',
     '| taken over → plan done | the plan is not done |',
     '| 1 | Entries as JSON | LOCAL-33 |  |  | landed before the take-over |  |',
-    '| 2 | Trimmed names | LOCAL-34 | 2026-10-24T17:00:40.000Z |  |  | 2026-10-24T17:00:05.000Z |',
+    '| 2 | Trimmed names | LOCAL-34 | 2026-10-24T17:00:40.000Z |  |  | put_back before the take-over |',
     '| 3 | Names in the feed | LOCAL-35 |  |  |  | 2026-10-24T19:00:00.000Z |',
   ]) assert.ok(text.includes(expected), `missing: ${expected}\n\n${text}`);
   assert.ok(!text.includes('goal sent → plan done'), text);

@@ -4354,7 +4354,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 
 **The defects.**
 - **Issue #285.** The 48-hour proof's driver always sent a new goal. On 2026-10-23 it could not take over plan-1, approved with its five items put back, so the orchestrator paused plan-1 and started again from the beginning (the plan-2 entry above).
-- **The 24-hour run** (the endurance proof's end, above). From 08:47 to 15:45 step 07 printed "nothing to do now" once, then nothing. Three items were held and LOCAL-42 waited on a question. Lane `j3-autonomy` (#297) now lets the plan go on, but the driver still could not tell a plan that waits from a plan that cannot move.
+- **The 24-hour run** (the endurance proof's end, above). Step 07 waited from 08:47 to 15:45, with three items held and LOCAL-42 waiting on a question. The driver says "nothing to do now" only when what waits changes, and it had no rule for a plan that cannot move. Lane `j3-autonomy` (#297) now lets the plan go on, but the driver still could not tell a plan that waits from a plan that cannot move.
 - **Issue #185.** The review follow-ups of the React port (#184).
 
 **Decision.**
@@ -4370,10 +4370,11 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - Every measure runs from the take-over: the ledger's facts, the 48 hours (`PROOF_HOURS`), the night messages.
    - The report says what the plan was at the take-over. An item already running or landed then reads "… before the take-over", and its order ("3 after 2") is not read, since its start was never seen.
    - The rehearsal refuses `PROOF_RESUME_PLAN`: its service is new and has no plan.
-   - The take-over is proven by the tests only. It was never run against the proof's service.
+   - The take-over and step 7's failure on a blocked plan are proven by the tests only. The fake-adapter rehearsal of `proof-j2.ts` ran the new-goal path: 9 of 9 steps, no blockage flagged at any reading. The take-over was never run against the proof's service.
 3. **A blocked plan** (`planBlockage`, `PROOF_STUCK_MINUTES`).
    - A plan is blocked when nothing runs, nothing waits for approval, and nothing was put back (the runner starts that again), and every item left is held, parked, ready but not started (the week stop or the day budget), or after one of those or a cancelled one. A paused plan is blocked as a whole.
    - The rule is a state, not "no change for N minutes". A night with long sessions is not blocked, and a blocked plan is seen at once.
+   - The 24-hour run's state at 08:47 would not have read as blocked at once: LOCAL-42 was still running, on its question. Under #297 that question parks the ticket after about 40 minutes (its 30, then the lead's 10). From then the plan is blocked, and step 7 fails 90 minutes later unless the lead starts an item again.
    - The blockage is logged when it starts, changes and ends, at night too. While the morning waits, a "nothing to do" line comes every 30 minutes, not only when what waits changes.
    - Step 7 fails when the same blockage lasts `PROOF_STUCK_MINUTES`, 90 by default, counted from when it was first seen, the night included. Then step 8 reads the lead at once instead of waiting out the hours left. 90 is above the service's own delays: a question's 30 minutes, then the lead's 10, and the watchdog's 15. So the lead gets its turn to start a held or parked item with `start_ticket` first.
    - `result.json` and `durations.md` keep the last blockage and say whether it stopped step 7.
