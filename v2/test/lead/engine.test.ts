@@ -443,6 +443,19 @@ test('lane 1\'s scripted lead plays its goal turn through the engine: the questi
   assert.match(sentTo(t.store.events, t.generations[0]?.id as string).at(-1) ?? '', /handover/, 'past the handover point, the next turn asks for it');
 });
 
+test('a note a step\'s session left reaches the lead in its next event turn (M4)', async () => {
+  const t = await leadSetup({ lead: [[...opening(), ...turn('e1', say('x', 'Noted.'))]] });
+  await t.lead.settled();
+  const gen1 = t.generations[0]?.id as string;
+  t.emitFlow(flowEvent({ type: 'step_note', ticket: 'LOCAL-7', session: 's-contract', step: 1, service: 'filter-api', text: 'The check answers a severity as a string.' }));
+  t.clock.now += 61_000;
+  await t.lead.tick();
+  await until(() => sentTo(t.store.events, gen1).length === 1, 'the event turn');
+  const batch = sentTo(t.store.events, gen1)[0] ?? '';
+  assert.match(batch, /LOCAL-7: the session of step 1 \(filter-api\) left a note for the other steps: The check answers a severity as a string\./);
+  await t.lead.settled();
+});
+
 test('a team\'s question past its delay is said in the thread and given to the lead at once, with what applies at the end of its window (issue #290)', async () => {
   const t = await leadSetup({ lead: [[...opening(), ...turn('e1', say('x', 'I will decide it.'))]] });
   await t.lead.settled();

@@ -190,7 +190,7 @@ test('a service step that changed the validated contract reopens the contract st
 
 test('the reopened contract, approved, makes the steps that ran on the old one run again against the new one', async () => {
   const { t, ticket, states, contract } = await stepped({
-    authors: [quickAuthor, waiting('s1'), quickAuthor, quickAuthor, quickAuthor, quickAuthor, quickAuthor],
+    authors: [quickAuthor, [started, note('n1', OWN_NOTE), { awaitMessage: true }, finished(0.5)], quickAuthor, quickAuthor, quickAuthor, quickAuthor, quickAuthor],
     reads: { 'filter-api': [contractRead(1), contractRead(5), contractRead(5), contractRead(5)] },
   });
   await t.engine.start(ticket.id, 'u1');
@@ -211,6 +211,9 @@ test('the reopened contract, approved, makes the steps that ran on the old one r
   assert.deepEqual(await states(), ['1 contract filter-api done', '2 service filter-api done', '3 service guestbook done', '4 integration guestbook done']);
   const prompt = t.startedSessions.find((s) => s.input.service === 'filter-api' && /the step of/.test(s.input.prompt) && s.id !== t.startedSessions[1]!.id)?.input.prompt ?? '';
   assert.match(prompt, /changed the contract/, 'the step that asked for the change is told it was validated');
+  assert.doesNotMatch(prompt, new RegExp(OWN_NOTE), 'a step\'s own earlier note is not handed back to it');
+  assert.match(guestbook[1]!.input.prompt, new RegExp(OWN_NOTE), 'the other step is handed it');
+  assert.ok((await t.tickets.comments(ticket.id)).some((c) => /changed the validated contract/.test(c.body)), 'a comment on the ticket says what happened');
   await t.engine.close();
 });
 
@@ -233,6 +236,7 @@ test('a reopened contract sent back resumes the contract step\'s session with th
 // Every contract item of the ticket, waiting or answered.
 const proposals = (t: Setup, ticket: string): number => t.inbox.contracts({ ticket }).length + t.inbox.contracts({ ticket, state: 'handled' }).length;
 
+const OWN_NOTE = 'Keep the severity a string.';
 const note = (id: string, body: string): FakeStep => ({ hostCall: { toolCallId: id, name: 'leave_note', input: { text: body } } });
 const noting = (body: string): readonly FakeStep[] => [started, note('n1', body), ...text('a1', 'Done.'), finished(0.3)];
 const NOTE = 'The check answers a severity as a string, not a number.';

@@ -4895,7 +4895,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Left as it was, and why.** The contract memory level itself (lane 19) is unchanged. A note is not a lesson: it lives with the ticket and is not filed in any memory; the lessons and decisions sections of the handover are the path to memory, as before. A service step that changes the contract and another file is allowed as before (the contract step's "contract file only" rule stays for the contract step).
 
-**To follow up (not done here).** The session screen does not yet show the notes (they are in the ledger as `cleared.step_note`, the lead sees them); a screen with its French and English words is a lane of its own.
+**To follow up (not done here).** The session screen does not yet show the notes (they are in the ledger as `cleared.step_note`, the lead sees them); a screen with its French and English words is a lane of its own. The two other callers of `captureHandover` (a variant's author and the author reopened after a review) still file contract lessons with the first-contract rule on a ticket of several services; they name no step.
 
 **Checks.** `npm run typecheck`; `npm test`; `npm run guard -- --base origin/v2`; the results are in the pull request.
 
