@@ -145,6 +145,19 @@ test('a session on the workspace\'s own service proposes its service lessons for
   assert.deepEqual(alone.map((i) => [i.level, i.service]), [['workspace', null]]);
 });
 
+// Lane j3-contract-notes (P163): a handover that names the contract its step
+// builds against proposes its decisions for that contract.
+test('a handover that names a contract proposes its decisions for the contract, not for the first the service consumes', async () => {
+  const t = await two();
+  const rules = service('rules-api', t.filter, { contract: { format: 'openapi', path: 'contract/rules.yaml' } });
+  const deps = { ...t.deps, workspace: { ...t.deps.workspace, services: [service('guestbook', t.guestbook, { consumes: ['filter-api', 'rules-api'] }), ...t.deps.workspace.services.slice(1), rules] } };
+  const content = `${HANDOVER}## Decisions for the contract\nA rule is a word and a severity.\n`;
+  const named = new Knowledge(deps).propose({ ticket: 'DEMO-9', sessionId: SESSION, content, service: 'guestbook', contract: 'rules-api' });
+  assert.deepEqual(named.map((i) => [i.level, i.service]), [['contract', 'rules-api']]);
+  const unnamed = new Knowledge(deps).propose({ ticket: 'DEMO-10', sessionId: LATER, content, service: 'guestbook' });
+  assert.deepEqual(unnamed.map((i) => [i.level, i.service]), [['contract', 'filter-api']], 'with no contract named: the first, as before');
+});
+
 test('Approve writes the entry at its level at once, so the next briefing has it, and queues it for the skill', async () => {
   const t = await two();
   const items = await handover(t, THREE);

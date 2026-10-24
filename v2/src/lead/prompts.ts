@@ -113,6 +113,7 @@ export function describeFlowEvent(event: FlowEvent): string | undefined {
     case 'ci_repair': return `${at}: ${repairComment(event, event.pr)}`;
     case 'question_raised': return `${at}: the team asked a question (session ${event.session}, request ${event.requestId}).`;
     case 'request_answered': return event.item.startsWith('question:') ? `${at}: the team's question ${event.requestId} was answered by ${event.by}.` : undefined;
+    case 'step_note': return `${at}: the session of step ${event.step} (${event.service}) left a note for the other steps: ${event.text}`;
     case 'session_stopped': return `${at}: the ${event.role} session ${event.session} ${event.phase}: ${event.reason || 'no reason given'}`;
     case 'question_timed_out':
       return event.stage === 'default' ? `${at}: the team's question ${event.requestId} waited ${event.minutes} min: its declared answer was applied.`

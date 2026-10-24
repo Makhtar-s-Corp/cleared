@@ -72,6 +72,8 @@ export type FlowEvent =
   | Base & { readonly type: 'question_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string }
   | Base & { readonly type: 'permission_raised'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly tool: string }
   | Base & { readonly type: 'request_answered'; readonly session: SessionId; readonly requestId: string; readonly item: string; readonly by: UserId | 'policy' | 'system' }
+  // A step's session left a note for the ticket's other steps (M4): the lead sees it.
+  | Base & { readonly type: 'step_note'; readonly session: SessionId; readonly step: number; readonly service: string; readonly text: string }
   | Base & { readonly type: 'session_stopped'; readonly session: SessionId; readonly role: Role; readonly phase: 'stopped' | 'failed'; readonly reason: string }
   // A team's question past its delay (issue #290): `lead`, the lead is asked
   // to decide; `default`, the session's declared answer was applied;
@@ -88,7 +90,7 @@ export type FlowEventType = FlowEvent['type'];
 export const FLOW_EVENT_TYPES: readonly FlowEventType[] = [
   'ticket_started', 'author_done', 'review_verdict', 'release_requested', 'release_approved', 'release_merged', 'release_landed',
   'release_unhealthy', 'rolled_back', 'ticket_put_back', 'question_raised', 'permission_raised', 'request_answered', 'session_stopped',
-  'question_timed_out', 'ci_repair',
+  'question_timed_out', 'ci_repair', 'step_note',
 ];
 
 // A listener is called in the flow's own turn, after the write: it must
