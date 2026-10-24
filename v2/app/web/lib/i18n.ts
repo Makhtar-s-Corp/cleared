@@ -8,8 +8,9 @@ export type Translate = (key: string, values?: Values) => string;
 
 // A number is said as the catalog's language says it ("12 345", "12,345",
 // "86,5"); a string is the caller's own text, left as it is. The catalog
-// names its language in its `locale` key (the shell's); one without it, the
-// server's sign-in page and a test's, writes the number as it comes.
+// names its language in its `locale` key (the shell's, which the server's
+// sign-in page and the screens' translators hold); a catalog without it, a
+// test's, writes the number as it comes.
 export function format(template: string, values: Values = {}, locale?: string): string {
   return template.replace(/\{([a-z_]+)\}/g, (_, name: string) => {
     const value = values[name];
