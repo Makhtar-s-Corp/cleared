@@ -70,8 +70,16 @@
 // idle watchdog (session/watchdog.ts) stops, through idleStop, a session
 // that waits for a person: its containers go, its question stays, and the
 // answer resumes it in a new container from its volume (#wake).
+//
+// A one-service ticket may start with 2 to 4 variants (issue #271,
+// flow/variants.ts): as many authors on the same ticket, each in its own
+// clone of the ticket branch, at most the Consumption screen's lanes at
+// once (3 by default). A variant that fails fails alone. Once one is done,
+// the inbox compares them; the owner's choice stops the others, releases
+// their containers and networks at once, and the review runs on the chosen
+// one's checkout, which is the ticket's from then on.
 import { posix } from 'node:path';
-import type { InboxItem, PermissionItem, QuestionItem, QuestionTimeout, ReleaseItem, SessionDetail, SessionPlan, SessionSummary, TakenOver, TicketStep } from '../api/types.ts';
+import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type InboxItem, type PermissionItem, type QuestionItem, type QuestionTimeout, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -107,6 +115,7 @@ import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdi
 import { humanEdits } from './human-edits.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
 import { foldState, sessionPlanOf } from './state.ts';
+import { VARIANT_PARALLEL, VariantStore, diffLines, publicVariant, variantPrompt, type Variant, type VariantKey } from './variants.ts';
 
 export type { ProjectSettings } from './config.ts';
 export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
@@ -119,8 +128,9 @@ export type { MergeOutcome } from '../release/lock.ts';
 export type FlowEffects = {
   settings(service?: ServiceConfig): Promise<ProjectSettings>;    // the service's settings at its base branch
   refreshProject(service?: ServiceConfig): Promise<void>;         // projectCheckout: fetch the forge, so publish sees the base as it is now (issue 141)
-  // The ticket's checkout: <workdirs>/<ticket>, or <workdirs>/<ticket>/<service> for a service of a workspace of several.
-  prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
+  // The ticket's checkout: <workdirs>/<ticket>, or <workdirs>/<ticket>/<service> for a service of a workspace of several,
+  // or <workdirs>/<ticket>.variant-<round>-<position> for a variant (flow/variants.ts variantFolder).
+  prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig; readonly variant?: VariantKey }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
   publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string; readonly service?: ServiceConfig }): Promise<Published>;
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
@@ -146,6 +156,10 @@ export type FlowEffects = {
   // ticket of several services is given it (owner decision of 2026-10-22
   // 20:33). Absent: the reviewer is told the change could not be read.
   branchChanges?(input: { readonly ticket: TicketId; readonly service: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
+  // What a variant's ticket branch changes against the base (issue #271),
+  // read out of its checkout as a step's branch is: committed changes only.
+  // Absent: the variants item says the change could not be read.
+  variantChanges?(input: { readonly ticket: TicketId; readonly workdir: string; readonly variant: VariantKey }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
 };
 
 export type StepChanges = {
@@ -290,6 +304,9 @@ export class FlowEngine {
   #launching = new Set<string>();                                   // steps whose session is being started
   #finishing = new Set<TicketId>();                                 // tickets whose last step is done: the review starts once
   #channels = new Map<TicketId, { readonly reviewer: SessionId; readonly round: number }>();   // the review channel waiting for the author's answer (issue 291)
+  #variants: VariantStore;                                          // the ticket's variants (issue #271)
+  #variantOf = new Map<SessionId, string>();                        // the variant an author session works on
+  #variantDirs = new Set<string>();                                 // the variants' checkouts, whose edits are their own
   // Sessions the watchdog stopped while they waited for a person (issue
   // #290): their ticket's flow goes on, what they wait for stays in the
   // inbox, and the answers given since are told to them when they resume.
@@ -310,6 +327,7 @@ export class FlowEngine {
     this.#levers = deps.levers;
     this.#trains = new TrainStore(deps.store.db, this.#now);
     this.#steps = new StepStore(deps.store.db, this.#now);
+    this.#variants = new VariantStore(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -348,7 +366,7 @@ export class FlowEngine {
   // The checkouts of a ticket: one per service of a train ticket, the
   // author and the reviewer working in the first one's.
   async #prepare(ticket: Ticket, role: Role): Promise<{ readonly workdir: string; readonly briefing: Briefing }> {
-    if (!this.#several) return this.#effects.prepareWorkdir({ ticket, role });
+    if (!this.#several) return this.#effects.prepareWorkdir({ ticket, role, ...this.#chosenVariant(ticket.id) });
     const services = this.#servicesOf(ticket);
     const workdirs = this.#workdirs.get(ticket.id) ?? new Map<string, string>();
     this.#workdirs.set(ticket.id, workdirs);
@@ -359,6 +377,12 @@ export class FlowEngine {
       first ??= prepared;
     }
     return first as { readonly workdir: string; readonly briefing: Briefing };
+  }
+
+  // A ticket whose variant was chosen works in that variant's checkout from then on.
+  #chosenVariant(ticket: TicketId): { readonly variant?: VariantKey } {
+    const chosen = this.#variants.chosen(ticket);
+    return chosen ? { variant: { round: chosen.round, position: chosen.position } } : {};
   }
 
   async #settings(ticket: Ticket): Promise<ProjectSettings> {
@@ -757,10 +781,14 @@ export class FlowEngine {
   // The caller is a person (the API routes), or the plan runner for the
   // person who approved the plan (`origin`): the service moving a ticket to
   // Todo itself, when it puts one back, never starts anything.
-  async start(ticketId: TicketId, by: UserId, origin?: Origin): Promise<void> {
+  // `variants`: 2 to 4 authors at once (issue #271); absent or 1, one.
+  async start(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number): Promise<void> {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(ticketId);
     if (!ticket) throw new FlowError('not_found', `unknown ticket ${ticketId}`);
+    const count = variants ?? 1;
+    const refused = count === 1 ? undefined : this.variantsRefusal(count);
+    if (refused) throw new FlowError('invalid', refused);
     if (ticket.project !== this.config.project) throw new FlowError('invalid', `ticket ${ticketId} belongs to project ${ticket.project ?? 'none'}, and this service runs ${this.config.project}`);
     if (this.#active.has(ticketId)) throw new FlowError('conflict', `ticket ${ticketId} already runs`);
     if (ticket.status !== tickets.states.todo) throw new FlowError('conflict', `ticket ${ticketId} is in ${ticket.status}: only a ticket in ${tickets.states.todo} starts`);
@@ -775,6 +803,10 @@ export class FlowEngine {
     const began = this.#now();
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
+      if (count > 1) {
+        await this.#startVariants(ticket, by, origin, count);
+        return;
+      }
       const steps = this.#stepPlan(ticket, origin);
       if (steps && steps.length > 1) {
         await this.#startSteps(ticket, by, origin, steps);
@@ -1099,6 +1131,7 @@ export class FlowEngine {
     else {
       this.#origins.delete(id);
       this.#steps.hold(id);
+      this.#dropVariants(id, note);
       await tickets.comment(id, note, SERVICE).catch(() => undefined);
     }
     return { sessions, items };
@@ -1155,6 +1188,219 @@ export class FlowEngine {
 
   // Haiku for a Quick ticket, unless Haiku reviews it or a service it
   // touches is `full` (decision 24), which refuses the fast lane.
+  // ---- a ticket in variants (issue #271) ------------------------------------
+
+  // Why `count` variants cannot run on this workspace; undefined when they
+  // can. The route asks before it creates the ticket, start() again.
+  variantsRefusal(count: number): string | undefined {
+    if (!Number.isInteger(count) || count < VARIANTS_MIN || count > VARIANTS_MAX) return `variants is a whole number from ${VARIANTS_MIN} to ${VARIANTS_MAX}`;
+    if (this.#several) return `variants run on a workspace of one service, and ${this.#workspace.id} has ${this.#workspace.services.length}`;
+    return undefined;
+  }
+
+  async #startVariants(ticket: Ticket, by: UserId, origin: Origin | undefined, count: number): Promise<void> {
+    this.#variants.create(ticket.id, this.config.project, count);
+    const comment = origin
+      ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}, in ${count} variants.`
+      : `Started by ${by} in ${count} variants.`;
+    await this.registry.ticketStore.comment(ticket.id, comment, SERVICE).catch(() => undefined);
+    await this.#runVariants(ticket.id, by);
+  }
+
+  // The flow's tick of a ticket in variants: each waiting variant starts,
+  // in position order, while fewer than the lanes run (the Consumption
+  // screen's, else VARIANT_PARALLEL). The sessions are watched once all of
+  // them have started, as a ticket's steps are. Every variant failed: the
+  // ticket goes back to Todo.
+  async #runVariants(id: TicketId, by?: UserId): Promise<void> {
+    const started: Live[] = [];
+    for (;;) {
+      if (!this.#active.has(id)) break;
+      const variants = this.#variants.list(id);
+      if (variants.length === 0 || variants.some((v) => v.state === 'chosen')) break;
+      const limit = Math.max(1, this.#levers?.read().maxLanes ?? VARIANT_PARALLEL);
+      if (variants.filter((v) => v.state === 'running').length >= limit) break;
+      const next = variants.find((v) => v.state === 'waiting');
+      if (!next) break;
+      // Running before the first wait, so a second tick never starts it too.
+      this.#variants.update(next.id, { state: 'running' });
+      try {
+        started.push(await this.#launchVariant(id, next, variants.length, by && started.length === 0 && this.#flowOf(id).size === 0 ? by : undefined));
+      } catch (error) {
+        const note = this.#clean(`Variant ${next.position} of ${variants.length} failed: its session could not start: ${name(error)}`);
+        this.#variants.update(next.id, { state: 'failed', note });
+        await this.registry.ticketStore.comment(id, note, SERVICE).catch(() => undefined);
+        this.#showVariants(id);
+      }
+    }
+    for (const live of started) if (!live.closed) this.#supervise(live, 0);
+    const variants = this.#variants.list(id);
+    if (this.#active.has(id) && variants.length > 0 && variants.every((v) => v.state === 'failed'))
+      await this.#putBack(id, `Every variant of the ticket failed:\n${variants.map((v) => `- ${v.note ?? `variant ${v.position} failed`}`).join('\n')}`, 'variants_failed');
+  }
+
+  // A variant's session, in its own checkout, told it is one of several.
+  async #launchVariant(id: TicketId, variant: Variant, count: number, by: UserId | undefined): Promise<Live> {
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
+    const ticket = await this.#ticketOf(id);
+    const began = this.#now();
+    const settings = await this.#settings(ticket);
+    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', variant: { round: variant.round, position: variant.position } });
+    const workspaceDone = this.#now();
+    const tools = this.config.authorTools === true;
+    const note = this.#origins.get(id)?.note;
+    const prompt = [authorPrompt(ticket, { plan: tools, report: tools }), variantPrompt(variant.position, count), ...(note ? [note] : [])].join('\n\n');
+    this.#variantDirs.add(prepared.workdir);
+    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined);
+    this.#variants.update(variant.id, { state: 'running', session: live.id, workdir: prepared.workdir });
+    this.#variantOf.set(live.id, variant.id);
+    const session = { id: live.id, ticket: id, project: this.config.project };
+    this.#step(session, 'STEP_STARTED', 'workspace', began);
+    this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
+    this.#step(session, 'STEP_STARTED', 'author', workspaceDone);
+    this.#snapshot(live.id, id);
+    if (by) this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: id, by, origin: this.#origins.get(id) ?? null, session: live.id });
+    return live;
+  }
+
+  // A variant's author ended its work: what its branch changes is read and
+  // shown with the others for the owner's choice, and the next one starts.
+  async #variantDone(live: Live, variant: Variant): Promise<void> {
+    const { ticket: id, project } = live.input;
+    this.#step({ id: live.id, ticket: id, project }, 'STEP_FINISHED', 'author');
+    await this.#close(live, 'done');
+    this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: live.id });
+    let read: { readonly files: readonly string[]; readonly diff: string } = { files: [], diff: '' };
+    let note: string | null = null;
+    if (!this.#effects.variantChanges) note = 'What it changed cannot be read: the flow has no reader of a variant\'s branch.';
+    else {
+      try {
+        read = await this.#effects.variantChanges({ ticket: id, workdir: live.input.workdir, variant: { round: variant.round, position: variant.position } });
+      } catch (error) {
+        note = this.#clean(`What it changed could not be read: ${name(error)}`);
+      }
+    }
+    const diff = this.#clean(read.diff);
+    this.#variants.update(variant.id, {
+      state: 'done', files: [...read.files], ...diffLines(diff), diff: diff.slice(0, VARIANT_DIFF_MAX), cut: diff.length > VARIANT_DIFF_MAX,
+      cost: this.#stepCost({ sessions: [live.id] }), minutes: this.#stepMinutes({ sessions: [live.id] }), note,
+    });
+    if (!this.#active.has(id)) return;
+    this.#showVariants(id);
+    await this.#runVariants(id);
+  }
+
+  // A variant's session that cannot go on fails its variant alone; the
+  // ticket's other variants go on.
+  async #failVariant(from: Live, variant: Variant, code: string | undefined, runMessage: string | undefined, note: string, phase: 'stopped' | 'failed'): Promise<void> {
+    const id = from.input.ticket;
+    if (code !== undefined && runMessage !== undefined)
+      this.#journal({ id: from.id, ticket: id, project: from.input.project }, { type: 'RUN_ERROR', message: this.#clean(runMessage), code });
+    await this.#close(from, phase, note);
+    const why = this.#clean(`Variant ${variant.position} of ${this.#variants.list(id, variant.round).length} failed: ${note}`);
+    this.#variants.update(variant.id, { state: 'failed', note: why, cost: this.#stepCost({ sessions: [from.id] }), minutes: this.#stepMinutes({ sessions: [from.id] }) });
+    await this.registry.ticketStore.comment(id, why, SERVICE).catch(() => undefined);
+    if (!this.#active.has(id)) return;
+    this.#showVariants(id);
+    await this.#runVariants(id);
+  }
+
+  // The variants item of the ticket's run: added once a variant is done,
+  // then kept as the variants are.
+  #showVariants(id: TicketId): void {
+    const variants = this.#variants.list(id);
+    const round = variants[0]?.round;
+    if (round === undefined || !variants.some((v) => v.state === 'done')) return;
+    const shown = variants.map(publicVariant);
+    const item = this.inbox.variants({ ticket: id }).find((i) => i.round === round);
+    if (item) this.inbox.setVariants(item.id, shown);
+    else this.inbox.addVariants({ ticket: id, project: this.config.project, round, variants: shown });
+  }
+
+  // A ticket that leaves the flow drops what of its variants was open, and
+  // its variants item no longer waits.
+  #dropVariants(id: TicketId, note: string): void {
+    this.#variants.drop(id, this.#clean(note));
+    for (const item of this.inbox.variants({ ticket: id })) this.inbox.handle(item.id, 'system');
+  }
+
+  // The ticket's last run of variants (GET /api/tickets/:id/variants): none
+  // for a ticket that never ran in variants, undefined for an unknown ticket.
+  async ticketVariants(id: TicketId): Promise<TicketVariant[] | undefined> {
+    const variants = this.#variants.list(id);
+    if (variants.length === 0 && !(await this.registry.ticketStore.get(id))) return undefined;
+    return variants.map(publicVariant);
+  }
+
+  // Choose (POST /api/variants/:id/choose): the variant at `position`, done,
+  // is the one reviewed. The others stop now, whether they still run, wait
+  // for a lane or are done, and their containers and networks are released
+  // at once, by session; `released` counts what was removed. The review
+  // starts in the background, since a click does not wait for a container.
+  async chooseVariant(itemId: string, position: number, by: UserId): Promise<{ readonly released: number }> {
+    const item = this.inbox.item(itemId);
+    if (!item || item.kind !== 'variants') throw new FlowError('not_found', `unknown variants item ${itemId}`);
+    if (item.state !== 'waiting') throw new FlowError('conflict', `variants item ${itemId} is already answered`);
+    const id = item.ticket;
+    const variants = this.#variants.list(id, item.round);
+    const chosen = variants.find((v) => v.position === position);
+    if (!chosen) throw new FlowError('invalid', `the ticket ${id} has no variant ${position}`);
+    if (chosen.state !== 'done') throw new FlowError('conflict', `variant ${position} of ${id} is ${chosen.state}: only a variant that is done is chosen`);
+    if (!this.#active.has(id)) throw new FlowError('conflict', `ticket ${id} no longer runs`);
+    // Written before the first wait, so a second choice is refused.
+    const note = `The owner chose variant ${position} of ${variants.length}: this variant was stopped.`;
+    const others = variants.filter((v) => v.id !== chosen.id);
+    for (const v of others) if (v.state !== 'failed') this.#variants.update(v.id, { state: 'dropped', note });
+    this.#variants.update(chosen.id, { state: 'chosen' });
+    this.inbox.setVariants(itemId, this.#variants.list(id, item.round).map(publicVariant));
+    if (!this.inbox.handleVariants(itemId, by, position)) throw new FlowError('conflict', `variants item ${itemId} is already answered`);
+    const dropped: SessionId[] = [];
+    for (const v of others) {
+      if (!v.session) continue;
+      const live = this.#live.get(v.session);
+      if (live && !live.closed) {
+        this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'RUN_ERROR', message: note, code: 'variant_dropped' });
+        await this.#close(live, 'stopped', note);
+      }
+      const dormant = this.#dormant.get(v.session);
+      if (dormant) this.#endDormant(dormant, 'stopped');
+      this.#flowOf(id).delete(v.session);
+      dropped.push(v.session);
+    }
+    let released = 0;
+    const named = dropped.filter(isSessionId);
+    if (this.#release && named.length > 0) {
+      try {
+        const { containers, networks } = await this.#release(named);
+        released = containers.length + networks.length;
+      } catch (error) {
+        console.error(`cleared-v2: the containers and networks of the variants not chosen could not be released (${error instanceof Error ? error.name : typeof error})`);
+      }
+    }
+    const stopped = others.map((v) => v.position);
+    await this.registry.ticketStore.comment(id, `Variant ${position} of ${variants.length} chosen by ${by} for review${stopped.length > 0 ? `; ${stopped.length === 1 ? 'variant' : 'variants'} ${stopped.join(', ')} stopped` : ''}.`, SERVICE).catch(() => undefined);
+    this.#background(this.#reviewVariant(id, chosen), id);
+    return { released };
+  }
+
+  // The chosen variant's handover is stored, and its review starts in its checkout.
+  async #reviewVariant(id: TicketId, chosen: Variant): Promise<void> {
+    const tickets = this.registry.ticketStore;
+    const ticket = await tickets.get(id);
+    if (!ticket || !this.#active.has(id)) return;
+    const kept = chosen.session ? this.#inputs.get(chosen.session) : undefined;
+    if (chosen.session && chosen.workdir) {
+      try {
+        await this.#effects.captureHandover({ workdir: chosen.workdir, role: 'author', model: kept?.input.model ?? this.#authorModel(ticket), ticket: id, sessionId: chosen.session });
+      } catch (error) {
+        await tickets.comment(id, this.#clean(`The author's handover could not be stored: ${name(error)}`), SERVICE).catch(() => undefined);
+      }
+    }
+    await tickets.move(id, tickets.states.review, SERVICE);
+    await this.#startReview(ticket, chosen.workdir ?? '');
+  }
+
   #authorModel(ticket: Ticket): string {
     if (!ticket.labels.includes(QUICK_LABEL) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.#chosenModel(ticket);
     return this.#servicesOf(ticket).some((service) => service.sensitivity === 'full') ? this.#chosenModel(ticket) : QUICK_MODEL;
@@ -1177,8 +1423,8 @@ export class FlowEngine {
 
   // start() in the background, for the routes: a person's click does not
   // wait for a clone. A failure becomes a note on the ticket (start wrote it).
-  begin(ticketId: TicketId, by: UserId, origin?: Origin): Promise<void> {
-    return this.#track(this.start(ticketId, by, origin).catch(() => undefined));
+  begin(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number): Promise<void> {
+    return this.#track(this.start(ticketId, by, origin, variants).catch(() => undefined));
   }
 
   // ---- after a restart -----------------------------------------------------
@@ -1285,15 +1531,19 @@ export class FlowEngine {
   // deletion rule knows them. The lead's is its own (lane 5).
   policyFor(input: StartInput): Policy {
     if (input.role === 'lead' || input.project !== this.config.project) return input.policy;
-    return { ...input.policy, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket) };
+    return { ...input.policy, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket, input.workdir) };
   }
 
   // An edit counts once its result says it was made: a refused or failed
   // edit changed nothing. Read incrementally, since this runs at every tool call.
-  #ticketFiles(ticket: TicketId): string[] {
+  // A variant's session counts only the sessions of its own checkout: its
+  // siblings' files are not in it (issue #271).
+  #ticketFiles(ticket: TicketId, workdir?: string): string[] {
     const out = new Set<string>();
+    const own = workdir !== undefined && this.#variantDirs.has(workdir);
     for (const row of this.#store.sessions.list({ ticket })) {
       if (row.role === 'lead') continue;
+      if (own && this.#inputs.get(row.id)?.input.workdir !== workdir) continue;
       let seen = this.#files.get(row.id);
       if (!seen) this.#files.set(row.id, (seen = { seq: 0, open: new Map(), files: [] }));
       for (const { seq, event } of this.#store.events.after(row.id, seen.seq)) {
@@ -1634,6 +1884,10 @@ export class FlowEngine {
   // failure of its own is the step's (lane 23).
   async #stopTicket(from: Live, code: string | undefined, runMessage: string | undefined, note: string, phase: 'stopped' | 'failed', reason: PutBackReason): Promise<void> {
     const ticket = from.input.ticket;
+    // A variant fails alone; a spent budget is the ticket's, and stops them all (issue #271).
+    const variantId = this.#variantOf.get(from.id);
+    const variant = variantId ? this.#variants.get(variantId) : undefined;
+    if (variant && variant.state === 'running' && reason !== 'budget') return this.#failVariant(from, variant, code, runMessage, note, phase);
     const stepId = this.#stepOf.get(from.id);
     const step = stepId ? this.#steps.get(stepId) : undefined;
     if (step && step.state === 'running' && this.#steps.list(ticket).length > 1) {
@@ -1664,6 +1918,7 @@ export class FlowEngine {
     this.#origins.delete(ticket);
     this.#channels.delete(ticket);
     this.#steps.hold(ticket);
+    this.#dropVariants(ticket, note);
     await tickets.comment(ticket, this.#clean(note), SERVICE)
       .catch((error: unknown) => console.error(`cleared-v2: the ${reason} note could not be written on ${ticket} (${error instanceof Error ? error.name : typeof error})`));
     try {
@@ -1682,6 +1937,9 @@ export class FlowEngine {
   // one-service ticket's one step is done with its author.
   async #authorDone(author: Live): Promise<void> {
     const { ticket: id, project } = author.input;
+    const variantId = this.#variantOf.get(author.id);
+    const variant = variantId ? this.#variants.get(variantId) : undefined;
+    if (variant && variant.state === 'running') return this.#variantDone(author, variant);
     const stepId = this.#stepOf.get(author.id);
     const step = stepId ? this.#steps.get(stepId) : undefined;
     if (step && step.state === 'running' && this.#steps.list(id).length > 1) return this.#stepDone(author, step);
@@ -1718,7 +1976,7 @@ export class FlowEngine {
       const settings = await this.#settings(ticket);
       const prepared = this.#several
         ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
-        : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer' });
+        : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', ...this.#chosenVariant(ticket.id) });
       // The files a person changed in the author's checkouts (decision 33): every author session of the flow, a ticket in steps having several.
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
       // The reviewer's git commands name its own service's base.

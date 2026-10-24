@@ -249,7 +249,7 @@ export function inboxAction(items: readonly { readonly detail: string; readonly 
 // An inbox item as GET /api/inbox gives it, reduced to what decides.
 export type InboxEntry = {
   readonly id: string;
-  readonly kind: 'release' | 'permission' | 'question' | 'plan' | 'session_plan' | 'contract' | 'knowledge';
+  readonly kind: 'release' | 'permission' | 'question' | 'plan' | 'session_plan' | 'contract' | 'knowledge' | 'variants';
   readonly ticket: string;
   readonly command?: string;                                  // a permission to run a command
   readonly checks?: 'pending' | 'passed' | 'failed';         // a release's pull request checks
@@ -288,6 +288,7 @@ export function morningAction(entries: readonly InboxEntry[], options: { readonl
     if (entry.kind === 'question') return 'a question, for the owner';
     if (entry.kind === 'knowledge') return 'knowledge, for the owner';
     if (entry.kind === 'contract') return 'a contract, validated in the multi-service proof only';
+    if (entry.kind === 'variants') return 'variants, for the owner to choose';
     if (entry.kind === 'plan' || entry.kind === 'session_plan' || (entry.kind === 'release' && !options.releases)) return 'the owner approves';
     return `checks ${entry.checks ?? 'pending'}`;
   };

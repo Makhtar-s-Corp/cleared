@@ -37,7 +37,7 @@
 // belongs to no lane in wave 8, so InboxItem keeps its four kinds there.
 import type {
   ApproveBody, ContractItem, InboxItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseFlag, ReleaseFlagKind,
-  ReleaseItem, SessionPlan, SessionPlanItem, SessionSummary, TrainState, TrainStop,
+  ReleaseItem, SessionPlan, SessionPlanItem, SessionSummary, TicketVariant, TrainState, TrainStop, VariantsItem,
 } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { Question, ToolInput } from '../../../../src/session/events.ts';
@@ -89,6 +89,7 @@ export type Local =
   | { readonly kind: 'plan_go'; readonly at: string }          // Go given to a session plan
   | { readonly kind: 'plan_changed'; readonly at: string }     // a Change sent to its author
   | { readonly kind: 'decided'; readonly decision: Decided; readonly at: string }   // a contract or a knowledge item answered from this page
+  | { readonly kind: 'chosen'; readonly position: number; readonly at: string }     // a variant chosen from this page (issue #271)
   | { readonly kind: 'settled' };                              // settled without the person
 
 export type Decided = 'approve' | 'send_back' | 'reject';
@@ -113,8 +114,8 @@ export type InboxView = {
 
 // The capture's order: a release, a permission, the lead's plan, a question.
 // A session plan holds its session as a permission does, so it comes after
-// the permissions; a contract and a knowledge item come last.
-const RANK: Readonly<Record<Item['kind'], number>> = { release: 0, permission: 1, session_plan: 2, plan: 3, question: 4, contract: 5, knowledge: 6 };
+// the permissions; variants to choose from, a contract and a knowledge item come last.
+const RANK: Readonly<Record<Item['kind'], number>> = { release: 0, permission: 1, session_plan: 2, plan: 3, question: 4, variants: 5, contract: 6, knowledge: 7 };
 // The catalog names a release's checks by colour, as the tower's does.
 export const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
@@ -144,14 +145,15 @@ export function chosen(view: InboxView): Item | undefined {
 // part of what it shows: the owner waits for them to turn green.
 // A plan's detail follows the plan read for it: read or not, and how it runs.
 // A train's follows each service as it lands; a session plan's, its Go; a
-// contract's or a knowledge item's, what the owner did with it.
+// contract's or a knowledge item's, what the owner did with it; variants', each one's state.
 export function detailKey(v: InboxView): string {
   const item = chosen(v);
   const checks = item?.kind === 'release' ? item.pr.checks : undefined;
   const plan = item?.kind === 'plan' ? planOf(v, item) : undefined;
   const moved = plan ? [plan.state, plan.items.map((i) => [i.state, i.ticket])] : undefined;
   const train = item?.kind === 'release' && item.train ? [item.train.state, item.train.services.map((s) => [s.state, s.at, s.note ?? null])] : undefined;
-  const after = item?.kind === 'session_plan' ? item.plan.go : item?.kind === 'contract' || item?.kind === 'knowledge' ? item.outcome : undefined;
+  const after = item?.kind === 'session_plan' ? item.plan.go : item?.kind === 'contract' || item?.kind === 'knowledge' ? item.outcome
+    : item?.kind === 'variants' ? [item.outcome, item.variants.map((v) => [v.state, v.added, v.removed])] : undefined;
   return JSON.stringify([v.items.length === 0, item?.id, item?.state, checks, moved, train, after, item ? v.local.get(item.id)?.kind : undefined, v.frame, v.selected]);
 }
 
@@ -343,13 +345,41 @@ export function outcomeLine(item: ContractItem | KnowledgeItem, view: InboxView,
   return t(outcome.decision === 'approve' ? 'knowledge_approved_by' : 'knowledge_rejected_by', values);
 }
 
+// ---------------------------------------------------------- the variants
+
+// Choose (issue #271): the variant at `position` is reviewed; the others
+// stop, and their containers are released.
+export async function chooseVariant(api: Api, item: VariantsItem, position: number, now: Date): Promise<Local> {
+  await api(`/variants/${encodeURIComponent(item.id)}/choose`, { method: 'POST', body: { variant: position } });
+  return { kind: 'chosen', position, at: now.toISOString() };
+}
+
+// The variants that ended, for the list's line: done or failed.
+export const variantsEnded = (item: VariantsItem) => item.variants.filter((v) => v.state !== 'waiting' && v.state !== 'running').length;
+
+// A variant's facts, in the person's language: its files, its lines, what it cost and how long it ran.
+export function variantFacts(variant: TicketVariant, view: InboxView, t: Translate): string[] {
+  const language = view.language ?? 'en';
+  const facts = [t(variant.files.length === 1 ? 'variant_files_one' : 'variant_files_other', { n: variant.files.length }), t('variant_lines', { added: variant.added, removed: variant.removed })];
+  if (variant.costUsd !== null) facts.push(t('plan_cost', { amount: decimals(variant.costUsd, 2, language) }));
+  if (variant.minutes !== null) facts.push(duration(variant.minutes, t));
+  return facts;
+}
+
+// What a handled variants item says the owner did.
+export function chosenLine(item: VariantsItem, view: InboxView, t: Translate): string {
+  const outcome = item.outcome;
+  if (!outcome) return t('variants_settled');
+  return t('variants_chosen_by', { n: outcome.chosen, who: outcome.by === view.me.id ? t('by_you') : outcome.by, time: clock(outcome.at) });
+}
+
 // What this page did, until the service's list says it.
 export function decidedLine(local: Extract<Local, { kind: 'decided' }>, item: ContractItem | KnowledgeItem, t: Translate): string {
   return t(`decided_${item.kind}_${local.decision}`, { time: clock(local.at) });
 }
 
 export type Gesture = 'approve' | 'undo' | 'send_back' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change'
-  | 'contract_approve' | 'contract_send_back' | 'knowledge_approve' | 'knowledge_reject';
+  | 'contract_approve' | 'contract_send_back' | 'knowledge_approve' | 'knowledge_reject' | 'variant_choose';
 
 // How a refusal of the service reads. An answer to a request that no longer
 // waits (404, or 409 for a session that stopped) was settled without the
@@ -390,6 +420,12 @@ export function failure(error: unknown, gesture: Gesture): { readonly key: strin
       if (status === 503) return { key: 'decided_off', settled: false };
       if (status === 400 && gesture === 'contract_send_back') return { key: 'contract_send_back_invalid', settled: false };
       return { key: `${gesture}_failed`, settled: false };
+    // 409: chosen already, the variant no longer done, or the ticket put back; the list says which.
+    case 'variant_choose':
+      if (status === 404 || status === 409) return { key: 'decided_settled', settled: true };
+      if (status === 403) return { key: 'decided_user', settled: false };
+      if (status === 503) return { key: 'decided_off', settled: false };
+      return { key: 'variant_choose_failed', settled: false };
   }
 }
 
@@ -418,6 +454,7 @@ export function itemTitle(item: Item, view: InboxView | undefined, t: Translate)
     case 'session_plan': return (view && ticketTitle(view, item.ticket)) ?? item.plan.steps[0] ?? item.ticket;
     case 'contract': return item.path;
     case 'knowledge': return item.text;
+    case 'variants': return (view && ticketTitle(view, item.ticket)) ?? item.ticket;
   }
 }
 
@@ -551,6 +588,8 @@ export function itemLine(item: Item, view: InboxView, t: Translate): string {
     case 'knowledge':
       return item.level === 'workspace' || !item.service ? t('knowledge_line_workspace', { ticket: item.ticket })
         : t(`knowledge_line_${item.level}`, { ticket: item.ticket, service: item.service });
+    case 'variants':
+      return t('variants_line', { ticket: item.ticket, n: variantsEnded(item), total: item.variants.length });
   }
 }
 

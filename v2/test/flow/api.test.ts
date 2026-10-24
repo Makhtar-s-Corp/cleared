@@ -2,12 +2,13 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { API_ROUTES, ASK_ROUTES, CONSUMPTION_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, SERVICE_USER_HEADER, TERMINAL_ROUTES, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, ASK_ROUTES, CONSUMPTION_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, SERVICE_USER_HEADER, TERMINAL_ROUTES, VARIANT_ROUTES, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createApiRoutes } from '../../src/api/routes.ts';
 import { filesRoutes } from '../../src/flow/files.ts';
 import { planGateRoutes } from '../../src/flow/plan-gate.ts';
 import { stepRoutes } from '../../src/flow/steps.ts';
 import { takeoverRoutes } from '../../src/flow/takeover.ts';
+import { variantRoutes } from '../../src/flow/variants.ts';
 import { terminalRoutes } from '../../src/terminal/routes.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
@@ -23,7 +24,7 @@ let base = '';
 before(async () => {
   t = await setup();
   parked = await t.tickets.create({ title: 'Parked', project: 'guestbook' }, { kind: 'human', id: 'u1' });
-  const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
+  const routes = [...createApiRoutes({ engine: () => t.engine, proof: () => PROOF }), ...variantRoutes({ engine: () => t.engine, proof: () => PROOF })];
   const app: App = { registry: t.engine.registry, tables: [], routes };
   server = createServer((request, response) => dispatch(app, request, response, handle));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -53,7 +54,7 @@ test('the service declares every route of the API but the approval, which is lan
   // route per depth, since the registry matches a fixed number of segments:
   // it is files/* here.
   const deps = { engine: () => t.engine, proof: () => PROOF, human: () => undefined };
-  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps), ...terminalRoutes(deps)];
+  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps), ...variantRoutes(deps), ...terminalRoutes(deps)];
   const declared = [...new Set(routes.map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
   // The preview is lane 15's (container/preview.ts). The ticket's steps and
   // the contract item's Approve and Send back are lane 23's (flow/steps.ts).
@@ -67,6 +68,7 @@ test('the service declares every route of the API but the approval, which is lan
   assert.ok(SESSION_PLAN_ROUTES.every((route) => declared.includes(route)), 'lane 17 serves the Go and the Change');
   assert.ok(SESSION_TABS_ROUTES.every((route) => declared.includes(route)), 'lane 20 serves the files, the take over and the give back');
   assert.ok(STEP_ROUTES.every((route) => declared.includes(route)), 'lane 23 serves the steps and the contract item');
+  assert.ok(VARIANT_ROUTES.every((route) => declared.includes(route)), 'issue #271 serves the variants and their choice');
   assert.ok(TERMINAL_ROUTES.every((route) => declared.includes(route)), 'lane 31 serves the web terminal and the editor\'s save');
   const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r) && !ahead.includes(r)).sort();
   assert.deepEqual(declared, wanted);
@@ -179,6 +181,11 @@ test('tickets: create, list, get, move; the move to go is refused; an unknown ti
   assert.equal(created.status, 'Todo');
   assert.equal((await call('POST', '/api/tickets', person, { title: '', project: 'guestbook' })).status, 400);
   assert.equal((await call('POST', '/api/tickets', person, { title: 'x' })).status, 400);
+  // Variants (issue #271): 2 to 4, refused before the ticket exists.
+  const before = ((await call('GET', '/api/tickets', signed)).json as Ticket[]).length;
+  for (const variants of [0, 5, 2.5, '3'])
+    assert.equal((await call('POST', '/api/tickets', person, { title: 'Variants', project: 'guestbook', variants })).status, 400, `variants ${variants}`);
+  assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).length, before, 'no ticket is created');
   assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).some((x) => x.id === created.id), true);
   assert.equal(((await call('GET', `/api/tickets/${created.id}`, signed)).json as Ticket).id, created.id);
   assert.equal((await call('GET', '/api/tickets/LOCAL-99', signed)).status, 404);
@@ -256,7 +263,7 @@ test('events: a stream from a sequence number, resumed with Last-Event-ID, and r
 });
 
 test('the module routes of the flow never collide with each other (assemble would stop the service)', () => {
-  const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
+  const routes = [...createApiRoutes({ engine: () => t.engine, proof: () => PROOF }), ...variantRoutes({ engine: () => t.engine, proof: () => PROOF })];
   assert.equal(new Set(routes.map((r) => `${r.method} ${r.path}`)).size, routes.length);
   assert.ok(matchRoute(routes, 'POST', '/api/tickets/LOCAL-1/approve') === undefined || 'allow' in (matchRoute(routes, 'POST', '/api/tickets/LOCAL-1/approve') ?? {}));
 });
@@ -297,4 +304,15 @@ test('a ticket waiting for approval can be sent back from the inbox with a move 
     sending.closeAllConnections();
     await new Promise<void>((resolve) => sending.close(() => resolve()));
   }
+});
+
+// Issue #271: the variants' routes, over HTTP.
+test('variants: the routes check the proof, the user and the body, and name an unknown ticket or item', async () => {
+  assert.equal((await call('GET', `/api/tickets/${parked.id}/variants`, {})).status, 401);
+  assert.deepEqual((await call('GET', `/api/tickets/${parked.id}/variants`, signed)).json, []);
+  assert.equal((await call('GET', '/api/tickets/LOCAL-99/variants', signed)).status, 404);
+  assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', { ...signed, 'content-type': 'application/json' }, { variant: 1 })).status, 403);
+  for (const body of [{}, { variant: '2' }, { variant: 0 }, { variant: 5 }, { variant: 1.5 }])
+    assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', person, body)).status, 400, JSON.stringify(body));
+  assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', person, { variant: 1 })).status, 404);
 });
