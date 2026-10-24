@@ -1,8 +1,15 @@
 // The fake of a service (milestone 2 plan, decision 20): when a sibling of a
 // session cannot run for real (the service declares no `run`, or its ticket
 // layer cannot be built), Cleared runs this server in its place, built from
-// the service's contract. OpenAPI 3 only in milestone 2 (plan question 5),
-// in YAML (the subset yaml.ts reads) or JSON.
+// the service's contract. OpenAPI 3 in milestone 2 (plan question 5), in YAML
+// (the subset yaml.ts reads) or JSON; JSON Schema, protobuf and events in
+// milestone 3 (owner decision O11, matrix M11), each read into the same
+// operations by its own reader:
+//   jsonschema  GET /<name> answers the example of the schema (GET / its root,
+//               GET /<name> each of its $defs), see schema.ts
+//   protobuf    POST /<package>.<Service>/<Method> answers the example of the
+//               rpc's response message, proto3 JSON mapping, see proto.ts
+//   events      GET and POST /events/<channel>, see events.ts
 //
 // Each operation answers its first example: its first 2xx response, then
 // `content`, `application/json`, then `example`, or the first entry of
@@ -12,10 +19,18 @@
 //
 // Settings (environment):
 //   FAKE_CONTRACT  the contract file, mounted read only
+//   FAKE_FORMAT    openapi (default), jsonschema, protobuf or events
 //   FAKE_PORT      default 8080
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { eventOperations } from './events.ts';
+import { readProto, ProtoError } from './proto.ts';
+import { generate, isObject, OMIT, SchemaError } from './schema.ts';
 import { parseYaml, YamlError, type Yaml } from './yaml.ts';
+
+// The formats a contract can be in; api/types.ts names the same ones (a test checks).
+export const CONTRACT_FORMATS = ['openapi', 'jsonschema', 'protobuf', 'events'] as const;
+export type ContractFormat = (typeof CONTRACT_FORMATS)[number];
 
 export class ContractError extends Error {
   override name = 'ContractError';
@@ -34,8 +49,6 @@ export type Contract = { readonly operations: readonly Operation[]; readonly ser
 
 export type Answer = { readonly status: number; readonly body: unknown };
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-
 // The first example of an operation's first 2xx JSON response.
 function firstExample(responses: unknown): Operation['answer'] {
   if (!isObject(responses)) return null;
@@ -51,13 +64,50 @@ function firstExample(responses: unknown): Operation['answer'] {
   return null;
 }
 
-export function readContract(text: string, file: string): Contract {
-  let document: Yaml | unknown;
+function parse(text: string, file: string): unknown {
   try {
-    document = file.endsWith('.json') ? JSON.parse(text) : parseYaml(text);
+    return file.endsWith('.json') ? JSON.parse(text) : parseYaml(text);
   } catch (error) {
     throw new ContractError(`${file} cannot be read: ${error instanceof YamlError || error instanceof SyntaxError ? error.message : String(error)}`);
   }
+}
+
+// A contract in `format` (OpenAPI 3 when none is given), as operations.
+export function readContract(text: string, file: string, format: ContractFormat = 'openapi'): Contract {
+  try {
+    if (format === 'jsonschema') return readJsonSchema(parse(text, file), file);
+    if (format === 'protobuf') return { operations: readProto(text, file).map((op) => ({ method: 'POST', path: op.path, name: op.name, answer: { status: 200, body: op.body } })), servers: [] };
+    if (format === 'events') return { operations: eventOperations(parse(text, file), file).map((op) => ({ ...op, name: `${op.method} ${op.path}` })), servers: [] };
+  } catch (error) {
+    if (error instanceof SchemaError || error instanceof ProtoError) throw new ContractError(error.message);
+    throw error;
+  }
+  if (format !== 'openapi') throw new ContractError(`${file}: format ${JSON.stringify(format)} is not one of ${CONTRACT_FORMATS.join(', ')}`);
+  return readOpenApi(parse(text, file), file);
+}
+
+const SCHEMA_KEYS = ['$schema', 'type', 'properties', '$defs', 'definitions', '$ref', 'enum', 'const', 'oneOf', 'anyOf', 'allOf', 'items'];
+
+function readJsonSchema(document: unknown, file: string): Contract {
+  if (isObject(document) && typeof document.openapi === 'string') throw new SchemaError(`${file} is an OpenAPI document: name its format openapi`);
+  if (!isObject(document) || !SCHEMA_KEYS.some((key) => key in document)) throw new SchemaError(`${file} is not a JSON Schema`);
+  const answer = (schema: unknown, stack: readonly string[] = []): Operation['answer'] => {
+    const body = generate(schema, document, stack);
+    return { status: 200, body: body === OMIT ? null : body };
+  };
+  const operations: Operation[] = [{ method: 'GET', path: '/', name: typeof document.title === 'string' && document.title ? document.title : 'schema', answer: answer(document) }];
+  for (const key of ['$defs', 'definitions'] as const) {
+    const defs = document[key];
+    if (!isObject(defs)) continue;
+    for (const [name, schema] of Object.entries(defs)) {
+      if (!/^[A-Za-z0-9_.:-]+$/.test(name)) throw new SchemaError(`${file}: the definition ${name} must be letters, digits and _ . : - only, to be one path of the fake`);
+      operations.push({ method: 'GET', path: `/${name}`, name, answer: answer(schema, [`#/${key}/${name}`]) });
+    }
+  }
+  return { operations, servers: [] };
+}
+
+function readOpenApi(document: Yaml | unknown, file: string): Contract {
   if (!isObject(document) || typeof document.openapi !== 'string' || !document.openapi.startsWith('3.'))
     throw new ContractError(`${file} is not an OpenAPI 3 document: milestone 2 reads OpenAPI 3 only`);
   if (!isObject(document.paths)) throw new ContractError(`${file} has no paths`);
@@ -133,11 +183,12 @@ export function createFakeServer(fake: Fake): Server {
 
 function main(): void {
   const file = process.env.FAKE_CONTRACT || '/etc/cleared/fake/openapi.yaml';
+  const format = (process.env.FAKE_FORMAT || 'openapi') as ContractFormat;
   const port = Number(process.env.FAKE_PORT || 8080);
   const log = (line: object) => console.log(JSON.stringify({ at: new Date().toISOString(), ...line }));
   let contract: Contract;
   try {
-    contract = readContract(readFileSync(file, 'utf8'), file);
+    contract = readContract(readFileSync(file, 'utf8'), file, format);
   } catch (error) {
     log({ error: error instanceof Error ? error.message : String(error) });
     process.exit(1);

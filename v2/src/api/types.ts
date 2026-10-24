@@ -178,6 +178,9 @@ export type ReleaseGroup = { readonly intent: string; readonly files: readonly s
 
 // A chip on the release card, from the diff (decision 23). Never a block,
 // except `contract` on an untouched consumer (the train's `blocked`).
+// The formats a service's contract can be in (owner decision O11, M11): OpenAPI 3 first, then JSON Schema, protobuf and events (AsyncAPI 2).
+export type ContractFormat = 'openapi' | 'jsonschema' | 'protobuf' | 'events';
+
 export type ReleaseFlagKind = 'schema' | 'dependency' | 'config' | 'secret_shape' | 'contract' | 'large';
 export type ReleaseFlag = { readonly kind: ReleaseFlagKind; readonly files: readonly string[]; readonly detail: string };
 
@@ -208,7 +211,7 @@ export type Service = {
   readonly sensitivity: ServiceSensitivity;
   readonly consumes: readonly string[];                     // the services it calls: they land before it
   readonly run: { readonly dockerfile: string; readonly port: number } | null;   // how a sibling of it runs (decision 20)
-  readonly contract: { readonly format: 'openapi'; readonly path: string } | null; // OpenAPI 3 only in milestone 2
+  readonly contract: { readonly format: ContractFormat; readonly path: string } | null;
 };
 
 // full: never the fast lane; reviewer:<model>: that model reviews its
