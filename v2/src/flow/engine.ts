@@ -99,7 +99,7 @@ import { readToolInput, readToolOutput, type AgUiEvent, type Question, type Sess
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
-import { ticketBranch } from '../workspace/checkout.ts';
+import { replayBranch, ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
 import { serviceLocks } from '../approval/service.ts';
 import { changesReport, flags } from '../release/flags.ts';
@@ -123,6 +123,7 @@ import { testComment, testLine, testRunOf } from './review-tests.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
+import { ReplayStore, replayPrompt, stepCommit, type Checkpoint, type Replay } from './replay.ts';
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
 import { foldState, sessionPlanOf } from './state.ts';
 import { VARIANT_PARALLEL, VariantStore, diffLines, publicVariant, variantPrompt, type Variant, type VariantKey } from './variants.ts';
@@ -140,7 +141,8 @@ export type FlowEffects = {
   refreshProject(service?: ServiceConfig): Promise<void>;         // projectCheckout: fetch the forge, so publish sees the base as it is now (issue 141)
   // The ticket's checkout: <workdirs>/<ticket>, or <workdirs>/<ticket>/<service> for a service of a workspace of several,
   // or <workdirs>/<ticket>.variant-<round>-<position> for a variant (flow/variants.ts variantFolder).
-  prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig; readonly variant?: VariantKey }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
+  // `branch`: the branch of a ticket resumed from a step (issue #272); ticketBranch's by default.
+  prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig; readonly variant?: VariantKey; readonly branch?: string }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId }): Promise<string | null>;
   publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string; readonly service?: ServiceConfig }): Promise<Published>;
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
@@ -170,6 +172,19 @@ export type FlowEffects = {
   // ticket of several services is given it (owner decision of 2026-10-22
   // 20:33). Absent: the reviewer is told the change could not be read.
   branchChanges?(input: { readonly ticket: TicketId; readonly service: ServiceConfig }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
+  // The branch a checkout is on and its commit, read from its files without
+  // git (issue #272, workspace/checkout.ts readTip). Absent: no checkpoint
+  // is journaled, and no step can be resumed from.
+  head?(input: { readonly workdir: string }): Promise<Checkpoint | undefined>;
+  // A one-service ticket resumed from a step (issue #272): the ticket's
+  // checkout is moved aside, its branch `previous` fetched into the
+  // service's own checkout and kept there, and a new checkout made on
+  // `branch` at `commit`, which must be in that branch's history. Absent:
+  // no ticket is resumed from a step.
+  replay?(input: { readonly ticket: TicketId; readonly n: number; readonly commit: string; readonly branch: string; readonly previous: string }): Promise<{ readonly previousHead: string; readonly aside: string }>;
+  // Before anything stops: the ticket has a checkout whose branch `previous`
+  // holds `commit` in its history, read as replay reads it; throws otherwise.
+  replayCheck?(input: { readonly ticket: TicketId; readonly commit: string; readonly previous: string }): Promise<void>;
   // What a variant's ticket branch changes against the base (issue #271),
   // read out of its checkout as a step's branch is: committed changes only.
   // Absent: the variants item says the change could not be read.
@@ -328,6 +343,9 @@ export class FlowEngine {
   #told = new Map<SessionId, string[]>();
   #repairing = new Set<TicketId>();                                 // tickets whose failed checks are being read or a repair started
   #repairs = new Map<TicketId, CiRepair>();                         // the repair a ticket's flow runs for, until its card is published
+  #replays: ReplayStore;                                            // the tickets resumed from a step (issue #272)
+  #replaying = new Set<TicketId>();                                 // tickets whose resume is under way
+  #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -344,6 +362,7 @@ export class FlowEngine {
     this.#trains = new TrainStore(deps.store.db, this.#now);
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#variants = new VariantStore(deps.store.db, this.#now);
+    this.#replays = new ReplayStore(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -382,7 +401,7 @@ export class FlowEngine {
   // The checkouts of a ticket: one per service of a train ticket, the
   // author and the reviewer working in the first one's.
   async #prepare(ticket: Ticket, role: Role): Promise<{ readonly workdir: string; readonly briefing: Briefing }> {
-    if (!this.#several) return this.#effects.prepareWorkdir({ ticket, role, ...this.#chosenVariant(ticket.id) });
+    if (!this.#several) return this.#effects.prepareWorkdir({ ticket, role, ...this.#chosenVariant(ticket.id), branch: this.#branchOf(ticket.id) });
     const services = this.#servicesOf(ticket);
     const workdirs = this.#workdirs.get(ticket.id) ?? new Map<string, string>();
     this.#workdirs.set(ticket.id, workdirs);
@@ -393,6 +412,11 @@ export class FlowEngine {
       first ??= prepared;
     }
     return first as { readonly workdir: string; readonly briefing: Briefing };
+  }
+
+  // The branch of a one-service ticket: its newest resume's (issue #272), else its own.
+  #branchOf(ticket: TicketId): string {
+    return this.#replays.latest(ticket)?.branch ?? ticketBranch(ticket);
   }
 
   // A ticket whose variant was chosen works in that variant's checkout from then on.
@@ -534,7 +558,7 @@ export class FlowEngine {
       }
       const checks = failures?.checks.map((check) => check.name) ?? [];
       const at = this.#at();
-      if (onBase(ticketBranch(id), this.config.base))
+      if (onBase(this.#branchOf(id), this.config.base))
         return await this.#repairSaid(release, { attempt: last?.attempt ?? 0, limit: CI_REPAIR_ATTEMPTS, state: 'refused', checks, at });
       if ((last?.attempt ?? 0) >= CI_REPAIR_ATTEMPTS)
         return await this.#repairSaid(release, { attempt: last?.attempt ?? 0, limit: CI_REPAIR_ATTEMPTS, state: 'gave_up', checks, at });
@@ -562,7 +586,7 @@ export class FlowEngine {
     this.#repairs.set(id, repair);
     try {
       await tickets.move(id, tickets.states.progress, SERVICE);
-      await this.#reopenWith(ticket, adapter, authorRow, repairMessage({ repair, pr: release.pr.number, branch: ticketBranch(id), ...(failures ? { failures } : {}) }));
+      await this.#reopenWith(ticket, adapter, authorRow, repairMessage({ repair, pr: release.pr.number, branch: this.#branchOf(id), ...(failures ? { failures } : {}) }));
     } catch (error) {
       await this.#putBack(id, `The repair of the failed checks could not start: ${name(error)}`, 'reopen_failed');
     }
@@ -899,32 +923,144 @@ export class FlowEngine {
         await this.#startSteps(ticket, by, origin, steps);
         return;
       }
-      const settings = await this.#settings(ticket);
-      const prepared = await this.#prepare(ticket, 'author');
-      const workspaceDone = this.#now();
-      const tools = this.config.authorTools === true;
-      const first = authorPrompt(ticket, { plan: tools, report: tools });
-      const prompt = origin?.note ? `${first}\n\n${origin.note}` : first;
-      const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined);
-      const session = { id: live.id, ticket: ticketId, project: this.config.project };
-      this.#step(session, 'STEP_STARTED', 'workspace', began);
-      this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
-      this.#step(session, 'STEP_STARTED', 'author', workspaceDone);
-      this.#snapshot(live.id, ticketId);
+      const live = await this.#startAuthor(adapter, ticket, began, (first) => (origin?.note ? `${first}\n\n${origin.note}` : first));
       const comment = origin ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}.` : `Started by ${by}.`;
       await tickets.comment(ticketId, comment, SERVICE).catch(() => undefined);
       this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: ticketId, by, origin: origin ?? null, session: live.id });
-      // A one-service ticket's one step is its author's (lane 23): nothing else changes.
-      if (steps) {
-        const step = this.#steps.ensure(ticketId, this.config.project, steps)[0] as Step;
-        this.#steps.resume(ticketId);
-        this.#steps.update(step.id, { state: 'running', session: live.id });
-        this.#stepOf.set(live.id, step.id);
-      }
+      this.#authorStep(ticketId, steps, live);
       this.#supervise(live, 0);
     } catch (error) {
       await this.#putBack(ticketId, `The flow could not start: ${name(error)}`, 'start_failed');
       throw error;
+    }
+  }
+
+  // The author of a one-service ticket (start, replay): its checkout, its
+  // session told `prompt` of the ticket's first prompt, the workspace's and
+  // the author's steps, and the branch's first checkpoint, read before the
+  // session starts (issue #272).
+  async #startAuthor(adapter: SessionAdapter, ticket: Ticket, began: Date, prompt: (first: string) => string): Promise<Live> {
+    const settings = await this.#settings(ticket);
+    const prepared = await this.#prepare(ticket, 'author');
+    const workspaceDone = this.#now();
+    const tools = this.config.authorTools === true;
+    const tip = await this.#tipOf(prepared.workdir);
+    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt(authorPrompt(ticket, { plan: tools, report: tools })), tools ? 'plan' : undefined);
+    const session = { id: live.id, ticket: ticket.id, project: this.config.project };
+    this.#step(session, 'STEP_STARTED', 'workspace', began);
+    this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
+    this.#step(session, 'STEP_STARTED', 'author', workspaceDone);
+    this.#snapshot(live.id, ticket.id);
+    if (tip) this.#journalTip(live, tip);
+    return live;
+  }
+
+  // A one-service ticket's one step is its author's (lane 23): nothing else changes.
+  #authorStep(ticket: TicketId, steps: readonly StepSpec[] | undefined, live: Live): void {
+    if (!steps) return;
+    const step = this.#steps.ensure(ticket, this.config.project, steps)[0] as Step;
+    this.#steps.resume(ticket);
+    this.#steps.update(step.id, { state: 'running', session: live.id });
+    this.#stepOf.set(live.id, step.id);
+  }
+
+  // ---- a step's commit (issue #272, flow/replay.ts) ---------------------------
+
+  // The tip of a one-service ticket's checkout; none in a workspace of several services, which is not resumed from a step.
+  async #tipOf(workdir: string): Promise<Checkpoint | undefined> {
+    if (this.#several || !this.#effects.head) return undefined;
+    return this.#effects.head({ workdir }).catch(() => undefined);
+  }
+
+  #journalTip(live: Live, tip: Checkpoint): void {
+    if (this.#tips.get(live.id) === tip.commit) return;
+    this.#tips.set(live.id, tip.commit);
+    this.#journal({ id: live.id, ticket: live.input.ticket, project: live.input.project }, { type: 'CUSTOM', name: 'cleared.checkpoint', value: { commit: tip.commit, branch: tip.branch } });
+  }
+
+  // After an author's tool call and at the end of its turn: the tip, when it moved.
+  async #checkpoint(live: Live): Promise<void> {
+    if (live.input.role !== 'author' || live.closed) return;
+    const tip = await this.#tipOf(live.input.workdir);
+    if (tip && !live.closed) this.#journalTip(live, tip);
+  }
+
+  // Resume from here (POST /api/sessions/:id/replay): the ticket's sessions
+  // stop and what of it waits in the inbox is settled, as Set aside does;
+  // the effect keeps the ticket's checkout and branch aside and makes a new
+  // checkout on a new branch at the commit the step began from (stepCommit);
+  // a new author starts there, told the owner's corrected instruction. The
+  // session left keeps every event, and both sessions get `cleared.replay`.
+  // The ticket keeps its plan item, its budget and its one step. Nothing is
+  // pushed: the next publish pushes the new branch, and opens its own pull
+  // request. A ticket of several services, approved, done, landing, taken
+  // over or already resuming is refused.
+  async replay(id: SessionId, seq: number, message: string, by: UserId): Promise<Replay> {
+    const row = this.#store.sessions.get(id);
+    if (!row || row.project !== this.config.project) throw new FlowError('not_found', `unknown session ${id}`);
+    if (row.role !== 'author') throw new FlowError('invalid', `session ${id} is the ${row.role}'s: a ticket is resumed from a step of an author's session`);
+    const tickets = this.registry.ticketStore;
+    const ticket = await tickets.get(row.ticket);
+    if (!ticket || ticket.project !== this.config.project) throw new FlowError('not_found', `unknown ticket ${row.ticket}`);
+    if (this.#several) throw new FlowError('conflict', `${ticket.id} is a ticket of a workspace of several services: in this version only a ticket of one service is resumed from a step`);
+    if (this.#variants.list(ticket.id).length > 0) throw new FlowError('conflict', `${ticket.id} ran variants (issue #271): in this version a ticket with variants is not resumed from a step`);
+    if (ticket.status === tickets.states.go || ticket.status === tickets.states.done) throw new FlowError('conflict', `${ticket.id} is in “${ticket.status}”: it is not resumed from a step`);
+    if (this.#trains.latest(ticket.id)?.state === 'landing') throw new FlowError('conflict', `the train of ${ticket.id} is landing: it is not resumed from a step`);
+    if ([...this.#paused.keys()].some((session) => this.#live.get(session)?.input.ticket === ticket.id)) throw new FlowError('conflict', `a session of ${ticket.id} is taken over: give it back first`);
+    if (this.#replaying.has(ticket.id)) throw new FlowError('conflict', `${ticket.id} is already being resumed`);
+    const adapter = this.registry.sessionAdapters[HARNESS];
+    if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
+    if (!this.#effects.replay || !this.#effects.replayCheck) throw new FlowError('unavailable', 'this service cannot make a resume branch');
+    const step = stepCommit(this.#store.events.after(id), seq);
+    if (!step) throw new FlowError('invalid', `no commit of session ${id} is known at its event ${seq}: a step is resumed from once the flow journaled its branch`);
+    const text = this.#clean(message.trim());
+    if (text === '') throw new FlowError('invalid', 'Resume from here says what to do instead');
+    this.#replaying.add(ticket.id);
+    const began = this.#now();
+    try {
+      // Checked while the ticket's sessions still run: a step whose commit
+      // the branch no longer holds (one of a continuation a resume left)
+      // stops nothing.
+      try {
+        await this.#effects.replayCheck({ ticket: ticket.id, commit: step.commit, previous: this.#branchOf(ticket.id) });
+      } catch (error) {
+        throw new FlowError('conflict', this.#clean(`the ticket cannot be resumed from that step: ${name(error)}`));
+      }
+      await this.#stopAll(ticket.id, by, 'The owner resumed the ticket from an earlier step: this session was stopped.', 'replayed', `The owner resumed the ticket from a step of ${id}.`);
+      this.#channels.delete(ticket.id);
+      this.#finishing.delete(ticket.id);
+      const n = (this.#replays.latest(ticket.id)?.n ?? 0) + 1;
+      const previous = this.#branchOf(ticket.id);
+      const branch = replayBranch(ticket.id, n);
+      let made: { readonly previousHead: string; readonly aside: string };
+      try {
+        made = await this.#effects.replay({ ticket: ticket.id, n, commit: step.commit, branch, previous });
+      } catch (error) {
+        await this.#putBack(ticket.id, `The ticket could not be resumed from a step of ${id}: ${name(error)}. Its branch ${previous} is as it was.`, 'start_failed');
+        throw new FlowError('conflict', this.#clean(`the ticket could not be resumed from that step: ${name(error)}`));
+      }
+      const replay = this.#replays.add({ ticket: ticket.id, n, project: this.config.project, session: id, seq, commit: step.commit, branch, previous, previousHead: made.previousHead, aside: made.aside, message: text, by });
+      this.#active.add(ticket.id);
+      this.#flows.set(ticket.id, new Set());
+      try {
+        if (ticket.status !== tickets.states.progress) await tickets.move(ticket.id, tickets.states.progress, SERVICE);
+        const live = await this.#startAuthor(adapter, ticket, began, (first) => replayPrompt(first, { commit: step.commit, branch, message: text }));
+        this.#replays.resumed(ticket.id, n, live.id);
+        const value = { from: id, to: live.id, seq, commit: step.commit, branch, previous, by, message: text };
+        this.#journal({ id, ticket: ticket.id, project: row.project }, { type: 'CUSTOM', name: 'cleared.replay', value });
+        this.#journal({ id: live.id, ticket: ticket.id, project: this.config.project }, { type: 'CUSTOM', name: 'cleared.replay', value });
+        await tickets.comment(ticket.id, `Resumed by ${by} from a step of session ${id}: a new author works on ${branch}, from commit ${step.commit.slice(0, 12)}. The branch ${previous} is kept as it was, at ${made.previousHead.slice(0, 12)}.`, SERVICE).catch(() => undefined);
+        const origin = this.#origins.get(ticket.id);
+        this.#emit({ type: 'ticket_started', at: this.#at(), project: this.config.project, ticket: ticket.id, by, origin: origin ?? null, session: live.id });
+        this.#authorStep(ticket.id, this.#stepPlan(ticket, origin), live);
+        this.#supervise(live, 0);
+        return { ...replay, resumed: live.id };
+      } catch (error) {
+        await this.#putBack(ticket.id, `The ticket resumed on ${branch} could not start: ${name(error)}`, 'start_failed');
+        throw error;
+      }
+    } finally {
+      this.#replaying.delete(ticket.id);
     }
   }
 
@@ -995,7 +1131,7 @@ export class FlowEngine {
     const began = this.#now();
     const scoped = this.#several ? service : undefined;
     const settings = await this.#effects.settings(scoped);
-    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : {}) });
+    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : { branch: this.#branchOf(id) }) });
     const workdirs = this.#workdirs.get(id) ?? new Map<string, string>();
     this.#workdirs.set(id, workdirs);
     workdirs.set(service.name, prepared.workdir);
@@ -1195,11 +1331,27 @@ export class FlowEngine {
     if (this.#trains.latest(id)?.state === 'landing') throw new FlowError('conflict', `the train of ${id} is landing: it is not set aside`);
     const done = ticket.status === tickets.states.done;
     const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
+    const { sessions, items } = await this.#stopAll(id, by, 'The owner set the ticket aside: this session was stopped.', 'set_aside', note);
+    if (done) return { sessions, items };
+    if (ticket.status !== tickets.states.todo) await this.#putBack(id, note, 'set_aside');
+    else {
+      this.#origins.delete(id);
+      this.#steps.hold(id);
+      this.#dropVariants(id, note);
+      await tickets.comment(id, note, SERVICE).catch(() => undefined);
+    }
+    return { sessions, items };
+  }
+
+  // Every session of the ticket stops, `message` on each live one's thread
+  // under `code`, and everything of it that waits in the inbox is settled; a
+  // train not yet approved is halted (Set aside, Resume from here).
+  async #stopAll(id: TicketId, by: UserId, message: string, code: string, note: string): Promise<{ readonly sessions: number; readonly items: number }> {
     // No step of it starts while its sessions stop.
     this.#active.delete(id);
     let sessions = 0;
     for (const live of [...this.#live.values()].filter((l) => l.input.ticket === id && !l.closed)) {
-      this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'RUN_ERROR', message: 'The owner set the ticket aside: this session was stopped.', code: 'set_aside' });
+      this.#journal({ id: live.id, ticket: id, project: live.input.project }, { type: 'RUN_ERROR', message, code });
       await this.#close(live, 'stopped', note);
       sessions++;
     }
@@ -1210,17 +1362,9 @@ export class FlowEngine {
     let items = 0;
     for (const item of this.inbox.items()) {
       if (item.ticket !== id || item.state !== 'waiting') continue;
-      if (item.kind === 'release' ? this.#settleRelease(item.id, id, ticket.project, by) : this.inbox.handle(item.id, by)) items++;
+      if (item.kind === 'release' ? this.#settleRelease(item.id, id, item.project, by) : this.inbox.handle(item.id, by)) items++;
     }
     this.#trains.haltActive(id);
-    if (done) return { sessions, items };
-    if (ticket.status !== tickets.states.todo) await this.#putBack(id, note, 'set_aside');
-    else {
-      this.#origins.delete(id);
-      this.#steps.hold(id);
-      this.#dropVariants(id, note);
-      await tickets.comment(id, note, SERVICE).catch(() => undefined);
-    }
     return { sessions, items };
   }
 
@@ -1866,6 +2010,7 @@ export class FlowEngine {
   async #onEvent(live: Live, stored: SessionEvent): Promise<void> {
     const event = stored.event;
     const session = { id: live.id, ticket: live.input.ticket, project: live.input.project };
+    if (event.type === 'TOOL_CALL_RESULT' || event.type === 'RUN_FINISHED') await this.#checkpoint(live);
     if (event.type === 'CUSTOM') {
       switch (event.name) {
         case 'cleared.permission_request': {
@@ -2082,7 +2227,7 @@ export class FlowEngine {
       const settings = await this.#settings(ticket);
       const prepared = this.#several
         ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
-        : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', ...this.#chosenVariant(ticket.id) });
+        : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', ...this.#chosenVariant(ticket.id), branch: this.#branchOf(ticket.id) });
       // The files a person changed in the author's checkouts (decision 33): every author session of the flow, a ticket in steps having several.
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
       // The reviewer's git commands name its own service's base.
@@ -2301,7 +2446,7 @@ export class FlowEngine {
       // The project checkout is fetched first: publish reads the base as the
       // checkout last saw it (issue 141).
       await this.#effects.refreshProject();
-      published = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report });
+      published = await this.#effects.publish({ ticket: id, workdir, branch: this.#branchOf(id), report });
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
       await this.#putBack(id, `The branch was not published: ${name(error)}`, 'publish_refused');

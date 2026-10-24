@@ -7,7 +7,8 @@
 // (lane 20) are flow/files.ts's and flow/takeover.ts's. A ticket's steps,
 // in ticket_steps, and the contract item's Approve and Send back (lane 23)
 // are flow/steps.ts's; a ticket's variants, in ticket_variants, and the
-// variants item's choice (issue #271) are flow/variants.ts's. The web terminal of a session taken over and the
+// variants item's choice (issue #271) are flow/variants.ts's; Resume from
+// here (issue #272), in ticket_replays, is flow/replay.ts's. The web terminal of a session taken over and the
 // editor's save (lane 31) are terminal/routes.ts's and flow/files.ts's,
 // with one human side per process (terminal/human.ts), made with the
 // engine and the store this module receives. The idle watchdog (issue #290,
@@ -15,6 +16,7 @@
 import { Docker } from '../container/docker.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
+import { REPLAYS_TABLE, replayRoutes } from '../flow/replay.ts';
 import { runtime } from '../flow/runtime.ts';
 import { STEPS_TABLE, stepRoutes } from '../flow/steps.ts';
 import { takeoverRoutes } from '../flow/takeover.ts';
@@ -40,7 +42,7 @@ function humanOf(registry: Registry): HumanSide | undefined {
 }
 
 const flow: Module = {
-  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE],
+  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE],
   routes: [
     ...runtime.routes((path) => path.startsWith('/api/tickets')),
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
@@ -49,6 +51,7 @@ const flow: Module = {
     ...terminalRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof(), human: humanOf }),
     ...stepRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...variantRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
+    ...replayRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
   ],
   provide: (deps) => {
     store = deps.store;
