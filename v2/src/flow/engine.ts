@@ -1186,8 +1186,6 @@ export class FlowEngine {
     }
   }
 
-  // Haiku for a Quick ticket, unless Haiku reviews it or a service it
-  // touches is `full` (decision 24), which refuses the fast lane.
   // ---- a ticket in variants (issue #271) ------------------------------------
 
   // Why `count` variants cannot run on this workspace; undefined when they
@@ -1253,9 +1251,22 @@ export class FlowEngine {
     const prompt = [authorPrompt(ticket, { plan: tools, report: tools }), variantPrompt(variant.position, count), ...(note ? [note] : [])].join('\n\n');
     this.#variantDirs.add(prepared.workdir);
     const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined);
-    this.#variants.update(variant.id, { state: 'running', session: live.id, workdir: prepared.workdir });
-    this.#variantOf.set(live.id, variant.id);
     const session = { id: live.id, ticket: id, project: this.config.project };
+    // Read again after the waits: a choice, a put back or a set aside may
+    // have dropped the variant while its checkout and its session started.
+    // Its session stops at once, and its containers go with it.
+    const now = this.#variants.get(variant.id);
+    if (now?.state !== 'running') {
+      this.#variants.update(variant.id, { session: live.id, workdir: prepared.workdir });
+      this.#flowOf(id).delete(live.id);
+      const why = now?.note ?? 'This variant was dropped while it started: its session was stopped.';
+      this.#journal(session, { type: 'RUN_ERROR', message: why, code: 'variant_dropped' });
+      await this.#close(live, 'stopped', why);
+      await this.#releaseNow([live.id]);
+      return live;
+    }
+    this.#variants.update(variant.id, { session: live.id, workdir: prepared.workdir });
+    this.#variantOf.set(live.id, variant.id);
     this.#step(session, 'STEP_STARTED', 'workspace', began);
     this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
     this.#step(session, 'STEP_STARTED', 'author', workspaceDone);
@@ -1368,20 +1379,25 @@ export class FlowEngine {
       this.#flowOf(id).delete(v.session);
       dropped.push(v.session);
     }
-    let released = 0;
-    const named = dropped.filter(isSessionId);
-    if (this.#release && named.length > 0) {
-      try {
-        const { containers, networks } = await this.#release(named);
-        released = containers.length + networks.length;
-      } catch (error) {
-        console.error(`cleared-v2: the containers and networks of the variants not chosen could not be released (${error instanceof Error ? error.name : typeof error})`);
-      }
-    }
+    const released = await this.#releaseNow(dropped);
     const stopped = others.map((v) => v.position);
     await this.registry.ticketStore.comment(id, `Variant ${position} of ${variants.length} chosen by ${by} for review${stopped.length > 0 ? `; ${stopped.length === 1 ? 'variant' : 'variants'} ${stopped.join(', ')} stopped` : ''}.`, SERVICE).catch(() => undefined);
     this.#background(this.#reviewVariant(id, chosen), id);
     return { released };
+  }
+
+  // The containers and networks of variants that stop, released now rather
+  // than at the next tick; how many were removed. A failure is said and the flow goes on.
+  async #releaseNow(sessions: readonly SessionId[]): Promise<number> {
+    const named = sessions.filter(isSessionId);
+    if (!this.#release || named.length === 0) return 0;
+    try {
+      const { containers, networks } = await this.#release(named);
+      return containers.length + networks.length;
+    } catch (error) {
+      console.error(`cleared-v2: the containers and networks of the variants not chosen could not be released (${error instanceof Error ? error.name : typeof error})`);
+      return 0;
+    }
   }
 
   // The chosen variant's handover is stored, and its review starts in its checkout.
@@ -1401,6 +1417,8 @@ export class FlowEngine {
     await this.#startReview(ticket, chosen.workdir ?? '');
   }
 
+  // Haiku for a Quick ticket, unless Haiku reviews it or a service it
+  // touches is `full` (decision 24), which refuses the fast lane.
   #authorModel(ticket: Ticket): string {
     if (!ticket.labels.includes(QUICK_LABEL) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.#chosenModel(ticket);
     return this.#servicesOf(ticket).some((service) => service.sensitivity === 'full') ? this.#chosenModel(ticket) : QUICK_MODEL;

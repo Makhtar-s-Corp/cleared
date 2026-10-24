@@ -183,7 +183,7 @@ test('tickets: create, list, get, move; the move to go is refused; an unknown ti
   assert.equal((await call('POST', '/api/tickets', person, { title: 'x' })).status, 400);
   // Variants (issue #271): 2 to 4, refused before the ticket exists.
   const before = ((await call('GET', '/api/tickets', signed)).json as Ticket[]).length;
-  for (const variants of [0, 5, 2.5, '3'])
+  for (const variants of [0, null, '3', 5, 2.5])
     assert.equal((await call('POST', '/api/tickets', person, { title: 'Variants', project: 'guestbook', variants })).status, 400, `variants ${variants}`);
   assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).length, before, 'no ticket is created');
   assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).some((x) => x.id === created.id), true);

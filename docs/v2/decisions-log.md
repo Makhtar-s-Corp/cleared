@@ -4547,6 +4547,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
    - Their containers and networks, labelled `cleared.dev=v2` and named by session, are released by the same call (`Docker.releaseStopped`), not at the next tick. The answer counts them. The volumes stay, as for every stopped session.
    - The chosen variant hands over, the ticket moves to review, and the reviewer, the publish and a reopened author work in the chosen checkout. The sessions not chosen leave the ticket's flow, so the rounds, the human edits and the release card count the chosen one only.
    - A second choice, a variant that is not done or a ticket that no longer runs is refused with a 409.
+   - A variant dropped while its checkout or its session was still starting is read again once its session exists: that session stops at once with `variant_dropped`, and its containers are released (review r2 of pull request 305).
    - Not chosen: keeping the handovers of the variants not chosen. They describe work that is not merged.
 
 7. **A ticket that leaves the flow drops its open variants.** A put back, a set aside or a restart marks the variants still open as dropped and settles the item without a choice. A later plain start works in the chosen variant's checkout, if one was chosen, as a ticket keeps its own.

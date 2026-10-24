@@ -148,6 +148,48 @@ test('four variants run three at once, the fourth when a lane is free; the lanes
   await one.engine.close();
 });
 
+test('a variant dropped by the choice while its checkout is prepared stops as soon as its session starts, and its containers are released', async () => {
+  const prepared: Prepared[] = [];
+  const effects = variantEffects(prepared, []);
+  let open: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  const levers = { model: null, maxLanes: 2, paused: false };
+  const t = await setup({
+    scripts: { authors: [done('a1', 'Done.'), working('a2'), working('a3')] }, levers: { read: () => levers },
+    effects: {
+      ...effects,
+      async prepareWorkdir(input) {
+        if (input.variant?.position === 3) await gate;            // the third checkout is slow to clone
+        return (effects.prepareWorkdir as NonNullable<FlowEffects['prepareWorkdir']>)(input);
+      },
+    },
+  });
+  const released: string[][] = [];
+  const engine = new FlowEngine({ ...t.deps, release: async (sessions) => { released.push([...sessions]); return { containers: [], networks: [] }; } });
+  await engine.start(t.ticket.id, 'u1', undefined, 3);
+  // The first ends, so the third takes its lane, and waits for its checkout.
+  await until(async () => item(t)?.variants[0]?.state === 'done' && (await engine.ticketVariants(t.ticket.id))?.[2]?.state === 'running', 'the third variant starting');
+  assert.equal(t.startedSessions.length, 2);
+
+  await engine.chooseVariant((item(t) as VariantsItem).id, 1, 'u1');
+  assert.equal((await engine.ticketVariants(t.ticket.id))?.[2]?.state, 'dropped');
+  open();
+  const authors = () => t.startedSessions.filter((s) => s.input.role === 'author');
+  await until(() => authors().length === 3, 'the third session');
+  const third = authors()[2]?.id as string;
+  await until(() => t.store.sessions.get(third)?.status === 'stopped', 'the third session to stop');
+  const stop = t.store.events.after(third).filter(({ event }) => event.type === 'RUN_ERROR').at(-1)?.event;
+  assert.equal(stop?.type === 'RUN_ERROR' ? stop.code : undefined, 'variant_dropped');
+  assert.ok(released.some((sessions) => sessions.includes(third)), 'its containers and networks are released at once');
+  const row = (await engine.ticketVariants(t.ticket.id))?.[2];
+  assert.deepEqual({ state: row?.state, session: row?.session }, { state: 'dropped', session: third });
+  // The review runs on the chosen one, and the third never counts as a variant at work.
+  await until(() => t.startedSessions.some((s) => s.input.role === 'reviewer'), 'the review');
+  assert.equal(t.startedSessions.find((s) => s.input.role === 'reviewer')?.input.workdir, '/work/LOCAL-1.variant-1-1');
+  await engine.settled();
+  await engine.close();
+});
+
 test('every variant failing puts the ticket back with each one\'s reason, and no choice is shown', async () => {
   const t = await setup({ scripts: { authors: [failing, failing] }, effects: variantEffects([], []) });
   await t.engine.start(t.ticket.id, 'u1', undefined, 2);
